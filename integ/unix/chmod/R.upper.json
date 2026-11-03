@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fc0r/d && printf y > /data/fc0r/d/f && chmod -R -v 700 /data/fc0r; chmod --recursive -c 755 /data/fc0r; rm -rf /data/fc0r",
+      "command": "mkdir -p /data/fc0r/d && printf y > /data/fc0r/d/f && chmod -R -v 700 /data/fc0r; chmod --recursive -c 755 /data/fc0r",
       "expect": {
         "exit": 0,
         "stdout": "mode of '/data/fc0r' changed from 0755 (rwxr-xr-x) to 0700 (rwx------)\nmode of '/data/fc0r/d' changed from 0755 (rwxr-xr-x) to 0700 (rwx------)\nmode of '/data/fc0r/d/f' changed from 0644 (rw-r--r--) to 0700 (rwx------)\nmode of '/data/fc0r' changed from 0700 (rwx------) to 0755 (rwxr-xr-x)\nmode of '/data/fc0r/d' changed from 0700 (rwx------) to 0755 (rwxr-xr-x)\nmode of '/data/fc0r/d/f' changed from 0700 (rwx------) to 0755 (rwxr-xr-x)\n",

@@ -203,7 +203,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/shl && printf 'echo linked\\n' > /data/shl/run.sh && ln -s /data/shl/run.sh /data/shl/link.sh && sh /data/shl/link.sh && rm -r /data/shl",
+      "command": "mkdir -p /data/shl && printf 'echo linked\\n' > /data/shl/run.sh && ln -s /data/shl/run.sh /data/shl/link.sh && sh /data/shl/link.sh",
       "expect": {
         "exit": 0,
         "stdout": "linked\n",

@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 SCOPE_ERROR = 5000
 DEFAULT_CHUNK_SIZE = 8192
 # A write past one chunk goes up through Nextcloud's chunked upload, which
@@ -26,3 +28,15 @@ CHECKSUM_TYPES = {
     "sha1": ("SHA1", 40),
     "sha256": ("SHA256", 64),
 }
+
+# The PROPFIND a removal surveys a folder with: its modified time.
+MTIME_PROPFIND = (
+    b'<?xml version="1.0" encoding="utf-8"?>'
+    b'<d:propfind xmlns:d="DAV:"><d:prop><d:getlastmodified/></d:prop>'
+    b"</d:propfind>"
+)
+# How long a folder stays unchanged by the server's clock before a removal's
+# If-Unmodified-Since sees every change after its survey, and the surveys
+# before a folder that keeps changing is busy.
+FENCE = timedelta(seconds=2)
+ATTEMPTS = 4

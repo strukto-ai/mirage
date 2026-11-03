@@ -170,7 +170,7 @@
       "targets": [
         "box"
       ],
-      "command": "find /data -name homepage",
+      "command": "find /data -maxdepth 1 -name homepage",
       "expect": {
         "exit": 0,
         "stdout": "",

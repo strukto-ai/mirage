@@ -60,7 +60,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/xm2_cpd && printf k > /data/xm2_cpd/k && cp /data/xm2_cpd /data2/xm2_cpd; echo rc=$?; rm -r /data/xm2_cpd",
+      "command": "mkdir -p /data/xm2_cpd && printf k > /data/xm2_cpd/k && cp /data/xm2_cpd /data2/xm2_cpd; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",

@@ -60,7 +60,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cn && printf x > /data/cn/.keep && cd /data/cn && for n in x '' -1 3x 2147483648; do printf 'l1\\nl2\\nl3\\n' | csplit -n \"$n\" - 2; echo rc=$?; done; printf 'l1\\nl2\\nl3\\n' | csplit -n ' +3' - 2 && ls; cd / && rm -r /data/cn",
+      "command": "mkdir -p /data/cn && printf x > /data/cn/.keep && cd /data/cn && for n in x '' -1 3x 2147483648; do printf 'l1\\nl2\\nl3\\n' | csplit -n \"$n\" - 2; echo rc=$?; done; printf 'l1\\nl2\\nl3\\n' | csplit -n ' +3' - 2 && ls; cd /",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=1\n3\n6\nxx000\nxx001\n",

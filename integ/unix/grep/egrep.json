@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/egr/sub; printf 'a|b\\nx\\none two\\n' > /data/egr/e.txt; printf 'a|b\\n' > /data/egr/sub/f.txt; cd /data/egr; egrep 'a|x' e.txt; fgrep 'a|b' e.txt; egrep -c 'o|x' e.txt sub/f.txt; fgrep -r 'a|b' . | sort; egrep -w 'one|two' e.txt; fgrep -x x e.txt; egrep -F 'a|b' e.txt; echo rc=$?; fgrep -G x e.txt; echo rc=$?; cd /; rm -rf /data/egr",
+      "command": "mkdir -p /data/egr/sub; printf 'a|b\\nx\\none two\\n' > /data/egr/e.txt; printf 'a|b\\n' > /data/egr/sub/f.txt; cd /data/egr; egrep 'a|x' e.txt; fgrep 'a|b' e.txt; egrep -c 'o|x' e.txt sub/f.txt; fgrep -r 'a|b' . | sort; egrep -w 'one|two' e.txt; fgrep -x x e.txt; egrep -F 'a|b' e.txt; echo rc=$?; fgrep -G x e.txt; echo rc=$?; cd /",
       "expect": {
         "exit": 0,
         "stdout": "a|b\nx\na|b\ne.txt:2\nsub/f.txt:0\n./e.txt:a|b\n./sub/f.txt:a|b\none two\nx\nrc=2\nrc=2\n",
@@ -69,7 +69,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/egr/sub; printf 'a|b\\nx\\none two\\n' > /data/egr/e.txt; printf 'a|b\\n' > /data/egr/sub/f.txt; cd /data/egr; egrep --bogus x e.txt; echo rc=$?; egrep; echo rc=$?; fgrep; echo rc=$?; egrep --version | head -1 | cut -d' ' -f1; fgrep -V | head -1 | cut -d' ' -f1; egrep --help | grep -ci '^usage: grep'; egrep -e; echo rc=$?; cd /; rm -rf /data/egr",
+      "command": "mkdir -p /data/egr/sub; printf 'a|b\\nx\\none two\\n' > /data/egr/e.txt; printf 'a|b\\n' > /data/egr/sub/f.txt; cd /data/egr; egrep --bogus x e.txt; echo rc=$?; egrep; echo rc=$?; fgrep; echo rc=$?; egrep --version | head -1 | cut -d' ' -f1; fgrep -V | head -1 | cut -d' ' -f1; egrep --help | grep -ci '^usage: grep'; egrep -e; echo rc=$?; cd /",
       "expect": {
         "exit": 0,
         "stdout": "rc=2\nrc=2\nrc=2\ngrep\ngrep\n1\nrc=2\n",

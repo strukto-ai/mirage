@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name \"*.txt\" -exec echo got {} \\; ; echo rc=$? ; cd / && rm -r /data/fe",
+      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name \"*.txt\" -exec echo got {} \\; ; echo rc=$? ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "got d/a.txt\ngot d/b.txt\ngot d/sub/c.txt\nrc=0\n",
@@ -63,7 +63,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name \"*.txt\" -exec echo got {} + ; echo rc=$? ; cd / && rm -r /data/fe",
+      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name \"*.txt\" -exec echo got {} + ; echo rc=$? ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "got d/a.txt d/b.txt d/sub/c.txt\nrc=0\n",
@@ -98,7 +98,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name \"*.txt\" -exec false \\; -print; echo rc=$?; find d -name \"*.txt\" -exec false {} + ; echo rc=$? ; cd / && rm -r /data/fe",
+      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name \"*.txt\" -exec false \\; -print; echo rc=$?; find d -name \"*.txt\" -exec false {} + ; echo rc=$? ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nrc=1\n",
@@ -133,7 +133,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name \"*.txt\" -exec grep -q x {} \\; -print ; cd / && rm -r /data/fe",
+      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name \"*.txt\" -exec grep -q x {} \\; -print ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "d/sub/c.txt\n",
@@ -168,7 +168,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name a.txt -exec echo {} \\; -print -exec echo again {} \\; ; cd / && rm -r /data/fe",
+      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name a.txt -exec echo {} \\; -print -exec echo again {} \\; ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "d/a.txt\nd/a.txt\nagain d/a.txt\n",
@@ -203,7 +203,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name b.txt -exec echo \"x{}y\" \"a b\" {} \\; ; cd / && rm -r /data/fe",
+      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name b.txt -exec echo \"x{}y\" \"a b\" {} \\; ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "xd/b.txty a b d/b.txt\n",
@@ -238,7 +238,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name a.txt -exec nosuchcmd {} \\; ; echo rc=$? ; cd / && rm -r /data/fe",
+      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name a.txt -exec nosuchcmd {} \\; ; echo rc=$? ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\n",
@@ -343,7 +343,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name a.txt -o -exec echo {} \\; ; echo rc=$? ; cd / && rm -r /data/fe",
+      "command": "mkdir -p /data/fe/d/sub && printf 'a\\n' > /data/fe/d/a.txt && printf 'bb\\n' > /data/fe/d/b.txt && printf x > /data/fe/d/sub/c.txt && cd /data/fe && find d -name a.txt -o -exec echo {} \\; ; echo rc=$? ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "d\nd/b.txt\nd/sub\nd/sub/c.txt\nrc=0\n",
@@ -734,7 +734,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fe/d/sub && printf A > /data/fe/d/a.txt && printf B > /data/fe/d/sub/b.txt && printf k > /data/fe/d/keep.md && cd /data/fe && find d -depth -exec echo saw {} \\; ; find d -depth; cd / && rm -r /data/fe",
+      "command": "mkdir -p /data/fe/d/sub && printf A > /data/fe/d/a.txt && printf B > /data/fe/d/sub/b.txt && printf k > /data/fe/d/keep.md && cd /data/fe && find d -depth -exec echo saw {} \\; ; find d -depth; cd /",
       "expect": {
         "exit": 0,
         "stdout": "saw d/a.txt\nsaw d/keep.md\nsaw d/sub/b.txt\nsaw d/sub\nsaw d\nd/a.txt\nd/keep.md\nd/sub/b.txt\nd/sub\nd\n",
@@ -870,7 +870,7 @@
     {
       "id": "find_delete_under_or_removes_the_other_arm",
       "seq": 981503,
-      "command": "mkdir -p /data/reviewor; touch /data/reviewor/keep /data/reviewor/remove; find /data/reviewor -name keep -o -delete; echo find:$?; test -f /data/reviewor/keep && test -f /data/reviewor/remove; echo kept:$?; rm -r /data/reviewor",
+      "command": "mkdir -p /data/reviewor; touch /data/reviewor/keep /data/reviewor/remove; find /data/reviewor -name keep -o -delete; echo find:$?; test -f /data/reviewor/keep && test -f /data/reviewor/remove; echo kept:$?",
       "expect": {
         "exit": 0,
         "stdout": "find:1\nkept:1\n",
@@ -1273,7 +1273,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fq1/d && printf 'hi\\n' > /data/fq1/d/a && printf 'yo\\n' > /data/fq1/d/b && cd /data/fq1 && find d -type f -printf '%p\\n' -exec cat {} ';' ; cd / && rm -r /data/fq1",
+      "command": "mkdir -p /data/fq1/d && printf 'hi\\n' > /data/fq1/d/a && printf 'yo\\n' > /data/fq1/d/b && cd /data/fq1 && find d -type f -printf '%p\\n' -exec cat {} ';' ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "d/a\nhi\nd/b\nyo\n",
@@ -1309,7 +1309,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fq2/d && printf 'hi\\n' > /data/fq2/d/a && printf 'yo\\n' > /data/fq2/d/b && cd /data/fq2 && find d -type f -exec cat {} ';' -printf '%f\\n' ; cd / && rm -r /data/fq2",
+      "command": "mkdir -p /data/fq2/d && printf 'hi\\n' > /data/fq2/d/a && printf 'yo\\n' > /data/fq2/d/b && cd /data/fq2 && find d -type f -exec cat {} ';' -printf '%f\\n' ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "hi\na\nyo\nb\n",
@@ -1344,7 +1344,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fq3/d && printf 'hi\\n' > /data/fq3/d/a && printf 'yo\\n' > /data/fq3/d/b && cd /data/fq3 && find d -type f -exec grep -q hi {} ';' -printf 'hit %p\\n' ; cd / && rm -r /data/fq3",
+      "command": "mkdir -p /data/fq3/d && printf 'hi\\n' > /data/fq3/d/a && printf 'yo\\n' > /data/fq3/d/b && cd /data/fq3 && find d -type f -exec grep -q hi {} ';' -printf 'hit %p\\n' ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "hit d/a\n",
@@ -1379,7 +1379,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fq4/d && printf 'hi\\n' > /data/fq4/d/a && printf 'yo\\n' > /data/fq4/d/b && cd /data/fq4 && find d -type f -printf '%f\\n' -exec echo batch {} + ; cd / && rm -r /data/fq4",
+      "command": "mkdir -p /data/fq4/d && printf 'hi\\n' > /data/fq4/d/a && printf 'yo\\n' > /data/fq4/d/b && cd /data/fq4 && find d -type f -printf '%f\\n' -exec echo batch {} + ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "a\nb\nbatch d/a d/b\n",
@@ -1414,7 +1414,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fq5/d && printf 'hi\\n' > /data/fq5/d/a && printf 'yo\\n' > /data/fq5/d/b && cd /data/fq5 && find d -type f -printf '%f ' -print; find d -type f -print -printf '%s\\n'; cd / && rm -r /data/fq5",
+      "command": "mkdir -p /data/fq5/d && printf 'hi\\n' > /data/fq5/d/a && printf 'yo\\n' > /data/fq5/d/b && cd /data/fq5 && find d -type f -printf '%f ' -print; find d -type f -print -printf '%s\\n'; cd /",
       "expect": {
         "exit": 0,
         "stdout": "a d/a\nb d/b\nd/a\n3\nd/b\n3\n",
@@ -1449,7 +1449,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fq6/d && printf 'hi\\n' > /data/fq6/d/a && printf 'yo\\n' > /data/fq6/d/b && cd /data/fq6 && find d -type f -printf '%f=' -print0 | tr '\\0' '\\n'; find d -type f -print0 -printf '|%s\\n' | tr '\\0' ' '; cd / && rm -r /data/fq6",
+      "command": "mkdir -p /data/fq6/d && printf 'hi\\n' > /data/fq6/d/a && printf 'yo\\n' > /data/fq6/d/b && cd /data/fq6 && find d -type f -printf '%f=' -print0 | tr '\\0' '\\n'; find d -type f -print0 -printf '|%s\\n' | tr '\\0' ' '; cd /",
       "expect": {
         "exit": 0,
         "stdout": "a=d/a\nb=d/b\nd/a |3\nd/b |3\n",
@@ -1484,7 +1484,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fq7/d && printf 'hi\\n' > /data/fq7/d/a && printf 'yo\\n' > /data/fq7/d/b && cd /data/fq7 && find d -type f -printf '%f ' -ls | awk '{print $1, $NF}'; find d -type f -ls -printf '%f\\n' | awk '{print $NF}'; cd / && rm -r /data/fq7",
+      "command": "mkdir -p /data/fq7/d && printf 'hi\\n' > /data/fq7/d/a && printf 'yo\\n' > /data/fq7/d/b && cd /data/fq7 && find d -type f -printf '%f ' -ls | awk '{print $1, $NF}'; find d -type f -ls -printf '%f\\n' | awk '{print $NF}'; cd /",
       "expect": {
         "exit": 0,
         "stdout": "a d/a\nb d/b\nd/a\na\nd/b\nb\n",
@@ -1519,7 +1519,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fq8/d && printf 'hi\\n' > /data/fq8/d/a.txt && printf 'yo\\n' > /data/fq8/d/b.txt && printf 'zz\\n' > /data/fq8/d/c.txt && printf 'k' > /data/fq8/d/keep && cd /data/fq8 && find d -name a.txt -printf 'rm %f\\n' -delete; find d -name b.txt -delete -printf 'gone %p\\n'; find d -name c.txt -printf '%s|' -delete -printf '%s\\n'; ls d; cd / && rm -r /data/fq8",
+      "command": "mkdir -p /data/fq8/d && printf 'hi\\n' > /data/fq8/d/a.txt && printf 'yo\\n' > /data/fq8/d/b.txt && printf 'zz\\n' > /data/fq8/d/c.txt && printf 'k' > /data/fq8/d/keep && cd /data/fq8 && find d -name a.txt -printf 'rm %f\\n' -delete; find d -name b.txt -delete -printf 'gone %p\\n'; find d -name c.txt -printf '%s|' -delete -printf '%s\\n'; ls d; cd /",
       "expect": {
         "exit": 0,
         "stdout": "rm a.txt\ngone d/b.txt\n3|3\nkeep\n",
@@ -1555,7 +1555,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fq9/d && printf 'hi\\n' > /data/fq9/d/a && printf 'yo\\n' > /data/fq9/d/b && cd /data/fq9 && find d -type f -printf '%f ' -printf '%s\\n'; cd / && rm -r /data/fq9",
+      "command": "mkdir -p /data/fq9/d && printf 'hi\\n' > /data/fq9/d/a && printf 'yo\\n' > /data/fq9/d/b && cd /data/fq9 && find d -type f -printf '%f ' -printf '%s\\n'; cd /",
       "expect": {
         "exit": 0,
         "stdout": "a 3\nb 3\n",
@@ -1590,7 +1590,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fq10/d/sub && printf 'A' > /data/fq10/d/a && printf 'B' > /data/fq10/d/sub/b && cd /data/fq10 && find d -depth -printf '%p\\n'; cd / && rm -r /data/fq10",
+      "command": "mkdir -p /data/fq10/d/sub && printf 'A' > /data/fq10/d/a && printf 'B' > /data/fq10/d/sub/b && cd /data/fq10 && find d -depth -printf '%p\\n'; cd /",
       "expect": {
         "exit": 0,
         "stdout": "d/a\nd/sub/b\nd/sub\nd\n",
@@ -1626,7 +1626,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fq11/d/sub && printf 'A' > /data/fq11/d/a && printf 'B' > /data/fq11/d/sub/b && cd /data/fq11 && find d d/sub -type f -printf '%P %d|' -print; cd / && rm -r /data/fq11",
+      "command": "mkdir -p /data/fq11/d/sub && printf 'A' > /data/fq11/d/a && printf 'B' > /data/fq11/d/sub/b && cd /data/fq11 && find d d/sub -type f -printf '%P %d|' -print; cd /",
       "expect": {
         "exit": 0,
         "stdout": "a 1|d/a\nsub/b 2|d/sub/b\nb 1|d/sub/b\n",
@@ -1732,7 +1732,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fl/d/sub && printf A > /data/fl/d/a.txt && printf B > /data/fl/d/sub/b.txt && printf K > /data/fl/d/sub/keep && cd /data/fl && find d -name '*.txt' -delete -ls -print; echo rc=$?; find d -type f | wc -l; cd / && rm -r /data/fl",
+      "command": "mkdir -p /data/fl/d/sub && printf A > /data/fl/d/a.txt && printf B > /data/fl/d/sub/b.txt && printf K > /data/fl/d/sub/keep && cd /data/fl && find d -name '*.txt' -delete -ls -print; echo rc=$?; find d -type f | wc -l; cd /",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n1\n",
@@ -1767,7 +1767,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fd/d && printf K > /data/fd/d/keep && cd /data/fd && ln -s keep d/link && ln -s nowhere d/dangling && find d -type l -delete; echo rc=$?; find d | sort; cd / && rm -r /data/fd",
+      "command": "mkdir -p /data/fd/d && printf K > /data/fd/d/keep && cd /data/fd && ln -s keep d/link && ln -s nowhere d/dangling && find d -type l -delete; echo rc=$?; find d | sort; cd /",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nd\nd/keep\n",
@@ -1802,7 +1802,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fz && printf A > /data/fz/a && cd /data/fz && find a -newermt '2026-01-01T00:00+99:99'; echo rc=$?; find a -newermt '2026-01-01T00:00+23:59' | wc -l; cd / && rm -r /data/fz",
+      "command": "mkdir -p /data/fz && printf A > /data/fz/a && cd /data/fz && find a -newermt '2026-01-01T00:00+99:99'; echo rc=$?; find a -newermt '2026-01-01T00:00+23:59' | wc -l; cd /",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n1\n",
@@ -1873,7 +1873,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/ft/d/sub && printf A > /data/ft/d/a.txt && printf B > /data/ft/d/sub/b.txt && printf K > /data/ft/d/keep && printf K > /data/ft/d/sub/keep && cd /data/ft && find d/ -depth; find d/ -name '*.txt' -delete; echo rc=$?; find d/ | sort; cd / && rm -r /data/ft",
+      "command": "mkdir -p /data/ft/d/sub && printf A > /data/ft/d/a.txt && printf B > /data/ft/d/sub/b.txt && printf K > /data/ft/d/keep && printf K > /data/ft/d/sub/keep && cd /data/ft && find d/ -depth; find d/ -name '*.txt' -delete; echo rc=$?; find d/ | sort; cd /",
       "expect": {
         "exit": 0,
         "stdout": "d/a.txt\nd/keep\nd/sub/b.txt\nd/sub/keep\nd/sub\nd/\nrc=0\nd/\nd/keep\nd/sub\nd/sub/keep\n",
@@ -1909,7 +1909,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fy/d && printf AB > /data/fy/d/a.txt && cd /data/fy && find d -name a.txt -ls | cut -c1-31; find d -name a.txt -ls | awk '{print NF, $7, $NF}'; cd / && rm -r /data/fy",
+      "command": "mkdir -p /data/fy/d && printf AB > /data/fy/d/a.txt && cd /data/fy && find d -name a.txt -ls | cut -c1-31; find d -name a.txt -ls | awk '{print NF, $7, $NF}'; cd /",
       "expect": {
         "exit": 0,
         "stdout": "        ?      ? -rw-r--r--   1\n11 2 d/a.txt\n",
@@ -1944,7 +1944,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fn/d/sub && printf A > /data/fn/d/a.txt && printf B > /data/fn/d/sub/b.txt && cd /data/fn && find d d/sub -depth -print; find d d -depth -exec echo saw {} \\; ; cd / && rm -r /data/fn",
+      "command": "mkdir -p /data/fn/d/sub && printf A > /data/fn/d/a.txt && printf B > /data/fn/d/sub/b.txt && cd /data/fn && find d d/sub -depth -print; find d d -depth -exec echo saw {} \\; ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "d/a.txt\nd/sub/b.txt\nd/sub\nd\nd/sub/b.txt\nd/sub\nsaw d/a.txt\nsaw d/sub/b.txt\nsaw d/sub\nsaw d\nsaw d/a.txt\nsaw d/sub/b.txt\nsaw d/sub\nsaw d\n",
@@ -2013,7 +2013,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/ff/d && printf x > /data/ff/d/keep && cd /data/ff && zff() { echo BAD; }; find d -maxdepth 0 -exec zff {} \\; ; echo rc=$?; find d -maxdepth 0 -exec cd {} \\; ; echo rc=$?; find d -maxdepth 0 -exec echo hi {} \\; ; unset -f zff; cd / && rm -r /data/ff",
+      "command": "mkdir -p /data/ff/d && printf x > /data/ff/d/keep && cd /data/ff && zff() { echo BAD; }; find d -maxdepth 0 -exec zff {} \\; ; echo rc=$?; find d -maxdepth 0 -exec cd {} \\; ; echo rc=$?; find d -maxdepth 0 -exec echo hi {} \\; ; unset -f zff; cd /",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nrc=0\nhi d\n",
@@ -2048,7 +2048,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fq/a && printf x > /data/fq/a/keep && cd /data/fq && find a -newermt @0x1; echo rc=$?; find a -newermt @1e2; echo rc=$?; find a -newermt @1.5 >/dev/null; echo rc=$?; find a -newermt '@ 1' >/dev/null; echo rc=$?; cd / && rm -r /data/fq",
+      "command": "mkdir -p /data/fq/a && printf x > /data/fq/a/keep && cd /data/fq && find a -newermt @0x1; echo rc=$?; find a -newermt @1e2; echo rc=$?; find a -newermt @1.5 >/dev/null; echo rc=$?; find a -newermt '@ 1' >/dev/null; echo rc=$?; cd /",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=0\nrc=0\n",
@@ -2083,7 +2083,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fh/s; printf 'echo ran\\n' > /data/fh/s/x; chmod 700 /data/fh/s/x; cd /data/fh; find s -type f -exec {} \\; ; echo rc=$?; cd / && rm -r /data/fh",
+      "command": "mkdir -p /data/fh/s; printf 'echo ran\\n' > /data/fh/s/x; chmod 700 /data/fh/s/x; cd /data/fh; find s -type f -exec {} \\; ; echo rc=$?; cd /",
       "expect": {
         "exit": 0,
         "stdout": "ran\nrc=0\n",
@@ -2118,7 +2118,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fs; printf 'content\\n' > /data/fs/f; cd /data/fs; cat() { echo BAD; }; find . -type f -exec cat {} \\; ; echo rc=$?; unset -f cat; cd / && rm -r /data/fs",
+      "command": "mkdir -p /data/fs; printf 'content\\n' > /data/fs/f; cd /data/fs; cat() { echo BAD; }; find . -type f -exec cat {} \\; ; echo rc=$?; unset -f cat; cd /",
       "expect": {
         "exit": 0,
         "stdout": "content\nrc=0\n",
@@ -2153,7 +2153,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fi/d; touch /data/fi/d/a /data/fi/d/b; cd /data/fi; printf x | find d -maxdepth 0 -exec cat \\; ; echo rc=$?; printf y | find d -type f -exec cat \\; ; echo rc=$?; printf z | find d -maxdepth 0 -exec true \\; -exec cat \\; ; echo rc=$?; printf abc | find d -maxdepth 0 -exec head -c 1 \\; -exec cat \\; ; echo rc=$?; cd / && rm -r /data/fi",
+      "command": "mkdir -p /data/fi/d; touch /data/fi/d/a /data/fi/d/b; cd /data/fi; printf x | find d -maxdepth 0 -exec cat \\; ; echo rc=$?; printf y | find d -type f -exec cat \\; ; echo rc=$?; printf z | find d -maxdepth 0 -exec true \\; -exec cat \\; ; echo rc=$?; printf abc | find d -maxdepth 0 -exec head -c 1 \\; -exec cat \\; ; echo rc=$?; cd /",
       "expect": {
         "exit": 0,
         "stdout": "xrc=0\nyrc=0\nzrc=0\nabcrc=0\n",
@@ -2188,7 +2188,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fp; touch /data/fp/f; cd /data/fp; unset fpx fpy; find . -type f -exec printf -v fpx hi \\; ; echo \"[$fpx]\"; find . -type f -exec sh -c 'printf -v fpy hi; echo \"[$fpy]\"' \\; ; cd / && rm -r /data/fp",
+      "command": "mkdir -p /data/fp; touch /data/fp/f; cd /data/fp; unset fpx fpy; find . -type f -exec printf -v fpx hi \\; ; echo \"[$fpx]\"; find . -type f -exec sh -c 'printf -v fpy hi; echo \"[$fpy]\"' \\; ; cd /",
       "expect": {
         "exit": 0,
         "stdout": "-v[]\n[hi]\n",
@@ -2224,7 +2224,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/dl; touch /data/dl/f /data/dl/g; cd /data; find dl/f -delete -ls | sed -E 's/.* //'; echo rc=$?; find dl -name g -size -1k -delete -ls | sed -E 's/.* //'; echo rc=$?; test -e dl/f -o -e dl/g; echo e=$?; cd / && rm -rf /data/dl",
+      "command": "mkdir -p /data/dl; touch /data/dl/f /data/dl/g; cd /data; find dl/f -delete -ls | sed -E 's/.* //'; echo rc=$?; find dl -name g -size -1k -delete -ls | sed -E 's/.* //'; echo rc=$?; test -e dl/f -o -e dl/g; echo e=$?; cd /",
       "expect": {
         "exit": 0,
         "stdout": "dl/f\nrc=0\ndl/g\nrc=0\ne=1\n",

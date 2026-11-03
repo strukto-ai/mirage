@@ -808,7 +808,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgb; printf 'abc\\ndefabc\\nabc abc\\n' > /data/cfgb/qb.txt; grep --byte-offset abc /data/cfgb/qb.txt; echo rc=$?; grep -bnH -o abc /data/cfgb/qb.txt; echo rc=$?; grep -bq abc /data/cfgb/qb.txt; echo rc=$?; grep -bv abc /data/cfgb/qb.txt; echo rc=$?; printf 'ab\\ncd\\n' | grep -b '[0-9]*'; echo rc=$?; rm -rf /data/cfgb",
+      "command": "mkdir -p /data/cfgb; printf 'abc\\ndefabc\\nabc abc\\n' > /data/cfgb/qb.txt; grep --byte-offset abc /data/cfgb/qb.txt; echo rc=$?; grep -bnH -o abc /data/cfgb/qb.txt; echo rc=$?; grep -bq abc /data/cfgb/qb.txt; echo rc=$?; grep -bv abc /data/cfgb/qb.txt; echo rc=$?; printf 'ab\\ncd\\n' | grep -b '[0-9]*'; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "0:abc\n4:defabc\n11:abc abc\nrc=0\n/data/cfgb/qb.txt:1:0:abc\n/data/cfgb/qb.txt:2:7:abc\n/data/cfgb/qb.txt:3:11:abc\n/data/cfgb/qb.txt:3:15:abc\nrc=0\nrc=0\nrc=1\n0:ab\n3:cd\nrc=0\n",
@@ -851,7 +851,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgb; printf 'one\\n\\377\\ntwo abc\\nthree\\n' > /data/cfgb/ccx.bin; grep -a -b -B1 abc /data/cfgb/ccx.bin | od -An -tx1; echo rc=${PIPESTATUS[0]}; grep -a -bn -A1 -B1 abc /data/cfgb/ccx.bin | od -An -tx1; echo rc=${PIPESTATUS[0]}; rm -rf /data/cfgb",
+      "command": "mkdir -p /data/cfgb; printf 'one\\n\\377\\ntwo abc\\nthree\\n' > /data/cfgb/ccx.bin; grep -a -b -B1 abc /data/cfgb/ccx.bin | od -An -tx1; echo rc=${PIPESTATUS[0]}; grep -a -bn -A1 -B1 abc /data/cfgb/ccx.bin | od -An -tx1; echo rc=${PIPESTATUS[0]}",
       "expect": {
         "exit": 0,
         "stdout": " 34 2d ff 0a 36 3a 74 77 6f 20 61 62 63 0a\nrc=0\n 32 2d 34 2d ff 0a 33 3a 36 3a 74 77 6f 20 61 62\n 63 0a 34 2d 31 34 2d 74 68 72 65 65 0a\nrc=0\n",

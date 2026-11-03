@@ -63,7 +63,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcB_xs /data2/fcB_xt && printf 'x\\n' > /data/fcB_xs/f && printf 'x\\n' > /data2/fcB_xt/g && ln -s /data2/fcB_xt /data/fcB_xs/tl && rg -L --one-file-system --no-one-file-system --sort path x /data/fcB_xs; rg --sort path x /data/fcB_xs; rg -L --sort path x /data/fcB_xs; rm /data/fcB_xs/tl && ln -s /data2/fcB_xt/g /data/fcB_xs/gl && rg -L --one-file-system --files --sort path /data/fcB_xs; rm -rf /data/fcB_xs /data2/fcB_xt",
+      "command": "mkdir -p /data/fcB_xs /data2/fcB_xt && printf 'x\\n' > /data/fcB_xs/f && printf 'x\\n' > /data2/fcB_xt/g && ln -s /data2/fcB_xt /data/fcB_xs/tl && rg -L --one-file-system --no-one-file-system --sort path x /data/fcB_xs; rg --sort path x /data/fcB_xs; rg -L --sort path x /data/fcB_xs; rm /data/fcB_xs/tl && ln -s /data2/fcB_xt/g /data/fcB_xs/gl && rg -L --one-file-system --files --sort path /data/fcB_xs",
       "expect": {
         "exit": 0,
         "stdout": "/data/fcB_xs/f:x\n/data/fcB_xs/tl/g:x\n/data/fcB_xs/f:x\n/data/fcB_xs/f:x\n/data/fcB_xs/tl/g:x\n/data/fcB_xs/f\n/data/fcB_xs/gl\n",

@@ -26,7 +26,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/mvl1301 && mkdir /data/mvl1301/dir && echo a > /data/mvl1301/a && echo b > /data/mvl1301/b && ln -s /data/mvl1301/dir /data/mvl1301/dl && mv /data/mvl1301/a /data/mvl1301/b /data/mvl1301/dl && ls /data/mvl1301 /data/mvl1301/dir; rc=$?; rm -r /data/mvl1301; exit $rc) && (mkdir -p /data/mvreview/out; cd /data/mvreview; ln -s /data/mvreview/out /data/mvreview/dir; ln -s /data/mvreview/missing /data/mvreview/link; echo old > /data/mvreview/out/link; echo /data/mvreview/a > /data/mvreview/a; mv -n /data/mvreview/link /data/mvreview/a /data/mvreview/dir; cat /data/mvreview/out/link; readlink /data/mvreview/link; echo /data/mvreview/b > /data/mvreview/b; mv --update=none /data/mvreview/link /data/mvreview/b /data/mvreview/dir; cat /data/mvreview/out/link; readlink /data/mvreview/link; echo /data/mvreview/c > /data/mvreview/c; mv --update=none-fail /data/mvreview/link /data/mvreview/c /data/mvreview/out; echo skip=$?; cat /data/mvreview/out/link; readlink /data/mvreview/link; echo /data/mvreview/d > /data/mvreview/d; mv -bv /data/mvreview/link /data/mvreview/d /data/mvreview/out; readlink /data/mvreview/out/link; cat /data/mvreview/out/link~; rm -r /data/mvreview)",
+      "command": "(mkdir -p /data/mvl1301 && mkdir /data/mvl1301/dir && echo a > /data/mvl1301/a && echo b > /data/mvl1301/b && ln -s /data/mvl1301/dir /data/mvl1301/dl && mv /data/mvl1301/a /data/mvl1301/b /data/mvl1301/dl && ls /data/mvl1301 /data/mvl1301/dir; rc=$?; rm -r /data/mvl1301; exit $rc) && (mkdir -p /data/mvreview/out; cd /data/mvreview; ln -s /data/mvreview/out /data/mvreview/dir; ln -s /data/mvreview/missing /data/mvreview/link; echo old > /data/mvreview/out/link; echo /data/mvreview/a > /data/mvreview/a; mv -n /data/mvreview/link /data/mvreview/a /data/mvreview/dir; cat /data/mvreview/out/link; readlink /data/mvreview/link; echo /data/mvreview/b > /data/mvreview/b; mv --update=none /data/mvreview/link /data/mvreview/b /data/mvreview/dir; cat /data/mvreview/out/link; readlink /data/mvreview/link; echo /data/mvreview/c > /data/mvreview/c; mv --update=none-fail /data/mvreview/link /data/mvreview/c /data/mvreview/out; echo skip=$?; cat /data/mvreview/out/link; readlink /data/mvreview/link; echo /data/mvreview/d > /data/mvreview/d; mv -bv /data/mvreview/link /data/mvreview/d /data/mvreview/out; readlink /data/mvreview/out/link; cat /data/mvreview/out/link~)",
       "expect": {
         "exit": 0,
         "stdout": "/data/mvl1301:\ndir\ndl\n\n/data/mvl1301/dir:\na\nb\nold\n/data/mvreview/missing\nold\n/data/mvreview/missing\nskip=1\nold\n/data/mvreview/missing\nrenamed '/data/mvreview/link' -> '/data/mvreview/out/link' (backup: '/data/mvreview/out/link~')\nrenamed '/data/mvreview/d' -> '/data/mvreview/out/d'\n/data/mvreview/missing\nold\n",
@@ -59,7 +59,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/mvl1302 && mkdir /data/mvl1302/dir && echo a > /data/mvl1302/a && echo b > /data/mvl1302/b && ln -s /data/mvl1302/dir /data/mvl1302/dl && mv -t /data/mvl1302/dl /data/mvl1302/a /data/mvl1302/b && ls /data/mvl1302 /data/mvl1302/dir; rc=$?; rm -r /data/mvl1302; exit $rc)",
+      "command": "(mkdir -p /data/mvl1302 && mkdir /data/mvl1302/dir && echo a > /data/mvl1302/a && echo b > /data/mvl1302/b && ln -s /data/mvl1302/dir /data/mvl1302/dl && mv -t /data/mvl1302/dl /data/mvl1302/a /data/mvl1302/b && ls /data/mvl1302 /data/mvl1302/dir; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "/data/mvl1302:\ndir\ndl\n\n/data/mvl1302/dir:\na\nb\n",
@@ -92,7 +92,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/mvl1303 && echo a > /data/mvl1303/a && echo b > /data/mvl1303/b && ln -s /data/mvl1303/nowhere /data/mvl1303/dang && mv /data/mvl1303/a /data/mvl1303/b /data/mvl1303/dang; echo rc=$?; ls /data/mvl1303; rc=$?; rm -r /data/mvl1303; exit $rc)",
+      "command": "(mkdir -p /data/mvl1303 && echo a > /data/mvl1303/a && echo b > /data/mvl1303/b && ln -s /data/mvl1303/nowhere /data/mvl1303/dang && mv /data/mvl1303/a /data/mvl1303/b /data/mvl1303/dang; echo rc=$?; ls /data/mvl1303; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\na\nb\ndang\n",
@@ -125,7 +125,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/mvl1304 && echo a > /data/mvl1304/a && echo b > /data/mvl1304/b && echo f > /data/mvl1304/f && ln -s /data/mvl1304/f /data/mvl1304/fl && mv /data/mvl1304/a /data/mvl1304/b /data/mvl1304/fl; echo rc=$?; ls /data/mvl1304; rc=$?; rm -r /data/mvl1304; exit $rc)",
+      "command": "(mkdir -p /data/mvl1304 && echo a > /data/mvl1304/a && echo b > /data/mvl1304/b && echo f > /data/mvl1304/f && ln -s /data/mvl1304/f /data/mvl1304/fl && mv /data/mvl1304/a /data/mvl1304/b /data/mvl1304/fl; echo rc=$?; ls /data/mvl1304; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\na\nb\nf\nfl\n",
@@ -158,7 +158,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/mvl1305 && mkdir /data/mvl1305/dir && echo f > /data/mvl1305/f && ln -s f /data/mvl1305/fl && mv /data/mvl1305/fl /data/mvl1305/dir && readlink /data/mvl1305/dir/fl && ls /data/mvl1305; rc=$?; rm -r /data/mvl1305; exit $rc) && (mkdir -p /data/mvpartial/src /data/mvpartial/out/src; cd /data/mvpartial; echo content > /data/mvpartial/src/file; ln -s file /data/mvpartial/src/link; mv -n /data/mvpartial/missing /data/mvpartial/src /data/mvpartial/out; echo skipped=$?; cat /data/mvpartial/src/link; mv /data/mvpartial/missing /data/mvpartial/src /data/mvpartial/out; echo moved=$?; cat /data/mvpartial/out/src/link; test ! -e /data/mvpartial/src; echo gone=$?; echo old > /data/mvpartial/fresh; ln -s missing /data/mvpartial/link; touch -h -t 202001010000 /data/mvpartial/link; touch -t 202101010000 /data/mvpartial/fresh; mv -u /data/mvpartial/link /data/mvpartial/fresh; cat /data/mvpartial/fresh; touch -h -t 202201010000 /data/mvpartial/link; mv -u /data/mvpartial/link /data/mvpartial/fresh; readlink /data/mvpartial/fresh; rm /data/mvpartial/fresh; test ! -e /data/mvpartial/fresh; echo removed=$?; rm -r /data/mvpartial)",
+      "command": "(mkdir -p /data/mvl1305 && mkdir /data/mvl1305/dir && echo f > /data/mvl1305/f && ln -s f /data/mvl1305/fl && mv /data/mvl1305/fl /data/mvl1305/dir && readlink /data/mvl1305/dir/fl && ls /data/mvl1305; rc=$?; rm -r /data/mvl1305; exit $rc) && (mkdir -p /data/mvpartial/src /data/mvpartial/out/src; cd /data/mvpartial; echo content > /data/mvpartial/src/file; ln -s file /data/mvpartial/src/link; mv -n /data/mvpartial/missing /data/mvpartial/src /data/mvpartial/out; echo skipped=$?; cat /data/mvpartial/src/link; mv /data/mvpartial/missing /data/mvpartial/src /data/mvpartial/out; echo moved=$?; cat /data/mvpartial/out/src/link; test ! -e /data/mvpartial/src; echo gone=$?; echo old > /data/mvpartial/fresh; ln -s missing /data/mvpartial/link; touch -h -t 202001010000 /data/mvpartial/link; touch -t 202101010000 /data/mvpartial/fresh; mv -u /data/mvpartial/link /data/mvpartial/fresh; cat /data/mvpartial/fresh; touch -h -t 202201010000 /data/mvpartial/link; mv -u /data/mvpartial/link /data/mvpartial/fresh; readlink /data/mvpartial/fresh; rm /data/mvpartial/fresh; test ! -e /data/mvpartial/fresh; echo removed=$?)",
       "expect": {
         "exit": 0,
         "stdout": "f\ndir\nf\nskipped=1\ncontent\nmoved=1\ncontent\ngone=0\nold\nmissing\nremoved=0\n",

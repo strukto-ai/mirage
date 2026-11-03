@@ -693,7 +693,7 @@
     "gdrive-folder",
     "box"
    ],
-   "command": "mkdir -p /data/cffind/sub/deep; printf 'nested\\ncontent\\n' > /data/cffind/sub/nested.txt; printf 'deep\\n' > /data/cffind/sub/deep/deeper.txt; find /data/cffind/sub; echo rc=$?; rm -rf /data/cffind",
+   "command": "mkdir -p /data/cffind/sub/deep; printf 'nested\\ncontent\\n' > /data/cffind/sub/nested.txt; printf 'deep\\n' > /data/cffind/sub/deep/deeper.txt; find /data/cffind/sub; echo rc=$?",
    "expect": {
     "exit": 0,
     "stdout": "/data/cffind/sub\n/data/cffind/sub/deep\n/data/cffind/sub/deep/deeper.txt\n/data/cffind/sub/nested.txt\nrc=0\n",

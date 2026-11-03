@@ -62,7 +62,7 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "mkdir -p /data/r10dx /data/r10dy /data/r10dd && echo 1 > /data/r10dx/a && echo 2 > /data/r10dy/a && cp /data/r10dx/a /data/r10dy/a /data/r10dd; echo rc=$?; cat /data/r10dd/a; cp -n /data/r10dx/a /data/r10dy/a /data/r10dd; echo rc=$?; cp /data/r10dx/a /data/r10dx/a /data/r10dd; echo rc=$?; rm -r /data/r10dx /data/r10dy /data/r10dd",
+      "command": "mkdir -p /data/r10dx /data/r10dy /data/r10dd && echo 1 > /data/r10dx/a && echo 2 > /data/r10dy/a && cp /data/r10dx/a /data/r10dy/a /data/r10dd; echo rc=$?; cat /data/r10dd/a; cp -n /data/r10dx/a /data/r10dy/a /data/r10dd; echo rc=$?; cp /data/r10dx/a /data/r10dx/a /data/r10dd; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n1\nrc=0\nrc=0\n",
@@ -95,7 +95,7 @@
         "ssh",
         "tidb-filesystem"
       ],
-      "command": "mkdir -p /data/fcF_n1/x /data/fcF_n1/y /data/fcF_n1/d && echo 1 > /data/fcF_n1/x/a && echo 2 > /data/fcF_n1/y/a && cp -n /data/fcF_n1/x/a /data/fcF_n1/y/a /data/fcF_n1/d; echo rc=$?; cat /data/fcF_n1/d/a; rm -r /data/fcF_n1",
+      "command": "mkdir -p /data/fcF_n1/x /data/fcF_n1/y /data/fcF_n1/d && echo 1 > /data/fcF_n1/x/a && echo 2 > /data/fcF_n1/y/a && cp -n /data/fcF_n1/x/a /data/fcF_n1/y/a /data/fcF_n1/d; echo rc=$?; cat /data/fcF_n1/d/a",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\n1\n",
@@ -131,7 +131,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcR_w/sub/e /data/fcR_w/sub/d && echo x > /data/fcR_w/sub/d/f && cp -rnT /data/fcR_w/sub /data/fcR_w; echo rc=$?; find /data/fcR_w | sort; cat /data/fcR_w/d/f; rm -r /data/fcR_w",
+      "command": "mkdir -p /data/fcR_w/sub/e /data/fcR_w/sub/d && echo x > /data/fcR_w/sub/d/f && cp -rnT /data/fcR_w/sub /data/fcR_w; echo rc=$?; find /data/fcR_w | sort; cat /data/fcR_w/d/f",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\n/data/fcR_w\n/data/fcR_w/d\n/data/fcR_w/d/f\n/data/fcR_w/e\n/data/fcR_w/sub\n/data/fcR_w/sub/d\n/data/fcR_w/sub/d/f\n/data/fcR_w/sub/e\nx\n",

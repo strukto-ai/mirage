@@ -336,7 +336,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/szb && printf abcd > /data/szb/four && printf '%0600d' 0 > /data/szb/six && find /data/szb -type f -size -2; find /data/szb -type f -size 2; find /data/szb -type f -size +1 | sort; rm -rf /data/szb",
+      "command": "mkdir -p /data/szb && printf abcd > /data/szb/four && printf '%0600d' 0 > /data/szb/six && find /data/szb -type f -size -2; find /data/szb -type f -size 2; find /data/szb -type f -size +1 | sort",
       "expect": {
         "exit": 0,
         "stdout": "/data/szb/four\n/data/szb/six\n/data/szb/six\n",
@@ -374,7 +374,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/szu && printf abcd > /data/szu/four && printf '%0600d' 0 > /data/szu/six && find /data/szu -type f -size 2b; find /data/szu -type f -size -3w; find /data/szu -type f -size 2w; rm -rf /data/szu",
+      "command": "mkdir -p /data/szu && printf abcd > /data/szu/four && printf '%0600d' 0 > /data/szu/six && find /data/szu -type f -size 2b; find /data/szu -type f -size -3w; find /data/szu -type f -size 2w",
       "expect": {
         "exit": 0,
         "stdout": "/data/szu/six\n/data/szu/four\n/data/szu/four\n",
@@ -412,7 +412,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/dsz/sub && printf abcd > /data/dsz/sub/f && stat -c '%s %F %n' /data/dsz /data/dsz/sub && find /data/dsz -printf '%s %y %p\\n' | sort -k3 && find /data/dsz -size +1k; rm -rf /data/dsz",
+      "command": "mkdir -p /data/dsz/sub && printf abcd > /data/dsz/sub/f && stat -c '%s %F %n' /data/dsz /data/dsz/sub && find /data/dsz -printf '%s %y %p\\n' | sort -k3 && find /data/dsz -size +1k",
       "expect": {
         "exit": 0,
         "stdout": "4096 directory /data/dsz\n4096 directory /data/dsz/sub\n4096 d /data/dsz\n4096 d /data/dsz/sub\n4 f /data/dsz/sub/f\n/data/dsz\n/data/dsz/sub\n",

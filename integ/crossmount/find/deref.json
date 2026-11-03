@@ -203,7 +203,7 @@
     "gdrive-folder",
     "box"
    ],
-   "command": "mkdir -p /data/fcX_fx /data2/fcX_fx/sub && echo t > /data2/fcX_fx/sub/f && echo o > /data/fcX_fx/own && ln -s /data2/fcX_fx /data/fcX_fx/link && find -L /data/fcX_fx -xdev | sort; find -L /data/fcX_fx/link -xdev | sort; rm -r /data/fcX_fx /data2/fcX_fx",
+   "command": "mkdir -p /data/fcX_fx /data2/fcX_fx/sub && echo t > /data2/fcX_fx/sub/f && echo o > /data/fcX_fx/own && ln -s /data2/fcX_fx /data/fcX_fx/link && find -L /data/fcX_fx -xdev | sort; find -L /data/fcX_fx/link -xdev | sort",
    "expect": {
     "exit": 0,
     "stdout": "/data/fcX_fx\n/data/fcX_fx/link\n/data/fcX_fx/own\n/data/fcX_fx/link\n/data/fcX_fx/link/sub\n/data/fcX_fx/link/sub/f\n",
@@ -242,7 +242,7 @@
     "gdrive-folder",
     "box"
    ],
-   "command": "mkdir -p /data/fcX_fe /data2/fcX_fe/sub && echo t > /data2/fcX_fe/sub/f && echo o > /data/fcX_fe/own && touch /data/fcX_fe/zero && ln -s /data2/fcX_fe /data/fcX_fe/link && find -L /data/fcX_fe -xdev -empty; rm -r /data/fcX_fe /data2/fcX_fe",
+   "command": "mkdir -p /data/fcX_fe /data2/fcX_fe/sub && echo t > /data2/fcX_fe/sub/f && echo o > /data/fcX_fe/own && touch /data/fcX_fe/zero && ln -s /data2/fcX_fe /data/fcX_fe/link && find -L /data/fcX_fe -xdev -empty",
    "expect": {
     "exit": 0,
     "stdout": "/data/fcX_fe/zero\n",

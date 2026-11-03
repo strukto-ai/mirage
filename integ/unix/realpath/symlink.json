@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "ln -s /data/rpe/f.txt /data/rpe/link && realpath /data/rpe/link; (mkdir -p /data/rpm/x/y && echo g > /data/rpm/x/y/g && ln -s /data/rpm/x/y /data/rpm/far && cd /data/rpm && realpath -s far/.. && realpath -L far/.. && realpath far/.. && realpath --no-symlinks far && realpath -L far && realpath --relative-to=far x/f . / && realpath -z --relative-base=. x far /data | tr '\\0' '|' && echo && realpath -s nope/../f; realpath -q /nope/x f; echo rc=$?; realpath; echo rc=$?; cd far && realpath -s . && realpath -sm ../../nope/../z; rm -r /data/rpm)",
+      "command": "ln -s /data/rpe/f.txt /data/rpe/link && realpath /data/rpe/link; (mkdir -p /data/rpm/x/y && echo g > /data/rpm/x/y/g && ln -s /data/rpm/x/y /data/rpm/far && cd /data/rpm && realpath -s far/.. && realpath -L far/.. && realpath far/.. && realpath --no-symlinks far && realpath -L far && realpath --relative-to=far x/f . / && realpath -z --relative-base=. x far /data | tr '\\0' '|' && echo && realpath -s nope/../f; realpath -q /nope/x f; echo rc=$?; realpath; echo rc=$?; cd far && realpath -s . && realpath -sm ../../nope/../z)",
       "expect": {
         "exit": 0,
         "stdout": "/data/rpe/f.txt\n/data/rpm\n/data/rpm\n/data/rpm/x\n/data/rpm/far\n/data/rpm/x/y\n../f\n../..\n../../../..\nx|x/y|/data|\n/data/rpm/f\nrc=1\nrc=1\n/data/rpm/x/y\n/data/rpm/z\n",

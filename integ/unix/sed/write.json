@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sw && printf 'a\\nb\\n' | sed -n 'w /data/sw/o' && cat /data/sw/o; rm -r /data/sw",
+      "command": "mkdir -p /data/sw && printf 'a\\nb\\n' | sed -n 'w /data/sw/o' && cat /data/sw/o",
       "expect": {
         "exit": 0,
         "stdout": "a\nb\n",
@@ -63,7 +63,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sw2 && printf 'old\\n' > /data/sw2/o && printf 'a\\n' | sed -n '2w /data/sw2/o' && wc -c < /data/sw2/o; rm -r /data/sw2",
+      "command": "mkdir -p /data/sw2 && printf 'old\\n' > /data/sw2/o && printf 'a\\n' | sed -n '2w /data/sw2/o' && wc -c < /data/sw2/o",
       "expect": {
         "exit": 0,
         "stdout": "0\n",
@@ -98,7 +98,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sw3 && printf 'old\\n' > /data/sw3/o && printf 'a\\n' | sed -e 'w /data/sw3/o' -e k; echo rc=$?; wc -c < /data/sw3/o; rm -r /data/sw3",
+      "command": "mkdir -p /data/sw3 && printf 'old\\n' > /data/sw3/o && printf 'a\\n' | sed -e 'w /data/sw3/o' -e k; echo rc=$?; wc -c < /data/sw3/o",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n0\n",
@@ -238,7 +238,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sw4 && printf 'a\\nb\\n' | sed 's/a/X/w /data/sw4/o' && cat /data/sw4/o; rm -r /data/sw4",
+      "command": "mkdir -p /data/sw4 && printf 'a\\nb\\n' | sed 's/a/X/w /data/sw4/o' && cat /data/sw4/o",
       "expect": {
         "exit": 0,
         "stdout": "X\nb\nX\n",
@@ -308,7 +308,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sw5 && printf 'a\\nb\\nc\\n' | sed -n 'N;W /data/sw5/o' && cat /data/sw5/o; rm -r /data/sw5",
+      "command": "mkdir -p /data/sw5 && printf 'a\\nb\\nc\\n' | sed -n 'N;W /data/sw5/o' && cat /data/sw5/o",
       "expect": {
         "exit": 0,
         "stdout": "a\n",
@@ -343,7 +343,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sw6 && printf 'a\\nb\\nc\\n' | sed -n -e '1w /data/sw6/o' -e '2w /data/sw6/o' && cat /data/sw6/o; rm -r /data/sw6",
+      "command": "mkdir -p /data/sw6 && printf 'a\\nb\\nc\\n' | sed -n -e '1w /data/sw6/o' -e '2w /data/sw6/o' && cat /data/sw6/o",
       "expect": {
         "exit": 0,
         "stdout": "a\nb\n",
@@ -378,7 +378,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sw7 && printf 'a\\nb' | sed -n 'w /data/sw7/o' && od -c /data/sw7/o; rm -r /data/sw7",
+      "command": "mkdir -p /data/sw7 && printf 'a\\nb' | sed -n 'w /data/sw7/o' && od -c /data/sw7/o",
       "expect": {
         "exit": 0,
         "stdout": "0000000   a  \\n   b\n0000003\n",
@@ -413,7 +413,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sw8 && printf 'one\\ntwo\\n' > /data/sw8/f && sed -i 's/one/1/w /dev/stdout' /data/sw8/f && cat /data/sw8/f; rm -r /data/sw8",
+      "command": "mkdir -p /data/sw8 && printf 'one\\ntwo\\n' > /data/sw8/f && sed -i 's/one/1/w /dev/stdout' /data/sw8/f && cat /data/sw8/f",
       "expect": {
         "exit": 0,
         "stdout": "1\n1\ntwo\n",
@@ -483,7 +483,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/swr && printf 'a\\nb\\nc\\n' | sed -e 'w /data/swr/o' -e '$r /data/swr/o' && echo -- && cat /data/swr/o; rm -r /data/swr",
+      "command": "mkdir -p /data/swr && printf 'a\\nb\\nc\\n' | sed -e 'w /data/swr/o' -e '$r /data/swr/o' && echo -- && cat /data/swr/o",
       "expect": {
         "exit": 0,
         "stdout": "a\nb\nc\n--\na\nb\nc\n",
@@ -518,7 +518,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sri && printf 'one\\ntwo\\n' > /data/sri/f && printf 'b1\\nb2\\n' > /data/sri/b && sed -i 's/b/B/;w /data/sri/f' /data/sri/b /data/sri/f && wc -c < /data/sri/f && cat /data/sri/b; rm -r /data/sri",
+      "command": "mkdir -p /data/sri && printf 'one\\ntwo\\n' > /data/sri/f && printf 'b1\\nb2\\n' > /data/sri/b && sed -i 's/b/B/;w /data/sri/f' /data/sri/b /data/sri/f && wc -c < /data/sri/f && cat /data/sri/b",
       "expect": {
         "exit": 0,
         "stdout": "0\nB1\nB2\n",

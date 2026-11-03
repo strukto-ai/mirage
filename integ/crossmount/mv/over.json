@@ -60,7 +60,7 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "mkdir -p /data/r17xr/m/sub /data/r17xr/e /data2/r17xr/m/sub /data2/r17xr/e && printf g > /data/r17xr/m/sub/g && printf y > /data/r17xr/e/y && printf z > /data2/r17xr/m/sub/z && (cd /data/r17xr && mv m /data2/r17xr; echo rc=$?; mv -v e /data2/r17xr; echo rc=$?); find /data2/r17xr | sort; rm -r /data/r17xr /data2/r17xr",
+      "command": "mkdir -p /data/r17xr/m/sub /data/r17xr/e /data2/r17xr/m/sub /data2/r17xr/e && printf g > /data/r17xr/m/sub/g && printf y > /data/r17xr/e/y && printf z > /data2/r17xr/m/sub/z && (cd /data/r17xr && mv m /data2/r17xr; echo rc=$?; mv -v e /data2/r17xr; echo rc=$?); find /data2/r17xr | sort",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\ncreated directory '/data2/r17xr/e'\ncopied 'e/y' -> '/data2/r17xr/e/y'\nremoved 'e/y'\nremoved directory 'e'\nrc=0\n/data2/r17xr\n/data2/r17xr/e\n/data2/r17xr/e/y\n/data2/r17xr/m\n/data2/r17xr/m/sub\n/data2/r17xr/m/sub/z\n",
@@ -90,7 +90,7 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "mkdir -p /data/r17xb/sub /data2/r17xb/a && printf a > /data/r17xb/a && printf b > /data/r17xb/sub/b && printf c > /data/r17xb/c && printf w > /data2/r17xb/a/w && printf x > /data2/r17xb/sub && printf y > /data2/r17xb/c && (cd /data/r17xb && mv -bv a sub /data2/r17xb; echo rc=$?; mv -b --no-copy c /data2/r17xb; echo rc=$?); find /data2/r17xb | sort; rm -r /data/r17xb /data2/r17xb",
+      "command": "mkdir -p /data/r17xb/sub /data2/r17xb/a && printf a > /data/r17xb/a && printf b > /data/r17xb/sub/b && printf c > /data/r17xb/c && printf w > /data2/r17xb/a/w && printf x > /data2/r17xb/sub && printf y > /data2/r17xb/c && (cd /data/r17xb && mv -bv a sub /data2/r17xb; echo rc=$?; mv -b --no-copy c /data2/r17xb; echo rc=$?); find /data2/r17xb | sort",
       "expect": {
         "exit": 0,
         "stdout": "copied 'a' -> '/data2/r17xb/a' (backup: '/data2/r17xb/a~')\nremoved 'a'\ncreated directory '/data2/r17xb/sub'\ncopied 'sub/b' -> '/data2/r17xb/sub/b'\nremoved 'sub/b'\nremoved directory 'sub'\nrc=0\nrc=1\n/data2/r17xb\n/data2/r17xb/a\n/data2/r17xb/a~\n/data2/r17xb/a~/w\n/data2/r17xb/c~\n/data2/r17xb/sub\n/data2/r17xb/sub/b\n/data2/r17xb/sub~\n",
@@ -122,7 +122,7 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "mkdir -p /data/r17xm/src && printf a > /data/r17xm/src/a && printf f > /data/r17xm/f && (cd /data/r17xm && mv -T src /data2; echo rc=$?; mv -nT src /data2; echo rc=$?; mv -bT f /data2; echo rc=$?; mv -T f /data2; echo rc=$?); ls /data/r17xm /data/r17xm/src; rm -r /data/r17xm",
+      "command": "mkdir -p /data/r17xm/src && printf a > /data/r17xm/src/a && printf f > /data/r17xm/f && (cd /data/r17xm && mv -T src /data2; echo rc=$?; mv -nT src /data2; echo rc=$?; mv -bT f /data2; echo rc=$?; mv -T f /data2; echo rc=$?); ls /data/r17xm /data/r17xm/src",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=0\nrc=1\nrc=1\n/data/r17xm:\nf\nsrc\n\n/data/r17xm/src:\na\n",

@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -U foo /data/gfl/a.txt; grep --binary -c foo /data/gfl/a.txt; grep -u -b foo /data/gfl/a.txt; grep --unix-byte-offsets -c foo /data/gfl/a.txt; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -U foo /data/gfl/a.txt; grep --binary -c foo /data/gfl/a.txt; grep -u -b foo /data/gfl/a.txt; grep --unix-byte-offsets -c foo /data/gfl/a.txt",
       "expect": {
         "exit": 0,
         "stdout": "foo one\nfoo two\n2\n11:foo one\n31:foo two\n2\n",

@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcF_k4 && echo one > /data/fcF_k4/ok && (cd /data/fcF_k4 && sha384sum ok > L1 && sha384sum ok | sed 's/ok$/gone/' >> L1 && sha384sum ok > L2 && echo junk >> L2 && sha384sum -c --ignore-missing L1; echo rc=$?; sha384sum -c --status L1; echo rc=$?; sha384sum --check --quiet L1; echo rc=$?; sha384sum -c -w L2; echo rc=$?; sha384sum -c --strict L2; echo rc=$?); rm -r /data/fcF_k4",
+      "command": "mkdir -p /data/fcF_k4 && echo one > /data/fcF_k4/ok && (cd /data/fcF_k4 && sha384sum ok > L1 && sha384sum ok | sed 's/ok$/gone/' >> L1 && sha384sum ok > L2 && echo junk >> L2 && sha384sum -c --ignore-missing L1; echo rc=$?; sha384sum -c --status L1; echo rc=$?; sha384sum --check --quiet L1; echo rc=$?; sha384sum -c -w L2; echo rc=$?; sha384sum -c --strict L2; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "ok: OK\nrc=0\nrc=1\ngone: FAILED open or read\nrc=1\nok: OK\nrc=0\nok: OK\nrc=1\n",

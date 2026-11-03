@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw6/d/sub /data/syw6/o && printf 'hello\\n' > /data/syw6/o/f && cd /data/syw6 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && { find -L d | sort && find -L d -type f | sort; }); rm -r /data/syw6",
+      "command": "(mkdir -p /data/syw6/d/sub /data/syw6/o && printf 'hello\\n' > /data/syw6/o/f && cd /data/syw6 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && { find -L d | sort && find -L d -type f | sort; })",
       "expect": {
         "exit": 0,
         "stdout": "d\nd/a\nd/ld\nd/ld/f\nd/lf\nd/sub\nd/sub/b\nd/a\nd/ld/f\nd/lf\nd/sub/b\n",
@@ -63,7 +63,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw7/d/sub /data/syw7/o && printf 'hello\\n' > /data/syw7/o/f && cd /data/syw7 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s .. d/sub/up && { find -L d -type f 2>&1 >/dev/null; echo rc=$?; find -L d 2>/dev/null | sort; }); rm -r /data/syw7",
+      "command": "(mkdir -p /data/syw7/d/sub /data/syw7/o && printf 'hello\\n' > /data/syw7/o/f && cd /data/syw7 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s .. d/sub/up && { find -L d -type f 2>&1 >/dev/null; echo rc=$?; find -L d 2>/dev/null | sort; })",
       "expect": {
         "exit": 0,
         "stdout": "find: File system loop detected; 'd/sub/up' is part of the same file system loop as 'd'.\nrc=1\nd\nd/a\nd/ld\nd/ld/f\nd/lf\nd/sub\nd/sub/b\n",
@@ -98,7 +98,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw8/d/sub /data/syw8/o && printf 'hello\\n' > /data/syw8/o/f && cd /data/syw8 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && rm d/lf && { du -aL d | cut -f2 | sort; }); rm -r /data/syw8",
+      "command": "(mkdir -p /data/syw8/d/sub /data/syw8/o && printf 'hello\\n' > /data/syw8/o/f && cd /data/syw8 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && rm d/lf && { du -aL d | cut -f2 | sort; })",
       "expect": {
         "exit": 0,
         "stdout": "d\nd/a\nd/ld\nd/ld/f\nd/sub\nd/sub/b\n",
@@ -133,7 +133,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw9/d/sub /data/syw9/o && printf 'hello\\n' > /data/syw9/o/f && cd /data/syw9 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s ../nowhere d/lx && ln -s missing d/sub/lm && { { du -aL d 2>&1 >/dev/null; echo rc=$?; } | sort; }); rm -r /data/syw9",
+      "command": "(mkdir -p /data/syw9/d/sub /data/syw9/o && printf 'hello\\n' > /data/syw9/o/f && cd /data/syw9 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s ../nowhere d/lx && ln -s missing d/sub/lm && { { du -aL d 2>&1 >/dev/null; echo rc=$?; } | sort; })",
       "expect": {
         "exit": 0,
         "stdout": "du: cannot access 'd/lx'\ndu: cannot access 'd/sub/lm'\nrc=1\n",
@@ -168,7 +168,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/sywd/d1 /data/sywd/d2 && printf 'hello\\n' > /data/sywd/ext && cd /data/sywd && printf 'a\\n' > d1/a && printf 'b\\n' > d2/b && ln -s ../ext d1/l && ln -s ../ext d2/l && du -aLc d1 d2 | cut -f2 | sort; du -L d1 d1 | cut -f2); rm -r /data/sywd",
+      "command": "(mkdir -p /data/sywd/d1 /data/sywd/d2 && printf 'hello\\n' > /data/sywd/ext && cd /data/sywd && printf 'a\\n' > d1/a && printf 'b\\n' > d2/b && ln -s ../ext d1/l && ln -s ../ext d2/l && du -aLc d1 d2 | cut -f2 | sort; du -L d1 d1 | cut -f2)",
       "expect": {
         "exit": 0,
         "stdout": "d1\nd1/a\nd1/l\nd2\nd2/b\ntotal\nd1\n",
@@ -203,7 +203,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/sywo/d/sub/deep && printf 'abc\\n' > /data/sywo/d/sub/f && printf 'xy\\n' > /data/sywo/d/sub/deep/g && printf 'z\\n' > /data/sywo/d/top && cd /data/sywo && du -aL d/sub d | cut -f2); rm -r /data/sywo",
+      "command": "(mkdir -p /data/sywo/d/sub/deep && printf 'abc\\n' > /data/sywo/d/sub/f && printf 'xy\\n' > /data/sywo/d/sub/deep/g && printf 'z\\n' > /data/sywo/d/top && cd /data/sywo && du -aL d/sub d | cut -f2)",
       "expect": {
         "exit": 0,
         "stdout": "d/sub/deep/g\nd/sub/deep\nd/sub/f\nd/sub\nd/top\nd\n",
@@ -238,7 +238,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw10/d/sub /data/syw10/o && printf 'hello\\n' > /data/syw10/o/f && cd /data/syw10 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s ../nowhere d/lx && { ls -RL d; echo rc=$?; }); rm -r /data/syw10",
+      "command": "(mkdir -p /data/syw10/d/sub /data/syw10/o && printf 'hello\\n' > /data/syw10/o/f && cd /data/syw10 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s ../nowhere d/lx && { ls -RL d; echo rc=$?; })",
       "expect": {
         "exit": 0,
         "stdout": "d:\na\nld\nlf\nlx\nsub\n\nd/ld:\nf\n\nd/sub:\nb\nrc=1\n",
@@ -273,7 +273,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw11/d/sub /data/syw11/o && printf 'hello\\n' > /data/syw11/o/f && cd /data/syw11 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s .. d/sub/up && ln -s ../d d/self && { ls -RL d; echo rc=$?; }); rm -r /data/syw11",
+      "command": "(mkdir -p /data/syw11/d/sub /data/syw11/o && printf 'hello\\n' > /data/syw11/o/f && cd /data/syw11 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s .. d/sub/up && ln -s ../d d/self && { ls -RL d; echo rc=$?; })",
       "expect": {
         "exit": 0,
         "stdout": "d:\na\nld\nlf\nself\nsub\n\nd/ld:\nf\n\nd/sub:\nb\nup\nrc=2\n",
@@ -308,7 +308,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw12/d/sub /data/syw12/o && printf 'hello\\n' > /data/syw12/o/f && cd /data/syw12 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && { grep -R hello d | sort && grep -r hello d; }); rm -r /data/syw12",
+      "command": "(mkdir -p /data/syw12/d/sub /data/syw12/o && printf 'hello\\n' > /data/syw12/o/f && cd /data/syw12 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && { grep -R hello d | sort && grep -r hello d; })",
       "expect": {
         "exit": 0,
         "stdout": "d/a:hello\nd/ld/f:hello\nd/lf:hello\nd/a:hello\n",
@@ -343,7 +343,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw13/d/sub /data/syw13/o && printf 'hello\\n' > /data/syw13/o/f && cd /data/syw13 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s ../nowhere d/lx && ln -s .. d/sub/up && { { grep -R hello d 2>&1 >/dev/null; echo rc=$?; } | sort; }); rm -r /data/syw13",
+      "command": "(mkdir -p /data/syw13/d/sub /data/syw13/o && printf 'hello\\n' > /data/syw13/o/f && cd /data/syw13 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s ../nowhere d/lx && ln -s .. d/sub/up && { { grep -R hello d 2>&1 >/dev/null; echo rc=$?; } | sort; })",
       "expect": {
         "exit": 0,
         "stdout": "grep: d/lx: No such file or directory\ngrep: d/sub/up: warning: recursive directory loop\nrc=2\n",
@@ -378,7 +378,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw14/d/sub /data/syw14/o && printf 'hello\\n' > /data/syw14/o/f && cd /data/syw14 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir -p e/sub && printf 'hello\\n' > e/a && printf 'hi\\n' > e/sub/b && { diff -r d e; echo rc=$?; }); rm -r /data/syw14",
+      "command": "(mkdir -p /data/syw14/d/sub /data/syw14/o && printf 'hello\\n' > /data/syw14/o/f && cd /data/syw14 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir -p e/sub && printf 'hello\\n' > e/a && printf 'hi\\n' > e/sub/b && { diff -r d e; echo rc=$?; })",
       "expect": {
         "exit": 0,
         "stdout": "Only in d: ld\nOnly in d: lf\nrc=1\n",
@@ -413,7 +413,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw15/d/sub /data/syw15/o && printf 'hello\\n' > /data/syw15/o/f && cd /data/syw15 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir -p f/sub f/ld && printf 'hello\\n' > f/a && printf 'hi\\n' > f/sub/b && printf 'hello\\n' > f/lf && printf 'hello\\n' > f/ld/f && { diff -r d f; echo rc=$?; }); rm -r /data/syw15",
+      "command": "(mkdir -p /data/syw15/d/sub /data/syw15/o && printf 'hello\\n' > /data/syw15/o/f && cd /data/syw15 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir -p f/sub f/ld && printf 'hello\\n' > f/a && printf 'hi\\n' > f/sub/b && printf 'hello\\n' > f/lf && printf 'hello\\n' > f/ld/f && { diff -r d f; echo rc=$?; })",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\n",
@@ -448,7 +448,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw16/d/sub /data/syw16/o && printf 'hello\\n' > /data/syw16/o/f && cd /data/syw16 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s ../nowhere d/lx && mkdir -p f/sub && printf 'hello\\n' > f/a && printf 'hi\\n' > f/sub/b && ln -s ../o/f f/lf && ln -s ../o f/ld && ln -s ../nowhere f/lx && { diff -r d f; echo rc=$?; }); rm -r /data/syw16",
+      "command": "(mkdir -p /data/syw16/d/sub /data/syw16/o && printf 'hello\\n' > /data/syw16/o/f && cd /data/syw16 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s ../nowhere d/lx && mkdir -p f/sub && printf 'hello\\n' > f/a && printf 'hi\\n' > f/sub/b && ln -s ../o/f f/lf && ln -s ../o f/ld && ln -s ../nowhere f/lx && { diff -r d f; echo rc=$?; })",
       "expect": {
         "exit": 0,
         "stdout": "rc=2\n",
@@ -483,7 +483,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw17/d/sub /data/syw17/o && printf 'hello\\n' > /data/syw17/o/f && cd /data/syw17 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s ../nowhere d/lx && { tree d && tree -d d; }); rm -r /data/syw17",
+      "command": "(mkdir -p /data/syw17/d/sub /data/syw17/o && printf 'hello\\n' > /data/syw17/o/f && cd /data/syw17 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s ../nowhere d/lx && { tree d && tree -d d; })",
       "expect": {
         "exit": 0,
         "stdout": "d\n|-- a\n|-- ld -> ../o\n|-- lf -> ../o/f\n|-- lx -> ../nowhere\n`-- sub\n    `-- b\n\n3 directories, 4 files\nd\n|-- ld -> ../o\n`-- sub\n\n3 directories\n",
@@ -518,7 +518,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw21/d/sub /data/syw21/o && printf 'hello\\n' > /data/syw21/o/f && cd /data/syw21 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && { grep -R --exclude-dir=ld hello d | sort; }); rm -r /data/syw21",
+      "command": "(mkdir -p /data/syw21/d/sub /data/syw21/o && printf 'hello\\n' > /data/syw21/o/f && cd /data/syw21 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && { grep -R --exclude-dir=ld hello d | sort; })",
       "expect": {
         "exit": 0,
         "stdout": "d/a:hello\nd/lf:hello\n",
@@ -553,7 +553,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw22/d/sub /data/syw22/o && printf 'hello\\n' > /data/syw22/o/f && cd /data/syw22 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s loop2 d/loop1 && ln -s loop1 d/loop2 && mkdir -p e/sub && printf 'hello\\n' > e/a && printf 'hi\\n' > e/sub/b && ln -s ../o/f e/lf && ln -s ../o e/ld && ln -s loop2 e/loop1 && ln -s loop1 e/loop2 && { diff -r d e; echo rc=$?; }); rm -r /data/syw22",
+      "command": "(mkdir -p /data/syw22/d/sub /data/syw22/o && printf 'hello\\n' > /data/syw22/o/f && cd /data/syw22 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s loop2 d/loop1 && ln -s loop1 d/loop2 && mkdir -p e/sub && printf 'hello\\n' > e/a && printf 'hi\\n' > e/sub/b && ln -s ../o/f e/lf && ln -s ../o e/ld && ln -s loop2 e/loop1 && ln -s loop1 e/loop2 && { diff -r d e; echo rc=$?; })",
       "expect": {
         "exit": 0,
         "stdout": "rc=2\n",
@@ -588,7 +588,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw25/d/sub /data/syw25/o && printf 'hello\\n' > /data/syw25/o/f && cd /data/syw25 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir -p e/sub && printf 'hello\\n' > e/a && printf 'hi\\n' > e/sub/b && ln -s ../o/f e/lf && ln -s ../o e/ld && ln -s . d/x && ln -s . d/y && ln -s . e/x && ln -s . e/y && { diff -r d e; echo rc=$?; }); rm -r /data/syw25",
+      "command": "(mkdir -p /data/syw25/d/sub /data/syw25/o && printf 'hello\\n' > /data/syw25/o/f && cd /data/syw25 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir -p e/sub && printf 'hello\\n' > e/a && printf 'hi\\n' > e/sub/b && ln -s ../o/f e/lf && ln -s ../o e/ld && ln -s . d/x && ln -s . d/y && ln -s . e/x && ln -s . e/y && { diff -r d e; echo rc=$?; })",
       "expect": {
         "exit": 0,
         "stdout": "rc=2\n",
@@ -623,7 +623,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw23/d/sub /data/syw23/o && printf 'hello\\n' > /data/syw23/o/f && cd /data/syw23 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && { tree -P 'a*' d; }); rm -r /data/syw23",
+      "command": "(mkdir -p /data/syw23/d/sub /data/syw23/o && printf 'hello\\n' > /data/syw23/o/f && cd /data/syw23 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && { tree -P 'a*' d; })",
       "expect": {
         "exit": 0,
         "stdout": "d\n|-- a\n`-- sub\n\n2 directories, 1 file\n",
@@ -658,7 +658,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw24/d/sub /data/syw24/o && printf 'hello\\n' > /data/syw24/o/f && cd /data/syw24 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s ../nowhere d/lx && { ls -L d; echo rc=$?; }); rm -r /data/syw24",
+      "command": "(mkdir -p /data/syw24/d/sub /data/syw24/o && printf 'hello\\n' > /data/syw24/o/f && cd /data/syw24 && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && ln -s ../nowhere d/lx && { ls -L d; echo rc=$?; })",
       "expect": {
         "exit": 0,
         "stdout": "a\nld\nlf\nlx\nsub\nrc=0\n",

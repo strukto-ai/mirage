@@ -28,7 +28,7 @@
         "hf",
         "hf-prefix"
       ],
-      "command": "(mkdir -p /data/fcA_zj/sub && printf 'alpha\\n' > /data/fcA_zj/a.txt && printf 'again\\n' > /data/fcA_zj/sub/a.txt && cd /data/fcA_zj && zip -j j.zip sub/a.txt a.txt 2>&1; echo rc=$?; zip -q -j jq.zip sub/a.txt a.txt 2>&1; echo rc=$?; ls; cd / && rm -r /data/fcA_zj)",
+      "command": "(mkdir -p /data/fcA_zj/sub && printf 'alpha\\n' > /data/fcA_zj/a.txt && printf 'again\\n' > /data/fcA_zj/sub/a.txt && cd /data/fcA_zj && zip -j j.zip sub/a.txt a.txt 2>&1; echo rc=$?; zip -q -j jq.zip sub/a.txt a.txt 2>&1; echo rc=$?; ls)",
       "expect": {
         "exit": 0,
         "stdout": "\tzip warning:   first full name: a.txt\n                      second full name: sub/a.txt\n                     name in zip file repeated: a.txt\n                     this may be a result of using -j\n\nzip error: Invalid command arguments (cannot repeat names in zip file)\nrc=16\n\nzip error: Invalid command arguments (cannot repeat names in zip file)\nrc=16\na.txt\nsub\n",

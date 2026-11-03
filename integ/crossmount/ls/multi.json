@@ -133,7 +133,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/xlr/d /data2/xlr && echo a > /data/xlr/d/f && echo b > /data2/xlr/g && ls -R /data/xlr /data2/xlr; rm -r /data/xlr /data2/xlr",
+      "command": "mkdir -p /data/xlr/d /data2/xlr && echo a > /data/xlr/d/f && echo b > /data2/xlr/g && ls -R /data/xlr /data2/xlr",
       "expect": {
         "exit": 0,
         "stdout": "/data/xlr:\nd\n\n/data/xlr/d:\nf\n\n/data2/xlr:\ng\n",
@@ -168,7 +168,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/xll /data2/xll && echo a > /data/xll/f && ln -s f /data/xll/lnk && ln -s loop /data/xll/loop && echo b > /data2/xll/g && ls -F /data/xll /data2/xll; ls -R /data/xll /data2/xll; echo rc=$?; rm -r /data/xll /data2/xll",
+      "command": "mkdir -p /data/xll /data2/xll && echo a > /data/xll/f && ln -s f /data/xll/lnk && ln -s loop /data/xll/loop && echo b > /data2/xll/g && ls -F /data/xll /data2/xll; ls -R /data/xll /data2/xll; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "/data/xll:\nf\nlnk@\nloop@\n\n/data2/xll:\ng\n/data/xll:\nf\nlnk\nloop\n\n/data2/xll:\ng\nrc=0\n",

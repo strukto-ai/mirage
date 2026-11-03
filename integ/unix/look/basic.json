@@ -134,7 +134,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r10look && printf 'apple\\nApricot\\nbanana\\n' > /data/r10look/f && look -f AP /data/r10look/f; echo rc=$?; look AP /data/r10look/f; echo rc=$?; rm -r /data/r10look",
+      "command": "mkdir -p /data/r10look && printf 'apple\\nApricot\\nbanana\\n' > /data/r10look/f && look -f AP /data/r10look/f; echo rc=$?; look AP /data/r10look/f; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "apple\nApricot\nrc=0\nrc=1\n",
@@ -169,7 +169,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/qlookbom && printf 'apple\\n\\357\\273\\277apple\\n' > /data/qlookbom/f && look a /data/qlookbom/f; echo rc=$?; printf '\\357\\273\\277apple\\nbanana\\n' > /data/qlookbom/f && look a /data/qlookbom/f; echo rc=$?; rm -r /data/qlookbom",
+      "command": "mkdir -p /data/qlookbom && printf 'apple\\n\\357\\273\\277apple\\n' > /data/qlookbom/f && look a /data/qlookbom/f; echo rc=$?; printf '\\357\\273\\277apple\\nbanana\\n' > /data/qlookbom/f && look a /data/qlookbom/f; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "apple\nrc=0\nrc=1\n",
@@ -239,7 +239,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/qlookend && printf 'ab\\napple' > /data/qlookend/f && look a /data/qlookend/f | od -An -c; rm -r /data/qlookend; mkdir -p /data/qlookf && printf '\\303\\251cole\\n' > /data/qlookf/f && look -f \"$(printf '\\303\\211')\" /data/qlookf/f; echo rc=$?; printf 'ECOLE\\necole\\n' > /data/qlookf/f && look -f e /data/qlookf/f; rm -r /data/qlookf; mkdir -p /data/qlookb && printf 'a\\377\\nab\\n' > /data/qlookb/f && look a /data/qlookb/f | od -An -c; rm -r /data/qlookb",
+      "command": "mkdir -p /data/qlookend && printf 'ab\\napple' > /data/qlookend/f && look a /data/qlookend/f | od -An -c; rm -r /data/qlookend; mkdir -p /data/qlookf && printf '\\303\\251cole\\n' > /data/qlookf/f && look -f \"$(printf '\\303\\211')\" /data/qlookf/f; echo rc=$?; printf 'ECOLE\\necole\\n' > /data/qlookf/f && look -f e /data/qlookf/f; rm -r /data/qlookf; mkdir -p /data/qlookb && printf 'a\\377\\nab\\n' > /data/qlookb/f && look a /data/qlookb/f | od -An -c",
       "expect": {
         "exit": 0,
         "stdout": "   a   b  \\n   a   p   p   l   e\nrc=1\nECOLE\necole\n   a 377  \\n   a   b  \\n\n",

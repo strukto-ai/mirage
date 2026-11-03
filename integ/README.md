@@ -267,6 +267,33 @@ dirs for ssh. The s3-denied target's bucket is the exception: its fake,
 the runner reads it with the restricted credentials the fake prints and never
 creates or removes it.
 
+## Nextcloud contract and full runs
+
+The regular integration workflow runs `--target nextcloud --suite nextcloud`
+on both hosts. `ci/nextcloud.json` selects source directories, source files,
+or case IDs from the shared corpus, keeping its order and goldens. Every
+selector must match; unknown suites, empty selections and mismatched targets
+fail. The full command matrix still runs on RAM and disk.
+
+The contract keeps all cross-mount and VFS cases and the file-operation
+families: reads, ranges, metadata, directory traversal, links, copy/move,
+removal, archives, redirection and working-directory behavior. It omits the
+exhaustive shell syntax and text-formatting matrix; cross-mount cases still
+exercise those commands through real storage. The runner gates require every
+Nextcloud case without equivalent RAM/disk coverage to remain selected.
+
+Both hosts create a run folder and remove it through the backend at teardown,
+so accumulated fixtures do not hit the shell's per-command walk limit. The
+backend removal fence remains active. Cleanup-only tails
+are omitted where later cases do not depend on them; functional removals and
+known shared-path dependencies remain. Cases still share ordered state, so
+selection changes must be checked against the live target on both hosts.
+
+`Nextcloud full` runs the entire Nextcloud corpus nightly, through its
+manual workflow entry point, and when its workflow or service tuning changes. Locally, omit `--suite nextcloud` to run the full
+target. The scheduled workflow keeps the real removal fence and existing
+30-minute job limit; it is not part of the PR gate.
+
 ## What a pull request runs
 
 A push to main runs every job in `.github/workflows/test_integ.yml`. A pull
@@ -313,7 +340,7 @@ The Nextcloud CI container also lowers its Argon2id memory cost from 8 MiB to
 same first 1,000 Nextcloud cases passed all 1,000 in both configurations and
 took 56.6 and 50.1 seconds respectively (11.5% less time). Fresh requests with
 wrong passwords still returned 401. This changes only the disposable service
-configuration; all Nextcloud cases remain selected in CI. The local result
+configuration; the full scheduled suite retains every Nextcloud case. The local result
 does not measure the full corpus or the end-to-end GitHub Actions savings.
 
 A README under one of the filtered trees is prose that nothing loads, so a
@@ -337,6 +364,7 @@ flowchart LR
     ts --> J2["integ-ts"]
     core & ts --> J3["integ-shared-py · integ-shared-ts<br/>integ-shared-parity · integ-selftests<br/>integ-facets · integ-wandb"]
     core & ts --> HOST["integ-hosting<br/>interrupts: CPU · streams · disconnect · cancellation<br/>hosting: FastAPI · Fastify · Monty<br/>RAM · S3 · Redis · Slack"]
+    NC["Nextcloud tuning and full workflow"] --> ts & data
     data --> J4["integ-data · integ-events<br/>integ-tidb-filesystem"]
     database --> J5["integ-database"]
     observability --> J6["integ-observability"]

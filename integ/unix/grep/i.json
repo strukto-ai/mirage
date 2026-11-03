@@ -500,7 +500,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -y FOO /data/gfl/a.txt; grep -yc FOO /data/gfl/a.txt; grep -i --no-ignore-case FOO /data/gfl/a.txt; echo rc=$?; grep --no-ignore-case -i -c FOO /data/gfl/a.txt; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -y FOO /data/gfl/a.txt; grep -yc FOO /data/gfl/a.txt; grep -i --no-ignore-case FOO /data/gfl/a.txt; echo rc=$?; grep --no-ignore-case -i -c FOO /data/gfl/a.txt",
       "expect": {
         "exit": 0,
         "stdout": "foo one\nfoo two\n2\nrc=1\n2\n",

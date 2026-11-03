@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fpx1/sub && printf 'hello\\n' > /data/fpx1/a.txt && printf 'hi\\n' > /data/fpx1/sub/b.txt && find /data/fpx1 -printf '%p %y %d\\n' && rm -r /data/fpx1",
+      "command": "mkdir -p /data/fpx1/sub && printf 'hello\\n' > /data/fpx1/a.txt && printf 'hi\\n' > /data/fpx1/sub/b.txt && find /data/fpx1 -printf '%p %y %d\\n'",
       "expect": {
         "exit": 0,
         "stdout": "/data/fpx1 d 0\n/data/fpx1/a.txt f 1\n/data/fpx1/sub d 1\n/data/fpx1/sub/b.txt f 2\n",
@@ -63,7 +63,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fpx2 && printf 'hello\\n' > /data/fpx2/a.txt && find /data/fpx2 -name a.txt -printf '%f\\t%s\\n' && find /data/fpx2 -name a.txt -printf '%P|%h\\n' && rm -r /data/fpx2",
+      "command": "mkdir -p /data/fpx2 && printf 'hello\\n' > /data/fpx2/a.txt && find /data/fpx2 -name a.txt -printf '%f\\t%s\\n' && find /data/fpx2 -name a.txt -printf '%P|%h\\n'",
       "expect": {
         "exit": 0,
         "stdout": "a.txt\t6\na.txt|/data/fpx2\n",
@@ -98,7 +98,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fpx3 && printf 'x' > /data/fpx3/a.txt && find /data/fpx3 -name a.txt -printf '%Q\\n' && rm -r /data/fpx3",
+      "command": "mkdir -p /data/fpx3 && printf 'x' > /data/fpx3/a.txt && find /data/fpx3 -name a.txt -printf '%Q\\n'",
       "expect": {
         "exit": 0,
         "stdout": "%Q\n",
@@ -222,7 +222,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "find /data -maxdepth 1 -name nomatch -printf '%z'",
+      "command": "find /data -maxdepth 0 -name nomatch -printf '%z'",
       "expect": {
         "exit": 0,
         "stdout": "",

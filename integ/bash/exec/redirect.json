@@ -398,7 +398,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/dv; touch /data/dv/f; ( exec 2>&0; find /data/dv -exec nosuch {} \\; ; echo rc=$?; ls /data/dv/nosuch; echo rc=$?; cat /data/dv/nosuch; echo rc=$?; echo hi >&2; echo rc=$?; find /data/dv -name f -print; echo rc=$? ); rm -r /data/dv",
+      "command": "mkdir -p /data/dv; touch /data/dv/f; ( exec 2>&0; find /data/dv -exec nosuch {} \\; ; echo rc=$?; ls /data/dv/nosuch; echo rc=$?; cat /data/dv/nosuch; echo rc=$?; echo hi >&2; echo rc=$?; find /data/dv -name f -print; echo rc=$? )",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nrc=2\nrc=1\nrc=1\n/data/dv/f\nrc=0\n",

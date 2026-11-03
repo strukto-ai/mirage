@@ -278,7 +278,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r17mu/s/sub /data/r17mu/t/a && printf a > /data/r17mu/s/a && printf b > /data/r17mu/s/sub/b && printf z > /data/r17mu/t/a/z && printf x > /data/r17mu/t/sub && (cd /data/r17mu && mv --update=none-fail s/a s/sub t; echo rc=$?; mv --update=none s/a s/sub t; echo rc=$?; mv -u s/sub t; echo rc=$?); find /data/r17mu | sort; rm -r /data/r17mu",
+      "command": "mkdir -p /data/r17mu/s/sub /data/r17mu/t/a && printf a > /data/r17mu/s/a && printf b > /data/r17mu/s/sub/b && printf z > /data/r17mu/t/a/z && printf x > /data/r17mu/t/sub && (cd /data/r17mu && mv --update=none-fail s/a s/sub t; echo rc=$?; mv --update=none s/a s/sub t; echo rc=$?; mv -u s/sub t; echo rc=$?); find /data/r17mu | sort",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=0\nrc=1\n/data/r17mu\n/data/r17mu/s\n/data/r17mu/s/a\n/data/r17mu/s/sub\n/data/r17mu/s/sub/b\n/data/r17mu/t\n/data/r17mu/t/a\n/data/r17mu/t/a/z\n/data/r17mu/t/sub\n",

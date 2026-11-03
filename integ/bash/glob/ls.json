@@ -26,7 +26,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "ls sub/*.txt && cd / && rm -r /data/g15",
+      "command": "ls sub/*.txt && cd /",
       "expect": {
         "exit": 0,
         "stdout": "sub/x.txt\n",

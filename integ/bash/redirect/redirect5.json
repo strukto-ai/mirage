@@ -53,7 +53,7 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "cd / && rm -r /data/r5",
+      "command": "cd /",
       "expect": {
         "exit": 0,
         "stdout": "",

@@ -158,7 +158,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( mkdir -p /data/ra && cd /data/ra && echo hi > $((1+2)) && echo more >> $((1+2)) && cat < $((1+2)) && ls ); rm -r /data/ra",
+      "command": "( mkdir -p /data/ra && cd /data/ra && echo hi > $((1+2)) && echo more >> $((1+2)) && cat < $((1+2)) && ls )",
       "expect": {
         "exit": 0,
         "stdout": "hi\nmore\n3\n",

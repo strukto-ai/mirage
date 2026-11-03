@@ -57,7 +57,7 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "(cd /data && mkdir -p r10xq/s/t && touch r10xq/s/t/f && cp -rv r10xq /data2/r10xq; echo rc=$?); rm -r /data/r10xq /data2/r10xq",
+      "command": "(cd /data && mkdir -p r10xq/s/t && touch r10xq/s/t/f && cp -rv r10xq /data2/r10xq; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "'r10xq' -> '/data2/r10xq'\n'r10xq/s' -> '/data2/r10xq/s'\n'r10xq/s/t' -> '/data2/r10xq/s/t'\n'r10xq/s/t/f' -> '/data2/r10xq/s/t/f'\nrc=0\n",
