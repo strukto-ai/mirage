@@ -16,7 +16,7 @@ import { conditionVersion, stale } from '../../cache/context.ts'
 import type { WriteCondition } from '../../cache/types.ts'
 import { enoent } from '../../errors/fs.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
-import { ByteSpool } from '../../io/spool.ts'
+import { ByteSpool, sizeOf } from '../../io/spool.ts'
 import type { PathSpec } from '../../types.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
 import type { BoxTokenManager } from './client.ts'
@@ -308,8 +308,7 @@ export async function uploadNewFile(
   name: string,
   data: Uint8Array | ByteSpool,
 ): Promise<unknown> {
-  const size = data instanceof ByteSpool ? data.size : data.length
-  if (size >= UPLOAD_SESSION_MIN)
+  if (sizeOf(data) >= UPLOAD_SESSION_MIN)
     return boxUploadSession(
       tm,
       `${tm.uploadBase}/files/upload_sessions`,
@@ -333,8 +332,7 @@ export async function uploadFileVersion(
   data: Uint8Array | ByteSpool,
   etag: string | null = null,
 ): Promise<unknown> {
-  const size = data instanceof ByteSpool ? data.size : data.length
-  if (size >= UPLOAD_SESSION_MIN)
+  if (sizeOf(data) >= UPLOAD_SESSION_MIN)
     return boxUploadSession(
       tm,
       `${tm.uploadBase}/files/${fileId}/upload_sessions`,

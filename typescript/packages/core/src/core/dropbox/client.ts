@@ -22,9 +22,15 @@ import {
   UPLOAD_CHUNK,
 } from './constants.ts'
 import { callerSignal } from '../../context/session_context.ts'
-import { type ApiResponse, apiRequest, loweredHeaders, stallTimeout } from '../api/client.ts'
+import {
+  type ApiResponse,
+  type ReadMode,
+  apiRequest,
+  loweredHeaders,
+  stallTimeout,
+} from '../api/client.ts'
 import { TokenManager as OAuthTokenManager } from '../api/oauth.ts'
-import { ByteSpool } from '../../io/spool.ts'
+import { ByteSpool, sizeOf, sliceOf } from '../../io/spool.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { type ByteWindow } from '../../utils/ranges.ts'
 import type { JsonValue } from '../../types.ts'
@@ -171,8 +177,7 @@ export async function dropboxUpload(
   data: Uint8Array | ByteSpool,
   rev: string | null = null,
 ): Promise<unknown> {
-  const size = data instanceof ByteSpool ? data.size : data.length
-  if (size > SIMPLE_UPLOAD_MAX) return dropboxUploadSession(tm, path, data, rev)
+  if (sizeOf(data) > SIMPLE_UPLOAD_MAX) return dropboxUploadSession(tm, path, data, rev)
   if (data instanceof ByteSpool) data = await data.read(0, data.size)
   const headers = await dropboxAuthHeaders(tm)
   const arg: Record<string, JsonValue> =
@@ -270,6 +275,7 @@ async function sessionRequest(
   action: string,
   arg: Record<string, JsonValue>,
   data: Uint8Array,
+  read: ReadMode = 'json',
 ): Promise<unknown> {
   return apiRequest('POST', `${tm.contentBase}/files/upload_session/${action}`, {
     timeout: tm.timeout,
@@ -285,6 +291,7 @@ async function sessionRequest(
       'Dropbox-API-Arg': headerJson(arg),
     },
     body: data as unknown as BodyInit,
+    read,
   })
 }
 
@@ -294,7 +301,7 @@ async function dropboxUploadSession(
   data: Uint8Array | ByteSpool,
   rev: string | null,
 ): Promise<unknown> {
-  const total = data instanceof ByteSpool ? data.size : data.length
+  const total = sizeOf(data)
   const opened = (await sessionRequest(tm, path, 'start', { close: false }, new Uint8Array())) as {
     session_id: string
   }
@@ -305,10 +312,7 @@ async function dropboxUploadSession(
       ? { path, mode: 'overwrite', mute: true }
       : { path, mode: { '.tag': 'update', update: rev }, mute: true, autorename: false }
   while (offset < total) {
-    const body =
-      data instanceof ByteSpool
-        ? await data.read(offset, UPLOAD_CHUNK)
-        : data.slice(offset, offset + UPLOAD_CHUNK)
+    const body = await sliceOf(data, offset, UPLOAD_CHUNK)
     await sessionRequest(
       tm,
       path,
@@ -318,11 +322,13 @@ async function dropboxUploadSession(
     )
     offset += body.length
   }
-  return await sessionRequest(
+  const finished = (await sessionRequest(
     tm,
     path,
     'finish',
     { cursor: { session_id: sessionId, offset }, commit },
     new Uint8Array(),
-  )
+    'response',
+  )) as ApiResponse
+  return finished.data
 }

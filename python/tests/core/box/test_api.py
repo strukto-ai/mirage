@@ -440,7 +440,13 @@ async def test_a_box_upload_from_20_mib_goes_through_a_session(
     assert reply == {"via": "session"}
     multipart.assert_not_awaited()
     assert session.await_args.args == (
-        (tm, f"{UPLOAD}/7/upload_sessions", {"file_name": "a.txt"}, data, '"v1"')
+        (
+            tm,
+            f"{UPLOAD}/7/upload_sessions",
+            {"file_name": "a.txt"},
+            data,
+            '"v1"',
+        )
         if versioning
         else (
             tm,

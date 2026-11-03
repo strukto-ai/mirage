@@ -26,7 +26,7 @@ from mirage.core.dropbox.constants import CONDITION_SUPPORT
 from mirage.core.dropbox.fingerprint import live_of
 from mirage.core.dropbox.paths import check_path, dropbox_path_of
 from mirage.core.dropbox.readdir import stat_from_entry
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, size_of
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
@@ -110,7 +110,7 @@ async def upload_prepared(
         "write",
         path.virtual,
         "dropbox",
-        data.size if isinstance(data, ByteSpool) else len(data),
+        size_of(data),
         timer,
         fingerprint=None if stored is None else stored.fingerprint,
     )

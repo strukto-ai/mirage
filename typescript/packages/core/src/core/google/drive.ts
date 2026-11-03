@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ByteSpool } from '../../io/spool.ts'
+import { ByteSpool, sizeOf } from '../../io/spool.ts'
 import { sha256Hex } from '../../utils/hash.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
 import type { TokenManager } from './client.ts'
@@ -482,8 +482,7 @@ export async function uploadFile(
   data: Uint8Array | ByteSpool,
   mimeType: string = DEFAULT_UPLOAD_MIME,
 ): Promise<DriveFile> {
-  const size = data instanceof ByteSpool ? data.size : data.length
-  if (size > SIMPLE_UPLOAD_MAX)
+  if (sizeOf(data) > SIMPLE_UPLOAD_MAX)
     return (await googleResumable(
       tm,
       'POST',
@@ -514,8 +513,7 @@ export async function updateFileContent(
   data: Uint8Array | ByteSpool,
   mimeType: string = DEFAULT_UPLOAD_MIME,
 ): Promise<DriveFile> {
-  const size = data instanceof ByteSpool ? data.size : data.length
-  if (size > SIMPLE_UPLOAD_MAX)
+  if (sizeOf(data) > SIMPLE_UPLOAD_MAX)
     return (await googleResumable(
       tm,
       'PATCH',

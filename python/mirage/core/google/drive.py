@@ -32,7 +32,7 @@ from mirage.core.google.client import (
     google_send_bytes,
 )
 from mirage.core.google.constants import SIMPLE_UPLOAD_MAX
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, size_of
 from mirage.utils.ranges import ByteWindow
 
 
@@ -637,8 +637,7 @@ async def upload_file(
         dict: created file metadata.
     """
     metadata = {"name": name, "parents": [parent_id]}
-    size = data.size if isinstance(data, ByteSpool) else len(data)
-    if size > SIMPLE_UPLOAD_MAX:
+    if size_of(data) > SIMPLE_UPLOAD_MAX:
         return await google_resumable(
             token_manager,
             "POST",
@@ -686,8 +685,7 @@ async def update_file_content(
     Returns:
         dict: updated file metadata.
     """
-    size = data.size if isinstance(data, ByteSpool) else len(data)
-    if size > SIMPLE_UPLOAD_MAX:
+    if size_of(data) > SIMPLE_UPLOAD_MAX:
         return await google_resumable(
             token_manager,
             "PATCH",

@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ByteSpool } from '../../io/spool.ts'
+import type { ByteSpool } from '../../io/spool.ts'
+import { sizeOf, sliceOf } from '../../io/spool.ts'
 import type { ApiRequestOptions, ApiResponse, ErrorOf, RetryPolicy } from '../api/client.ts'
 import type { GoogleConfig } from './config.ts'
 import {
@@ -348,7 +349,7 @@ export async function googleResumable(
   mimeType: string,
   params: Record<string, string>,
 ): Promise<unknown> {
-  const total = data instanceof ByteSpool ? data.size : data.length
+  const total = sizeOf(data)
   const location = await googleRequest(tm, method, url, {
     headers: {
       'X-Upload-Content-Type': mimeType,
@@ -363,10 +364,7 @@ export async function googleResumable(
     throw new Error('Drive upload session returned no Location')
   let offset = 0
   while (offset < total) {
-    const chunk =
-      data instanceof ByteSpool
-        ? await data.read(offset, UPLOAD_CHUNK)
-        : data.slice(offset, offset + UPLOAD_CHUNK)
+    const chunk = await sliceOf(data, offset, UPLOAD_CHUNK)
     const response = (await googleRequest(tm, 'PUT', location, {
       headers: {
         'Content-Type': mimeType,

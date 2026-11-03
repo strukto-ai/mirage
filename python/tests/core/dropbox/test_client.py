@@ -230,32 +230,61 @@ MIB = 1024 * 1024
 
 
 # Dropbox's files/upload takes up to 150 MB (its API docs, not probed);
-# past 8 MiB an upload takes a session whatever holds the bytes, so
-# exactly 8 MiB is the largest single request.
+# past 8 MiB an upload takes a session whatever holds the bytes.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("spooled", [False, True], ids=["bytes", "spool"])
-async def test_a_dropbox_upload_of_8_mib_stays_one_request(spooled):
+@pytest.mark.parametrize("size", [8 * MIB, 8 * MIB + 1])
+async def test_a_dropbox_upload_takes_a_session_only_past_8_mib(spooled, size):
     tm = DropboxTokenManager(make_config())
     tm.seed("tok", float("inf"))
     base = f"{tm.content_base}/files/upload_session"
-    payload = b"x" * (8 * MIB)
+    payload = b"x" * size
     async with ByteSpool() as spool:
         await spool.append(payload)
         with aioresponses() as m:
             m.post(UPLOAD_URL, payload={"name": "file"})
-            for action in ("start", "append_v2", "finish"):
-                m.post(f"{base}/{action}", payload={"session_id": "s"})
+            m.post(f"{base}/start", payload={"session_id": "s"})
+            m.post(f"{base}/append_v2", payload=None, repeat=True)
+            m.post(f"{base}/finish", payload={"name": "file"})
             got = await dropbox_upload(
                 tm, "/file", spool if spooled else payload
             )
             assert got == {"name": "file"}
             assert {
                 str(url): len(calls) for (_, url), calls in m.requests.items()
-            } == {UPLOAD_URL: 1}
-            assert (
-                m.requests[("POST", URL(UPLOAD_URL))][0].kwargs["data"]
-                == payload
+            } == (
+                {UPLOAD_URL: 1}
+                if size <= 8 * MIB
+                else {
+                    f"{base}/start": 1,
+                    f"{base}/append_v2": 2,
+                    f"{base}/finish": 1,
+                }
             )
+            if size <= 8 * MIB:
+                assert (
+                    m.requests[("POST", URL(UPLOAD_URL))][0].kwargs["data"]
+                    == payload
+                )
+    await tm.close()
+
+
+@pytest.mark.asyncio
+async def test_a_session_upload_with_a_non_json_finish_hands_it_back():
+    # As with files/upload, the file has landed; the reply must not raise.
+    tm = DropboxTokenManager(make_config())
+    tm.seed("tok", float("inf"))
+    base = f"{tm.content_base}/files/upload_session"
+    with aioresponses() as m:
+        m.post(f"{base}/start", payload={"session_id": "s"})
+        m.post(f"{base}/append_v2", payload=None, repeat=True)
+        m.post(
+            f"{base}/finish",
+            body=b"not json",
+            headers={"Content-Type": "text/plain"},
+        )
+        got = await dropbox_upload(tm, "/file", b"x" * (8 * MIB + 1))
+    assert got == "not json"
     await tm.close()
 
 

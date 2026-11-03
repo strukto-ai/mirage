@@ -24,8 +24,7 @@ export const CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3'
 export const FORMS_API_BASE = 'https://forms.googleapis.com/v1'
 export const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
 export const TOKEN_BUFFER_SECONDS = 300
-// Drive takes at most 5 MB in one multipart or media request; past this an
-// upload goes resumable, in chunks that are a multiple of 256 KiB.
+// Drive takes 5 MB per request; past this, resumable in 256 KiB multiples.
 export const SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024
 export const UPLOAD_CHUNK = 8 * 1024 * 1024
 

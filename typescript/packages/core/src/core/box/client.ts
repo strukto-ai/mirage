@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ByteSpool } from '../../io/spool.ts'
+import type { ByteSpool } from '../../io/spool.ts'
+import { sizeOf, sliceOf } from '../../io/spool.ts'
 import { chunks } from '../../io/cooperative.ts'
 import { Sha1 } from '../../utils/hash.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
@@ -386,7 +387,7 @@ export async function boxUploadSession(
   data: Uint8Array | ByteSpool,
   etag: string | null = null,
 ): Promise<unknown> {
-  const total = data instanceof ByteSpool ? data.size : data.length
+  const total = sizeOf(data)
   const created = (await boxPostJson(tm, url, { ...metadata, file_size: total })) as {
     session_endpoints: { upload_part: string; commit: string; abort: string }
     part_size: number
@@ -399,10 +400,7 @@ export async function boxUploadSession(
     if (!Number.isSafeInteger(partSize) || partSize <= 0 || partSize > 64 * 1024 * 1024)
       throw new Error('Invalid Box upload part size')
     for (let offset = 0; offset < total; offset += partSize) {
-      const part =
-        data instanceof ByteSpool
-          ? await data.read(offset, partSize)
-          : data.slice(offset, offset + partSize)
+      const part = await sliceOf(data, offset, partSize)
       const partDigest = new Sha1()
       for await (const chunk of chunks(part)) {
         digest.update(chunk)

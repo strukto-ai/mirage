@@ -19,7 +19,12 @@ from typing import Any
 
 import aiohttp
 
-from mirage.core.api.client import ApiResponse, api_request, lowered_headers
+from mirage.core.api.client import (
+    ApiResponse,
+    ReadMode,
+    api_request,
+    lowered_headers,
+)
 from mirage.core.api.errors import ApiError
 from mirage.core.api.oauth import TokenManager as OAuthTokenManager
 from mirage.core.dropbox.constants import (
@@ -31,7 +36,7 @@ from mirage.core.dropbox.constants import (
     TOKEN_BUFFER_SECONDS,
     UPLOAD_CHUNK,
 )
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, size_of, slice_of
 from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow
 from mirage.vfs.dropbox.config import DropboxConfig
@@ -173,8 +178,7 @@ async def dropbox_upload(
         data (bytes | ByteSpool): file content.
         rev (str | None): the revision the file must still be, or None.
     """
-    size = data.size if isinstance(data, ByteSpool) else len(data)
-    if size > SIMPLE_UPLOAD_MAX:
+    if size_of(data) > SIMPLE_UPLOAD_MAX:
         return await dropbox_upload_session(tm, path, data, rev)
     if isinstance(data, ByteSpool):
         data = await data.read(0, data.size)
@@ -276,6 +280,7 @@ async def _session_request(
     action: str,
     arg: dict[str, Any],
     data: bytes,
+    read: ReadMode = "json",
 ) -> Any:
     return await api_request(
         "POST",
@@ -287,6 +292,7 @@ async def _session_request(
             "Dropbox-API-Arg": json.dumps(arg),
         },
         data=data,
+        read=read,
         session=tm.pool,
     )
 
@@ -297,7 +303,7 @@ async def dropbox_upload_session(
     data: bytes | ByteSpool,
     rev: str | None,
 ) -> JsonValue:
-    total = data.size if isinstance(data, ByteSpool) else len(data)
+    total = size_of(data)
     opened = await _session_request(tm, path, "start", {"close": False}, b"")
     session_id = opened["session_id"]
     offset = 0
@@ -305,11 +311,7 @@ async def dropbox_upload_session(
     if rev is not None:
         commit.update(mode={".tag": "update", "update": rev}, autorename=False)
     while offset < total:
-        body = (
-            await data.read(offset, UPLOAD_CHUNK)
-            if isinstance(data, ByteSpool)
-            else data[offset : offset + UPLOAD_CHUNK]
-        )
+        body = await slice_of(data, offset, UPLOAD_CHUNK)
         await _session_request(
             tm,
             path,
@@ -321,7 +323,7 @@ async def dropbox_upload_session(
             body,
         )
         offset += len(body)
-    result: JsonValue = await _session_request(
+    finished = await _session_request(
         tm,
         path,
         "finish",
@@ -330,5 +332,7 @@ async def dropbox_upload_session(
             "commit": commit,
         },
         b"",
+        read="response",
     )
+    result: JsonValue = finished.data
     return result

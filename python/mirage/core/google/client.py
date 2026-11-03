@@ -49,7 +49,7 @@ from mirage.core.google.constants import (
     UPLOAD_CHUNK,
     WRITE_RETRY_STATUSES,
 )
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, size_of, slice_of
 from mirage.types import JsonValue
 from mirage.utils.clock import Clock
 from mirage.utils.ranges import ByteWindow
@@ -457,7 +457,7 @@ async def google_resumable(
     mime_type: str,
     params: dict[str, str],
 ) -> dict[str, Any]:
-    total = data.size if isinstance(data, ByteSpool) else len(data)
+    total = size_of(data)
     location = await google_request(
         tm,
         method,
@@ -475,11 +475,7 @@ async def google_resumable(
         raise RuntimeError("Drive upload session returned no Location")
     offset = 0
     while offset < total:
-        chunk = (
-            await data.read(offset, UPLOAD_CHUNK)
-            if isinstance(data, ByteSpool)
-            else data[offset : offset + UPLOAD_CHUNK]
-        )
+        chunk = await slice_of(data, offset, UPLOAD_CHUNK)
         response = await google_request(
             tm,
             "PUT",

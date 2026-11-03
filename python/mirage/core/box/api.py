@@ -37,7 +37,7 @@ from mirage.core.box.constants import (
 )
 from mirage.errors.fs import enoent
 from mirage.errors.types import StaleWriteError
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, size_of
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.ranges import ByteWindow
 
@@ -328,8 +328,7 @@ async def search_content(
 async def upload_new_file(
     tm: BoxTokenManager, parent_id: str, name: str, data: bytes | ByteSpool
 ) -> JsonValue:
-    size = data.size if isinstance(data, ByteSpool) else len(data)
-    if size >= UPLOAD_SESSION_MIN:
+    if size_of(data) >= UPLOAD_SESSION_MIN:
         return await box_upload_session(
             tm,
             f"{tm.upload_base}/files/upload_sessions",
@@ -354,8 +353,7 @@ async def upload_file_version(
     data: bytes | ByteSpool,
     etag: str | None = None,
 ) -> JsonValue:
-    size = data.size if isinstance(data, ByteSpool) else len(data)
-    if size >= UPLOAD_SESSION_MIN:
+    if size_of(data) >= UPLOAD_SESSION_MIN:
         return await box_upload_session(
             tm,
             f"{tm.upload_base}/files/{file_id}/upload_sessions",

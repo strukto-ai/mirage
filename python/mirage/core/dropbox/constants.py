@@ -22,8 +22,7 @@ DROPBOX_TOKEN_URL = "https://api.dropboxapi.com/oauth2/token"
 DROPBOX_API_BASE = "https://api.dropboxapi.com/2"
 DROPBOX_CONTENT_BASE = "https://content.dropboxapi.com/2"
 TOKEN_BUFFER_SECONDS = 300
-# Past this size an upload goes through an upload session, appended in
-# chunks of this size (files/upload itself takes up to 150 MB).
+# files/upload takes 150 MB; past this, a session in UPLOAD_CHUNK appends.
 SIMPLE_UPLOAD_MAX = 8 * 1024 * 1024
 UPLOAD_CHUNK = 8 * 1024 * 1024
 # The download response header that names the file's metadata, and the

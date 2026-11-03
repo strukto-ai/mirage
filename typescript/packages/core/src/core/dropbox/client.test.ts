@@ -191,11 +191,10 @@ describe('dropboxUpload', () => {
 const MIB = 1024 * 1024
 
 // Dropbox's files/upload takes up to 150 MB (its API docs, not probed); past
-// 8 MiB an upload takes a session whatever holds the bytes, so exactly 8 MiB is
-// the largest single request.
-it.each([false, true])(
-  'a dropbox upload of 8 MiB stays one request (spooled %s)',
-  async (spooled) => {
+// 8 MiB an upload takes a session whatever holds the bytes.
+it.each([false, true].flatMap((spooled) => [8 * MIB, 8 * MIB + 1].map((size) => [spooled, size])))(
+  'a dropbox upload takes a session only past 8 MiB (spooled %s, %i bytes)',
+  async (spooled, size) => {
     const urls: string[] = []
     const bodies: unknown[] = []
     vi.stubGlobal(
@@ -204,23 +203,48 @@ it.each([false, true])(
         await Promise.resolve()
         urls.push(url)
         bodies.push(init.body)
-        return Response.json(url.endsWith('/files/upload') ? { name: 'file' } : { session_id: 's' })
+        if (url.endsWith('/start')) return Response.json({ session_id: 's' })
+        if (url.endsWith('/append_v2')) return Response.json(null)
+        return Response.json({ name: 'file' })
       }),
     )
-    const payload = new Uint8Array(8 * MIB).fill(120)
+    const payload = new Uint8Array(size as number).fill(120)
     const spool = new ByteSpool()
     try {
       await spool.append(payload)
       expect(await dropboxUpload(tokenManager(), '/file', spooled ? spool : payload)).toEqual({
         name: 'file',
       })
-      expect(urls).toEqual(['https://content.dropboxapi.com/2/files/upload'])
-      expect(Buffer.compare(bodies[0] as Uint8Array, payload)).toBe(0)
+      const base = 'https://content.dropboxapi.com/2/files'
+      if ((size as number) <= 8 * MIB) {
+        expect(urls).toEqual([`${base}/upload`])
+        expect(Buffer.compare(bodies[0] as Uint8Array, payload)).toBe(0)
+      } else
+        expect(urls).toEqual([
+          `${base}/upload_session/start`,
+          `${base}/upload_session/append_v2`,
+          `${base}/upload_session/append_v2`,
+          `${base}/upload_session/finish`,
+        ])
     } finally {
       await spool.close()
     }
   },
 )
+
+it('a session upload hands a non-JSON finish back, as files/upload does', async () => {
+  // The file has landed; an unreadable reply must not raise.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      await Promise.resolve()
+      if (url.endsWith('/start')) return Response.json({ session_id: 's' })
+      if (url.endsWith('/append_v2')) return Response.json(null)
+      return new Response('not json', { status: 200, headers: { 'Content-Type': 'text/plain' } })
+    }),
+  )
+  expect(await dropboxUpload(tokenManager(), '/file', new Uint8Array(8 * MIB + 1))).toBe('not json')
+})
 
 it.each([
   [false, true],
