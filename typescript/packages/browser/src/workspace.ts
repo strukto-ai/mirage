@@ -17,8 +17,8 @@ import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/wor
 import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
-import { watch } from './io/gateway.ts'
-import { watchNetwork } from './io/network.ts'
+import { watch } from '@struktoai/mirage-core/io/web/gateway'
+import { watchNetwork } from '@struktoai/mirage-core/io/web/network'
 import './io/spool.ts'
 
 // TODO(MIRAGE-36): an OPFS spool store, so spools spill here too.

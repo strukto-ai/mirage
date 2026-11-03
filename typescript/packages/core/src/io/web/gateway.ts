@@ -12,16 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type Egress, liveEgress, opened } from '@struktoai/mirage-core/io/gateway'
-import type { Policy } from '@struktoai/mirage-core/policy/base'
-import {
-  type Policies,
-  postNetworkGate,
-  preNetworkGate,
-} from '@struktoai/mirage-core/policy/policies'
-import type { NetworkContext, NetworkEnd } from '@struktoai/mirage-core/policy/types'
-import type { Limit } from '@struktoai/mirage-core/types'
-import { REACHING, portOf, routed, watchNetwork } from './network.ts'
+import { type Egress, liveEgress, opened } from '../gateway.ts'
+import type { Policy } from '../../policy/base.ts'
+import { type Policies, postNetworkGate, preNetworkGate } from '../../policy/policies.ts'
+import type { NetworkContext, NetworkEnd } from '../../policy/types.ts'
+import type { Limit } from '../../types.ts'
+import { REACHING, portOf, routed, targetOf, watchNetwork } from './network.ts'
 
 let watching = false
 
@@ -75,7 +71,7 @@ async function through(
     console.debug('gateway:', err)
     throw new TypeError('Failed to fetch')
   }
-  const target = new URL(input instanceof Request ? input.url : input, globalThis.location.href)
+  const target = targetOf(input)
   if (owners.size === 0 || !REACHING.has(target.protocol)) return send(input, init)
   const host = target.hostname
   const port = portOf(target)

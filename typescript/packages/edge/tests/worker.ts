@@ -14,7 +14,7 @@
 
 import { createApp, MountMode, RAMVFS, Workspace } from '../src/index.ts'
 
-const app = createApp({ maxWorkspaces: 8 })
+const app = createApp({ maxWorkspaces: 32 })
 
 interface Run {
   readonly lines: readonly string[]
