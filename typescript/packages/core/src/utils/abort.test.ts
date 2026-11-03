@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import type * as AsyncContext from './async_context.ts'
 import {
   SignalStop,
   abortable,
@@ -219,6 +220,51 @@ describe('runWithDeadline', () => {
       })
     })
     expect(boundDeadline()).toBeNull()
+  })
+
+  it("gives a job's own deadline in place of the line's, or none", async () => {
+    const line = vi.fn()
+    const job = vi.fn()
+    await runWithDeadline(1, line, async () => {
+      await runWithDeadline(
+        600,
+        job,
+        () => {
+          expect(boundDeadline()?.fire).toBe(job)
+        },
+        true,
+      )
+      await runWithDeadline(
+        null,
+        job,
+        () => {
+          expect(boundDeadline()).toBeNull()
+        },
+        true,
+      )
+      expect(boundDeadline()?.fire).toBe(line)
+    })
+  })
+
+  it('binds nothing a host that cannot tell calls apart would lend another', async () => {
+    vi.resetModules()
+    vi.doMock('./async_context.ts', async (importOriginal) => {
+      const actual = await importOriginal<typeof AsyncContext>()
+      return {
+        ...actual,
+        asyncContextIsolatesTasks: false,
+        createAsyncContext: () => new actual.FallbackStorage(),
+      }
+    })
+    try {
+      const fresh = await import('./abort.ts')
+      await fresh.runWithDeadline(1, vi.fn(), () => {
+        expect(fresh.boundDeadline()).toBeNull()
+      })
+    } finally {
+      vi.doUnmock('./async_context.ts')
+      vi.resetModules()
+    }
   })
 })
 

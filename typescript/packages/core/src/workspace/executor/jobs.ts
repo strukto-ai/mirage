@@ -362,7 +362,7 @@ export async function handleBackground(
       const disarm = limit === null ? undefined : atDeadline(limit, expire)
       let result: [IOResult, ExecutionNode]
       try {
-        result = await (limit === null ? run() : runWithDeadline(limit, expire, run))
+        result = await runWithDeadline(limit, expire, run, true)
       } catch (err) {
         // Past its own limit, or stopped by a command's own timeout, the job
         // answers as a line does, 124 and the message; a killed job ends as

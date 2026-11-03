@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { createAsyncContext } from './async_context.ts'
+import { asyncContextIsolatesTasks, createAsyncContext } from './async_context.ts'
 
 /**
  * The one error an aborted invocation rejects with. A signal's own reason
@@ -92,28 +92,35 @@ export interface Deadline {
   readonly fire: () => void
 }
 
-const deadlines = createAsyncContext<Deadline>()
+const deadlines = createAsyncContext<Deadline | null>()
 
 /**
- * Run `fn` under the deadline `seconds` from now that `fire` stops. The
- * timer `atDeadline` arms is what stops it; a guest that holds the thread
- * the timer needs (monty in an edge isolate) reads it through
- * `boundDeadline` and stops itself there. The earlier of it and a deadline
- * already bound is the one bound.
+ * Run `fn` under the deadline `seconds` from now that `fire` stops, null
+ * for none. The timer `atDeadline` arms is what stops it; a guest that
+ * holds the thread the timer needs (monty in an edge isolate) reads it
+ * through `boundDeadline` and stops itself there. A nested line runs under
+ * the earlier of it and the deadline already bound; an `own` deadline (a
+ * background job's, which runs to its own limit as the line's deadline
+ * leaves the line's jobs alone) replaces the one bound.
  */
 export function runWithDeadline<R>(
-  seconds: number,
+  seconds: number | null,
   fire: () => void,
   fn: () => R | Promise<R>,
+  own = false,
 ): R | Promise<R> {
-  const deadline = { at: performance.now() + seconds * 1000, fire }
-  const outer = deadlines.getStore()
-  return deadlines.run(outer !== undefined && outer.at <= deadline.at ? outer : deadline, fn)
+  const outer = own ? null : (deadlines.getStore() ?? null)
+  const mine = seconds === null ? null : { at: performance.now() + seconds * 1000, fire }
+  return deadlines.run(mine === null || (outer !== null && outer.at <= mine.at) ? outer : mine, fn)
 }
 
-/** The deadline the running call is under, null for none. */
+/**
+ * The deadline the running call is under: null for none, and null where
+ * the host cannot tell one call's binding from another's, so no call
+ * stops at a deadline that is not its own.
+ */
 export function boundDeadline(): Deadline | null {
-  return deadlines.getStore() ?? null
+  return asyncContextIsolatesTasks ? (deadlines.getStore() ?? null) : null
 }
 
 /**
