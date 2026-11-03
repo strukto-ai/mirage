@@ -42,6 +42,7 @@ from mirage.errors.types import (
 from mirage.io import OpReport
 from mirage.io.stream import yield_bytes
 from mirage.observe.context import RecordingScope, record, start_op
+from mirage.observe.record import OpServed
 from mirage.policy import (
     Action,
     AdmissionRules,
@@ -4161,3 +4162,33 @@ async def test_a_policy_refusing_reads_refuses_their_shortcuts():
         assert vfs.asked == []
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_getxattr_reports_the_namespace_answered():
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        path = PathSpec.from_str_path("/ram/a.txt")
+        await ws.vfs.write("/ram/a.txt", b"body")
+        await ws.vfs.setxattr("/ram/a.txt", "user.k", b"v")
+        report = OpReport()
+        await ws.dispatch("getxattr", path, name="user.k", report=report)
+        assert (report.answerer, report.source, report.bytes) == (
+            OpServed.NAMESPACE,
+            "ram",
+            1,
+        )
+
+
+@pytest.mark.asyncio
+async def test_an_overlay_only_setattr_reports_the_namespace_answered():
+    with Workspace({"/ram/": RAMVFS()}, mode=MountMode.WRITE) as ws:
+        await ws.shell("echo body > /ram/a.txt; ln -s a.txt /ram/lk")
+        report = OpReport()
+        await ws.dispatch(
+            "setattr",
+            PathSpec.from_str_path("/ram/lk"),
+            mode=0o640,
+            nofollow=True,
+            report=report,
+        )
+        assert (report.answerer, report.source) == (OpServed.NAMESPACE, "ram")

@@ -2433,7 +2433,7 @@ class Dispatcher:
         try:
             if call.name == "setattr":
                 result = await self._apply_setattr(
-                    mount, call.path, kwargs, call.vis
+                    mount, call.path, kwargs, call.vis, call.report
                 )
             elif await self._streams(call, mount):
                 return await self._open_stream(call, mount, filler)
@@ -3997,16 +3997,16 @@ class Dispatcher:
             if attr not in stored:
                 raise no_xattr(path)
             await self._namespace.remove_xattr(path.virtual, attr)
+        moved = len(result) if isinstance(result, bytes) else 0
         record(
             name,
             path.virtual,
             VFSName.RAM.value,
-            len(result) if isinstance(result, bytes) else 0,
+            moved,
             timer,
             served=OpServed.NAMESPACE,
         )
-        if report is not None:
-            report.served(None, None)
+        _memory_answered(report, moved)
         return await boundary.complete(CALLS[name], path, write, result)
 
     async def _statfs(
@@ -4080,6 +4080,7 @@ class Dispatcher:
         path: PathSpec,
         kwargs: dict[str, Any],
         vis: Visibility | None,
+        report: OpReport | None = None,
     ) -> dict[str, Any]:
         """Apply attributes natively where the backend can, overlay the rest.
 
@@ -4099,6 +4100,8 @@ class Dispatcher:
             path (PathSpec): target path.
             kwargs (dict[str, Any]): the requested attribute fields.
             vis (Visibility | None): the session's view.
+            report (OpReport | None): the caller's report, told when the
+                overlay alone answered.
         """
         requested = {key: kwargs.get(key) for key in SETATTR_KEYS}
         if self._namespace.is_link(path.virtual) or not mount.answers_at(
@@ -4107,7 +4110,7 @@ class Dispatcher:
             # No backend inode answers for the path here, so nothing
             # would refuse a missing one: the overlay would stamp it.
             await self._xattr_target(mount, path, vis)
-            return await self._overlay_setattr(path, kwargs)
+            return await self._overlay_setattr(path, kwargs, report)
         residual = await mount.call("setattr", path.virtual, **kwargs)
         applied = [
             key
@@ -4126,13 +4129,18 @@ class Dispatcher:
         return dict(residual)
 
     async def _overlay_setattr(
-        self, path: PathSpec, kwargs: dict[str, Any]
+        self,
+        path: PathSpec,
+        kwargs: dict[str, Any],
+        report: OpReport | None = None,
     ) -> dict[str, Any]:
         """Store every requested field in the namespace overlay.
 
         Args:
             path (PathSpec): target path.
             kwargs (dict[str, Any]): the requested attribute fields.
+            report (OpReport | None): the caller's report, stamped as a
+                namespace answer.
         """
         timer = start_op()
         overlay = {
@@ -4149,6 +4157,7 @@ class Dispatcher:
             timer,
             served=OpServed.NAMESPACE,
         )
+        _memory_answered(report, 0)
         return overlay
 
     async def _write_overlay(

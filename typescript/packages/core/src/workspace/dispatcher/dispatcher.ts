@@ -2412,7 +2412,7 @@ export class Dispatcher {
           mount.framed(() => {
             const pending = Promise.resolve(
               name === 'setattr'
-                ? this.applySetattr(mount, scope, p, opKwargs)
+                ? this.applySetattr(mount, scope, p, opKwargs, call.report)
                 : mount.callKeyed(name, scope, fullArgs, opKwargs, this.access, call.report),
             )
             onCall?.(pending)
@@ -3810,15 +3810,9 @@ export class Dispatcher {
       if (!stored.has(attr)) throw noXattr(path.virtual)
       await this.namespace.removeXattr(path.virtual, attr)
     }
-    record(
-      name,
-      path.virtual,
-      VFSName.RAM,
-      result instanceof Uint8Array ? result.byteLength : 0,
-      timer,
-      { served: 'namespace' },
-    )
-    report?.served(null, null)
+    const moved = result instanceof Uint8Array ? result.byteLength : 0
+    record(name, path.virtual, VFSName.RAM, moved, timer, { served: 'namespace' })
+    memoryAnswered(report, moved)
     return boundary.complete(mark, path, write, result, issuer)
   }
 
@@ -3905,12 +3899,13 @@ export class Dispatcher {
     scope: PathSpec,
     p: PathSpec,
     kwargs: OpKwargs,
+    report?: OpReport,
   ): Promise<Record<string, number | string>> {
     if (this.namespace.isLink(p.virtual) || !mount.answers('setattr')) {
       // No backend inode answers for the path here, so nothing would
       // refuse a missing one: the overlay would stamp it.
       await this.xattrTarget(mount, p)
-      return this.overlaySetattr(p, kwargs)
+      return this.overlaySetattr(p, kwargs, report)
     }
     const raw = await mount.callKeyed('setattr', scope, [], kwargs, this.access)
     const residual = raw as Record<string, number | string>
@@ -3932,6 +3927,7 @@ export class Dispatcher {
   private async overlaySetattr(
     p: PathSpec,
     kwargs: OpKwargs,
+    report?: OpReport,
   ): Promise<Record<string, number | string>> {
     const timer = startOp()
     const overlay: Record<string, number | string> = {}
@@ -3941,6 +3937,7 @@ export class Dispatcher {
     }
     await this.writeOverlay(p.virtual, overlay)
     record('setattr', p.virtual, VFSName.RAM, 0, timer, { served: 'namespace' })
+    memoryAnswered(report, 0)
     return overlay
   }
 
