@@ -26,6 +26,7 @@ from multidict import MultiDictProxy
 
 MTIME = 1792965402
 TOKEN = "fs-token"
+MIN_PART_SIZE = 5 * 1024 * 1024
 
 
 def _parent(path: str) -> str:
@@ -53,12 +54,13 @@ class FakeDrive9:
     write, a mkdir and a file rename make missing parents, a listing of a
     missing folder is empty, GET on a directory is 404, a plain PUT of
     ``inline_threshold`` bytes or more is refused, a large file reads as
-    a 302 to its object, and only a large file takes ``?append``, whose
-    plan copies the parts it keeps and hands out a read URL for the one
-    it rewrites. Presigned objects are served on ``localhost``
-    while the API is on ``127.0.0.1``, a different origin, and refuse a
-    request that carries the bearer token, as object storage refuses two
-    credentials.
+    a 302 to its object, and only a large file takes ``?append`` or a
+    PATCH to a new size, whose plan copies the parts it keeps and hands
+    out a read URL for each one it rewrites. A PATCH below S3's 5 MiB part
+    floor gets ``part_size`` instead, as drive9 falls back to its own.
+    Presigned objects are served on ``localhost`` while the API is on
+    ``127.0.0.1``, a different origin, and refuse a request that carries
+    the bearer token, as object storage refuses two credentials.
 
     Args:
         files (dict): path to bytes.
@@ -164,6 +166,8 @@ class FakeDrive9:
             return self._rename(request, path)
         if request.method == "POST" and "append" in query:
             return await self._append(request, path)
+        if request.method == "PATCH":
+            return await self._patch(request, path)
         return _missing(400, "unknown POST action")
 
     async def _append(self, request: web.Request, path: str) -> web.Response:
@@ -204,6 +208,53 @@ class FakeDrive9:
                 "upload_id": upload_id,
                 "part_size": size,
                 "base_size": base,
+                "upload_parts": rows,
+                "copied_parts": sorted(upload.parts),
+            },
+            status=202,
+        )
+
+    async def _patch(self, request: web.Request, path: str) -> web.Response:
+        body = await request.json()
+        total = body["new_size"]
+        if total <= 0:
+            return _missing(400, "new_size must be positive")
+        if not body["dirty_parts"]:
+            return _missing(400, "dirty_parts must not be empty")
+        data = self.files.get(path)
+        if data is None:
+            return _missing(404, "stat existing file: not found")
+        if len(data) < self.inline_threshold:
+            return _missing(400, f"file is not S3-stored: {path}")
+        size = body.get("part_size", 0)
+        if size < MIN_PART_SIZE:
+            size = self.part_size
+        base = len(data)
+        kept = -(-base // size)
+        upload_id = f"up{len(self.uploads) + 1}"
+        upload = Upload(path, total)
+        rows: list[dict[str, str | int | dict[str, str]]] = []
+        for number in range(1, -(-total // size) + 1):
+            start = (number - 1) * size
+            part = min(size, total - start)
+            end = min(start + part, base) - 1
+            if number not in body["dirty_parts"] and number <= kept:
+                upload.parts[number] = data[start : end + 1]
+                continue
+            row: dict[str, str | int | dict[str, str]] = {
+                "number": number,
+                "url": f"{self.object_url}/s3/upload/{upload_id}/{number}",
+                "size": part,
+            }
+            if number <= kept and not self.drop_read_urls:
+                row["read_url"] = f"{self.object_url}/s3/objects{path}"
+                row["read_headers"] = {"Range": f"bytes={start}-{end}"}
+            rows.append(row)
+        self.uploads[upload_id] = upload
+        return web.json_response(
+            {
+                "upload_id": upload_id,
+                "part_size": size,
                 "upload_parts": rows,
                 "copied_parts": sorted(upload.parts),
             },

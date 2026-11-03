@@ -306,7 +306,9 @@ async def walk_find(
         search_path.raw_path,
     )
     need_size = args.min_size is not None or args.max_size is not None
-    need_mtime = args.mtime_min is not None or args.mtime_max is not None
+    windowed = args.mtime_min is not None or args.mtime_max is not None
+    need_mtime = windowed or find_eval.tree_has_time(tree)
+    failing = find_eval.time_tests_failing(tree)
     learned: dict[str, float | None] = {}
     results: list[str] = []
     vis = session_visibility()
@@ -342,9 +344,11 @@ async def walk_find(
         st = None
         if need_mtime:
             st = await _stat_entry(stat, p, unstatted)
-            if st is None:
+            if st is None and windowed:
                 continue
-            learned[key] = modified_ts(st.modified)
+            # A failed stat leaves the time unknown, which fails every time
+            # test, so another -o arm (-name) can still match the entry.
+            learned[key] = modified_ts(st.modified) if st is not None else None
         entry = find_types.FindEntry(
             key=key,
             name=entry_name,
@@ -353,7 +357,8 @@ async def walk_find(
             is_empty=is_empty,
             mtime=learned.get(key),
         )
-        if not find_eval.keep(entry, tree, args.mindepth, acts):
+        judged = failing if need_mtime and entry.mtime is None else tree
+        if not find_eval.keep(entry, judged, args.mindepth, acts):
             continue
         if need_size and not is_dir and st is None:
             st = await _stat_entry(stat, p, unstatted)
@@ -367,7 +372,7 @@ async def walk_find(
                 continue
             if args.max_size is not None and size > args.max_size:
                 continue
-        if need_mtime and st is not None:
+        if windowed and st is not None:
             ts = modified_ts(st.modified)
             if ts is None:
                 continue

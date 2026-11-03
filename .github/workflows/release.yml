@@ -3,8 +3,9 @@ name: Release
 permissions:
   contents: read
 
-# A pushed `v*` tag builds, checks and publishes. Run by hand, on a branch
-# or a tag, it is a dry run: every build and check, nothing published.
+# A pushed `v*` tag, or a run by hand on a branch or a tag, builds and checks
+# every artifact. Nothing is published: the wheels and tarballs it uploads go
+# to PyPI and npm by hand, once checked.
 "on":
   push:
     tags: ["v*"]
@@ -21,7 +22,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     outputs:
-      npm-tag: ${{ steps.check.outputs.npm-tag }}
       npm-packages: ${{ steps.check.outputs.npm-packages }}
     steps:
       - uses: actions/checkout@v7
@@ -67,57 +67,3 @@ jobs:
         with:
           name: npm-tarballs
           path: ${{ runner.temp }}/npm/*.tgz
-
-  # PyPI trusted publishing: no token, the pypi environment's OIDC identity.
-  # A rerun skips what an earlier attempt already uploaded.
-  publish-pypi:
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [wheels, npm]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: pypi
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/download-artifact@v8
-        with:
-          pattern: mirage-ai-*
-          path: dist
-          merge-multiple: true
-      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
-        with:
-          packages-dir: dist/
-          skip-existing: true
-
-  # npm trusted publishing (npm 11.5.1 or later), with provenance, under the
-  # dist-tag the version names: `alpha` for 0.0.7-alpha.3, `latest` for 0.0.7.
-  publish-npm:
-    if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [versions, publish-pypi]
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    environment: npm
-    permissions:
-      id-token: write
-    steps:
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          registry-url: https://registry.npmjs.org
-      - run: npm install -g npm@11.20.0
-      - uses: actions/download-artifact@v8
-        with:
-          name: npm-tarballs
-          path: npm
-      - name: Publish each package not yet on npm
-        env:
-          NPM_TAG: ${{ needs.versions.outputs.npm-tag }}
-        run: |
-          for tarball in npm/*.tgz; do
-            spec=$(tar -xOzf "$tarball" package/package.json | node -p 'const p = JSON.parse(require("fs").readFileSync(0)); `${p.name}@${p.version}`')
-            if [ -n "$(npm view "$spec" version 2> /dev/null)" ]; then
-              echo "$spec is already published"
-              continue
-            fi
-            npm publish "$tarball" --access public --tag "$NPM_TAG"
-          done

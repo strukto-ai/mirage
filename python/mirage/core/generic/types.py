@@ -104,15 +104,16 @@ class Mtime:
     """``-mtime``, ``-newermt`` and a resolved ``-newer``: an inclusive
     epoch-second window over the entry's modification time.
 
-    The same bounds fold into the expression's flat window
-    (``FindExpr.mtime_min``/``mtime_max``), which is what a backend pushes
-    down and the generic post-filters with, so an entry whose mtime the
-    walk did not fetch passes here and meets the window afterwards. The
-    node's own job is its position: a ``-prune`` after it fires only for
-    a directory the test holds for, and one before it fires regardless,
-    as GNU orders them. A prune reached past an undecided test is
-    recorded as pending (``PendingPrune``) for the caller to settle once
-    it has statted the directory.
+    Only a test in the top-level ``-a`` chain also narrows the
+    expression's flat window (``FindExpr.mtime_min``/``mtime_max``),
+    which is what a backend pushes down and the generic post-filters
+    with; the tree decides the rest, so a walk fetches mtimes whenever
+    the tree holds one of these. An entry whose mtime is unknown passes
+    here. The node also orders prunes: a ``-prune`` after it fires only
+    for a directory the test holds for, and one before it fires
+    regardless, as GNU orders them. A prune reached past an undecided
+    test is recorded as pending (``PendingPrune``) for the caller to
+    settle once it has statted the directory.
     """
 
     lo: float | None

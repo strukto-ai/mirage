@@ -34,7 +34,7 @@ function commands(node: Node.CommandSpec, parents: readonly string[] = []): stri
 const specs = Object.values(Node).filter((value) => value instanceof Node.CLI)
 assert.ok(specs.length > 0, 'No bundled CLI specs were loaded')
 const pages = readdirSync(DOCS)
-  .filter((name) => name.endsWith('.mdx') && name !== 'index.mdx' && name !== 'custom.mdx')
+  .filter((name) => name.endsWith('.mdx') && !['index.mdx', 'custom.mdx', 'mcp.mdx'].includes(name))
   .map((name) => name.slice(0, -4))
 assert.deepEqual(
   pages.sort(compareCodePoints),

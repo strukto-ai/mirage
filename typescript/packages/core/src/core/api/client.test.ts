@@ -1041,6 +1041,15 @@ describe('stallTimeout', () => {
     const response = await stallTimeout(0.05, drip([0, 500]))(TARGET)
     await expect(response.text()).rejects.toMatchObject({ name: 'TimeoutError' })
   })
+
+  it('hands back a 204 that Chrome gives an empty body', async () => {
+    const response = await stallTimeout(0.05, () => {
+      const reply = new Response(null, { status: 204 })
+      Object.defineProperty(reply, 'body', { value: new ReadableStream() })
+      return Promise.resolve(reply)
+    })(TARGET)
+    expect(response.status).toBe(204)
+  })
 })
 
 // A request a command makes answers to the call it runs in: the line that

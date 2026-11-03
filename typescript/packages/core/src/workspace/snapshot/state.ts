@@ -17,6 +17,7 @@ import { CacheEntry } from '../../cache/file/entry.ts'
 import type { FileCacheMixin } from '../../cache/file/mixin.ts'
 import { RAMFileCacheStore } from '../../cache/file/ram.ts'
 import { tokenOrNull } from '../../cache/file/utils.ts'
+import { buildCli } from '../../commands/cli/mcp/build.ts'
 import { CLI } from '../../commands/cli/types.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOConfig } from '../../io/config.ts'
@@ -79,6 +80,7 @@ import { setCwd } from '../session/shell_dirs.ts'
 import { gateRestoredVars } from '../session/state.ts'
 import type { MountArgs } from './config.ts'
 import { indexConfigDump, restoreIndexConfig } from './config.ts'
+import { MCPKey } from './keys.ts'
 import { captureFingerprints, liveOnlyMountPrefixes } from './drift.ts'
 import { readRegular } from './fs.ts'
 import type {
@@ -252,6 +254,18 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
  * a language that never existed.
  */
 function cliSpecFromEntry(entry: CLISnapshot): string | CLI {
+  const source = entry.mcp
+  if (source !== undefined) {
+    return buildCli({
+      title: source[MCPKey.TITLE],
+      tools: source[MCPKey.TOOLS].map((tool) => ({
+        name: tool[MCPKey.NAME],
+        description: tool[MCPKey.DESCRIPTION],
+        inputSchema: tool[MCPKey.INPUT_SCHEMA],
+        annotations: tool[MCPKey.ANNOTATIONS],
+      })),
+    })
+  }
   if (entry.script === undefined) return entry.spec
   const language = entry.script.language
   if (language !== 'python' && language !== 'js') {
@@ -297,6 +311,19 @@ function cliSnapshot(name: string, install: CLIInstall): CLISnapshot {
       module: script.module,
     }
     entry.runtime = install.cli.runtime
+  }
+  // An MCP install's tool list rides along, so load rebuilds it with no request.
+  const source = install.cli.mcp
+  if (source !== null) {
+    entry.mcp = {
+      [MCPKey.TITLE]: source.title,
+      [MCPKey.TOOLS]: source.tools.map((tool) => ({
+        [MCPKey.NAME]: tool.name,
+        [MCPKey.DESCRIPTION]: tool.description,
+        [MCPKey.INPUT_SCHEMA]: { ...tool.inputSchema },
+        [MCPKey.ANNOTATIONS]: { ...tool.annotations },
+      })),
+    }
   }
   return entry
 }

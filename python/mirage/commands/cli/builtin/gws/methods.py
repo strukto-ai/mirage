@@ -169,6 +169,51 @@ GWS_METHODS: tuple[GwsMethod, ...] = (
         "/files/{fileId}/permissions/{permissionId}",
     ),
     GwsMethod(
+        "gmail",
+        "users drafts",
+        "create",
+        "POST",
+        "/users/{userId}/drafts",
+        needs_body=True,
+    ),
+    GwsMethod(
+        "gmail",
+        "users drafts",
+        "delete",
+        "DELETE",
+        "/users/{userId}/drafts/{id}",
+    ),
+    GwsMethod(
+        "gmail",
+        "users drafts",
+        "get",
+        "GET",
+        "/users/{userId}/drafts/{id}",
+    ),
+    GwsMethod(
+        "gmail",
+        "users drafts",
+        "list",
+        "GET",
+        "/users/{userId}/drafts",
+    ),
+    GwsMethod(
+        "gmail",
+        "users drafts",
+        "send",
+        "POST",
+        "/users/{userId}/drafts/send",
+        needs_body=True,
+    ),
+    GwsMethod(
+        "gmail",
+        "users drafts",
+        "update",
+        "PUT",
+        "/users/{userId}/drafts/{id}",
+        needs_body=True,
+    ),
+    GwsMethod(
         "gmail", "users labels", "list", "GET", "/users/{userId}/labels"
     ),
     GwsMethod(

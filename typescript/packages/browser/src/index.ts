@@ -106,6 +106,7 @@ export { Workspace } from './workspace.ts'
 // core to reach them (`@struktoai/mirage-core/<path>` works too).
 export { generic } from '@struktoai/mirage-core/commands/builtin/generic_bind/index'
 export type { Context } from '@struktoai/mirage-core/commands/config'
+export { MCPToolsError } from '@struktoai/mirage-core/commands/cli/mcp/errors'
 export { UsageError } from '@struktoai/mirage-core/commands/errors'
 export { FlagView } from '@struktoai/mirage-core/commands/spec/flag_view'
 export { UsageStyle, type FlagValue } from '@struktoai/mirage-core/commands/spec/types'

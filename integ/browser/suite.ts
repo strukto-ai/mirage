@@ -19,7 +19,15 @@ import { CLI, CLIHandler } from '@struktoai/mirage-core/commands/cli/types'
 import { CommandSpec } from '@struktoai/mirage-core/commands/spec/types'
 import { IOResult } from '@struktoai/mirage-core/io/types'
 import { DiffRequest } from '@struktoai/mirage-core/rs/diff_worker'
-import { buildRuntime, JobConsole, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-browser'
+import {
+  buildRuntime,
+  JobConsole,
+  MountMode,
+  RAMVFS,
+  S3VFS,
+  Workspace,
+  type S3Config,
+} from '@struktoai/mirage-browser'
 import {
   bindMount,
   compare,
@@ -678,10 +686,35 @@ async function quickjsCheck(home: string): Promise<void> {
 }
 
 /**
- * Run every check on a workspace of its own, recording each outcome, and
- * QuickJS's when the page serves its module under `quickjsHome`.
+ * An object store as a page reaches it, through signed URLs, alone and with
+ * a policy listening on the page's gateway. A delete answered 204 comes back
+ * with an empty body stream in Chrome where Node gives none.
  */
-export async function runSuite(quickjsHome: string | null = null): Promise<Outcome[]> {
+async function s3Check(config: S3Config): Promise<void> {
+  for (const policies of [[], [{ postNetwork: () => null }]]) {
+    const ws = new Workspace(
+      { '/s3': new S3VFS({ ...config, keyPrefix: `browser-${crypto.randomUUID()}/` }) },
+      { mode: MountMode.WRITE, policies },
+    )
+    try {
+      equal(await shell(ws, 'echo hi > /s3/a.txt; cat /s3/a.txt'), [0, 'hi\n', ''])
+      equal(await shell(ws, 'rm /s3/a.txt'), [0, '', ''])
+      equal(await shell(ws, '[ -e /s3/a.txt ]; echo $?'), [0, '1\n', ''])
+    } finally {
+      await ws.close()
+    }
+  }
+}
+
+/**
+ * Run every check on a workspace of its own, recording each outcome,
+ * QuickJS's when the page serves its module under `quickjsHome`, and an
+ * object store's when `s3` names one.
+ */
+export async function runSuite(
+  quickjsHome: string | null = null,
+  s3: S3Config | null = null,
+): Promise<Outcome[]> {
   const outcomes: Outcome[] = []
   for (const [name, check] of CHECKS) {
     const ws = workspace()
@@ -698,6 +731,15 @@ export async function runSuite(quickjsHome: string | null = null): Promise<Outco
     const name = 'QuickJS runs on a worker over the page bridge'
     try {
       await quickjsCheck(quickjsHome)
+      outcomes.push({ name })
+    } catch (error) {
+      outcomes.push({ name, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  if (s3 !== null) {
+    const name = 'an object store round-trips through the page gateway'
+    try {
+      await s3Check(s3)
       outcomes.push({ name })
     } catch (error) {
       outcomes.push({ name, error: error instanceof Error ? error.message : String(error) })

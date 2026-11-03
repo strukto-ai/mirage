@@ -20,6 +20,7 @@ from typing import Any, Callable, Literal
 from pydantic import BaseModel
 
 from mirage.accessor.base import Accessor, NOOPAccessor
+from mirage.commands.cli.mcp.types import MCPSource
 from mirage.commands.spec.compile import compile_spec
 from mirage.commands.spec.flag_view import FlagBag
 from mirage.commands.spec.types import CommandSpec, FlagValue
@@ -62,6 +63,8 @@ class CLI:
             that reaches no service keeps ``NOOPAccessor``.
         script (ScriptSource | None): program owning the whole installation.
         runtime (str | None): runtime executing that script.
+        mcp (MCPSource | None): the MCP tool list the tree was built
+            from, so a snapshot rebuilds it without the server.
     """
 
     spec: CommandSpec
@@ -70,6 +73,7 @@ class CLI:
     accessor: Callable[..., Accessor] = NOOPAccessor
     script: ScriptSource | None = None
     runtime: str | None = None
+    mcp: MCPSource | None = None
 
     def __post_init__(self) -> None:
         handlers = dict(self.handlers)
@@ -90,6 +94,8 @@ def _validate_cli(cli: CLI) -> None:
         cli (CLI): definition being constructed.
     """
     name = cli.spec.name
+    if cli.script is not None and cli.mcp is not None:
+        raise ValueError(f"cli {name!r}: an MCP tree takes no script")
     if cli.script is not None:
         if cli.spec.subcommands:
             raise ValueError(
