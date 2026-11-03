@@ -18,7 +18,7 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { DiskRecordClient, Workspace } from '@struktoai/mirage-node'
+import { DiskRecordClient, loadPolicyFile, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { DaemonConfigError } from './daemon_config.ts'
 import { ENV_GRACEFUL_TIMEOUT, ENV_HOME, ENV_MAX_SESSIONS, ENV_MAX_WORKSPACES } from './env.ts'
@@ -52,9 +52,9 @@ describe('resolvePolicyFile', () => {
         join(home, 'config.toml'),
         `[daemon]\npolicy_file = "${join(elsewhere, 'policy.yaml')}"\n`,
       )
-      expect(Object.keys(resolvePolicyFile(undefined, env))).toEqual(['preCommand'])
+      expect(Object.keys(resolvePolicyFile(loadPolicyFile, undefined, env))).toEqual(['preCommand'])
       await writeFile(join(home, 'config.toml'), '[daemon]\npolicy_file = "near.yaml"\n')
-      expect(Object.keys(resolvePolicyFile(undefined, env))).toEqual(['postCommand'])
+      expect(Object.keys(resolvePolicyFile(loadPolicyFile, undefined, env))).toEqual(['postCommand'])
     } finally {
       await rm(home, { recursive: true, force: true })
       await rm(elsewhere, { recursive: true, force: true })

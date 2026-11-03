@@ -32,18 +32,9 @@ import { SharedStorageError, WritePolicyError } from '@struktoai/mirage-core/wor
 import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import {
-  configToWorkspaceArgs,
-  DiskWorkspaceStateStore,
-  DOT_IDS,
-  loadProfilePolicy,
-  loadWorkspaceConfig,
-  Workspace,
-  type WorkspaceConfigRaw,
-} from '@struktoai/mirage-node'
-import { buildCliEntries } from '@struktoai/mirage-node/config'
-import { quoteName } from '@struktoai/mirage-node/workspace/record/disk'
-import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
+import { loadWorkspaceConfig, type WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
+import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
+import type { RouteApp, RouteReply, RouteRequest, ServerHost } from '../routes.ts'
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { buildOverrideMounts, cloneWorkspaceWithOverride } from '../clone.ts'
@@ -63,7 +54,7 @@ import { queryFlag } from './vfs.ts'
 
 export interface WorkspaceRoutesDeps {
   registry: WorkspaceRegistry
-  stateRoot: string
+  host: ServerHost
   /** The S3-like store a snapshot request may name a key in. */
   snapshotStore: S3Config | undefined
 }
@@ -166,10 +157,10 @@ const ACCOUNTS_DIR = 'accounts'
  * its own prefix, so no account can write or load another's by naming
  * its key.
  */
-function storeKey(account: string | null, key: string): string | null {
+function storeKey(host: ServerHost, account: string | null, key: string): string | null {
   const relative = key.replace(/^\/+/, '')
   if (!isSafeBlobPath(relative)) return null
-  return account === null ? relative : `${ACCOUNTS_DIR}/${quoteName(account)}/${relative}`
+  return account === null ? relative : `${ACCOUNTS_DIR}/${host.quoteName(account)}/${relative}`
 }
 
 function noStore(reply: RouteReply): RouteReply {
@@ -177,8 +168,8 @@ function noStore(reply: RouteReply): RouteReply {
 }
 
 /** Whether the server's state root holds state for `id`. */
-async function hasState(stateRoot: string, id: string): Promise<boolean> {
-  const store = new DiskWorkspaceStateStore({ root: stateRoot })
+async function hasState(host: ServerHost, id: string): Promise<boolean> {
+  const store = host.stateStore()
   try {
     return (await store.loadMeta(id)) !== null
   } finally {
@@ -237,7 +228,7 @@ async function claimed(
       detail: `server is at max_workspaces (${String(deps.registry.maxWorkspaces)})`,
     })
   }
-  const stored = req.account !== null && (await hasState(deps.stateRoot, id))
+  const stored = req.account !== null && (await hasState(deps.host, id))
   const claim = await deps.registry.claim(id, req.account, stored)
   if (claim === Claim.Taken) {
     return answer(reply, 409, { detail: `workspace id already exists: ${id}` })
@@ -358,7 +349,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       // id run one at a time, so a second of the same config answers what
       // the first built, and one of another config is refused at once.
       const wid = body.id ?? cfg.workspaceId ?? newWorkspaceId()
-      if (DOT_IDS.has(wid)) return refuseDotId(reply, wid)
+      if (deps.host.reservedIds.has(wid)) return refuseDotId(reply, wid)
       const digest = configDigest(config)
       return deps.registry.creating(wid, digest, async (admitted) => {
         if (!admitted) {
@@ -374,13 +365,13 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
         const refusal = await admit(deps, req, reply, config)
         if (refusal !== null) return refusal
         return claimed(deps, req, reply, wid, async () => {
-          let args: Awaited<ReturnType<typeof configToWorkspaceArgs>>
+          let args: Awaited<ReturnType<ServerHost['workspaceArgs']>>
           try {
             // Mounts that answer as they are built, and the secrets the
             // config names, go out under the network the workspace will be
             // held to.
             args = await runWithNetwork(deps.registry.ruleFor(cfg.network), () =>
-              configToWorkspaceArgs(cfg),
+              deps.host.workspaceArgs(cfg),
             )
           } catch (e) {
             if (
@@ -406,13 +397,13 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
             // clis block parsed, validated, and then installed nothing.
             // Only identity and the store default are the daemon's to
             // decide.
-            ws = new Workspace(vfsMap, {
+            ws = new deps.host.Workspace(vfsMap, {
               ...args.options,
               workspaceId: wid,
               // Daemon default is disk (a created workspace survives restart
               // with zero infrastructure, like git init); the library default
               // stays ram. An explicit store always wins.
-              store: args.options.store ?? new DiskWorkspaceStateStore({ root: deps.stateRoot }),
+              store: args.options.store ?? deps.host.stateStore(),
               // Whichever of the two built it, no sibling workspace shares
               // it, so this workspace is the one that closes it.
               ownsStore: true,
@@ -440,7 +431,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
           let entry
           try {
             for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {
-              await ws.addFuseMount(prefix, mountpoint, undefined, backend)
+              await deps.host.mountKernel(ws, prefix, mountpoint, backend)
             }
             entry = deps.registry.add(ws, wid, req.account)
             entry.configDigest = digest
@@ -473,7 +464,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
         if (body.key === undefined) {
           throw new MultipartError(400, "load needs a 'key' or an uploaded 'snapshot' part")
         }
-        const scoped = storeKey(req.account, body.key)
+        const scoped = storeKey(deps.host, req.account, body.key)
         if (scoped === null) throw new MultipartError(400, `invalid snapshot key: ${body.key}`)
         source = scoped
       }
@@ -483,7 +474,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       return reply.status(e.statusCode).send({ detail: e.message })
     }
     const { key, id: workspaceId, override } = body
-    if (workspaceId !== undefined && DOT_IDS.has(workspaceId))
+    if (workspaceId !== undefined && deps.host.reservedIds.has(workspaceId))
       return refuseDotId(reply, workspaceId)
     if (
       workspaceId !== undefined &&
@@ -506,7 +497,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
         // these declarations; a container the constructor will reject
         // is left for it to reject. Mirrors the python load route.
         overrides = await runWithNetwork(rule, () =>
-          buildOverrideMounts(override ?? null, override?.secrets),
+          buildOverrideMounts(override ?? null, override?.secrets, deps.host.buildVfs),
         )
       } catch (e) {
         return answer(reply, 400, { detail: `override build failed: ${(e as Error).message}` })
@@ -519,7 +510,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
         ws = await deps.registry.restoring((policies) => {
           restoredWith = policies
           return runWithNetwork(rule, () =>
-            Workspace.load(
+            deps.host.Workspace.load(
               source,
               {
                 maxSnapshotBytes: MAX_SNAPSHOT_BYTES,
@@ -651,7 +642,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       try {
         entry.runner.ws.setProfile(
           name,
-          loadProfilePolicy(SessionProfile(req.body, `profile \`${name}\``)),
+          deps.host.loadProfile(SessionProfile(req.body, `profile \`${name}\``)),
         )
       } catch (err) {
         return reply.status(422).send({ detail: err instanceof Error ? err.message : String(err) })
@@ -686,7 +677,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
         const sources = await resolveSourcesFor(ws.declaredSources, [
           isPlainObject(block.config) ? block.config : {},
         ])
-        const built = await buildCliEntries({ [name]: block }, sources)
+        const built = await deps.host.buildCliEntries({ [name]: block }, sources)
         const [cli, config] = built[name] ?? []
         if (taken()) return false
         ws.registerCli(name, cli as CLI, config ?? null)
@@ -733,7 +724,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       const source = deps.registry.visible(req.params.id, req.account)
       if (source === null) return reply.status(404).send({ detail: 'workspace not found' })
       const body = req.body
-      if (body.id !== undefined && DOT_IDS.has(body.id)) return refuseDotId(reply, body.id)
+      if (body.id !== undefined && deps.host.reservedIds.has(body.id)) return refuseDotId(reply, body.id)
       if (
         body.id !== undefined &&
         (deps.registry.has(body.id) || deps.registry.removing(body.id))
@@ -748,7 +739,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
         let newWs
         try {
           newWs = await runWithNetwork(deps.registry.ruleFor(src.network), () =>
-            cloneWorkspaceWithOverride(src, body.override ?? null),
+            cloneWorkspaceWithOverride(src, body.override ?? null, deps.host),
           )
         } catch (e) {
           if (
@@ -803,7 +794,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
     }
     if (deps.snapshotStore === undefined) return noStore(reply)
     const { key } = parsed.data
-    const scoped = storeKey(req.account, key)
+    const scoped = storeKey(deps.host, req.account, key)
     if (scoped === null) {
       return reply.status(400).send({ detail: `invalid snapshot key: ${key}` })
     }
