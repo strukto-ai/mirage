@@ -23,7 +23,7 @@ import { PassThrough } from 'node:stream'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '@struktoai/mirage-node'
 
-import { buildApp } from '../app.ts'
+import { buildApp, type BuildAppOptions } from '../app.ts'
 import { WorkspaceRegistry } from '../registry.ts'
 import { DaemonToolOperations } from '../mcp/http.ts'
 import { MirageRpcServer } from '../rpc/server.ts'
@@ -295,8 +295,9 @@ describe('AuthMiddleware integration', () => {
       await rm(root, { recursive: true, force: true })
     })
 
-    const jwtApp = (): ReturnType<typeof buildApp> =>
+    const jwtApp = (options: BuildAppOptions = {}): ReturnType<typeof buildApp> =>
       buildApp({
+        ...options,
         authConfig: {
           mode: 'jwt',
           jwt: {
@@ -828,6 +829,32 @@ describe('AuthMiddleware integration', () => {
         })
         expect(r.statusCode, r.body).toBe(201)
       } finally {
+        await app.close()
+      }
+    })
+
+    it('drops what a failed create saved before freeing the id', async () => {
+      const app = jwtApp({ maxSessions: 4 })
+      vi.spyOn(WorkspaceRegistry.prototype, 'add').mockImplementationOnce(() => {
+        throw new Error('refused')
+      })
+      try {
+        let r = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          headers: await bearer({ sub: 'alice' }),
+          payload: { ...RAM, id: 'w' },
+        })
+        expect(r.statusCode).toBe(409)
+        r = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          headers: await bearer({ sub: 'bob' }),
+          payload: { ...RAM, id: 'w' },
+        })
+        expect(r.statusCode, r.body).toBe(201)
+      } finally {
+        vi.restoreAllMocks()
         await app.close()
       }
     })
