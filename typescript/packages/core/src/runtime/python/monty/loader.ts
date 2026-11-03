@@ -62,8 +62,20 @@ export interface MontyModuleLike extends MontyFsBits {
   MontyCrashedError: new (...args: never[]) => MontyCrashedLike
 }
 
+let provided: (() => Promise<MontyModuleLike>) | undefined
+
+/**
+ * Use the host's monty module in place of `@pydantic/monty`'s own: a runtime
+ * that cannot start a worker (a Cloudflare Worker) hands in one whose pool
+ * runs each program in the same isolate. Set it before the first run.
+ */
+export function provideMontyModule(load: () => Promise<MontyModuleLike>): void {
+  provided = load
+}
+
 /** Import the optional engine package, failing loud when it is absent. */
 export async function loadMontyModule(): Promise<MontyModuleLike> {
+  if (provided !== undefined) return provided()
   try {
     return (await import('@pydantic/monty')) as unknown as MontyModuleLike
   } catch (err) {

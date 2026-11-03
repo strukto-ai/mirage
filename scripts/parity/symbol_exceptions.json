@@ -1198,6 +1198,12 @@
     "RELATION_ISSUE_SCHEMA": "Zod parses external issue identities and infers their TypeScript type; Python validates the same fields in _relation_issue.",
     "RELATION_SCHEMA": "Zod parses external relation records and infers their TypeScript type; Python validates the same fields in _relation."
    }
+  },
+  "runtime/python/monty/loader": {
+   "typescript_only": {
+    "provideMontyModule": "A host with no worker threads (a Cloudflare Worker) hands TypeScript an in-process monty pool; Python imports pydantic_monty natively and starts its own workers.",
+    "provided": "The host's monty loader that provideMontyModule sets; Python has no such hook."
+   }
   }
  }
 }
