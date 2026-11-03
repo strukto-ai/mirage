@@ -160,9 +160,8 @@ function makeHttpTransport(
       }),
     )
   }
-  vi.stubGlobal('fetch', fakeFetch)
   const transport = new HttpNotionTransport({ apiKey: 'k-123', baseUrl: 'http://mock/v1' })
-  vi.unstubAllGlobals()
+  ;(transport as unknown as { fetch: typeof fetch }).fetch = fakeFetch
   return { transport, requests }
 }
 
