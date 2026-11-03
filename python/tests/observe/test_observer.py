@@ -502,8 +502,11 @@ def test_bash_history_lists_lines_in_the_order_they_ended():
 @pytest.mark.parametrize(
     "status,changed", [("failed", False), ("partial", True)]
 )
+@pytest.mark.parametrize(
+    "number,name", [(13, "EACCES"), (28, "ENOSPC"), (36, "ENAMETOOLONG")]
+)
 def test_failed_and_partial_child_spans_export_the_outcome(
-    monkeypatch, status, changed
+    monkeypatch, status, changed, number, name
 ):
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
@@ -519,7 +522,7 @@ def test_failed_and_partial_child_spans_export_the_outcome(
         1000,
         5,
         status=OpStatus(status),
-        errno=13,
+        errno=number,
         changed=changed,
         served=OpServed.BACKEND,
     )
@@ -535,9 +538,9 @@ def test_failed_and_partial_child_spans_export_the_outcome(
         "mirage.vfs.source": "disk",
         "mirage.vfs.bytes": 0,
         "mirage.vfs.status": status,
-        "mirage.vfs.errno": 13,
+        "mirage.vfs.errno": number,
         "mirage.vfs.changed": changed,
         "mirage.vfs.served": "backend",
-        "error.type": "EACCES",
+        "error.type": name,
     }
     provider.shutdown()

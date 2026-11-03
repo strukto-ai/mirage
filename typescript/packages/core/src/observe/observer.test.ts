@@ -437,7 +437,7 @@ describe('a damaged history file', () => {
           status,
           changed: status === 'partial',
           served: 'cache',
-          errno: status === 'ok' ? null : 13,
+          errno: status === 'ok' ? null : 28,
         })
         await observer.logCommand('cat /d/a', 's1', undefined, 'L')
         clock.advance(1)
@@ -461,7 +461,7 @@ describe('a damaged history file', () => {
           'mirage.vfs.status': status,
           'mirage.vfs.changed': status === 'partial',
           'mirage.vfs.served': 'cache',
-          ...(status === 'ok' ? {} : { 'mirage.vfs.errno': 13, 'error.type': 'EACCES' }),
+          ...(status === 'ok' ? {} : { 'mirage.vfs.errno': 28, 'error.type': 'ENOSPC' }),
         })
         expect(child?.status.code).toBe(
           status === 'ok' ? SpanStatusCode.UNSET : SpanStatusCode.ERROR,
