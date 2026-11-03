@@ -41,7 +41,8 @@ const FINDS: readonly string[] = ['grep', 'rg']
 
 /**
  * The mounts the documents describe, each with its prefix and the mode in
- * force there: every one the session sees but mirage's own.
+ * force there: every one the session sees but mirage's commands, history
+ * and documents.
  */
 function* listed(
   registry: MountRegistry,
@@ -52,8 +53,8 @@ function* listed(
   )) {
     const prefix = mount.prefix.replace(/\/$/, '') || '/'
     if (
-      ['/dev', '/usr/bin', '/.bash_history'].includes(prefix) ||
-      ['dev', 'history', 'bin', 'document'].includes(mount.vfs.name) ||
+      ['/usr/bin', '/.bash_history'].includes(prefix) ||
+      ['history', 'bin', 'document'].includes(mount.vfs.name) ||
       !pathVisible(session.visibility, prefix)
     )
       continue

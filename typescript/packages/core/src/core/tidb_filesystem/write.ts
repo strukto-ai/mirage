@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { TiDBFilesystemAccessor } from '../../accessor/tidb_filesystem.ts'
-import { ByteSpool } from '../../io/spool.ts'
+import { ByteSpool, sizeOf } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
@@ -48,6 +48,6 @@ export async function write(
   const kinds = await kindsOf(accessor, [...ancestors(key), key])
   checkWriteTarget(kinds, path, key)
   await upload(accessor, backendPath(accessor.config, path), data)
-  const size = data instanceof ByteSpool ? data.size : data.byteLength
+  const size = sizeOf(data)
   record('write', path.virtual, VFSName.TIDB_FILESYSTEM, size, timer)
 }

@@ -188,9 +188,71 @@ describe('dropboxUpload', () => {
   })
 })
 
-it.each([false, true])(
-  'upload sessions chunk and preserve conditional commit (failure %s)',
-  async (fail) => {
+const MIB = 1024 * 1024
+
+// Dropbox's files/upload takes up to 150 MB (its API docs, not probed); past
+// 8 MiB an upload takes a session whatever holds the bytes.
+it.each([false, true].flatMap((spooled) => [8 * MIB, 8 * MIB + 1].map((size) => [spooled, size])))(
+  'a dropbox upload takes a session only past 8 MiB (spooled %s, %i bytes)',
+  async (spooled, size) => {
+    const urls: string[] = []
+    const bodies: unknown[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init: RequestInit) => {
+        await Promise.resolve()
+        urls.push(url)
+        bodies.push(init.body)
+        if (url.endsWith('/start')) return Response.json({ session_id: 's' })
+        if (url.endsWith('/append_v2')) return Response.json(null)
+        return Response.json({ name: 'file' })
+      }),
+    )
+    const payload = new Uint8Array(size as number).fill(120)
+    const spool = new ByteSpool()
+    try {
+      await spool.append(payload)
+      expect(await dropboxUpload(tokenManager(), '/file', spooled ? spool : payload)).toEqual({
+        name: 'file',
+      })
+      const base = 'https://content.dropboxapi.com/2/files'
+      if ((size as number) <= 8 * MIB) {
+        expect(urls).toEqual([`${base}/upload`])
+        expect(Buffer.compare(bodies[0] as Uint8Array, payload)).toBe(0)
+      } else
+        expect(urls).toEqual([
+          `${base}/upload_session/start`,
+          `${base}/upload_session/append_v2`,
+          `${base}/upload_session/append_v2`,
+          `${base}/upload_session/finish`,
+        ])
+    } finally {
+      await spool.close()
+    }
+  },
+)
+
+it('a session upload hands a non-JSON finish back, as files/upload does', async () => {
+  // The file has landed; an unreadable reply must not raise.
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      await Promise.resolve()
+      if (url.endsWith('/start')) return Response.json({ session_id: 's' })
+      if (url.endsWith('/append_v2')) return Response.json(null)
+      return new Response('not json', { status: 200, headers: { 'Content-Type': 'text/plain' } })
+    }),
+  )
+  expect(await dropboxUpload(tokenManager(), '/file', new Uint8Array(8 * MIB + 1))).toBe('not json')
+})
+
+it.each([
+  [false, true],
+  [false, false],
+  [true, true],
+])(
+  'upload sessions chunk and preserve conditional commit (failure %s, spooled %s)',
+  async (fail, spooled) => {
     const requests: { url: string; init: RequestInit }[] = []
     vi.stubGlobal(
       'fetch',
@@ -205,23 +267,39 @@ it.each([false, true])(
         return Response.json(null)
       }),
     )
+    // A distinct tail, so a window read from the wrong offset differs.
+    const payload = new Uint8Array(8 * MIB + 7).fill(120)
+    payload.set(new TextEncoder().encode('abcdefg'), 8 * MIB)
     const spool = new ByteSpool()
     try {
-      await spool.append(new Uint8Array(8 * 1024 * 1024 + 7).fill(120))
-      const uploading = dropboxUpload(tokenManager(), '/file', spool, 'rev1')
+      await spool.append(payload)
+      const read = vi.spyOn(spool, 'read')
+      const uploading = dropboxUpload(tokenManager(), '/file', spooled ? spool : payload, 'rev1')
       if (fail) await expect(uploading).rejects.toBeInstanceOf(DropboxApiError)
       else expect(await uploading).toEqual({ name: 'file' })
       const appends = requests.filter((r) => r.url.endsWith('/append_v2'))
-      expect(appends.slice(0, 2).map((r) => (r.init.body as Uint8Array).length)).toEqual([
-        8 * 1024 * 1024,
-        7,
-      ])
+      const bodies = appends.map((r) => r.init.body as Uint8Array)
+      expect(bodies.map((b) => b.length)).toEqual([8 * MIB, 7])
+      expect(Buffer.compare(bodies[0] ?? new Uint8Array(), payload.subarray(0, 8 * MIB))).toBe(0)
+      expect(Buffer.compare(bodies[1] ?? new Uint8Array(), payload.subarray(8 * MIB))).toBe(0)
+      expect(
+        appends.map(
+          (r) =>
+            (
+              JSON.parse(new Headers(r.init.headers).get('Dropbox-API-Arg') ?? '{}') as {
+                cursor: { offset: number }
+              }
+            ).cursor.offset,
+        ),
+      ).toEqual([0, 8 * MIB])
       const finish = requests.find((r) => r.url.endsWith('/finish'))
       const arg = JSON.parse(new Headers(finish?.init.headers).get('Dropbox-API-Arg') ?? '{}') as {
         cursor: { offset: number }
         commit: { mode: unknown }
       }
-      expect(arg.cursor.offset).toBe(spool.size)
+      expect(arg.cursor.offset).toBe(payload.length)
+      // One window per read: the spool is never loaded whole.
+      expect(read.mock.calls.every(([, size]) => size <= 8 * MIB)).toBe(true)
       expect(arg.commit.mode).toEqual({ '.tag': 'update', update: 'rev1' })
       expect(appends).toHaveLength(2)
     } finally {

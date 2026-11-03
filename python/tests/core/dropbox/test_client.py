@@ -226,15 +226,87 @@ async def test_an_upload_with_a_non_json_body_hands_it_back_unchecked():
     assert await _upload(b"not json", "text/plain") == "not json"
 
 
+MIB = 1024 * 1024
+
+
+# Dropbox's files/upload takes up to 150 MB (its API docs, not probed);
+# past 8 MiB an upload takes a session whatever holds the bytes.
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fail", [False, True])
-async def test_upload_session_chunks_and_conditional_commit(fail):
+@pytest.mark.parametrize("spooled", [False, True], ids=["bytes", "spool"])
+@pytest.mark.parametrize("size", [8 * MIB, 8 * MIB + 1])
+async def test_a_dropbox_upload_takes_a_session_only_past_8_mib(spooled, size):
     tm = DropboxTokenManager(make_config())
     tm.seed("tok", float("inf"))
     base = f"{tm.content_base}/files/upload_session"
+    payload = b"x" * size
     async with ByteSpool() as spool:
-        await spool.append(b"x" * (8 * 1024 * 1024 + 7))
+        await spool.append(payload)
         with aioresponses() as m:
+            m.post(UPLOAD_URL, payload={"name": "file"})
+            m.post(f"{base}/start", payload={"session_id": "s"})
+            m.post(f"{base}/append_v2", payload=None, repeat=True)
+            m.post(f"{base}/finish", payload={"name": "file"})
+            got = await dropbox_upload(
+                tm, "/file", spool if spooled else payload
+            )
+            assert got == {"name": "file"}
+            assert {
+                str(url): len(calls) for (_, url), calls in m.requests.items()
+            } == (
+                {UPLOAD_URL: 1}
+                if size <= 8 * MIB
+                else {
+                    f"{base}/start": 1,
+                    f"{base}/append_v2": 2,
+                    f"{base}/finish": 1,
+                }
+            )
+            if size <= 8 * MIB:
+                assert (
+                    m.requests[("POST", URL(UPLOAD_URL))][0].kwargs["data"]
+                    == payload
+                )
+    await tm.close()
+
+
+@pytest.mark.asyncio
+async def test_a_session_upload_with_a_non_json_finish_hands_it_back():
+    # As with files/upload, the file has landed; the reply must not raise.
+    tm = DropboxTokenManager(make_config())
+    tm.seed("tok", float("inf"))
+    base = f"{tm.content_base}/files/upload_session"
+    with aioresponses() as m:
+        m.post(f"{base}/start", payload={"session_id": "s"})
+        m.post(f"{base}/append_v2", payload=None, repeat=True)
+        m.post(
+            f"{base}/finish",
+            body=b"not json",
+            headers={"Content-Type": "text/plain"},
+        )
+        got = await dropbox_upload(tm, "/file", b"x" * (8 * MIB + 1))
+    assert got == "not json"
+    await tm.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fail", "spooled"),
+    [(False, True), (False, False), (True, True)],
+    ids=["spool", "bytes", "conflict"],
+)
+async def test_upload_session_chunks_and_conditional_commit(fail, spooled):
+    tm = DropboxTokenManager(make_config())
+    tm.seed("tok", float("inf"))
+    base = f"{tm.content_base}/files/upload_session"
+    # A distinct tail, so a window read from the wrong offset differs.
+    payload = b"x" * (8 * MIB) + b"abcdefg"
+    async with ByteSpool() as spool:
+        await spool.append(payload)
+        data = spool if spooled else payload
+        with (
+            aioresponses() as m,
+            patch.object(spool, "read", wraps=spool.read) as read,
+        ):
             m.post(base + "/start", payload={"session_id": "session"})
             m.post(base + "/append_v2", payload=None, repeat=True)
             m.post(
@@ -246,19 +318,26 @@ async def test_upload_session_chunks_and_conditional_commit(fail):
             )
             if fail:
                 with pytest.raises(DropboxApiError):
-                    await dropbox_upload(tm, "/file", spool, "rev1")
+                    await dropbox_upload(tm, "/file", data, "rev1")
             else:
-                assert await dropbox_upload(tm, "/file", spool, "rev1") == {
+                assert await dropbox_upload(tm, "/file", data, "rev1") == {
                     "name": "file"
                 }
             appends = m.requests[("POST", URL(base + "/append_v2"))]
-            assert [len(c.kwargs["data"]) for c in appends[:2]] == [
-                8 * 1024 * 1024,
-                7,
-            ]
+            bodies = [c.kwargs["data"] for c in appends]
+            assert b"".join(bodies) == payload
+            assert [len(body) for body in bodies] == [8 * MIB, 7]
+            assert [
+                json.loads(c.kwargs["headers"]["Dropbox-API-Arg"])["cursor"][
+                    "offset"
+                ]
+                for c in appends
+            ] == [0, 8 * MIB]
             finish = m.requests[("POST", URL(base + "/finish"))][0].kwargs
             arg = json.loads(finish["headers"]["Dropbox-API-Arg"])
-            assert arg["cursor"]["offset"] == spool.size
+            assert arg["cursor"]["offset"] == len(payload)
+            # One window per read: the spool is never loaded whole.
+            assert all(c.args[1] <= 8 * MIB for c in read.await_args_list)
             assert arg["commit"]["mode"] == {
                 ".tag": "update",
                 "update": "rev1",

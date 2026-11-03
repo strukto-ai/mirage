@@ -46,9 +46,10 @@ from mirage.core.google.constants import (
     SLIDES_API_BASE,
     TOKEN_BUFFER_SECONDS,
     TOKEN_URL,
+    UPLOAD_CHUNK,
     WRITE_RETRY_STATUSES,
 )
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, size_of, slice_of
 from mirage.types import JsonValue
 from mirage.utils.clock import Clock
 from mirage.utils.ranges import ByteWindow
@@ -452,17 +453,18 @@ async def google_resumable(
     method: str,
     url: str,
     metadata: dict[str, Any],
-    spool: ByteSpool,
+    data: bytes | ByteSpool,
     mime_type: str,
     params: dict[str, str],
 ) -> dict[str, Any]:
+    total = size_of(data)
     location = await google_request(
         tm,
         method,
         url,
         headers={
             "X-Upload-Content-Type": mime_type,
-            "X-Upload-Content-Length": str(spool.size),
+            "X-Upload-Content-Length": str(total),
         },
         params={**params, "uploadType": "resumable"},
         json_body=metadata,
@@ -472,8 +474,8 @@ async def google_resumable(
     if not location:
         raise RuntimeError("Drive upload session returned no Location")
     offset = 0
-    while offset < spool.size:
-        data = await spool.read(offset, 8 * 1024 * 1024)
+    while offset < total:
+        chunk = await slice_of(data, offset, UPLOAD_CHUNK)
         response = await google_request(
             tm,
             "PUT",
@@ -481,10 +483,10 @@ async def google_resumable(
             headers={
                 "Content-Type": mime_type,
                 "Content-Range": (
-                    f"bytes {offset}-{offset + len(data) - 1}/{spool.size}"
+                    f"bytes {offset}-{offset + len(chunk) - 1}/{total}"
                 ),
             },
-            data=data,
+            data=chunk,
             read="response",
         )
         if response.status in (200, 201):
@@ -497,7 +499,7 @@ async def google_resumable(
         next_offset = (
             int(acknowledged.rsplit("-", 1)[-1]) + 1 if acknowledged else 0
         )
-        if not offset < next_offset <= offset + len(data):
+        if not offset < next_offset <= offset + len(chunk):
             raise RuntimeError("Drive upload session made no progress")
         offset = next_offset
     raise RuntimeError("Drive upload session did not commit")

@@ -45,7 +45,7 @@ from mirage.core.msgraph.client import (
 from mirage.core.msgraph.constants import BATCH_LIMIT
 from mirage.core.msgraph.paths import check_item
 from mirage.errors.fs import eexist, enoent, enotdir, enotsup, listing_error
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, size_of, slice_of
 from mirage.io.types import ByteSource
 from mirage.observe.context import (
     active_recorder,
@@ -379,15 +379,11 @@ async def upload_session_write(
         {"item": {"@microsoft.graph.conflictBehavior": "replace"}},
     )
     upload_url = created["uploadUrl"]
-    total = data.size if isinstance(data, ByteSpool) else len(data)
+    total = size_of(data)
     start = 0
     try:
         while start < total:
-            chunk = (
-                await data.read(start, UPLOAD_CHUNK)
-                if isinstance(data, ByteSpool)
-                else data[start : start + UPLOAD_CHUNK]
-            )
+            chunk = await slice_of(data, start, UPLOAD_CHUNK)
             result = await upload_chunk(
                 accessor, upload_url, chunk, start, total
             )

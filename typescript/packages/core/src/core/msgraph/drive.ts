@@ -14,7 +14,7 @@
 
 import { eexist, enoent, enotdir, enotsup, listingError } from '../../errors/fs.ts'
 import { chunks } from '../../io/cooperative.ts'
-import { ByteSpool } from '../../io/spool.ts'
+import { ByteSpool, sizeOf, sliceOf } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 import {
   record,
@@ -358,14 +358,11 @@ async function uploadSessionWrite(
   })
   const uploadUrl = asString(session.uploadUrl)
   if (uploadUrl === null) throw new GraphError(502, 'missingUploadUrl', sessionUrl)
-  const total = data instanceof ByteSpool ? data.size : data.length
+  const total = sizeOf(data)
   let start = 0
   try {
     while (start < total) {
-      const chunk =
-        data instanceof ByteSpool
-          ? await data.read(start, UPLOAD_CHUNK)
-          : data.slice(start, start + UPLOAD_CHUNK)
+      const chunk = await sliceOf(data, start, UPLOAD_CHUNK)
       const result = await uploadChunk(config, uploadUrl, chunk, start, total)
       const ranges = result.nextExpectedRanges
       const next =

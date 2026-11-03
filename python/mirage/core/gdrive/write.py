@@ -19,7 +19,7 @@ from mirage.core.gdrive.fingerprint import NATIVE_RESOURCE_TYPES
 from mirage.core.gdrive.readdir import live_row, stat_from_item
 from mirage.core.gdrive.resolve import eacces_on_denied, parent_folder
 from mirage.errors.fs import eacces, eisdir
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, size_of
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import FileStat, FileType, PathSpec
@@ -80,7 +80,7 @@ async def write(
         "write",
         virtual,
         "gdrive",
-        data.size if isinstance(data, ByteSpool) else len(data),
+        size_of(data),
         timer,
         fingerprint=token,
     )

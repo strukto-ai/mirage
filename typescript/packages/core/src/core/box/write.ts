@@ -15,7 +15,7 @@
 import { CONDITION_SUPPORT } from './constants.ts'
 import { requireSupported, writesConditioned } from '../../cache/context.ts'
 import { chunks } from '../../io/cooperative.ts'
-import { ByteSpool } from '../../io/spool.ts'
+import { ByteSpool, sizeOf } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { closeQuietly } from '../../io/stream.ts'
 import type { ReplaceRequest, WriteCondition } from '../../cache/types.ts'
@@ -156,7 +156,7 @@ async function uploadPrepared(
       : undefined
   const first = Array.isArray(entries) ? (entries[0] as BoxItem | undefined) : undefined
   const stored = uploadStat(first, statFromItem, path.virtual)
-  record('write', path.virtual, 'box', data instanceof ByteSpool ? data.size : data.length, timer, {
+  record('write', path.virtual, 'box', sizeOf(data), timer, {
     fingerprint: stored?.fingerprint ?? null,
   })
   return stored

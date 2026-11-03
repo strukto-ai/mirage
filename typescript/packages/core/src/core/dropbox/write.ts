@@ -15,7 +15,7 @@
 import { CONDITION_SUPPORT } from './constants.ts'
 import { requireSupported } from '../../cache/context.ts'
 import { chunks } from '../../io/cooperative.ts'
-import { ByteSpool } from '../../io/spool.ts'
+import { ByteSpool, sizeOf } from '../../io/spool.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { closeQuietly } from '../../io/stream.ts'
 import type { ReplaceRequest, WriteCondition } from '../../cache/types.ts'
@@ -30,10 +30,10 @@ import { dropboxUpload } from './client.ts'
 import { checkPath, dropboxPathOf } from './paths.ts'
 import { statFromEntry } from './readdir.ts'
 
-// Large spooled inputs use upload sessions, and a stream is spooled first, as
-// its size picks the upload; `signal` stops it. A held version costs one
-// get_metadata and goes out as the file's rev in `update` mode. Answers the
-// stored file's stat, null for a reply that names none.
+// A write past `SIMPLE_UPLOAD_MAX` uses an upload session, and a stream is
+// spooled first, as its size picks the upload; `signal` stops it. A held
+// version costs one get_metadata and goes out as the file's rev in `update`
+// mode. Answers the stored file's stat, null for a reply that names none.
 export async function write(
   accessor: DropboxAccessor,
   path: PathSpec,
@@ -99,15 +99,8 @@ async function uploadPrepared(
     throw (await refused(path, err, cond, rev)) ?? err
   }
   const stored = uploadStat(entry as DropboxEntry | null, statFromEntry, path.virtual)
-  record(
-    'write',
-    path.virtual,
-    'dropbox',
-    data instanceof ByteSpool ? data.size : data.byteLength,
-    timer,
-    {
-      fingerprint: stored?.fingerprint ?? null,
-    },
-  )
+  record('write', path.virtual, 'dropbox', sizeOf(data), timer, {
+    fingerprint: stored?.fingerprint ?? null,
+  })
   return stored
 }
