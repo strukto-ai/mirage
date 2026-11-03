@@ -8,7 +8,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
 import { GridFSVFS } from '../gridfs/gridfs.ts'
 import { HfModelsVFS } from '../hf_models/hf_models.ts'
-import { R2VFS } from '../r2/r2.ts'
+import { R2VFS } from '@struktoai/mirage-core/vfs/r2/r2'
 import { S3VFS } from './s3.ts'
 import { installS3Mock, S3MockStore, type S3Mock } from '../../../tests/vfs/s3/mock.ts'
 

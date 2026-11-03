@@ -15,6 +15,7 @@
 import { z } from 'zod'
 import { timeoutShape } from '../../core/api/config.ts'
 import * as kp from '../../utils/key_prefix.ts'
+import type { FieldNormalizer } from '../../utils/normalize.ts'
 import { secretSchema, secretStr } from '../secrets.ts'
 
 export type S3BrowserOperation = 'GET' | 'PUT' | 'HEAD' | 'DELETE' | 'LIST' | 'COPY'
@@ -125,3 +126,13 @@ export function normalizeKeyPrefix(v: string | undefined): string | undefined {
   const out = kp.normalize(v)
   return out === '' ? undefined : out
 }
+
+// The S3 family's python spellings, shared by `s3` and every S3-compatible
+// provider.
+export const S3_FAMILY_RENAME: Record<string, string> = {
+  aws_profile: 'profile',
+  endpoint_url: 'endpoint',
+  path_style: 'forcePathStyle',
+}
+
+export const S3_FAMILY_NORMALIZER: FieldNormalizer = { rename: S3_FAMILY_RENAME }

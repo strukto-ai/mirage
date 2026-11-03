@@ -20,7 +20,8 @@
    "runtime/python/pyodide/fs": "The Emscripten filesystem adapter for Pyodide. Python uses the shared WASI host or native filesystem integration instead.",
    "agents/pi": "Ecosystem split: pi is an npm-only coding agent.",
    "workspace/tools/read_file": "Constants (the MIME tables) of the TypeScript-only read_file tool; see modules.workspace/tools.typescript_only.read_file.",
-   "io/web": "The network gateway for hosts whose only way out is fetch (the browser and edge runtimes, which share it): it judges and counts each request at fetch and routes it by URL. Python's gateway (io/gateway, io/network) watches sockets in its one host, as node's io/gateway does."
+   "io/web": "The network gateway for hosts whose only way out is fetch (the browser and edge runtimes, which share it): it judges and counts each request at fetch and routes it by URL. Python's gateway (io/gateway, io/network) watches sockets in its one host, as node's io/gateway does.",
+   "vfs/direct": "The backends core wires for a host that holds their credential and reaches the service with fetch (node and edge), apart from core's own table because the browser builds the same backends through a proxy that holds the token. Python has one host, which always holds the credential, so each python vfs/x/x.py is already this class and there is no second wiring to mirror."
   }
  },
  "modules": {

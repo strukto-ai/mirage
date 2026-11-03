@@ -25,7 +25,7 @@ import {
 import { createHash } from 'node:crypto'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { installS3Mock, type S3Mock } from '../../tests/vfs/s3/mock.ts'
-import type { S3Config } from '../vfs/s3/config.ts'
+import type { S3Config } from '@struktoai/mirage-core/vfs/direct/s3'
 import { S3VFS } from '../vfs/s3/s3.ts'
 import { Workspace } from '../workspace.ts'
 

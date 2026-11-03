@@ -20,7 +20,7 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { Workspace } from '../../workspace.ts'
 import { S3VFS } from './s3.ts'
-import type { S3Config } from './config.ts'
+import type { S3Config } from '@struktoai/mirage-core/vfs/direct/s3'
 import { installS3Mock, type S3Mock } from '../../../tests/vfs/s3/mock.ts'
 
 const DATA_DIR = path.resolve(

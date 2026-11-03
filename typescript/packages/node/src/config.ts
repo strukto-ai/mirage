@@ -54,7 +54,7 @@ import { releaseNetwork, watchNetwork } from './io/network.ts'
 import { isModulePath, loadAttr, splitRef } from './utils/loader.ts'
 import { parseYaml } from './utils/yaml.ts'
 import { buildVfs } from './vfs/registry.ts'
-import { S3Config } from './vfs/s3/config.ts'
+import { S3Config } from '@struktoai/mirage-core/vfs/direct/s3'
 import { DiskWorkspaceStateStore } from './workspace/store/disk.ts'
 import { RedisWorkspaceStateStore } from './workspace/store/redis.ts'
 

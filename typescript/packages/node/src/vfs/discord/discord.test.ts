@@ -20,7 +20,7 @@ import { parseConfigWithSchema, redactConfigWithSchema } from '@struktoai/mirage
 import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildVfs } from '../registry.ts'
-import { DiscordVFS } from './discord.ts'
+import { DiscordVFS } from '@struktoai/mirage-core/vfs/direct/discord'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {

@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { createServer, type Server } from 'node:http'
+import type { AddressInfo } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { unstable_dev, type Unstable_DevWorker } from 'wrangler'
@@ -255,6 +257,138 @@ describe('the server API in workerd', () => {
     const fetched = await shell('netguard', 'curl -s -o /dev/null https://example.com')
     expect(fetched.exit_code).not.toBe(0)
   })
+
+  it('mounts a backend that holds its own token, reaching its service with fetch', async () => {
+    const seen: string[] = []
+    const server: Server = createServer((req, res) => {
+      seen.push(`${req.url ?? ''} ${req.headers.authorization ?? ''}`)
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          ok: true,
+          channels: [{ id: 'C1', name: 'general', created: 1700000000 }],
+          members: [],
+          response_metadata: { next_cursor: '' },
+        }),
+      )
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`
+    try {
+      const created = await call('POST', '/v1/workspaces', {
+        id: 'slack',
+        config: {
+          mounts: {
+            '/': { vfs: 'ram' },
+            '/slack': { vfs: 'slack', config: { token: 'xoxb-edge', base_url: base } },
+          },
+        },
+      })
+      expect(created.status).toBe(201)
+      const listed = await shell('slack', 'ls /slack/channels')
+      expect(listed.stdout).toContain('general__C1')
+      expect(
+        seen.some((s) => s.startsWith('/conversations.list') && s.endsWith('Bearer xoxb-edge')),
+      ).toBe(true)
+    } finally {
+      server.close()
+    }
+  })
+
+  it('mounts an S3-compatible bucket, signing each request with its own keys', async () => {
+    const seen: string[] = []
+    const listing = [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">',
+      '<Name>b</Name><Prefix></Prefix><KeyCount>1</KeyCount><MaxKeys>1000</MaxKeys>',
+      '<IsTruncated>false</IsTruncated>',
+      '<Contents><Key>hello.txt</Key><LastModified>2026-01-01T00:00:00.000Z</LastModified>',
+      '<ETag>&quot;abc&quot;</ETag><Size>5</Size><StorageClass>STANDARD</StorageClass></Contents>',
+      '</ListBucketResult>',
+    ].join('')
+    const server: Server = createServer((req, res) => {
+      seen.push(`${req.method ?? ''} ${req.url ?? ''} ${req.headers.authorization ?? ''}`)
+      if (req.url?.startsWith('/b/hello.txt') === true) {
+        res.writeHead(200, {
+          'content-type': 'text/plain',
+          'content-length': '5',
+          etag: '"abc"',
+          'last-modified': 'Thu, 01 Jan 2026 00:00:00 GMT',
+        })
+        res.end(req.method === 'HEAD' ? undefined : 'hello')
+        return
+      }
+      res.writeHead(200, { 'content-type': 'application/xml' })
+      res.end(listing)
+    })
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`
+    try {
+      const created = await call('POST', '/v1/workspaces', {
+        id: 'bucket',
+        config: {
+          mounts: {
+            '/': { vfs: 'ram' },
+            '/r2': {
+              vfs: 'r2',
+              config: {
+                bucket: 'b',
+                endpoint: base,
+                force_path_style: true,
+                access_key_id: 'AKEDGE',
+                secret_access_key: 'edge-secret',
+              },
+            },
+          },
+        },
+      })
+      expect(created.status).toBe(201)
+      const listed = await shell('bucket', 'ls /r2')
+      expect(listed.stdout).toContain('hello.txt')
+      expect((await shell('bucket', 'cat /r2/hello.txt')).stdout).toBe('hello')
+      expect(
+        seen.some(
+          (s) => s.startsWith('GET /b/?') && s.includes('AWS4-HMAC-SHA256 Credential=AKEDGE/'),
+        ),
+      ).toBe(true)
+      const proxied = await call('POST', '/v1/workspaces', {
+        id: 'proxied',
+        config: {
+          mounts: {
+            '/': { vfs: 'ram' },
+            '/s3': {
+              vfs: 's3',
+              config: { bucket: 'b', endpoint: base, proxy: 'http://proxy.test' },
+            },
+          },
+        },
+      })
+      expect(proxied.status).toBe(400)
+    } finally {
+      server.close()
+    }
+  })
+
+  // A live Postgres the worker reaches over a TCP socket, as pg does in workerd.
+  it.skipIf(process.env.MIRAGE_EDGE_POSTGRES_DSN === undefined)(
+    'mounts Postgres through pg over a socket',
+    async () => {
+      const created = await call('POST', '/v1/workspaces', {
+        id: 'pg',
+        config: {
+          mounts: {
+            '/': { vfs: 'ram' },
+            '/pg': { vfs: 'postgres', config: { dsn: process.env.MIRAGE_EDGE_POSTGRES_DSN } },
+          },
+        },
+      })
+      expect(created.status).toBe(201)
+      expect((await shell('pg', 'ls /pg/public/tables')).stdout).toContain('notes')
+      expect((await shell('pg', 'cat /pg/public/tables/notes/rows.jsonl')).stdout).toContain(
+        'hi from pg',
+      )
+    },
+  )
 
   it('closes a workspace', async () => {
     await call('POST', '/v1/workspaces', {

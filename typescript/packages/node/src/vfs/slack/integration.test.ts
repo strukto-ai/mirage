@@ -16,7 +16,7 @@ import { SLACK } from '@struktoai/mirage-core/commands/cli/builtin/slack/index'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../../workspace.ts'
-import { SlackVFS } from './slack.ts'
+import { SlackVFS } from '@struktoai/mirage-core/vfs/direct/slack'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {

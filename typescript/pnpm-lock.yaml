@@ -631,6 +631,9 @@ importers:
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
+      '@types/pg':
+        specifier: ^8.11.0
+        version: 8.20.0
       '@types/sha.js':
         specifier: ^2.4.4
         version: 2.4.4
@@ -643,6 +646,9 @@ importers:
       esbuild:
         specifier: ^0.28.2
         version: 0.28.2
+      pg:
+        specifier: ^8.13.0
+        version: 8.20.0
       pyodide:
         specifier: ^314.0.5
         version: 314.0.5
@@ -704,6 +710,9 @@ importers:
       '@struktoai/mirage-server':
         specifier: workspace:*
         version: link:../server
+      '@xmldom/xmldom':
+        specifier: ^0.9.12
+        version: 0.9.12
     devDependencies:
       '@pydantic/monty':
         specifier: 1.4.0
@@ -3950,6 +3959,10 @@ packages:
 
   '@workflow/serde@4.1.0-beta.2':
     resolution: {integrity: sha512-8kkeoQKLDaKXefjV5dbhBj2aErfKp1Mc4pb6tj8144cF+Em5SPbyMbyLCHp+BVrFfFVCBluCtMx+jjvaFVZGww==}
+
+  '@xmldom/xmldom@0.9.12':
+    resolution: {integrity: sha512-5AXjrcMClTryPe9LgZrygpB1lj7s0S9E0+W+AHaVKAVyHanafK86iPSvG5xHVSp/jC+VH1UXu0TAEmY279xH7A==}
+    engines: {node: '>=14.6'}
 
   '@zkochan/fuse-native@0.1.0':
     resolution: {integrity: sha512-Mexe5KhVA6Hy0aC9gSMoU1RuTyUkHkHSJd9/yM5KV/vOdHvjYN8tuadguG/yYCDGNBuvDvpsm1Yv9uZXj0C5EQ==}
@@ -10565,6 +10578,8 @@ snapshots:
 
   '@workflow/serde@4.1.0-beta.2': {}
 
+  '@xmldom/xmldom@0.9.12': {}
+
   '@zkochan/fuse-native@0.1.0(patch_hash=99469ae5d18239b8df5dca4b9b2a3a292198afc2e16f229263342359c3e68ee7)':
     dependencies:
       fuse-shared-library: '@zkochan/fuse-shared-library@0.0.0'
@@ -11622,6 +11637,10 @@ snapshots:
   fdir@6.5.0(picomatch@4.0.4):
     optionalDependencies:
       picomatch: 4.0.4
+
+  fdir@6.5.0(picomatch@4.0.7):
+    optionalDependencies:
+      picomatch: 4.0.7
 
   fetch-blob@3.2.0:
     dependencies:
@@ -14165,8 +14184,8 @@ snapshots:
   vite@7.3.7(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.8.3):
     dependencies:
       esbuild: 0.28.2
-      fdir: 6.5.0(picomatch@4.0.4)
-      picomatch: 4.0.4
+      fdir: 6.5.0(picomatch@4.0.7)
+      picomatch: 4.0.7
       postcss: 8.5.23
       rollup: 4.60.2
       tinyglobby: 0.2.17
@@ -14181,8 +14200,8 @@ snapshots:
   vite@7.3.7(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.1):
     dependencies:
       esbuild: 0.28.2
-      fdir: 6.5.0(picomatch@4.0.4)
-      picomatch: 4.0.4
+      fdir: 6.5.0(picomatch@4.0.7)
+      picomatch: 4.0.7
       postcss: 8.5.23
       rollup: 4.60.2
       tinyglobby: 0.2.17
@@ -14197,8 +14216,8 @@ snapshots:
   vite@7.3.7(@types/node@24.12.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.0):
     dependencies:
       esbuild: 0.28.2
-      fdir: 6.5.0(picomatch@4.0.4)
-      picomatch: 4.0.4
+      fdir: 6.5.0(picomatch@4.0.7)
+      picomatch: 4.0.7
       postcss: 8.5.23
       rollup: 4.60.2
       tinyglobby: 0.2.17
@@ -14213,8 +14232,8 @@ snapshots:
   vite@7.3.7(@types/node@24.12.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.1):
     dependencies:
       esbuild: 0.28.2
-      fdir: 6.5.0(picomatch@4.0.4)
-      picomatch: 4.0.4
+      fdir: 6.5.0(picomatch@4.0.7)
+      picomatch: 4.0.7
       postcss: 8.5.23
       rollup: 4.60.2
       tinyglobby: 0.2.17

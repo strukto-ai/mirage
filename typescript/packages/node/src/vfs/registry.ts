@@ -18,6 +18,7 @@ import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { type BaseVFS, VFS_BRAND } from '@struktoai/mirage-core/vfs/base'
 import {
   buildVfsFrom,
+  DIRECT_REGISTRY,
   REGISTRY as CORE_REGISTRY,
   type VFSFactory,
 } from '@struktoai/mirage-core/vfs/registry'
@@ -25,6 +26,7 @@ import { parseConfigWithSchema, refuseUnknownKeys } from '@struktoai/mirage-core
 import { loadAttr } from '../utils/loader.ts'
 import type { DiskVFSOptions } from './disk/disk.ts'
 import type { RedisVFSOptions } from './redis/redis.ts'
+import './s3/s3.ts'
 
 // The backends that take their options without a schema, and the option
 // names each takes. Python builds them from constructor keywords,
@@ -34,8 +36,9 @@ const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = ['url', 'keyPrefix', '
 
 /**
  * Node's VFS table: the backends core implements (`REGISTRY` in
- * `@struktoai/mirage-core/vfs/registry`) plus the ones this package
- * implements for Node. Mirrors Python's `mirage.vfs.registry.build_vfs`.
+ * `@struktoai/mirage-core/vfs/registry`), the ones core wires for a host
+ * that holds their credential (`DIRECT_REGISTRY`), and the ones this
+ * package implements for Node. Mirrors Python's `mirage.vfs.registry.build_vfs`.
  *
  * Each entry is an async factory that lazy-imports its module so that
  * importing this file doesn't pull in every backend's dependencies.
@@ -48,6 +51,7 @@ const REDIS_OPTIONS: readonly (keyof RedisVFSOptions)[] = ['url', 'keyPrefix', '
  */
 const REGISTRY: Record<string, VFSFactory> = {
   ...CORE_REGISTRY,
+  ...DIRECT_REGISTRY,
   disk: async (config) => {
     refuseUnknownKeys(config, DISK_OPTIONS)
     const { DiskVFS } = await import('./disk/disk.ts')
@@ -60,30 +64,10 @@ const REGISTRY: Record<string, VFSFactory> = {
     const norm = normalizeFields(config)
     return new RedisVFS(norm)
   },
-  s3: async (config) => {
-    const { S3VFS } = await import('./s3/s3.ts')
-    const { S3Config } = await import('./s3/config.ts')
-    return new S3VFS(parseConfigWithSchema(S3Config, config))
-  },
   gridfs: async (config) => {
     const { GridFSVFS } = await import('./gridfs/gridfs.ts')
     const { normalizeGridFSConfig } = await import('./gridfs/config.ts')
     return new GridFSVFS(normalizeGridFSConfig(config))
-  },
-  gcs: async (config) => {
-    const { GCSVFS } = await import('./gcs/gcs.ts')
-    const { GCSConfig } = await import('./gcs/config.ts')
-    return new GCSVFS(parseConfigWithSchema(GCSConfig, config))
-  },
-  oci: async (config) => {
-    const { OCIVFS } = await import('./oci/oci.ts')
-    const { OCIConfig } = await import('./oci/config.ts')
-    return new OCIVFS(parseConfigWithSchema(OCIConfig, config))
-  },
-  r2: async (config) => {
-    const { R2VFS } = await import('./r2/r2.ts')
-    const { R2Config } = await import('./r2/config.ts')
-    return new R2VFS(parseConfigWithSchema(R2Config, config))
   },
   hf_buckets: async (config) => {
     const { HfBucketsVFS } = await import('./hf_buckets/hf_buckets.ts')
@@ -105,78 +89,6 @@ const REGISTRY: Record<string, VFSFactory> = {
     const { normalizeHfRepoConfig } = await import('./hf_buckets/config.ts')
     return new HfSpacesVFS(normalizeHfRepoConfig(config))
   },
-  supabase: async (config) => {
-    const { SupabaseVFS } = await import('./supabase/supabase.ts')
-    const { SupabaseConfig } = await import('./supabase/config.ts')
-    return new SupabaseVFS(parseConfigWithSchema(SupabaseConfig, config))
-  },
-  databricks_volume: async (config) => {
-    const { DatabricksVolumeVFS } = await import('./databricks_volume/databricks_volume.ts')
-    const { DatabricksVolumeConfig } =
-      await import('@struktoai/mirage-core/vfs/databricks_volume/config')
-    return DatabricksVolumeVFS.create(parseConfigWithSchema(DatabricksVolumeConfig, config))
-  },
-  tidb_filesystem: async (config) => {
-    const { TiDBFilesystemVFS } = await import('./tidb_filesystem/tidb_filesystem.ts')
-    const { TiDBFilesystemConfig } =
-      await import('@struktoai/mirage-core/vfs/tidb_filesystem/config')
-    return TiDBFilesystemVFS.create(parseConfigWithSchema(TiDBFilesystemConfig, config))
-  },
-  minio: async (config) => {
-    const { MinIOVFS } = await import('./minio/minio.ts')
-    const { MinIOConfig } = await import('./minio/config.ts')
-    return new MinIOVFS(parseConfigWithSchema(MinIOConfig, config))
-  },
-  ceph: async (config) => {
-    const { CephVFS } = await import('./ceph/ceph.ts')
-    const { CephConfig } = await import('./ceph/config.ts')
-    return new CephVFS(parseConfigWithSchema(CephConfig, config))
-  },
-  seaweedfs: async (config) => {
-    const { SeaweedFSVFS } = await import('./seaweedfs/seaweedfs.ts')
-    const { SeaweedFSConfig } = await import('./seaweedfs/config.ts')
-    return new SeaweedFSVFS(parseConfigWithSchema(SeaweedFSConfig, config))
-  },
-  wasabi: async (config) => {
-    const { WasabiVFS } = await import('./wasabi/wasabi.ts')
-    const { WasabiConfig } = await import('./wasabi/config.ts')
-    return new WasabiVFS(parseConfigWithSchema(WasabiConfig, config))
-  },
-  backblaze: async (config) => {
-    const { BackblazeVFS } = await import('./backblaze/backblaze.ts')
-    const { BackblazeConfig } = await import('./backblaze/config.ts')
-    return new BackblazeVFS(parseConfigWithSchema(BackblazeConfig, config))
-  },
-  digitalocean: async (config) => {
-    const { DigitalOceanVFS } = await import('./digitalocean/digitalocean.ts')
-    const { DigitalOceanConfig } = await import('./digitalocean/config.ts')
-    return new DigitalOceanVFS(parseConfigWithSchema(DigitalOceanConfig, config))
-  },
-  tencent: async (config) => {
-    const { TencentVFS } = await import('./tencent/tencent.ts')
-    const { TencentConfig } = await import('./tencent/config.ts')
-    return new TencentVFS(parseConfigWithSchema(TencentConfig, config))
-  },
-  aliyun: async (config) => {
-    const { AliyunVFS } = await import('./aliyun/aliyun.ts')
-    const { AliyunConfig } = await import('./aliyun/config.ts')
-    return new AliyunVFS(parseConfigWithSchema(AliyunConfig, config))
-  },
-  scaleway: async (config) => {
-    const { ScalewayVFS } = await import('./scaleway/scaleway.ts')
-    const { ScalewayConfig } = await import('./scaleway/config.ts')
-    return new ScalewayVFS(parseConfigWithSchema(ScalewayConfig, config))
-  },
-  qingstor: async (config) => {
-    const { QingStorVFS } = await import('./qingstor/qingstor.ts')
-    const { QingStorConfig } = await import('./qingstor/config.ts')
-    return new QingStorVFS(parseConfigWithSchema(QingStorConfig, config))
-  },
-  postgres: async (config) => {
-    const { PostgresVFS } = await import('./postgres/postgres.ts')
-    const { PostgresConfig } = await import('@struktoai/mirage-core/vfs/postgres/config')
-    return new PostgresVFS(parseConfigWithSchema(PostgresConfig, config))
-  },
   mongodb: async (config) => {
     const { MongoDBVFS } = await import('./mongodb/mongodb.ts')
     const { MongoDBConfig } = await import('@struktoai/mirage-core/vfs/mongodb/config')
@@ -187,11 +99,6 @@ const REGISTRY: Record<string, VFSFactory> = {
     const { LanceDBConfig } = await import('@struktoai/mirage-core/vfs/lancedb/config')
     return new LanceDBVFS(parseConfigWithSchema(LanceDBConfig, config))
   },
-  slack: async (config) => {
-    const { SlackVFS } = await import('./slack/slack.ts')
-    const { SlackConfig } = await import('@struktoai/mirage-core/vfs/slack/config')
-    return new SlackVFS(parseConfigWithSchema(SlackConfig, config))
-  },
   ssh: async (config) => {
     const { SSHVFS } = await import('./ssh/ssh.ts')
     const { SSHConfig } = await import('./ssh/config.ts')
@@ -201,26 +108,6 @@ const REGISTRY: Record<string, VFSFactory> = {
     const { NextcloudVFS } = await import('./nextcloud/nextcloud.ts')
     const { NextcloudConfig } = await import('./nextcloud/config.ts')
     return new NextcloudVFS(parseConfigWithSchema(NextcloudConfig, config))
-  },
-  discord: async (config) => {
-    const { DiscordVFS } = await import('./discord/discord.ts')
-    const { DiscordConfig } = await import('@struktoai/mirage-core/vfs/discord/config')
-    return new DiscordVFS(parseConfigWithSchema(DiscordConfig, config))
-  },
-  notion: async (config) => {
-    const { NotionVFS } = await import('./notion/notion.ts')
-    const { NotionConfig } = await import('@struktoai/mirage-core/core/notion/config')
-    return new NotionVFS(parseConfigWithSchema(NotionConfig, config))
-  },
-  jaeger: async (config) => {
-    const { JaegerVFS } = await import('./jaeger/jaeger.ts')
-    const { JaegerConfig } = await import('@struktoai/mirage-core/vfs/jaeger/config')
-    return new JaegerVFS(parseConfigWithSchema(JaegerConfig, config))
-  },
-  dropbox: async (config) => {
-    const { DropboxVFS } = await import('@struktoai/mirage-core/vfs/dropbox/dropbox')
-    const { DropboxConfig } = await import('./dropbox/config.ts')
-    return new DropboxVFS(parseConfigWithSchema(DropboxConfig, config))
   },
   email: async (config) => {
     const { EmailVFS } = await import('./email/email.ts')

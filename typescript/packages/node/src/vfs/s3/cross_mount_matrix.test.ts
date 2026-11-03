@@ -24,7 +24,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { Workspace } from '../../workspace.ts'
 import { DiskVFS } from '../disk/disk.ts'
 import { S3VFS } from './s3.ts'
-import type { S3Config } from './config.ts'
+import type { S3Config } from '@struktoai/mirage-core/vfs/direct/s3'
 import { installS3Mock, type S3Mock } from '../../../tests/vfs/s3/mock.ts'
 
 type BackendKind = 'ram' | 'disk' | 's3'

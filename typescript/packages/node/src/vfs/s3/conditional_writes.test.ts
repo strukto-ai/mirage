@@ -23,7 +23,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
 import { openMode } from '@struktoai/mirage-core/runtime/handles/index'
-import { MinIOVFS } from '../minio/minio.ts'
+import { MinIOVFS } from '@struktoai/mirage-core/vfs/minio/minio'
 import {
   inFlightConflict,
   installS3Mock,

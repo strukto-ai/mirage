@@ -14,7 +14,7 @@
 
 import { resolvePostgresConfig } from '@struktoai/mirage-core/vfs/postgres/config'
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
-import { PostgresStore } from './store.ts'
+import { PostgresStore } from '@struktoai/mirage-core/vfs/postgres/store'
 
 // vitest 4 types a bare `vi.fn()` as neither callable nor constructable.
 type AnyMock = Mock<(...args: never[]) => unknown>

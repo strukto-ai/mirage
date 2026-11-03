@@ -19,8 +19,8 @@ import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../../workspace.ts'
 import { buildVfs } from '../registry.ts'
-import { DatabricksVolumeConfig } from './config.ts'
-import { DatabricksVolumeVFS } from './databricks_volume.ts'
+import { DatabricksVolumeConfig } from '@struktoai/mirage-core/vfs/databricks_volume/config'
+import { DatabricksVolumeVFS } from '@struktoai/mirage-core/vfs/direct/databricks_volume'
 
 const BASE_CONFIG = {
   catalog: 'main',

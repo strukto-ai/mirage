@@ -89,7 +89,9 @@
     "@types/node": "^22.0.0",
     "@types/sha.js": "^2.4.4",
     "vitest": "^4.1.12",
-    "e2b": "^2.62.0"
+    "e2b": "^2.62.0",
+    "pg": "^8.13.0",
+    "@types/pg": "^8.11.0"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1116.0",
@@ -110,7 +112,8 @@
     "chromadb": "^3.4.3",
     "pyodide": "^0.29.0 || ^314.0.0",
     "redis": "^5.0.0",
-    "e2b": "^2.62.0"
+    "e2b": "^2.62.0",
+    "pg": "^8.13.0"
   },
   "peerDependenciesMeta": {
     "@qdrant/js-client-rest": {
@@ -129,6 +132,9 @@
       "optional": true
     },
     "e2b": {
+      "optional": true
+    },
+    "pg": {
       "optional": true
     }
   }

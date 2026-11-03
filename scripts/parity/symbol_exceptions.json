@@ -1142,7 +1142,8 @@
   "vfs/registry": {
    "typescript_only": {
     "RAM_OPTIONS": "The TypeScript registry refuses unknown config keys against a per-backend key list, as DISK_OPTIONS does; Python's build_vfs reads the constructor's keywords.",
-    "buildVfsFrom": "TypeScript splits its backends across core, node and browser, so each runtime's buildVfs is this one build over its own table; Python keeps every backend in one REGISTRY and needs no table parameter."
+    "buildVfsFrom": "TypeScript splits its backends across core, node and browser, so each runtime's buildVfs is this one build over its own table; Python keeps every backend in one REGISTRY and needs no table parameter.",
+    "DIRECT_REGISTRY": "The token-holding backends (vfs/direct) node and edge add to core's table and the browser does not, since it reaches the same services through a proxy; Python has one host and one REGISTRY."
    }
   },
   "io/gateway": {

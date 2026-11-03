@@ -27,7 +27,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
 import { buildVfs, knownVfsNames, registerVfs } from './registry.ts'
-import { S3Config } from './s3/config.ts'
+import { S3Config } from '@struktoai/mirage-core/vfs/direct/s3'
 
 // Captured before any test calls register(), which is the public hook for
 // custom VFS and legitimately adds names with no VFSName.

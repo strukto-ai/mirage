@@ -43,7 +43,7 @@ import { ManualClock } from '@struktoai/mirage-core/utils/clock'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { Reconciler } from '@struktoai/mirage-core/workspace/reconcile'
 import { Workspace } from '../../workspace.ts'
-import type { S3Config } from './config.ts'
+import type { S3Config } from '@struktoai/mirage-core/vfs/direct/s3'
 import { installS3Mock, type S3Mock } from '../../../tests/vfs/s3/mock.ts'
 import { S3VFS } from './s3.ts'
 

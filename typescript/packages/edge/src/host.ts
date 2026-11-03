@@ -23,7 +23,6 @@ import { watch } from '@struktoai/mirage-core/io/web/gateway'
 import { refuseUnseenAddresses, watchNetwork } from '@struktoai/mirage-core/io/web/network'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
-import { buildVfs, knownVfsNames } from '@struktoai/mirage-core/vfs/registry'
 import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import {
   generationOf,
@@ -36,9 +35,11 @@ import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/r
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ServerHost } from '@struktoai/mirage-server/routes'
 import './monty.ts'
+import './xml.ts'
+import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 
 export class Workspace extends CoreWorkspace {
-  /** A saved mount rebuilds through core's VFS registry. */
+  /** A saved mount rebuilds through the edge's VFS registry. */
   protected static override async buildSavedVfs(entry: MountSnapshot): Promise<BaseVFS | null> {
     const build = savedVfsBuild(entry, (name) => knownVfsNames().includes(name))
     return build === null ? null : buildVfs(build.name, build.config)
@@ -77,7 +78,7 @@ const CONFIG: ConfigHost = {
 }
 
 /**
- * The server's host on an edge runtime: core's VFS registry and config
+ * The server's host on an edge runtime: the edge's VFS registry, core's config
  * loader, no disk, no kernel mounts, no module loading by reference. Its
  * workspaces keep their state in one store held in memory, so a closed
  * workspace reopens with it while the isolate lives.
