@@ -57,9 +57,9 @@ def top_path(operand: str) -> str | None:
     other operand.
 
     git's short magic ``:/`` reads the rest from the work tree root; a
-    ``:`` ends the magic and keeps what follows as typed, so a path
-    still starting with ``/`` names nothing. ``:/!`` and ``:/^`` add
-    exclusion, which this build lacks. Pinned against git 2.51.2.
+    ``:`` ends the magic and keeps what follows as typed. ``:/!`` and
+    ``:/^`` add exclusion, which this build lacks. Pinned against git
+    2.51.2.
 
     Args:
         operand (str): the operand as the user spelled it.
@@ -82,7 +82,9 @@ def repo_relative(
     Git uses the work tree as the base when invoked from outside it,
     as is possible with --git-dir and --work-tree. A pathspec's top
     magic (``:/``) names a path from the root; ``mv`` reads its operands
-    as plain paths, so it turns magic off.
+    as plain paths, so it turns magic off. A path after the magic's
+    ``:`` that still starts with ``/`` is refused as outside the tree,
+    where git matches nothing, so no caller reads it.
 
     Args:
         location (RepoLocation): the discovered repository.
@@ -94,7 +96,7 @@ def repo_relative(
     prefix = root if root.endswith("/") else f"{root}/"
     top = top_path(operand) if magic else None
     if top is not None and top.startswith(SLASH):
-        return top
+        raise OutsideRepositoryError(operand, root)
     if top is not None:
         absolute = absolute_operand(root, top or ".")
     else:

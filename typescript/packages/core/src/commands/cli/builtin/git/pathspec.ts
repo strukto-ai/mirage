@@ -46,9 +46,8 @@ export function absoluteOperand(start: string, operand: string): string {
  * The root-relative path a top-magic operand names, null for any other operand.
  *
  * git's short magic `:/` reads the rest from the work tree root; a `:` ends the
- * magic and keeps what follows as typed, so a path still starting with `/`
- * names nothing. `:/!` and `:/^` add exclusion, which this build lacks. Pinned
- * against git 2.51.2.
+ * magic and keeps what follows as typed. `:/!` and `:/^` add exclusion, which
+ * this build lacks. Pinned against git 2.51.2.
  *
  * @param operand the operand as the user spelled it
  */
@@ -66,7 +65,9 @@ export function topPath(operand: string): string | null {
  * the top resolves to and means "everything". Git uses the work tree as the
  * base when invoked from outside it, as with --git-dir and --work-tree. A
  * pathspec's top magic (`:/`) names a path from the root; `mv` reads its
- * operands as plain paths, so it turns magic off.
+ * operands as plain paths, so it turns magic off. A path after the magic's `:`
+ * that still starts with `/` is refused as outside the tree, where git matches
+ * nothing, so no caller reads it.
  *
  * @param location the discovered repository
  * @param start absolute virtual path git is running in
@@ -82,7 +83,7 @@ export function repoRelative(
   const root = rstripSlash(location.worktree.virtual) || '/'
   const prefix = root.endsWith('/') ? root : `${root}/`
   const top = magic ? topPath(operand) : null
-  if (top?.startsWith(SLASH)) return top
+  if (top?.startsWith(SLASH)) throw new OutsideRepositoryError(operand, root)
   const base = start === root || start.startsWith(prefix) ? start : root
   const absolute =
     top === null ? absoluteOperand(base, operand) : absoluteOperand(root, top === '' ? '.' : top)

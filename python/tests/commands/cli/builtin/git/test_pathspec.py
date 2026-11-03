@@ -73,12 +73,16 @@ def test_a_run_directory_below_the_root_still_resolves():
         ("/repo/docs", ":/:a.txt", "a.txt"),
         ("/repo/docs", ":///a.txt", "a.txt"),
         ("/repo/docs", ":/:", ""),
-        ("/repo/docs", ":/:/", "/"),
-        ("/repo/docs", ":/:/a.txt", "/a.txt"),
     ],
 )
 def test_top_magic_names_a_path_from_the_root(start, operand, relative):
     assert repo_relative(LOCATION, start, operand) == relative
+
+
+@pytest.mark.parametrize("operand", [":/:/", ":/:/a.txt", ":/:/elsewhere/a"])
+def test_a_rooted_path_after_the_top_magic_colon_is_refused(operand):
+    with pytest.raises(OutsideRepositoryError):
+        repo_relative(LOCATION, "/repo/docs", operand)
 
 
 def test_without_magic_a_colon_is_part_of_the_path():
