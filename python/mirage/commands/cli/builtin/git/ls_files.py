@@ -29,7 +29,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
     pathspec_selects,
     repo_relative,
 )
-from mirage.commands.cli.builtin.git.render import quote_path
+from mirage.commands.cli.builtin.git.render import quote_path, relative_path
 from mirage.commands.cli.builtin.git.repo import config_bool
 from mirage.commands.cli.builtin.git.rows import Line, entry_path, printed
 from mirage.commands.cli.builtin.git.seen import place_named
@@ -86,7 +86,7 @@ async def ls_files(
         name = path.decode("utf-8", "surrogateescape")
         if not pathspec_selects(name, patterns or (prefix,)):
             continue
-        relative = posixpath.relpath(name, prefix or ".")
+        relative = relative_path(name, prefix)
         label = relative if nul else quote_path(relative, False, fully)
         metadata = ""
         if fl.as_bool("stage"):
@@ -153,9 +153,7 @@ async def ls_tree(
     terminator = "\0" if nul else "\n"
     out: list[Line] = []
     for path, mode, oid in rows:
-        relative = (
-            path if full_name else posixpath.relpath(path, prefix or ".")
-        )
+        relative = path if full_name else relative_path(path, prefix)
         label = relative if nul else quote_path(relative, False, fully)
         kind = (
             "tree"

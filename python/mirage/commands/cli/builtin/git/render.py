@@ -486,7 +486,7 @@ def long_format(
     return "".join(f"{line}\n" for line in lines)
 
 
-def _relative_path(path: str, base: list[str]) -> str:
+def relative_path(path: str, prefix: str) -> str:
     """A repository-relative path as seen from a directory inside the tree.
 
     Computed on the names alone, as git computes it: the
@@ -496,8 +496,12 @@ def _relative_path(path: str, base: list[str]) -> str:
     Args:
         path (str): repository-relative path, ``/``-terminated for a
             directory.
-        base (list[str]): the invocation directory's components.
+        prefix (str): the invocation directory relative to the work
+            tree, empty at its root.
     """
+    if not prefix:
+        return path
+    base = prefix.split("/")
     parts = [part for part in path.split("/") if part]
     shared = 0
     while (
@@ -521,12 +525,11 @@ def relative_entries(
     """
     if not prefix:
         return rows
-    base = prefix.split("/")
     return [
         replace(
             row,
-            path=_relative_path(row.path, base),
-            original=_relative_path(row.original, base)
+            path=relative_path(row.path, prefix),
+            original=relative_path(row.original, prefix)
             if row.original is not None
             else None,
         )
