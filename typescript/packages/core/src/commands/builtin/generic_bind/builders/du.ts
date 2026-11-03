@@ -316,7 +316,8 @@ const du: CommandFn = async (_accessor, paths, _texts, ctx) => {
         }
   const links = linksOf(ctx)
   const follow =
-    links !== undefined && flags.typedOrder('L', 'P').at(-1) === 'L'
+    links !== undefined &&
+    flags.typedOrder('dereference', 'no_dereference').at(-1) === 'dereference'
       ? new Dereference(links, flags.asBool('one_file_system') ? (mountsOf(ctx) ?? null) : null)
       : null
   const computeSize: ComputeSize = (p) => walkSize(treeOf(files, listing), tally, follow, p)

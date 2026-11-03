@@ -1,6 +1,7 @@
 mod awk;
 mod base64;
 mod bc;
+mod block_size;
 mod cat;
 mod cmp;
 mod column;

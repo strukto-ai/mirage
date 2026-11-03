@@ -24,7 +24,7 @@ import { mountPrefixOf } from '../../../utils/key_prefix.ts'
 import { respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
-import { scaledSize } from '../utils/formatting.ts'
+import { scaledSize, blockSizeOf, type BlockSize } from '../utils/formatting.ts'
 import type { MountView, StatPath } from '../../../view/types.ts'
 import { compareCodePoints } from '../../../utils/sort.ts'
 
@@ -45,6 +45,8 @@ export interface DuFlags {
   a: boolean
   /** -h, human-readable sizes. */
   h: boolean
+  /** Explicit unit, or null for bytes/-h. */
+  blockSize: BlockSize | null
   /** -c, append a grand total. */
   c: boolean
   /** -S/--separate-dirs, directories exclude subdirectory sizes. */
@@ -72,8 +74,8 @@ export interface DuOutput {
   records: PathRecord[] | null
 }
 
-function line(size: number, human: boolean, label: string): string {
-  return `${scaledSize(size, null, human)}\t${label}`
+function line(size: number, flags: DuFlags, label: string): string {
+  return `${scaledSize(size, flags.blockSize, flags.h)}\t${label}`
 }
 
 /**
@@ -85,7 +87,10 @@ export function parseFlags(ctx: Context): DuFlags | IOResult {
   const fl = new FlagView(ctx.flags, specOf('du'))
   let values
   try {
-    values = scan('du', fl.texts('max_depth', 's', 'a'))
+    values = scan(
+      'du',
+      fl.texts('max_depth', 'summarize', 'all', 'human_readable', 'bytes', 'k', 'm', 'block_size'),
+    )
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
     return refused(err)
@@ -98,10 +103,11 @@ export function parseFlags(ctx: Context): DuFlags | IOResult {
     throw new Error(`du: mirage-rs read --max-depth as ${JSON.stringify(values)}`)
   }
   return {
-    s: fl.asBool('s'),
-    a: fl.asBool('a'),
-    h: fl.asBool('h'),
-    c: fl.asBool('c'),
+    s: fl.asBool('summarize'),
+    a: fl.asBool('all'),
+    h: fl.asBool('human_readable'),
+    blockSize: blockSizeOf(values.block_size),
+    c: fl.asBool('total'),
     S: fl.asBool('separate_dirs'),
     maxDepth: depth,
     ...(warning === null ? {} : { warning }),
@@ -426,7 +432,7 @@ async function duOne(
     // a total their names never justify, so that session takes the
     // entries walk below instead.
     const total = await computeSize(path)
-    return [[line(total, flags.h, label)], total, null]
+    return [[line(total, flags, label)], total, null]
   }
 
   const [raw, rawTotal] = await computeEntries(path)
@@ -447,7 +453,7 @@ async function duOne(
     // directory, or one a rule refused, which a second walk would
     // report twice.
     const fallback = await computeSize(path)
-    return [[line(fallback, flags.h, label)], fallback, fallback === 0 ? [{ path, run }] : null]
+    return [[line(fallback, flags, label)], fallback, fallback === 0 ? [{ path, run }] : null]
   }
 
   const counted = toVirtual(raw, path).map(([leaf, size]): PathRecord => ({
@@ -469,14 +475,14 @@ async function duOne(
   // a file operand keeps its own size in both its row and the grand total.
   const first = entries[0]
   if (entries.length === 1 && first !== undefined && norm(first[0]) === rootKey) {
-    return [[line(first[1], flags.h, label)], total, records]
+    return [[line(first[1], flags, label)], total, records]
   }
   // -S changes what the operand's own row counts, not what the operand
   // contributes to -c: GNU's grand total stays recursive (coreutils 9.7,
   // `du -bSc dir` prints `3 dir` then `6 total`).
   const own = flags.S ? separateTotal(entries, path.virtual) : total
   if (flags.s) {
-    return [[line(own, flags.h, label)], total, records]
+    return [[line(own, flags, label)], total, records]
   }
 
   const rows = rollup(entries, path.virtual, {
@@ -490,8 +496,8 @@ async function duOne(
     path.virtual,
     label,
   )
-  const lines = rows.map(([, size], i) => line(size, flags.h, shown[i] ?? ''))
-  lines.push(line(own, flags.h, label))
+  const lines = rows.map(([, size], i) => line(size, flags, shown[i] ?? ''))
+  lines.push(line(own, flags, label))
   return [lines, total, records]
 }
 
@@ -550,7 +556,7 @@ export async function du(
   }
   // GNU still prints the grand total when every operand failed ("0 total"), so
   // this stays outside the loop guard.
-  if (flags.c) lines.push(line(grand, flags.h, 'total'))
+  if (flags.c) lines.push(line(grand, flags, 'total'))
 
   const notes = flags.warning === undefined ? [] : [flags.warning]
   notes.push(
@@ -581,6 +587,13 @@ export async function du(
 
 /**
  * Run one whole `du` invocation, from raw flags to rendered bytes.
+ *
+ * Deliberate divergence: --exclude remains refused. GNU 9.7 prunes matched
+ * operands before stat and directories before traversal. Backend size
+ * shortcuts and separately scheduled descendant mounts do not share a
+ * pruning contract, so filtering measured rows would still read excluded
+ * paths and report their failures. --apparent-size preserves the existing
+ * apparent-byte measurement; only explicit unit options change its scale.
  *
  * Every caller needs the same three steps in the same order: validate the
  * flags before touching I/O, split the operands into readable and unreadable,
@@ -653,7 +666,10 @@ function respellUnder(virtual: string, paths: readonly PathSpec[]): string {
  */
 export function facts(fl: FlagView, _operands: readonly (string | PathSpec)[]): LineFacts {
   return new LineFacts({
-    follows: fl.typedOrder('L', 'P').at(-1) === 'L' ? Follow.LAST : Follow.NONE,
+    follows:
+      fl.typedOrder('dereference', 'no_dereference').at(-1) === 'dereference'
+        ? Follow.LAST
+        : Follow.NONE,
     walks: !fl.asBool('one_file_system'),
     readsSubtree: true,
   })

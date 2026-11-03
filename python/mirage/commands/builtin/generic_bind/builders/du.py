@@ -368,7 +368,9 @@ async def du(
     links = links_of(ctx)
     follow = (
         Dereference(links, mounts if fl.as_bool("one_file_system") else None)
-        if links is not None and fl.typed_order("L", "P")[-1:] == ["L"]
+        if links is not None
+        and fl.typed_order("dereference", "no_dereference")[-1:]
+        == ["dereference"]
         else None
     )
 

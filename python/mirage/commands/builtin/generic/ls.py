@@ -150,27 +150,6 @@ class LsValues:
     time_style: str
 
 
-def _block_size_of(raw: JsonValue) -> formatting.BlockSize | None:
-    """The size scale mirage-rs answered, checked for its shape.
-
-    Args:
-        raw (JsonValue): the ``block_size`` value of the scan.
-    """
-    if raw is None:
-        return None
-    if isinstance(raw, dict):
-        divisor = raw.get("divisor")
-        suffix = raw.get("suffix")
-        base = raw.get("human_base")
-        if (
-            isinstance(divisor, str)
-            and isinstance(suffix, str)
-            and (base is None or type(base) is int)
-        ):
-            return formatting.BlockSize(int(divisor), suffix, base)
-    raise TypeError(f"ls: mirage-rs read --block-size as {raw!r}")
-
-
 def _tape(fl: FlagView, names: Sequence[str]) -> list[tuple[str, str]]:
     """The typed options as the scan reads them: a switch empty, except
     the bare spelling of an option that takes ``WHEN``, which is the word
@@ -223,7 +202,7 @@ def scan_values(fl: FlagView, names: Sequence[str] = _SCANNED) -> LsValues:
         time_kind=LsTimeKind(time),
         indicator=LsIndicator(indicator),
         hyperlink=hyperlink,
-        block_size=_block_size_of(values["block_size"]),
+        block_size=formatting.block_size_of(values["block_size"]),
         time_style=text_view(style),
     )
 

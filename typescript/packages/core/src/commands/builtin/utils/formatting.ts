@@ -18,6 +18,7 @@ import {
   LINK_TARGET_KEY,
   type FileStat,
   type LsTimeKind,
+  type JsonValue,
 } from '../../../types.ts'
 import { systemNow } from '../../../utils/clock.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
@@ -81,6 +82,21 @@ export const DEFAULT_COLUMNS: LsColumns = Object.freeze({
   timeStyle: 'locale',
   blockSize: null,
 })
+
+export function blockSizeOf(raw: JsonValue | undefined): BlockSize | null {
+  if (raw === null) return null
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    const { divisor, suffix, human_base: base } = raw
+    if (
+      typeof divisor === 'string' &&
+      typeof suffix === 'string' &&
+      (base === null || typeof base === 'number')
+    ) {
+      return { divisor: Number(divisor), suffix, humanBase: base }
+    }
+  }
+  throw new Error(`mirage-rs read block size as ${JSON.stringify(raw)}`)
+}
 
 // The size column under -h or --block-size, bytes otherwise.
 export function scaledSize(n: number, block: BlockSize | null, human: boolean): string {
