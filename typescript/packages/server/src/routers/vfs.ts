@@ -19,14 +19,20 @@ import { TooManyMatches } from '@struktoai/mirage-core/shell/errors'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { Session } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { Console } from 'node:console'
 import { stderr } from 'node:process'
+import { format } from 'node:util'
 import { answered, CallArgsError, checked, customAnswer, failureToDict } from '../io_serde.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import { streamOf, type RouteApp, type RouteReply } from '../routes.ts'
 import { VFS_CALLS } from '../vfs_calls.ts'
 
-const logger = new Console({ stdout: stderr, stderr })
+// Diagnostics go to stderr, never stdout, which a stdio transport speaks on;
+// written whole, as a Worker's node:console cannot build a Console.
+const logger = {
+  debug: (...args: unknown[]): void => {
+    stderr.write(`${format(...args)}\n`)
+  },
+}
 
 interface CallQuery {
   session_id?: string
@@ -153,7 +159,7 @@ export function registerVfsRoutes(
               raw: args.raw === true,
               stream: true,
             })
-            return await reply
+            return reply
               .type('application/octet-stream')
               .header('Cache-Control', 'no-store')
               .send(streamOf(source))
@@ -174,7 +180,7 @@ export function registerVfsRoutes(
       try {
         const ws = requireEntry(deps.registry, req.params.wsId, req.account).runner.ws
         const session = await sessionOf(ws, req.query.session_id)
-        return await reply
+        return reply
           .type('application/json; charset=utf-8')
           .send(JSON.stringify(await customAnswer(session, req.params.name, req.body)))
       } catch (err) {

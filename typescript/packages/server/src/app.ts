@@ -46,18 +46,8 @@ import {
   resolveAllowedHosts,
   resolveForwardedAllowIps,
 } from './host_validation.ts'
-import { registerMcpRoutes } from './mcp/http.ts'
-import { registerRpcRoutes } from './rpc/http.ts'
-import { registerAsksRoutes } from './routers/asks.ts'
-import { registerShellRoutes } from './routers/shell.ts'
-import { registerToolsRoutes } from './routers/tools.ts'
-import { registerVfsRoutes } from './routers/vfs.ts'
-import { registerHealthRoutes } from './routers/health.ts'
-import { registerDocumentsRoutes } from './routers/documents.ts'
-import { registerOAuthRoutes } from './routers/oauth.ts'
-import { registerSessionsRoutes } from './routers/sessions.ts'
+import { registerApi } from './api.ts'
 import { registerSshRoutes } from './routers/ssh.ts'
-import { registerWorkspacesRoutes } from './routers/workspaces.ts'
 import { readDaemonTable, validateDaemonTable } from './daemon_config.ts'
 import { mirageHome, pidFilePath, stateRootPath } from './paths.ts'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
@@ -229,18 +219,14 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.addContentTypeParser(/^multipart\//, (_req, _payload, done) => {
     done(null)
   })
-  const routes = fastifyRoutes(app)
-  registerHealthRoutes(routes, { registry, startedAt, exit: exitFn })
-  registerOAuthRoutes(routes, { auth: authConfig })
-  registerWorkspacesRoutes(routes, { registry, host, snapshotStore: options.snapshotStore })
-  registerSessionsRoutes(routes, { registry, loadProfile: host.loadProfile })
-  registerDocumentsRoutes(routes, { registry })
-  registerAsksRoutes(routes, { registry })
-  registerShellRoutes(routes, { registry, jobs })
-  const mcp = registerMcpRoutes(app, registry, jobs)
-  registerRpcRoutes(app, registry, jobs, mcp)
-  registerToolsRoutes(routes, { mcp })
-  registerVfsRoutes(routes, { registry })
+  const mcp = registerApi(fastifyRoutes(app), {
+    registry,
+    host,
+    auth: authConfig,
+    startedAt,
+    exit: exitFn,
+    snapshotStore: options.snapshotStore,
+  })
   const ssh: SSHEndpoint = {
     config: options.sshConfig ?? resolveSSHConfig(),
     listener: null,

@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
-import { Console } from 'node:console'
 import { stderr } from 'node:process'
+import { format } from 'node:util'
 import { fromJsonSchema } from '@modelcontextprotocol/server'
 import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tools/tool_operations'
 import { TooManyMatches } from '@struktoai/mirage-core/shell/errors'
@@ -41,7 +41,13 @@ import {
 } from './constants.ts'
 import { VFS_CALLS, type VfsCall } from '../vfs_calls.ts'
 
-const logger = new Console({ stdout: stderr, stderr })
+// Diagnostics go to stderr, never stdout, which a stdio transport speaks on;
+// written whole, as a Worker's node:console cannot build a Console.
+const logger = {
+  debug: (...args: unknown[]): void => {
+    stderr.write(`${format(...args)}\n`)
+  },
+}
 
 const PROTOCOL_VERSION = '1'
 export const CANCEL_REQUEST = '$/cancelRequest'

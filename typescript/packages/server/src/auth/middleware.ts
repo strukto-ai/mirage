@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { timingSafeEqual } from 'node:crypto'
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import type { FastifyInstance, FastifyReply } from 'fastify'
 import { createRemoteJWKSet } from 'jose'
 
 import { AuthMode, PROTECTED_RESOURCE_PATH, type AuthConfig } from './config.ts'
@@ -47,11 +47,44 @@ function constantTimeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb)
 }
 
-function extractBearer(req: FastifyRequest): string | undefined {
-  const raw = req.headers.authorization
+function extractBearer(raw: string | undefined): string | undefined {
   if (typeof raw !== 'string' || !raw.startsWith(BEARER_PREFIX)) return undefined
   const value = raw.slice(BEARER_PREFIX.length).trim()
   return value.length > 0 ? value : undefined
+}
+
+/**
+ * The check `config` asks of each request, on any host: given the
+ * request's `Authorization` header it answers the account the request
+ * runs as (null when the mode names none), or why it is refused. Null
+ * when the mode checks nothing, a local daemon with no token.
+ */
+export function authenticator(
+  config: AuthConfig,
+): ((authorization: string | undefined) => Promise<{ account: string | null } | string>) | null {
+  if (config.mode === AuthMode.Local && config.localToken === undefined) return null
+  // The issuer's published keys, cached and fetched again for a key id
+  // they do not hold, so a key rotation needs no restart.
+  const keySet =
+    config.jwt?.jwksUrl !== undefined ? createRemoteJWKSet(new URL(config.jwt.jwksUrl)) : undefined
+  return async (authorization) => {
+    const token = extractBearer(authorization)
+    if (token === undefined) return 'missing bearer token'
+    if (config.mode === AuthMode.Jwt) {
+      if (config.jwt === undefined || !JWT_SHAPE.test(token)) return 'token shape is not a JWT'
+      try {
+        const claims = await verifyJwt(token, config.jwt, keySet)
+        // verifyJwt refuses a token without one; null would be refused
+        // too, since jwt mode requires an account.
+        return { account: claims.sub ?? null }
+      } catch (e) {
+        return e instanceof JWTVerificationError ? e.message : String(e)
+      }
+    }
+    const expected = config.mode === AuthMode.Local ? config.localToken : config.bearerToken
+    if (expected === undefined || !constantTimeEqual(token, expected)) return 'bearer mismatch'
+    return { account: null }
+  }
 }
 
 async function unauthorized(reply: FastifyReply, reason: string): Promise<void> {
@@ -62,45 +95,21 @@ async function unauthorized(reply: FastifyReply, reason: string): Promise<void> 
 
 export function registerAuth(app: FastifyInstance, config: AuthConfig): void {
   app.decorateRequest('account', null)
-  if (config.mode === AuthMode.Local && config.localToken === undefined) {
+  const check = authenticator(config)
+  if (check === null) {
     console.warn(
       'daemon starting without bearer auth; anyone who can reach it can drive it. ' +
         'Set MIRAGE_AUTH_TOKEN or use a non-local MIRAGE_AUTH_MODE to enforce authentication.',
     )
     return
   }
-  // The issuer's published keys, cached and fetched again for a key id
-  // they do not hold, so a key rotation needs no restart.
-  const keySet =
-    config.jwt?.jwksUrl !== undefined ? createRemoteJWKSet(new URL(config.jwt.jwksUrl)) : undefined
   app.addHook('onRequest', async (req, reply) => {
     if (PUBLIC_PATHS.has(req.url.split('?', 1)[0] ?? '')) return
-    const token = extractBearer(req)
-    if (token === undefined) {
-      await unauthorized(reply, 'missing bearer token')
+    const answer = await check(req.headers.authorization)
+    if (typeof answer === 'string') {
+      await unauthorized(reply, answer)
       return
     }
-    if (config.mode === AuthMode.Jwt) {
-      if (config.jwt === undefined || !JWT_SHAPE.test(token)) {
-        await unauthorized(reply, 'token shape is not a JWT')
-        return
-      }
-      try {
-        const claims = await verifyJwt(token, config.jwt, keySet)
-        // verifyJwt refuses a token without one; null would be refused
-        // too, since jwt mode requires an account.
-        req.account = claims.sub ?? null
-      } catch (e) {
-        const reason = e instanceof JWTVerificationError ? e.message : String(e)
-        await unauthorized(reply, reason)
-        return
-      }
-      return
-    }
-    const expected = config.mode === AuthMode.Local ? config.localToken : config.bearerToken
-    if (expected === undefined || !constantTimeEqual(token, expected)) {
-      await unauthorized(reply, 'bearer mismatch')
-      return
-    }
+    req.account = answer.account
   })
 }

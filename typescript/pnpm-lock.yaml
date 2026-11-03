@@ -701,6 +701,9 @@ importers:
       '@struktoai/mirage-core':
         specifier: workspace:*
         version: link:../core
+      '@struktoai/mirage-server':
+        specifier: workspace:*
+        version: link:../server
     devDependencies:
       '@pydantic/monty':
         specifier: 1.4.0

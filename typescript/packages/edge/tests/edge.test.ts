@@ -25,7 +25,7 @@ interface Result {
 let worker: Unstable_DevWorker
 
 async function run(lines: readonly string[], maxMemory?: string): Promise<Result[]> {
-  const response = await worker.fetch('http://edge.test/', {
+  const response = await worker.fetch('http://edge.test/run', {
     method: 'POST',
     body: JSON.stringify({ lines, ...(maxMemory !== undefined ? { maxMemory } : {}) }),
   })
@@ -42,7 +42,7 @@ beforeAll(async () => {
 }, 120_000)
 
 afterAll(async () => {
-  await worker?.stop()
+  await worker.stop()
 })
 
 describe('mirage in workerd', () => {
@@ -63,14 +63,14 @@ describe('mirage in workerd', () => {
     const [inline, write, script] = await run([
       "python3 -c 'print(sum(range(10)))'",
       "printf 'n\\n4\\n6\\n' > /data/n.csv",
-      "python3 -c 'import csv; rows = list(csv.DictReader(open(\"/data/n.csv\"))); print(sum(int(r[\"n\"]) for r in rows))'",
+      'python3 -c \'import csv; rows = list(csv.DictReader(open("/data/n.csv"))); print(sum(int(r["n"]) for r in rows))\'',
     ])
     expect(inline).toEqual({ exit: 0, stdout: '45\n', stderr: '' })
     expect(write?.exit).toBe(0)
     expect(script?.stdout).toBe('10\n')
   })
 
-  it('stops a runaway python3 loop with monty\'s own time limit', async () => {
+  it("stops a runaway python3 loop with monty's own time limit", async () => {
     const [loop, next] = await run(["python3 -c 'while True: pass'", "python3 -c 'print(1 + 1)'"])
     expect(loop?.exit).toBe(1)
     expect(loop?.stderr).toContain('TimeoutError')
