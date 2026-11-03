@@ -1030,7 +1030,9 @@ async def test_a_failed_create_leaves_the_id_free(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_failed_create_drops_what_it_saved(tmp_path, monkeypatch):
+async def test_a_failed_create_keeps_its_claim_with_what_it_saved(
+    tmp_path, monkeypatch
+):
     secret = "s" * 32
     app = _jwt_app(secret, tmp_path / "state", max_sessions=4)
     registry = app.state.registry
@@ -1054,6 +1056,10 @@ async def test_a_failed_create_drops_what_it_saved(tmp_path, monkeypatch):
         )
         assert r.status_code == 409, r.text
         r = await bob.post(
+            "/v1/workspaces", json={**_minimal_config(), "id": "w"}
+        )
+        assert r.status_code == 409, r.text
+        r = await alice.post(
             "/v1/workspaces", json={**_minimal_config(), "id": "w"}
         )
         assert r.status_code == 201, r.text

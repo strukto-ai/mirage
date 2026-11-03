@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { networkRule, runWithNetwork } from '@struktoai/mirage-core/io/network'
 import { createApp, MountMode, RAMVFS, Workspace } from '../src/index.ts'
 
 const app = createApp({ maxWorkspaces: 32 })
@@ -21,11 +22,32 @@ interface Run {
   readonly maxMemory?: string
 }
 
+interface Follow {
+  readonly url: string
+  readonly allowed: readonly string[]
+}
+
+/** `follow.url` fetched as a mount's client fetches, under a workspace's rule. */
+async function follow({ url, allowed }: Follow): Promise<Response> {
+  const network = { allowed_domains: allowed }
+  const ws = new Workspace({ '/': new RAMVFS() }, { network })
+  try {
+    const response = await runWithNetwork(networkRule(network), () => fetch(url))
+    return Response.json({ status: response.status, body: await response.text() })
+  } catch (e) {
+    return Response.json({ error: String(e) })
+  } finally {
+    await ws.close()
+  }
+}
+
 const decoder = new TextDecoder()
 
 export default {
   async fetch(request: Request): Promise<Response> {
-    if (new URL(request.url).pathname !== '/run') return app.fetch(request)
+    const { pathname } = new URL(request.url)
+    if (pathname === '/follow') return follow((await request.json()) as Follow)
+    if (pathname !== '/run') return app.fetch(request)
     const run = (await request.json()) as Run
     const ws = new Workspace(
       { '/data': new RAMVFS(), '/tmp': new RAMVFS() },

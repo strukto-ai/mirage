@@ -20,7 +20,7 @@ import {
   type StoreBlock,
 } from '@struktoai/mirage-core/config'
 import { watch } from '@struktoai/mirage-core/io/web/gateway'
-import { watchNetwork } from '@struktoai/mirage-core/io/web/network'
+import { refuseUnseenAddresses, watchNetwork } from '@struktoai/mirage-core/io/web/network'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import { buildVfs, knownVfsNames } from '@struktoai/mirage-core/vfs/registry'
@@ -45,6 +45,7 @@ export class Workspace extends CoreWorkspace {
   }
 
   constructor(...args: ConstructorParameters<typeof CoreWorkspace>) {
+    refuseUnseenAddresses(args[1]?.network)
     super(...args)
     this.registry.setNetworkWatch(watchNetwork)
     if (this.registry.network !== null) watchNetwork()

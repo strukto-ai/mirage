@@ -833,7 +833,7 @@ describe('AuthMiddleware integration', () => {
       }
     })
 
-    it('drops what a failed create saved before freeing the id', async () => {
+    it('keeps the claim with what a failed create saved', async () => {
       const app = jwtApp({ maxSessions: 4 })
       vi.spyOn(WorkspaceRegistry.prototype, 'add').mockImplementationOnce(() => {
         throw new Error('refused')
@@ -850,6 +850,13 @@ describe('AuthMiddleware integration', () => {
           method: 'POST',
           url: '/v1/workspaces',
           headers: await bearer({ sub: 'bob' }),
+          payload: { ...RAM, id: 'w' },
+        })
+        expect(r.statusCode).toBe(409)
+        r = await app.inject({
+          method: 'POST',
+          url: '/v1/workspaces',
+          headers: await bearer({ sub: 'alice' }),
           payload: { ...RAM, id: 'w' },
         })
         expect(r.statusCode, r.body).toBe(201)

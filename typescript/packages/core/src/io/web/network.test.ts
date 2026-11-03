@@ -16,8 +16,8 @@ import { runWithEgress } from '../gateway.ts'
 import { type NetworkRule, networkRule, runWithNetwork } from '../network.ts'
 import { Policies } from '../../policy/policies.ts'
 import type * as AsyncContext from '../../utils/async_context.ts'
-import { afterAll, describe, expect, it, vi } from 'vitest'
-import { routed, watchNetwork } from './network.ts'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { refuseUnseenAddresses, routed, watchNetwork } from './network.ts'
 
 // A page's storage: every concurrently bound call is live at once.
 vi.mock('../../utils/async_context.ts', async (importOriginal) => {
@@ -61,7 +61,15 @@ async function apart(one: Binding, two: Binding): Promise<string> {
   }
 }
 
+// What fetch answers beneath the watcher, which wraps it once.
+let answer: typeof fetch = () => Promise.reject(new Error('no answer'))
+
 describe('the page network watcher', () => {
+  beforeAll(() => {
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => answer(input, init))
+    watchNetwork()
+  })
+
   afterAll(() => {
     vi.unstubAllGlobals()
   })
@@ -69,12 +77,11 @@ describe('the page network watcher', () => {
   it('follows no redirect under a rule, since a page cannot see where one goes', async () => {
     const asked: (RequestRedirect | undefined)[] = []
     vi.stubGlobal('location', { href: 'https://page.test/' })
-    vi.stubGlobal('fetch', (_input: RequestInfo | URL, init?: RequestInit) => {
+    answer = (_input, init) => {
       asked.push(init?.redirect)
       const type = init?.redirect === 'manual' ? 'opaqueredirect' : 'basic'
       return Promise.resolve({ type } as Response)
-    })
-    watchNetwork()
+    }
     const rule = networkRule({ allowed_domains: ['api.test'] })
     await expect(runWithNetwork(rule, () => fetch('https://api.test/a'))).rejects.toThrow(
       'Failed to fetch',
@@ -88,6 +95,62 @@ describe('the page network watcher', () => {
     expect(manual.type).toBe('opaqueredirect')
     expect((await fetch('https://other.test/')).type).toBe('basic')
     expect(asked).toEqual(['manual', 'manual', undefined])
+  })
+
+  it('follows a redirect it can see hop by hop, judging each hop', async () => {
+    const sent: string[] = []
+    answer = (input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      const auth = new Headers(init?.headers).get('authorization') ?? '-'
+      sent.push(`${init?.method ?? 'GET'} ${url} ${auth}`)
+      const to = { 'https://api.test/a': 'https://dl.test/f', 'https://api.test/b': '/c' }[url]
+      if (url === 'https://api.test/bad') {
+        return Promise.resolve(
+          new Response(null, { status: 302, headers: { location: 'https://other.test/' } }),
+        )
+      }
+      if (to !== undefined) {
+        return Promise.resolve(new Response(null, { status: 302, headers: { location: to } }))
+      }
+      return Promise.resolve(new Response(url))
+    }
+    const rule = networkRule({ allowed_domains: ['api.test', 'dl.test'] })
+    const download = await runWithNetwork(rule, () =>
+      fetch('https://api.test/a', {
+        method: 'POST',
+        body: 'x',
+        headers: { authorization: 'Bearer t', 'content-type': 'text/plain' },
+      }),
+    )
+    expect(await download.text()).toBe('https://dl.test/f')
+    const relative = await runWithNetwork(rule, () =>
+      fetch('https://api.test/b', { headers: { authorization: 'Bearer t' } }),
+    )
+    expect(await relative.text()).toBe('https://api.test/c')
+    await expect(runWithNetwork(rule, () => fetch('https://api.test/bad'))).rejects.toThrow(
+      'Failed to fetch',
+    )
+    expect(sent).toEqual([
+      'POST https://api.test/a Bearer t',
+      'GET https://dl.test/f -',
+      'GET https://api.test/b Bearer t',
+      'GET https://api.test/c Bearer t',
+      'GET https://api.test/bad -',
+    ])
+  })
+
+  it('refuses a rule that denies an address it never sees', () => {
+    for (const entry of ['10.0.0.0/8', '169.254.169.254', '10.0.0.1:22', '::1', '[::1]:8080']) {
+      expect(() => {
+        refuseUnseenAddresses({ denied_domains: [entry] })
+      }).toThrow(entry)
+    }
+    refuseUnseenAddresses({
+      allowed_domains: ['10.0.0.0/8'],
+      denied_domains: ['*:22', 'evil.test', '*.evil.test:443'],
+    })
+    refuseUnseenAddresses(false)
+    refuseUnseenAddresses(undefined)
   })
 
   it('sends a request where the bound rule routes its host and port', async () => {

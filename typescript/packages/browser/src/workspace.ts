@@ -18,7 +18,7 @@ import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 import { watch } from '@struktoai/mirage-core/io/web/gateway'
-import { watchNetwork } from '@struktoai/mirage-core/io/web/network'
+import { refuseUnseenAddresses, watchNetwork } from '@struktoai/mirage-core/io/web/network'
 import './io/spool.ts'
 
 // TODO(MIRAGE-36): an OPFS spool store, so spools spill here too.
@@ -30,6 +30,7 @@ export class Workspace extends CoreWorkspace {
   }
 
   constructor(...args: ConstructorParameters<typeof CoreWorkspace>) {
+    refuseUnseenAddresses(args[1]?.network)
     super(...args)
     this.registry.setNetworkWatch(watchNetwork)
     if (this.registry.network !== null) watchNetwork()
