@@ -176,6 +176,7 @@ describe('vfsMd', () => {
       '| Path | Description |\n| --- | --- |\n' +
         '| `/` | `ram`, exec |\n' +
         '| `/data` | `ram`, read |\n' +
+        '| `/dev` | `ram`, write |\n' +
         '| `/scratch` | `ram`, write |\n',
     )
   })

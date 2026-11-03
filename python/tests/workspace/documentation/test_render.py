@@ -130,6 +130,7 @@ async def test_vfs_md_states_each_mount_mode():
         "| Path | Description |\n| --- | --- |\n"
         "| `/` | `ram`, exec |\n"
         "| `/data` | `ram`, read |\n"
+        "| `/dev` | `ram`, write |\n"
         "| `/scratch` | `ram`, write |\n" in markdown
     )
 

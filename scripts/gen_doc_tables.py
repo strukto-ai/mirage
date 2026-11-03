@@ -471,9 +471,10 @@ def hidden(session_id: str | None) -> bool:
 async def _vfs_md(name: str, config: dict[str, JsonValue]) -> str:
     vfs = build_vfs(name, dict(config))
     ws = Workspace({PLACEHOLDER: (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
-    # The scratch root every workspace adds is no part of this VFS, and
-    # the agent's opening paragraph is no part of a docs page.
+    # The scratch root and /dev every workspace adds are no part of this
+    # VFS, and the agent's opening paragraph is no part of a docs page.
     ws.mount("/").visible = hidden
+    ws.mount("/dev").visible = hidden
     try:
         return (await ws.vfs_md()).replace(INTRO + "\n\n", "", 1)
     finally:
