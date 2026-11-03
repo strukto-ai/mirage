@@ -70,6 +70,8 @@ export interface FakeMCP {
   expired: Set<string>
   /** List the tools over exactly this many pages, empty past the last tool. */
   pages: number | null
+  /** Milliseconds each tool page waits before it answers. */
+  pageDelay: number
   /** Requests are never answered. */
   stalling: boolean
   /** Every request is answered 503. */
@@ -120,7 +122,8 @@ function sortedJson(value: unknown): string {
 function mcpServer(fake: FakeMCP, tools: Tool[]): McpServer {
   const server = new McpServer({ name: 'fixture', title: TITLE, version: '1.0.0' })
   server.server.registerCapabilities({ tools: {} })
-  server.server.setRequestHandler('tools/list', (request) => {
+  server.server.setRequestHandler('tools/list', async (request) => {
+    await new Promise((resolve) => setTimeout(resolve, fake.pageDelay))
     const cursor = request.params?.cursor
     const start = cursor === undefined ? 0 : Number(cursor)
     if (fake.pages !== null) {
@@ -201,6 +204,7 @@ export async function servedMcp(tools: Tool[] = TOOLS): Promise<FakeMCP> {
     cancelled: [],
     expired: new Set(),
     pages: null,
+    pageDelay: 0,
     stalling: false,
     down: false,
     oversized: {},

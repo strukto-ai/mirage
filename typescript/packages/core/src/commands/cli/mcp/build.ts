@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Tool } from '@modelcontextprotocol/client'
-import { MCPAccessor, refusal } from '../../../accessor/mcp.ts'
+import { MCPAccessor, refusal, timedOut } from '../../../accessor/mcp.ts'
 import { MCPConfig, parseMCPConfig } from '../../../core/mcp/config.ts'
 import { MAX_TOOLS } from '../../../core/mcp/constants.ts'
 import { compactJsonText } from '../../../core/render/json.ts'
@@ -102,7 +102,9 @@ export async function mcpCli(config: MCPConfig | Record<string, unknown>): Promi
   try {
     listed = await new MCPAccessor(validated).listTools()
   } catch (error) {
-    const reason = refusal(error) ?? causes(error).join('; ')
+    const reason =
+      refusal(error) ??
+      ((await timedOut(error)) ? 'MCP server timed out' : causes(error).join('; '))
     throw new MCPToolsError(`cannot list the server's tools: ${reason}`, { cause: error })
   }
   const [title, tools] = listed

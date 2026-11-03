@@ -62,14 +62,16 @@ def answered(error: Exception) -> bool:
 
 
 def timed_out(error: BaseException) -> bool:
-    """Whether the SDK gave up waiting for the server's answer, found
-    through any exception group the call raised.
+    """Whether the SDK gave up waiting for the server's answer, or a
+    deadline ran out, found through any exception group the call raised.
 
     Args:
         error (BaseException): what the call raised.
     """
     if isinstance(error, BaseExceptionGroup):
         return any(timed_out(inner) for inner in error.exceptions)
+    if isinstance(error, TimeoutError):
+        return True
     return isinstance(error, MCPError) and error.code == types.REQUEST_TIMEOUT
 
 
@@ -247,8 +249,11 @@ class MCPAccessor(Accessor):
 
     async def list_tools(self) -> tuple[str, list[types.Tool]]:
         """The server's title and every tool it lists, page by page,
-        all its pages held to one reply cap."""
-        async with self.session(shared=True) as client:
+        all its pages held to one reply cap and one ``TIMEOUT``."""
+        async with (
+            asyncio.timeout(TIMEOUT),
+            self.session(shared=True) as client,
+        ):
             page = await client.list_tools()
             tools = list(page.tools)
             pages = 1

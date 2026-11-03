@@ -48,8 +48,12 @@ export async function answered(error: unknown): Promise<boolean> {
   return code === INVALID_PARAMS || code === METHOD_NOT_FOUND || code < -32768 || code > -32000
 }
 
-/** Whether the SDK gave up waiting for the server's answer. Mirrors Python's `timed_out`. */
+/**
+ * Whether the SDK gave up waiting for the server's answer, or a deadline ran
+ * out. Mirrors Python's `timed_out`.
+ */
 export async function timedOut(error: unknown): Promise<boolean> {
+  if (error instanceof Error && error.name === 'TimeoutError') return true
   const { SdkError, SdkErrorCode } = await import('@modelcontextprotocol/client')
   return error instanceof SdkError && error.code === SdkErrorCode.RequestTimeout
 }
@@ -249,16 +253,17 @@ export class MCPAccessor extends Accessor {
     if (this.dropped.delete(opening)) void this.shutting(opening)
   }
 
-  /** The server's title and every tool it lists; the SDK reads every page, all held to one reply cap. */
+  /** The server's title and every tool it lists; the SDK reads every page, all held to one reply cap and one `TIMEOUT`. */
   async listTools(): Promise<[string, Tool[]]> {
+    const deadline = AbortSignal.timeout(TIMEOUT * 1000)
     return this.session(
       async (client) => {
-        const { tools } = await client.listTools({}, { timeout: TIMEOUT * 1000 })
+        const { tools } = await client.listTools({}, { timeout: TIMEOUT * 1000, signal: deadline })
         const info = client.getServerVersion()
         if (info === undefined) return ['', tools]
         return [info.title === undefined || info.title === '' ? info.name : info.title, tools]
       },
-      undefined,
+      deadline,
       true,
     )
   }
