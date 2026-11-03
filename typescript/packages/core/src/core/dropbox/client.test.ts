@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ByteSpool } from '../../io/spool.ts'
+import { sameBytes } from '../../test-utils.ts'
 import { DropboxApiError } from './client.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -188,9 +189,44 @@ describe('dropboxUpload', () => {
   })
 })
 
-it.each([false, true])(
-  'upload sessions chunk and preserve conditional commit (failure %s)',
-  async (fail) => {
+const MIB = 1024 * 1024
+
+// Dropbox's files/upload takes up to 150 MB (its API docs, not probed); past
+// 8 MiB an upload takes a session whatever holds the bytes, so exactly 8 MiB is
+// the largest single request.
+it.each([false, true])('a dropbox upload of 8 MiB stays one request (spooled %s)', async (spooled) => {
+  const urls: string[] = []
+  const bodies: unknown[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string, init: RequestInit) => {
+      await Promise.resolve()
+      urls.push(url)
+      bodies.push(init.body)
+      return Response.json(url.endsWith('/files/upload') ? { name: 'file' } : { session_id: 's' })
+    }),
+  )
+  const payload = new Uint8Array(8 * MIB).fill(120)
+  const spool = new ByteSpool()
+  try {
+    await spool.append(payload)
+    expect(await dropboxUpload(tokenManager(), '/file', spooled ? spool : payload)).toEqual({
+      name: 'file',
+    })
+    expect(urls).toEqual(['https://content.dropboxapi.com/2/files/upload'])
+    expect(sameBytes(bodies[0], payload)).toBe(true)
+  } finally {
+    await spool.close()
+  }
+})
+
+it.each([
+  [false, true],
+  [false, false],
+  [true, true],
+])(
+  'upload sessions chunk and preserve conditional commit (failure %s, spooled %s)',
+  async (fail, spooled) => {
     const requests: { url: string; init: RequestInit }[] = []
     vi.stubGlobal(
       'fetch',
@@ -205,23 +241,36 @@ it.each([false, true])(
         return Response.json(null)
       }),
     )
+    // A distinct tail, so a window read from the wrong offset differs.
+    const payload = new Uint8Array(8 * MIB + 7).fill(120)
+    payload.set(new TextEncoder().encode('abcdefg'), 8 * MIB)
     const spool = new ByteSpool()
     try {
-      await spool.append(new Uint8Array(8 * 1024 * 1024 + 7).fill(120))
-      const uploading = dropboxUpload(tokenManager(), '/file', spool, 'rev1')
+      await spool.append(payload)
+      const uploading = dropboxUpload(tokenManager(), '/file', spooled ? spool : payload, 'rev1')
       if (fail) await expect(uploading).rejects.toBeInstanceOf(DropboxApiError)
       else expect(await uploading).toEqual({ name: 'file' })
       const appends = requests.filter((r) => r.url.endsWith('/append_v2'))
-      expect(appends.slice(0, 2).map((r) => (r.init.body as Uint8Array).length)).toEqual([
-        8 * 1024 * 1024,
-        7,
-      ])
+      const bodies = appends.map((r) => r.init.body as Uint8Array)
+      expect(bodies.map((b) => b.length)).toEqual([8 * MIB, 7])
+      expect(sameBytes(bodies[0], payload.subarray(0, 8 * MIB))).toBe(true)
+      expect(sameBytes(bodies[1], payload.subarray(8 * MIB))).toBe(true)
+      expect(
+        appends.map(
+          (r) =>
+            (
+              JSON.parse(new Headers(r.init.headers).get('Dropbox-API-Arg') ?? '{}') as {
+                cursor: { offset: number }
+              }
+            ).cursor.offset,
+        ),
+      ).toEqual([0, 8 * MIB])
       const finish = requests.find((r) => r.url.endsWith('/finish'))
       const arg = JSON.parse(new Headers(finish?.init.headers).get('Dropbox-API-Arg') ?? '{}') as {
         cursor: { offset: number }
         commit: { mode: unknown }
       }
-      expect(arg.cursor.offset).toBe(spool.size)
+      expect(arg.cursor.offset).toBe(payload.length)
       expect(arg.commit.mode).toEqual({ '.tag': 'update', update: 'rev1' })
       expect(appends).toHaveLength(2)
     } finally {

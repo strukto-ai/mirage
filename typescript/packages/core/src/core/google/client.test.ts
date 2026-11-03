@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { ByteSpool } from '../../io/spool.ts'
+import { sameBytes } from '../../test-utils.ts'
 import { googleResumable } from './client.ts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -294,12 +295,21 @@ describe('TokenManager.accessToken short-circuit', () => {
   })
 })
 
-it.each([true, false])('resumable upload honors acknowledged ranges: %s', async (advance) => {
+it.each([
+  [true, true],
+  [true, false],
+  [false, true],
+])('resumable upload honors acknowledged ranges: %s, spooled %s', async (advance, spooled) => {
   const tm = new TokenManager({ clientId: 'c', refreshToken: 'r' })
   vi.spyOn(tm, 'getToken').mockResolvedValue('token')
+  const half = 4 * 1024 * 1024
   const total = 8 * 1024 * 1024 + 17
+  // Two halves of different bytes, so a window read from the wrong offset
+  // differs in content, not only in length.
+  const payload = new Uint8Array(total).fill(97, 0, half).fill(98, half)
   const spool = new ByteSpool()
-  await spool.append(new Uint8Array(total))
+  await spool.append(payload)
+  const data = spooled ? spool : payload
   const fake = vi
     .fn()
     .mockResolvedValueOnce(
@@ -317,15 +327,16 @@ it.each([true, false])('resumable upload honors acknowledged ranges: %s', async 
       'POST',
       'https://example.test/start',
       {},
-      spool,
+      data,
       'text/plain',
       {},
     )
     if (advance) {
       await expect(result).resolves.toEqual({ id: 'done' })
       const calls = fake.mock.calls as [string, RequestInit][]
-      expect((calls[1]?.[1].body as Uint8Array).length).toBe(8 * 1024 * 1024)
-      expect((calls[2]?.[1].body as Uint8Array).length).toBe(total - 4 * 1024 * 1024)
+      expect(calls[0]?.[1].headers).toMatchObject({ 'X-Upload-Content-Length': String(total) })
+      expect(sameBytes(calls[1]?.[1].body, payload.subarray(0, 8 * 1024 * 1024))).toBe(true)
+      expect(sameBytes(calls[2]?.[1].body, payload.subarray(half))).toBe(true)
       expect(calls[2]?.[1].headers).toMatchObject({
         'Content-Range': `bytes 4194304-${String(total - 1)}/${String(total)}`,
       })

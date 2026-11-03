@@ -37,6 +37,14 @@ import type { DispatchFn } from './runtime/types.ts'
 import type { RAMAccessor } from './accessor/ram.ts'
 import type { StorageUsage } from './vfs/capacity.ts'
 
+/** Whether `got` holds exactly `want`'s bytes: `toEqual` walks megabytes per element. */
+export function sameBytes(got: unknown, want: Uint8Array): boolean {
+  return (
+    got instanceof Uint8Array &&
+    Buffer.from(got.buffer, got.byteOffset, got.byteLength).equals(want)
+  )
+}
+
 /** A RAM accessor whose store holds at most `cap` bytes. */
 export function capped(
   cap: number,

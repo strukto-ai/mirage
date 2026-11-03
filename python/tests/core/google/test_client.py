@@ -253,14 +253,23 @@ async def test_a_stream_closed_early_closes_its_download():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("advance", [True, False])
-async def test_resumable_upload_honors_acknowledged_ranges(advance):
+@pytest.mark.parametrize(
+    ("advance", "spooled"),
+    [(True, True), (True, False), (False, True)],
+    ids=["spool", "bytes", "no-progress"],
+)
+async def test_resumable_upload_honors_acknowledged_ranges(advance, spooled):
     tm = _manager()
     tm.get_token = AsyncMock(return_value="token")
     url, upload = "https://example.test/start", "https://example.test/upload"
+    half = 4 * 1024 * 1024
     total = 8 * 1024 * 1024 + 17
+    # Two halves of different bytes, so a window read from the wrong offset
+    # differs in content, not only in length.
+    payload = b"a" * half + b"b" * (total - half)
     async with ByteSpool(0) as spool:
-        await spool.append(b"x" * total)
+        await spool.append(payload)
+        data = spool if spooled else payload
         with aioresponses() as mock:
             mock.post(
                 url + "?uploadType=resumable", headers={"Location": upload}
@@ -273,13 +282,19 @@ async def test_resumable_upload_honors_acknowledged_ranges(advance):
             if advance:
                 mock.put(upload, payload={"id": "done"})
                 result = await google_resumable(
-                    tm, "POST", url, {}, spool, "text/plain", {}
+                    tm, "POST", url, {}, data, "text/plain", {}
                 )
                 assert result == {"id": "done"}
+                start = mock.requests[
+                    ("POST", URL(url + "?uploadType=resumable"))
+                ][0]
+                assert start.kwargs["headers"][
+                    "X-Upload-Content-Length"
+                ] == str(total)
                 calls = mock.requests[("PUT", URL(upload))]
-                assert [len(call.kwargs["data"]) for call in calls] == [
-                    8 * 1024 * 1024,
-                    total - 4 * 1024 * 1024,
+                assert [call.kwargs["data"] for call in calls] == [
+                    payload[: 8 * 1024 * 1024],
+                    payload[half:],
                 ]
                 assert (
                     calls[1].kwargs["headers"]["Content-Range"]

@@ -40,6 +40,7 @@ from mirage.core.box.api import (
 )
 from mirage.core.box.client import BoxApiError, BoxTokenManager
 from mirage.errors.types import StaleWriteError
+from mirage.io.spool import ByteSpool
 from mirage.types import PathSpec
 from mirage.vfs.box.config import BoxConfig
 from tests.fixtures.write_context import KeptVersions
@@ -389,3 +390,64 @@ async def test_refused_reads_box_answers_like_the_shared_table(case, sent):
         assert got is None and store.kept == []
     else:
         assert isinstance(got, StaleWriteError) and store.kept == outcome
+
+
+MIB = 1024 * 1024
+UPLOAD = "https://upload.box.com/api/2.0/files"
+
+
+# Box takes up to 50 MB in one files/content request and opens an upload
+# session from 20,000,000 bytes (its API docs, not probed); from 20 MiB an
+# upload takes a session whatever holds the bytes.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("versioning", [False, True], ids=["new", "version"])
+@pytest.mark.parametrize("spooled", [False, True], ids=["bytes", "spool"])
+@pytest.mark.parametrize("size", [20 * MIB - 1, 20 * MIB])
+async def test_a_box_upload_from_20_mib_goes_through_a_session(
+    tm, versioning, spooled, size
+):
+    payload = b"a" * size
+    async with ByteSpool() as spool:
+        await spool.append(payload)
+        data = spool if spooled else payload
+        with (
+            patch(
+                "mirage.core.box.api.box_upload_session",
+                new_callable=AsyncMock,
+                return_value={"via": "session"},
+            ) as session,
+            patch(
+                "mirage.core.box.api.box_upload_multipart",
+                new_callable=AsyncMock,
+                return_value={"via": "multipart"},
+            ) as multipart,
+        ):
+            if versioning:
+                reply = await upload_file_version(
+                    tm, "7", "a.txt", data, '"v1"'
+                )
+            else:
+                reply = await upload_new_file(tm, "0", "a.txt", data)
+    if size < 20 * MIB:
+        assert reply == {"via": "multipart"}
+        session.assert_not_awaited()
+        sent = multipart.await_args
+        assert sent.args[4] == payload
+        assert sent.kwargs.get("headers") == (
+            {"If-Match": '"v1"'} if versioning else None
+        )
+        return
+    assert reply == {"via": "session"}
+    multipart.assert_not_awaited()
+    assert session.await_args.args == (
+        (tm, f"{UPLOAD}/7/upload_sessions", {"file_name": "a.txt"}, data, '"v1"')
+        if versioning
+        else (
+            tm,
+            f"{UPLOAD}/upload_sessions",
+            {"folder_id": "0", "file_name": "a.txt"},
+            data,
+        )
+    )
+    # The input itself: a spool is streamed from, never read into memory.
+    assert session.await_args.args[3] is data

@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { ByteSpool } from '../../io/spool.ts'
+import { sameBytes } from '../../test-utils.ts'
 import type * as ClientModule from './client.ts'
 
 vi.mock('./client.ts', async () => {
@@ -22,6 +24,8 @@ vi.mock('./client.ts', async () => {
     googleGet: vi.fn(),
     googleGetBytes: vi.fn(),
     googleDelete: vi.fn(),
+    googleResumable: vi.fn(),
+    googleSendBytes: vi.fn(),
   }
 })
 
@@ -37,6 +41,8 @@ import {
   listSharedDrives,
   searchFiles,
   storageQuota,
+  updateFileContent,
+  uploadFile,
 } from './drive.ts'
 
 const STUB_TOKEN_MANAGER = {
@@ -223,5 +229,55 @@ describe('downloadRevision', () => {
     const [, url, sent] = vi.mocked(client.googleGetBytes).mock.calls[0] ?? []
     expect(url).toMatch(/\/files\/f1\/revisions\/r1\?alt=media$/)
     expect(sent).toBe(window)
+  })
+})
+
+const UPLOAD = 'https://www.googleapis.com/upload/drive/v3/files'
+const MIB = 1024 * 1024
+
+// Drive takes at most 5 MB in one multipart or media request (its upload
+// guide, not probed), so past 4 MiB an upload goes resumable whatever holds
+// the bytes.
+describe('drive upload protocol', () => {
+  it.each(
+    [false, true].flatMap((updating) =>
+      [false, true].flatMap((spooled) =>
+        [4 * MIB, 4 * MIB + 1].map((size) => [updating, spooled, size] as const),
+      ),
+    ),
+  )('a drive upload past 4 MiB goes resumable: update %s, spooled %s, %i bytes', async (updating, spooled, size) => {
+    const payload = new Uint8Array(size).fill(97)
+    const spool = new ByteSpool()
+    await spool.append(payload)
+    const data = spooled ? spool : payload
+    vi.mocked(client.googleResumable).mockResolvedValue({ id: 'resumed' })
+    vi.mocked(client.googleSendBytes).mockResolvedValue({ id: 'sent' })
+    try {
+      const reply = updating
+        ? await updateFileContent(STUB_TOKEN_MANAGER, 'f1', data)
+        : await uploadFile(STUB_TOKEN_MANAGER, 'a.txt', 'p1', data)
+      if (size <= 4 * MIB) {
+        expect(reply).toEqual({ id: 'sent' })
+        expect(client.googleResumable).not.toHaveBeenCalled()
+        const body = vi.mocked(client.googleSendBytes).mock.calls[0]?.[3] as Uint8Array
+        if (updating) expect(sameBytes(body, payload)).toBe(true)
+        else expect(Buffer.from(body).includes(Buffer.from(payload))).toBe(true)
+        return
+      }
+      expect(reply).toEqual({ id: 'resumed' })
+      expect(client.googleSendBytes).not.toHaveBeenCalled()
+      const args = vi.mocked(client.googleResumable).mock.calls[0] ?? []
+      expect(args.slice(0, 4)).toEqual(
+        updating
+          ? [STUB_TOKEN_MANAGER, 'PATCH', `${UPLOAD}/f1`, {}]
+          : [STUB_TOKEN_MANAGER, 'POST', UPLOAD, { name: 'a.txt', parents: ['p1'] }],
+      )
+      // The input itself: a spool is streamed from, never read into memory.
+      expect(args[4]).toBe(data)
+      expect(args[5]).toBe('application/octet-stream')
+      expect(args[6]).toEqual({ supportsAllDrives: 'true', fields: expect.stringContaining('id') })
+    } finally {
+      await spool.close()
+    }
   })
 })

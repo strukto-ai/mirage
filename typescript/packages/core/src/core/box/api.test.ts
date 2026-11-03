@@ -24,6 +24,7 @@ vi.mock('./client.ts', async () => {
     boxOptions: vi.fn(),
     boxPostJson: vi.fn(),
     boxUploadMultipart: vi.fn(),
+    boxUploadSession: vi.fn(),
   }
 })
 
@@ -31,9 +32,10 @@ import * as client from './client.ts'
 import { BoxApiError, BoxTokenManager } from './client.ts'
 import { runWithWriteContext } from '../../cache/context.ts'
 import type { Measured } from '../../cache/types.ts'
-import { keptVersions } from '../../test-utils.ts'
+import { keptVersions, sameBytes } from '../../test-utils.ts'
 import { isStaleWrite } from '../../errors/fs.ts'
 import type { StaleWriteError } from '../../errors/types.ts'
+import { ByteSpool } from '../../io/spool.ts'
 import { PathSpec } from '../../types.ts'
 import {
   createFolder,
@@ -218,6 +220,55 @@ describe('refused', () => {
     else {
       expect(isStaleWrite(got)).toBe(true)
       expect(kept).toEqual(['s1'])
+    }
+  })
+})
+
+const MIB = 1024 * 1024
+const UPLOAD = 'https://upload.box.com/api/2.0/files'
+
+// Box takes up to 50 MB in one files/content request and opens an upload
+// session from 20,000,000 bytes (its API docs, not probed); from 20 MiB an
+// upload takes a session whatever holds the bytes.
+describe('box upload protocol', () => {
+  it.each(
+    [false, true].flatMap((versioning) =>
+      [false, true].flatMap((spooled) =>
+        [20 * MIB - 1, 20 * MIB].map((size) => [versioning, spooled, size] as const),
+      ),
+    ),
+  )('a box upload from 20 MiB goes through a session: version %s, spooled %s, %i bytes', async (versioning, spooled, size) => {
+    const tm = new BoxTokenManager({ accessToken: 'tok' })
+    const payload = new Uint8Array(size).fill(97)
+    const spool = new ByteSpool()
+    await spool.append(payload)
+    const data = spooled ? spool : payload
+    vi.mocked(client.boxUploadSession).mockResolvedValue({ via: 'session' })
+    vi.mocked(client.boxUploadMultipart).mockResolvedValue({ via: 'multipart' })
+    try {
+      const reply = versioning
+        ? await uploadFileVersion(tm, '7', 'a.txt', data, '"v1"')
+        : await uploadNewFile(tm, '0', 'a.txt', data)
+      if (size < 20 * MIB) {
+        expect(reply).toEqual({ via: 'multipart' })
+        expect(client.boxUploadSession).not.toHaveBeenCalled()
+        const sent = vi.mocked(client.boxUploadMultipart).mock.calls[0] ?? []
+        expect(sameBytes(sent[4], payload)).toBe(true)
+        expect(sent[5]).toEqual(versioning ? { 'If-Match': '"v1"' } : undefined)
+        return
+      }
+      expect(reply).toEqual({ via: 'session' })
+      expect(client.boxUploadMultipart).not.toHaveBeenCalled()
+      const args = vi.mocked(client.boxUploadSession).mock.calls[0] ?? []
+      // The input itself: a spool is streamed from, never read into memory.
+      expect(args[3]).toBe(data)
+      expect([...args.slice(0, 3), ...args.slice(4)]).toEqual(
+        versioning
+          ? [tm, `${UPLOAD}/7/upload_sessions`, { file_name: 'a.txt' }, '"v1"']
+          : [tm, `${UPLOAD}/upload_sessions`, { folder_id: '0', file_name: 'a.txt' }],
+      )
+    } finally {
+      await spool.close()
     }
   })
 })

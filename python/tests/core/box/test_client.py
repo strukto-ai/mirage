@@ -194,12 +194,19 @@ def test_conflict_of_reads_the_item_a_409_names(text, kind):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fail", [False, True])
-async def test_upload_session_digests_commit_condition_and_abort(fail):
+@pytest.mark.parametrize(
+    ("fail", "spooled"),
+    [(False, True), (False, False), (True, True)],
+    ids=["spool", "bytes", "abort"],
+)
+async def test_upload_session_digests_commit_condition_and_abort(
+    fail, spooled
+):
     tm = BoxTokenManager(BoxConfig(access_token="token"))
     base = "https://example.test/session"
     async with ByteSpool(0) as spool:
         await spool.append(b"abcdefg")
+        data = spool if spooled else b"abcdefg"
         with aioresponses() as mock:
             mock.post(
                 base,
@@ -228,13 +235,18 @@ async def test_upload_session_digests_commit_condition_and_abort(fail):
             mock.delete(base, status=204)
             if fail:
                 with pytest.raises(Exception):
-                    await box_upload_session(tm, base, {}, spool, '"version"')
+                    await box_upload_session(tm, base, {}, data, '"version"')
             else:
                 assert await box_upload_session(
-                    tm, base, {}, spool, '"version"'
+                    tm, base, {}, data, '"version"'
                 ) == {"entries": [{"id": "done"}]}
+            created = mock.requests[("POST", URL(base))][0]
+            assert created.kwargs["json"] == {"file_size": 7}
             calls = mock.requests[("PUT", URL(base + "/part"))]
             assert [call.kwargs["data"] for call in calls] == [b"abcd", b"efg"]
+            assert [
+                call.kwargs["headers"]["Content-Range"] for call in calls
+            ] == ["bytes 0-3/7", "bytes 4-6/7"]
             for call in calls:
                 assert (
                     call.kwargs["headers"]["Digest"]
