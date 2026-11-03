@@ -185,6 +185,68 @@ describe('the server API in workerd', () => {
     expect((await call('GET', '/v1/workspaces/api/codex-exec')).status).toBe(501)
   })
 
+  it('runs a Python policy program on monty', async () => {
+    const guard = [
+      'import json, os',
+      'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
+      'if ctx["command"] == "cat":',
+      '    print(json.dumps({"kind": "deny", "reason": "no cat here"}))',
+    ].join('\n')
+    const created = await call('POST', '/v1/workspaces', {
+      id: 'guarded',
+      config: {
+        mounts: { '/': { vfs: 'ram' } },
+        profiles: {
+          guard: {
+            policy: {
+              pre_command: [{ script: { source: guard, language: 'python' }, runtime: 'monty' }],
+            },
+          },
+        },
+        profile: 'guard',
+      },
+    })
+    expect(created.status).toBe(201)
+    const denied = await shell('guarded', 'echo hi > /x && cat /x')
+    expect(denied.exit_code).not.toBe(0)
+    expect(JSON.stringify(denied)).toContain('no cat here')
+    expect((await shell('guarded', 'echo ok')).stdout).toBe('ok\n')
+  })
+
+  it("holds a workspace's lines to its network rule", async () => {
+    await call('POST', '/v1/workspaces', {
+      id: 'offline',
+      config: { mounts: { '/': { vfs: 'ram' } }, network: false },
+    })
+    const fetched = await shell('offline', 'curl -s -o /dev/null https://example.com')
+    expect(fetched.exit_code).toBe(7)
+  })
+
+  it('asks a Python pre_network program before a line connects', async () => {
+    const guard = [
+      'import json, os',
+      'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
+      'if ctx["host"] == "example.com":',
+      '    print(json.dumps({"kind": "deny", "reason": "not this host"}))',
+    ].join('\n')
+    await call('POST', '/v1/workspaces', {
+      id: 'netguard',
+      config: {
+        mounts: { '/': { vfs: 'ram' } },
+        profiles: {
+          guard: {
+            policy: {
+              pre_network: [{ script: { source: guard, language: 'python' }, runtime: 'monty' }],
+            },
+          },
+        },
+        profile: 'guard',
+      },
+    })
+    const fetched = await shell('netguard', 'curl -s -o /dev/null https://example.com')
+    expect(fetched.exit_code).not.toBe(0)
+  })
+
   it('closes a workspace', async () => {
     await call('POST', '/v1/workspaces', {
       id: 'gone',

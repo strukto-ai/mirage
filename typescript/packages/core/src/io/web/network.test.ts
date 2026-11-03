@@ -12,15 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runWithEgress } from '@struktoai/mirage-core/io/gateway'
-import { type NetworkRule, networkRule, runWithNetwork } from '@struktoai/mirage-core/io/network'
-import { Policies } from '@struktoai/mirage-core/policy/policies'
-import type * as AsyncContext from '@struktoai/mirage-core/utils/async_context'
+import { runWithEgress } from '../gateway.ts'
+import { type NetworkRule, networkRule, runWithNetwork } from '../network.ts'
+import { Policies } from '../../policy/policies.ts'
+import type * as AsyncContext from '../../utils/async_context.ts'
 import { afterAll, describe, expect, it, vi } from 'vitest'
 import { routed, watchNetwork } from './network.ts'
 
 // A page's storage: every concurrently bound call is live at once.
-vi.mock('@struktoai/mirage-core/utils/async_context', async (importOriginal) => {
+vi.mock('../../utils/async_context.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof AsyncContext>()
   return {
     ...actual,

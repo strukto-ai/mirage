@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { runWithEgress } from '@struktoai/mirage-core/io/gateway'
-import type { Policy } from '@struktoai/mirage-core/policy/base'
-import { Policies } from '@struktoai/mirage-core/policy/policies'
-import type { NetworkContext, NetworkResultContext } from '@struktoai/mirage-core/policy/types'
-import { Limit } from '@struktoai/mirage-core/types'
+import { runWithEgress } from '../gateway.ts'
+import type { Policy } from '../../policy/base.ts'
+import { Policies } from '../../policy/policies.ts'
+import type { NetworkContext, NetworkResultContext } from '../../policy/types.ts'
+import { Limit } from '../../types.ts'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { watch } from './gateway.ts'
 

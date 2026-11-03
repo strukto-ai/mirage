@@ -14,6 +14,7 @@
 
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
+import { watchNetwork } from '@struktoai/mirage-core/io/web/network'
 import { registerApi } from '@struktoai/mirage-server/api'
 import { AuthMode, resolveAuthConfig, type AuthConfig } from '@struktoai/mirage-server/auth/config'
 import { authenticator, PUBLIC_PATHS } from '@struktoai/mirage-server/auth/middleware'
@@ -83,6 +84,7 @@ export function createApp(options: EdgeAppOptions = {}): EdgeApp {
     const registry = new WorkspaceRegistry({
       accountsRequired: auth.mode === AuthMode.Jwt,
       owners: new RAMRecordClient(),
+      watchNetwork,
       ...(options.maxWorkspaces !== undefined ? { maxWorkspaces: options.maxWorkspaces } : {}),
       ...(options.maxSessions !== undefined ? { maxSessions: options.maxSessions } : {}),
       policies: options.policies ?? [],

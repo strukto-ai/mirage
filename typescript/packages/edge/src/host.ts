@@ -19,6 +19,8 @@ import {
   type ConfigHost,
   type StoreBlock,
 } from '@struktoai/mirage-core/config'
+import { watch } from '@struktoai/mirage-core/io/web/gateway'
+import { watchNetwork } from '@struktoai/mirage-core/io/web/network'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import { buildVfs, knownVfsNames } from '@struktoai/mirage-core/vfs/registry'
@@ -41,10 +43,13 @@ export class Workspace extends CoreWorkspace {
     const build = savedVfsBuild(entry, (name) => knownVfsNames().includes(name))
     return build === null ? null : buildVfs(build.name, build.config)
   }
-}
 
-function noop(): void {
-  /* an edge host enforces no network rule of its own */
+  constructor(...args: ConstructorParameters<typeof CoreWorkspace>) {
+    super(...args)
+    this.registry.setNetworkWatch(watchNetwork)
+    if (this.registry.network !== null) watchNetwork()
+    watch()
+  }
 }
 
 /** A workspace's state lives in memory: the host has no disk and no store client. */
@@ -66,7 +71,7 @@ const CONFIG: ConfigHost = {
   buildStateStore,
   readScript: (path) => refuse(`read the script file ${path}; inline its source`),
   loadRef: (ref) => Promise.reject(new Error(`an edge host cannot import ${ref}`)),
-  watchNetwork: noop,
+  watchNetwork,
   releaseNetwork: () => Promise.resolve(),
 }
 
@@ -91,7 +96,7 @@ export function edgeHost(): ServerHost {
         (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
       ),
     reservedIds: new Set(['', '.', '..']),
-    watchNetwork: noop,
+    watchNetwork,
     mountKernel: () => Promise.reject(new Error('an edge host has no kernel mounts')),
   }
 }

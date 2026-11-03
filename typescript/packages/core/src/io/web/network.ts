@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { type Egress, liveEgress } from '@struktoai/mirage-core/io/gateway'
-import { networkBound, networkLets, networkRoute } from '@struktoai/mirage-core/io/network'
+import { type Egress, liveEgress } from '../gateway.ts'
+import { networkBound, networkLets, networkRoute } from '../network.ts'
 
 // The schemes that reach a host; data:, blob: and the like never leave the page.
 export const REACHING = new Set(['http:', 'https:', 'ws:', 'wss:'])
@@ -26,8 +26,14 @@ export function portOf(target: URL): number {
   return target.protocol === 'https:' || target.protocol === 'wss:' ? 443 : 80
 }
 
+/** A request's URL, resolved against the page where there is one; an edge isolate has none. */
+export function targetOf(input: RequestInfo | URL): URL {
+  const { location } = globalThis as { location?: { href: string } }
+  return new URL(input instanceof Request ? input.url : input, location?.href)
+}
+
 function lets(url: string | URL): boolean {
-  const target = new URL(url, globalThis.location.href)
+  const target = targetOf(url)
   return !REACHING.has(target.protocol) || networkLets(target.hostname, '', portOf(target))
 }
 
@@ -67,7 +73,7 @@ function routeOf(host: string, port: number): readonly [string, number] | null {
  * Throws when it cannot be routed.
  */
 export function routed(input: RequestInfo | URL): RequestInfo | URL {
-  const target = new URL(input instanceof Request ? input.url : input, globalThis.location.href)
+  const target = targetOf(input)
   if (!REACHING.has(target.protocol)) return input
   const route = routeOf(target.hostname, portOf(target))
   if (route === null) return input
