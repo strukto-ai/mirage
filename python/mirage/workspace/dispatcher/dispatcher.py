@@ -1516,6 +1516,7 @@ class Dispatcher:
                     _forward(parent, row)
             if rec is not None:
                 rec.duration_ms = timer.elapsed_ms
+                rec.timestamp = int(timer.clock.now() * 1000)
 
     async def _dispatch_op(
         self,

@@ -45,6 +45,7 @@ import type { Policy } from '../../policy/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import type { Action, VfsContext, VfsResultContext } from '../../policy/types.ts'
 import { followedDay } from '../../core/time_range.ts'
+import { ManualClock } from '../../utils/clock.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
 import { sliceWindow, spliceWindow } from '../../utils/ranges.ts'
 import { ident } from '../../utils/stat_view.ts'
@@ -4076,6 +4077,43 @@ it('a read its backend records at close is one row', async () => {
     const rows = ws.records.filter((r) => r.op === 'read')
     expect(rows.map((r) => [r.bytes, r.served])).toEqual([[2, 'backend']])
     expect(ws.networkBytes).toBe(2)
+  } finally {
+    await ws.close()
+  }
+})
+
+class SlowStreamRAM extends RAMVFS {
+  constructor(private readonly clock: ManualClock) {
+    super()
+  }
+
+  override read(
+    path: PathSpec,
+    handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset !== 0 || size !== null) return super.read(path, handed, offset, size)
+    return this.slow()
+  }
+
+  private async *slow(): AsyncIterable<Uint8Array> {
+    yield new TextEncoder().encode('a')
+    this.clock.advance(5)
+    yield new TextEncoder().encode('b')
+  }
+}
+
+it('a streamed read is stamped when it finishes', async () => {
+  const clock = new ManualClock(1000)
+  const ws = new Workspace({ '/m': new SlowStreamRAM(clock) }, { mode: MountMode.WRITE, clock })
+  try {
+    await ws.vfs.write('/m/a', 'ab')
+    ws.records.length = 0
+    const io = await ws.shell('cat /m/a')
+    expect(io.stdoutText).toBe('ab')
+    const rows = ws.records.filter((r) => r.op === 'read')
+    expect(rows.map((r) => [r.timestamp, r.durationMs])).toEqual([[1_005_000, 5_000]])
   } finally {
     await ws.close()
   }

@@ -1115,7 +1115,10 @@ export class Dispatcher {
           forward(parent, row)
         }
       }
-      if (rec !== null) rec.durationMs = timer.elapsedMs
+      if (rec !== null) {
+        rec.durationMs = timer.elapsedMs
+        rec.timestamp = Math.floor(timer.clock.now() * 1000)
+      }
     }
   }
 

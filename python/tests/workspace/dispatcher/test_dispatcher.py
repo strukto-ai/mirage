@@ -73,6 +73,7 @@ from mirage.types import (
     SearchQuery,
     Visibility,
 )
+from mirage.utils.clock import ManualClock
 from mirage.utils.key_prefix import mounted_path
 from mirage.utils.ranges import slice_window, splice_window
 from mirage.utils.stat_view import ident
@@ -4245,5 +4246,42 @@ async def test_a_read_its_backend_records_at_close_is_one_row():
         rows = [r for r in ws.vfs.records if r.op == "read"]
         assert [(r.bytes, r.served) for r in rows] == [(2, "backend")]
         assert ws.vfs.network_bytes == 2
+    finally:
+        await ws.close()
+
+
+class _SlowStreamRAM(RAMVFS):
+    def __init__(self, clock: ManualClock) -> None:
+        super().__init__()
+        self.clock = clock
+
+    def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> Any:
+        if offset or size is not None:
+            return super().read(path, offset, size)
+        return self._slow()
+
+    async def _slow(self) -> AsyncIterator[bytes]:
+        yield b"a"
+        self.clock.advance(5)
+        yield b"b"
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_read_is_stamped_when_it_finishes():
+    clock = ManualClock(1_000)
+    ws = Workspace(
+        {"/m": _SlowStreamRAM(clock)}, mode=MountMode.WRITE, clock=clock
+    )
+    try:
+        await ws.vfs.write("/m/a", b"ab")
+        ws.vfs.records.clear()
+        io = await ws.shell("cat /m/a")
+        assert await io.stdout_str() == "ab"
+        rows = [r for r in ws.vfs.records if r.op == "read"]
+        assert [(r.timestamp, r.duration_ms) for r in rows] == [
+            (1_005_000, 5_000)
+        ]
     finally:
         await ws.close()

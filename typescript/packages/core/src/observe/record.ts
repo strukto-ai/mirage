@@ -158,7 +158,7 @@ export class OpRecord {
   readonly path: string
   readonly source: string
   bytes: number
-  readonly timestamp: number
+  timestamp: number
   durationMs: number
   fingerprint: string | null
   revision: string | null
