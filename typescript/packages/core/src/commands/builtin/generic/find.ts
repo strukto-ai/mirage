@@ -468,15 +468,20 @@ export function findGeneric(
       // Yielding it first lets a closed pipe prevent that remote traversal.
       const usesEmptyEarly = expr !== null ? expr.usesEmpty : emptyFlag
       const timed = treeHasTime(tree)
+      const mtimePushed = pushMtime && (effMtimeMin !== null || effMtimeMax !== null)
+      // The start point's own time answers its row's time tests, early and
+      // in the row that replaces the backend's below; unknown leaves the
+      // early row to the walk.
+      const rootMtime =
+        startIsDir && timed && !mtimePushed
+          ? stat !== undefined
+            ? await rowMtime(stat, rstripSlash(root.virtual) || '/')
+            : modifiedTs(startFile?.modified ?? null)
+          : null
       let first: string[] = []
-      if (
-        startIsDir &&
-        !usesEmptyEarly &&
-        !timed &&
-        !(pushMtime && (effMtimeMin !== null || effMtimeMax !== null))
-      ) {
+      if (startIsDir && !usesEmptyEarly && !mtimePushed && !(timed && rootMtime === null)) {
         const rootRows =
-          rootDirResults(root, rootOptions, argsToTree(rootOptions), null).length > 0
+          rootDirResults(root, rootOptions, argsToTree(rootOptions), null, rootMtime).length > 0
             ? [rstripSlash(root.virtual) || '/']
             : []
         const checked =
@@ -531,7 +536,6 @@ export function findGeneric(
       // each backend, which read existence off its own listing. A pushed-down
       // mtime window is the one case left to the backend: this row never
       // passed through it.
-      const mtimePushed = pushMtime && (effMtimeMin !== null || effMtimeMax !== null)
       // Emptiness is the one fact this row needs that a caller can decline to
       // offer (a bespoke wrapper wires no readdir), and that caller's op may
       // know it. Left alone in that case, so a backend's answer is never
@@ -541,11 +545,6 @@ export function findGeneric(
       let rows = rootMatches
       if (startIsDir && !mtimePushed && canProbe) {
         const rootEmpty = usesEmpty && dirEmpty !== undefined ? await dirEmpty(root) : null
-        const rootMtime = !timed
-          ? null
-          : stat !== undefined
-            ? await rowMtime(stat, rootKey)
-            : modifiedTs(startFile?.modified ?? null)
         rows = withRootRow(
           rootMatches,
           root.virtual === '/' ? '/' : rstripSlash(root.virtual),

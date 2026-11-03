@@ -344,9 +344,11 @@ async def walk_find(
         st = None
         if need_mtime:
             st = await _stat_entry(stat, p, unstatted)
-            if st is None:
+            if st is None and windowed:
                 continue
-            learned[key] = modified_ts(st.modified)
+            # A failed stat leaves the time unknown, which fails every time
+            # test, so another -o arm (-name) can still match the entry.
+            learned[key] = modified_ts(st.modified) if st is not None else None
         entry = find_types.FindEntry(
             key=key,
             name=entry_name,

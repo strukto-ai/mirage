@@ -307,8 +307,10 @@ export async function walkFind(
     let st: FileStat | null = null
     if (needMtime) {
       st = await statEntry(deps, entry.path)
-      if (st === null) continue
-      learned.set(key, modifiedTs(st.modified))
+      if (st === null && windowed) continue
+      // A failed stat leaves the time unknown, which fails every time test,
+      // so another -o arm (-name) can still match the entry.
+      learned.set(key, st !== null ? modifiedTs(st.modified) : null)
     }
     const findEntry: FindEntry = {
       key,

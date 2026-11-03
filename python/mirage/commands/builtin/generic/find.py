@@ -43,6 +43,7 @@ from mirage.types import (
     LineFacts,
     PathSpec,
 )
+from mirage.utils.dates import in_mtime_window
 from mirage.utils.path import respell_one, respell_raw
 from mirage.view.types import LinkView, StatPath
 
@@ -377,14 +378,15 @@ def root_dir_results(
     tree: find_types.PredNode,
     *,
     is_empty: bool | None,
+    mtime: float | None = None,
 ) -> list[str]:
     """Results for the directory start point itself, at depth 0.
 
     GNU lists a directory start point before descending into it, so
     ``find <dir>`` names the directory even when it holds nothing. The
     start point was already statted to get here, so this row needs no
-    walk. ``-mtime`` is not applied: the caller skips the row under a
-    time test and leaves it to the walk.
+    walk. The time window is not applied here; ``mtime`` answers the
+    tree's own time tests.
 
     Args:
         search_path (PathSpec): the start point, as the operand named it.
@@ -392,6 +394,8 @@ def root_dir_results(
         tree (PredNode): the predicate tree bound to the start point.
         is_empty (bool | None): whether the directory holds nothing, None
             when no listing was taken (``-empty`` then cannot match it).
+        mtime (float | None): the start point's epoch-second mtime, None
+            when unknown.
     """
     results: list[str] = []
     find_eval.emit_start_path(
@@ -406,6 +410,7 @@ def root_dir_results(
         mindepth=args.mindepth,
         min_size=args.min_size,
         max_size=args.max_size,
+        mtime=mtime,
     )
     return results
 
@@ -418,7 +423,9 @@ async def early_root(
     """Emit an independently known start point before asking for descendants.
 
     The walk must not delay the directory row the dispatcher already
-    resolved, so a closing pipe can stop here before any listing.
+    resolved, so a closing pipe can stop here before any listing. Under
+    a time test the row is answered from the start point's own mtime,
+    and left to the walk when that is unknown.
 
     Args:
         search (PathSpec): the start point, as the operand named it.
@@ -429,19 +436,21 @@ async def early_root(
         list[str]: the start point's own row, or nothing when it cannot
             be answered before the walk.
     """
-    if (
-        args.empty
-        or args.mtime_min is not None
-        or args.mtime_max is not None
-        or start.stat is None
-    ):
+    if args.empty or start.stat is None:
         return []
     tree = find_eval.bind_tree(
         find_eval.args_to_tree(args), "", search.virtual, search.raw_path
     )
-    if find_eval.tree_has_time(tree):
-        return []
-    rows = root_dir_results(search, args, tree, is_empty=None)
+    ts = None
+    windowed = args.mtime_min is not None or args.mtime_max is not None
+    if windowed or find_eval.tree_has_time(tree):
+        # Only a known time answers early; otherwise the walk stats it.
+        ts = modified_ts(start.stat.modified)
+        if ts is None or not in_mtime_window(
+            ts, args.mtime_min, args.mtime_max
+        ):
+            return []
+    rows = root_dir_results(search, args, tree, is_empty=None, mtime=ts)
     return respell_raw(rows, search.virtual, search.raw_path)
 
 
