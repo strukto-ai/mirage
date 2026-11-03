@@ -129,7 +129,7 @@ export interface ExecWorkspace {
     kwargs?: Record<string, unknown>,
   ): Promise<unknown>
   cache: { clear(): Promise<void> }
-  mounts(): readonly { vfs: { index?: { clear(): Promise<void> } } }[]
+  mounts(): readonly { indexStore: { clear(): Promise<void> } }[]
   createSession(
     sessionId: string,
     options: { profile?: string | SessionProfile; permissions?: SessionProfile },

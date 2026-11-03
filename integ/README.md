@@ -504,6 +504,18 @@ duration or throughput estimate is not the assertion. The normal `python/**`,
 suite. Run it locally with `cd integ && pnpm exec tsx hosting/run.ts` after
 building TypeScript; append `python` or `typescript` to select one host.
 
+`integ-edge` runs the corpus's hf, email, slack and linear targets on the
+edge host: `edge/run.ts` starts their fakes through the launcher on the ports
+`ci/fakes.json` pins, starts the edge test worker under `wrangler dev`, builds
+each target's mounts and CLIs as a config the way the node adapters build
+instances, and sends every line over the server API, checked against the same
+goldens. A case needing more than the shell (sessions' inline profiles ride in
+as named ones; stat checks, faults, decisions, documents, fresh reads and
+capacity are skipped and counted, and a `clear_cache` case runs warm, so the
+write it makes still lands) stays on the node battery. Run it locally
+with `cd integ && pnpm exec tsx edge/run.ts`, optionally naming target ids,
+after building TypeScript and generating those fakes' Prisma clients.
+
 `hosting/tracking.json` also runs on both HTTP hosts, in foreground and
 background modes. It joins job records with policy denials,
 approval/retry decisions and the observer's history view. Completed records

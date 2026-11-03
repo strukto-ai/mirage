@@ -16,6 +16,7 @@
     "fuse/discord.ts",
     "server/**/*.ts",
     "hosting/**/*.ts",
+    "edge/**/*.ts",
     "access/**/*.ts",
     "events/airtable/**/*.ts",
     "events/cache/**/*.ts",
