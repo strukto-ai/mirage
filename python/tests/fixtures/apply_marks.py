@@ -1,11 +1,11 @@
 from collections.abc import Callable
 
-from mirage.observe.record import OpRecord
+from mirage.observe.record import OpRecord, OpServed
 from mirage.types import CacheFacts, MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
-Mark = tuple[str, str]
+Mark = tuple[str, str, OpServed]
 
 
 def caching_ram_workspace() -> Workspace:
@@ -23,7 +23,7 @@ def capture_marks(ws: Workspace) -> list[tuple[list[Mark], bool]]:
 
     Returns:
         list[tuple[list[Mark], bool]]: per line end, each record's
-        ``(op, path)`` and whether the line was nested.
+        ``(op, path, served)`` and whether the line was nested.
     """
     captured: list[tuple[list[Mark], bool]] = []
     orig = ws._dispatcher.keep_versions
@@ -33,7 +33,7 @@ def capture_marks(ws: Workspace) -> list[tuple[list[Mark], bool]]:
         cache_facts: Callable[[str], CacheFacts],
         nested: bool = False,
     ) -> None:
-        captured.append(([(r.op, r.path) for r in records], nested))
+        captured.append(([(r.op, r.path, r.served) for r in records], nested))
         await orig(records, cache_facts, nested)
 
     ws._dispatcher.keep_versions = recording  # type: ignore[method-assign]

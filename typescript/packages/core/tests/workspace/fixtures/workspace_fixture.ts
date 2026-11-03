@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { LostPaths, OpRecord } from '../../../src/observe/record.ts'
+import type { LostPaths, OpRecord, OpServed } from '../../../src/observe/record.ts'
 import { RAMVFS } from '../../../src/vfs/ram/ram.ts'
 import { type CacheFacts, MountMode, type Refusal } from '../../../src/types.ts'
 import type { RuntimeEntry } from '../../../src/runtime/base.ts'
@@ -30,7 +30,7 @@ export function cachingRamWorkspace(): Workspace {
   return new Workspace({ '/r': ram }, { mode: MountMode.WRITE })
 }
 
-export type Mark = [op: string, path: string]
+export type Mark = [op: string, path: string, served: OpServed]
 
 type KeepVersionsFn = (
   records: readonly OpRecord[],
@@ -41,7 +41,7 @@ type KeepVersionsFn = (
 
 /**
  * Snapshot the records each line's end keeps versions against, as
- * `[op, path]`, and whether the line was nested. Mirrors Python's
+ * `[op, path, served]`, and whether the line was nested. Mirrors Python's
  * `capture_marks`.
  */
 export function captureMarks(ws: Workspace): [Mark[], boolean][] {
@@ -49,7 +49,7 @@ export function captureMarks(ws: Workspace): [Mark[], boolean][] {
   const dispatcher = (ws as unknown as { dispatcher: { keepVersions: KeepVersionsFn } }).dispatcher
   const orig = dispatcher.keepVersions.bind(dispatcher)
   dispatcher.keepVersions = async (records, cacheFacts, lost, nested = false) => {
-    captured.push([records.map((r): Mark => [r.op, r.path]), nested])
+    captured.push([records.map((r): Mark => [r.op, r.path, r.served]), nested])
     await orig(records, cacheFacts, lost, nested)
   }
   return captured

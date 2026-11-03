@@ -25,6 +25,7 @@ from mirage.commands.config import command
 from mirage.commands.spec import CommandSpec
 from mirage.context.session_context import current_execution_id
 from mirage.io.types import IOResult
+from mirage.observe.record import OpServed
 from mirage.observe.store import RAMObserverStore
 from mirage.policy import Action, CommandContext, Deny, Policy
 from mirage.utils.abort import ABORT_JOIN_SECONDS, MirageAbortError
@@ -830,9 +831,10 @@ async def test_invocation_shell_does_not_admit_unrelated_calls(named):
 
 @pytest.mark.asyncio
 async def test_a_nested_line_applies_against_only_the_writes_since_it_began():
-    # Neither the outer line's earlier write nor any read reaches the
-    # nested apply: a concurrent sibling records into the same list, so a
-    # read token there could label bytes it never described.
+    # The outer line's earlier write does not reach the nested apply, and
+    # the apply drops the nested reads: a concurrent sibling records into
+    # the same list, so a read token there could label bytes it never
+    # described.
     ws = caching_ram_workspace()
     try:
         # Seeded with no copy kept, so the first cat reads the backend.
@@ -844,6 +846,9 @@ async def test_a_nested_line_applies_against_only_the_writes_since_it_began():
     finally:
         await ws.close()
     (nested, _), (outer, _) = captured
-    assert [m[:2] for m in nested] == [("write", "/r/h")]
     # The nested cat is served the entry the first one kept.
-    assert [m[:2] for m in outer].count(("read", "/r/f")) == 1
+    assert nested == [
+        ("read", "/r/f", OpServed.CACHE),
+        ("write", "/r/h", OpServed.BACKEND),
+    ]
+    assert outer.count(("read", "/r/f", OpServed.BACKEND)) == 1

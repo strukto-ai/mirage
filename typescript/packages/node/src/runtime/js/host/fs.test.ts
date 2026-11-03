@@ -644,10 +644,13 @@ describe('patchNodeFs — ledger', () => {
     // bytes, as an open, a write and a close do on a kernel mount.
     await fs.promises.writeFile('/data/x.txt', 'hi')
     await fs.promises.readFile('/data/x.txt')
-    expect(ws.vfs.records.map((r) => [r.op, r.path, r.bytes])).toEqual([
-      ['create', '/data/x.txt', 0],
-      ['pwrite', '/data/x.txt', 2],
-      ['read', '/data/x.txt', 2],
+    // The probes before the create fail, and are recorded as failed.
+    expect(ws.vfs.records.map((r) => [r.op, r.path, r.bytes, r.status])).toEqual([
+      ['stat', '/data/x.txt', 0, 'failed'],
+      ['readdir', '/data/x.txt', 0, 'failed'],
+      ['create', '/data/x.txt', 0, 'ok'],
+      ['pwrite', '/data/x.txt', 2, 'ok'],
+      ['read', '/data/x.txt', 2, 'ok'],
     ])
     await ws.close()
   })
