@@ -22,7 +22,7 @@ from urllib.parse import quote
 
 from opentelemetry import trace
 
-from mirage.errors.posix import POSIX
+from mirage.errors.posix import errno_name
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
@@ -138,17 +138,6 @@ def _tracer() -> trace.Tracer:
     return trace.get_tracer(TRACER_NAME)
 
 
-def _errno_name(number: int) -> str:
-    return next(
-        (
-            condition.name
-            for condition, posix in POSIX.items()
-            if posix.errno == number
-        ),
-        str(number),
-    )
-
-
 def _trace_line(
     workspace_id: str | None,
     session: str,
@@ -218,7 +207,9 @@ def _trace_line(
             )
             if rec.errno is not None:
                 call.set_attribute("mirage.vfs.errno", rec.errno)
-                call.set_attribute("error.type", _errno_name(rec.errno))
+                call.set_attribute(
+                    "error.type", errno_name(rec.errno) or "_OTHER"
+                )
             if rec.status in (OpStatus.FAILED, OpStatus.PARTIAL):
                 call.set_status(trace.StatusCode.ERROR)
             call.end(end_time=rec.timestamp * _NS_PER_MS)

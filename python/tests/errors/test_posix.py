@@ -19,6 +19,8 @@ import pytest
 from mirage.errors.posix import (
     LINUX_ERRNO,
     POSIX,
+    errno_name,
+    errno_of,
     linux_errno,
     posix_errno,
     posix_phrase,
@@ -106,3 +108,24 @@ def test_linux_errno_numbers_every_condition_as_linux_does():
     assert linux_errno(FsCondition.ENOTDIR) == 20
     assert linux_errno(FsCondition.ELOOP) == 40
     assert linux_errno(FsCondition.EDQUOT) == 122
+
+
+@pytest.mark.parametrize(
+    "native,number",
+    [(errno.ENOSPC, 28), (errno.ENAMETOOLONG, 36), (errno.ELOOP, 40)],
+)
+def test_errno_of_numbers_a_raw_error_as_linux_does(native, number):
+    assert errno_of(OSError(native, "x")) == number
+
+
+def test_errno_of_has_nothing_for_an_error_without_one():
+    assert errno_of(None) is None
+    assert errno_of(ValueError("x")) is None
+    assert errno_of(OSError("x")) is None
+
+
+def test_errno_name_gives_the_canonical_name():
+    assert errno_name(28) == "ENOSPC"
+    assert errno_name(95) == "ENOTSUP"
+    assert errno_name(61) == "ENODATA"
+    assert errno_name(999) is None

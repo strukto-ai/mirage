@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { POSIX, posixErrno, posixPhrase } from './posix.ts'
+import { POSIX, errnoName, errnoOf, posixErrno, posixPhrase } from './posix.ts'
 import { FS_CONDITIONS } from './types.ts'
 
 describe('the posix table', () => {
@@ -50,5 +50,29 @@ describe('the posix table', () => {
       expect(posixErrno(cond)).toBeGreaterThan(0)
       expect(POSIX[cond].phrase).not.toBe('')
     }
+  })
+})
+
+describe('errnoOf', () => {
+  it.each([
+    ['ENOSPC', 28],
+    ['ENAMETOOLONG', 36],
+    ['ELOOP', 40],
+  ] as const)('numbers a raw %s as Linux does', (code, number) => {
+    expect(errnoOf(Object.assign(new Error('x'), { code }))).toBe(number)
+  })
+
+  it('has nothing for an error without one', () => {
+    expect(errnoOf(null)).toBeNull()
+    expect(errnoOf(new Error('x'))).toBeNull()
+  })
+})
+
+describe('errnoName', () => {
+  it('gives the canonical name', () => {
+    expect(errnoName(28)).toBe('ENOSPC')
+    expect(errnoName(95)).toBe('ENOTSUP')
+    expect(errnoName(61)).toBe('ENODATA')
+    expect(errnoName(999)).toBeNull()
   })
 })
