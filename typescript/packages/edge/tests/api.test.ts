@@ -390,24 +390,37 @@ describe('the server API in workerd', () => {
     },
   )
 
-  it("holds a database's socket to the network rule", async () => {
+  it("holds a database's and a mail server's sockets to the network rule", async () => {
+    const account = {
+      imap_host: 'mail.test',
+      smtp_host: 'mail.test',
+      username: 'u',
+      password: 'p',
+    }
     const created = await call('POST', '/v1/workspaces', {
       id: 'sockets',
       config: {
         mounts: {
           '/': { vfs: 'ram' },
           '/pg': { vfs: 'postgres', config: { dsn: 'postgres://u:p@db.test:5432/x' } },
+          '/mail': { vfs: 'email', config: account },
         },
-        network: { denied_domains: ['db.test'] },
+        clis: { himalaya: { cli: 'himalaya', config: account } },
+        network: { denied_domains: ['db.test', 'mail.test'] },
       },
     })
     expect(created.status).toBe(201)
-    const answer = await call('POST', '/v1/workspaces/sockets/shell', {
-      command: 'ls /pg/public/tables',
-    })
-    const { exit_code, stderr } = answer.json as { exit_code: number; stderr: string }
-    expect(exit_code).not.toBe(0)
-    expect(stderr).toContain('Permission denied')
+    const refused = async (command: string): Promise<string> => {
+      const answer = await call('POST', '/v1/workspaces/sockets/shell', { command })
+      const { exit_code, stderr } = answer.json as { exit_code: number; stderr: string }
+      expect(exit_code).not.toBe(0)
+      return stderr
+    }
+    expect(await refused('ls /pg/public/tables')).toContain('Permission denied')
+    expect(await refused('ls /mail')).toContain('Permission denied')
+    expect(
+      await refused("printf 'To: a@b.test\\nSubject: s\\n\\nhi\\n' | himalaya message send"),
+    ).toContain('EACCES mail.test:587')
   })
 
   it('runs an MCP server as a CLI, its client kept across requests', async () => {
