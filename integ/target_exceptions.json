@@ -1336,6 +1336,33 @@
       "sharepoint-prefix": "This fake does not report a newly written file's modified time as the time it was written, so a fresh file never meets a time test that needs its age (seen on both hosts in CI). The time test is host code, pinned on the targets that report real write times: ram, disk, redis, opfs, s3, gridfs, hf and ssh.",
       "nextcloud": "The shared integ jobs that showed which fakes report a fresh file's write time do not run this target, so whether a fresh file meets a time test here is unverified. The time test is host code, pinned on ram, disk, redis, opfs, s3, gridfs, hf and ssh.",
       "tidb-filesystem": "The shared integ jobs that showed which fakes report a fresh file's write time do not run this target, so whether a fresh file meets a time test here is unverified. The time test is host code, pinned on ram, disk, redis, opfs, s3, gridfs, hf and ssh."
+    },
+    "integ/unix/find/mtime.json :: find_mtime": {
+      "dropbox": "Dropbox folders carry no modified time, so this tautology lists no folder there; find_mtime_skips_folders_with_no_time runs the same line on dropbox and dropbox-root and pins that output.",
+      "dropbox-root": "Dropbox folders carry no modified time, so this tautology lists no folder there; find_mtime_skips_folders_with_no_time runs the same line on dropbox and dropbox-root and pins that output."
+    },
+    "integ/unix/find/mtime.json :: find_mtime_skips_folders_with_no_time": {
+      "box": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "databricks": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "databricks-prefix": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "disk": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "gdrive": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "gdrive-folder": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "gridfs": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "gridfs-prefix": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "hf": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "hf-prefix": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "nextcloud": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "onedrive": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "opfs": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "ram": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "redis": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "s3": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "s3-prefix": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "sharepoint": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "sharepoint-prefix": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "ssh": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time.",
+      "tidb-filesystem": "This target reports a modified time for every folder, so find_mtime, which runs the same line here, lists its folders; this case exists for the Dropbox targets, whose folders carry no modified time."
     }
   }
 }
