@@ -53,8 +53,18 @@ if (path === undefined) throw new Error('cargo reported no mirage_rs_wasm.wasm')
 const wasm = readFileSync(path)
 const output = new URL('../src/generated/', import.meta.url)
 mkdirSync(output, { recursive: true })
-writeFileSync(
-  new URL('mirage_rs.ts', output),
-  `export default ${JSON.stringify(wasm.toString('base64'))} as string\n`,
-)
+const base64 = JSON.stringify(wasm.toString('base64'))
+writeFileSync(new URL('mirage_rs.ts', output), `export default ${base64} as string\n`)
 writeFileSync(new URL('mirage_rs.wasm', output), wasm)
+
+// The modules `#mirage-rs-wasm` names, written here rather than by the
+// build so code run from source (tsx, the integ runners) finds them too:
+// the base64 string, and under workerd the .wasm itself.
+const built = new URL('../dist/generated/', import.meta.url)
+mkdirSync(built, { recursive: true })
+writeFileSync(new URL('mirage_rs.js', built), `export default ${base64}\n`)
+writeFileSync(new URL('mirage_rs.wasm', built), wasm)
+writeFileSync(
+  new URL('mirage_rs.workerd.js', built),
+  "import module from './mirage_rs.wasm'\n\nexport default module\n",
+)
