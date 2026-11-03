@@ -168,9 +168,13 @@ export function parseNewermt(value: string): number {
   return ts.getTime() / 1000
 }
 
-/** One `-mtime` as inclusive epoch-second bounds: `cmp` is `+`, `-` or `=`. */
+/**
+ * One `-mtime` as inclusive epoch-second bounds: `cmp` is `+`, `-` or `=`.
+ * GNU drops the fraction of a file's age in days before comparing, so `+N`
+ * matches only files at least N+1 whole days old.
+ */
 export function mtimeBounds(cmp: string, days: number, now: number): Bounds {
-  if (cmp === '+') return [null, now - days * DAY]
+  if (cmp === '+') return [null, now - (days + 1) * DAY]
   if (cmp === '-') return [now - days * DAY, null]
   return [now - (days + 1) * DAY, now - days * DAY]
 }

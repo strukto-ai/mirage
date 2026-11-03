@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { evaluate, treeHasAction } from '../core/generic/find_eval.ts'
 import { UsageError } from '../commands/errors.ts'
-import { parseFindExpression } from './find.ts'
+import { mtimeBounds, parseFindExpression } from './find.ts'
 
 describe('parseFindExpression', () => {
   it('negation', () => {
@@ -112,6 +112,16 @@ describe('parseFindExpression', () => {
     expect([e.minSize, e.maxSize]).toEqual([null, 1])
     e = parseFindExpression(['-size', '2c'])
     expect([e.minSize, e.maxSize]).toEqual([2, 2])
+  })
+
+  it('mtime bounds count whole days like GNU', () => {
+    // GNU drops the fraction of a day, so +N needs N+1 whole days.
+    const now = 1_000_000
+    const day = 86400
+    expect(mtimeBounds('+', 0, now)).toEqual([null, now - day])
+    expect(mtimeBounds('+', 7, now)).toEqual([null, now - 8 * day])
+    expect(mtimeBounds('=', 1, now)).toEqual([now - 2 * day, now - day])
+    expect(mtimeBounds('-', 1, now)).toEqual([now - day, null])
   })
 
   it('intersects top-level windows and widens them under -o', () => {

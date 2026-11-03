@@ -234,13 +234,16 @@ def mtime_bounds(
 ) -> tuple[float | None, float | None]:
     """One ``-mtime`` as inclusive epoch-second bounds.
 
+    GNU drops the fraction of a file's age in days before comparing, so
+    ``+N`` matches only files at least N+1 whole days old.
+
     Args:
         cmp (str): ``+``, ``-`` or ``=``.
         days (float): the day count.
         now (float): the clock the day count is measured from.
     """
     if cmp == "+":
-        return None, now - days * DAY
+        return None, now - (days + 1) * DAY
     if cmp == "-":
         return now - days * DAY, None
     return now - (days + 1) * DAY, now - days * DAY

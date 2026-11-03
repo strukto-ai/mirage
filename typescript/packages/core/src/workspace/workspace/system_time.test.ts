@@ -51,6 +51,19 @@ describe('system_time', () => {
     expect(await out(ws, "echo '{}' | jq -r 'now|todate'")).toBe('2026-03-02T09:01:00Z\n')
   })
 
+  it('counts find -mtime in whole days on the workspace clock', async () => {
+    const clock = new ManualClock(1_000_000)
+    const ws = started('2026-03-02T09:00:00Z', clock)
+    await ws.shell('touch /data/a')
+    clock.advance(23 * 3600)
+    expect(await out(ws, 'find /data/a -mtime +0')).toBe('')
+    expect(await out(ws, 'find /data/a -mtime 0')).toBe('/data/a\n')
+    clock.advance(13 * 3600)
+    expect(await out(ws, 'find /data/a -mtime +0')).toBe('/data/a\n')
+    expect(await out(ws, 'find /data/a -mtime +1')).toBe('')
+    expect(await out(ws, 'find /data/a -mtime 1')).toBe('/data/a\n')
+  })
+
   it('stamps copies and processes', async () => {
     const ws = started('2026-03-02T09:00:00Z')
     const line =

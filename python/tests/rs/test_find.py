@@ -28,6 +28,7 @@ from mirage.core.generic.types import (
 )
 from mirage.rs.find import (
     find_layout,
+    mtime_bounds,
     parse_find,
     parse_find_expression,
     strictly_after,
@@ -110,6 +111,16 @@ def test_size_bounds_follow_gnu_strictness():
     assert (expr.min_size, expr.max_size) == (None, 1)
     expr = parse_find_expression(["-size", "2c"])
     assert (expr.min_size, expr.max_size) == (2, 2)
+
+
+def test_mtime_bounds_count_whole_days_like_gnu():
+    # GNU drops the fraction of a day, so +N needs N+1 whole days.
+    now = 1_000_000.0
+    day = 86400
+    assert mtime_bounds("+", 0, now) == (None, now - day)
+    assert mtime_bounds("+", 7, now) == (None, now - 8 * day)
+    assert mtime_bounds("=", 1, now) == (now - 2 * day, now - day)
+    assert mtime_bounds("-", 1, now) == (now - day, None)
 
 
 def test_repeated_mtime_windows_merge_to_union():
@@ -705,7 +716,7 @@ def test_a_bound_time_test_folds_by_where_it_sat():
 
 def test_a_mtime_counts_days_from_the_clock_bound_with_it():
     parsed = parse_find(["-mtime", "+2"])
-    assert parsed.bind(now=1000000.0).mtime_max == 1000000.0 - 2 * 86400
+    assert parsed.bind(now=1000000.0).mtime_max == 1000000.0 - 3 * 86400
     assert parse_find(["-mtime", "-2"]).bind(now=1000000.0).mtime_min == (
         1000000.0 - 2 * 86400
     )

@@ -179,6 +179,41 @@
         "stdout": "done\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "find_mtime_plus_zero_needs_a_whole_day",
+      "seq": 502182,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "ssh",
+        "box",
+        "dropbox",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf hi > /data/mtplus.txt; find /data -name mtplus.txt -mtime +0; echo code=$?; find /data -name mtplus.txt -mtime 0; rm /data/mtplus.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=0\n/data/mtplus.txt\n",
+        "stderr": ""
+      }
     }
   ]
 }
