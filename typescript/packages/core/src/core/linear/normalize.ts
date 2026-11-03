@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { Relation } from './client.ts'
+
 import type { JsonObject } from '../../types.ts'
 import {
   asObject,
@@ -198,3 +200,19 @@ export function projectIssueRows(issues: readonly JsonObject[], projectId: strin
 // The fields of an issue's JSON Linear's issue search reads; every other field
 // is checked against the listing instead (`unsearchedText`).
 export const SEARCHED_FIELDS: ReadonlySet<string> = new Set(['title', 'description'])
+
+export function normalizeRelation(relation: Relation, issueId: string): Record<string, unknown> {
+  const incoming = relation.issue.id !== issueId
+  const issue = incoming ? relation.relatedIssue : relation.issue
+  const related = incoming ? relation.issue : relation.relatedIssue
+  return {
+    relation_id: relation.id,
+    type: incoming && relation.type === 'blocks' ? 'blocked-by' : relation.type,
+    direction: incoming ? 'incoming' : 'outgoing',
+    issue_id: issue.id,
+    issue_key: issue.identifier,
+    related_issue_id: related.id,
+    related_issue_key: related.identifier,
+    related_issue_title: related.title,
+  }
+}

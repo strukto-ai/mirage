@@ -20,6 +20,7 @@
     "events/airtable/**/*.ts",
     "events/cache/**/*.ts",
     "wandb/**/*.ts",
+    "linear_conformance.ts",
     "slack_atlas.ts",
     "airtable_atlas.ts",
     "scripts/capture_airtable_atlas.ts"

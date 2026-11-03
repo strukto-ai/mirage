@@ -86,6 +86,7 @@ describe('linear tree', () => {
       'transition',
       'set-priority',
       'set-project',
+      'relation',
       'add-label',
     ])
     expect(cliSpecFor('linear')).toBe(LINEAR)

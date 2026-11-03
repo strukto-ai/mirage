@@ -236,3 +236,17 @@ model IssueLabel {
 
   @@index([tenant, issueId])
 }
+
+model IssueRelation {
+  tenant          String
+  id              String
+  issueId         String
+  relatedIssueId  String
+  type            String
+  previousStateId String?
+  seq             Int
+
+  @@id([tenant, id])
+  @@index([tenant, issueId])
+  @@index([tenant, relatedIssueId])
+}

@@ -243,7 +243,7 @@
       "command": "linear issue --help | head -n 1",
       "expect": {
         "exit": 0,
-        "stdout": "usage: linear issue [-h] {list,get,create,update,assign,transition,set-priority,set-project,add-label} ...\n",
+        "stdout": "usage: linear issue [-h] {list,get,create,update,assign,transition,set-priority,set-project,relation,add-label} ...\n",
         "stderr": ""
       }
     },
@@ -482,19 +482,6 @@
       }
     },
     {
-      "id": "ln_disc_type_a_shadowed",
-      "seq": 567120,
-      "targets": [
-        "cli-linear"
-      ],
-      "command": "linear() { echo shadowed; }; type -a linear",
-      "expect": {
-        "exit": 0,
-        "stdout": "linear is a function\nlinear () \n{ \n    echo shadowed\n}\nlinear is /usr/bin/linear\n",
-        "stderr": ""
-      }
-    },
-    {
       "id": "ln_disc_which_miss",
       "seq": 567121,
       "targets": [
@@ -504,6 +491,227 @@
       "expect": {
         "exit": 1,
         "stdout": "",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_empty",
+      "seq": 567200,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue relation list PLAT-1 | jq length",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_blocks",
+      "seq": 567201,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue relation add plat-1 BLOCKS PLAT-2 | jq -r '[.type,.direction,.issue_key,.related_issue_key]|join(\" \")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "blocks outgoing PLAT-1 PLAT-2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_incoming",
+      "seq": 567202,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue relation list PLAT-2 | jq -r '[.[0].type,.[0].direction,.[0].related_issue_key]|join(\" \")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "blocked-by incoming PLAT-1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_delete",
+      "seq": 567203,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue relation delete PLAT-2 blocked-by PLAT-1 --yes | jq -r .type",
+      "expect": {
+        "exit": 0,
+        "stdout": "blocked-by\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_related",
+      "seq": 567204,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue relation add https://linear.app/example/issue/PLAT-1/title related PLAT-2 | jq -r .type",
+      "expect": {
+        "exit": 0,
+        "stdout": "related\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_related_delete",
+      "seq": 567205,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue relation delete PLAT-1 related PLAT-2 -y | jq -r .type",
+      "expect": {
+        "exit": 0,
+        "stdout": "related\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_cache_before",
+      "seq": 567206,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "cat /issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/issue.json | jq -r .state_name",
+      "expect": {
+        "exit": 0,
+        "stdout": "Done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_duplicate",
+      "seq": 567207,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue relation add PLAT-1 duplicate PLAT-2 | jq -r '[.type,.direction,.related_issue_key]|join(\" \")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "duplicate outgoing PLAT-2\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_cache_after",
+      "seq": 567208,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "cat /issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/issue.json | jq -r .state_name",
+      "expect": {
+        "exit": 0,
+        "stdout": "Duplicate\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_duplicate_state",
+      "seq": 567209,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue get PLAT-1 | jq -r .state_name",
+      "expect": {
+        "exit": 0,
+        "stdout": "Duplicate\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_canonical_state",
+      "seq": 567210,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue get PLAT-2 | jq -r .state_name",
+      "expect": {
+        "exit": 0,
+        "stdout": "Todo\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_duplicate_incoming",
+      "seq": 567211,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue relation list PLAT-2 | jq -r '[.[0].type,.[0].direction,.[0].related_issue_key]|join(\" \")'",
+      "expect": {
+        "exit": 0,
+        "stdout": "duplicate incoming PLAT-1\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_duplicate_delete",
+      "seq": 567212,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue relation delete PLAT-1 duplicate PLAT-2 --confirm | jq -r .type",
+      "expect": {
+        "exit": 0,
+        "stdout": "duplicate\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_cache_restored",
+      "seq": 567213,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "cat /issues/teams/PLAT__Platform__team_plat/issues/PLAT-1__iss_plat_1/issue.json | jq -r .state_name",
+      "expect": {
+        "exit": 0,
+        "stdout": "Done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_restored_state",
+      "seq": 567214,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue get PLAT-1 | jq -r .state_name",
+      "expect": {
+        "exit": 0,
+        "stdout": "Done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_relation_deleted_empty",
+      "seq": 567215,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear issue relation list PLAT-1 | jq length",
+      "expect": {
+        "exit": 0,
+        "stdout": "0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "ln_disc_type_a_shadowed",
+      "seq": 567999,
+      "targets": [
+        "cli-linear"
+      ],
+      "command": "linear() { echo shadowed; }; type -a linear",
+      "expect": {
+        "exit": 0,
+        "stdout": "linear is a function\nlinear () \n{ \n    echo shadowed\n}\nlinear is /usr/bin/linear\n",
         "stderr": ""
       }
     }

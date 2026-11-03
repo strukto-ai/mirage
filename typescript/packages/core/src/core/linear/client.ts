@@ -12,11 +12,23 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+// Relation behavior adapted from schpet/linear-cli v3.1.0,
+// 02571d34be662e5487204841fb80bf23ed79b4f0, ISC.
+// Copyright (c) Peter Schilling and contributors.
+// See licenses/third_party/schpet-linear-cli.txt for the permission notice.
+
+import { z } from 'zod'
+
 import { enoent } from '../../errors/fs.ts'
 import { apiRequest } from '../api/client.ts'
 import { ApiError } from '../api/errors.ts'
 import type { LinearConfig } from './config.ts'
 import {
+  INCOMING_RELATIONS_QUERY,
+  OUTGOING_RELATIONS_QUERY,
+  RELATION_CREATE_MUTATION,
+  RELATION_DELETE_MUTATION,
+  RELATION_ISSUE_QUERY,
   COMMENT_CREATE_MUTATION,
   COMMENT_UPDATE_MUTATION,
   ISSUE_COMMENTS_QUERY,
@@ -403,4 +415,133 @@ export async function searchIssues(
     )
   if (!valid) throw new LinearApiError('unexpected response from searchIssues')
   return nodes as Record<string, unknown>[]
+}
+
+export enum RelationType {
+  BLOCKS = 'blocks',
+  BLOCKED_BY = 'blocked-by',
+  RELATED = 'related',
+  DUPLICATE = 'duplicate',
+}
+
+const RELATION_DIRECTIONS: Record<RelationType, readonly [string, boolean]> = {
+  [RelationType.BLOCKS]: ['blocks', false],
+  [RelationType.BLOCKED_BY]: ['blocks', true],
+  [RelationType.RELATED]: ['related', false],
+  [RelationType.DUPLICATE]: ['duplicate', false],
+}
+
+export function relationInput(
+  kind: RelationType,
+  issueId: string,
+  relatedIssueId: string,
+): Record<'issueId' | 'relatedIssueId' | 'type', string> {
+  const [type, reverse] = RELATION_DIRECTIONS[kind]
+  return {
+    issueId: reverse ? relatedIssueId : issueId,
+    relatedIssueId: reverse ? issueId : relatedIssueId,
+    type,
+  }
+}
+
+const RELATION_ISSUE_SCHEMA = z.object({
+  id: z.string().min(1),
+  identifier: z.string(),
+  title: z.string(),
+})
+const RELATION_SCHEMA = z.object({
+  id: z.string().min(1),
+  type: z.string().min(1),
+  issue: RELATION_ISSUE_SCHEMA,
+  relatedIssue: RELATION_ISSUE_SCHEMA,
+})
+
+export type Relation = z.infer<typeof RELATION_SCHEMA>
+
+function relationIssue(value: unknown): z.infer<typeof RELATION_ISSUE_SCHEMA> {
+  const result = RELATION_ISSUE_SCHEMA.safeParse(value)
+  if (!result.success) throw new LinearApiError('unexpected issue in relation response')
+  return result.data
+}
+
+export async function getRelationIssue(
+  transport: LinearTransport,
+  reference: string,
+): Promise<z.infer<typeof RELATION_ISSUE_SCHEMA>> {
+  const data = await transport.graphql(RELATION_ISSUE_QUERY, { issueId: reference })
+  if (data.issue === null || data.issue === undefined) throw enoent(reference)
+  return relationIssue(data.issue)
+}
+
+export async function listIssueRelations(
+  transport: LinearTransport,
+  issueId: string,
+  incoming = false,
+): Promise<Relation[]> {
+  const field = incoming ? 'inverseRelations' : 'relations'
+  const query = incoming ? INCOMING_RELATIONS_QUERY : OUTGOING_RELATIONS_QUERY
+  let after: string | null = null
+  const seen = new Set<string>()
+  const nodes: Relation[] = []
+  const pageSchema = z.object({
+    nodes: z.array(RELATION_SCHEMA),
+    pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+  })
+  for (;;) {
+    const data = await transport.graphql(query, { issueId, first: 100, after })
+    if (data.issue === null || data.issue === undefined) throw enoent(issueId)
+    const envelope = z.object({ [field]: pageSchema }).safeParse(data.issue)
+    if (!envelope.success) throw new LinearApiError('unexpected relation page')
+    const page = envelope.data[field]
+    if (page === undefined) throw new LinearApiError('unexpected relation page')
+    nodes.push(...page.nodes)
+    if (!page.pageInfo.hasNextPage) return nodes
+    const cursor = page.pageInfo.endCursor
+    if (cursor === null || cursor === '' || seen.has(cursor))
+      throw new LinearApiError('relation pagination did not advance')
+    seen.add(cursor)
+    after = cursor
+  }
+}
+
+export async function issueRelationCreate(
+  transport: LinearTransport,
+  payload: Record<string, string>,
+): Promise<Relation> {
+  const data = await transport.graphql(RELATION_CREATE_MUTATION, { input: payload })
+  const result = z
+    .object({ success: z.boolean(), issueRelation: z.unknown().optional() })
+    .safeParse(data.issueRelationCreate)
+  if (!result.success)
+    throw new LinearApiError(
+      'unexpected create relation response; the outcome is unknown, check relations before retrying',
+    )
+  if (!result.data.success) throw new LinearApiError('Linear did not create the relation')
+  const created = RELATION_SCHEMA.safeParse(result.data.issueRelation)
+  if (!created.success)
+    throw new LinearApiError(
+      'unexpected create relation response; the outcome is unknown, check relations before retrying',
+    )
+  if (
+    created.data.type !== payload.type ||
+    created.data.issue.id !== payload.issueId ||
+    created.data.relatedIssue.id !== payload.relatedIssueId
+  )
+    throw new LinearApiError(
+      'unexpected create relation response; the outcome is unknown, check relations before retrying',
+    )
+  return created.data
+}
+
+export async function issueRelationDelete(
+  transport: LinearTransport,
+  relationId: string,
+): Promise<void> {
+  const data = await transport.graphql(RELATION_DELETE_MUTATION, { id: relationId })
+  const result = z.object({ success: z.boolean() }).safeParse(data.issueRelationDelete)
+  if (!result.success)
+    throw new LinearApiError(
+      'unexpected delete relation response; the outcome is unknown, check relations before retrying',
+    )
+  if (!result.data.success) throw new LinearApiError('Linear did not delete the relation')
 }

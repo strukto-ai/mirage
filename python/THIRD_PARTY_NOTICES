@@ -8,6 +8,33 @@ native module is compiled from.
 
 ------------------------------------------------------------------------
 
+Issue-reference preparation and relation direction, pagination, and deletion
+behavior in python/mirage/commands/cli/builtin/linear/issue/relation.py,
+python/mirage/core/linear/client.py, and their TypeScript twins are adapted
+from schpet/linear-cli v3.1.0, commit
+02571d34be662e5487204841fb80bf23ed79b4f0, specifically refs/issue.rs,
+refs/url.rs and commands/issue/relation/.
+Source: https://github.com/schpet/linear-cli/tree/02571d34be662e5487204841fb80bf23ed79b4f0
+The runtime help and Mirage JSON output are original.
+
+ISC License
+
+Copyright (c) Peter Schilling and contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+
+------------------------------------------------------------------------
+
 The JSON parser in python/mirage/core/jq/parse.py and
 typescript/packages/core/src/core/jq/parse.ts follows src/jv_parse.c of jq
 1.8.2 (https://github.com/jqlang/jq), with the UTF-8 decoding of its

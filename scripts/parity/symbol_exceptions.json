@@ -1192,6 +1192,12 @@
    "typescript_only": {
     "isDBRefLike": "Python tells a DBRef apart with isinstance; the JS driver's DBRef is told apart by its _bsontype, as the sampler's other is*Like checks are."
    }
+  },
+  "core/linear/client": {
+   "typescript_only": {
+    "RELATION_ISSUE_SCHEMA": "Zod parses external issue identities and infers their TypeScript type; Python validates the same fields in _relation_issue.",
+    "RELATION_SCHEMA": "Zod parses external relation records and infers their TypeScript type; Python validates the same fields in _relation."
+   }
   }
  }
 }

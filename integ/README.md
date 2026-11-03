@@ -4,6 +4,20 @@ Cross-host integration tests: one declarative case corpus runs on the python
 host and the typescript host against the same targets, so the two
 implementations cannot drift apart.
 
+Linear issue relation compatibility is checked by `linear_conformance.ts` against
+schpet/linear-cli v3.1.0 at `02571d34be662e5487204841fb80bf23ed79b4f0`.
+Set `LINEAR_BIN` to its built binary and `LINEAR_REFERENCE` to its clean source
+checkout, then run `pnpm run linear:conformance` from `integ/`. The runner checks
+both the pinned revision and binary version. Its local fake verifies mutation
+inputs, directions, pagination, refusal without confirmation, duplicate state
+changes and restoration. The virtual CLI also checks policy refusal and cached
+VFS reads after mutation. JSON rendering, raw ID operands and explicit list
+operands are intentional differences documented in the CLI reference.
+`integ/cli/linear.json` runs the same mutation and cache-read sequence on both
+hosts. The existing whole-host Python, TypeScript and `integ/**` filters select
+the `integ-facets` job for these files; that job builds the pinned reference and
+runs conformance before the regular CLI and project batteries.
+
 ## Pieces
 
 - `runners/`: the battery. Every case is a shell line executed in a mirage
@@ -18,8 +32,9 @@ implementations cannot drift apart.
   `server/launcher/main.ts` hosts all of them in one process, one pinned port
   each from `ci/fakes.json`, and announces one `NAME_URL=...` line per arm.
   Some fakes carry a selftest (`pnpm run <name>:selftest`; the list is the
-  `*:selftest` scripts in `package.json`); linear and trello have none, and
-  the battery is what exercises them. `server/mcp/main.ts` is a stateless
+  `*:selftest` scripts in `package.json`). Linear relations also run
+  `linear:conformance` against the pinned real CLI; the shared battery
+  exercises the remaining Linear and Trello commands. `server/mcp/main.ts` is a stateless
   streamable-HTTP MCP server for the `cli-mcp` target (built in code) and
   `cli-mcp-yaml` (built through the YAML loader), shared by both hosts.
 - `access/`: every way into a workspace (in-app, HTTP, the CLI, MCP over

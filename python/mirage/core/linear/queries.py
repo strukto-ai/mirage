@@ -331,3 +331,47 @@ query IssueSearch($term: String!, $first: Int) {
   }
 }
 """
+
+
+RELATION_ISSUE_QUERY = """
+query GetIssueId($issueId: String!) { issue(id: $issueId) { id identifier title } }
+"""
+
+
+OUTGOING_RELATIONS_QUERY = """
+query GetOutgoingRelationsPage($issueId: String!, $first: Int!, $after: String) {
+  issue(id: $issueId) { relations(first: $first, after: $after) {
+    nodes { id type issue { id identifier title } relatedIssue { id identifier title } }
+    pageInfo { hasNextPage endCursor }
+  } }
+}
+"""
+
+
+INCOMING_RELATIONS_QUERY = """
+query GetIncomingRelationsPage($issueId: String!, $first: Int!, $after: String) {
+  issue(id: $issueId) { inverseRelations(first: $first, after: $after) {
+    nodes { id type issue { id identifier title } relatedIssue { id identifier title } }
+    pageInfo { hasNextPage endCursor }
+  } }
+}
+"""
+
+
+RELATION_CREATE_MUTATION = """
+mutation CreateIssueRelation($input: IssueRelationCreateInput!) {
+  issueRelationCreate(input: $input) {
+    success
+    issueRelation {
+      id type
+      issue { id identifier title }
+      relatedIssue { id identifier title }
+    }
+  }
+}
+"""
+
+
+RELATION_DELETE_MUTATION = """
+mutation DeleteIssueRelation($id: String!) { issueRelationDelete(id: $id) { success } }
+"""

@@ -40,6 +40,9 @@ This list is generated from Mirage's registered command tree.
 | `linear issue transition` | Move an issue to a workflow state |
 | `linear issue set-priority` | Set an issue's priority |
 | `linear issue set-project` | Attach an issue to a project |
+| `linear issue relation add` | Create an issue relation |
+| `linear issue relation list` | List incoming and outgoing relations |
+| `linear issue relation delete` | Delete an issue relation |
 | `linear issue add-label` | Add a label to an issue |
 | `linear project list` | List a team's projects |
 | `linear project get` | Get one project by ID |
@@ -101,6 +104,56 @@ linear comment update --comment COMMENT_ID --body "Reviewed"
 Descriptions and comment bodies can come from stdin. Issue creation requires
 `--team` and `--title`; updates use the values explicitly supplied.
 
+## Issue relations
+
+```bash
+linear issue relation add ENG-42 blocks ENG-43
+linear issue relation add ENG-42 blocked-by ENG-43
+linear issue relation add ENG-42 related ENG-43
+linear issue relation add ENG-42 duplicate ENG-43
+linear issue relation list ENG-42
+linear issue relation delete ENG-42 duplicate ENG-43 --yes
+```
+
+The positional order is `ISSUE RELATION RELATED`, matching
+[linear-cli v3.1.0](https://github.com/schpet/linear-cli/tree/02571d34be662e5487204841fb80bf23ed79b4f0).
+Relation names are case insensitive. `blocked-by` stores the inverse of
+`blocks`. Deletion matches the exact stored direction, including `related`.
+Both issue references are validated before contacting the service. Relation
+commands accept full keys such as `eng-42`, Linear issue URLs, UUIDs and opaque
+IDs of the form `prefix_value`. UUID and opaque ID operands extend the upstream
+interface. An explicit issue is required for listing; branch inference and
+bare issue numbers are unavailable in this virtual CLI.
+
+Adding `ENG-42 duplicate ENG-43` marks ENG-42 as the duplicate and ENG-43 as
+its original. Linear applies the reserved Duplicate status through the relation
+mutation. Mirage does not submit a separate state update. Removing that
+relation lets Linear restore the previous status. See
+[Linear issue properties](https://linear.app/docs/issue-property) and the
+[June 18, 2026 changelog](https://linear.app/changelog/2026-06-18-agent-assisted-project-updates).
+
+Add and delete return one normalized JSON relation. List returns an array,
+outgoing relations first, followed by incoming relations, with all pages read.
+Each row contains `relation_id`, `type`, `direction`, `issue_id`, `issue_key`,
+`related_issue_id`, `related_issue_key` and `related_issue_title`. `issue_id`
+always identifies the queried or first operand issue. Incoming `blocks` rows
+have type `blocked-by`. Incoming `duplicate` rows keep type `duplicate` and
+`direction: "incoming"`; the other issue is the duplicate in that case.
+This JSON contract deliberately differs from upstream's text output.
+
+Deletion requires `--yes`, also spelled `-y`, `-f`, `--force` or `--confirm`.
+The virtual CLI cannot prompt. The relation is looked up before confirmation,
+so a missing relation still reports that failure first. Service errors and
+false mutation success flags fail the command. Mutations are not retried
+automatically, including when a response cannot confirm the outcome.
+
+Failure output follows the virtual CLI's conventions. Missing required operands
+and unknown options exit 2. Extra operands, relation validation, missing issues
+or relations, missing confirmation and service failures exit 1. Upstream instead classifies invalid
+relation names and missing confirmation as usage errors with exit 2, and missing
+entities with exit 3. Its authentication and availability failures use exits 4
+and 5. Error wording also follows the virtual CLI rather than upstream text.
+
 ## VFS and limits
 
 The [Linear VFS](/typescript/setup/linear) lets agents browse the same service
@@ -111,5 +164,6 @@ Only the commands above are implemented. Commands, flags and JSON output
 follow this reference; Mirage does not promise full compatibility with
 `schpet/linear-cli`. That project uses the
 [ISC license](https://github.com/schpet/linear-cli/blob/main/LICENSE).
-Mirage's command implementation is Apache-2.0; see
+Mirage's command implementation is Apache-2.0, with ISC-licensed relation adaptations
+recorded in `licenses/third_party/schpet-linear-cli.txt`; see
 [compatibility and licenses](/home/setup/clis#compatibility-and-licenses).
