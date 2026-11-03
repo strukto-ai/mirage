@@ -90,7 +90,7 @@ function validate(body: unknown, schema: BodySchema): unknown {
   }
   const record: Record<string, unknown> = {}
   for (const [field, value] of Object.entries(given)) {
-    const declared = schema.properties[field]
+    const declared = Object.hasOwn(schema.properties, field) ? schema.properties[field] : undefined
     if (declared === undefined) {
       if (schema.additionalProperties !== false) record[field] = value
       continue
@@ -106,12 +106,30 @@ function validate(body: unknown, schema: BodySchema): unknown {
   return record
 }
 
+/** The body as text, refused once it passes `limit` bytes, before the rest is read. */
 async function readBody(request: Request, limit: number): Promise<string> {
-  const declared = Number(request.headers.get('content-length') ?? 0)
   const tooLarge = new RouteError(413, 'FST_ERR_CTP_BODY_TOO_LARGE', 'Request body is too large')
-  if (declared > limit) throw tooLarge
-  const bytes = new Uint8Array(await request.arrayBuffer())
-  if (bytes.byteLength > limit) throw tooLarge
+  if (Number(request.headers.get('content-length') ?? 0) > limit) throw tooLarge
+  if (request.body === null) return ''
+  const chunks: Uint8Array[] = []
+  let size = 0
+  const reader = request.body.getReader()
+  for (;;) {
+    const next = await reader.read()
+    if (next.done) break
+    size += next.value.byteLength
+    if (size > limit) {
+      await reader.cancel()
+      throw tooLarge
+    }
+    chunks.push(next.value)
+  }
+  const bytes = new Uint8Array(size)
+  let at = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, at)
+    at += chunk.byteLength
+  }
   return new TextDecoder().decode(bytes)
 }
 
@@ -259,7 +277,21 @@ export class WebRoutes implements RouteApp {
   /** Answer `request` as `account` (null when the auth mode names none). */
   async fetch(request: Request, account: string | null): Promise<Response> {
     const url = new URL(request.url)
-    const found = this.match(request.method === 'HEAD' ? 'GET' : request.method, url.pathname)
+    let found: [Route, Record<string, string>] | null
+    try {
+      found = this.match(request.method === 'HEAD' ? 'GET' : request.method, url.pathname)
+    } catch (error) {
+      if (!(error instanceof URIError)) throw error
+      return Response.json(
+        {
+          statusCode: 400,
+          code: 'FST_ERR_BAD_URL',
+          error: 'Bad Request',
+          message: `'${url.pathname}' is not a valid url component`,
+        },
+        { status: 400 },
+      )
+    }
     if (found === null) {
       return Response.json(
         {
@@ -290,7 +322,11 @@ export class WebRoutes implements RouteApp {
         host: url.host,
         account,
         raw: (request.body ??
-          new ReadableStream<Uint8Array>()) as unknown as AsyncIterable<Uint8Array>,
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.close()
+            },
+          })) as unknown as AsyncIterable<Uint8Array>,
         closed: request.signal,
       }
       const answer = await route.handler(req, reply)

@@ -23,6 +23,11 @@ import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import { buildVfs, knownVfsNames } from '@struktoai/mirage-core/vfs/registry'
 import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
+import {
+  generationOf,
+  type RecordClient,
+  type RecordFields,
+} from '@struktoai/mirage-core/workspace/record/types'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
@@ -67,22 +72,68 @@ const CONFIG: ConfigHost = {
 
 /**
  * The server's host on an edge runtime: core's VFS registry and config
- * loader, workspace state in memory, no disk, no kernel mounts, no module
- * loading by reference.
+ * loader, no disk, no kernel mounts, no module loading by reference. Its
+ * workspaces keep their state in one store held in memory, so a closed
+ * workspace reopens with it while the isolate lives.
  */
-export const HOST: ServerHost = {
-  Workspace,
-  workspaceArgs: (cfg) => configToWorkspaceArgs(cfg, CONFIG),
-  buildVfs,
-  buildCliEntries: (clis, sources) => buildCliEntries(clis, sources, CONFIG),
-  loadProfile: (profile) => loadProfilePolicy(profile, CONFIG),
-  stateStore: () => new RAMWorkspaceStateStore(),
-  quoteName: (name) =>
-    encodeURIComponent(name).replace(
-      /[!'()*]/g,
-      (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
-    ),
-  reservedIds: new Set(['', '.', '..']),
-  watchNetwork: noop,
-  mountKernel: () => Promise.reject(new Error('an edge host has no kernel mounts')),
+export function edgeHost(): ServerHost {
+  const state = new RAMWorkspaceStateStore()
+  return {
+    Workspace,
+    workspaceArgs: (cfg) => configToWorkspaceArgs(cfg, CONFIG),
+    buildVfs,
+    buildCliEntries: (clis, sources) => buildCliEntries(clis, sources, CONFIG),
+    loadProfile: (profile) => loadProfilePolicy(profile, CONFIG),
+    stateStore: () => state,
+    quoteName: (name) =>
+      encodeURIComponent(name).replace(
+        /[!'()*]/g,
+        (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+      ),
+    reservedIds: new Set(['', '.', '..']),
+    watchNetwork: noop,
+    mountKernel: () => Promise.reject(new Error('an edge host has no kernel mounts')),
+  }
+}
+
+/**
+ * Keyed records held in memory: who owns each workspace id, kept across
+ * a close as the Node server keeps them on disk, for the isolate's life.
+ */
+export class RAMRecordClient implements RecordClient {
+  private readonly records = new Map<string, RecordFields>()
+
+  get(name: string): Promise<[RecordFields | null, string]> {
+    const fields = this.records.get(name)
+    return Promise.resolve([fields === undefined ? null : structuredClone(fields), ''])
+  }
+
+  put(name: string, fields: RecordFields): Promise<void> {
+    this.records.set(name, structuredClone(fields))
+    return Promise.resolve()
+  }
+
+  casPut(name: string, fields: RecordFields, expectedGeneration: number): Promise<boolean> {
+    if (generationOf(this.records.get(name)) !== expectedGeneration) return Promise.resolve(false)
+    this.records.set(name, structuredClone(fields))
+    return Promise.resolve(true)
+  }
+
+  listNames(): Promise<string[]> {
+    return Promise.resolve([...this.records.keys()])
+  }
+
+  delete(names: readonly string[]): Promise<void> {
+    for (const name of names) this.records.delete(name)
+    return Promise.resolve()
+  }
+
+  clear(): Promise<void> {
+    this.records.clear()
+    return Promise.resolve()
+  }
+
+  close(): Promise<void> {
+    return Promise.resolve()
+  }
 }

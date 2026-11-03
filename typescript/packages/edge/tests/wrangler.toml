@@ -1,7 +1,7 @@
 name = "mirage-edge-test"
 main = "worker.ts"
 compatibility_date = "2026-10-01"
-compatibility_flags = ["nodejs_compat"]
+compatibility_flags = ["nodejs_compat", "no_handle_cross_request_promise_resolution"]
 
 [limits]
 cpu_ms = 60000
