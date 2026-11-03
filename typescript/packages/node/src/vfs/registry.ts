@@ -95,11 +95,6 @@ const REGISTRY: Record<string, VFSFactory> = {
     const { NextcloudConfig } = await import('./nextcloud/config.ts')
     return new NextcloudVFS(parseConfigWithSchema(NextcloudConfig, config))
   },
-  email: async (config) => {
-    const { EmailVFS } = await import('./email/email.ts')
-    const { EmailConfig } = await import('../core/email/config.ts')
-    return new EmailVFS(parseConfigWithSchema(EmailConfig, config))
-  },
 }
 
 export type { VFSFactory }

@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
-import { IOResult } from '@struktoai/mirage-core/io/types'
-import type { ByteSource } from '@struktoai/mirage-core/io/types'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import { FlagView } from '../../../spec/index.ts'
+import { IOResult } from '../../../../io/types.ts'
+import type { ByteSource } from '../../../../io/types.ts'
 import type { EmailAccessor } from '../../../../accessor/email.ts'
 import { fetchHeaders, listMessageUids } from '../../../../core/email/client.ts'
 import { envelopesJsonBytes } from '../../../../core/email/render.ts'

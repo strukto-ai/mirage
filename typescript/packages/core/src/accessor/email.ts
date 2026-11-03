@@ -12,15 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { Accessor } from '@struktoai/mirage-core/accessor/index'
-import { DEFAULT_TIMEOUT } from '@struktoai/mirage-core/core/api/constants'
-import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
+import { Accessor } from './index.ts'
+import { DEFAULT_TIMEOUT } from '../core/api/constants.ts'
+import { loadOptionalPeer } from '../utils/optional_peer.ts'
 import type { ImapFlow } from 'imapflow'
+import { currentRequest, type IncomingRequest } from '../io/web/request.ts'
 import type { EmailConfig } from '../core/email/config.ts'
 
 export class EmailAccessor extends Accessor {
   readonly config: EmailConfig
   private clientPromise: Promise<ImapFlow> | null = null
+  private opener: IncomingRequest | null = null
 
   constructor(config: EmailConfig) {
     super()
@@ -36,7 +38,14 @@ export class EmailAccessor extends Accessor {
    * so the next access connects afresh instead of reusing a dead socket.
    */
   async getImap(): Promise<ImapFlow> {
+    const request = currentRequest()
+    if (this.clientPromise !== null && this.opener !== request) {
+      // An edge runtime cancelled the socket with the request that opened
+      // it: closing it from here is I/O it refuses, so it is let go.
+      this.clientPromise = null
+    }
     if (this.clientPromise === null) {
+      this.opener = request
       const pending: Promise<ImapFlow> = (async () => {
         const mod = await loadOptionalPeer(
           () =>

@@ -12,17 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
-import type { EmailAccessor } from '../../../../accessor/email.ts'
-import { route } from './util.ts'
+import { makeStat } from '../hierarchy/stat.ts'
+import type { EmailAccessor } from '../../accessor/email.ts'
+import { detectScope } from './scope.ts'
 
-export async function compose(
-  accessor: EmailAccessor,
-  _paths: PathSpec[],
-  _texts: string[],
-  ctx: Context,
-): Promise<CommandFnResult> {
-  return route(accessor, new FlagView(ctx.flags), ctx.stdin, null, ctx.vfs)
-}
+export const stat = makeStat<EmailAccessor>(detectScope)

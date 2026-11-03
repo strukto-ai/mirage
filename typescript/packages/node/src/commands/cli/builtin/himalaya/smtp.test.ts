@@ -13,8 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
-import { buildEmailConfig } from '../../../../core/email/config.ts'
-import { bccAddresses, sendRaw, stripBcc } from './smtp.ts'
+import { buildEmailConfig } from '@struktoai/mirage-core/core/email/config'
+import {
+  bccAddresses,
+  sendRaw,
+  stripBcc,
+} from '@struktoai/mirage-core/commands/cli/builtin/himalaya/smtp'
 
 const transports = vi.hoisted((): Record<string, unknown>[] => [])
 

@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { makeRead } from '@struktoai/mirage-core/core/hierarchy/read'
-import type { ScopeMatch } from '@struktoai/mirage-core/core/hierarchy/scope'
-import type { FileStat, PathSpec } from '@struktoai/mirage-core/types'
-import type { Handed } from '@struktoai/mirage-core/vfs/types'
-import { enoent } from '@struktoai/mirage-core/errors/fs'
+import { makeRead } from '../hierarchy/read.ts'
+import type { ScopeMatch } from '../hierarchy/scope.ts'
+import type { FileStat, PathSpec } from '../../types.ts'
+import type { Handed } from '../../vfs/types.ts'
+import { enoent } from '../../errors/fs.ts'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import { fetchAttachment, fetchHeaders, fetchMessage } from './client.ts'
 import { messageJsonBytes } from './render.ts'

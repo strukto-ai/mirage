@@ -12,8 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { MONTHS } from '@struktoai/mirage-core/commands/builtin/utils/constants'
-import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
+import { MONTHS } from '../../../builtin/utils/constants.ts'
+import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { fetchMessage } from '../../../../core/email/client.ts'
 import { quoteString } from '../../../../core/email/client.ts'
 

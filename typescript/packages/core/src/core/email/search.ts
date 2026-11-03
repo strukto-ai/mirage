@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ROOT } from '@struktoai/mirage-core/core/hierarchy/scope'
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import { mountedPath } from '@struktoai/mirage-core/utils/key_prefix'
-import { recordQueries } from '@struktoai/mirage-core/utils/record_search'
+import { ROOT } from '../hierarchy/scope.ts'
+import type { PathSpec } from '../../types.ts'
+import { mountedPath } from '../../utils/key_prefix.ts'
+import { recordQueries } from '../../utils/record_search.ts'
 import type { EmailAccessor } from '../../accessor/email.ts'
 import type { fetchMessage } from './client.ts'
 import { fetchHeaders, listMessageUids, quoteString } from './client.ts'

@@ -13,8 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type * as ClientModule from './client.ts'
-import type * as FoldersModule from './folders.ts'
+import type * as ClientModule from '@struktoai/mirage-core/core/email/client'
+import type * as FoldersModule from '@struktoai/mirage-core/core/email/folders'
 
 function message(
   overrides: Partial<Awaited<ReturnType<typeof ClientModule.fetchMessage>>>,
@@ -45,8 +45,10 @@ const HEADERS = [message({})]
 const NO_DATE_HEADERS = [message({ date: '', internalDate: '2026-08-07T20:54:05.000Z' })]
 let headersList = HEADERS
 
-vi.mock('./client.ts', async () => {
-  const actual = await vi.importActual<typeof ClientModule>('./client.ts')
+vi.mock('@struktoai/mirage-core/core/email/client', async () => {
+  const actual = await vi.importActual<typeof ClientModule>(
+    '@struktoai/mirage-core/core/email/client',
+  )
   return {
     ...actual,
     listMessageUids: vi.fn(() => Promise.resolve(['101'])),
@@ -54,15 +56,17 @@ vi.mock('./client.ts', async () => {
   }
 })
 
-vi.mock('./folders.ts', async () => {
-  const actual = await vi.importActual<typeof FoldersModule>('./folders.ts')
+vi.mock('@struktoai/mirage-core/core/email/folders', async () => {
+  const actual = await vi.importActual<typeof FoldersModule>(
+    '@struktoai/mirage-core/core/email/folders',
+  )
   return { ...actual, listFolders: vi.fn(() => Promise.resolve(['INBOX'])) }
 })
 
 import { DirListing, FileStat, FileType, PathSpec } from '@struktoai/mirage-core/types'
-import type { EmailAccessor } from '../../accessor/email.ts'
-import { dateBucket, readdir } from './readdir.ts'
-import { messageJsonBytes } from './render.ts'
+import type { EmailAccessor } from '@struktoai/mirage-core/accessor/email'
+import { dateBucket, readdir } from '@struktoai/mirage-core/core/email/readdir'
+import { messageJsonBytes } from '@struktoai/mirage-core/core/email/render'
 
 const ACCESSOR = { config: { maxMessages: 50 } } as unknown as EmailAccessor
 

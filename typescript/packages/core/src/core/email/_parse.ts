@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { loadOptionalPeer } from '@struktoai/mirage-core/utils/optional_peer'
+import { loadOptionalPeer } from '../../utils/optional_peer.ts'
 import type {
   AddressObject,
   EmailAddress as MailparserEmailAddress,

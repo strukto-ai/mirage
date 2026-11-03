@@ -12,33 +12,17 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { CommandFnResult, Context } from '@struktoai/mirage-core/commands/config'
-import type { PathSpec } from '@struktoai/mirage-core/types'
-import { FlagView } from '@struktoai/mirage-core/commands/spec/index'
+import type { CommandFnResult, Context } from '../../../config.ts'
+import type { PathSpec } from '../../../../types.ts'
+import { FlagView } from '../../../spec/index.ts'
 import type { EmailAccessor } from '../../../../accessor/email.ts'
-import { fetchMessage } from '../../../../core/email/client.ts'
-import { firstText, route } from './util.ts'
+import { route } from './util.ts'
 
-export async function forward(
+export async function compose(
   accessor: EmailAccessor,
   _paths: PathSpec[],
-  texts: string[],
+  _texts: string[],
   ctx: Context,
 ): Promise<CommandFnResult> {
-  const fl = new FlagView(ctx.flags)
-  const uid = firstText(texts, 'message id')
-  const mailbox = fl.asStr('mailbox', 'INBOX')
-  const original = await fetchMessage(accessor, mailbox, uid)
-  return route(
-    accessor,
-    fl,
-    ctx.stdin,
-    {
-      message: original,
-      mode: 'forward',
-      postingStyle: fl.asStr('posting_style') === 'bottom' ? 'bottom' : 'top',
-      quoteHeadline: fl.asStr('quote_headline') ?? '',
-    },
-    ctx.vfs,
-  )
+  return route(accessor, new FlagView(ctx.flags), ctx.stdin, null, ctx.vfs)
 }

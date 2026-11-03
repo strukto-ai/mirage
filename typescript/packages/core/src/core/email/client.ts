@@ -68,10 +68,12 @@ export async function listMessageUids(
   try {
     const query = parseSearchCriteria(searchCriteria)
     const uidsRaw = await imap.search(query, { uid: true })
-    // imapflow answers `false` when the server refused the search. That
-    // must not read as "matched nothing": it would hide criteria the
-    // server cannot answer behind an empty result.
-    if (uidsRaw === false) throw new Error(`IMAP rejected the search: ${searchCriteria}`)
+    // imapflow answers `false` when the server refused the search, and
+    // nothing when no mailbox is open. Neither may read as "matched
+    // nothing": it would hide criteria the server cannot answer behind an
+    // empty result.
+    if (uidsRaw === false || uidsRaw === undefined)
+      throw new Error(`IMAP rejected the search: ${searchCriteria}`)
     const uids = uidsRaw.map((n) => String(n))
     if (maxResults !== null && uids.length > maxResults) {
       return uids.slice(uids.length - maxResults)
