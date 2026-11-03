@@ -29,7 +29,9 @@ import {
 } from '../api/client.ts'
 import {
   BATCH_STAT_LIMIT,
+  MAX_PARTS,
   MAX_UPLOAD_WORKERS,
+  PATCH_PART_SIZE,
   PRESIGN_BATCH,
   SMALL_FILE_LIMIT,
   TREE_DELETE_RETRY,
@@ -68,11 +70,13 @@ const AppendPart = PresignedPart.extend({
   read_url: z.string().nullish(),
   read_headers: z.record(z.string(), z.string()).default({}),
 })
-const AppendPlan = z.object({
+const PatchPlan = z.object({
   upload_id: z.string(),
   part_size: z.number().int().positive(),
-  base_size: z.number().int().nonnegative(),
   upload_parts: z.array(AppendPart).default([]),
+})
+const AppendPlan = PatchPlan.extend({
+  base_size: z.number().int().nonnegative(),
 })
 const BYTES = z.instanceof(Uint8Array)
 
@@ -251,6 +255,23 @@ async function putPart(
   return response.headers.etag ?? ''
 }
 
+async function readPart(
+  accessor: TiDBFilesystemAccessor,
+  part: z.infer<typeof AppendPart>,
+): Promise<Uint8Array> {
+  if (part.read_url == null) return new Uint8Array()
+  return BYTES.parse(
+    await apiRequest('GET', part.read_url, {
+      headers: part.read_headers,
+      errorOf,
+      retry: NO_RETRY,
+      read: 'bytes',
+      maxBodyBytes: part.size,
+      timeout: accessor.config.timeout,
+    }),
+  )
+}
+
 async function abort(
   accessor: TiDBFilesystemAccessor,
   method: string,
@@ -343,12 +364,14 @@ export async function upload(
  * copies the parts the bytes leave alone into a new upload, the last part's
  * own bytes come back through its read URL, and they go up again with the
  * new ones. False, with nothing sent, for a file drive9 keeps inline (400) or
- * a path that is not a file (404).
+ * a path that is not a file (404), and false, with the upload aborted, when
+ * the file is not `baseSize` bytes long.
  */
 export async function appendTo(
   accessor: TiDBFilesystemAccessor,
   remotePath: string,
   data: Uint8Array | ByteSpool,
+  baseSize: number | null = null,
 ): Promise<boolean> {
   const host = accessor.config.host
   const size = sizeOf(data)
@@ -364,24 +387,20 @@ export async function appendTo(
     return false
   }
   const plan = AppendPlan.parse(raw)
+  if (baseSize !== null && plan.base_size !== baseSize) {
+    console.debug(
+      `tidb_filesystem: ${remotePath} is ${String(plan.base_size)} bytes, not ${String(baseSize)}`,
+    )
+    await abort(accessor, 'DELETE', `${host}/v1/uploads/${plan.upload_id}`)
+    return false
+  }
   const kept = (part: z.infer<typeof AppendPart>): number => {
     const start = (part.number - 1) * plan.part_size
     return Math.max(0, Math.min(plan.base_size, start + part.size) - start)
   }
   const put = async (part: z.infer<typeof AppendPart>): Promise<string> => {
     const own = kept(part)
-    let original = new Uint8Array()
-    if (own > 0 && part.read_url != null) {
-      original = BYTES.parse(
-        await apiRequest('GET', part.read_url, {
-          headers: part.read_headers,
-          errorOf,
-          retry: NO_RETRY,
-          read: 'bytes',
-          timeout: accessor.config.timeout,
-        }),
-      )
-    }
+    const original = own > 0 ? await readPart(accessor, part) : new Uint8Array()
     const start = (part.number - 1) * plan.part_size + own - plan.base_size
     const added = part.size > own ? await sliceOf(data, start, part.size - own) : new Uint8Array()
     if (original.byteLength !== own || added.byteLength !== part.size - own) {
@@ -400,6 +419,60 @@ export async function appendTo(
     if (covered !== size) {
       throw new TiDBFilesystemApiError('the append plan does not cover the appended bytes', 502)
     }
+    await boundedMap(plan.upload_parts, put, MAX_UPLOAD_WORKERS)
+    await request(accessor, 'POST', `${host}/v1/uploads/${plan.upload_id}/complete`, {
+      read: 'none',
+    })
+  } catch (exc) {
+    await abort(accessor, 'DELETE', `${host}/v1/uploads/${plan.upload_id}`)
+    throw exc
+  }
+  return true
+}
+
+/**
+ * Cut a file drive9 keeps in object storage to `length` bytes. A PATCH names
+ * the part the cut falls in as the one dirty part, so the server copies the
+ * whole parts before it into a new upload and hands out a read URL for that
+ * part's kept bytes, which go up again as they came. The part size grows with
+ * the file so it never needs more than S3's 10,000 parts. False, with nothing
+ * sent, for a file drive9 keeps inline (400) or a path that is not a file
+ * (404).
+ */
+export async function shrinkTo(
+  accessor: TiDBFilesystemAccessor,
+  remotePath: string,
+  length: number,
+): Promise<boolean> {
+  const host = accessor.config.host
+  const mib = 1024 * 1024
+  const partSize = Math.max(PATCH_PART_SIZE, Math.ceil(length / (MAX_PARTS * mib)) * mib)
+  let raw: unknown
+  try {
+    raw = await request(accessor, 'PATCH', url(accessor, remotePath), {
+      json: {
+        new_size: length,
+        dirty_parts: [Math.ceil(length / partSize)],
+        part_size: partSize,
+      },
+    })
+  } catch (err) {
+    if (!(hasStatus(err, 400) || hasStatus(err, 404))) throw err
+    console.debug('tidb_filesystem: no native shrink:', err)
+    return false
+  }
+  const plan = PatchPlan.parse(raw)
+  const put = async (part: z.infer<typeof AppendPart>): Promise<string> => {
+    const kept = await readPart(accessor, part)
+    if (kept.byteLength !== part.size) {
+      throw new TiDBFilesystemApiError(
+        `patch part ${String(part.number)} does not match its plan`,
+        502,
+      )
+    }
+    return putPart(accessor, part, kept)
+  }
+  try {
     await boundedMap(plan.upload_parts, put, MAX_UPLOAD_WORKERS)
     await request(accessor, 'POST', `${host}/v1/uploads/${plan.upload_id}/complete`, {
       read: 'none',

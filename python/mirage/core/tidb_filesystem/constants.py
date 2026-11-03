@@ -25,6 +25,11 @@ BATCH_STAT_LIMIT = 256
 # never holds a URL past its expiry.
 PRESIGN_BATCH = 16
 
+# The part size a patch upload asks for, drive9's default, grown only
+# when a file would need more than the most parts S3 takes in one upload.
+PATCH_PART_SIZE = 8 * 1024 * 1024
+MAX_PARTS = 10_000
+
 # Parts of one upload in flight at once; each holds its bytes in memory.
 MAX_UPLOAD_WORKERS = 4
 

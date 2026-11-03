@@ -132,6 +132,22 @@ async def test_append_to_an_inline_file_sends_nothing(accessor, drive9):
 
 
 @pytest.mark.asyncio
+async def test_append_to_a_file_of_another_size_aborts(accessor, drive9):
+    drive9.files["/root/big.bin"] = b"x" * 70_000
+
+    assert (
+        await append_to(
+            accessor, "/root/big.bin", bytes(40_000), base_size=60_000
+        )
+        is False
+    )
+
+    assert drive9.files["/root/big.bin"] == b"x" * 70_000
+    assert drive9.count("PUT", "/s3/upload") == 0
+    assert drive9.uploads == {}
+
+
+@pytest.mark.asyncio
 async def test_append_to_a_missing_file_sends_nothing(accessor, drive9):
     assert await append_to(accessor, "/root/nope", b"!") is False
 
