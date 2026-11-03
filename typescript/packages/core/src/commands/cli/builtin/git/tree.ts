@@ -20,7 +20,7 @@ import { SYMLINK } from './constants.ts'
 import { GitError } from './errors.ts'
 import { resolveObject, unwrapped } from './revparse.ts'
 import { rawObject, repoArgs, type Repo } from './repo.ts'
-import { rooted } from './seen.ts'
+import { decoded, rooted } from './seen.ts'
 import type { GitObject } from './types.ts'
 
 const SPACE = 0x20
@@ -72,7 +72,7 @@ export async function treeItems(repo: Repo, treeOid: string): Promise<TreeItem[]
     })
     at = nul + 1 + OID_BYTES
   }
-  return items
+  return decoded(items)
 }
 
 /**
@@ -117,8 +117,7 @@ export function ntfsPieces(part: string): string[] {
  * 8-character hashed short name built on `gi7eba`), or a directory part that is
  * `.gitmodules`, with or without a `:` stream. Case is ASCII-folded, as git
  * folds it. macOS's HFS spellings of `.git` are not covered. An empty-named
- * tree entry below the root reaches here as an empty part, which the Python
- * host's dulwich joins away for a directory.
+ * tree entry never reaches here: reading the tree refuses it first.
  */
 export function validPath(path: string, mode: string): boolean {
   const parts = path.split('/')

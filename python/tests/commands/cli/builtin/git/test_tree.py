@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from pathlib import Path
+
 import pytest
 from dulwich.objects import Blob, Tree
 from dulwich.repo import MemoryRepo
@@ -24,6 +26,7 @@ from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.spec.compile import compile_spec
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
+from tests.commands.cli.builtin.git.conftest import branch_with_paths, run
 
 HEAD_MAIN = b"ref: refs/heads/main\n"
 NOT_A_REPO = (
@@ -38,6 +41,11 @@ NOTHING_YET = (
     b'and use "git add" to track)\n'
 )
 ON_MAIN = b"On branch main" + NOTHING_YET
+EMPTY_NAMED = {
+    "root": {"/x.txt": b"x\n", "a.txt": b"a\n"},
+    "nested": {"sub//x.txt": b"x\n", "a.txt": b"a\n"},
+}
+EMPTY_NAME = b"fatal: empty filename in tree entry\n"
 
 
 def leaf(name: str):
@@ -325,3 +333,95 @@ def test_tree_entries_flattens_subtrees_and_keeps_a_submodule_whole():
 )
 def test_a_path_passes_the_rule_git_checks_out_by(path, mode, expected):
     assert valid_path(path, mode) is expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "shape,line",
+    [
+        ("root", "ls-tree odd"),
+        ("root", "ls-tree odd a.txt"),
+        ("root", "cat-file -p odd^{tree}"),
+        ("root", "show odd^{tree}"),
+        ("root", "rev-parse odd:a.txt"),
+        ("root", "show odd:a.txt"),
+        ("nested", "ls-tree -r odd"),
+        ("nested", "ls-tree odd sub/"),
+        ("nested", "cat-file -p odd:sub"),
+        ("nested", "rev-parse odd:sub/x.txt"),
+        *(
+            (shape, line)
+            for shape in EMPTY_NAMED
+            for line in (
+                "show odd",
+                "show --stat odd",
+                "log -p odd",
+                "log --stat odd",
+                "log --name-only odd",
+                "diff HEAD odd",
+                "diff --stat HEAD odd",
+                "diff odd HEAD",
+                "grep x odd",
+                "checkout odd",
+                "switch odd",
+                "restore --source odd a.txt",
+            )
+        ),
+    ],
+)
+async def test_a_tree_entry_with_an_empty_name_is_fatal(
+    git_rw, repo_path: Path, shape, line
+):
+    branch_with_paths(repo_path, "odd", EMPTY_NAMED[shape])
+    files = {p: p.read_bytes() for p in repo_path.glob("*.txt")}
+    code, _, stderr = await run(git_rw, line)
+    assert (code, stderr) == (128, EMPTY_NAME)
+    assert {p: p.read_bytes() for p in repo_path.glob("*.txt")} == files
+    assert not (repo_path / "x.txt").exists()
+    head = await run(git_rw, "rev-parse --abbrev-ref HEAD")
+    assert head[1] == b"main\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "shape,line",
+    [
+        ("root", "log --oneline odd"),
+        ("root", "cat-file -t odd^{tree}"),
+        ("root", "cat-file -s odd^{tree}"),
+        ("root", "rev-parse odd:"),
+        ("nested", "ls-tree odd"),
+        ("nested", "cat-file -p odd^{tree}"),
+        ("nested", "rev-parse odd:a.txt"),
+    ],
+)
+async def test_a_read_that_decodes_no_empty_name_goes_on(
+    git_rw, repo_path: Path, shape, line
+):
+    branch_with_paths(repo_path, "odd", EMPTY_NAMED[shape])
+    code, _, stderr = await run(git_rw, line)
+    assert (code, stderr) == (0, b"")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shape", list(EMPTY_NAMED))
+@pytest.mark.parametrize("line", ["reset", "reset -- a.txt", "status"])
+async def test_a_head_with_an_empty_entry_name_is_fatal(
+    git_rw, repo_path: Path, shape, line
+):
+    branch_with_paths(repo_path, "odd", EMPTY_NAMED[shape])
+    await run(git_rw, "symbolic-ref HEAD refs/heads/odd")
+    index = (repo_path / ".git" / "index").read_bytes()
+    assert (await run(git_rw, line)) == (128, b"", EMPTY_NAME)
+    assert (repo_path / ".git" / "index").read_bytes() == index
+
+
+@pytest.mark.asyncio
+async def test_fsck_names_a_tree_with_an_empty_entry_name(
+    git_rw, repo_path: Path
+):
+    branch_with_paths(repo_path, "odd", EMPTY_NAMED["root"])
+    tree = (await run(git_rw, "rev-parse odd^{tree}"))[1].strip()
+    code, _, stderr = await run(git_rw, "fsck")
+    assert code == 1
+    assert stderr == b"error: object %s: empty filename in tree entry\n" % tree

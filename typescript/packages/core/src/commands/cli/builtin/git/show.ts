@@ -42,7 +42,7 @@ import { commitFacts, configBool, rawObject, repoArgs, type Repo } from './repo.
 import { opened } from './session.ts'
 import { resolveCommit, resolveObject } from './revparse.ts'
 import { deltas, shownSides, type Delta } from './rows.ts'
-import { located, placeNamed, shownItems } from './seen.ts'
+import { decoded, located, placeNamed, shownItems } from './seen.ts'
 import {
   checkOperands,
   loneHelp,
@@ -135,8 +135,9 @@ async function tagBlock(repo: Repo, oid: string, flags: ShowFlags): Promise<[str
 }
 
 /**
- * Every commit a line shows the diff of, tags peeled. Mirrors Python's
- * `_commits`.
+ * Every commit a line shows the diff of, tags peeled. A tree it lists is read
+ * here, so an entry git refuses refuses the line before anything prints.
+ * Mirrors Python's `_commits`.
  */
 async function commits(
   repo: Repo,
@@ -147,8 +148,9 @@ async function commits(
   for (const [, obj] of objects) {
     let target = obj
     while (target.type === 'tag') target = (await tagBlock(repo, target.oid, flags))[1]
-    if (target.type !== 'blob' && target.type !== 'tree')
-      found.push(await commitFacts(repo, target.oid))
+    if (target.type === 'tree')
+      decoded((await git.readTree({ ...repoArgs(repo), oid: target.oid })).tree)
+    else if (target.type !== 'blob') found.push(await commitFacts(repo, target.oid))
   }
   return found
 }

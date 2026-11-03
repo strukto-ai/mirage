@@ -951,19 +951,34 @@ export class InvalidPathError extends GitError {
 }
 
 /**
- * `clone` whose checkout refused a path: the repository stays, the working
- * tree stays empty, exit 128.
+ * A tree entry whose name is empty, met while reading the tree's entries;
+ * reading the object whole, as `cat-file -t` does, is no refusal. Pinned
+ * against git 2.51.2.
+ */
+export class EmptyTreeNameError extends GitError {
+  constructor() {
+    super('empty filename in tree entry')
+  }
+}
+
+/**
+ * `clone` whose checkout was refused: the repository stays, the working tree
+ * stays empty, exit 128.
  *
- * git names the first refused path only and says the clone itself succeeded,
- * pinned against git 2.47.3.
+ * git names the first refused path only, or the empty entry name it met, and
+ * says the clone itself succeeded, pinned against git 2.47.3 and 2.51.2.
  */
 export class CloneCheckoutError extends GitError {
   override readonly prefix = null
 
-  constructor(notes: string, path: string) {
+  constructor(notes: string, cause: InvalidPathError | EmptyTreeNameError) {
+    const refusal =
+      cause instanceof InvalidPathError
+        ? `error: ${new InvalidPathError(cause.paths.slice(0, 1)).message}\n` +
+          'fatal: unable to checkout working tree\n'
+        : `fatal: ${cause.message}\n`
     super(
-      `${notes}error: ${new InvalidPathError([path]).message}\n` +
-        'fatal: unable to checkout working tree\n' +
+      `${notes}${refusal}` +
         'warning: Clone succeeded, but checkout failed.\n' +
         "You can inspect what was checked out with 'git status'\n" +
         "and retry with 'git restore --source=HEAD :/'\n",
