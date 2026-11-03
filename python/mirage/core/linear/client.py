@@ -19,7 +19,7 @@
 
 import json
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 import aiohttp
 
@@ -50,7 +50,7 @@ from mirage.core.linear.queries import (
     TEAM_PROJECTS_QUERY,
     USER_LOOKUP_QUERY,
 )
-from mirage.errors.fs import enoent
+from mirage.errors.fs import enoent, is_aborting
 from mirage.types import JsonValue
 from mirage.vfs.secrets import reveal_secret
 
@@ -511,11 +511,31 @@ async def list_issue_relations(
         after = cursor
 
 
+async def _relation_mutation(
+    accessor: LinearAccessor,
+    query: str,
+    variables: dict[str, Any],
+    operation: Literal["create", "delete"],
+) -> dict[str, Any]:
+    try:
+        return await graphql_request(accessor, query, variables)
+    except Exception as exc:
+        if is_aborting(exc) or (
+            isinstance(exc, LinearAPIError)
+            and (exc.status is None or exc.status < 500)
+        ):
+            raise
+        raise LinearAPIError(
+            f"could not confirm {operation} relation; the outcome is unknown, "
+            "check relations before retrying"
+        ) from exc
+
+
 async def issue_relation_create(
     accessor: LinearAccessor, payload: dict[str, str]
 ) -> dict[str, Any]:
-    data = await graphql_request(
-        accessor, RELATION_CREATE_MUTATION, {"input": payload}
+    data = await _relation_mutation(
+        accessor, RELATION_CREATE_MUTATION, {"input": payload}, "create"
     )
     result = data.get("issueRelationCreate")
     if not isinstance(result, dict) or type(result.get("success")) is not bool:
@@ -546,8 +566,8 @@ async def issue_relation_create(
 async def issue_relation_delete(
     accessor: LinearAccessor, relation_id: str
 ) -> None:
-    data = await graphql_request(
-        accessor, RELATION_DELETE_MUTATION, {"id": relation_id}
+    data = await _relation_mutation(
+        accessor, RELATION_DELETE_MUTATION, {"id": relation_id}, "delete"
     )
     result = data.get("issueRelationDelete")
     if not isinstance(result, dict) or type(result.get("success")) is not bool:

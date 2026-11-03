@@ -19,7 +19,7 @@
 
 import { z } from 'zod'
 
-import { enoent } from '../../errors/fs.ts'
+import { enoent, isAborting } from '../../errors/fs.ts'
 import { apiRequest } from '../api/client.ts'
 import { ApiError } from '../api/errors.ts'
 import type { LinearConfig } from './config.ts'
@@ -504,11 +504,38 @@ export async function listIssueRelations(
   }
 }
 
+async function relationMutation(
+  transport: LinearTransport,
+  query: string,
+  variables: Record<string, unknown>,
+  operation: 'create' | 'delete',
+): Promise<Record<string, unknown>> {
+  try {
+    return await transport.graphql(query, variables)
+  } catch (error) {
+    if (
+      isAborting(error) ||
+      (error instanceof LinearApiError && (error.status === null || error.status < 500))
+    )
+      throw error
+    const failure = new LinearApiError(
+      `could not confirm ${operation} relation; the outcome is unknown, check relations before retrying`,
+    )
+    failure.cause = error
+    throw failure
+  }
+}
+
 export async function issueRelationCreate(
   transport: LinearTransport,
   payload: Record<string, string>,
 ): Promise<Relation> {
-  const data = await transport.graphql(RELATION_CREATE_MUTATION, { input: payload })
+  const data = await relationMutation(
+    transport,
+    RELATION_CREATE_MUTATION,
+    { input: payload },
+    'create',
+  )
   const result = z
     .object({ success: z.boolean(), issueRelation: z.unknown().optional() })
     .safeParse(data.issueRelationCreate)
@@ -537,7 +564,12 @@ export async function issueRelationDelete(
   transport: LinearTransport,
   relationId: string,
 ): Promise<void> {
-  const data = await transport.graphql(RELATION_DELETE_MUTATION, { id: relationId })
+  const data = await relationMutation(
+    transport,
+    RELATION_DELETE_MUTATION,
+    { id: relationId },
+    'delete',
+  )
   const result = z.object({ success: z.boolean() }).safeParse(data.issueRelationDelete)
   if (!result.success)
     throw new LinearApiError(

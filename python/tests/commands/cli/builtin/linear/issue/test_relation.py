@@ -1,6 +1,8 @@
+import asyncio
 import json
 from unittest.mock import AsyncMock
 
+import aiohttp
 import pytest
 
 from mirage import Workspace
@@ -9,6 +11,7 @@ from mirage.commands.cli.builtin.linear.issue import relation
 from mirage.commands.config import Context
 from mirage.core.linear import client
 from mirage.core.linear.config import LinearConfig
+from mirage.errors.types import CommandTimeoutError
 from mirage.io.types import materialize
 from mirage.policy import Deny, Policy
 
@@ -298,3 +301,74 @@ async def test_actual_shell_policy_refuses_relation_write_before_requests(
     finally:
         await workspace.close()
     request.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "delete"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        aiohttp.ClientConnectionError("reply lost"),
+        TimeoutError("reply timed out"),
+        json.JSONDecodeError("truncated reply", "", 0),
+        client.LinearAPIError("upstream unavailable", status=503),
+    ],
+)
+async def test_uncertain_request_failure_preserves_cause_without_retry(
+    monkeypatch, operation, failure
+):
+    request = AsyncMock(side_effect=failure)
+    monkeypatch.setattr(client, "graphql_request", request)
+    with pytest.raises(
+        client.LinearAPIError, match="outcome is unknown"
+    ) as caught:
+        if operation == "create":
+            await client.issue_relation_create(None, {})
+        else:
+            await client.issue_relation_delete(None, "r1")
+    assert caught.value.__cause__ is failure
+    assert request.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "delete"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        client.LinearAPIError("access denied", status=403),
+        client.LinearAPIError(
+            "invalid relation", errors=[{"message": "invalid relation"}]
+        ),
+    ],
+)
+async def test_confirmed_service_refusal_is_preserved(
+    monkeypatch, operation, failure
+):
+    request = AsyncMock(side_effect=failure)
+    monkeypatch.setattr(client, "graphql_request", request)
+    with pytest.raises(client.LinearAPIError) as caught:
+        if operation == "create":
+            await client.issue_relation_create(None, {})
+        else:
+            await client.issue_relation_delete(None, "r1")
+    assert caught.value is failure
+    assert request.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["create", "delete"])
+@pytest.mark.parametrize(
+    "failure", [asyncio.CancelledError(), CommandTimeoutError("linear", 1)]
+)
+async def test_caller_cancellation_and_budget_timeout_propagate(
+    monkeypatch, operation, failure
+):
+    request = AsyncMock(side_effect=failure)
+    monkeypatch.setattr(client, "graphql_request", request)
+    with pytest.raises(type(failure)) as caught:
+        if operation == "create":
+            await client.issue_relation_create(None, {})
+        else:
+            await client.issue_relation_delete(None, "r1")
+    assert caught.value is failure
+    assert request.await_count == 1
