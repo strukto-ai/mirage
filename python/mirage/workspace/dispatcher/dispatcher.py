@@ -1372,6 +1372,7 @@ class Dispatcher:
                             )
                         finally:
                             reset_active_recorder(token)
+                failure = None
 
     async def _record_stream(
         self,
