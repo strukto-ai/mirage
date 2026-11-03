@@ -23,6 +23,7 @@ import { TiDBFilesystemConfig } from '../../../src/vfs/tidb_filesystem/config.ts
 
 export const TOKEN = 'fs-token'
 const MTIME = 1792965402
+const MIN_PART_SIZE = 5 * 1024 * 1024
 
 interface Upload {
   path: string
@@ -54,9 +55,10 @@ function json(res: ServerResponse, status: number, data: unknown): void {
  * name live side by side, a write, a mkdir and a file rename make missing
  * parents, a listing of a missing folder is empty, GET on a directory is 404,
  * a plain PUT of `inlineThreshold` bytes or more is refused, a large file
- * reads as a 302 to its object, and only a large file takes `?append`, whose
- * plan copies the parts it keeps and hands out a read URL for the one it
- * rewrites. Objects are served on `localhost` while the API is on
+ * reads as a 302 to its object, and only a large file takes `?append` or a
+ * PATCH to a new size, whose plan copies the parts it keeps and hands out a
+ * read URL for each one it rewrites. A PATCH below S3's 5 MiB part floor gets
+ * `partSize` instead, as drive9 falls back to its own. Objects are served on `localhost` while the API is on
  * `127.0.0.1`, a different origin, and refuse a request carrying the bearer
  * token. `partDelay` holds each part upload so `peak` shows how many run at
  * once; `dropReadUrls` leaves read URLs out of an append plan.
@@ -253,7 +255,70 @@ export class FakeDrive9 {
       await this.append(req, res, path)
       return
     }
+    if (method === 'PATCH') {
+      await this.patch(req, res, path)
+      return
+    }
     json(res, 400, { error: 'unknown POST action' })
+  }
+
+  private async patch(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
+    const body = JSON.parse(Buffer.from(await bodyOf(req)).toString()) as {
+      new_size: number
+      dirty_parts: number[]
+      part_size?: number
+    }
+    const total = body.new_size
+    if (total <= 0) {
+      json(res, 400, { error: 'new_size must be positive' })
+      return
+    }
+    if (body.dirty_parts.length === 0) {
+      json(res, 400, { error: 'dirty_parts must not be empty' })
+      return
+    }
+    const data = this.files.get(path)
+    if (data === undefined) {
+      json(res, 404, { error: 'stat existing file: not found' })
+      return
+    }
+    if (data.byteLength < this.inlineThreshold) {
+      json(res, 400, { error: `file is not S3-stored: ${path}` })
+      return
+    }
+    const asked = body.part_size ?? 0
+    const size = asked < MIN_PART_SIZE ? this.partSize : asked
+    const base = data.byteLength
+    const kept = Math.ceil(base / size)
+    const uploadId = `up${String(this.uploads.size + 1)}`
+    const upload: Upload = { path, total, parts: new Map() }
+    const rows: Record<string, unknown>[] = []
+    for (let number = 1; number <= Math.ceil(total / size); number++) {
+      const start = (number - 1) * size
+      const part = Math.min(size, total - start)
+      const end = Math.min(start + part, base) - 1
+      if (!body.dirty_parts.includes(number) && number <= kept) {
+        upload.parts.set(number, data.slice(start, end + 1))
+        continue
+      }
+      const row: Record<string, unknown> = {
+        number,
+        url: `${this.objectUrl}/s3/upload/${uploadId}/${String(number)}`,
+        size: part,
+      }
+      if (number <= kept && !this.dropReadUrls) {
+        row.read_url = `${this.objectUrl}/s3/objects${path}`
+        row.read_headers = { Range: `bytes=${String(start)}-${String(end)}` }
+      }
+      rows.push(row)
+    }
+    this.uploads.set(uploadId, upload)
+    json(res, 202, {
+      upload_id: uploadId,
+      part_size: size,
+      upload_parts: rows,
+      copied_parts: [...upload.parts.keys()].sort((a, b) => a - b),
+    })
   }
 
   private async append(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
