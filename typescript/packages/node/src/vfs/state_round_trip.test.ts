@@ -32,9 +32,9 @@ import { buildVfs } from './registry.ts'
 import { Workspace } from '../workspace.ts'
 import { DiskVFS } from './disk/disk.ts'
 import { S3VFS } from './s3/s3.ts'
-import { GCSVFS } from './gcs/gcs.ts'
-import { OCIVFS } from './oci/oci.ts'
-import { R2VFS } from './r2/r2.ts'
+import { GCSVFS } from '@struktoai/mirage-core/vfs/gcs/gcs'
+import { OCIVFS } from '@struktoai/mirage-core/vfs/oci/oci'
+import { R2VFS } from '@struktoai/mirage-core/vfs/r2/r2'
 
 const ENC = new TextEncoder()
 

@@ -18,7 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
 import { classifyError } from '../mount/errors.ts'
 import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
-import { DiscordVFS } from '../vfs/discord/discord.ts'
+import { DiscordVFS } from '@struktoai/mirage-core/vfs/direct/discord'
 import { Workspace } from '../workspace.ts'
 import { MirageFS } from './fs.ts'
 

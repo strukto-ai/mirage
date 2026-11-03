@@ -39,7 +39,24 @@ import { exdev } from '../../errors/fs.ts'
 import type { ByteSource } from '../../io/types.ts'
 import type { DirListing, FileStat, PathSpec } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
+import type { S3Config } from './config.ts'
 import type { Handed } from '../types.ts'
+
+/**
+ * The endpoint a mount declares, for its write-condition row: the config's,
+ * else AWS_ENDPOINT_URL_S3 or AWS_ENDPOINT_URL unless
+ * AWS_IGNORE_CONFIGURED_ENDPOINT_URLS is true. An endpoint set only in an AWS
+ * profile is not read, and a host with no process environment has none.
+ */
+export function declaredEndpoint(config: S3Config): string | undefined {
+  if (config.endpoint !== undefined && config.endpoint !== '') return config.endpoint
+  const env: Record<string, string | undefined> =
+    (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env ?? {}
+  if (env.AWS_IGNORE_CONFIGURED_ENDPOINT_URLS?.toLowerCase() === 'true') return undefined
+  const endpoint = env.AWS_ENDPOINT_URL_S3 ?? ''
+  if (endpoint !== '') return endpoint
+  return env.AWS_ENDPOINT_URL !== '' ? env.AWS_ENDPOINT_URL : undefined
+}
 
 function awsEndpoint(endpoint: string): boolean {
   let host: string

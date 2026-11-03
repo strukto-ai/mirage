@@ -15,7 +15,7 @@
 import { MountMode } from '@struktoai/mirage-core/types'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../../workspace.ts'
-import { DiscordVFS } from './discord.ts'
+import { DiscordVFS } from '@struktoai/mirage-core/vfs/direct/discord'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {

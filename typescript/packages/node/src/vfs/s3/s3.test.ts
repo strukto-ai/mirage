@@ -25,7 +25,7 @@ import { HttpProxyAgent } from 'http-proxy-agent'
 import { HttpsProxyAgent } from 'https-proxy-agent'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { S3VFS } from './s3.ts'
-import type { S3Config } from './config.ts'
+import type { S3Config } from '@struktoai/mirage-core/vfs/direct/s3'
 import { installS3Mock, type S3Mock } from '../../../tests/vfs/s3/mock.ts'
 import { s3Vfs } from '../../../tests/test-utils.ts'
 

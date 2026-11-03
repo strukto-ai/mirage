@@ -14,19 +14,19 @@
 
 import { describe, expect, it } from 'vitest'
 import { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import { DatabricksVolumeVFS } from '@struktoai/mirage-core/vfs/direct/databricks_volume'
+import { DiscordVFS } from '@struktoai/mirage-core/vfs/direct/discord'
+import { NotionVFS } from '@struktoai/mirage-core/vfs/direct/notion'
+import { SlackVFS } from '@struktoai/mirage-core/vfs/direct/slack'
+import { TiDBFilesystemVFS } from '@struktoai/mirage-core/vfs/direct/tidb_filesystem'
 import { MountEntry } from '@struktoai/mirage-core/workspace/mount/mount'
-import { DatabricksVolumeVFS } from './databricks_volume/databricks_volume.ts'
-import { DiscordVFS } from './discord/discord.ts'
 import { DiskVFS } from './disk/disk.ts'
 import { EmailVFS } from './email/email.ts'
 import { HfBucketsVFS } from './hf_buckets/hf_buckets.ts'
 import { LanceDBVFS } from './lancedb/lancedb.ts'
 import { MongoDBVFS } from './mongodb/mongodb.ts'
-import { NotionVFS } from './notion/notion.ts'
-import { PostgresVFS } from './postgres/postgres.ts'
-import { SlackVFS } from './slack/slack.ts'
+import { PostgresVFS } from '@struktoai/mirage-core/vfs/direct/postgres'
 import { SSHVFS } from './ssh/ssh.ts'
-import { TiDBFilesystemVFS } from './tidb_filesystem/tidb_filesystem.ts'
 
 // Every backend's op surface as the dispatcher sees it, pinned when the op tables
 // became VFS methods. A diff here is a lost or gained op unless the change is

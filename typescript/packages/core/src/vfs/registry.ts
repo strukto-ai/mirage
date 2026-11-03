@@ -147,6 +147,130 @@ export const REGISTRY: Readonly<Record<string, VFSFactory>> = {
   },
 }
 
+/**
+ * The backends a host that may hold their credential builds: each takes
+ * its token in the config and reaches its service with `fetch` (`direct/`).
+ * Node and edge runtimes build these on top of {@link REGISTRY}; the
+ * browser builds its own, which leave the token to a proxy, so this table
+ * is kept apart rather than in core's own `buildVfs`.
+ */
+export const DIRECT_REGISTRY: Readonly<Record<string, VFSFactory>> = {
+  slack: async (config) => {
+    const { SlackVFS } = await import('./direct/slack.ts')
+    const { SlackConfig } = await import('./slack/config.ts')
+    return new SlackVFS(parseConfigWithSchema(SlackConfig, config))
+  },
+  discord: async (config) => {
+    const { DiscordVFS } = await import('./direct/discord.ts')
+    const { DiscordConfig } = await import('./discord/config.ts')
+    return new DiscordVFS(parseConfigWithSchema(DiscordConfig, config))
+  },
+  notion: async (config) => {
+    const { NotionVFS } = await import('./direct/notion.ts')
+    const { NotionConfig } = await import('../core/notion/config.ts')
+    return new NotionVFS(parseConfigWithSchema(NotionConfig, config))
+  },
+  jaeger: async (config) => {
+    const { JaegerVFS } = await import('./direct/jaeger.ts')
+    const { JaegerConfig } = await import('./jaeger/config.ts')
+    return new JaegerVFS(parseConfigWithSchema(JaegerConfig, config))
+  },
+  databricks_volume: async (config) => {
+    const { DatabricksVolumeVFS } = await import('./direct/databricks_volume.ts')
+    const { DatabricksVolumeConfig } = await import('./databricks_volume/config.ts')
+    return DatabricksVolumeVFS.create(parseConfigWithSchema(DatabricksVolumeConfig, config))
+  },
+  tidb_filesystem: async (config) => {
+    const { TiDBFilesystemVFS } = await import('./direct/tidb_filesystem.ts')
+    const { TiDBFilesystemConfig } = await import('./tidb_filesystem/config.ts')
+    return TiDBFilesystemVFS.create(parseConfigWithSchema(TiDBFilesystemConfig, config))
+  },
+  dropbox: async (config) => {
+    const { DropboxVFS } = await import('./dropbox/dropbox.ts')
+    const { DropboxConfig } = await import('./direct/dropbox.ts')
+    return new DropboxVFS(parseConfigWithSchema(DropboxConfig, config))
+  },
+  s3: async (config) => {
+    const { S3Config, S3VFS } = await import('./direct/s3.ts')
+    return new S3VFS(parseConfigWithSchema(S3Config, config))
+  },
+  gcs: async (config) => {
+    const { GCSVFS } = await import('./gcs/gcs.ts')
+    const { GCSConfig } = await import('./gcs/config.ts')
+    return new GCSVFS(parseConfigWithSchema(GCSConfig, config))
+  },
+  oci: async (config) => {
+    const { OCIVFS } = await import('./oci/oci.ts')
+    const { OCIConfig } = await import('./oci/config.ts')
+    return new OCIVFS(parseConfigWithSchema(OCIConfig, config))
+  },
+  r2: async (config) => {
+    const { R2VFS } = await import('./r2/r2.ts')
+    const { R2Config } = await import('./r2/config.ts')
+    return new R2VFS(parseConfigWithSchema(R2Config, config))
+  },
+  supabase: async (config) => {
+    const { SupabaseVFS } = await import('./supabase/supabase.ts')
+    const { SupabaseConfig } = await import('./supabase/config.ts')
+    return new SupabaseVFS(parseConfigWithSchema(SupabaseConfig, config))
+  },
+  minio: async (config) => {
+    const { MinIOVFS } = await import('./minio/minio.ts')
+    const { MinIOConfig } = await import('./minio/config.ts')
+    return new MinIOVFS(parseConfigWithSchema(MinIOConfig, config))
+  },
+  ceph: async (config) => {
+    const { CephVFS } = await import('./ceph/ceph.ts')
+    const { CephConfig } = await import('./ceph/config.ts')
+    return new CephVFS(parseConfigWithSchema(CephConfig, config))
+  },
+  seaweedfs: async (config) => {
+    const { SeaweedFSVFS } = await import('./seaweedfs/seaweedfs.ts')
+    const { SeaweedFSConfig } = await import('./seaweedfs/config.ts')
+    return new SeaweedFSVFS(parseConfigWithSchema(SeaweedFSConfig, config))
+  },
+  wasabi: async (config) => {
+    const { WasabiVFS } = await import('./wasabi/wasabi.ts')
+    const { WasabiConfig } = await import('./wasabi/config.ts')
+    return new WasabiVFS(parseConfigWithSchema(WasabiConfig, config))
+  },
+  backblaze: async (config) => {
+    const { BackblazeVFS } = await import('./backblaze/backblaze.ts')
+    const { BackblazeConfig } = await import('./backblaze/config.ts')
+    return new BackblazeVFS(parseConfigWithSchema(BackblazeConfig, config))
+  },
+  digitalocean: async (config) => {
+    const { DigitalOceanVFS } = await import('./digitalocean/digitalocean.ts')
+    const { DigitalOceanConfig } = await import('./digitalocean/config.ts')
+    return new DigitalOceanVFS(parseConfigWithSchema(DigitalOceanConfig, config))
+  },
+  tencent: async (config) => {
+    const { TencentVFS } = await import('./tencent/tencent.ts')
+    const { TencentConfig } = await import('./tencent/config.ts')
+    return new TencentVFS(parseConfigWithSchema(TencentConfig, config))
+  },
+  aliyun: async (config) => {
+    const { AliyunVFS } = await import('./aliyun/aliyun.ts')
+    const { AliyunConfig } = await import('./aliyun/config.ts')
+    return new AliyunVFS(parseConfigWithSchema(AliyunConfig, config))
+  },
+  scaleway: async (config) => {
+    const { ScalewayVFS } = await import('./scaleway/scaleway.ts')
+    const { ScalewayConfig } = await import('./scaleway/config.ts')
+    return new ScalewayVFS(parseConfigWithSchema(ScalewayConfig, config))
+  },
+  qingstor: async (config) => {
+    const { QingStorVFS } = await import('./qingstor/qingstor.ts')
+    const { QingStorConfig } = await import('./qingstor/config.ts')
+    return new QingStorVFS(parseConfigWithSchema(QingStorConfig, config))
+  },
+  postgres: async (config) => {
+    const { PostgresVFS } = await import('./direct/postgres.ts')
+    const { PostgresConfig } = await import('./postgres/config.ts')
+    return new PostgresVFS(parseConfigWithSchema(PostgresConfig, config))
+  },
+}
+
 const CUSTOM: Record<string, VFSFactory> = {}
 
 /**

@@ -21,7 +21,7 @@ import { MirageFS } from '@struktoai/mirage-node/fuse/fs'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
 import { classifyError } from '@struktoai/mirage-node/mount/errors'
 import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
-import { DiscordVFS } from '@struktoai/mirage-node/vfs/discord/discord'
+import { DiscordVFS } from '@struktoai/mirage-node'
 import { Workspace } from '@struktoai/mirage-node/workspace'
 
 interface Case {

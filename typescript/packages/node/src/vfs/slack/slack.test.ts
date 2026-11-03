@@ -19,7 +19,7 @@ import { SlackConfig } from '@struktoai/mirage-core/vfs/slack/config'
 import { commandsFor } from '@struktoai/mirage-core/workspace/mount/backends'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildVfs } from '../registry.ts'
-import { SlackVFS } from './slack.ts'
+import { SlackVFS } from '@struktoai/mirage-core/vfs/direct/slack'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {

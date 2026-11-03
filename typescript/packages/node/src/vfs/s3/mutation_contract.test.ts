@@ -15,7 +15,7 @@
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { checkMutationContract } from '@struktoai/mirage-core/vfs/testing'
 import { afterAll, beforeAll, beforeEach, describe, it } from 'vitest'
-import { MinIOVFS } from '../minio/minio.ts'
+import { MinIOVFS } from '@struktoai/mirage-core/vfs/minio/minio'
 import { installS3Mock, type S3Mock } from '../../../tests/vfs/s3/mock.ts'
 import { s3Vfs } from '../../../tests/test-utils.ts'
 

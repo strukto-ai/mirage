@@ -498,22 +498,23 @@ function refuses(node: ts.Node): boolean {
 }
 
 /**
- * The registry file a `...REGISTRY` spread in a host's table reads from:
- * node and browser lay their own entries over core's.
+ * The registry file and table a `...REGISTRY` spread in a host's table
+ * reads from: node and browser lay their own entries over core's, and node
+ * and edge over core's `DIRECT_REGISTRY` too.
  */
 function spreadRegistry(
   source: ts.SourceFile,
   prop: ts.SpreadAssignment,
   packagesRoot: string,
-): string {
+): { file: string; table: string } {
   const local = prop.expression.getText(source)
   const origin = ts.isIdentifier(prop.expression)
     ? importOrigin(source, local, packagesRoot)
     : undefined
-  if (origin?.exported !== 'REGISTRY') {
+  if (origin === undefined || !origin.exported.endsWith('REGISTRY')) {
     throw new Error(`${source.fileName}: cannot follow the spread of ${local} in REGISTRY`)
   }
-  return origin.file
+  return { file: origin.file, table: origin.exported }
 }
 
 /**
@@ -527,10 +528,12 @@ function spreadRegistry(
  *
  * Args:
  *   registryFile: absolute path to the variant's `VFS/registry.ts`.
+ *   table: the table in it to read.
  */
 export function registryClasses(
   registryFile: string,
   packagesRoot: string,
+  table = 'REGISTRY',
 ): Map<string, string | null> {
   const source = parse(registryFile)
   const reference = classResolver(packagesRoot)
@@ -539,14 +542,15 @@ export function registryClasses(
     if (
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
-      node.name.text === 'REGISTRY' &&
+      node.name.text === table &&
       node.initializer !== undefined &&
       ts.isObjectLiteralExpression(node.initializer)
     ) {
       for (const prop of node.initializer.properties) {
         if (ts.isSpreadAssignment(prop)) {
           const spread = spreadRegistry(source, prop, packagesRoot)
-          for (const [name, cls] of registryClasses(spread, packagesRoot)) out.set(name, cls)
+          for (const [name, cls] of registryClasses(spread.file, packagesRoot, spread.table))
+            out.set(name, cls)
           continue
         }
         if (!ts.isPropertyAssignment(prop)) continue
@@ -701,6 +705,7 @@ export function moduleFile(
 function registryConfigs(
   registryFile: string,
   packagesRoot: string,
+  table = 'REGISTRY',
 ): Map<string, { file: string; name: string } | null> {
   const source = parse(registryFile)
   const out = new Map<string, { file: string; name: string } | null>()
@@ -708,14 +713,15 @@ function registryConfigs(
     if (
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
-      node.name.text === 'REGISTRY' &&
+      node.name.text === table &&
       node.initializer !== undefined &&
       ts.isObjectLiteralExpression(node.initializer)
     ) {
       for (const prop of node.initializer.properties) {
         if (ts.isSpreadAssignment(prop)) {
           const spread = spreadRegistry(source, prop, packagesRoot)
-          for (const [name, config] of registryConfigs(spread, packagesRoot)) out.set(name, config)
+          for (const [name, config] of registryConfigs(spread.file, packagesRoot, spread.table))
+            out.set(name, config)
           continue
         }
         if (!ts.isPropertyAssignment(prop)) continue
