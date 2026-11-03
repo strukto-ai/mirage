@@ -13,7 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { MUTATION_OPS, OpRecord, RecordIndex } from './record.ts'
+import { LostPaths, MUTATION_OPS, OpRecord, type OpStatus, RecordIndex } from './record.ts'
+import { OwnRead } from '../cache/types.ts'
+import { VersionHistory, VersionScope } from '../cache/versions.ts'
+import type { MountEntry } from '../workspace/mount/mount.ts'
+import { captureFingerprints } from '../workspace/snapshot/drift.ts'
 import { ExecutionNode } from '../workspace/types.ts'
 
 describe('OpRecord', () => {
@@ -259,5 +263,76 @@ it('a failed mutation preserves the read version', () => {
     errno: 13,
     changed: false,
     served: 'backend',
+  })
+})
+
+const OUTCOMES: Record<string, [OpStatus, boolean]> = {
+  ok: ['ok', true],
+  'ok, unchanged': ['ok', false],
+  failed: ['failed', false],
+  partial: ['partial', true],
+}
+
+function outcome(op: string, name: string, fingerprint: string | null = null): OpRecord {
+  const [status, changed] = OUTCOMES[name] ?? ['ok', true]
+  return new OpRecord({
+    op,
+    path: '/s3/a',
+    source: 's3',
+    bytes: 0,
+    timestamp: 1,
+    durationMs: 0,
+    fingerprint,
+    status,
+    errno: status === 'ok' ? null : 13,
+    changed,
+  })
+}
+
+describe('a row against the version consumers', () => {
+  it.each([
+    ['ok', true],
+    ['ok, unchanged', false],
+    ['failed', false],
+    ['partial', true],
+  ] as const)('a %s removal speaks for the path only when it settles', (name, settles) => {
+    const read = new OpRecord({
+      op: 'read',
+      path: '/s3/a',
+      source: 's3',
+      bytes: 3,
+      timestamp: 0,
+      durationMs: 0,
+      fingerprint: 'v1',
+    })
+    const gone = outcome('unlink', name)
+    expect(gone.settles).toBe(settles)
+    expect(new RecordIndex([read, gone]).newestVersion('/s3/a')).toBe(settles ? gone : read)
+    const history = new VersionHistory()
+    const scope = new VersionScope()
+    history.observe(scope, 'a', read)
+    history.observe(scope, 'a', gone)
+    expect(history.read(scope, 'a')).toBe(settles ? OwnRead.ABSENT : 'v1')
+    const mount = {
+      prefix: '/s3/',
+      vfs: { supportsSnapshot: true },
+      revisions: new Map(),
+    } as unknown as MountEntry
+    const registry = { tryMountFor: () => mount, allMounts: () => [mount] }
+    const pins = captureFingerprints([read, gone], registry)
+    expect(pins.map((pin) => pin.path)).toEqual(settles ? [] : ['/s3/a'])
+  })
+
+  it.each([
+    ['ok', true],
+    ['ok, unchanged', false],
+    ['failed', false],
+    ['partial', false],
+  ] as const)('a %s write lifts a lost mark only when it landed', (name, lifts) => {
+    const sink: OpRecord[] = []
+    const lost = new LostPaths(sink)
+    lost.mark('/s3/a', 'v1')
+    sink.push(outcome('write', name, 'v2'))
+    expect(lost.holds('/s3/a')).toBe(!lifts)
   })
 })

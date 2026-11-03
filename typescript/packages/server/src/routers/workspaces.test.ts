@@ -12,7 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import * as fs from 'node:fs/promises'
+import type * as fsModule from 'node:fs/promises'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -42,6 +44,11 @@ const limits = vi.hoisted(() => ({
   snapshot: undefined as number | undefined,
   expanded: undefined as number | undefined,
 }))
+
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof fsModule>()
+  return { ...actual, copyFile: vi.fn(actual.copyFile) }
+})
 
 vi.mock('../constants.ts', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>()
@@ -123,6 +130,53 @@ describe('workspaces router', () => {
     expect(body.status).toBe('ok')
     expect(body.workspaces).toBe(0)
     await app.close()
+  })
+
+  it.skipIf(process.getuid?.() === 0).each([
+    ['failed', false, 13],
+    ['partial', true, 28],
+  ] as const)('history reads a %s disk cp', async (outcome, changed, errno) => {
+    const root = mkdtempSync(join(tmpdir(), 'mirage-history-cp-'))
+    writeFileSync(join(root, 'a.txt'), 'hello\n')
+    mkdirSync(join(root, 'ro'))
+    chmodSync(join(root, 'ro'), 0o500)
+    let dst = '/ro/c.txt'
+    if (outcome === 'partial') {
+      dst = '/c.txt'
+      vi.mocked(fs.copyFile).mockImplementationOnce(async (_src, target) => {
+        await fs.writeFile(target as string, 'half')
+        throw Object.assign(new Error('full'), { code: 'ENOSPC', errno: -28 })
+      })
+    }
+    const app = buildApp()
+    try {
+      const mounts = { '/': { vfs: 'disk', mode: 'write', config: { root } } }
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: { id: `cp-${outcome}`, config: { mounts } },
+      })
+      expect(created.statusCode).toBe(201)
+      const ran = await app.inject({
+        method: 'POST',
+        url: `/v1/workspaces/cp-${outcome}/shell`,
+        payload: { command: `cp /a.txt ${dst}` },
+      })
+      expect(ran.statusCode).toBe(200)
+      const history = await app.inject({
+        method: 'GET',
+        url: `/v1/workspaces/cp-${outcome}/history?vfs=true`,
+      })
+      const copies = history
+        .json<Record<string, unknown>[]>()
+        .filter((e) => e.vfs === 'copy')
+        .map((e) => [e.path, e.status, e.errno, e.changed])
+      expect(copies).toEqual([[dst, outcome, errno, changed]])
+    } finally {
+      await app.close()
+      chmodSync(join(root, 'ro'), 0o700)
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('POST /v1/workspaces creates and returns detail', async () => {

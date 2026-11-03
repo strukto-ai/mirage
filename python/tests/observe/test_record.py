@@ -12,10 +12,21 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from types import SimpleNamespace
+
 import pytest
 
+from mirage.cache.types import OwnRead
+from mirage.cache.versions import VersionHistory, VersionScope
 from mirage.observe import OpRecord
-from mirage.observe.record import MUTATION_OPS, OpStatus, RecordIndex
+from mirage.observe.record import (
+    MUTATION_OPS,
+    LostPaths,
+    OpStatus,
+    RecordIndex,
+)
+from mirage.workspace.snapshot.drift import capture_fingerprints
+from mirage.workspace.snapshot.keys import FingerprintKey
 from mirage.workspace.types import ExecutionNode
 
 
@@ -216,3 +227,76 @@ def test_a_row_states_its_own_effect_and_server():
     read = OpRecord("read", "/a", "ram", 3, 1, 0)
     assert read.changed is False
     assert read.served == "backend"
+
+
+_OUTCOMES = {
+    "ok": (OpStatus.OK, True),
+    "ok, unchanged": (OpStatus.OK, False),
+    "failed": (OpStatus.FAILED, False),
+    "partial": (OpStatus.PARTIAL, True),
+}
+
+
+def _outcome(op: str, outcome: str, fingerprint: str | None = None) -> OpRecord:
+    status, changed = _OUTCOMES[outcome]
+    return OpRecord(
+        op,
+        "/s3/a",
+        "s3",
+        0,
+        1,
+        0,
+        fingerprint=fingerprint,
+        status=status,
+        errno=None if status == OpStatus.OK else 13,
+        changed=changed,
+    )
+
+
+@pytest.mark.parametrize(
+    "outcome, settles",
+    [
+        ("ok", True),
+        ("ok, unchanged", False),
+        ("failed", False),
+        ("partial", True),
+    ],
+)
+def test_a_removal_speaks_for_the_path_only_when_it_settles(outcome, settles):
+    read = OpRecord("read", "/s3/a", "s3", 3, 0, 0, fingerprint="v1")
+    gone = _outcome("unlink", outcome)
+    assert gone.settles is settles
+    assert RecordIndex([read, gone]).newest_version("/s3/a") is (
+        gone if settles else read
+    )
+    history, scope = VersionHistory(), VersionScope()
+    history.observe(scope, "a", read)
+    history.observe(scope, "a", gone)
+    assert history.read(scope, "a") == (OwnRead.ABSENT if settles else "v1")
+    mount = SimpleNamespace(
+        prefix="/s3/",
+        mount_id=None,
+        vfs=SimpleNamespace(supports_snapshot=True),
+    )
+    registry = SimpleNamespace(try_mount_for=lambda path: mount)
+    pins = capture_fingerprints([read, gone], registry)
+    assert [pin[FingerprintKey.PATH] for pin in pins] == (
+        [] if settles else ["/s3/a"]
+    )
+
+
+@pytest.mark.parametrize(
+    "outcome, lifts",
+    [
+        ("ok", True),
+        ("ok, unchanged", False),
+        ("failed", False),
+        ("partial", False),
+    ],
+)
+def test_only_a_write_that_landed_lifts_a_lost_mark(outcome, lifts):
+    sink: list[OpRecord] = []
+    lost = LostPaths(sink)
+    lost.mark("/s3/a", "v1")
+    sink.append(_outcome("write", outcome, fingerprint="v2"))
+    assert lost.holds("/s3/a") is not lifts

@@ -13,12 +13,21 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import * as fs from 'node:fs/promises'
+import type * as fsModule from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { Policy } from '@struktoai/mirage-core/policy/base'
+import type { Action, CommandResultContext } from '@struktoai/mirage-core/policy/types'
 import { MountMode } from '@struktoai/mirage-core/types'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DiskVFS } from '../../vfs/disk/disk.ts'
 import { Workspace } from '../../workspace.ts'
+
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof fsModule>()
+  return { ...actual, copyFile: vi.fn(actual.copyFile) }
+})
 
 const MUTATIONS = new Set(['copy', 'rename', 'rename_prefix', 'unlink', 'mkdir', 'rmdir', 'rm_r'])
 
@@ -124,3 +133,47 @@ describe.skipIf(process.getuid?.() === 0)(
     })
   },
 )
+
+class RecordsByCommand implements Policy {
+  readonly seen = new Map<string, readonly Record<string, unknown>[]>()
+
+  postCommand(ctx: CommandResultContext): Action | null {
+    this.seen.set(ctx.command, [...ctx.records])
+    return null
+  }
+}
+
+describe.skipIf(process.getuid?.() === 0)('a failed disk cp reaches postCommand', () => {
+  afterEach(() => {
+    if (existsSync(join(root, 'ro'))) chmodSync(join(root, 'ro'), 0o700)
+  })
+
+  it.each([
+    ['failed', false, 13],
+    ['partial', true, 28],
+  ] as const)('%s', async (outcome, changed, errno) => {
+    let dst = '/m/c.txt'
+    if (outcome === 'failed') {
+      mkdirSync(join(root, 'ro'))
+      chmodSync(join(root, 'ro'), 0o500)
+      dst = '/m/ro/c.txt'
+    } else {
+      vi.mocked(fs.copyFile).mockImplementationOnce(async (_src, target) => {
+        await fs.writeFile(target as string, 'half')
+        throw Object.assign(new Error('full'), { code: 'ENOSPC', errno: -28 })
+      })
+    }
+    const ws = new Workspace({ '/m': new DiskVFS({ root }) }, { mode: MountMode.WRITE })
+    const policy = new RecordsByCommand()
+    ws.policies.add(policy)
+    try {
+      expect((await ws.shell(`cp /m/a.txt ${dst}`)).exitCode).toBe(1)
+    } finally {
+      await ws.close()
+    }
+    const copies = (policy.seen.get('cp') ?? []).filter((r) => r.op === 'copy')
+    expect(copies.map((r) => [r.path, r.status, r.errno, r.changed])).toEqual([
+      [dst, outcome, errno, changed],
+    ])
+  })
+})
