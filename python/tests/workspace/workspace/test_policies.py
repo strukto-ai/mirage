@@ -1243,7 +1243,7 @@ async def test_a_program_printing_something_else_fails_closed():
         assert refused.exit_code == 126
         assert refused.refusal is not None
         assert refused.refusal.reason.startswith(
-            "profile 'release' policy must print a JSON answer at pre_command"
+            "profile 'release' policy must return or print a JSON answer at pre_command"
         )
     finally:
         await ws.close()

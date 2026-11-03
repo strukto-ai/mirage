@@ -90,7 +90,7 @@ async def test_a_program_prints_its_route_or_nothing():
     ("source", "refusal"),
     [
         ("1 / 0", "route_policy exited 1"),
-        ("print('beta')", "route_policy must print a JSON answer"),
+        ("print('beta')", "route_policy must return or print a JSON answer"),
     ],
 )
 async def test_a_program_that_fails_is_the_deployments_mistake(

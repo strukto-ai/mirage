@@ -238,17 +238,12 @@ To get started, see the quickstarts for
 
 ## Scriptable Policy
 
-A profile can name policy scripts for what its rules cannot express. A script
-reads the command as JSON, can open the files it names, and prints a deny, an
-ask or nothing. This one disables `rm`, and a Python script whose code
+A profile can name policy scripts for what its rules cannot express. A script's
+`pre_command` takes the command, can open the files it names, and returns a
+deny, an ask or `None`. This one disables `rm`, and a Python script whose code
 deletes files:
 
 ```python
-import json, os
-
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-
-
 def deletes(path):
     try:
         code = open(path).read()
@@ -257,10 +252,11 @@ def deletes(path):
     return any(call in code for call in ("os.remove", "os.unlink", "shutil.rmtree"))
 
 
-if ctx["command"] == "rm" or (
-    ctx["command"].startswith("python") and any(deletes(p) for p in ctx["paths"])
-):
-    print(json.dumps({"kind": "deny", "reason": "deleting files is disabled"}))
+def pre_command(ctx):
+    if ctx["command"] == "rm" or (
+        ctx["command"].startswith("python") and any(deletes(p) for p in ctx["paths"])
+    ):
+        return {"kind": "deny", "reason": "deleting files is disabled"}
 ```
 
 Register it in a profile, here to run on Monty before every command:

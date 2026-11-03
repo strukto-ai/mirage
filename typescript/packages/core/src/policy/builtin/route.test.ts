@@ -76,7 +76,7 @@ describe('RoutePolicy', () => {
 
   it.each([
     ['1 / 0', /route_policy exited 1/],
-    ["print('beta')", /route_policy must print a JSON answer/],
+    ["print('beta')", /route_policy must return or print a JSON answer/],
   ])("treats a failing program as the deployment's mistake: %s", async (source, refusal) => {
     const policy = routePolicy({ script: new ScriptSource(source, 'python'), runtime: 'monty' })
     await expect(policy.preExecute(line('echo hi'))).rejects.toThrow(refusal)

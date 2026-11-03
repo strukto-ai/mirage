@@ -282,7 +282,7 @@ describe('profile policies', () => {
       const refused = await ws.shell('echo hi', { sessionId: 's' })
       expect(refused.exitCode).toBe(126)
       expect(refused.refusal?.reason).toMatch(
-        /^profile 'release' policy must print a JSON answer at pre_command/,
+        /^profile 'release' policy must return or print a JSON answer at pre_command/,
       )
     } finally {
       await ws.close()

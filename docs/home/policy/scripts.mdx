@@ -1,13 +1,14 @@
 ---
 title: Scripts
-description: Write a policy as a program that runs sandboxed on monty or Python on wasm, reads the same context a coded policy reads as JSON, and prints its answer.
+description: Write a policy as a program that runs sandboxed on monty or Python on wasm, takes the same context a coded policy reads, and returns its answer.
 icon: code
 ---
 
 A policy can be a program instead of a class. A profile names a list of
 programs for each method it answers at, and the runtime each one runs on.
-A program reads the same `ctx` a [coded policy](/home/policy/policies)
-reads, as JSON, and prints its answer. Two places take a program:
+A program defines a function named for the method, which takes the same
+`ctx` a [coded policy](/home/policy/policies) reads and returns its answer.
+Two places take a program:
 
 | Where | Asked | Answers |
 | --- | --- | --- |
@@ -37,12 +38,9 @@ profile: reviewer
 ```
 
 ```python guard.py
-import json
-import os
-
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-if ctx["command"] == "rm":
-    print(json.dumps({"kind": "deny", "reason": "deletes are disabled"}))
+def pre_command(ctx):
+    if ctx["command"] == "rm":
+        return {"kind": "deny", "reason": "deletes are disabled"}
 ```
 
 ```bash
@@ -88,32 +86,50 @@ profiles: {
 
 ## The program
 
-A program runs the way any program runs on its runtime. Mirage never edits
-it:
+A program runs the way any program runs on its runtime. When it defines a
+function named for its method at the top level, `def pre_command(ctx)` at
+`pre_command`, Mirage calls the function after the program and edits
+nothing else:
 
-- **Input:** `ctx` as JSON, in the environment variable `MIRAGE_POLICY_CTX`
-  and on stdin. On monty, which has no `sys.stdin`, stdin arrives as a
-  `stdin` variable, so read the environment variable to run anywhere.
-  `MIRAGE_POLICY_CTX` is reserved, and the session never sees it. Beside
-  it, Mirage passes only the entry's own [`env`](#variables): the
-  session's variables stay out of its environment. A runtime may add its
-  own, as wasi adds `PYTHONHOME` and `PYTHONDONTWRITEBYTECODE`.
+- **Input:** `ctx`, the function's argument, as plain data. The same `ctx`
+  is in the environment variable `MIRAGE_POLICY_CTX` and on stdin, as
+  JSON; on monty, which has no `sys.stdin`, stdin arrives as a `stdin`
+  variable. `MIRAGE_POLICY_CTX` is reserved, and the session never sees
+  it. Beside it, Mirage passes only the entry's own [`env`](#variables):
+  the session's variables stay out of its environment. A runtime may add
+  its own, as wasi adds `PYTHONHOME` and `PYTHONDONTWRITEBYTECODE`.
 - **Session:** the program starts in the session's working directory, so
   `os.getcwd()` is the session's. The session's variables are in
   `ctx["env"]`, not in `os.environ`. An `import` never loads a module from
   the session's directory.
-- **Answer:** printed on stdout. Nothing, or `null`, is no opinion.
+- **Answer:** what the function returns. `None` is no opinion. On monty the
+  function may be `async def`, to await [host functions](#host-functions).
 
-| Prints | Effect |
+| Returns | Effect |
 | --- | --- |
-| nothing | no opinion |
+| `None` | no opinion |
 | `{"kind": "deny", "reason": "..."}` | refuses |
 | `{"kind": "ask", "reason": "..."}` | [asks the host](/home/policy/policies#asks) |
 | `{"kind": "route", "runtime": "docker"}` | at `pre_execute`: runs the line on that runtime |
 
 A deny or an ask without a `reason` gets the default one. A route may give
-one too, which `explain` shows. Anything else on
-stdout, such as a debug line, fails the program; write those to stderr.
+one too, which `explain` shows.
+
+Mirage reads the answer on stdout, where the function's return value is
+printed as JSON. A program without the function prints its answer there
+itself:
+
+```python guard.py
+import json
+import os
+
+ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+if ctx["command"] == "rm":
+    print(json.dumps({"kind": "deny", "reason": "deletes are disabled"}))
+```
+
+Either way, anything else on stdout, such as a debug line, fails the
+program; write those to stderr.
 
 ## Variables
 
@@ -164,13 +180,10 @@ const ws = new Workspace(mounts, {
 </CodeGroup>
 
 ```python guard.py
-import json
-import os
-
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-user = await lookup_user(ctx["session_id"])
-if ctx["command"] == "rm" and not user["admin"]:
-    print(json.dumps({"kind": "deny", "reason": "only admins delete"}))
+async def pre_command(ctx):
+    user = await lookup_user(ctx["session_id"])
+    if ctx["command"] == "rm" and not user["admin"]:
+        return {"kind": "deny", "reason": "only admins delete"}
 ```
 
 A function may be sync or async and takes and returns plain data: strings,
@@ -256,11 +269,6 @@ So a program can judge a file by what is in it. This one disables `rm`, and
 a Python script whose code deletes files:
 
 ```python guard.py
-import json, os
-
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-
-
 def deletes(path):
     try:
         code = open(path).read()
@@ -269,10 +277,11 @@ def deletes(path):
     return any(call in code for call in ("os.remove", "os.unlink", "shutil.rmtree"))
 
 
-if ctx["command"] == "rm" or (
-    ctx["command"].startswith("python") and any(deletes(p) for p in ctx["paths"])
-):
-    print(json.dumps({"kind": "deny", "reason": "deleting files is disabled"}))
+def pre_command(ctx):
+    if ctx["command"] == "rm" or (
+        ctx["command"].startswith("python") and any(deletes(p) for p in ctx["paths"])
+    ):
+        return {"kind": "deny", "reason": "deleting files is disabled"}
 ```
 
 The script reads the code as text, so it stops the usual calls, not every way
@@ -335,7 +344,7 @@ python3: Permission denied
 
 ## When a program fails
 
-A program that exits non-zero, runs past 10 seconds, prints anything but
+A program that exits non-zero, runs past 10 seconds, answers anything but
 an answer its method can give, or names a runtime that cannot run here
 refuses the action. The reason names the profile and what went wrong, such
 as `profile 'reviewer' policy exited 1`, and the program's stderr goes to
