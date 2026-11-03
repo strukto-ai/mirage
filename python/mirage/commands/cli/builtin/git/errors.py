@@ -897,24 +897,42 @@ class InvalidPathError(GitError):
         )
 
 
-class CloneCheckoutError(GitError):
-    """``clone`` whose checkout refused a path: the repository stays,
-    the working tree stays empty, exit 128.
+class EmptyTreeNameError(GitError):
+    """A tree entry whose name is empty, met while reading the tree's
+    entries; reading the object whole, as ``cat-file -t`` does, is no
+    refusal. Pinned against git 2.51.2.
+    """
 
-    git names the first refused path only and says the clone itself
-    succeeded, pinned against git 2.47.3.
+    def __init__(self) -> None:
+        super().__init__("empty filename in tree entry")
+
+
+class CloneCheckoutError(GitError):
+    """``clone`` whose checkout was refused: the repository stays, the
+    working tree stays empty, exit 128.
+
+    git names the first refused path only, or the empty entry name it
+    met, and says the clone itself succeeded, pinned against git 2.47.3
+    and 2.51.2.
 
     Args:
         notes (str): what the clone printed before the checkout.
-        path (str): the first refused path.
+        cause (InvalidPathError | EmptyTreeNameError): the refusal.
     """
 
     prefix = None
 
-    def __init__(self, notes: str, path: str) -> None:
-        super().__init__(
-            f"{notes}error: {InvalidPathError([path])}\n"
+    def __init__(
+        self, notes: str, cause: InvalidPathError | EmptyTreeNameError
+    ) -> None:
+        refusal = (
+            f"error: {InvalidPathError(cause.paths[:1])}\n"
             "fatal: unable to checkout working tree\n"
+            if isinstance(cause, InvalidPathError)
+            else f"fatal: {cause}\n"
+        )
+        super().__init__(
+            f"{notes}{refusal}"
             "warning: Clone succeeded, but checkout failed.\n"
             "You can inspect what was checked out with 'git status'\n"
             "and retry with 'git restore --source=HEAD :/'\n"

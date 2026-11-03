@@ -39,6 +39,7 @@ from mirage.commands.cli.builtin.git.ref_fields import MINIMUM_ABBREV
 from mirage.commands.cli.builtin.git.refs import TAG_PREFIX
 from mirage.commands.cli.builtin.git.repo import Repo
 from mirage.commands.cli.builtin.git.seen import (
+    decoded,
     guarded,
     located,
     place_of,
@@ -564,7 +565,7 @@ def _at_path(repo: BaseRepo, rev: str, path: str, revision: str) -> ShaFile:
         raise AmbiguousArgumentError(revision)
     try:
         _mode, sha = holder.lookup_path(
-            repo.object_store.__getitem__, path.encode()
+            lambda oid: decoded(repo.object_store[oid]), path.encode()
         )
     except (KeyError, NotTreeError, ValueError) as exc:
         raise PathNotInRevisionError(path, rev, _on_disk(repo, path)) from exc

@@ -29,6 +29,7 @@ from dulwich.repo import BaseRepo
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.commands.cli.builtin.git.constants import TREE
+from mirage.commands.cli.builtin.git.errors import EmptyTreeNameError
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.pathspec import visible_path
 from mirage.commands.cli.builtin.git.repo import Repo
@@ -220,6 +221,19 @@ def place_named(repo: BaseRepo, name: str, oid: bytes) -> str:
     return place_of(repo, oid)
 
 
+def decoded(obj: T) -> T:
+    """An object whose entries a reader is about to walk, refused as git
+    refuses a tree holding an entry with an empty name; any other object
+    comes back untouched.
+
+    Args:
+        obj (T): the object read.
+    """
+    if isinstance(obj, Tree) and b"" in obj:
+        raise EmptyTreeNameError()
+    return obj
+
+
 def shown_items(
     repo: BaseRepo, tree: Tree, base: str | None = None
 ) -> Iterator[TreeEntry]:
@@ -232,11 +246,11 @@ def shown_items(
             command found it.
     """
     if not guarded(repo):
-        yield from tree.iteritems()
+        yield from decoded(tree).iteritems()
         return
     assert isinstance(repo, Repo)
     where = place_of(repo, tree.id) if base is None else base
-    for entry in tree.iteritems():
+    for entry in decoded(tree).iteritems():
         name = entry.path.decode("utf-8", "surrogateescape")
         if visible_path(repo.location, posixpath.join(where, name)):
             yield entry

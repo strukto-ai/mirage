@@ -28,6 +28,7 @@ from mirage.commands.cli.builtin.git.constants import DEFAULT_BRANCH
 from mirage.commands.cli.builtin.git.errors import (
     CloneCheckoutError,
     CloneReadOnlyError,
+    EmptyTreeNameError,
     GitError,
     InvalidPathError,
     UsageError,
@@ -353,13 +354,13 @@ async def _populate(
         notes += f"Note: switching to '{commit}'.\n\n{DETACHED_ADVICE}\n"
     await append(vfs, gitdir, "logs/HEAD", line)
     if not fl.as_bool("no_checkout"):
-        tree = await asyncio.to_thread(
-            commit_entries, repo, ObjectID(commit.encode())
-        )
         try:
+            tree = await asyncio.to_thread(
+                commit_entries, repo, ObjectID(commit.encode())
+            )
             await switch_to(vfs, repo, location, {}, tree)
-        except InvalidPathError as exc:
-            raise CloneCheckoutError(notes, exc.paths[0]) from exc
+        except (InvalidPathError, EmptyTreeNameError) as exc:
+            raise CloneCheckoutError(notes, exc) from exc
     return notes
 
 

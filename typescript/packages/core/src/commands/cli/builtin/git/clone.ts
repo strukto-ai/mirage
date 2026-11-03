@@ -23,6 +23,7 @@ import { DETACHED_ADVICE, switchTo } from './checkout.ts'
 import {
   CloneCheckoutError,
   CloneReadOnlyError,
+  EmptyTreeNameError,
   GitError,
   InvalidPathError,
   UsageError,
@@ -255,7 +256,8 @@ async function populate(
     try {
       await switchTo(repo, vfs, new Map(), await commitEntries(repo, commit))
     } catch (err) {
-      if (err instanceof InvalidPathError) throw new CloneCheckoutError(notes, err.paths[0] ?? '')
+      if (err instanceof InvalidPathError || err instanceof EmptyTreeNameError)
+        throw new CloneCheckoutError(notes, err)
       throw err
     }
   }

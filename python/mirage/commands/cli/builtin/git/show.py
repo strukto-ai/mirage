@@ -66,6 +66,7 @@ from mirage.commands.cli.builtin.git.rows import (
     shown_sides,
 )
 from mirage.commands.cli.builtin.git.seen import (
+    decoded,
     located,
     place_named,
     shown_items,
@@ -213,6 +214,8 @@ def _commits(
     flags: ShowFlags,
 ) -> list[Commit]:
     """Every commit a line shows the diff of, tags peeled, synchronously.
+    A tree it lists is read here, so an entry git refuses refuses the
+    line before anything prints.
 
     Args:
         repo (BaseRepo): repository to read.
@@ -227,6 +230,8 @@ def _commits(
             _block, target = _tag_block(repo, target, flags)
         if isinstance(target, Commit):
             found.append(target)
+        else:
+            decoded(target)
     return found
 
 

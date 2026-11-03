@@ -3681,3 +3681,110 @@ describe('a tree path git rejects', () => {
     ])
   })
 })
+
+const EMPTY_NAMED: Record<string, Record<string, string>> = {
+  root: { '/x.txt': 'x\n', 'a.txt': 'a\n' },
+  nested: { 'sub//x.txt': 'x\n', 'a.txt': 'a\n' },
+}
+const EMPTY_NAME = 'fatal: empty filename in tree entry\n'
+
+describe('a tree entry with an empty name', () => {
+  it.each([
+    ['root', 'ls-tree odd'],
+    ['root', 'ls-tree odd a.txt'],
+    ['root', 'cat-file -p odd^{tree}'],
+    ['root', 'show odd^{tree}'],
+    ['root', 'rev-parse odd:a.txt'],
+    ['root', 'show odd:a.txt'],
+    ['nested', 'ls-tree -r odd'],
+    ['nested', 'ls-tree odd sub/'],
+    ['nested', 'cat-file -p odd:sub'],
+    ['nested', 'rev-parse odd:sub/x.txt'],
+    ...Object.keys(EMPTY_NAMED).flatMap((shape) =>
+      [
+        'show odd',
+        'show --stat odd',
+        'log -p odd',
+        'log --stat odd',
+        'log --name-only odd',
+        'diff HEAD odd',
+        'diff --stat HEAD odd',
+        'diff odd HEAD',
+        'grep x odd',
+        'checkout odd',
+        'switch odd',
+        'restore --source odd a.txt',
+      ].map((line) => [shape, line]),
+    ),
+  ])('is fatal to %s: %s', async (shape, line) => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', EMPTY_NAMED[shape] ?? {})
+    })
+    const letters = await h.read('/repo/letters.txt')
+    const [code, , stderr] = await h.run(line)
+    expect([code, stderr]).toEqual([128, EMPTY_NAME])
+    expect(await h.read('/repo/letters.txt')).toEqual(letters)
+    expect(await h.read('/repo/x.txt')).toBeNull()
+    expect((await h.run('rev-parse --abbrev-ref HEAD'))[1]).toBe('main\n')
+  })
+
+  it.each(
+    Object.keys(EMPTY_NAMED).flatMap((shape) =>
+      ['reset', 'reset -- a.txt', 'status'].map((line) => [shape, line]),
+    ),
+  )('is fatal on HEAD to %s: %s', async (shape, line) => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', EMPTY_NAMED[shape] ?? {})
+      git(repo, ['symbolic-ref', 'HEAD', 'refs/heads/odd'])
+    })
+    const index = await h.read('/repo/.git/index')
+    expect(await h.run(line)).toEqual([128, '', EMPTY_NAME])
+    expect(await h.read('/repo/.git/index')).toEqual(index)
+  })
+
+  it.each([
+    ['root', 'log --oneline odd'],
+    ['root', 'cat-file -t odd^{tree}'],
+    ['root', 'cat-file -s odd^{tree}'],
+    ['root', 'rev-parse odd:'],
+    ['nested', 'ls-tree odd'],
+    ['nested', 'cat-file -p odd^{tree}'],
+    ['nested', 'rev-parse odd:a.txt'],
+  ])('lets %s: %s read on', async (shape, line) => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', EMPTY_NAMED[shape] ?? {})
+    })
+    const [code, , stderr] = await h.run(line)
+    expect([code, stderr]).toEqual([0, ''])
+  })
+
+  it('is named by fsck', async () => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', EMPTY_NAMED.root ?? {})
+    })
+    const tree = (await h.run('rev-parse odd^{tree}'))[1].trim()
+    const [code, , stderr] = await h.run('fsck')
+    expect([code, stderr]).toEqual([1, `error: object ${tree}: empty filename in tree entry\n`])
+  })
+
+  it('leaves a clone behind with nothing checked out', async () => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', EMPTY_NAMED.root ?? {})
+    })
+    const result = await h.ws.shell('cd /repo && git clone -b odd . dst')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+      128,
+      "Cloning into 'dst'...\n" +
+        'done.\n' +
+        EMPTY_NAME +
+        'warning: Clone succeeded, but checkout failed.\n' +
+        "You can inspect what was checked out with 'git status'\n" +
+        "and retry with 'git restore --source=HEAD :/'\n\n",
+    ])
+    expect(await readNames(h.dispatch, PathSpec.fromStrPath('/repo/dst'))).toEqual([
+      '/repo/dst/.git',
+    ])
+    const log = await h.ws.shell('git -C /repo/dst log --format=%s -1')
+    expect(DEC.decode(log.stdout)).toBe('odd\n')
+  })
+})

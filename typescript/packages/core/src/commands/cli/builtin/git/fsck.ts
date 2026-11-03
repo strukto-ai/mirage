@@ -17,6 +17,7 @@ import { entryName } from '../../../../utils/remnants.ts'
 
 import { loadRefs } from './refs.ts'
 import { repoArgs, type Repo } from './repo.ts'
+import { decoded } from './seen.ts'
 import { opened } from './session.ts'
 import type { Files } from '../../../../workspace/files.ts'
 
@@ -145,6 +146,7 @@ export async function fsck(
     for (const oid of await logRoots(repo.vfs, directory.join('logs'))) roots.add(oid)
   }
   const referenced = new Set(roots)
+  const broken = new Set<string>()
   const edges = new Map<string, string[]>()
   const objects = new Map<string, string>()
   const errors: string[] = []
@@ -167,7 +169,7 @@ export async function fsck(
         links.push(commit.tree, ...commit.parent)
       } else if (result.type === 'tree') {
         const { tree } = await git.readTree({ ...args, oid })
-        for (const entry of tree) if (entry.mode !== GITLINK_MODE) links.push(entry.oid)
+        for (const entry of decoded(tree)) if (entry.mode !== GITLINK_MODE) links.push(entry.oid)
       } else if (result.type === 'tag') {
         const { tag } = await git.readTag({ ...args, oid })
         links.push(tag.object)
@@ -176,11 +178,13 @@ export async function fsck(
       edges.set(oid, links)
       for (const link of links) referenced.add(link)
     } catch (err) {
+      broken.add(oid)
       errors.push(`error: object ${oid}: ${err instanceof Error ? err.message : String(err)}\n`)
     }
   }
   for (const oid of [...referenced].sort(compareCodePoints))
-    if (!objects.has(oid) && !roots.has(oid)) errors.push(`missing object ${oid}\n`)
+    if (!objects.has(oid) && !roots.has(oid) && !broken.has(oid))
+      errors.push(`missing object ${oid}\n`)
   let stderr = errors.join('')
   if (roots.size === 0) {
     const head = await readOptional(repo.vfs, repo.location.gitdir.join('HEAD'))
