@@ -71,6 +71,10 @@ def test_a_run_directory_below_the_root_still_resolves():
         ("/repo/docs", ":/a.txt", "a.txt"),
         ("/repo/docs", ":/docs/notes.md", "docs/notes.md"),
         ("/repo/docs", ":/:a.txt", "a.txt"),
+        ("/repo/docs", ":///a.txt", "a.txt"),
+        ("/repo/docs", ":/:", ""),
+        ("/repo/docs", ":/:/", "/"),
+        ("/repo/docs", ":/:/a.txt", "/a.txt"),
     ],
 )
 def test_top_magic_names_a_path_from_the_root(start, operand, relative):

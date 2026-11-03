@@ -388,3 +388,16 @@ async def test_cached_keeps_the_file_a_link_hides(git_rw):
         b"rm 'slot/child'\n",
         b"",
     )
+
+
+@pytest.mark.asyncio
+async def test_a_path_after_the_top_magic_colon_is_kept_as_typed(
+    git_rw, repo_path: Path
+):
+    assert await run(git_rw, "rm -r -- ':/:/'") == (
+        128,
+        b"",
+        b"fatal: pathspec ':/:/' did not match any files\n",
+    )
+    assert (repo_path / "a.txt").exists()
+    assert (await run(git_rw, "ls-files"))[1] == b"a.txt\nb.txt\n"

@@ -14,6 +14,8 @@
 
 import pytest
 from dulwich import porcelain
+from dulwich.objects import Tree
+from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
 from tests.commands.cli.builtin.git.conftest import (
@@ -22,7 +24,9 @@ from tests.commands.cli.builtin.git.conftest import (
     commit_merge,
     make_branch,
     mounted,
+    write_branch,
 )
+from tests.commands.cli.builtin.git.conftest import run as run
 
 
 @pytest.mark.asyncio
@@ -310,3 +314,19 @@ async def test_show_bare_format_is_refused_like_git(git_ws):
     result = await git_ws.shell("git -C /repo show --format")
     assert result.exit_code == 128
     assert result.stderr == b"fatal: unrecognized argument: --format\n"
+
+
+@pytest.mark.asyncio
+async def test_a_path_under_a_missing_subtree_is_one_the_revision_lacks(
+    git_rw, repo_path
+):
+    tree = Tree()
+    tree.add(b"dir", 0o040000, b"1" * 40)
+    with Repo(str(repo_path)) as repo:
+        repo.object_store.add_object(tree)
+        write_branch(repo, "gone", tree.id, b"gone")
+    assert await run(git_rw, "show gone:dir/file") == (
+        128,
+        b"",
+        b"fatal: path 'dir/file' does not exist in 'gone'\n",
+    )

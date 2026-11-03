@@ -45,17 +45,18 @@ export function absoluteOperand(start: string, operand: string): string {
 /**
  * The root-relative path a top-magic operand names, null for any other operand.
  *
- * git's short magic `:/` reads the rest from the work tree root, an optional
- * `:` ending the magic; `:/!` and `:/^` add exclusion, which this build lacks.
- * Pinned against git 2.51.2.
+ * git's short magic `:/` reads the rest from the work tree root; a `:` ends the
+ * magic and keeps what follows as typed, so a path still starting with `/`
+ * names nothing. `:/!` and `:/^` add exclusion, which this build lacks. Pinned
+ * against git 2.51.2.
  *
  * @param operand the operand as the user spelled it
  */
 export function topPath(operand: string): string | null {
   if (!operand.startsWith(TOP)) return null
-  const rest = operand.slice(TOP.length)
+  const rest = operand.slice(TOP.length).replace(/^\/+/, '')
   if (EXCLUDE.some((mark) => rest.startsWith(mark))) return null
-  return (rest.startsWith(MAGIC) ? rest.slice(MAGIC.length) : rest).replace(/^\/+/, '')
+  return rest.startsWith(MAGIC) ? rest.slice(MAGIC.length) : rest
 }
 
 /**
@@ -81,6 +82,7 @@ export function repoRelative(
   const root = rstripSlash(location.worktree.virtual) || '/'
   const prefix = root.endsWith('/') ? root : `${root}/`
   const top = magic ? topPath(operand) : null
+  if (top?.startsWith(SLASH)) return top
   const base = start === root || start.startsWith(prefix) ? start : root
   const absolute =
     top === null ? absoluteOperand(base, operand) : absoluteOperand(root, top === '' ? '.' : top)

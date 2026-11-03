@@ -1259,6 +1259,12 @@ describe('git rm', () => {
       '',
       "fatal: pathspec 'nosuch' did not match any files\n",
     ])
+    expect(await h.run("rm -r -- ':/:/'")).toEqual([
+      128,
+      '',
+      "fatal: pathspec ':/:/' did not match any files\n",
+    ])
+    expect((await h.run('ls-files'))[1]).toBe('docs/readme.md\nletters.txt\nnumbers.txt\n')
     expect(await h.run('rm')).toEqual([
       128,
       '',
@@ -3397,6 +3403,27 @@ describe('an object the store cannot read', () => {
       `fatal: Not a valid object name ${'1'.repeat(40)}\n`,
     ])
   })
+
+  it('names a path under a missing subtree as one the revision lacks', async () => {
+    const h = await harness((repo) => {
+      const body = Buffer.concat([Buffer.from('40000 dir\0'), Buffer.from('1'.repeat(40), 'hex')])
+      const tree = execFileSync(
+        'git',
+        ['-C', repo, 'hash-object', '-w', '-t', 'tree', '--literally', '--stdin'],
+        { input: body, encoding: 'utf8' },
+      ).trim()
+      git(repo, [
+        'update-ref',
+        'refs/heads/gone',
+        git(repo, ['commit-tree', tree, '-m', 'gone']).trim(),
+      ])
+    })
+    expect(await h.run('show gone:dir/file')).toEqual([
+      128,
+      '',
+      "fatal: path 'dir/file' does not exist in 'gone'\n",
+    ])
+  })
 })
 
 /**
@@ -3763,6 +3790,20 @@ describe('a tree entry with an empty name', () => {
     const index = await h.read('/repo/.git/index')
     expect(await h.run(line)).toEqual([128, '', EMPTY_NAME])
     expect(await h.read('/repo/.git/index')).toEqual(index)
+  })
+
+  it('shows a tag alone when its tree is one the session cannot see', async () => {
+    const h = await harness((repo) => {
+      branchWithPaths(repo, 'odd', { 'cellar/inner//x.txt': 'x\n', 'a.txt': 'a\n' })
+      git(repo, ['tag', '-a', '-m', 'points at a tree', 'ttag', 'odd:cellar/inner'])
+    })
+    expect(await h.run('show ttag')).toEqual([128, '', EMPTY_NAME])
+    await h.ws.setSessionProfile(
+      h.ws.defaultSessionId,
+      SessionProfile({ paths: { hide: ['/repo/cellar'] } }, 'cellared'),
+    )
+    const [code, out, err] = await h.run('show ttag')
+    expect([code, out.startsWith('tag ttag\n'), err]).toEqual([0, true, ''])
   })
 
   it.each([

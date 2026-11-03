@@ -136,8 +136,9 @@ async function tagBlock(repo: Repo, oid: string, flags: ShowFlags): Promise<[str
 
 /**
  * Every commit a line shows the diff of, tags peeled. A tree it lists is read
- * here, so an entry git refuses refuses the line before anything prints.
- * Mirrors Python's `_commits`.
+ * here, so an entry git refuses refuses the line before anything prints; a
+ * tag's tree the session cannot see is left to `render` to skip. Mirrors
+ * Python's `_commits`.
  */
 async function commits(
   repo: Repo,
@@ -147,10 +148,12 @@ async function commits(
   const found: CommitFacts[] = []
   for (const [, obj] of objects) {
     let target = obj
+    const tagged = target.type === 'tag'
     while (target.type === 'tag') target = (await tagBlock(repo, target.oid, flags))[1]
-    if (target.type === 'tree')
-      decoded((await git.readTree({ ...repoArgs(repo), oid: target.oid })).tree)
-    else if (target.type !== 'blob') found.push(await commitFacts(repo, target.oid))
+    if (target.type === 'tree') {
+      if (!tagged || (await located(repo, target)) !== null)
+        decoded((await git.readTree({ ...repoArgs(repo), oid: target.oid })).tree)
+    } else if (target.type !== 'blob') found.push(await commitFacts(repo, target.oid))
   }
   return found
 }

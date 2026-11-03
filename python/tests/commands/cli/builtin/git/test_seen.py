@@ -57,6 +57,7 @@ PROFILES = {
         }
     },
     "half": {"paths": {"hide": ["/repo/a/secret.txt"]}},
+    "cellared": {"paths": {"hide": ["/repo/cellar"]}},
     "fresh": {
         "commands": {"deny": [{"reason": "fresh", "paths": ["/repo/new.txt"]}]}
     },
@@ -337,6 +338,32 @@ async def test_a_tag_or_a_ref_naming_a_hidden_blob_names_nothing(
     ) == (0, "", "error: refs/tags/raw does not point to a valid object!\n")
     _, out, _ = await shell(history, "git cat-file blob atag")
     assert out == "S3CR3T two\n"
+
+
+@pytest.mark.asyncio
+async def test_a_tag_naming_a_hidden_tree_shows_the_tag_alone(history: Path):
+    branch_with_paths(
+        history, "odd", {"cellar/inner//x.txt": b"x\n", "ok.txt": b"o\n"}
+    )
+    with Repo(str(history)) as repo:
+        root = repo[repo[repo.refs[b"refs/heads/odd"]].tree]
+        inner = repo[root[b"cellar"][1]][b"inner"][1]
+    porcelain.tag_create(
+        str(history),
+        b"ttag",
+        author=b"T <t@example.com>",
+        message=b"points at a tree",
+        annotated=True,
+        objectish=inner,
+    )
+    code, out, err = await shell(history, "git show ttag", "cellared")
+    assert (code, err) == (0, "")
+    assert out.startswith("tag ttag\n")
+    assert await shell(history, "git show ttag") == (
+        128,
+        "",
+        "fatal: empty filename in tree entry\n",
+    )
 
 
 @pytest.fixture

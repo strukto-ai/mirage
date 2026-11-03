@@ -42,6 +42,10 @@ it.each([
   [':/a.txt', 'a.txt'],
   [':/docs/notes.md', 'docs/notes.md'],
   [':/:a.txt', 'a.txt'],
+  [':///a.txt', 'a.txt'],
+  [':/:', ''],
+  [':/:/', '/'],
+  [':/:/a.txt', '/a.txt'],
 ])('reads top magic %j from the root', (operand, relative) => {
   expect(repoRelative(LOCATION, '/repo/docs', operand)).toBe(relative)
 })
