@@ -319,3 +319,20 @@ it('du long link aliases keep last option order', async () => {
     await ws.close()
   }
 })
+
+it.each([
+  ['3', '6004799503160662'],
+  ['18014398509481983', '2'],
+])('du large byte totals keep exact units %s', async (unit, expected) => {
+  const total = 18014398509481984
+  const [size, entries] = backend({ '/dir/f': total })
+  const parsed = parseFlags(ctx({ block_size: unit, all: true, total: true }))
+  if (parsed instanceof IOResult) throw new Error('du refused a block size')
+  const out = await du([spec('/dir', 'dir')], parsed, size, entries)
+  expect(DEC.decode(out.stdout)).toBe(
+    `${expected}\t/dir/f\n${expected}\t/dir\n${expected}\ttotal\n`,
+  )
+  expect(DEC.decode(out.stderr)).toBe('')
+  expect(out.exitCode).toBe(0)
+  expect(out.records?.map((record) => record.size ?? null)).toEqual([null, total])
+})

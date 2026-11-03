@@ -53,7 +53,7 @@ const EPOCH = new Date(0)
  * human base (1024 for human-readable, 1000 for si) when it is one of
  * the two -h scales instead of a fixed divisor. */
 export interface BlockSize {
-  readonly divisor: number
+  readonly divisor: bigint
   readonly suffix: string
   readonly humanBase: number | null
 }
@@ -92,7 +92,7 @@ export function blockSizeOf(raw: JsonValue | undefined): BlockSize | null {
       typeof suffix === 'string' &&
       (base === null || typeof base === 'number')
     ) {
-      return { divisor: Number(divisor), suffix, humanBase: base }
+      return { divisor: BigInt(divisor), suffix, humanBase: base }
     }
   }
   throw new Error(`mirage-rs read block size as ${JSON.stringify(raw)}`)
@@ -103,7 +103,7 @@ export function scaledSize(n: number, block: BlockSize | null, human: boolean): 
   if (block === null) return human ? humanSize(n) : String(n)
   if (block.humanBase === 1000) return humanScaled(n, 1000, ['', 'k', 'M', 'G', 'T', 'P', 'E'])
   if (block.humanBase !== null) return humanSize(n)
-  return `${String(Math.ceil(n / block.divisor))}${block.suffix}`
+  return `${ceilDiv(BigInt(Math.trunc(n)), block.divisor).toString()}${block.suffix}`
 }
 
 /**

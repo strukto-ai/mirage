@@ -492,15 +492,19 @@ describe('lsGeneric option values', () => {
   })
 
   it.each<[Record<string, FlagValue>, unknown]>([
-    [{ block_size: 'K' }, { divisor: 1024, suffix: 'K', humanBase: null }],
-    [{ block_size: 'KB' }, { divisor: 1000, suffix: 'kB', humanBase: null }],
-    [{ block_size: '2K' }, { divisor: 2048, suffix: '', humanBase: null }],
-    [{ block_size: 'human-readable' }, { divisor: 1024, suffix: '', humanBase: 1024 }],
-    [{ block_size: 'si' }, { divisor: 1000, suffix: '', humanBase: 1000 }],
+    [{ block_size: 'K' }, { divisor: 1024n, suffix: 'K', humanBase: null }],
+    [{ block_size: 'KB' }, { divisor: 1000n, suffix: 'kB', humanBase: null }],
+    [{ block_size: '2K' }, { divisor: 2048n, suffix: '', humanBase: null }],
+    [{ block_size: 'human-readable' }, { divisor: 1024n, suffix: '', humanBase: 1024 }],
+    [{ block_size: 'si' }, { divisor: 1000n, suffix: '', humanBase: 1000 }],
+    [
+      { block_size: '18446744073709551615' },
+      { divisor: 18446744073709551615n, suffix: '', humanBase: null },
+    ],
     [{ block_size: 'K', human_readable: true }, null],
     [
       { human_readable: true, block_size: 'K' },
-      { divisor: 1024, suffix: 'K', humanBase: null },
+      { divisor: 1024n, suffix: 'K', humanBase: null },
     ],
   ])('the later of -h and --block-size wins (%o)', (flags, block) => {
     expect(parseFlags(view(flags)).columns.blockSize).toEqual(block)
