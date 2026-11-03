@@ -29,27 +29,14 @@ import {
   runWithNetwork,
 } from './io/network.ts'
 import { parseCommandLimits } from './policy/builtin/output_cap.ts'
-import {
-  parseProgram,
-  SessionProfile,
-  type ProfilePolicySpec,
-} from './policy/profile.ts'
+import { parseProgram, SessionProfile, type ProfilePolicySpec } from './policy/profile.ts'
 import { validateDocument } from './rs/document.ts'
 import { Runtime, type RuntimeEntry } from './runtime/base.ts'
 import type { RuntimeOptions } from './runtime/config.ts'
 import { buildRuntime, checkRuntimeOptions } from './runtime/table.ts'
 import { ScriptSource } from './runtime/types.ts'
-import {
-  EnvVar,
-  SecretSource,
-  type EnvEntries,
-  type SecretEntries,
-} from './secrets/config.ts'
-import {
-  configHoldsPointer,
-  resolveConfigSecrets,
-  resolveSourcesFor,
-} from './secrets/sources.ts'
+import { EnvVar, SecretSource, type EnvEntries, type SecretEntries } from './secrets/config.ts'
+import { configHoldsPointer, resolveConfigSecrets, resolveSourcesFor } from './secrets/sources.ts'
 import type { ResolvedSource } from './secrets/types.ts'
 import {
   KERNEL_BACKENDS,
@@ -64,10 +51,7 @@ import { snakeToCamel } from './utils/normalize.ts'
 import { isPlainObject } from './utils/records.ts'
 import { parseLimit } from './utils/size.ts'
 import { compareCodePoints } from './utils/sort.ts'
-import {
-  coerceReadPolicy,
-  resolveReadSpec,
-} from './workspace/mount/read_policy.ts'
+import { coerceReadPolicy, resolveReadSpec } from './workspace/mount/read_policy.ts'
 import { Mount } from './workspace/mount/spec.ts'
 import { coerceWritePolicy } from './workspace/mount/write_policy.ts'
 import type { WorkspaceStateStore } from './workspace/store/base.ts'
@@ -129,7 +113,9 @@ async function buildRuntimeEntries(entries: unknown[], host: ConfigHost): Promis
   const out: RuntimeEntry[] = []
   for (const entry of entries) {
     if (typeof entry === 'string') {
-      out.push(entry.includes(':') ? new (await loadRuntimeClass(entry, host))() : buildRuntime(entry))
+      out.push(
+        entry.includes(':') ? new (await loadRuntimeClass(entry, host))() : buildRuntime(entry),
+      )
       continue
     }
     if (!isPlainObject(entry)) throw new Error('runtime entry must be a name or a mapping')
@@ -446,7 +432,10 @@ export function loadProfilePolicy(profile: SessionProfile, host: ConfigHost): Se
     : {
         ...profile,
         policy: Object.fromEntries(
-          Object.entries(policy).map(([method, programs]) => [method, programs.map((program) => loadProgram(program, host))]),
+          Object.entries(policy).map(([method, programs]) => [
+            method,
+            programs.map((program) => loadProgram(program, host)),
+          ]),
         ),
       }
 }
@@ -669,7 +658,9 @@ export interface WorkspaceConfigRaw {
 /** The process environment with its unset entries dropped. */
 export function readProcessEnv(): Record<string, string> {
   const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(globalThis.process?.env ?? {})) {
+  // A host with no Node has no `process`, whatever Node's types say.
+  const { process } = globalThis as { process?: { env: Record<string, string | undefined> } }
+  for (const [k, v] of Object.entries(process?.env ?? {})) {
     if (typeof v === 'string') out[k] = v
   }
   return out

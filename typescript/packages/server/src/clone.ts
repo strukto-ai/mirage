@@ -115,7 +115,9 @@ async function clone(
   // own wins, the way a mount override does, so a staging clone does
   // not keep reading production accounts.
   const secrets = override?.secrets ?? src.declaredSources
-  const overrideMounts = await buildOverrideMounts(override, secrets, host.buildVfs)
+  const overrideMounts = await buildOverrideMounts(override, secrets, (name, config, sources) =>
+    host.buildVfs(name, config, sources),
+  )
   const existing = existingRedactedMounts(src, state, new Set(Object.keys(overrideMounts)))
   const merged = { ...existing, ...overrideMounts }
   // The clone shares the source's remote mounts, whose clients run on the

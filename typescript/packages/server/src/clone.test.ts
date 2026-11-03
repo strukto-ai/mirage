@@ -115,7 +115,11 @@ describe('cloneWorkspaceWithOverride', () => {
 
   it('leaves a null override write to the saved policy', async () => {
     // null means absent, as on every other entry point.
-    const built = await buildOverrideMounts({ mounts: { '/r': { vfs: 'ram', write: null } } }, null, buildVfs)
+    const built = await buildOverrideMounts(
+      { mounts: { '/r': { vfs: 'ram', write: null } } },
+      null,
+      buildVfs,
+    )
     expect((built['/r/'] as Mount).options.write).toBeUndefined()
   })
 
@@ -132,9 +136,13 @@ describe('cloneWorkspaceWithOverride', () => {
   it('keeps a mount limit unless the override names one', async () => {
     const src = new Workspace({ '/a': capped(), '/b': capped() })
     try {
-      const clone = await cloneWorkspaceWithOverride(src, {
-        mounts: { '/b': { vfs: 'ram', command_limits: { [ALL_COMMANDS]: { walk_limit: 5 } } } },
-      }, HOST)
+      const clone = await cloneWorkspaceWithOverride(
+        src,
+        {
+          mounts: { '/b': { vfs: 'ram', command_limits: { [ALL_COMMANDS]: { walk_limit: 5 } } } },
+        },
+        HOST,
+      )
       try {
         expect(['/a/', '/b/'].map((p) => clone.mount(p).vfs.walkLimit)).toEqual([3, 5])
       } finally {
@@ -182,9 +190,13 @@ describe('cloneWorkspaceWithOverride', () => {
         env: { TOKEN: { from: 'prod', ref: 'r', key: 'credential' } },
       },
     )
-    const clone = await cloneWorkspaceWithOverride(src, {
-      secrets: { prod: { source: 'acct-override', config: { account: 'staging' } } },
-    }, HOST)
+    const clone = await cloneWorkspaceWithOverride(
+      src,
+      {
+        secrets: { prod: { source: 'acct-override', config: { account: 'staging' } } },
+      },
+      HOST,
+    )
     expect((await clone.shell('echo "$TOKEN"')).stdoutText.trim()).toBe('staging:r')
     await src.close()
     await clone.close()
@@ -202,15 +214,19 @@ describe('cloneWorkspaceWithOverride', () => {
       { '/': new RAMVFS(), '/slack': await buildVfs('slack', { token: 'xoxb-src' }) },
       { mode: MountMode.WRITE },
     )
-    const clone = await cloneWorkspaceWithOverride(src, {
-      secrets: { prod: { source: 'acct-mount', config: { account: 'live' } } },
-      mounts: {
-        '/slack': {
-          vfs: 'slack',
-          config: { token: { from: 'prod', ref: 'bot', key: 'credential' } },
+    const clone = await cloneWorkspaceWithOverride(
+      src,
+      {
+        secrets: { prod: { source: 'acct-mount', config: { account: 'live' } } },
+        mounts: {
+          '/slack': {
+            vfs: 'slack',
+            config: { token: { from: 'prod', ref: 'bot', key: 'credential' } },
+          },
         },
       },
-    }, HOST)
+      HOST,
+    )
     const mounted = clone.mount('/slack').vfs as SlackVFS
     expect(mounted.config.token).toBe('live:bot')
     await src.close()
@@ -244,14 +260,18 @@ describe('cloneWorkspaceWithOverride', () => {
       { mode: MountMode.WRITE, secrets: brokenBootstrap('acct-wanted') },
     )
     await expect(
-      cloneWorkspaceWithOverride(src, {
-        mounts: {
-          '/slack': {
-            vfs: 'slack',
-            config: { token: { from: 'prod', ref: 'bot', key: 'credential' } },
+      cloneWorkspaceWithOverride(
+        src,
+        {
+          mounts: {
+            '/slack': {
+              vfs: 'slack',
+              config: { token: { from: 'prod', ref: 'bot', key: 'credential' } },
+            },
           },
         },
-      }, HOST),
+        HOST,
+      ),
     ).rejects.toThrow('secrets.prod.config.account')
     await src.close()
   })
@@ -280,7 +300,11 @@ describe('cloneWorkspaceWithOverride', () => {
     const src = new Workspace({ '/a': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       expect((await src.shell('echo hi > /f')).exitCode).toBe(0)
-      const cloned = await cloneWorkspaceWithOverride(src, { mounts: { '/': { vfs: 'ram' } } }, HOST)
+      const cloned = await cloneWorkspaceWithOverride(
+        src,
+        { mounts: { '/': { vfs: 'ram' } } },
+        HOST,
+      )
       try {
         expect((await cloned.shell('cat /f')).stdoutText).toBe('hi\n')
         expect(cloned.syntheticRoot).toBe(true)

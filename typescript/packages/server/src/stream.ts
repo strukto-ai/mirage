@@ -109,8 +109,5 @@ export function shellResponse(
       }
     }
   }
-  return reply
-    .header('connection', 'close')
-    .type('application/x-ndjson')
-    .send(streamOf(body()))
+  return reply.header('connection', 'close').type('application/x-ndjson').send(streamOf(body()))
 }

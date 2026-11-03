@@ -70,7 +70,7 @@ export function registerDocumentsRoutes(
               const content = await (kind === 'vfs'
                 ? ws.vfsMd(path, options)
                 : ws.skillMd(path, options))
-              return await reply.type('text/markdown; charset=utf-8').send(content)
+              return reply.type('text/markdown; charset=utf-8').send(content)
             } catch (error) {
               // The session is looked up inside the call, as Python does, so
               // one closed since the request arrived answers 404 too.

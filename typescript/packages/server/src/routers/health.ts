@@ -31,7 +31,7 @@ export function registerHealthRoutes(
   // Whether the server takes new workspaces: 503 while it drains for
   // shutdown or holds maxWorkspaces, so a load balancer sends new work
   // elsewhere. /v1/health only says the process is up.
-  app.get('/v1/ready', async (_req, reply) => {
+  app.get('/v1/ready', (_req, reply) => {
     const { registry } = deps
     let status = 'ready'
     if (registry.draining) status = 'shutting_down'
@@ -39,7 +39,7 @@ export function registerHealthRoutes(
     return reply.status(status === 'ready' ? 200 : 503).send({ status })
   })
   // The daemon serves every account, so an account may not stop it.
-  app.post('/v1/shutdown', async (req, reply) => {
+  app.post('/v1/shutdown', (req, reply) => {
     if (req.account !== null) {
       return reply.status(403).send({ detail: 'an account may not shut the daemon down' })
     }
