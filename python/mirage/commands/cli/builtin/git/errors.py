@@ -861,6 +861,66 @@ class UnmergedPathError(GitError):
         )
 
 
+class InvalidPathError(GitError):
+    """Tree paths a checkout, restore or reset meets that git refuses to
+    write, by the rule ``tree.valid_path`` holds.
+
+    One line per path and nothing written, exit 1, pinned against git
+    2.47.3. Where git goes on to refuse the line in other words (an
+    unmatched pathspec, reset's ``make_cache_entry``), those follow, and
+    the last one sets the exit code. Its text also words restore's note
+    for the paths it skips.
+
+    Args:
+        paths (list[str]): the refused paths.
+        then (tuple[GitError, ...]): the refusals git prints after them.
+    """
+
+    prefix = "error"
+    exit_code = 1
+
+    def __init__(
+        self, paths: list[str], then: tuple[GitError, ...] = ()
+    ) -> None:
+        self.paths = sorted(paths)
+        if then:
+            self.exit_code = then[-1].exit_code
+        # Later lines carry their prefix inline; the renderer writes the first.
+        super().__init__(
+            "\nerror: ".join(f"invalid path '{path}'" for path in self.paths)
+            + "".join(
+                f"\n{after}"
+                if after.prefix is None
+                else f"\n{after.prefix}: {after}"
+                for after in then
+            )
+        )
+
+
+class CloneCheckoutError(GitError):
+    """``clone`` whose checkout refused a path: the repository stays,
+    the working tree stays empty, exit 128.
+
+    git names the first refused path only and says the clone itself
+    succeeded, pinned against git 2.47.3.
+
+    Args:
+        notes (str): what the clone printed before the checkout.
+        path (str): the first refused path.
+    """
+
+    prefix = None
+
+    def __init__(self, notes: str, path: str) -> None:
+        super().__init__(
+            f"{notes}error: {InvalidPathError([path])}\n"
+            "fatal: unable to checkout working tree\n"
+            "warning: Clone succeeded, but checkout failed.\n"
+            "You can inspect what was checked out with 'git status'\n"
+            "and retry with 'git restore --source=HEAD :/'\n"
+        )
+
+
 class UsageError(GitError):
     """A refusal parse-options words in full, exit 129.
 

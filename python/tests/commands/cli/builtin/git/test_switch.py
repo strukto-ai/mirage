@@ -19,7 +19,10 @@ from dulwich.refs import Ref
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git.switch import expected_kind
-from tests.commands.cli.builtin.git.conftest import conflict_index
+from tests.commands.cli.builtin.git.conftest import (
+    branch_with_paths,
+    conflict_index,
+)
 from tests.commands.cli.builtin.git.conftest import head_ref as head_ref
 from tests.commands.cli.builtin.git.conftest import run as run
 
@@ -475,4 +478,15 @@ async def test_an_unmerged_index_stops_a_switch_to_the_current_branch(
     assert code == 1
     assert out == b"a.txt: needs merge\n"
     assert err == b"error: you need to resolve your current index first\n"
+    assert head_ref(repo_path) == b"ref: refs/heads/main"
+
+
+@pytest.mark.asyncio
+async def test_switch_refuses_a_branch_naming_paths_git_rejects(
+    git_rw, repo_path: Path
+):
+    branch_with_paths(repo_path, "odd", {"sub/.git/config": b"[core]\n"})
+    code, _out, err = await run(git_rw, "switch odd")
+    assert (code, err) == (1, b"error: invalid path 'sub/.git/config'\n")
+    assert not (repo_path / "sub").exists()
     assert head_ref(repo_path) == b"ref: refs/heads/main"

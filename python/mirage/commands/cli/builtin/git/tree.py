@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
+import stat
+
 from dulwich.object_store import iter_tree_contents
 from dulwich.objects import Blob, Commit, ObjectID, ShaFile
 from dulwich.objects import Tree as GitTree
@@ -24,6 +27,18 @@ from mirage.commands.cli.builtin.git.revparse import resolve_object, unwrapped
 from mirage.commands.cli.builtin.git.seen import rooted
 
 Tree = dict[bytes, tuple[int, bytes]]
+DOT_GIT = re.compile(
+    r"(?:\.git|git~1)[ .]*(?::.*)?", re.IGNORECASE | re.DOTALL | re.ASCII
+)
+GITMODULES_LINK = re.compile(
+    r"(?:\.gitmodules|gitmod~[1-4]|~[1-9][0-9]{6}|g~[1-9][0-9]{5}"
+    r"|gi~[1-9][0-9]{4}|gi7~[1-9][0-9]{3}|gi7e~[1-9][0-9]{2}"
+    r"|gi7eb~[1-9][0-9]|gi7eba~[1-9])[ .]*(?::.*)?",
+    re.IGNORECASE | re.DOTALL | re.ASCII,
+)
+GITMODULES_DIR = re.compile(
+    r"\.gitmodules(?::.*)?", re.IGNORECASE | re.DOTALL | re.ASCII
+)
 
 
 def tree_entries(repo: BaseRepo, tree: bytes | None) -> Tree:
@@ -44,6 +59,53 @@ def tree_entries(repo: BaseRepo, tree: bytes | None) -> Tree:
         entry.path: (entry.mode, entry.sha)
         for entry in iter_tree_contents(repo.object_store, ObjectID(tree))
     }
+
+
+def ntfs_pieces(part: str) -> list[str]:
+    """A path part as NTFS reads it: split at every backslash but one
+    that starts the part, which git keeps as part of the name.
+
+    Args:
+        part (str): one ``/``-separated part of a tree path.
+    """
+    head, *rest = part[1:].split("\\")
+    return [part[:1] + head, *rest]
+
+
+def valid_path(path: str, mode: int) -> bool:
+    """Whether a tree path passes git's checkout rule, pinned against
+    git 2.47.3 with its defaults (every row is in test_tree.py).
+
+    Refused: a part that is empty, ``.`` or ``..``; a part, or an NTFS
+    piece of one, that NTFS reads as ``.git`` (``.git`` or its short name
+    ``git~1``, then dots or spaces, then the end or a ``:`` stream); and
+    for a symlink, a last piece NTFS reads as ``.gitmodules`` (the name,
+    its short names ``gitmod~1``-``~4``, or the 8-character hashed short
+    name built on ``gi7eba``), or a directory part that is
+    ``.gitmodules``, with or without a ``:`` stream. Case is
+    ASCII-folded, as git folds it. macOS's HFS spellings of ``.git``
+    are not covered. An empty-named tree entry below the root reaches
+    here as an empty part, except a directory on this host, which
+    dulwich joins away.
+
+    Args:
+        path (str): the repository-relative path a tree records.
+        mode (int): the entry's mode.
+    """
+    parts = path.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return False
+    if any(
+        DOT_GIT.fullmatch(piece)
+        for part in parts
+        for piece in ntfs_pieces(part)
+    ):
+        return False
+    if not stat.S_ISLNK(mode):
+        return True
+    return not GITMODULES_LINK.fullmatch(
+        ntfs_pieces(parts[-1])[-1]
+    ) and not any(GITMODULES_DIR.fullmatch(part) for part in parts[:-1])
 
 
 def commit_entries(repo: BaseRepo, commit_id: ObjectID) -> Tree:

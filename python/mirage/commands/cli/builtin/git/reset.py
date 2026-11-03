@@ -25,6 +25,7 @@ from mirage.commands.cli.builtin.git.errors import (
     AmbiguousArgumentError,
     BareResetError,
     GitError,
+    InvalidPathError,
     RevisionResetError,
 )
 from mirage.commands.cli.builtin.git.index_file import read_index, write_index
@@ -36,6 +37,7 @@ from mirage.commands.cli.builtin.git.pathspec import (
 )
 from mirage.commands.cli.builtin.git.revparse import resolve_commit
 from mirage.commands.cli.builtin.git.session import opened
+from mirage.commands.cli.builtin.git.tree import valid_path
 from mirage.commands.cli.builtin.git.util import (
     check_switches,
     require_vfs,
@@ -139,13 +141,21 @@ async def reset(
             selected |= hits
     else:
         selected = names
-    for name in selected:
+    for name in sorted(selected):
         key = name.encode()
         recorded = tree.get(key)
+        held = state.entries.get(key)
         if recorded is None:
             state.entries.pop(key, None)
-        else:
-            state.entries[key] = restored(ObjectID(recorded[1]), recorded[0])
+            continue
+        # git checks only an entry the reset changes.
+        changes = held is None or (held.mode, held.sha) != recorded
+        if changes and not valid_path(name, recorded[0]):
+            raise InvalidPathError(
+                [name],
+                (GitError(f"make_cache_entry failed for path '{name}'"),),
+            )
+        state.entries[key] = restored(ObjectID(recorded[1]), recorded[0])
     if not texts:
         for key in visible_entries(location, state.conflicts):
             state.conflicts.pop(key)

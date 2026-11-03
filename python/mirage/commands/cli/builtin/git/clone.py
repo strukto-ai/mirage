@@ -26,8 +26,10 @@ from mirage.commands.cli.builtin.git.checkout import (
 )
 from mirage.commands.cli.builtin.git.constants import DEFAULT_BRANCH
 from mirage.commands.cli.builtin.git.errors import (
+    CloneCheckoutError,
     CloneReadOnlyError,
     GitError,
+    InvalidPathError,
     UsageError,
 )
 from mirage.commands.cli.builtin.git.fetch import (
@@ -212,15 +214,14 @@ async def clone(
             ctx, transport, target, stored, local and not quiet
         )
     except GitError as exc:
-        if info is None:
-            await remove_tree(vfs, target)
-        else:
-            for entry in await read_names(vfs, target):
-                child = posixpath.basename(entry.rstrip("/"))
-                await remove_tree(
-                    vfs,
-                    target.join(child),
-                )
+        # A refused checkout leaves the clone behind, as git does.
+        if not isinstance(exc, CloneCheckoutError):
+            if info is None:
+                await remove_tree(vfs, target)
+            else:
+                for entry in await read_names(vfs, target):
+                    child = posixpath.basename(entry.rstrip("/"))
+                    await remove_tree(vfs, target.join(child))
         refusal = str(exc) if exc.prefix is None else f"{exc.prefix}: {exc}"
         return None, IOResult(
             exit_code=exc.exit_code, stderr=f"{notes}{refusal}\n".encode()
@@ -355,13 +356,10 @@ async def _populate(
         tree = await asyncio.to_thread(
             commit_entries, repo, ObjectID(commit.encode())
         )
-        await switch_to(
-            vfs,
-            repo,
-            location,
-            {},
-            tree,
-        )
+        try:
+            await switch_to(vfs, repo, location, {}, tree)
+        except InvalidPathError as exc:
+            raise CloneCheckoutError(notes, exc.paths[0]) from exc
     return notes
 
 

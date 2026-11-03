@@ -27,6 +27,7 @@ from mirage.commands.cli.builtin.git.changes import head_entries
 from mirage.commands.cli.builtin.git.constants import GITLINK, HEAD
 from mirage.commands.cli.builtin.git.errors import (
     GitError,
+    InvalidPathError,
     NoRestorePathsError,
     UnknownPathspecError,
     UnmergedPathError,
@@ -69,6 +70,7 @@ from mirage.commands.cli.builtin.git.tree import (
     commit_entries,
     contents,
     tree_entries,
+    valid_path,
 )
 from mirage.commands.cli.builtin.git.types import RepoLocation
 from mirage.commands.cli.builtin.git.util import (
@@ -356,12 +358,30 @@ async def restore_paths(
         | decoded(visible_entries(location, tree))
         | decoded(visible_entries(location, state.conflicts))
     )
+    # git drops the paths it rejects before matching the operands.
     selected: set[str] = set()
+    invalid: set[str] = set()
+    unmatched: list[str] = []
     for operand in operands:
         hits = matched(names, repo_relative(location, start, operand))
-        if not hits:
-            raise UnknownPathspecError(operand)
-        selected |= hits
+        rejected = {
+            name
+            for name in hits
+            if not valid_path(name, tree.get(name.encode(), (0, b""))[0])
+        }
+        invalid |= rejected
+        if hits == rejected:
+            unmatched.append(operand)
+        selected |= hits - rejected
+    if invalid and unmatched:
+        raise InvalidPathError(
+            list(invalid),
+            tuple(UnknownPathspecError(operand) for operand in unmatched),
+        )
+    if unmatched:
+        raise UnknownPathspecError(unmatched[0])
+    if invalid:
+        notes.append(f"error: {InvalidPathError(list(invalid))}\n")
     present = {name for name in selected if name.encode() in tree}
     absent = selected - present
     # A selected path the source does not hold and the index still
