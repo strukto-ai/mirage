@@ -32,6 +32,7 @@ if TYPE_CHECKING:
         CLIHandler,
         register_cli_spec,
     )
+    from mirage.commands.cli.mcp import MCPToolsError, mcp_cli
     from mirage.commands.config import Context, command
     from mirage.commands.errors import UsageError
     from mirage.commands.spec import (
@@ -134,6 +135,7 @@ _EXPORTS: dict[str, tuple[str, ...]] = {
         "CLIHandler",
         "register_cli_spec",
     ),
+    "mirage.commands.cli.mcp": ("MCPToolsError", "mcp_cli"),
     "mirage.commands.spec": (
         "Argument",
         "SPECS",
@@ -255,6 +257,8 @@ __all__ = [
     "CLIHandler",
     "Argument",
     "register_cli_spec",
+    "MCPToolsError",
+    "mcp_cli",
     "command",
     "new_session_id",
     "new_workspace_id",

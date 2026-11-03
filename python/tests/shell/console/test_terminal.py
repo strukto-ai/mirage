@@ -71,6 +71,21 @@ async def test_a_line_takes_what_reached_the_terminal_in_order():
 
 
 @pytest.mark.asyncio
+async def test_an_entry_takes_what_reached_the_terminal_since_the_one_before():
+    tty = Terminal()
+    await tty.attach(None)
+    await tty.emit(Channel.STDOUT, b"a\n")
+    assert tty.entry() == (b"a\n", b"")
+    await tty.emit(Channel.STDOUT, b"b\n")
+    await tty.emit(Channel.STDERR, b"w\n")
+    tty.put_back(*tty.drain())
+    await tty.emit(Channel.STDOUT, b"c\n")
+    assert tty.entry() == (b"b\nc\n", b"w\n")
+    assert tty.entry() == (b"", b"")
+    assert tty.take() == (b"a\nb\nc\n", b"w\n")
+
+
+@pytest.mark.asyncio
 async def test_a_job_writes_into_the_statement_running_never_one_already_left():
     tty = Terminal()
     statement = Recorder()

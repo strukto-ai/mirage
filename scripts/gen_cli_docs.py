@@ -178,6 +178,7 @@ def main() -> int:
         documented = {p.stem for p in directory.glob("*.mdx")} - {
             "index",
             "custom",
+            "mcp",
         }
         if documented != set(BUILTIN_CLI_SPECS):
             raise SystemExit(

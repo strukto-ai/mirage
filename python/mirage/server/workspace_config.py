@@ -99,11 +99,15 @@ async def build_workspace_from_config(config_path: str | Path) -> "Workspace":
     # Imported here, as the TypeScript twin awaits mirage-node: a CLI
     # spawn that only resolves the config path must not load the
     # workspace.
-    from mirage.config import load_config, resolve_secrets  # noqa: PLC0415
+    from mirage.config import (  # noqa: PLC0415
+        build_mcp_clis,
+        load_config,
+        resolve_secrets,
+    )
     from mirage.workspace.workspace import Workspace  # noqa: PLC0415
 
     config = await resolve_secrets(load_config(config_path))
-    kwargs = config.to_workspace_kwargs()
+    kwargs = config.to_workspace_kwargs(mcp_clis=await build_mcp_clis(config))
     kwargs["workspace_id"] = kwargs.get("workspace_id") or new_workspace_id()
     workspace = Workspace(**kwargs)
     try:

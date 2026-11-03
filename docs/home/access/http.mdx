@@ -128,7 +128,7 @@ A `200` means the server ran the line, not that the line succeeded: check
 | `401` | The token is missing or wrong. |
 | `403` | A policy or mount mode refused the call. |
 | `404` | The workspace, session, job or file does not exist. |
-| `409` | The id is taken, the workspace is busy, or a file changed since it was read. |
+| `409` | The id or CLI name is taken, the workspace is busy, or a file changed since it was read. |
 | `413` | The request is too large. |
 | `422` | The request body is invalid. |
 | `429` | Past a [rate limit](#rate-limits), with `Retry-After` in seconds, or a new session past `max_sessions`. |
@@ -384,6 +384,37 @@ curl -X PUT http://127.0.0.1:8765/v1/workspaces/demo/profiles/reader \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"paths":{"hide":["/vault"]},"commands":{"allow":["cat","ls","whoami"]}}'
 ```
+
+### Install an MCP CLI
+
+<Badge color="orange">PUT</Badge> `/v1/workspaces/{id}/clis/{name}`
+
+The body is one `clis` entry with `cli: mcp`, the same document as in the
+workspace YAML ([From MCP](/python/cli/mcp)). The server resolves its
+credential pointers, lists the server's tools under the workspace's network
+rules, and installs them as the CLI `name`. Returns `{"name": "issues"}`.
+To pick up tools the server added later, remove the CLI and install it again.
+
+A `name` already installed returns HTTP 409 Conflict. When the body is not
+an MCP entry, `name` belongs to a command, or the server cannot be listed,
+the server returns HTTP 422 Unprocessable Entity. A server
+policy that refuses the entry returns HTTP 403. The workspace's config is
+not rewritten, so creating the workspace again installs only the CLIs its
+YAML defines.
+
+```bash
+curl -X PUT http://127.0.0.1:8765/v1/workspaces/demo/clis/issues \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"cli":"mcp","config":{"url":"https://mcp.example.com/mcp","auth":{"type":"bearer","token":{"from":"env","key":"ISSUES_TOKEN"}}}}'
+```
+
+### Remove an MCP CLI
+
+<Badge color="red">DELETE</Badge> `/v1/workspaces/{id}/clis/{name}`
+
+Removes the MCP CLI installed as `name`, returning `{"name": "issues"}`.
+A name with no CLI returns HTTP 404 Not Found; a CLI that is not an MCP
+server returns HTTP 422.
 
 ### Clone a workspace
 

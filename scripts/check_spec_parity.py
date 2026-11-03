@@ -177,6 +177,29 @@ def check_shell_specs(trees: dict[str, dict[str, Any]]) -> list[str]:
     return failures
 
 
+def check_mcp_config(trees: dict[str, dict[str, Any]]) -> list[str]:
+    """Compare the fields a ``cli: mcp`` entry's config takes, per
+    model: which are required and the values an enum allows.
+
+    Args:
+        trees (dict[str, dict[str, Any]]): the generated host manifests.
+    """
+    missing = [
+        host for host, tree in trees.items() if "mcp_config" not in tree
+    ]
+    if missing:
+        return [f"mcp_config missing for {missing}; regenerate them"]
+    return [
+        difference
+        for host in ("node", "browser")
+        for difference in cli_differences(
+            trees["python"]["mcp_config"],
+            trees[host]["mcp_config"],
+            f"mcp_config ({host})",
+        )
+    ]
+
+
 def merge_variants(
     loaded: dict[str, dict[str, Any]], key: str, language_only: set[str]
 ) -> dict[str, Any]:
@@ -731,6 +754,7 @@ def main() -> int:
     trees = load_vfs_trees()
     failures.extend(check_cli_specs(trees))
     failures.extend(check_shell_specs(trees))
+    failures.extend(check_mcp_config(trees))
     failures.extend(compare_variants(ts_variants))
     failures.extend(
         check_vfs_names(trees, language_only, expansions, unconstructible)
