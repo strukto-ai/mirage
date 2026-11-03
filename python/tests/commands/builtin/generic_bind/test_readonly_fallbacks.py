@@ -56,7 +56,9 @@ async def test_find_walks_tree_without_native_find_op():
 
 @pytest.mark.asyncio
 async def test_du_walks_tree_without_native_du_op():
-    out, _ = await run_on_mount(_ws(), "du", [_spec("/g")], flags={"s": True})
+    out, _ = await run_on_mount(
+        _ws(), "du", [_spec("/g")], flags={"summarize": True}
+    )
     text = out.decode()
     # alpha\n (6) + bravo\n (6) = 12 bytes summed by the readdir walk.
     assert "12" in text

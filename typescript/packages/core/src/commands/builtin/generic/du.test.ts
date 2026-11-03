@@ -24,7 +24,9 @@ import {
   toVirtual,
 } from './du.ts'
 import { IOResult } from '../../../io/types.ts'
-import { PathSpec } from '../../../types.ts'
+import { MountMode, PathSpec } from '../../../types.ts'
+import { RAMVFS } from '../../../vfs/ram/ram.ts'
+import { Workspace } from '../../../workspace/workspace/workspace.ts'
 import { enoent } from '../../../errors/fs.ts'
 import type { Context } from '../../config.ts'
 import type { MountView } from '../../../view/types.ts'
@@ -50,7 +52,16 @@ function ctx(flags: Record<string, string | boolean> = {}): Context {
 }
 
 function flags(over: Partial<DuFlags> = {}): DuFlags {
-  return { s: false, a: false, h: false, c: false, S: false, maxDepth: null, ...over }
+  return {
+    s: false,
+    a: false,
+    h: false,
+    blockSize: null,
+    c: false,
+    S: false,
+    maxDepth: null,
+    ...over,
+  }
 }
 
 /** Build (computeSize, computeEntries) over a mount-relative in-memory tree. */
@@ -77,7 +88,7 @@ describe('du', () => {
     }
     const [out, io] = await duGeneric(
       [spec('/data/nosuch', 'nosuch')],
-      ctx({ c: true }),
+      ctx({ total: true }),
       (targets) => Promise.resolve(targets),
       (p) => Promise.reject(enoent(p.virtual)),
       boom as unknown as ComputeSize,
@@ -197,7 +208,7 @@ describe('du parseFlags', () => {
   })
 
   it('warns that -s is --max-depth=0', () => {
-    const parsed = read({ s: true, max_depth: '0' })
+    const parsed = read({ summarize: true, max_depth: '0' })
     if (parsed instanceof IOResult) throw new Error('du refused -s -d 0')
     expect(parsed.warning).toBe('du: warning: summarizing is the same as using --max-depth=0')
   })
@@ -205,8 +216,8 @@ describe('du parseFlags', () => {
   it.each([
     [{ max_depth: '09' }, "du: invalid maximum depth '09'"],
     [{ max_depth: ' 1' }, "du: invalid maximum depth ' 1'"],
-    [{ s: true, a: true }, 'du: cannot both summarize and show all entries'],
-    [{ s: true, max_depth: '2' }, 'du: warning: summarizing conflicts with --max-depth=2'],
+    [{ summarize: true, all: true }, 'du: cannot both summarize and show all entries'],
+    [{ summarize: true, max_depth: '2' }, 'du: warning: summarizing conflicts with --max-depth=2'],
   ])('refuses %j', (flags, line) => {
     const parsed = read(flags)
     if (!(parsed instanceof IOResult)) throw new Error('du read a refused line')
@@ -215,4 +226,96 @@ describe('du parseFlags', () => {
       line + hint,
     ])
   })
+})
+
+it.each([
+  ['-b', '6'],
+  ['--bytes', '6'],
+  ['--apparent-size', '6'],
+  ['-k', '1'],
+  ['-m', '1'],
+  ['-B1', '6'],
+  ['--block-size=K', '1K'],
+  ['-BKB', '1kB'],
+  ['-BKiB', '1KiB'],
+  ['-b -k', '1'],
+  ['-k -b', '6'],
+  ['-k -b -k', '1'],
+  ['-bkb', '6'],
+  ['-B1 -h -B1024', '1'],
+  ['-k --human-readable', '6'],
+  ['--summarize --bytes', '6'],
+  ['--dereference --no-dereference --bytes', '6'],
+])('du GNU units and long aliases %s', async (options, expected) => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    await ws.shell('printf abcdef > /data/f')
+    const result = await ws.shell(`du ${options} /data/f`)
+    expect(result.exitCode).toBe(0)
+    expect(DEC.decode(result.stderr)).toBe('')
+    expect(DEC.decode(result.stdout)).toBe(`${expected}\t/data/f\n`)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('du rounds rows after summing', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    await ws.shell('mkdir /data/d; printf a > /data/d/a; printf b > /data/d/b')
+    const result = await ws.shell('du --all --total -B4 /data/d')
+    expect(result.exitCode).toBe(0)
+    expect(DEC.decode(result.stdout)).toBe('1\t/data/d/a\n1\t/data/d/b\n1\t/data/d\n1\ttotal\n')
+    for (const [size, count] of [
+      [0, 0],
+      [1024, 1],
+      [1025, 2],
+    ] satisfies [number, number][]) {
+      await ws.shell(size ? `printf '%${String(size)}s' x > /data/f` : ': > /data/f')
+      const row = await ws.shell('du -k /data/f')
+      expect(DEC.decode(row.stdout)).toBe(`${String(count)}\t/data/f\n`)
+    }
+  } finally {
+    await ws.close()
+  }
+})
+
+it('du orders human units and validates each block size', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    await ws.shell("printf '%1025s' x > /data/f")
+    for (const [options, expected] of [
+      ['-k -h', '1.1K'],
+      ['-h -k', '2'],
+      ['-B0x10', '65'],
+      ['-B010', '129'],
+    ] satisfies [string, string][]) {
+      const result = await ws.shell(`du ${options} /data/f`)
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe(`${expected}\t/data/f\n`)
+    }
+    const refused = await ws.shell('du -B0 -b /data/f')
+    expect(refused.exitCode).toBe(1)
+    expect(DEC.decode(refused.stderr)).toBe("du: invalid -B argument '0'\n")
+  } finally {
+    await ws.close()
+  }
+})
+
+it('du long link aliases keep last option order', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    await ws.shell('printf abcdef > /data/target; ln -s /data/target /data/link')
+    for (const [options, expected] of [
+      ['--no-dereference --dereference', '6'],
+      ['--dereference --no-dereference', '12'],
+      ['-L --no-dereference --dereference', '6'],
+    ] satisfies [string, string][]) {
+      const result = await ws.shell(`du --bytes ${options} /data/link`)
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe(`${expected}\t/data/link\n`)
+    }
+  } finally {
+    await ws.close()
+  }
 })

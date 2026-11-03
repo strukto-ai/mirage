@@ -328,7 +328,7 @@ describe('du rows for directories no file points at', () => {
 
   it('prints an empty and a refused directory, GNU-style, and names the refusals', async () => {
     expect(await run({})).toEqual(['0\t/db/empty\n0\t/db/sealed\n3\t/db\n', 1, notes])
-    expect(await run({ a: true })).toEqual([
+    expect(await run({ all: true })).toEqual([
       '3\t/db/a.txt\n0\t/db/empty\n0\t/db/sealed\n3\t/db\n',
       1,
       notes,
@@ -377,7 +377,7 @@ describe('du -L through a directory it may not list', () => {
     const result = await du(
       LINKED,
       [PathSpec.fromStrPath('/db')],
-      { flags: { a: true, L: true } },
+      { flags: { all: true, dereference: true } },
       ONE_LINK,
     )
     const [out, io] = result as [Uint8Array, { exitCode: number; stderr: Uint8Array | null }]
