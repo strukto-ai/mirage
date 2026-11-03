@@ -14,8 +14,10 @@
 
 import type { TiDBFilesystemAccessor } from '../../accessor/tidb_filesystem.ts'
 import { eisdir, enotsup, isEnoent } from '../../errors/fs.ts'
+import { callerSignal } from '../../context/session_context.ts'
 import { CHUNK_SIZE } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
+import { YieldBudget } from '../../io/yield_budget.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { FileType, VFSName, type FileStat, type PathSpec } from '../../types.ts'
 import { expectOffset } from '../generic/rewrite.ts'
@@ -25,9 +27,21 @@ import { read } from './read.ts'
 import { stat } from './stat.ts'
 import { write } from './write.ts'
 
-async function* resized(head: Uint8Array, added: ByteSpool): AsyncGenerator<Uint8Array> {
-  yield head
-  yield* added.stream()
+async function pad(spool: ByteSpool, count: number): Promise<void> {
+  const budget = new YieldBudget(callerSignal())
+  for (let at = 0; at < count; at += CHUNK_SIZE) {
+    await spool.append(new Uint8Array(Math.min(CHUNK_SIZE, count - at)))
+    await budget.run()
+  }
+}
+
+async function withSpool<T>(fill: (spool: ByteSpool) => Promise<T>): Promise<T> {
+  const spool = new ByteSpool()
+  try {
+    return await fill(spool)
+  } finally {
+    await spool.close()
+  }
 }
 
 async function fileAt(accessor: TiDBFilesystemAccessor, path: PathSpec): Promise<FileStat | null> {
@@ -45,10 +59,12 @@ async function fileAt(accessor: TiDBFilesystemAccessor, path: PathSpec): Promise
 /**
  * Resize a file, cutting its end or padding it with zeros. A file drive9
  * keeps in object storage is cut by a patch upload, which moves only the part
- * the cut falls in, and grown by a native append of the zeros. A file drive9
- * keeps inline sits in one TiDB row that any change rewrites whole, so it is
- * read and written back, as is a missing file, which is made. drive9 has no
- * create-only write, so `noCreate` is refused before anything is sent.
+ * the cut falls in, and grown by a native append of the zeros, refused when
+ * the file changed size since its stat. A file drive9 keeps inline sits in one
+ * TiDB row that any change rewrites whole, so it is read and written back, as
+ * is a missing file, which is made, and a file whose append was refused.
+ * drive9 has no create-only write, so `noCreate` is refused before anything
+ * is sent.
  */
 export async function truncate(
   accessor: TiDBFilesystemAccessor,
@@ -63,26 +79,24 @@ export async function truncate(
   const size = found?.size ?? 0
   if (found !== null && length === size) return
   const remote = backendPath(accessor.config, path)
-  const added = new ByteSpool()
-  try {
-    for (let at = size; at < length; at += CHUNK_SIZE) {
-      await added.append(new Uint8Array(Math.min(CHUNK_SIZE, length - at)))
+  if (found !== null && length > 0) {
+    const done =
+      length < size
+        ? await shrinkTo(accessor, remote, length)
+        : await withSpool(async (added) => {
+            await pad(added, length - size)
+            return appendTo(accessor, remote, added, size)
+          })
+    if (done) {
+      record('truncate', path.virtual, VFSName.TIDB_FILESYSTEM, 0, timer)
+      return
     }
-    if (found !== null && length > 0) {
-      const done =
-        length < size
-          ? await shrinkTo(accessor, remote, length)
-          : await appendTo(accessor, remote, added)
-      if (done) {
-        record('truncate', path.virtual, VFSName.TIDB_FILESYSTEM, 0, timer)
-        return
-      }
-    }
-    const kept = Math.min(size, length)
-    const head = kept > 0 ? await read(accessor, path, 0, kept) : new Uint8Array()
-    await write(accessor, path, resized(head, added))
-  } finally {
-    await added.close()
   }
+  const kept = Math.min(size, length)
+  await withSpool(async (content) => {
+    if (kept > 0) await content.append(await read(accessor, path, 0, kept))
+    await pad(content, length - kept)
+    await write(accessor, path, content)
+  })
   record('truncate', path.virtual, VFSName.TIDB_FILESYSTEM, 0, timer)
 }

@@ -266,6 +266,7 @@ async function readPart(
       errorOf,
       retry: NO_RETRY,
       read: 'bytes',
+      maxBodyBytes: part.size,
       timeout: accessor.config.timeout,
     }),
   )
@@ -363,12 +364,14 @@ export async function upload(
  * copies the parts the bytes leave alone into a new upload, the last part's
  * own bytes come back through its read URL, and they go up again with the
  * new ones. False, with nothing sent, for a file drive9 keeps inline (400) or
- * a path that is not a file (404).
+ * a path that is not a file (404), and false, with the upload aborted, when
+ * the file is not `baseSize` bytes long.
  */
 export async function appendTo(
   accessor: TiDBFilesystemAccessor,
   remotePath: string,
   data: Uint8Array | ByteSpool,
+  baseSize: number | null = null,
 ): Promise<boolean> {
   const host = accessor.config.host
   const size = sizeOf(data)
@@ -384,6 +387,13 @@ export async function appendTo(
     return false
   }
   const plan = AppendPlan.parse(raw)
+  if (baseSize !== null && plan.base_size !== baseSize) {
+    console.debug(
+      `tidb_filesystem: ${remotePath} is ${String(plan.base_size)} bytes, not ${String(baseSize)}`,
+    )
+    await abort(accessor, 'DELETE', `${host}/v1/uploads/${plan.upload_id}`)
+    return false
+  }
   const kept = (part: z.infer<typeof AppendPart>): number => {
     const start = (part.number - 1) * plan.part_size
     return Math.max(0, Math.min(plan.base_size, start + part.size) - start)

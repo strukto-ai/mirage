@@ -12,8 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
-
 from mirage.accessor.tidb_filesystem import TiDBFilesystemAccessor
 from mirage.core.generic.rewrite import expect_offset
 from mirage.core.tidb_filesystem.client import append_to, shrink_to
@@ -28,10 +26,9 @@ from mirage.observe.context import record, start_op
 from mirage.types import FileStat, FileType, PathSpec
 
 
-async def _resized(head: bytes, added: ByteSpool) -> AsyncIterator[bytes]:
-    yield head
-    async for chunk in added.stream():
-        yield chunk
+async def _pad(spool: ByteSpool, count: int) -> None:
+    for at in range(0, count, CHUNK_SIZE):
+        await spool.append(bytes(min(CHUNK_SIZE, count - at)))
 
 
 async def _file_at(
@@ -56,10 +53,11 @@ async def truncate(
 
     A file drive9 keeps in object storage is cut by a patch upload, which
     moves only the part the cut falls in, and grown by a native append of
-    the zeros. A file drive9 keeps inline sits in one TiDB row that any
-    change rewrites whole, so it is read and written back, as is a
-    missing file, which is made. drive9 has no create-only write, so
-    ``no_create`` is refused before anything is sent.
+    the zeros, refused when the file changed size since its stat. A file
+    drive9 keeps inline sits in one TiDB row that any change rewrites
+    whole, so it is read and written back, as is a missing file, which is
+    made, and a file whose append was refused. drive9 has no create-only
+    write, so ``no_create`` is refused before anything is sent.
 
     Args:
         accessor (TiDBFilesystemAccessor): the file system's accessor.
@@ -79,18 +77,20 @@ async def truncate(
     if found is not None and length == size:
         return
     remote = backend_path(accessor.config, path)
-    async with ByteSpool() as added:
-        for at in range(size, length, CHUNK_SIZE):
-            await added.append(bytes(min(CHUNK_SIZE, length - at)))
-        if found is not None and length:
-            if length < size:
-                done = await shrink_to(accessor, remote, length)
-            else:
-                done = await append_to(accessor, remote, added)
-            if done:
-                record("truncate", path.virtual, "tidb_filesystem", 0, timer)
-                return
-        kept = min(size, length)
-        head = await read(accessor, path, 0, kept) if kept else b""
-        await write(accessor, path, _resized(head, added))
+    if found is not None and length:
+        if length < size:
+            done = await shrink_to(accessor, remote, length)
+        else:
+            async with ByteSpool() as added:
+                await _pad(added, length - size)
+                done = await append_to(accessor, remote, added, base_size=size)
+        if done:
+            record("truncate", path.virtual, "tidb_filesystem", 0, timer)
+            return
+    kept = min(size, length)
+    async with ByteSpool() as content:
+        if kept:
+            await content.append(await read(accessor, path, 0, kept))
+        await _pad(content, length - kept)
+        await write(accessor, path, content)
     record("truncate", path.virtual, "tidb_filesystem", 0, timer)
