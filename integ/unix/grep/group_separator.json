@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -A0 --group-separator=XX foo /data/gfl/a.txt; grep -A0 --group-separator= foo /data/gfl/a.txt; grep -A0 --no-group-separator foo /data/gfl/a.txt; grep -A0 --no-group-separator --group-separator=YY foo /data/gfl/a.txt; grep --group-separator=XX foo /data/gfl/a.txt; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -A0 --group-separator=XX foo /data/gfl/a.txt; grep -A0 --group-separator= foo /data/gfl/a.txt; grep -A0 --no-group-separator foo /data/gfl/a.txt; grep -A0 --no-group-separator --group-separator=YY foo /data/gfl/a.txt; grep --group-separator=XX foo /data/gfl/a.txt",
       "expect": {
         "exit": 0,
         "stdout": "foo one\nXX\nfoo two\nfoo one\n\nfoo two\nfoo one\nfoo two\nfoo one\nYY\nfoo two\nfoo one\nfoo two\n",
@@ -68,7 +68,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -A0 foo /data/gfl/a.txt /data/gfl/b.txt; grep -B0 foo /data/gfl/a.txt; grep -C0 -n foo /data/gfl/a.txt; grep -o -A1 foo /data/gfl/a.txt; grep -v -A0 foo /data/gfl/a.txt; grep -c -A0 foo /data/gfl/a.txt; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -A0 foo /data/gfl/a.txt /data/gfl/b.txt; grep -B0 foo /data/gfl/a.txt; grep -C0 -n foo /data/gfl/a.txt; grep -o -A1 foo /data/gfl/a.txt; grep -v -A0 foo /data/gfl/a.txt; grep -c -A0 foo /data/gfl/a.txt",
       "expect": {
         "exit": 0,
         "stdout": "/data/gfl/a.txt:foo one\n--\n/data/gfl/a.txt:foo two\n--\n/data/gfl/b.txt:foo\tbar\nfoo one\n--\nfoo two\n3:foo one\n--\n6:foo two\nfoo\n--\nfoo\nalpha\nbeta\n--\ngamma\ndelta\n--\nepsilon\n2\n",

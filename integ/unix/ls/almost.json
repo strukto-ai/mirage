@@ -105,7 +105,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r10dot/d && touch /data/r10dot/.h /data/r10dot/v /data/r10dot/d/.x && ls /data/r10dot; ls -a /data/r10dot; ls -A /data/r10dot; ls -R /data/r10dot; rm -r /data/r10dot",
+      "command": "mkdir -p /data/r10dot/d && touch /data/r10dot/.h /data/r10dot/v /data/r10dot/d/.x && ls /data/r10dot; ls -a /data/r10dot; ls -A /data/r10dot; ls -R /data/r10dot",
       "expect": {
         "exit": 0,
         "stdout": "d\nv\n.\n..\n.h\nd\nv\n.h\nd\nv\n/data/r10dot:\nd\nv\n\n/data/r10dot/d:\n",

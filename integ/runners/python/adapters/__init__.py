@@ -547,7 +547,7 @@ class SSHService:
         return res
 
     async def teardown(self) -> None:
-        await _admin_exec(self.admin_ws, f"rm -rf /admin/{self.base}")
+        await self.admin.rm_r(PathSpec.from_str_path(f"/{self.base}"))
         # Workspace.close() does not close VFS accessors; an in-process
         # server's wait_closed() blocks until every client connection is gone.
         for res in self.mounts:
@@ -568,12 +568,14 @@ class NextcloudService:
         username: str | None,
         password: str | None,
         admin_ws: Workspace,
+        admin: NextcloudVFS,
         base: str,
     ) -> None:
         self.url = url
         self.username = username
         self.password = password
         self.admin_ws = admin_ws
+        self.admin = admin
         self.base = base
 
     @classmethod
@@ -590,7 +592,7 @@ class NextcloudService:
             f"/admin/{base}/{m['root']}" for m in target["mounts"]
         )
         await _admin_exec(admin_ws, f"mkdir -p {paths}")
-        return cls(url, username, password, admin_ws, base)
+        return cls(url, username, password, admin_ws, admin, base)
 
     def vfs(self, mount: dict) -> NextcloudVFS:
         url = f"{self.url.rstrip('/')}/{self.base}/{mount['root']}/"
@@ -601,8 +603,10 @@ class NextcloudService:
         )
 
     async def teardown(self) -> None:
-        await _admin_exec(self.admin_ws, f"rm -rf /admin/{self.base}")
-        await self.admin_ws.close()
+        try:
+            await self.admin.rm_r(PathSpec.from_str_path(f"/{self.base}"))
+        finally:
+            await self.admin_ws.close()
 
 
 class TiDBFilesystemService:
@@ -618,15 +622,22 @@ class TiDBFilesystemService:
         token (str): the file system token.
         base (str): this run's folder.
         admin_ws (Workspace): a workspace over the file system's root.
+        admin (TiDBFilesystemVFS): the root used for teardown.
     """
 
     def __init__(
-        self, host: str, token: str, base: str, admin_ws: Workspace
+        self,
+        host: str,
+        token: str,
+        base: str,
+        admin_ws: Workspace,
+        admin: TiDBFilesystemVFS,
     ) -> None:
         self.host = host
         self.token = token
         self.base = base
         self.admin_ws = admin_ws
+        self.admin = admin
 
     @classmethod
     async def create(
@@ -639,7 +650,7 @@ class TiDBFilesystemService:
         admin_ws = Workspace({"/admin": admin}, mode=MountMode.WRITE)
         paths = " ".join(f"/admin{base}/{m['root']}" for m in target["mounts"])
         await _admin_exec(admin_ws, f"mkdir -p {paths}")
-        return cls(host, token, base, admin_ws)
+        return cls(host, token, base, admin_ws, admin)
 
     def vfs(self, mount: dict) -> TiDBFilesystemVFS:
         return TiDBFilesystemVFS(
@@ -651,8 +662,10 @@ class TiDBFilesystemService:
         )
 
     async def teardown(self) -> None:
-        await _admin_exec(self.admin_ws, f"rm -rf /admin{self.base}")
-        await self.admin_ws.close()
+        try:
+            await self.admin.rm_r(PathSpec.from_str_path(self.base))
+        finally:
+            await self.admin_ws.close()
 
 
 FOLDER_MIME = "application/vnd.google-apps.folder"

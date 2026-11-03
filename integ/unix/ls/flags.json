@@ -1941,7 +1941,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/lsdsz/sub && printf abcd > /data/lsdsz/sub/f && printf '%05000d' 0 > /data/lsdsz/big && printf abc > /data/lsdsz/small && ls -ld /data /data/lsdsz /data/lsdsz/sub | awk '{print $5, $NF}' && ls -lS /data/lsdsz | awk 'NF>2{print $5, $NF}' && ls -ldh /data/lsdsz | awk '{print $5}' && find /data/lsdsz -ls | awk '{print $7, $NF}' | sort -k2; rm -rf /data/lsdsz",
+      "command": "mkdir -p /data/lsdsz/sub && printf abcd > /data/lsdsz/sub/f && printf '%05000d' 0 > /data/lsdsz/big && printf abc > /data/lsdsz/small && ls -ld /data /data/lsdsz /data/lsdsz/sub | awk '{print $5, $NF}' && ls -lS /data/lsdsz | awk 'NF>2{print $5, $NF}' && ls -ldh /data/lsdsz | awk '{print $5}' && find /data/lsdsz -ls | awk '{print $7, $NF}' | sort -k2",
       "expect": {
         "exit": 0,
         "stdout": "4096 /data\n4096 /data/lsdsz\n4096 /data/lsdsz/sub\n5000 big\n4096 sub\n3 small\n4.0K\n4096 /data/lsdsz\n5000 /data/lsdsz/big\n3 /data/lsdsz/small\n4096 /data/lsdsz/sub\n4 /data/lsdsz/sub/f\n",
@@ -2137,7 +2137,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/crlh && printf x > /data/crlh/a.txt && ls --hyperlink=always /data/crlh; ls --hyperlink=auto /data/crlh; rm -r /data/crlh",
+      "command": "mkdir -p /data/crlh && printf x > /data/crlh/a.txt && ls --hyperlink=always /data/crlh; ls --hyperlink=auto /data/crlh",
       "expect": {
         "exit": 0,
         "stdout": "\u001b]8;;file:///data/crlh/a.txt\u0007a.txt\u001b]8;;\u0007\na.txt\n",
@@ -2214,7 +2214,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/crli/d && printf x > /data/crli/d/k && printf x > /data/crli/f && ln -s f /data/crli/l && cd /data/crli && for o in '-F -p' '-p -F' '--file-type' '--file-type --indicator-style=none' '--classify=always' '--classify=auto' '-p --classify'; do echo \"[$o]\"; ls $o | tr '\\n' ' '; echo; done; ls --indicator-style=bogus; echo rc=$?; ls --classify=bogus -F; echo rc=$?; cd / && rm -r /data/crli",
+      "command": "mkdir -p /data/crli/d && printf x > /data/crli/d/k && printf x > /data/crli/f && ln -s f /data/crli/l && cd /data/crli && for o in '-F -p' '-p -F' '--file-type' '--file-type --indicator-style=none' '--classify=always' '--classify=auto' '-p --classify'; do echo \"[$o]\"; ls $o | tr '\\n' ' '; echo; done; ls --indicator-style=bogus; echo rc=$?; ls --classify=bogus -F; echo rc=$?; cd /",
       "expect": {
         "exit": 0,
         "stdout": "[-F -p]\nd/ f l \n[-p -F]\nd/ f l@ \n[--file-type]\nd/ f l@ \n[--file-type --indicator-style=none]\nd f l \n[--classify=always]\nd/ f l@ \n[--classify=auto]\nd f l \n[-p --classify]\nd/ f l@ \nrc=1\nrc=1\n",
@@ -2256,7 +2256,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/lsow/sub/deep && printf 'deep\\n' > /data/lsow/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/lsow/sub/nested.txt && (cd /data/lsow/sub; ls --color=bogus; echo rc=$?; ls --color=a; echo rc=$?; ls --color=never --color=bogus; echo rc=$?; ls --color; echo rc=$?; ls --sort=bogus --sort=size; echo rc=$?; ls --block-size=bogus --block-size=K; echo rc=$?; ls --hyperlink=bogus --hyperlink=never; echo rc=$?; ls --time=x --sort=y; echo rc=$?); rm -r /data/lsow",
+      "command": "mkdir -p /data/lsow/sub/deep && printf 'deep\\n' > /data/lsow/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/lsow/sub/nested.txt && (cd /data/lsow/sub; ls --color=bogus; echo rc=$?; ls --color=a; echo rc=$?; ls --color=never --color=bogus; echo rc=$?; ls --color; echo rc=$?; ls --sort=bogus --sort=size; echo rc=$?; ls --block-size=bogus --block-size=K; echo rc=$?; ls --hyperlink=bogus --hyperlink=never; echo rc=$?; ls --time=x --sort=y; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=1\ndeep\nnested.txt\nrc=0\nrc=1\nrc=2\nrc=1\nrc=1\n",

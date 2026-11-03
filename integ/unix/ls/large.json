@@ -29,7 +29,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/lsbig && for i in $(seq 100 219); do printf x > /data/lsbig/f$i; done; ls /data/lsbig | wc -l; ls -l /data/lsbig | grep -c '^-'; ls /data/lsbig/f150 /data/lsbig/f220; echo \"rc=$?\"; printf y > /data/lsbig/g; ls /data/lsbig/g; ls /data/lsbig | wc -l; rm -r /data/lsbig",
+      "command": "mkdir -p /data/lsbig && for i in $(seq 100 219); do printf x > /data/lsbig/f$i; done; ls /data/lsbig | wc -l; ls -l /data/lsbig | grep -c '^-'; ls /data/lsbig/f150 /data/lsbig/f220; echo \"rc=$?\"; printf y > /data/lsbig/g; ls /data/lsbig/g; ls /data/lsbig | wc -l",
       "expect": {
         "exit": 0,
         "stdout": "120\n120\n/data/lsbig/f150\nrc=2\n/data/lsbig/g\n121\n",

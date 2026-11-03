@@ -25,7 +25,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/gzl131101 && printf 'hi\\n' | gzip > /data/gzl131101/t.gz && ln -s t.gz /data/gzl131101/tl.gz && gunzip /data/gzl131101/tl.gz; echo rc=$?; ls /data/gzl131101; rc=$?; rm -r /data/gzl131101; exit $rc)",
+      "command": "(mkdir -p /data/gzl131101 && printf 'hi\\n' | gzip > /data/gzl131101/t.gz && ln -s t.gz /data/gzl131101/tl.gz && gunzip /data/gzl131101/tl.gz; echo rc=$?; ls /data/gzl131101; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nt.gz\ntl.gz\n",
@@ -57,7 +57,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/gzl131102 && printf 'hi\\n' | gzip > /data/gzl131102/t.gz && ln -s t.gz /data/gzl131102/tl.gz && gunzip -c /data/gzl131102/tl.gz && gunzip -t /data/gzl131102/tl.gz && echo ok; rc=$?; rm -r /data/gzl131102; exit $rc)",
+      "command": "(mkdir -p /data/gzl131102 && printf 'hi\\n' | gzip > /data/gzl131102/t.gz && ln -s t.gz /data/gzl131102/tl.gz && gunzip -c /data/gzl131102/tl.gz && gunzip -t /data/gzl131102/tl.gz && echo ok; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "hi\nok\n",
@@ -89,7 +89,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/gzl131103 && printf 'hi\\n' | gzip > /data/gzl131103/t.gz && ln -s t.gz /data/gzl131103/tl.gz && gunzip -f /data/gzl131103/tl.gz && ls /data/gzl131103 && cat /data/gzl131103/tl; rc=$?; rm -r /data/gzl131103; exit $rc)",
+      "command": "(mkdir -p /data/gzl131103 && printf 'hi\\n' | gzip > /data/gzl131103/t.gz && ln -s t.gz /data/gzl131103/tl.gz && gunzip -f /data/gzl131103/tl.gz && ls /data/gzl131103 && cat /data/gzl131103/tl; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "t.gz\ntl\nhi\n",
@@ -121,7 +121,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/gzl131104 && printf 'hi\\n' | gzip > /data/gzl131104/t.gz && ln -s t.gz /data/gzl131104/tl.gz && gunzip -kf /data/gzl131104/tl.gz && ls /data/gzl131104; rc=$?; rm -r /data/gzl131104; exit $rc)",
+      "command": "(mkdir -p /data/gzl131104 && printf 'hi\\n' | gzip > /data/gzl131104/t.gz && ln -s t.gz /data/gzl131104/tl.gz && gunzip -kf /data/gzl131104/tl.gz && ls /data/gzl131104; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "t.gz\ntl\ntl.gz\n",
@@ -153,7 +153,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/gzl131105 && printf 'hi\\n' | gzip > /data/gzl131105/t.gz && ln -s t.gz /data/gzl131105/x.gz && gunzip /data/gzl131105/x; echo rc=$?; gunzip -c /data/gzl131105/x; rc=$?; rm -r /data/gzl131105; exit $rc)",
+      "command": "(mkdir -p /data/gzl131105 && printf 'hi\\n' | gzip > /data/gzl131105/t.gz && ln -s t.gz /data/gzl131105/x.gz && gunzip /data/gzl131105/x; echo rc=$?; gunzip -c /data/gzl131105/x; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nhi\n",
@@ -185,7 +185,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/gzl131106 && printf 'hi\\n' | gzip > /data/gzl131106/t.gz && ln -s nowhere /data/gzl131106/t && gunzip /data/gzl131106/t.gz; echo rc=$?; gunzip -f /data/gzl131106/t.gz && ls /data/gzl131106 && cat /data/gzl131106/t; rc=$?; rm -r /data/gzl131106; exit $rc)",
+      "command": "(mkdir -p /data/gzl131106 && printf 'hi\\n' | gzip > /data/gzl131106/t.gz && ln -s nowhere /data/gzl131106/t && gunzip /data/gzl131106/t.gz; echo rc=$?; gunzip -f /data/gzl131106/t.gz && ls /data/gzl131106 && cat /data/gzl131106/t; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "rc=2\nt\nhi\n",
@@ -217,7 +217,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/gzl131107 && printf 'hi\\n' > /data/gzl131107/a && ln -s a /data/gzl131107/al && gzip /data/gzl131107/al; echo rc=$?; ls /data/gzl131107; rc=$?; rm -r /data/gzl131107; exit $rc)",
+      "command": "(mkdir -p /data/gzl131107 && printf 'hi\\n' > /data/gzl131107/a && ln -s a /data/gzl131107/al && gzip /data/gzl131107/al; echo rc=$?; ls /data/gzl131107; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\na\nal\n",
@@ -249,7 +249,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/gzl131108 && printf 'hi\\n' > /data/gzl131108/a && ln -s a /data/gzl131108/al && gzip -f /data/gzl131108/al && ls /data/gzl131108 && gunzip -c /data/gzl131108/al.gz; rc=$?; rm -r /data/gzl131108; exit $rc)",
+      "command": "(mkdir -p /data/gzl131108 && printf 'hi\\n' > /data/gzl131108/a && ln -s a /data/gzl131108/al && gzip -f /data/gzl131108/al && ls /data/gzl131108 && gunzip -c /data/gzl131108/al.gz; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "a\nal.gz\nhi\n",
@@ -349,7 +349,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_ln/dir && cd /data/fcA_ln && printf 'hello\\n' | gzip > t.gz && ln -s t.gz tl.gz && gunzip -k -q tl.gz; echo rc=$?; gzip -d tl.gz; echo rc=$?; ln -s nowhere d.gz && gunzip d.gz; echo rc=$?; ln -s dir dl && gunzip dl; echo rc=$?; ls -F; cd / && rm -r /data/fcA_ln)",
+      "command": "(mkdir -p /data/fcA_ln/dir && cd /data/fcA_ln && printf 'hello\\n' | gzip > t.gz && ln -s t.gz tl.gz && gunzip -k -q tl.gz; echo rc=$?; gzip -d tl.gz; echo rc=$?; ln -s nowhere d.gz && gunzip d.gz; echo rc=$?; ln -s dir dl && gunzip dl; echo rc=$?; ls -F)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nd.gz@\ndir/\ndl@\nt.gz\ntl.gz@\n",
@@ -383,7 +383,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_lo/dir && cd /data/fcA_lo && printf 'hello\\n' | gzip > t.gz && ln -s dir t && gunzip t.gz; echo rc=$?; gunzip -f t.gz; echo rc=$?; ls -F; cat t; cd / && rm -r /data/fcA_lo)",
+      "command": "(mkdir -p /data/fcA_lo/dir && cd /data/fcA_lo && printf 'hello\\n' | gzip > t.gz && ln -s dir t && gunzip t.gz; echo rc=$?; gunzip -f t.gz; echo rc=$?; ls -F; cat t)",
       "expect": {
         "exit": 0,
         "stdout": "rc=2\nrc=0\ndir/\nt\nhello\n",
@@ -416,7 +416,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_lr && cd /data/fcA_lr && printf 'hello\\n' | gzip > t.gz && ln -s t.gz tl.gz && gunzip -f tl.gz tl.gz; echo rc=$?; ls; cd / && rm -r /data/fcA_lr)",
+      "command": "(mkdir -p /data/fcA_lr && cd /data/fcA_lr && printf 'hello\\n' | gzip > t.gz && ln -s t.gz tl.gz && gunzip -f tl.gz tl.gz; echo rc=$?; ls)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nt.gz\ntl\n",
@@ -449,7 +449,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_gl && cd /data/fcA_gl && printf 'hello\\n' > a.txt && ln -s a.txt al && gzip -k al; echo rc=$?; gzip -q al; echo rc=$?; gzip -kf al; echo rc=$?; ls -F; gunzip -c al.gz; cd / && rm -r /data/fcA_gl)",
+      "command": "(mkdir -p /data/fcA_gl && cd /data/fcA_gl && printf 'hello\\n' > a.txt && ln -s a.txt al && gzip -k al; echo rc=$?; gzip -q al; echo rc=$?; gzip -kf al; echo rc=$?; ls -F; gunzip -c al.gz)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=0\na.txt\nal@\nal.gz\nhello\n",

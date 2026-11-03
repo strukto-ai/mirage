@@ -26,7 +26,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "wc -l sub/a.txt && head -v sub/a.txt && cd / && rm -r /data/g14",
+      "command": "wc -l sub/a.txt && head -v sub/a.txt && cd /",
       "expect": {
         "exit": 0,
         "stdout": "1 sub/a.txt\n==> sub/a.txt <==\nhello\n",

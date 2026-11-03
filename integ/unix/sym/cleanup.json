@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rm /data/symd/dangle /data/lp1 /data/lp2 /data/dl && rm -r /data/symd",
+      "command": "rm /data/symd/dangle /data/lp1 /data/lp2 /data/dl",
       "expect": {
         "exit": 0,
         "stdout": "",

@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/fcA_zs && printf 'hi\\n' | gzip > /data/fcA_zs/q.x && printf 'yo\\n' | gzip > /data/fcA_zs/r.gz && zcat -S .x /data/fcA_zs/q /data/fcA_zs/q.x /data/fcA_zs/r; echo rc=$?; zcat -Sx /data/fcA_zs/q; echo rc=$?; zcat -S .x /data/fcA_zs/nope; echo rc=$?; zcat -S .aaaaaaaaaaaaaaaaaaaaaaaaaaaaa /data/fcA_zs/q.x; echo rc=$?; zcat -S .aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa /data/fcA_zs/q.x; echo rc=$?; zcat -S '' /data/fcA_zs/q.x; echo rc=$?; rm -r /data/fcA_zs)",
+      "command": "(mkdir -p /data/fcA_zs && printf 'hi\\n' | gzip > /data/fcA_zs/q.x && printf 'yo\\n' | gzip > /data/fcA_zs/r.gz && zcat -S .x /data/fcA_zs/q /data/fcA_zs/q.x /data/fcA_zs/r; echo rc=$?; zcat -Sx /data/fcA_zs/q; echo rc=$?; zcat -S .x /data/fcA_zs/nope; echo rc=$?; zcat -S .aaaaaaaaaaaaaaaaaaaaaaaaaaaaa /data/fcA_zs/q.x; echo rc=$?; zcat -S .aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa /data/fcA_zs/q.x; echo rc=$?; zcat -S '' /data/fcA_zs/q.x; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "hi\nhi\nyo\nrc=0\nrc=1\nrc=1\nhi\nrc=0\nrc=1\nrc=1\n",

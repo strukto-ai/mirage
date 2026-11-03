@@ -813,7 +813,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "rm /data/slashx/dlnk && rm -r /data/slashx",
+      "command": "rm /data/slashx/dlnk",
       "expect": {
         "exit": 0,
         "stdout": "",

@@ -519,6 +519,129 @@ def selftest_case_target_defaults(typescript: bool = False) -> None:
                 )
 
 
+def selftest_nextcloud_suite(typescript: bool = False) -> None:
+    """Check selection, rejection and host parity without starting a service.
+
+    Args:
+        typescript (bool): exercise the TypeScript selector when true.
+    """
+    cases = [
+        {"id": "first", "targets": ["nextcloud"], "_source": "unix/rm/a.json"},
+        {"id": "other", "targets": ["ram"], "_source": "unix/rm/a.json"},
+        {
+            "id": "second",
+            "targets": ["nextcloud"],
+            "_source": "unix/cat/a.json",
+        },
+        {
+            "id": "omitted",
+            "targets": ["nextcloud"],
+            "_source": "unix/date/a.json",
+        },
+    ]
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        (root / "ci").mkdir()
+        for label, selectors, expected in [
+            (
+                "ordered union",
+                ["second", "unix/rm/", "first"],
+                ["first", "second"],
+            ),
+            ("exact file", ["unix/cat/a.json"], ["second"]),
+            ("unknown selector", ["gone"], None),
+            ("wrong target", ["other"], None),
+            ("directory boundary", ["unix/r/"], None),
+            ("empty", [], None),
+            ("duplicate selector", ["first", "first"], None),
+            ("wrong shape", {"cases": ["first"]}, None),
+            ("wrong type", [1], None),
+        ]:
+            (root / "ci" / "nextcloud.json").write_text(json.dumps(selectors))
+            host = "ts" if typescript else "py"
+            name = f"nextcloud suite ({host}): {label}"
+            if typescript:
+                proc = subprocess.run(
+                    [
+                        str(TSX),
+                        "--eval",
+                        "import('./runners/typescript/harness.ts').then(m => "
+                        "console.log(JSON.stringify(m.selectSuite("
+                        "process.env.CASE_ROOT, "
+                        "JSON.parse(process.env.SUITE_CASES), "
+                        "'nextcloud').map(c => c.id))))",
+                    ],
+                    cwd=ROOT,
+                    env={
+                        **os.environ,
+                        "CASE_ROOT": temp,
+                        "SUITE_CASES": json.dumps(cases),
+                    },
+                    capture_output=True,
+                    text=True,
+                )
+                check(
+                    name,
+                    proc.returncode != 0
+                    if expected is None
+                    else proc.returncode == 0
+                    and json.loads(proc.stdout) == expected,
+                    proc.stderr,
+                )
+            elif expected is None:
+                try:
+                    harness.select_suite(root, cases, "nextcloud")
+                except ValueError:
+                    check(name, True)
+                else:
+                    check(name, False, "invalid selection accepted")
+            else:
+                actual = harness.select_suite(root, cases, "nextcloud")
+                check(name, [c["id"] for c in actual] == expected)
+
+    real = harness.load_cases(ROOT)
+    chosen = harness.select_suite(ROOT, real, "nextcloud")
+    ids = {c["id"] for c in chosen}
+    required = {
+        c["id"]
+        for c in real
+        if "nextcloud" in c["targets"]
+        and (
+            not {"ram", "disk"} <= set(c["targets"])
+            or c.get("clear_cache")
+            or "check" in c
+            or c["_source"].startswith(
+                ("vfs/", "crossmount/", "unix/rm/", "unix/rmdir/")
+            )
+        )
+    }
+    check(
+        "nextcloud suite: backend distinctions, cache checks and removals remain",
+        required <= ids,
+        repr(sorted(required - ids)),
+    )
+    if typescript:
+        proc = subprocess.run(
+            [
+                str(TSX),
+                "--eval",
+                "import('./runners/typescript/harness.ts').then(m => "
+                "console.log(JSON.stringify(m.selectSuite("
+                "m.integRoot(), m.loadCases(m.integRoot()), "
+                "'nextcloud').map(c => c.id))))",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        check(
+            "nextcloud suite: both hosts select the same ordered cases",
+            proc.returncode == 0
+            and json.loads(proc.stdout) == [c["id"] for c in chosen],
+            proc.stderr,
+        )
+
+
 def run_main(args: list[str], env: dict) -> int:
     return run_main_out(args, env)[0]
 
@@ -1521,6 +1644,7 @@ def selftest_typescript_gates(require: bool) -> None:
         f"exit {code}: {err}",
     )
     selftest_case_target_defaults(typescript=True)
+    selftest_nextcloud_suite(typescript=True)
     selftest_run_ids()
     selftest_plan_run()
     selftest_no_shadow_fails()
@@ -2022,6 +2146,7 @@ def main() -> None:
     selftest_delete_refused()
     selftest_delete_flag()
     selftest_case_target_defaults()
+    selftest_nextcloud_suite()
     selftest_strict_exit()
     selftest_fake_ports()
     selftest_target_pool()

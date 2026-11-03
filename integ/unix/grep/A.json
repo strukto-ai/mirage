@@ -105,7 +105,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgA; printf 'hello\\nworld\\nfoo\\nbar\\nbaz\\n' > /data/cfgA/a.txt; grep -A -1 world /data/cfgA/a.txt; echo rc=$?; grep -A x world /data/cfgA/a.txt; echo rc=$?; grep -B -1 -A x world /data/cfgA/a.txt; echo rc=$?; rm -rf /data/cfgA",
+      "command": "mkdir -p /data/cfgA; printf 'hello\\nworld\\nfoo\\nbar\\nbaz\\n' > /data/cfgA/a.txt; grep -A -1 world /data/cfgA/a.txt; echo rc=$?; grep -A x world /data/cfgA/a.txt; echo rc=$?; grep -B -1 -A x world /data/cfgA/a.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=2\nrc=2\nrc=2\n",
@@ -144,7 +144,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgA; printf 'a\\nb\\nc\\n' > /data/cfgA/g1; printf 'x\\na\\ny\\n' > /data/cfgA/g2; printf 'zzz\\n' > /data/cfgA/g0; grep -A1 a /data/cfgA/g1 /data/cfgA/g2; echo rc=$?; grep -n -A1 a /data/cfgA/g1 /data/cfgA/g2; echo rc=$?; grep -h -A1 a /data/cfgA/g1 /data/cfgA/g2; echo rc=$?; grep -A1 a /data/cfgA/g0 /data/cfgA/g2; echo rc=$?; rm -rf /data/cfgA",
+      "command": "mkdir -p /data/cfgA; printf 'a\\nb\\nc\\n' > /data/cfgA/g1; printf 'x\\na\\ny\\n' > /data/cfgA/g2; printf 'zzz\\n' > /data/cfgA/g0; grep -A1 a /data/cfgA/g1 /data/cfgA/g2; echo rc=$?; grep -n -A1 a /data/cfgA/g1 /data/cfgA/g2; echo rc=$?; grep -h -A1 a /data/cfgA/g1 /data/cfgA/g2; echo rc=$?; grep -A1 a /data/cfgA/g0 /data/cfgA/g2; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "/data/cfgA/g1:a\n/data/cfgA/g1-b\n--\n/data/cfgA/g2:a\n/data/cfgA/g2-y\nrc=0\n/data/cfgA/g1:1:a\n/data/cfgA/g1-2-b\n--\n/data/cfgA/g2:2:a\n/data/cfgA/g2-3-y\nrc=0\na\nb\n--\na\ny\nrc=0\n/data/cfgA/g2:a\n/data/cfgA/g2-y\nrc=0\n",

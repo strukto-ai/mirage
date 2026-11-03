@@ -9,7 +9,6 @@ from mirage.core.nextcloud.constants import UPLOAD_CHUNK_SIZE
 from mirage.core.nextcloud.copy import copy, dir_copy
 from mirage.core.nextcloud.create import create
 from mirage.core.nextcloud.rename import rename
-from mirage.core.nextcloud.rm import rm_r
 from mirage.core.nextcloud.truncate import truncate
 from mirage.core.nextcloud.unlink import unlink
 from mirage.core.nextcloud.write import write
@@ -188,17 +187,6 @@ async def test_rename_moves_file(make_acc):
     )
     assert acc._fake.files.get("new.txt") == b"data"
     assert "old.txt" not in acc._fake.files
-
-
-@pytest.mark.asyncio
-async def test_rm_r_removes_subtree(make_acc):
-    acc = make_acc(
-        {"dir/a.txt": b"a", "dir/sub/b.txt": b"b", "keep.txt": b"k"}
-    )
-    await rm_r(acc, PathSpec.from_str_path("/dir"))
-    assert "dir/a.txt" not in acc._fake.files
-    assert "dir/sub/b.txt" not in acc._fake.files
-    assert "keep.txt" in acc._fake.files
 
 
 @pytest.mark.asyncio

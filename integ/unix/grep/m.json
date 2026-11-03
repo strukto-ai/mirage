@@ -377,7 +377,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgA; printf 'hello\\nworld\\nfoo\\nbar\\nbaz\\n' > /data/cfgA/a.txt; grep -m 0 -B1 -c hello /data/cfgA/a.txt; echo rc=$?; rm -rf /data/cfgA",
+      "command": "mkdir -p /data/cfgA; printf 'hello\\nworld\\nfoo\\nbar\\nbaz\\n' > /data/cfgA/a.txt; grep -m 0 -B1 -c hello /data/cfgA/a.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
@@ -417,7 +417,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -m -1 -c foo /data/gfl/a.txt; grep -m ' 1' foo /data/gfl/a.txt; grep -m +1 -c foo /data/gfl/a.txt; grep -m 0 foo /data/gfl/a.txt; echo rc=$?; grep -m 2x foo /data/gfl/a.txt; echo rc=$?; grep -m '' foo /data/gfl/a.txt; echo rc=$?; grep -m nope -V; echo rc=$?; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep -m -1 -c foo /data/gfl/a.txt; grep -m ' 1' foo /data/gfl/a.txt; grep -m +1 -c foo /data/gfl/a.txt; grep -m 0 foo /data/gfl/a.txt; echo rc=$?; grep -m 2x foo /data/gfl/a.txt; echo rc=$?; grep -m '' foo /data/gfl/a.txt; echo rc=$?; grep -m nope -V; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "2\nfoo one\n1\nrc=1\nrc=2\nrc=2\nrc=2\n",

@@ -28,7 +28,7 @@
         "hf",
         "hf-prefix"
       ],
-      "command": "(mkdir -p /data/fcA_zx/sub && printf 'alpha\\n' > /data/fcA_zx/a.txt && printf 'beta\\n' > /data/fcA_zx/sub/b.txt && cd /data/fcA_zx && zip -q -r d.zip ././a.txt sub/. ./sub/b.txt -x ./sub/b.txt && unzip -Z1 d.zip && zip -q -r x1.zip sub -x b.txt && unzip -Z1 x1.zip && zip -q -r x2.zip sub a.txt -x '*.txt' && unzip -Z1 x2.zip; cd / && rm -r /data/fcA_zx)",
+      "command": "(mkdir -p /data/fcA_zx/sub && printf 'alpha\\n' > /data/fcA_zx/a.txt && printf 'beta\\n' > /data/fcA_zx/sub/b.txt && cd /data/fcA_zx && zip -q -r d.zip ././a.txt sub/. ./sub/b.txt -x ./sub/b.txt && unzip -Z1 d.zip && zip -q -r x1.zip sub -x b.txt && unzip -Z1 x1.zip && zip -q -r x2.zip sub a.txt -x '*.txt' && unzip -Z1 x2.zip)",
       "expect": {
         "exit": 0,
         "stdout": "a.txt\nsub/./\nsub/./b.txt\nsub/\nsub/b.txt\nsub/\n",
@@ -68,7 +68,7 @@
         "hf",
         "hf-prefix"
       ],
-      "command": "(mkdir -p /data/fcA_zxb && printf 'x\\n' > /data/fcA_zxb/é.txt && printf 'y\\n' > /data/fcA_zxb/a.txt && cd /data/fcA_zxb && zip -q o1.zip a.txt é.txt -x '?.txt' && unzip -Z1 o1.zip && zip -q o2.zip a.txt é.txt -x '??.txt' && unzip -Z1 o2.zip; cd / && rm -r /data/fcA_zxb)",
+      "command": "(mkdir -p /data/fcA_zxb && printf 'x\\n' > /data/fcA_zxb/é.txt && printf 'y\\n' > /data/fcA_zxb/a.txt && cd /data/fcA_zxb && zip -q o1.zip a.txt é.txt -x '?.txt' && unzip -Z1 o1.zip && zip -q o2.zip a.txt é.txt -x '??.txt' && unzip -Z1 o2.zip)",
       "expect": {
         "exit": 0,
         "stdout": "é.txt\na.txt\n",

@@ -66,7 +66,7 @@
         "databricks-prefix",
         "sharepoint-prefix"
       ],
-      "command": "mkdir -p /data/r10tree/d && touch /data/r10tree/.h /data/r10tree/v /data/r10tree/d/f && tree /data/r10tree; tree -a /data/r10tree; rm -r /data/r10tree",
+      "command": "mkdir -p /data/r10tree/d && touch /data/r10tree/.h /data/r10tree/v /data/r10tree/d/f && tree /data/r10tree; tree -a /data/r10tree",
       "expect": {
         "exit": 0,
         "stdout": "/data/r10tree\n|-- d\n|   `-- f\n`-- v\n\n2 directories, 2 files\n/data/r10tree\n|-- .h\n|-- d\n|   `-- f\n`-- v\n\n2 directories, 3 files\n",

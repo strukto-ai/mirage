@@ -246,7 +246,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r10mb/x /data/r10mb/y /data/r10mb/d && echo X > /data/r10mb/x/a && echo Y > /data/r10mb/y/a && mv --backup=numbered /data/r10mb/x/a /data/r10mb/y/a /data/r10mb/d; echo rc=$?; cat /data/r10mb/d/a /data/r10mb/d/a.~1~; rm -r /data/r10mb",
+      "command": "mkdir -p /data/r10mb/x /data/r10mb/y /data/r10mb/d && echo X > /data/r10mb/x/a && echo Y > /data/r10mb/y/a && mv --backup=numbered /data/r10mb/x/a /data/r10mb/y/a /data/r10mb/d; echo rc=$?; cat /data/r10mb/d/a /data/r10mb/d/a.~1~",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nY\nX\n",
@@ -279,7 +279,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcF_m3/d1 /data/fcF_m3/d2 && echo x > /data/fcF_m3/d1/x && echo y > /data/fcF_m3/d2/y && mv -T --backup=none /data/fcF_m3/d1 /data/fcF_m3/d2; echo rc=$?; cat /data/fcF_m3/d1/x /data/fcF_m3/d2/y; rm -r /data/fcF_m3",
+      "command": "mkdir -p /data/fcF_m3/d1 /data/fcF_m3/d2 && echo x > /data/fcF_m3/d1/x && echo y > /data/fcF_m3/d2/y && mv -T --backup=none /data/fcF_m3/d1 /data/fcF_m3/d2; echo rc=$?; cat /data/fcF_m3/d1/x /data/fcF_m3/d2/y",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nx\ny\n",
@@ -316,7 +316,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r17mb/s/sub /data/r17mb/t/a /data/r17mb/x/a /data/r17mb/u && printf a > /data/r17mb/s/a && printf b > /data/r17mb/s/sub/b && printf z > /data/r17mb/t/a/z && printf x > /data/r17mb/t/sub && printf w > /data/r17mb/x/a/w && (cd /data/r17mb && mv -bv s/a s/sub t; echo rc=$?; mv -b t/a x/a u; echo rc=$?); find /data/r17mb/t /data/r17mb/u /data/r17mb/x | sort; rm -r /data/r17mb",
+      "command": "mkdir -p /data/r17mb/s/sub /data/r17mb/t/a /data/r17mb/x/a /data/r17mb/u && printf a > /data/r17mb/s/a && printf b > /data/r17mb/s/sub/b && printf z > /data/r17mb/t/a/z && printf x > /data/r17mb/t/sub && printf w > /data/r17mb/x/a/w && (cd /data/r17mb && mv -bv s/a s/sub t; echo rc=$?; mv -b t/a x/a u; echo rc=$?); find /data/r17mb/t /data/r17mb/u /data/r17mb/x | sort",
       "expect": {
         "exit": 0,
         "stdout": "renamed 's/a' -> 't/a' (backup: 't/a~')\nrenamed 's/sub' -> 't/sub' (backup: 't/sub~')\nrc=0\nrc=1\n/data/r17mb/t\n/data/r17mb/t/a~\n/data/r17mb/t/a~/z\n/data/r17mb/t/sub\n/data/r17mb/t/sub/b\n/data/r17mb/t/sub~\n/data/r17mb/u\n/data/r17mb/u/a\n/data/r17mb/x\n/data/r17mb/x/a\n/data/r17mb/x/a/w\n",

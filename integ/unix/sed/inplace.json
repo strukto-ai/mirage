@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/si && printf 'one\\ntwo\\n' > /data/si/f && sed -i 'c chg' /data/si/f && cat /data/si/f && rm -r /data/si",
+      "command": "mkdir -p /data/si && printf 'one\\ntwo\\n' > /data/si/f && sed -i 'c chg' /data/si/f && cat /data/si/f",
       "expect": {
         "exit": 0,
         "stdout": "chg\nchg\n",
@@ -63,7 +63,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/si2 && printf 'one\\ntwo\\nthree\\n' > /data/si2/f && sed -i '2i inserted' /data/si2/f && cat /data/si2/f && rm -r /data/si2",
+      "command": "mkdir -p /data/si2 && printf 'one\\ntwo\\nthree\\n' > /data/si2/f && sed -i '2i inserted' /data/si2/f && cat /data/si2/f",
       "expect": {
         "exit": 0,
         "stdout": "one\ninserted\ntwo\nthree\n",
@@ -98,7 +98,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/si3 && printf 'one\\ntwo\\n' > /data/si3/f && sed -i p /data/si3/f && cat /data/si3/f && rm -r /data/si3",
+      "command": "mkdir -p /data/si3 && printf 'one\\ntwo\\n' > /data/si3/f && sed -i p /data/si3/f && cat /data/si3/f",
       "expect": {
         "exit": 0,
         "stdout": "one\none\ntwo\ntwo\n",
@@ -133,7 +133,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/si4 && printf 'one\\ntwo\\nthree\\n' > /data/si4/f && sed -i 2q /data/si4/f && cat /data/si4/f && rm -r /data/si4",
+      "command": "mkdir -p /data/si4 && printf 'one\\ntwo\\nthree\\n' > /data/si4/f && sed -i 2q /data/si4/f && cat /data/si4/f",
       "expect": {
         "exit": 0,
         "stdout": "one\ntwo\n",

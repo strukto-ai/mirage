@@ -98,7 +98,7 @@
         "ssh",
         "tidb-filesystem"
       ],
-      "command": "(cd /data && mkdir -p r10rm/s/n r10rm/d/s && echo a > r10rm/s/n/f && stat -c %n r10rm/d/s/n; cp -r r10rm/s r10rm/d; echo rc=$?; find r10rm/d | sort; rm -r r10rm)",
+      "command": "(cd /data && mkdir -p r10rm/s/n r10rm/d/s && echo a > r10rm/s/n/f && stat -c %n r10rm/d/s/n; cp -r r10rm/s r10rm/d; echo rc=$?; find r10rm/d | sort)",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nr10rm/d\nr10rm/d/s\nr10rm/d/s/n\nr10rm/d/s/n/f\n",
@@ -165,7 +165,7 @@
         "ssh",
         "tidb-filesystem"
       ],
-      "command": "(cd /data && mkdir -p r16dot/s/sub r16dot/t r16dot/v && printf a > r16dot/s/a && printf b > r16dot/s/sub/b && cp -r r16dot/s/. r16dot/t && cp -r r16dot/s/sub/.. r16dot/u && cp -r r16dot/s/sub/../ r16dot/v; echo rc=$?; find r16dot/t r16dot/u r16dot/v | sort; rm -r r16dot)",
+      "command": "(cd /data && mkdir -p r16dot/s/sub r16dot/t r16dot/v && printf a > r16dot/s/a && printf b > r16dot/s/sub/b && cp -r r16dot/s/. r16dot/t && cp -r r16dot/s/sub/.. r16dot/u && cp -r r16dot/s/sub/../ r16dot/v; echo rc=$?; find r16dot/t r16dot/u r16dot/v | sort)",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nr16dot/t\nr16dot/t/a\nr16dot/t/sub\nr16dot/t/sub/b\nr16dot/u\nr16dot/u/a\nr16dot/u/sub\nr16dot/u/sub/b\nr16dot/v\nr16dot/v/a\nr16dot/v/sub\nr16dot/v/sub/b\n",
@@ -198,7 +198,7 @@
         "ssh",
         "tidb-filesystem"
       ],
-      "command": "(cd /data && mkdir -p r16dotx/s/sub && printf a > r16dotx/s/a && cd r16dotx && (cd s && cp -r . ../t) && find t | sort && cp -rv s/sub/.. t && cp -r s/. s; echo rc=$?; cp -r s/sub/.. s/sub; echo rc=$?; cd /data && rm -r r16dotx)",
+      "command": "(cd /data && mkdir -p r16dotx/s/sub && printf a > r16dotx/s/a && cd r16dotx && (cd s && cp -r . ../t) && find t | sort && cp -rv s/sub/.. t && cp -r s/. s; echo rc=$?; cp -r s/sub/.. s/sub; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "t\nt/a\nt/sub\n's/sub/../a' -> 't/./a'\nrc=1\nrc=1\n",
@@ -232,7 +232,7 @@
         "ssh",
         "tidb-filesystem"
       ],
-      "command": "(cd /data && mkdir -p r16rep/s/sub r16rep/t r16rep/u && printf a > r16rep/s/a && cd r16rep && cp -r s s u; echo rc=$?; cp -r s/. s t; echo rc=$?; ln -s s/a la && cp s/a la u; echo rc=$?; find t u | sort; cd /data && rm -r r16rep)",
+      "command": "(cd /data && mkdir -p r16rep/s/sub r16rep/t r16rep/u && printf a > r16rep/s/a && cd r16rep && cp -r s s u; echo rc=$?; cp -r s/. s t; echo rc=$?; ln -s s/a la && cp s/a la u; echo rc=$?; find t u | sort)",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nrc=1\nrc=0\nt\nt/a\nt/sub\nu\nu/a\nu/la\nu/s\nu/s/a\nu/s/sub\n",
@@ -265,7 +265,7 @@
         "ssh",
         "tidb-filesystem"
       ],
-      "command": "(cd /data && mkdir -p r16ord/s r16ord/t/a && printf a > r16ord/s/a && cd r16ord && cp -rn s/. t; echo rc=$?; cp -n s/a t; echo rc=$?; cp -r --update=none-fail s/. t; echo rc=$?; cp -rb s/. t; echo rc=$?; cp -r s/. t; echo rc=$?; find t | sort; cd /data && rm -r r16ord)",
+      "command": "(cd /data && mkdir -p r16ord/s r16ord/t/a && printf a > r16ord/s/a && cd r16ord && cp -rn s/. t; echo rc=$?; cp -n s/a t; echo rc=$?; cp -r --update=none-fail s/. t; echo rc=$?; cp -rb s/. t; echo rc=$?; cp -r s/. t; echo rc=$?; find t | sort)",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nrc=0\nrc=1\nrc=1\nrc=1\nt\nt/a\n",
@@ -298,7 +298,7 @@
         "ssh",
         "tidb-filesystem"
       ],
-      "command": "(cd /data && mkdir -p r16lnk/s/sub r16lnk/t && printf a > r16lnk/s/a && ln -s ../a r16lnk/s/sub/link && printf x > r16lnk/t/sub && cd r16lnk && cp -r s/. t; echo rc=$?; cp -rn s/. t; echo rc=$?; find t | sort; cd /data && rm -r r16lnk)",
+      "command": "(cd /data && mkdir -p r16lnk/s/sub r16lnk/t && printf a > r16lnk/s/a && ln -s ../a r16lnk/s/sub/link && printf x > r16lnk/t/sub && cd r16lnk && cp -r s/. t; echo rc=$?; cp -rn s/. t; echo rc=$?; find t | sort)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nt\nt/a\nt/sub\n",

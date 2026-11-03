@@ -168,7 +168,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sr4 && printf 'R1\\n' > /data/sr4/r && printf 'a\\nb\\nc\\n' | sed -e '1r /data/sr4/r' -e 1d; printf 'a\\nb\\nc\\n' | sed -e '1r /data/sr4/r' -e 1q; printf 'a\\nb\\nc\\n' | sed -e '1r /data/sr4/r' -e 1Q; rm -r /data/sr4",
+      "command": "mkdir -p /data/sr4 && printf 'R1\\n' > /data/sr4/r && printf 'a\\nb\\nc\\n' | sed -e '1r /data/sr4/r' -e 1d; printf 'a\\nb\\nc\\n' | sed -e '1r /data/sr4/r' -e 1q; printf 'a\\nb\\nc\\n' | sed -e '1r /data/sr4/r' -e 1Q",
       "expect": {
         "exit": 0,
         "stdout": "R1\nb\nc\na\nR1\n",
@@ -203,7 +203,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sr5 && printf 'x' > /data/sr5/r && printf 'a\\nb\\n' | sed 'r /data/sr5/r'; rm -r /data/sr5",
+      "command": "mkdir -p /data/sr5 && printf 'x' > /data/sr5/r && printf 'a\\nb\\n' | sed 'r /data/sr5/r'",
       "expect": {
         "exit": 0,
         "stdout": "a\nxb\nx",
@@ -238,7 +238,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sr6 && printf 'R1\\n' > /data/sr6/r && printf 'a\\nb\\nc\\n' | sed '1r /data/sr6/r ;p'; rm -r /data/sr6",
+      "command": "mkdir -p /data/sr6 && printf 'R1\\n' > /data/sr6/r && printf 'a\\nb\\nc\\n' | sed '1r /data/sr6/r ;p'",
       "expect": {
         "exit": 0,
         "stdout": "a\nb\nc\n",
@@ -273,7 +273,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sR && printf 'R1\\nR2\\n' > /data/sR/r && printf 'a\\nb\\nc\\n' | sed 'R /data/sR/r'; rm -r /data/sR",
+      "command": "mkdir -p /data/sR && printf 'R1\\nR2\\n' > /data/sR/r && printf 'a\\nb\\nc\\n' | sed 'R /data/sR/r'",
       "expect": {
         "exit": 0,
         "stdout": "a\nR1\nb\nR2\nc\n",
@@ -308,7 +308,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sR2 && printf 'R1\\nR2' > /data/sR2/r && printf 'a\\nb\\nc\\n' | sed 'R /data/sR2/r'; rm -r /data/sR2",
+      "command": "mkdir -p /data/sR2 && printf 'R1\\nR2' > /data/sR2/r && printf 'a\\nb\\nc\\n' | sed 'R /data/sR2/r'",
       "expect": {
         "exit": 0,
         "stdout": "a\nR1\nb\nR2c\n",
@@ -378,7 +378,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sR3 && printf 'R1\\nR2\\n' > /data/sR3/r && printf 'a\\n' > /data/sR3/f && sed 'R /data/sR3/r' /data/sR3/f /data/sR3/f && sed -s 'R /data/sR3/r' /data/sR3/f /data/sR3/f; rm -r /data/sR3",
+      "command": "mkdir -p /data/sR3 && printf 'R1\\nR2\\n' > /data/sR3/r && printf 'a\\n' > /data/sR3/f && sed 'R /data/sR3/r' /data/sR3/f /data/sR3/f && sed -s 'R /data/sR3/r' /data/sR3/f /data/sR3/f",
       "expect": {
         "exit": 0,
         "stdout": "a\nR1\na\nR2\na\nR1\na\nR1\n",
@@ -448,7 +448,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sri && printf 'one\\ntwo\\n' > /data/sri/f && printf 'b1\\nb2\\n' > /data/sri/b && sed -i '1r /data/sri/f' /data/sri/f /data/sri/b && cat /data/sri/f && echo -- && cat /data/sri/b; rm -r /data/sri",
+      "command": "mkdir -p /data/sri && printf 'one\\ntwo\\n' > /data/sri/f && printf 'b1\\nb2\\n' > /data/sri/b && sed -i '1r /data/sri/f' /data/sri/f /data/sri/b && cat /data/sri/f && echo -- && cat /data/sri/b",
       "expect": {
         "exit": 0,
         "stdout": "one\none\ntwo\ntwo\n--\nb1\none\none\ntwo\ntwo\nb2\n",
@@ -483,7 +483,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/sri && printf 'one\\ntwo\\n' > /data/sri/f && printf 'b1\\nb2\\n' > /data/sri/b && sed -i 'R /data/sri/f' /data/sri/f /data/sri/b && cat /data/sri/b; rm -r /data/sri",
+      "command": "mkdir -p /data/sri && printf 'one\\ntwo\\n' > /data/sri/f && printf 'b1\\nb2\\n' > /data/sri/b && sed -i 'R /data/sri/f' /data/sri/f /data/sri/b && cat /data/sri/b",
       "expect": {
         "exit": 0,
         "stdout": "b1\none\nb2\ntwo\n",

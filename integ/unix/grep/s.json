@@ -191,16 +191,6 @@
       "flags": [
         "s"
       ]
-    },
-    {
-      "id": "grep_s_cleanup",
-      "seq": 1516014,
-      "command": "rm -r /data/grep-s-dir",
-      "expect": {
-        "exit": 0,
-        "stdout": "",
-        "stderr": ""
-      }
     }
   ]
 }

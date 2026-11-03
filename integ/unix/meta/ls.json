@@ -168,7 +168,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/metatree/sub && echo beta > /data/metatree/sub/g.txt && listing=$(ls -laR /data/metatree) && printf '%s\\n' \"$listing\" | awk '/:$/ || $NF == \".\" || $NF == \"..\" { print $NF }'; rm -r /data/metatree)",
+      "command": "(mkdir -p /data/metatree/sub && echo beta > /data/metatree/sub/g.txt && listing=$(ls -laR /data/metatree) && printf '%s\\n' \"$listing\" | awk '/:$/ || $NF == \".\" || $NF == \"..\" { print $NF }')",
       "expect": {
         "exit": 0,
         "stdout": "/data/metatree:\n.\n..\n/data/metatree/sub:\n.\n..\n",

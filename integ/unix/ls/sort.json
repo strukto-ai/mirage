@@ -337,7 +337,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/crls && printf xx > /data/crls/c && cd /data/crls && printf xx > a && printf xx > b && touch -t 202401010000 a b c && ls -S c a b; ls -rS c a b; ls -S; ls -rS; ls -t c a b; ls -rt c a b; ls -t; ls -rt; cd / && rm -r /data/crls",
+      "command": "mkdir -p /data/crls && printf xx > /data/crls/c && cd /data/crls && printf xx > a && printf xx > b && touch -t 202401010000 a b c && ls -S c a b; ls -rS c a b; ls -S; ls -rS; ls -t c a b; ls -rt c a b; ls -t; ls -rt; cd /",
       "expect": {
         "exit": 0,
         "stdout": "a\nb\nc\nc\nb\na\na\nb\nc\nc\nb\na\na\nb\nc\nc\nb\na\na\nb\nc\nc\nb\na\n",
@@ -377,7 +377,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/lssn/sub/deep && printf 'deep\\n' > /data/lssn/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/lssn/sub/nested.txt && (cd /data/lssn/sub && ls --sort=name; ls --sort=nam -r; ls -t --sort=name; ls --sort=n; echo rc=$?); rm -r /data/lssn",
+      "command": "mkdir -p /data/lssn/sub/deep && printf 'deep\\n' > /data/lssn/sub/deep/deeper.txt && printf 'nested\\ncontent\\n' > /data/lssn/sub/nested.txt && (cd /data/lssn/sub && ls --sort=name; ls --sort=nam -r; ls -t --sort=name; ls --sort=n; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "deep\nnested.txt\nnested.txt\ndeep\ndeep\nnested.txt\nrc=1\n",

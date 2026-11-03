@@ -26,7 +26,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/cpl1301 && mkdir /data/cpl1301/s && echo x > /data/cpl1301/s/f && ln -s f /data/cpl1301/s/lk && cp -r /data/cpl1301/s /data/cpl1301/t && readlink /data/cpl1301/t/lk && cat /data/cpl1301/t/lk; rc=$?; rm -r /data/cpl1301; exit $rc) && (mkdir -p /data/cptree/src /data/cptree/out/src; cd /data/cptree; echo old > /data/cptree/out/src/link; ln -s /data/cptree/missing /data/cptree/src/link; ln -s fresh /data/cptree/src/new; cp -rn /data/cptree/src /data/cptree/out; cat /data/cptree/out/src/link; readlink /data/cptree/out/src/new; cp -r --update=none-fail /data/cptree/src /data/cptree/out; echo skip=$?; cat /data/cptree/out/src/link; cp -rb /data/cptree/src /data/cptree/out; readlink /data/cptree/out/src/link; cat /data/cptree/out/src/link~; rm -r /data/cptree)",
+      "command": "(mkdir -p /data/cpl1301 && mkdir /data/cpl1301/s && echo x > /data/cpl1301/s/f && ln -s f /data/cpl1301/s/lk && cp -r /data/cpl1301/s /data/cpl1301/t && readlink /data/cpl1301/t/lk && cat /data/cpl1301/t/lk; rc=$?; rm -r /data/cpl1301; exit $rc) && (mkdir -p /data/cptree/src /data/cptree/out/src; cd /data/cptree; echo old > /data/cptree/out/src/link; ln -s /data/cptree/missing /data/cptree/src/link; ln -s fresh /data/cptree/src/new; cp -rn /data/cptree/src /data/cptree/out; cat /data/cptree/out/src/link; readlink /data/cptree/out/src/new; cp -r --update=none-fail /data/cptree/src /data/cptree/out; echo skip=$?; cat /data/cptree/out/src/link; cp -rb /data/cptree/src /data/cptree/out; readlink /data/cptree/out/src/link; cat /data/cptree/out/src/link~)",
       "expect": {
         "exit": 0,
         "stdout": "f\nx\nold\nfresh\nskip=1\nold\n/data/cptree/missing\nold\n",
@@ -59,7 +59,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/cpl1302 && mkdir /data/cpl1302/s && echo x > /data/cpl1302/s/f && ln -s f /data/cpl1302/s/lk && cp -rL /data/cpl1302/s /data/cpl1302/t && cat /data/cpl1302/t/lk && readlink /data/cpl1302/t/lk; echo rc=$?; rc=$?; rm -r /data/cpl1302; exit $rc) && (mkdir -p /data/cpfollow/src /data/cpfollow/out/src; cd /data/cpfollow; echo new > /data/cpfollow/source; ln -s ../source /data/cpfollow/src/link; echo old > /data/cpfollow/out/src/link; cp -rLn /data/cpfollow/src /data/cpfollow/out; cat /data/cpfollow/out/src/link; cp -rL --update=none /data/cpfollow/src /data/cpfollow/out; cat /data/cpfollow/out/src/link; cp -rLb /data/cpfollow/src /data/cpfollow/out; cat /data/cpfollow/out/src/link /data/cpfollow/out/src/link~; rm -r /data/cpfollow)",
+      "command": "(mkdir -p /data/cpl1302 && mkdir /data/cpl1302/s && echo x > /data/cpl1302/s/f && ln -s f /data/cpl1302/s/lk && cp -rL /data/cpl1302/s /data/cpl1302/t && cat /data/cpl1302/t/lk && readlink /data/cpl1302/t/lk; echo rc=$?; rc=$?; rm -r /data/cpl1302; exit $rc) && (mkdir -p /data/cpfollow/src /data/cpfollow/out/src; cd /data/cpfollow; echo new > /data/cpfollow/source; ln -s ../source /data/cpfollow/src/link; echo old > /data/cpfollow/out/src/link; cp -rLn /data/cpfollow/src /data/cpfollow/out; cat /data/cpfollow/out/src/link; cp -rL --update=none /data/cpfollow/src /data/cpfollow/out; cat /data/cpfollow/out/src/link; cp -rLb /data/cpfollow/src /data/cpfollow/out; cat /data/cpfollow/out/src/link /data/cpfollow/out/src/link~)",
       "expect": {
         "exit": 0,
         "stdout": "x\nrc=1\nold\nold\nnew\nold\n",
@@ -92,7 +92,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/cpl1303 && echo x > /data/cpl1303/f && ln -s f /data/cpl1303/l && cp -P /data/cpl1303/l /data/cpl1303/c && readlink /data/cpl1303/c; rc=$?; rm -r /data/cpl1303; exit $rc) && (mkdir -p /data/cpreview; cd /data/cpreview; ln -s /data/cpreview/missing /data/cpreview/src; echo old > /data/cpreview/dst; cp -Pn /data/cpreview/src /data/cpreview/dst; cat /data/cpreview/dst; cp -P --update=none /data/cpreview/src /data/cpreview/dst; cat /data/cpreview/dst; cp -P --update=none-fail /data/cpreview/src /data/cpreview/dst; echo skip=$?; cat /data/cpreview/dst; cp -Pb /data/cpreview/src /data/cpreview/dst; readlink /data/cpreview/dst; cat /data/cpreview/dst~; ln -s second /data/cpreview/other; cp -P --backup=numbered /data/cpreview/other /data/cpreview/dst; readlink /data/cpreview/dst /data/cpreview/dst.~1~; echo newer > /data/cpreview/newer; touch -h -t 202001010000 /data/cpreview/src; touch -t 202101010000 /data/cpreview/newer; cp -Pu /data/cpreview/src /data/cpreview/newer; cat /data/cpreview/newer; touch -h -t 202201010000 /data/cpreview/src; cp -Pu /data/cpreview/src /data/cpreview/newer; readlink /data/cpreview/newer; rm -r /data/cpreview)",
+      "command": "(mkdir -p /data/cpl1303 && echo x > /data/cpl1303/f && ln -s f /data/cpl1303/l && cp -P /data/cpl1303/l /data/cpl1303/c && readlink /data/cpl1303/c; rc=$?; rm -r /data/cpl1303; exit $rc) && (mkdir -p /data/cpreview; cd /data/cpreview; ln -s /data/cpreview/missing /data/cpreview/src; echo old > /data/cpreview/dst; cp -Pn /data/cpreview/src /data/cpreview/dst; cat /data/cpreview/dst; cp -P --update=none /data/cpreview/src /data/cpreview/dst; cat /data/cpreview/dst; cp -P --update=none-fail /data/cpreview/src /data/cpreview/dst; echo skip=$?; cat /data/cpreview/dst; cp -Pb /data/cpreview/src /data/cpreview/dst; readlink /data/cpreview/dst; cat /data/cpreview/dst~; ln -s second /data/cpreview/other; cp -P --backup=numbered /data/cpreview/other /data/cpreview/dst; readlink /data/cpreview/dst /data/cpreview/dst.~1~; echo newer > /data/cpreview/newer; touch -h -t 202001010000 /data/cpreview/src; touch -t 202101010000 /data/cpreview/newer; cp -Pu /data/cpreview/src /data/cpreview/newer; cat /data/cpreview/newer; touch -h -t 202201010000 /data/cpreview/src; cp -Pu /data/cpreview/src /data/cpreview/newer; readlink /data/cpreview/newer)",
       "expect": {
         "exit": 0,
         "stdout": "f\nold\nold\nskip=1\nold\n/data/cpreview/missing\nold\nsecond\n/data/cpreview/missing\nnewer\n/data/cpreview/missing\n",
@@ -125,7 +125,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/cpl1304 && echo x > /data/cpl1304/f && ln -s f /data/cpl1304/l && cp -d /data/cpl1304/l /data/cpl1304/c && readlink /data/cpl1304/c; rc=$?; rm -r /data/cpl1304; exit $rc)",
+      "command": "(mkdir -p /data/cpl1304 && echo x > /data/cpl1304/f && ln -s f /data/cpl1304/l && cp -d /data/cpl1304/l /data/cpl1304/c && readlink /data/cpl1304/c; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "f\n",
@@ -158,7 +158,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/cpl1305 && echo x > /data/cpl1305/f && ln -s f /data/cpl1305/l && cp /data/cpl1305/l /data/cpl1305/c && cat /data/cpl1305/c && readlink /data/cpl1305/c; echo rc=$?; rc=$?; rm -r /data/cpl1305; exit $rc)",
+      "command": "(mkdir -p /data/cpl1305 && echo x > /data/cpl1305/f && ln -s f /data/cpl1305/l && cp /data/cpl1305/l /data/cpl1305/c && cat /data/cpl1305/c && readlink /data/cpl1305/c; echo rc=$?; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "x\nrc=1\n",
@@ -191,7 +191,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/cpl1306 && mkdir /data/cpl1306/s && echo x > /data/cpl1306/s/f && ln -s f /data/cpl1306/s/lk && ln -s s /data/cpl1306/sl && cp -rH /data/cpl1306/sl /data/cpl1306/t && readlink /data/cpl1306/t/lk && readlink /data/cpl1306/t; echo rc=$?; rc=$?; rm -r /data/cpl1306; exit $rc)",
+      "command": "(mkdir -p /data/cpl1306 && mkdir /data/cpl1306/s && echo x > /data/cpl1306/s/f && ln -s f /data/cpl1306/s/lk && ln -s s /data/cpl1306/sl && cp -rH /data/cpl1306/sl /data/cpl1306/t && readlink /data/cpl1306/t/lk && readlink /data/cpl1306/t; echo rc=$?; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "f\nrc=1\n",
@@ -224,7 +224,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/cpl1307 && mkdir /data/cpl1307/s && ln -s nowhere /data/cpl1307/s/dang && cp -r /data/cpl1307/s /data/cpl1307/t && readlink /data/cpl1307/t/dang; rc=$?; rm -r /data/cpl1307; exit $rc)",
+      "command": "(mkdir -p /data/cpl1307 && mkdir /data/cpl1307/s && ln -s nowhere /data/cpl1307/s/dang && cp -r /data/cpl1307/s /data/cpl1307/t && readlink /data/cpl1307/t/dang; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "nowhere\n",
@@ -257,7 +257,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/cpl1308 && mkdir /data/cpl1308/s && echo x > /data/cpl1308/s/f && ln -s nowhere /data/cpl1308/s/dang && cp -rL /data/cpl1308/s /data/cpl1308/t; echo rc=$?; ls /data/cpl1308/t; rc=$?; rm -r /data/cpl1308; exit $rc)",
+      "command": "(mkdir -p /data/cpl1308 && mkdir /data/cpl1308/s && echo x > /data/cpl1308/s/f && ln -s nowhere /data/cpl1308/s/dang && cp -rL /data/cpl1308/s /data/cpl1308/t; echo rc=$?; ls /data/cpl1308/t; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nf\n",
@@ -290,7 +290,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/cpl1309 && echo x > /data/cpl1309/f && echo y > /data/cpl1309/g && ln -s f /data/cpl1309/l && ln -s g /data/cpl1309/m && cp -P /data/cpl1309/l /data/cpl1309/m && readlink /data/cpl1309/m && cat /data/cpl1309/g; rc=$?; rm -r /data/cpl1309; exit $rc)",
+      "command": "(mkdir -p /data/cpl1309 && echo x > /data/cpl1309/f && echo y > /data/cpl1309/g && ln -s f /data/cpl1309/l && ln -s g /data/cpl1309/m && cp -P /data/cpl1309/l /data/cpl1309/m && readlink /data/cpl1309/m && cat /data/cpl1309/g; rc=$?; exit $rc)",
       "expect": {
         "exit": 0,
         "stdout": "f\ny\n",
@@ -323,7 +323,7 @@
         "ssh",
         "tidb-filesystem"
       ],
-      "command": "mkdir -p /data/r10lx /data/r10ly /data/r10ld /data/r10le && ln -s t1 /data/r10lx/l && ln -s t2 /data/r10ly/l && cp -P /data/r10lx/l /data/r10ly/l /data/r10ld; echo rc=$?; readlink /data/r10ld/l; cp -P --backup=numbered /data/r10lx/l /data/r10ly/l /data/r10le; echo rc=$?; readlink /data/r10le/l /data/r10le/l.~1~; rm -r /data/r10lx /data/r10ly /data/r10ld /data/r10le",
+      "command": "mkdir -p /data/r10lx /data/r10ly /data/r10ld /data/r10le && ln -s t1 /data/r10lx/l && ln -s t2 /data/r10ly/l && cp -P /data/r10lx/l /data/r10ly/l /data/r10ld; echo rc=$?; readlink /data/r10ld/l; cp -P --backup=numbered /data/r10lx/l /data/r10ly/l /data/r10le; echo rc=$?; readlink /data/r10le/l /data/r10le/l.~1~",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nt1\nrc=0\nt2\nt1\n",
@@ -356,7 +356,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( cd /data && mkdir -p cplv/real/d cplv/a cplv/b && printf y > cplv/real/d/g && printf x > cplv/real/f && ln -s ../real/d cplv/a/ld && ln -s ../real/f cplv/b/lf && cd cplv && cp -rLv a a2 && cp -rLv b b2; echo \"st=$?\" ); rm -r /data/cplv",
+      "command": "( cd /data && mkdir -p cplv/real/d cplv/a cplv/b && printf y > cplv/real/d/g && printf x > cplv/real/f && ln -s ../real/d cplv/a/ld && ln -s ../real/f cplv/b/lf && cd cplv && cp -rLv a a2 && cp -rLv b b2; echo \"st=$?\" )",
       "expect": {
         "exit": 0,
         "stdout": "'a' -> 'a2'\n'a/ld' -> 'a2/ld'\n'a/ld/g' -> 'a2/ld/g'\n'b' -> 'b2'\n'b/lf' -> 'b2/lf'\nst=0\n",
@@ -389,7 +389,7 @@
         "ssh",
         "tidb-filesystem"
       ],
-      "command": "mkdir -p /data/fcF_l/dir /data/fcF_l/w && printf 'x\\n' > /data/fcF_l/a.txt && ln -s ../a.txt /data/fcF_l/dir/al && ln -s dir /data/fcF_l/dl && cp -P /data/fcF_l/dl/al /data/fcF_l/w/x && cp -d /data/fcF_l/dl/al /data/fcF_l/w/y && readlink /data/fcF_l/w/x /data/fcF_l/w/y && ls -F /data/fcF_l/w; rm -r /data/fcF_l",
+      "command": "mkdir -p /data/fcF_l/dir /data/fcF_l/w && printf 'x\\n' > /data/fcF_l/a.txt && ln -s ../a.txt /data/fcF_l/dir/al && ln -s dir /data/fcF_l/dl && cp -P /data/fcF_l/dl/al /data/fcF_l/w/x && cp -d /data/fcF_l/dl/al /data/fcF_l/w/y && readlink /data/fcF_l/w/x /data/fcF_l/w/y && ls -F /data/fcF_l/w",
       "expect": {
         "exit": 0,
         "stdout": "../a.txt\n../a.txt\nx@\ny@\n",
@@ -426,7 +426,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw18/d/sub /data/syw18/o && cd /data/syw18 && printf 'hello\\n' > o/f && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir s t && printf new > s/a && printf old > o/x && ln -s ../o/x t/a && { cp s/a t; echo rc=$?; cat o/x; echo; readlink t/a; }); rm -r /data/syw18",
+      "command": "(mkdir -p /data/syw18/d/sub /data/syw18/o && cd /data/syw18 && printf 'hello\\n' > o/f && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir s t && printf new > s/a && printf old > o/x && ln -s ../o/x t/a && { cp s/a t; echo rc=$?; cat o/x; echo; readlink t/a; })",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nnew\n../o/x\n",
@@ -459,7 +459,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw19/d/sub /data/syw19/o && cd /data/syw19 && printf 'hello\\n' > o/f && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir s t && printf new > s/a && printf old > o/x && ln -s ../o/x t/a && { cp -b s/a t; echo rc=$?; cat o/x; echo; readlink t/a~; cat t/a; }); rm -r /data/syw19",
+      "command": "(mkdir -p /data/syw19/d/sub /data/syw19/o && cd /data/syw19 && printf 'hello\\n' > o/f && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir s t && printf new > s/a && printf old > o/x && ln -s ../o/x t/a && { cp -b s/a t; echo rc=$?; cat o/x; echo; readlink t/a~; cat t/a; })",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nold\n../o/x\nnew",
@@ -492,7 +492,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(mkdir -p /data/syw20/d/sub /data/syw20/o && cd /data/syw20 && printf 'hello\\n' > o/f && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir s t && printf new > s/a && printf old > o/x && ln -s ../o/x t/a && { cp -bv s/a t/a; echo rc=$?; cat o/x; echo; readlink t/a~; cat t/a; }); rm -r /data/syw20",
+      "command": "(mkdir -p /data/syw20/d/sub /data/syw20/o && cd /data/syw20 && printf 'hello\\n' > o/f && printf 'hello\\n' > d/a && printf 'hi\\n' > d/sub/b && ln -s ../o/f d/lf && ln -s ../o d/ld && mkdir s t && printf new > s/a && printf old > o/x && ln -s ../o/x t/a && { cp -bv s/a t/a; echo rc=$?; cat o/x; echo; readlink t/a~; cat t/a; })",
       "expect": {
         "exit": 0,
         "stdout": "'s/a' -> 't/a' (backup: 't/a~')\nrc=0\nold\n../o/x\nnew",
@@ -525,7 +525,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cpl_d/s/sub /data/cpl_d/t /data/cpl_d/other && echo x > /data/cpl_d/s/sub/f && echo y > /data/cpl_d/s/top && echo o > /data/cpl_d/other/o && echo z > /data/cpl_d/t/z && ln -s ../other /data/cpl_d/t/sub && cd /data/cpl_d && cp -r s/. t; echo rc=$?; ls other; cp -rb s/. t; echo rc=$?; ls -A t; cat t/sub/f; ls other; cd /; rm -r /data/cpl_d",
+      "command": "mkdir -p /data/cpl_d/s/sub /data/cpl_d/t /data/cpl_d/other && echo x > /data/cpl_d/s/sub/f && echo y > /data/cpl_d/s/top && echo o > /data/cpl_d/other/o && echo z > /data/cpl_d/t/z && ln -s ../other /data/cpl_d/t/sub && cd /data/cpl_d && cp -r s/. t; echo rc=$?; ls other; cp -rb s/. t; echo rc=$?; ls -A t; cat t/sub/f; ls other; cd /",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\no\nrc=0\nsub\nsub~\ntop\ntop~\nz\nx\no\n",

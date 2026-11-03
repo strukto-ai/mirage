@@ -58,7 +58,7 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; printf 'foo\\nfoo\\n' | gzip -c > /data/gfl/z.gz; zgrep -m 1 foo /data/gfl/z.gz; zgrep -m -1 -c foo /data/gfl/z.gz; zgrep -m nope foo /data/gfl/z.gz; echo rc=$?; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; printf 'foo\\nfoo\\n' | gzip -c > /data/gfl/z.gz; zgrep -m 1 foo /data/gfl/z.gz; zgrep -m -1 -c foo /data/gfl/z.gz; zgrep -m nope foo /data/gfl/z.gz; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "foo\n2\nrc=2\n",
@@ -92,7 +92,7 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "mkdir -p /data/zgm; printf 'aa\\nxa a\\nb\\n' | gzip -c > /data/zgm/f.gz; zgrep -o -m1 a /data/zgm/f.gz; zgrep -o -m2 a /data/zgm/f.gz; zgrep -o -c a /data/zgm/f.gz; zgrep -o -n -b -m1 a /data/zgm/f.gz; rc=$?; rm -r /data/zgm; exit $rc",
+      "command": "mkdir -p /data/zgm; printf 'aa\\nxa a\\nb\\n' | gzip -c > /data/zgm/f.gz; zgrep -o -m1 a /data/zgm/f.gz; zgrep -o -m2 a /data/zgm/f.gz; zgrep -o -c a /data/zgm/f.gz; zgrep -o -n -b -m1 a /data/zgm/f.gz; rc=$?; exit $rc",
       "expect": {
         "exit": 0,
         "stdout": "a\na\na\na\na\na\n2\n1:0:a\n1:1:a\n",

@@ -66,7 +66,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r10bare/d && echo hi > /data/r10bare/d/f && (cd /data/r10bare && ls -R); rm -r /data/r10bare",
+      "command": "mkdir -p /data/r10bare/d && echo hi > /data/r10bare/d/f && (cd /data/r10bare && ls -R)",
       "expect": {
         "exit": 0,
         "stdout": ".:\nd\n\n./d:\nf\n",

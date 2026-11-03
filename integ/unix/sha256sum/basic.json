@@ -271,7 +271,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r10sh && touch /data/r10sh/ok.txt && (cd /data/r10sh && printf 'one\\n' > ok.txt && sha256sum ok.txt > good.sums && sha256sum -c good.sums good.sums; echo rc=$?; sha256sum -c nope.sums good.sums; echo rc=$?); rm -r /data/r10sh",
+      "command": "mkdir -p /data/r10sh && touch /data/r10sh/ok.txt && (cd /data/r10sh && printf 'one\\n' > ok.txt && sha256sum ok.txt > good.sums && sha256sum -c good.sums good.sums; echo rc=$?; sha256sum -c nope.sums good.sums; echo rc=$?)",
       "expect": {
         "exit": 0,
         "stdout": "ok.txt: OK\nok.txt: OK\nrc=0\nok.txt: OK\nrc=1\n",

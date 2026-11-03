@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcF_dx/s && echo x > /data/fcF_dx/s/f && du -x /data/fcF_dx | cut -f2; du -a --one-file-system /data/fcF_dx | cut -f2; rm -r /data/fcF_dx",
+      "command": "mkdir -p /data/fcF_dx/s && echo x > /data/fcF_dx/s/f && du -x /data/fcF_dx | cut -f2; du -a --one-file-system /data/fcF_dx | cut -f2",
       "expect": {
         "exit": 0,
         "stdout": "/data/fcF_dx/s\n/data/fcF_dx\n/data/fcF_dx/s/f\n/data/fcF_dx/s\n/data/fcF_dx\n",

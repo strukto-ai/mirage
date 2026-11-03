@@ -880,7 +880,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgbn; printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/cfgbn/binary.txt; grep --binary-files=binary needle /data/cfgbn/binary.txt; echo rc=$?; grep -n needle /data/cfgbn/binary.txt; echo rc=$?; grep -q needle /data/cfgbn/binary.txt; echo rc=$?; grep -qc needle /data/cfgbn/binary.txt; echo rc=$?; grep -lc needle /data/cfgbn/binary.txt; echo rc=$?; grep -Il needle /data/cfgbn/binary.txt; echo rc=$?; grep -Iq needle /data/cfgbn/binary.txt; echo rc=$?; grep -v needle /data/cfgbn/binary.txt; echo rc=$?; grep -o needle /data/cfgbn/binary.txt; echo rc=$?; grep -on needle /data/cfgbn/binary.txt; echo rc=$?; grep -aon needle /data/cfgbn/binary.txt; echo rc=$?; grep -In needle /data/cfgbn/binary.txt; echo rc=$?; grep -m 0 needle /data/cfgbn/binary.txt; echo rc=$?; grep -m 1 needle /data/cfgbn/binary.txt; echo rc=$?; grep -A 1 needle /data/cfgbn/binary.txt; echo rc=$?; grep -B 1 needle /data/cfgbn/binary.txt; echo rc=$?; grep -C 1 needle /data/cfgbn/binary.txt; echo rc=$?; grep -I -a needle /data/cfgbn/binary.txt; echo rc=$?; grep -a -I needle /data/cfgbn/binary.txt; echo rc=$?; rm -rf /data/cfgbn",
+      "command": "mkdir -p /data/cfgbn; printf 'before\\nneedle\\000tail\\nneedle next\\n' > /data/cfgbn/binary.txt; grep --binary-files=binary needle /data/cfgbn/binary.txt; echo rc=$?; grep -n needle /data/cfgbn/binary.txt; echo rc=$?; grep -q needle /data/cfgbn/binary.txt; echo rc=$?; grep -qc needle /data/cfgbn/binary.txt; echo rc=$?; grep -lc needle /data/cfgbn/binary.txt; echo rc=$?; grep -Il needle /data/cfgbn/binary.txt; echo rc=$?; grep -Iq needle /data/cfgbn/binary.txt; echo rc=$?; grep -v needle /data/cfgbn/binary.txt; echo rc=$?; grep -o needle /data/cfgbn/binary.txt; echo rc=$?; grep -on needle /data/cfgbn/binary.txt; echo rc=$?; grep -aon needle /data/cfgbn/binary.txt; echo rc=$?; grep -In needle /data/cfgbn/binary.txt; echo rc=$?; grep -m 0 needle /data/cfgbn/binary.txt; echo rc=$?; grep -m 1 needle /data/cfgbn/binary.txt; echo rc=$?; grep -A 1 needle /data/cfgbn/binary.txt; echo rc=$?; grep -B 1 needle /data/cfgbn/binary.txt; echo rc=$?; grep -C 1 needle /data/cfgbn/binary.txt; echo rc=$?; grep -I -a needle /data/cfgbn/binary.txt; echo rc=$?; grep -a -I needle /data/cfgbn/binary.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nrc=0\nrc=0\nrc=0\n/data/cfgbn/binary.txt\nrc=0\nrc=1\nrc=1\nrc=0\nrc=0\nrc=0\n2:needle\n3:needle\nrc=0\nrc=1\nrc=1\nrc=0\nrc=0\nrc=0\nrc=0\nneedle\u0000tail\nneedle next\nrc=0\nrc=1\n",
@@ -915,7 +915,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( export LC_ALL=C; mkdir -p /data/cfgbi; printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/cfgbi/binary.txt; grep  needle /data/cfgbi/binary.txt; echo rc=$?; grep -I needle /data/cfgbi/binary.txt; echo rc=$?; grep --binary-files=without-match needle /data/cfgbi/binary.txt; echo rc=$?; grep --binary-files=binary needle /data/cfgbi/binary.txt; echo rc=$?; grep -n needle /data/cfgbi/binary.txt; echo rc=$?; grep -c needle /data/cfgbi/binary.txt; echo rc=$?; grep -l needle /data/cfgbi/binary.txt; echo rc=$?; grep -q needle /data/cfgbi/binary.txt; echo rc=$?; grep -qc needle /data/cfgbi/binary.txt; echo rc=$?; grep -lc needle /data/cfgbi/binary.txt; echo rc=$?; grep -Ic needle /data/cfgbi/binary.txt; echo rc=$?; grep -Il needle /data/cfgbi/binary.txt; echo rc=$?; grep -Iq needle /data/cfgbi/binary.txt; echo rc=$?; grep -v needle /data/cfgbi/binary.txt; echo rc=$?; grep -o needle /data/cfgbi/binary.txt; echo rc=$?; grep -on needle /data/cfgbi/binary.txt; echo rc=$?; grep -aon needle /data/cfgbi/binary.txt; echo rc=$?; grep -In needle /data/cfgbi/binary.txt; echo rc=$?; grep -m 0 needle /data/cfgbi/binary.txt; echo rc=$?; grep -m 1 needle /data/cfgbi/binary.txt; echo rc=$?; grep -B 1 needle /data/cfgbi/binary.txt; echo rc=$?; grep -C 1 needle /data/cfgbi/binary.txt; echo rc=$?; grep -a -I needle /data/cfgbi/binary.txt; echo rc=$?; rm -rf /data/cfgbi ) | od -An -tx1",
+      "command": "( export LC_ALL=C; mkdir -p /data/cfgbi; printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/cfgbi/binary.txt; grep  needle /data/cfgbi/binary.txt; echo rc=$?; grep -I needle /data/cfgbi/binary.txt; echo rc=$?; grep --binary-files=without-match needle /data/cfgbi/binary.txt; echo rc=$?; grep --binary-files=binary needle /data/cfgbi/binary.txt; echo rc=$?; grep -n needle /data/cfgbi/binary.txt; echo rc=$?; grep -c needle /data/cfgbi/binary.txt; echo rc=$?; grep -l needle /data/cfgbi/binary.txt; echo rc=$?; grep -q needle /data/cfgbi/binary.txt; echo rc=$?; grep -qc needle /data/cfgbi/binary.txt; echo rc=$?; grep -lc needle /data/cfgbi/binary.txt; echo rc=$?; grep -Ic needle /data/cfgbi/binary.txt; echo rc=$?; grep -Il needle /data/cfgbi/binary.txt; echo rc=$?; grep -Iq needle /data/cfgbi/binary.txt; echo rc=$?; grep -v needle /data/cfgbi/binary.txt; echo rc=$?; grep -o needle /data/cfgbi/binary.txt; echo rc=$?; grep -on needle /data/cfgbi/binary.txt; echo rc=$?; grep -aon needle /data/cfgbi/binary.txt; echo rc=$?; grep -In needle /data/cfgbi/binary.txt; echo rc=$?; grep -m 0 needle /data/cfgbi/binary.txt; echo rc=$?; grep -m 1 needle /data/cfgbi/binary.txt; echo rc=$?; grep -B 1 needle /data/cfgbi/binary.txt; echo rc=$?; grep -C 1 needle /data/cfgbi/binary.txt; echo rc=$?; grep -a -I needle /data/cfgbi/binary.txt; echo rc=$? ) | od -An -tx1",
       "expect": {
         "exit": 0,
         "stdout": " 6e 65 65 64 6c 65 ff 74 61 69 6c 0a 6e 65 65 64\n 6c 65 20 6e 65 78 74 0a 72 63 3d 30 0a 6e 65 65\n 64 6c 65 ff 74 61 69 6c 0a 6e 65 65 64 6c 65 20\n 6e 65 78 74 0a 72 63 3d 30 0a 6e 65 65 64 6c 65\n ff 74 61 69 6c 0a 6e 65 65 64 6c 65 20 6e 65 78\n 74 0a 72 63 3d 30 0a 6e 65 65 64 6c 65 ff 74 61\n 69 6c 0a 6e 65 65 64 6c 65 20 6e 65 78 74 0a 72\n 63 3d 30 0a 32 3a 6e 65 65 64 6c 65 ff 74 61 69\n 6c 0a 33 3a 6e 65 65 64 6c 65 20 6e 65 78 74 0a\n 72 63 3d 30 0a 32 0a 72 63 3d 30 0a 2f 64 61 74\n 61 2f 63 66 67 62 69 2f 62 69 6e 61 72 79 2e 74\n 78 74 0a 72 63 3d 30 0a 72 63 3d 30 0a 72 63 3d\n 30 0a 2f 64 61 74 61 2f 63 66 67 62 69 2f 62 69\n 6e 61 72 79 2e 74 78 74 0a 72 63 3d 30 0a 32 0a\n 72 63 3d 30 0a 2f 64 61 74 61 2f 63 66 67 62 69\n 2f 62 69 6e 61 72 79 2e 74 78 74 0a 72 63 3d 30\n 0a 72 63 3d 30 0a 62 65 66 6f 72 65 0a 72 63 3d\n 30 0a 6e 65 65 64 6c 65 0a 6e 65 65 64 6c 65 0a\n 72 63 3d 30 0a 32 3a 6e 65 65 64 6c 65 0a 33 3a\n 6e 65 65 64 6c 65 0a 72 63 3d 30 0a 32 3a 6e 65\n 65 64 6c 65 0a 33 3a 6e 65 65 64 6c 65 0a 72 63\n 3d 30 0a 32 3a 6e 65 65 64 6c 65 ff 74 61 69 6c\n 0a 33 3a 6e 65 65 64 6c 65 20 6e 65 78 74 0a 72\n 63 3d 30 0a 72 63 3d 31 0a 6e 65 65 64 6c 65 ff\n 74 61 69 6c 0a 72 63 3d 30 0a 62 65 66 6f 72 65\n 0a 6e 65 65 64 6c 65 ff 74 61 69 6c 0a 6e 65 65\n 64 6c 65 20 6e 65 78 74 0a 72 63 3d 30 0a 62 65\n 66 6f 72 65 0a 6e 65 65 64 6c 65 ff 74 61 69 6c\n 0a 6e 65 65 64 6c 65 20 6e 65 78 74 0a 72 63 3d\n 30 0a 6e 65 65 64 6c 65 ff 74 61 69 6c 0a 6e 65\n 65 64 6c 65 20 6e 65 78 74 0a 72 63 3d 30 0a\n",
@@ -950,7 +950,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgbi; printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/cfgbi/binary.txt; grep -a needle /data/cfgbi/binary.txt | od -An -tx1; echo rc=${PIPESTATUS[0]}; grep --binary-files=text needle /data/cfgbi/binary.txt | od -An -tx1; echo rc=${PIPESTATUS[0]}; grep -I -a needle /data/cfgbi/binary.txt | od -An -tx1; echo rc=${PIPESTATUS[0]}; rm -rf /data/cfgbi",
+      "command": "mkdir -p /data/cfgbi; printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/cfgbi/binary.txt; grep -a needle /data/cfgbi/binary.txt | od -An -tx1; echo rc=${PIPESTATUS[0]}; grep --binary-files=text needle /data/cfgbi/binary.txt | od -An -tx1; echo rc=${PIPESTATUS[0]}; grep -I -a needle /data/cfgbi/binary.txt | od -An -tx1; echo rc=${PIPESTATUS[0]}",
       "expect": {
         "exit": 0,
         "stdout": " 6e 65 65 64 6c 65 ff 74 61 69 6c 0a 6e 65 65 64\n 6c 65 20 6e 65 78 74 0a\nrc=0\n 6e 65 65 64 6c 65 ff 74 61 69 6c 0a 6e 65 65 64\n 6c 65 20 6e 65 78 74 0a\nrc=0\n 6e 65 65 64 6c 65 ff 74 61 69 6c 0a 6e 65 65 64\n 6c 65 20 6e 65 78 74 0a\nrc=0\n",
@@ -985,7 +985,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( export LC_ALL=C; mkdir -p /data/cfgbi; printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/cfgbi/binary.txt; grep -A 1 needle /data/cfgbi/binary.txt; echo rc=$?; rm -rf /data/cfgbi ) | od -An -tx1",
+      "command": "( export LC_ALL=C; mkdir -p /data/cfgbi; printf 'before\\nneedle\\377tail\\nneedle next\\n' > /data/cfgbi/binary.txt; grep -A 1 needle /data/cfgbi/binary.txt; echo rc=$? ) | od -An -tx1",
       "expect": {
         "exit": 0,
         "stdout": " 6e 65 65 64 6c 65 ff 74 61 69 6c 0a 6e 65 65 64\n 6c 65 20 6e 65 78 74 0a 72 63 3d 30 0a\n",
@@ -1055,7 +1055,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgbo; printf 'needle\\000tail\\n' > /data/cfgbo/binary.txt; grep absent /data/cfgbo/binary.txt; echo rc=$?; grep needle /data/cfgbo/missing /data/cfgbo/binary.txt; echo rc=$?; grep -q needle /data/cfgbo/missing /data/cfgbo/binary.txt; echo rc=$?; rm -rf /data/cfgbo",
+      "command": "mkdir -p /data/cfgbo; printf 'needle\\000tail\\n' > /data/cfgbo/binary.txt; grep absent /data/cfgbo/binary.txt; echo rc=$?; grep needle /data/cfgbo/missing /data/cfgbo/binary.txt; echo rc=$?; grep -q needle /data/cfgbo/missing /data/cfgbo/binary.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=2\nrc=0\n",
@@ -1090,7 +1090,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgbr/textdir /data/cfgbr/datadir; printf 'needle\\n' > /data/cfgbr/text.bin; printf 'needle\\n' > /data/cfgbr/textdir/text.bin; printf 'needle\\000tail\\n' > /data/cfgbr/datadir/data.pdf; grep -rn needle /data/cfgbr/text.bin; echo rc=$?; grep --binary-files=text -rn needle /data/cfgbr/textdir; echo rc=$?; grep -rn needle /data/cfgbr/datadir; echo rc=$?; grep -Irn needle /data/cfgbr/datadir; echo rc=$?; grep -arn needle /data/cfgbr/datadir; echo rc=$?; rm -rf /data/cfgbr",
+      "command": "mkdir -p /data/cfgbr/textdir /data/cfgbr/datadir; printf 'needle\\n' > /data/cfgbr/text.bin; printf 'needle\\n' > /data/cfgbr/textdir/text.bin; printf 'needle\\000tail\\n' > /data/cfgbr/datadir/data.pdf; grep -rn needle /data/cfgbr/text.bin; echo rc=$?; grep --binary-files=text -rn needle /data/cfgbr/textdir; echo rc=$?; grep -rn needle /data/cfgbr/datadir; echo rc=$?; grep -Irn needle /data/cfgbr/datadir; echo rc=$?; grep -arn needle /data/cfgbr/datadir; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "1:needle\nrc=0\n/data/cfgbr/textdir/text.bin:1:needle\nrc=0\nrc=0\nrc=1\n/data/cfgbr/datadir/data.pdf:1:needle\u0000tail\nrc=0\n",
@@ -1125,7 +1125,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgbl; printf 'needle\\n%262137s\\000tail\\n' x > /data/cfgbl/late.txt; printf 'needle\\n' > /data/cfgbl/plain.txt; grep -I needle /data/cfgbl/late.txt; echo rc=$?; grep -Ic -m1 needle /data/cfgbl/late.txt; echo rc=$?; grep -Iq needle /data/cfgbl/late.txt; echo rc=$?; grep -Il needle /data/cfgbl/late.txt; echo rc=$?; grep -Ic needle /data/cfgbl/late.txt /data/cfgbl/plain.txt; echo rc=$?; grep -Ic needle /data/cfgbl/plain.txt /data/cfgbl/late.txt; echo rc=$?; rm -rf /data/cfgbl",
+      "command": "mkdir -p /data/cfgbl; printf 'needle\\n%262137s\\000tail\\n' x > /data/cfgbl/late.txt; printf 'needle\\n' > /data/cfgbl/plain.txt; grep -I needle /data/cfgbl/late.txt; echo rc=$?; grep -Ic -m1 needle /data/cfgbl/late.txt; echo rc=$?; grep -Iq needle /data/cfgbl/late.txt; echo rc=$?; grep -Il needle /data/cfgbl/late.txt; echo rc=$?; grep -Ic needle /data/cfgbl/late.txt /data/cfgbl/plain.txt; echo rc=$?; grep -Ic needle /data/cfgbl/plain.txt /data/cfgbl/late.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "needle\nrc=1\n1\nrc=0\nrc=0\n/data/cfgbl/late.txt\nrc=0\n/data/cfgbl/late.txt:0\n/data/cfgbl/plain.txt:1\nrc=0\n/data/cfgbl/plain.txt:1\n/data/cfgbl/late.txt:0\nrc=0\n",
@@ -1160,7 +1160,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgbf/prefix; printf 'needle\\n' > /data/cfgbf/name.txt; printf 'needle\\n' > /data/cfgbf/prefix/name.txt; grep -chH needle /data/cfgbf/name.txt; echo rc=$?; grep -chHh needle /data/cfgbf/name.txt; echo rc=$?; printf 'needle\\n' | grep -hH needle; echo rc=$?; grep -Hh needle /data/cfgbf/name.txt /data/cfgbf/name.txt; echo rc=$?; grep -rHh needle /data/cfgbf/prefix; echo rc=$?; rm -rf /data/cfgbf",
+      "command": "mkdir -p /data/cfgbf/prefix; printf 'needle\\n' > /data/cfgbf/name.txt; printf 'needle\\n' > /data/cfgbf/prefix/name.txt; grep -chH needle /data/cfgbf/name.txt; echo rc=$?; grep -chHh needle /data/cfgbf/name.txt; echo rc=$?; printf 'needle\\n' | grep -hH needle; echo rc=$?; grep -Hh needle /data/cfgbf/name.txt /data/cfgbf/name.txt; echo rc=$?; grep -rHh needle /data/cfgbf/prefix; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "/data/cfgbf/name.txt:1\nrc=0\n1\nrc=0\n(standard input):needle\nrc=0\nneedle\nneedle\nrc=0\nneedle\nrc=0\n",
@@ -1195,7 +1195,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/cfgbz; printf 'a\\000b\\n' > /data/cfgbz/z.bin; printf 'a\\377b\\n' > /data/cfgbz/z.txt; grep -o '^' /data/cfgbz/z.bin; echo rc=$?; grep -o '^' /data/cfgbz/z.txt; echo rc=$?; rm -rf /data/cfgbz",
+      "command": "mkdir -p /data/cfgbz; printf 'a\\000b\\n' > /data/cfgbz/z.bin; printf 'a\\377b\\n' > /data/cfgbz/z.txt; grep -o '^' /data/cfgbz/z.bin; echo rc=$?; grep -o '^' /data/cfgbz/z.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nrc=0\n",

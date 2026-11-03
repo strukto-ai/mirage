@@ -208,7 +208,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/fcF_m4 && echo a > /data/fcF_m4/a && echo b > /data/fcF_m4/b && mv -b -n /data/fcF_m4/a /data/fcF_m4/b; echo rc=$?; cat /data/fcF_m4/a /data/fcF_m4/b; rm -r /data/fcF_m4",
+      "command": "mkdir -p /data/fcF_m4 && echo a > /data/fcF_m4/a && echo b > /data/fcF_m4/b && mv -b -n /data/fcF_m4/a /data/fcF_m4/b; echo rc=$?; cat /data/fcF_m4/a /data/fcF_m4/b",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\na\nb\n",

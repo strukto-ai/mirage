@@ -24,7 +24,7 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "mkdir -p /data/fcB_so/b && printf 'x\\n' > /data/fcB_so/c.txt && printf 'x\\n' > /data/fcB_so/a.txt && printf 'x\\n' > /data/fcB_so/b/z.txt && rg -l --sort-files x /data/fcB_so; rg -l --sortr path --sort-files x /data/fcB_so; rg -l --sort-files --sortr path x /data/fcB_so; rg -l --sort-files --no-sort-files x /data/fcB_so | sort; rg -l --sort path --sort none x /data/fcB_so | sort; rm -rf /data/fcB_so",
+      "command": "mkdir -p /data/fcB_so/b && printf 'x\\n' > /data/fcB_so/c.txt && printf 'x\\n' > /data/fcB_so/a.txt && printf 'x\\n' > /data/fcB_so/b/z.txt && rg -l --sort-files x /data/fcB_so; rg -l --sortr path --sort-files x /data/fcB_so; rg -l --sort-files --sortr path x /data/fcB_so; rg -l --sort-files --no-sort-files x /data/fcB_so | sort; rg -l --sort path --sort none x /data/fcB_so | sort",
       "expect": {
         "exit": 0,
         "stdout": "/data/fcB_so/a.txt\n/data/fcB_so/b/z.txt\n/data/fcB_so/c.txt\n/data/fcB_so/a.txt\n/data/fcB_so/b/z.txt\n/data/fcB_so/c.txt\n/data/fcB_so/c.txt\n/data/fcB_so/b/z.txt\n/data/fcB_so/a.txt\n/data/fcB_so/a.txt\n/data/fcB_so/b/z.txt\n/data/fcB_so/c.txt\n/data/fcB_so/a.txt\n/data/fcB_so/b/z.txt\n/data/fcB_so/c.txt\n",

@@ -24,7 +24,7 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -U 'foo\\nbar' /data/rgfl/a.txt; rg -U -n 'foo\\nbar' /data/rgfl/a.txt; rg -U -c 'foo\\nbar|baz' /data/rgfl/a.txt; rg -U --count-matches 'o\\n' /data/rgfl/a.txt; rg -U -n -o 'o\\nbar' /data/rgfl/a.txt; rg -U -n -C1 'foo\\nbar' /data/rgfl/a.txt; rg --multiline -b 'foo\\nbar' /data/rgfl/a.txt; rm -rf /data/rgfl",
+      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -U 'foo\\nbar' /data/rgfl/a.txt; rg -U -n 'foo\\nbar' /data/rgfl/a.txt; rg -U -c 'foo\\nbar|baz' /data/rgfl/a.txt; rg -U --count-matches 'o\\n' /data/rgfl/a.txt; rg -U -n -o 'o\\nbar' /data/rgfl/a.txt; rg -U -n -C1 'foo\\nbar' /data/rgfl/a.txt; rg --multiline -b 'foo\\nbar' /data/rgfl/a.txt",
       "expect": {
         "exit": 0,
         "stdout": "foo\nbar\n2:foo\n3:bar\n2\n2\n2:o\n3:bar\n1-alpha\n2:foo\n3:bar\n4-baz\n6:foo\n10:bar\n",
@@ -65,7 +65,7 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -U -n --vimgrep 'x2\\nx3|x5' /data/rgfl/c.txt; rg -U -n -r Y 'x2\\nx3' /data/rgfl/c.txt; rg -U -v 'x2\\nx3|x5' /data/rgfl/c.txt; rg -U -n -m1 'x2\\nx3|x5' /data/rgfl/c.txt; rg -j1 -U -l 'x2\\nx3' /data/rgfl/c.txt /data/rgfl/a.txt; rg -U -n -C1 'x2\\nx3|x6' /data/rgfl/c.txt; rg -U -c -v 'foo\\nbar' /data/rgfl/a.txt; echo rc=$?; rm -rf /data/rgfl",
+      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -U -n --vimgrep 'x2\\nx3|x5' /data/rgfl/c.txt; rg -U -n -r Y 'x2\\nx3' /data/rgfl/c.txt; rg -U -v 'x2\\nx3|x5' /data/rgfl/c.txt; rg -U -n -m1 'x2\\nx3|x5' /data/rgfl/c.txt; rg -j1 -U -l 'x2\\nx3' /data/rgfl/c.txt /data/rgfl/a.txt; rg -U -n -C1 'x2\\nx3|x6' /data/rgfl/c.txt; rg -U -c -v 'foo\\nbar' /data/rgfl/a.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "/data/rgfl/c.txt:2:1:x2\n/data/rgfl/c.txt:5:1:x5\n2:Y\nx1\nx4\nx6\nx7\nx8\n2:x2\n3:x3\n/data/rgfl/c.txt\n1-x1\n2:x2\n3:x3\n4-x4\n5-x5\n6:x6\n7-x7\nrc=1\n",
@@ -108,7 +108,7 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -U 'foo.bar' /data/rgfl/a.txt; echo rc=$?; rg -U --multiline-dotall 'foo.bar' /data/rgfl/a.txt; rg -U --multiline-dotall --no-multiline-dotall 'foo.bar' /data/rgfl/a.txt; echo rc=$?; rg --multiline-dotall 'x1.x2' /data/rgfl/c.txt; echo rc=$?; rm -rf /data/rgfl",
+      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -U 'foo.bar' /data/rgfl/a.txt; echo rc=$?; rg -U --multiline-dotall 'foo.bar' /data/rgfl/a.txt; rg -U --multiline-dotall --no-multiline-dotall 'foo.bar' /data/rgfl/a.txt; echo rc=$?; rg --multiline-dotall 'x1.x2' /data/rgfl/c.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nfoo\nbar\nrc=1\nrc=1\n",
@@ -179,7 +179,7 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -U --passthru zzz /data/rgfl/b.txt; echo rc=$?; rg -j1 -U --passthru -n zzz /data/rgfl/b.txt /data/rgfl/c.txt; printf 'foo\\nbar\\0baz\\0' > /data/rgfl/n.bin; rg -U --null-data -r X foo /data/rgfl/n.bin | tr '\\0' '@'; echo; rm -rf /data/rgfl",
+      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; rg -U --passthru zzz /data/rgfl/b.txt; echo rc=$?; rg -j1 -U --passthru -n zzz /data/rgfl/b.txt /data/rgfl/c.txt; printf 'foo\\nbar\\0baz\\0' > /data/rgfl/n.bin; rg -U --null-data -r X foo /data/rgfl/n.bin | tr '\\0' '@'; echo",
       "expect": {
         "exit": 0,
         "stdout": "nothing\nrc=1\n/data/rgfl/b.txt-1-nothing\n/data/rgfl/c.txt-1-x1\n/data/rgfl/c.txt-2-x2\n/data/rgfl/c.txt-3-x3\n/data/rgfl/c.txt-4-x4\n/data/rgfl/c.txt-5-x5\n/data/rgfl/c.txt-6-x6\n/data/rgfl/c.txt-7-x7\n/data/rgfl/c.txt-8-x8\nX\nbar@\n",
@@ -217,7 +217,7 @@
         "tidb-filesystem",
         "box"
       ],
-      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'a1\\na2\\nb\\na3\\n' > /data/rgfl/s.txt; rg -U --stop-on-nonmatch a /data/rgfl/s.txt; rg -U --stop-on-nonmatch -c a /data/rgfl/s.txt; rg -U --stop-on-nonmatch -n -A1 a /data/rgfl/s.txt; rg -U --stop-on-nonmatch -v b /data/rgfl/s.txt; rg -U --stop-on-nonmatch -B1 a3 /data/rgfl/s.txt; rm -rf /data/rgfl",
+      "command": "mkdir -p /data/rgfl/sub; printf 'alpha\\nfoo\\nbar\\nbaz\\nfoo\\nqux\\n' > /data/rgfl/a.txt; printf 'nothing\\n' > /data/rgfl/b.txt; printf 'x1\\nx2\\nx3\\nx4\\nx5\\nx6\\nx7\\nx8\\n' > /data/rgfl/c.txt; printf 'a1\\na2\\nb\\na3\\n' > /data/rgfl/s.txt; rg -U --stop-on-nonmatch a /data/rgfl/s.txt; rg -U --stop-on-nonmatch -c a /data/rgfl/s.txt; rg -U --stop-on-nonmatch -n -A1 a /data/rgfl/s.txt; rg -U --stop-on-nonmatch -v b /data/rgfl/s.txt; rg -U --stop-on-nonmatch -B1 a3 /data/rgfl/s.txt",
       "expect": {
         "exit": 0,
         "stdout": "a1\na2\n2\n1:a1\n2:a2\n3-b\na1\na2\na3\nb\na3\n",

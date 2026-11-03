@@ -28,7 +28,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --ignore-case FOO /data/gfl/a.txt; grep --invert-match -c foo /data/gfl/a.txt; grep --count foo /data/gfl/a.txt /data/gfl/b.txt; grep --word-regexp foo /data/gfl/b.txt; grep --fixed-strings 'o o' /data/gfl/a.txt; grep --fixed-regexp 'o t' /data/gfl/a.txt; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --ignore-case FOO /data/gfl/a.txt; grep --invert-match -c foo /data/gfl/a.txt; grep --count foo /data/gfl/a.txt /data/gfl/b.txt; grep --word-regexp foo /data/gfl/b.txt; grep --fixed-strings 'o o' /data/gfl/a.txt; grep --fixed-regexp 'o t' /data/gfl/a.txt",
       "expect": {
         "exit": 0,
         "stdout": "foo one\nfoo two\n5\n/data/gfl/a.txt:2\n/data/gfl/b.txt:1\nfoo\tbar\nfoo one\nfoo two\n",
@@ -71,7 +71,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --line-number foo /data/gfl/a.txt; grep --only-matching fo /data/gfl/b.txt; grep --max-count=1 foo /data/gfl/a.txt; grep --regexp=beta --regexp=none /data/gfl/a.txt /data/gfl/b.txt; grep --files-with-matches none /data/gfl/a.txt /data/gfl/b.txt; grep --with-filename beta /data/gfl/a.txt; grep --no-filename foo /data/gfl/a.txt /data/gfl/b.txt; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --line-number foo /data/gfl/a.txt; grep --only-matching fo /data/gfl/b.txt; grep --max-count=1 foo /data/gfl/a.txt; grep --regexp=beta --regexp=none /data/gfl/a.txt /data/gfl/b.txt; grep --files-with-matches none /data/gfl/a.txt /data/gfl/b.txt; grep --with-filename beta /data/gfl/a.txt; grep --no-filename foo /data/gfl/a.txt /data/gfl/b.txt",
       "expect": {
         "exit": 0,
         "stdout": "3:foo one\n6:foo two\nfo\nfoo one\n/data/gfl/a.txt:beta\n/data/gfl/b.txt:none\n/data/gfl/b.txt\n/data/gfl/a.txt:beta\nfoo one\nfoo two\nfoo\tbar\n",
@@ -115,7 +115,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --quiet foo /data/gfl/a.txt; echo rc=$?; grep --silent zzz /data/gfl/a.txt; echo rc=$?; grep --extended-regexp 'fo+ o' /data/gfl/a.txt; grep --basic-regexp 'fo\\+ t' /data/gfl/a.txt; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --quiet foo /data/gfl/a.txt; echo rc=$?; grep --silent zzz /data/gfl/a.txt; echo rc=$?; grep --extended-regexp 'fo+ o' /data/gfl/a.txt; grep --basic-regexp 'fo\\+ t' /data/gfl/a.txt",
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nrc=1\nfoo one\nfoo two\n",
@@ -156,7 +156,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --after-context=1 one /data/gfl/a.txt; grep --before-context=1 one /data/gfl/a.txt; grep --context=1 two /data/gfl/a.txt; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --after-context=1 one /data/gfl/a.txt; grep --before-context=1 one /data/gfl/a.txt; grep --context=1 two /data/gfl/a.txt",
       "expect": {
         "exit": 0,
         "stdout": "foo one\ngamma\nbeta\nfoo one\ndelta\nfoo two\nepsilon\n",
@@ -196,7 +196,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --recursive bar /data/gfl; grep --dereference-recursive --count none /data/gfl; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --recursive bar /data/gfl; grep --dereference-recursive --count none /data/gfl",
       "expect": {
         "exit": 0,
         "stdout": "/data/gfl/b.txt:foo\tbar\n/data/gfl/a.txt:0\n/data/gfl/b.txt:1\n",
@@ -235,7 +235,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --ign FOO /data/gfl/a.txt; grep --fixed 'o o' /data/gfl/a.txt; grep --no-ig -c FOO /data/gfl/a.txt; echo rc=$?; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --ign FOO /data/gfl/a.txt; grep --fixed 'o o' /data/gfl/a.txt; grep --no-ig -c FOO /data/gfl/a.txt; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "foo one\nfoo two\nfoo one\n0\nrc=1\n",
@@ -274,7 +274,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --i FOO /data/gfl/a.txt 2>&1; echo rc=$?; grep --nu foo /data/gfl/a.txt 2>&1; echo rc=$?; rm -rf /data/gfl",
+      "command": "mkdir -p /data/gfl; printf 'alpha\\nbeta\\nfoo one\\ngamma\\ndelta\\nfoo two\\nepsilon\\n' > /data/gfl/a.txt; printf 'foo\\tbar\\nnone\\n' > /data/gfl/b.txt; grep --i FOO /data/gfl/a.txt 2>&1; echo rc=$?; grep --nu foo /data/gfl/a.txt 2>&1; echo rc=$?",
       "expect": {
         "exit": 0,
         "stdout": "grep: option '--i' is ambiguous; possibilities: '--include' '--ignore-case' '--initial-tab' '--invert-match'\nTry 'grep --help' for more information.\nrc=2\ngrep: option '--nu' is ambiguous; possibilities: '--null' '--null-data'\nTry 'grep --help' for more information.\nrc=2\n",
