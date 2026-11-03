@@ -260,7 +260,8 @@ def shown_raw(repo: BaseRepo, obj: ShaFile, name: str | None = None) -> bytes:
     """An object's stored bytes as the session is shown them: a tree's
     re-encoded with only the entries it sees, so neither the bytes nor
     their count name a hidden one. Only a tree is placed, so a commit's
-    or a blob's bytes cost no lookup.
+    or a blob's bytes cost no lookup. The bytes are read whole, as git
+    reads them, so no entry name is refused here.
 
     Args:
         repo (BaseRepo): the opened repository.
@@ -275,9 +276,12 @@ def shown_raw(repo: BaseRepo, obj: ShaFile, name: str | None = None) -> bytes:
         if name is None
         else place_named(repo, name, obj.id)
     )
+    assert isinstance(repo, Repo)
     kept = Tree()
-    for entry in shown_items(repo, obj, base):
-        kept.add(entry.path, entry.mode, entry.sha)
+    for entry in obj.iteritems():
+        part = entry.path.decode("utf-8", "surrogateescape")
+        if visible_path(repo.location, posixpath.join(base, part)):
+            kept.add(entry.path, entry.mode, entry.sha)
     return kept.as_raw_string()
 
 

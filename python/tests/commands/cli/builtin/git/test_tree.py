@@ -345,6 +345,8 @@ def test_a_path_passes_the_rule_git_checks_out_by(path, mode, expected):
         ("root", "show odd^{tree}"),
         ("root", "rev-parse odd:a.txt"),
         ("root", "show odd:a.txt"),
+        ("root", "restore --source odd a.txt"),
+        ("root", "diff-tree odd"),
         ("nested", "ls-tree -r odd"),
         ("nested", "ls-tree odd sub/"),
         ("nested", "cat-file -p odd:sub"),
@@ -364,7 +366,7 @@ def test_a_path_passes_the_rule_git_checks_out_by(path, mode, expected):
                 "grep x odd",
                 "checkout odd",
                 "switch odd",
-                "restore --source odd a.txt",
+                "restore --source odd .",
             )
         ),
     ],
@@ -393,6 +395,7 @@ async def test_a_tree_entry_with_an_empty_name_is_fatal(
         ("nested", "ls-tree odd"),
         ("nested", "cat-file -p odd^{tree}"),
         ("nested", "rev-parse odd:a.txt"),
+        ("nested", "diff-tree odd"),
     ],
 )
 async def test_a_read_that_decodes_no_empty_name_goes_on(

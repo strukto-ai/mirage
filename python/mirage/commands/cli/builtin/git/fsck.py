@@ -7,7 +7,7 @@ from dulwich.repo import BaseRepo
 
 from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.constants import GITLINK
-from mirage.commands.cli.builtin.git.errors import GitError
+from mirage.commands.cli.builtin.git.errors import EmptyTreeNameError, GitError
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import (
     file_size,
@@ -192,7 +192,8 @@ def check(
             edges[oid] = links(obj)
             referenced.update(edges[oid])
         except Exception as exc:
-            broken.add(oid)
+            if isinstance(exc, EmptyTreeNameError):
+                broken.add(oid)
             errors.append(f"error: object {oid.decode()}: {exc}\n")
     for missing in sorted(referenced - objects.keys() - broken):
         if missing not in roots:
