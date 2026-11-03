@@ -28,6 +28,7 @@ from mirage.core.generic.types import (
 )
 from mirage.rs.find import (
     find_layout,
+    mtime_bounds,
     parse_find,
     parse_find_expression,
     strictly_after,
@@ -112,18 +113,34 @@ def test_size_bounds_follow_gnu_strictness():
     assert (expr.min_size, expr.max_size) == (2, 2)
 
 
-def test_repeated_mtime_windows_merge_to_union():
-    # `-mtime +0 -o -mtime -1` is a tautology in GNU; the flat window
-    # must impose no bounds rather than keep only the last predicate.
+def test_mtime_bounds_count_whole_days_like_gnu():
+    # GNU drops the fraction of a day, so +N needs N+1 whole days.
+    now = 1_000_000.0
+    day = 86400
+    assert mtime_bounds("+", 0, now) == (None, now - day)
+    assert mtime_bounds("+", 7, now) == (None, now - 8 * day)
+    assert mtime_bounds("=", 1, now) == (now - 2 * day, now - day)
+    assert mtime_bounds("-", 1, now) == (now - day, None)
+
+
+def test_only_top_level_time_tests_narrow_the_window():
+    # A test under -o or ! need not hold for a match, so it
+    # leaves the window alone and the tree decides it per entry.
     expr = parse_find_expression(["-mtime", "+0", "-o", "-mtime", "-1"])
     assert (expr.mtime_min, expr.mtime_max) == (None, None)
     expr = parse_find_expression(["-mtime", "-1"])
     assert expr.mtime_min is not None
     assert expr.mtime_max is None
     expr = parse_find_expression(["-mtime", "1", "-o", "-mtime", "3"])
-    assert expr.mtime_min is not None
-    assert expr.mtime_max is not None
-    assert expr.mtime_max - expr.mtime_min == pytest.approx(3 * 86400, abs=1)
+    assert (expr.mtime_min, expr.mtime_max) == (None, None)
+    expr = parse_find_expression(["-mtime", "+0", "-o", "-name", "x"])
+    assert (expr.mtime_min, expr.mtime_max) == (None, None)
+    alone = parse_find_expression(["-mtime", "+2"])
+    expr = parse_find_expression(
+        ["-mtime", "+2", "-a", "(", "-mtime", "1", "-o", "-name", "x", ")"]
+    )
+    assert expr.mtime_min is None
+    assert expr.mtime_max == pytest.approx(alone.mtime_max, abs=2)
 
 
 @pytest.mark.parametrize("unit,factor", [("c", 1), ("", 512), ("G", 1024**3)])
@@ -652,10 +669,10 @@ def test_newer_placement_refusals(tokens, message):
     assert str(exc.value) == message
 
 
-def test_top_level_windows_intersect_and_or_windows_widen():
+def test_top_level_windows_intersect_and_or_windows_stay_open():
     # GNU: every test in the implicit -a chain must hold, so `-newermt a
     # -newermt b` keeps what is newer than both and `-mtime +2 -mtime
-    # -1` keeps nothing; under -o the flat window can only widen.
+    # -1` keeps nothing; a test under -o leaves the window open.
     later = parse_find_expression(["-newermt", "2021-06-01"]).mtime_min
     for order in (["2020-06-01", "2021-06-01"], ["2021-06-01", "2020-06-01"]):
         expr = parse_find_expression(
@@ -667,8 +684,8 @@ def test_top_level_windows_intersect_and_or_windows_widen():
     assert expr.mtime_min > expr.mtime_max
     both = parse_find_expression(["-mtime", "-1", "-mtime", "-3"])
     either = parse_find_expression(["-mtime", "-1", "-o", "-mtime", "-3"])
-    assert both.mtime_min - either.mtime_min == pytest.approx(2 * 86400, abs=2)
-    assert (both.mtime_max, either.mtime_max) == (None, None)
+    assert both.mtime_min is not None and both.mtime_max is None
+    assert (either.mtime_min, either.mtime_max) == (None, None)
 
 
 def test_printf_compiles_once_into_parts_the_action_carries():
@@ -705,7 +722,7 @@ def test_a_bound_time_test_folds_by_where_it_sat():
 
 def test_a_mtime_counts_days_from_the_clock_bound_with_it():
     parsed = parse_find(["-mtime", "+2"])
-    assert parsed.bind(now=1000000.0).mtime_max == 1000000.0 - 2 * 86400
+    assert parsed.bind(now=1000000.0).mtime_max == 1000000.0 - 3 * 86400
     assert parse_find(["-mtime", "-2"]).bind(now=1000000.0).mtime_min == (
         1000000.0 - 2 * 86400
     )

@@ -294,6 +294,27 @@ it('streams the start point before calling a native backend', async () => {
   await out.return(undefined)
 })
 
+it('streams a start point whose mtime is known before fetching descendants', async () => {
+  const result = await streamFind(
+    [spec('/remote')],
+    ['-mtime', '+0', '-o', '-mtime', '-1'],
+    optsWith({
+      name: 'remote',
+      type: FileType.DIRECTORY,
+      modified: new Date().toISOString(),
+    } as FileStat),
+    () => {
+      throw new Error('must not fetch descendants')
+    },
+  )
+  if (result === null) throw new Error('find returned no result')
+  const out = result[0] as AsyncGenerator<Uint8Array, void>
+  const first = await out.next()
+  if (first.done) throw new Error('find returned no start point')
+  expect(DEC.decode(first.value)).toBe('/remote\n')
+  await out.return(undefined)
+})
+
 describe('a link onto a directory a rule refuses to list', () => {
   const SEALED_DOC = SessionProfile({
     commands: {

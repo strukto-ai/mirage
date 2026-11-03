@@ -24,14 +24,32 @@
         "gdrive",
         "gdrive-folder",
         "box",
-        "dropbox",
-        "tidb-filesystem",
-        "dropbox-root"
+        "tidb-filesystem"
       ],
       "command": "find /data -mtime +0 -o -mtime -1",
       "expect": {
         "exit": 0,
         "stdout": "/data\n/data/a.txt\n/data/abc.csv\n/data/anchors.txt\n/data/b.txt\n/data/binary.bin\n/data/c.txt\n/data/chat.jsonl\n/data/csv.csv\n/data/data.jsonl\n/data/disptree\n/data/disptree/d\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard\n/data/guard/g.txt\n/data/guard/sub\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.diff\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub\n/data/sub/deep\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n/data/user.json\n/data/users.json\n",
+        "stderr": ""
+      },
+      "flags": [
+        "mtime",
+        "o",
+        "1"
+      ]
+    },
+    {
+      "id": "find_mtime_skips_folders_with_no_time",
+      "seq": 301,
+      "targets": [
+        "dropbox",
+        "dropbox-root"
+      ],
+      "note": "Dropbox folders carry no modified time, so a folder passes no time test, as it already fails a bounded window like -mtime -1; only the start point and files are listed.",
+      "command": "find /data -mtime +0 -o -mtime -1",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data\n/data/a.txt\n/data/abc.csv\n/data/anchors.txt\n/data/b.txt\n/data/binary.bin\n/data/c.txt\n/data/chat.jsonl\n/data/csv.csv\n/data/data.jsonl\n/data/disptree/d/y.txt\n/data/disptree/x.txt\n/data/dup.txt\n/data/empty.txt\n/data/fields.txt\n/data/guard/g.txt\n/data/guard/sub/s.txt\n/data/mixed.txt\n/data/multi.txt\n/data/no_nl.txt\n/data/numbers.txt\n/data/one_byte.txt\n/data/oooo.txt\n/data/patterns.txt\n/data/patterns2.txt\n/data/poem.diff\n/data/poem.txt\n/data/prefix_dup.txt\n/data/repeats.txt\n/data/sections.txt\n/data/sorted_a.txt\n/data/sorted_b.txt\n/data/sorted_c.txt\n/data/spaced.txt\n/data/sub/deep/deeper.txt\n/data/sub/nested.txt\n/data/tabbed.txt\n/data/user.json\n/data/users.json\n",
         "stderr": ""
       },
       "flags": [
@@ -177,6 +195,87 @@
       "expect": {
         "exit": 0,
         "stdout": "done\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_mtime_plus_zero_needs_a_whole_day",
+      "seq": 502182,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "ssh",
+        "box",
+        "dropbox",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder"
+      ],
+      "command": "printf hi > /data/mtplus.txt; find /data -name mtplus.txt -mtime +0; echo code=$?; rm /data/mtplus.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "code=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_mtime_test_under_or_or_not_decides_per_entry",
+      "seq": 502183,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "ssh",
+        "s3",
+        "s3-prefix",
+        "gridfs",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "printf hi > /data/mtor.txt; find /data/mtor.txt -mtime +0 -o -name mtor.txt; find /data -name mtor.txt ! -mtime +0; find /data -name mtor.txt \\( -mtime +0 \\); echo code=$?; rm /data/mtor.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/mtor.txt\n/data/mtor.txt\ncode=0\n",
+        "stderr": ""
+      }
+    },
+    {
+      "id": "find_mtime_zero_lists_a_fresh_file",
+      "seq": 502184,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "ssh",
+        "s3",
+        "s3-prefix",
+        "gridfs",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix"
+      ],
+      "command": "printf hi > /data/mtzero.txt; find /data -name mtzero.txt -mtime 0; rm /data/mtzero.txt",
+      "expect": {
+        "exit": 0,
+        "stdout": "/data/mtzero.txt\n",
         "stderr": ""
       }
     }

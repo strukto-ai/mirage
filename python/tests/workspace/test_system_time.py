@@ -60,6 +60,48 @@ async def test_system_time_starts_date_file_times_and_jq():
 
 
 @pytest.mark.asyncio
+async def test_find_mtime_counts_whole_days_on_the_workspace_clock():
+    clock = ManualClock(1_000_000)
+    ws = _started("2026-03-02T09:00:00Z", clock)
+    try:
+        await ws.shell("touch /data/a")
+        clock.advance(23 * 3600)
+        assert await _out(ws, "find /data/a -mtime +0") == ""
+        assert await _out(ws, "find /data/a -mtime 0") == "/data/a\n"
+        clock.advance(13 * 3600)
+        assert await _out(ws, "find /data/a -mtime +0") == "/data/a\n"
+        assert await _out(ws, "find /data/a -mtime +1") == ""
+        assert await _out(ws, "find /data/a -mtime 1") == "/data/a\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_find_time_test_under_or_or_not_decides_per_entry():
+    clock = ManualClock(1_000_000)
+    ws = _started("2026-03-02T09:00:00Z", clock)
+    try:
+        await ws.shell("touch /data/keep; mkdir /data/d")
+        clock.advance(3600)
+        keep = "/data/keep\n"
+        line = "find /data/keep -mtime +0 -o -name keep"
+        assert await _out(ws, line) == keep
+        line = "find /data/keep -mtime +1 -o -name keep"
+        assert await _out(ws, line) == keep
+        assert await _out(ws, "find /data/keep ! -mtime +0") == keep
+        assert await _out(ws, "find /data/keep \\( -mtime +0 \\)") == ""
+        line = "find /data -name keep ! -mtime +0"
+        assert await _out(ws, line) == keep
+        line = "find /data -name keep \\( -mtime +0 \\)"
+        assert await _out(ws, line) == ""
+        assert await _out(ws, "find /data/d -mtime +0 -o -name x") == ""
+        assert await _out(ws, "find /data/d ! -mtime +0") == "/data/d\n"
+        assert await _out(ws, "find /data -mtime +0 -o -name x") == ""
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_system_time_stamps_copies_and_processes(tmp_path):
     # A disk mount stamps the host's time itself, which a copy must not show.
     ws = Workspace(

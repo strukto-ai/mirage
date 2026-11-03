@@ -20,7 +20,7 @@ import type { Identity } from '../../commands/builtin/utils/identity.ts'
 import { linkView } from '../../commands/builtin/utils/links.ts'
 import { getCurrentSession, runAsProgram } from '../../context/session_context.ts'
 import { modifiedTs } from '../../core/generic/find.ts'
-import { printfKind } from '../../core/generic/find_eval.ts'
+import { printfKind, treeHasTime } from '../../core/generic/find_eval.ts'
 import { enoent, strerrorOf } from '../../errors/fs.ts'
 import { posixPhrase } from '../../errors/posix.ts'
 import { SharedStdin } from '../../io/stream.ts'
@@ -329,6 +329,7 @@ function testsStat(expr: FindExpr): boolean {
     expr.maxSize !== null ||
     expr.mtimeMin !== null ||
     expr.mtimeMax !== null ||
+    treeHasTime(expr.tree) ||
     expr.usesEmpty ||
     expr.newer.length > 0
   )

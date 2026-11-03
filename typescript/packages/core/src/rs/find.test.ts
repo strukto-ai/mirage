@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { evaluate, treeHasAction } from '../core/generic/find_eval.ts'
 import { UsageError } from '../commands/errors.ts'
-import { parseFindExpression } from './find.ts'
+import { mtimeBounds, parseFindExpression } from './find.ts'
 
 describe('parseFindExpression', () => {
   it('negation', () => {
@@ -114,10 +114,20 @@ describe('parseFindExpression', () => {
     expect([e.minSize, e.maxSize]).toEqual([2, 2])
   })
 
-  it('intersects top-level windows and widens them under -o', () => {
+  it('mtime bounds count whole days like GNU', () => {
+    // GNU drops the fraction of a day, so +N needs N+1 whole days.
+    const now = 1_000_000
+    const day = 86400
+    expect(mtimeBounds('+', 0, now)).toEqual([null, now - day])
+    expect(mtimeBounds('+', 7, now)).toEqual([null, now - 8 * day])
+    expect(mtimeBounds('=', 1, now)).toEqual([now - 2 * day, now - day])
+    expect(mtimeBounds('-', 1, now)).toEqual([now - day, null])
+  })
+
+  it('intersects top-level windows and leaves them open under -o', () => {
     // GNU: every test in the implicit -a chain must hold, so `-newermt a
     // -newermt b` keeps what is newer than both and `-mtime +2 -mtime -1`
-    // keeps nothing; under -o the flat window can only widen.
+    // keeps nothing; a test under -o leaves the window open.
     const later = parseFindExpression(['-newermt', '2021-06-01']).mtimeMin
     for (const order of [
       ['2020-06-01', '2021-06-01'],
@@ -132,22 +142,27 @@ describe('parseFindExpression', () => {
     expect(empty.mtimeMin ?? 0).toBeGreaterThan(empty.mtimeMax ?? 0)
     const both = parseFindExpression(['-mtime', '-1', '-mtime', '-3'])
     const either = parseFindExpression(['-mtime', '-1', '-o', '-mtime', '-3'])
-    expect((both.mtimeMin ?? 0) - (either.mtimeMin ?? 0)).toBeCloseTo(2 * 86400, 0)
-    expect([both.mtimeMax, either.mtimeMax]).toEqual([null, null])
+    expect(both.mtimeMin).not.toBeNull()
+    expect(both.mtimeMax).toBeNull()
+    expect([either.mtimeMin, either.mtimeMax]).toEqual([null, null])
   })
 
-  it('repeated -mtime windows merge to their union', () => {
-    // `-mtime +0 -o -mtime -1` is a tautology in GNU; the flat window
-    // must impose no bounds rather than keep only the last predicate.
+  it('narrows the window only by top-level time tests', () => {
+    // A test under -o or ! need not hold for a match, so it
+    // leaves the window alone and the tree decides it per entry.
     let e = parseFindExpression(['-mtime', '+0', '-o', '-mtime', '-1'])
     expect([e.mtimeMin, e.mtimeMax]).toEqual([null, null])
     e = parseFindExpression(['-mtime', '-1'])
     expect(e.mtimeMin).not.toBeNull()
     expect(e.mtimeMax).toBeNull()
     e = parseFindExpression(['-mtime', '1', '-o', '-mtime', '3'])
-    expect(e.mtimeMin).not.toBeNull()
-    expect(e.mtimeMax).not.toBeNull()
-    expect((e.mtimeMax ?? 0) - (e.mtimeMin ?? 0)).toBeCloseTo(3 * 86400, 0)
+    expect([e.mtimeMin, e.mtimeMax]).toEqual([null, null])
+    e = parseFindExpression(['-mtime', '+0', '-o', '-name', 'x'])
+    expect([e.mtimeMin, e.mtimeMax]).toEqual([null, null])
+    const alone = parseFindExpression(['-mtime', '+2'])
+    e = parseFindExpression(['-mtime', '+2', '-a', '(', '-mtime', '1', '-o', '-name', 'x', ')'])
+    expect(e.mtimeMin).toBeNull()
+    expect(Math.abs((e.mtimeMax ?? 0) - (alone.mtimeMax ?? 0))).toBeLessThan(2)
   })
 
   it('size rounds up to the unit like GNU', () => {
