@@ -44,11 +44,16 @@ it.each([
   [':/:a.txt', 'a.txt'],
   [':///a.txt', 'a.txt'],
   [':/:', ''],
-  [':/:/', '/'],
-  [':/:/a.txt', '/a.txt'],
 ])('reads top magic %j from the root', (operand, relative) => {
   expect(repoRelative(LOCATION, '/repo/docs', operand)).toBe(relative)
 })
+
+it.each([':/:/', ':/:/a.txt', ':/:/elsewhere/a'])(
+  'refuses rooted %j after the magic colon',
+  (operand) => {
+    expect(() => repoRelative(LOCATION, '/repo/docs', operand)).toThrow(OutsideRepositoryError)
+  },
+)
 
 it('keeps a colon in the path without magic', () => {
   expect(repoRelative(LOCATION, '/repo', ':/a.txt', false)).toBe(':/a.txt')

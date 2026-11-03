@@ -1252,6 +1252,18 @@ describe('git rm', () => {
     expect(await h.run('rm -f letters.txt')).toEqual([0, "rm 'letters.txt'\n", ''])
   })
 
+  it('reads nothing a rooted path after top magic names', async () => {
+    const h = await harness()
+    const config = await h.read('/repo/.git/config')
+    const oid = execFileSync('git', ['hash-object', '--stdin'], {
+      input: config ?? new Uint8Array(),
+      encoding: 'utf8',
+    }).trim()
+    const [code, out, err] = await h.run("add -- ':/:/repo/.git/config'")
+    expect([code, out, err.includes('is outside repository')]).toEqual([128, '', true])
+    expect((await h.run(`cat-file -e ${oid}`))[0]).not.toBe(0)
+  })
+
   it('refuses an unknown path and a missing pathspec', async () => {
     const h = await harness()
     expect(await h.run('rm nosuch')).toEqual([
@@ -1259,11 +1271,12 @@ describe('git rm', () => {
       '',
       "fatal: pathspec 'nosuch' did not match any files\n",
     ])
-    expect(await h.run("rm -r -- ':/:/'")).toEqual([
-      128,
-      '',
-      "fatal: pathspec ':/:/' did not match any files\n",
-    ])
+    const [rmCode, rmOut, rmErr] = await h.run("rm -r -- ':/:/'")
+    expect([
+      rmCode,
+      rmOut,
+      rmErr.startsWith("fatal: :/:/: ':/:/' is outside repository at "),
+    ]).toEqual([128, '', true])
     expect((await h.run('ls-files'))[1]).toBe('docs/readme.md\nletters.txt\nnumbers.txt\n')
     expect(await h.run('rm')).toEqual([
       128,
