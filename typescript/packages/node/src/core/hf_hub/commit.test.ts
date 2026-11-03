@@ -13,10 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
-import * as client from './client.ts'
+import * as client from '@struktoai/mirage-core/core/hf_hub/client'
 import { handle } from '../../../tests/core/hf_hub/_test_util.ts'
-import { COMMIT_CHUNK } from './constants.ts'
-import { LfsRequiredError, commit, commitUrl, payload, preupload } from './commit.ts'
+import { COMMIT_CHUNK } from '@struktoai/mirage-core/core/hf_hub/constants'
+import {
+  LfsRequiredError,
+  commit,
+  commitUrl,
+  payload,
+  preupload,
+} from '@struktoai/mirage-core/core/hf_hub/commit'
 
 function lines(raw: Uint8Array): Record<string, unknown>[] {
   return new TextDecoder()

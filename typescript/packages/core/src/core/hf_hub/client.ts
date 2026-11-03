@@ -1,0 +1,345 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import { apiRequest, apiStream } from '../api/client.ts'
+import type { HfAccountAccessor } from '../../accessor/hf_hub.ts'
+import type { ApiResponse, RetryPolicy } from '../api/client.ts'
+import type { ByteWindow } from '../../utils/ranges.ts'
+import { API_SEGMENTS, MAX_RETRIES, RESOLVE_SEGMENTS, RETRY_STATUSES } from './constants.ts'
+import { lstripSlash, rstripSlash } from '../../utils/slash.ts'
+import { ApiError } from '../api/errors.ts'
+
+export const RETRY: RetryPolicy = {
+  statuses: RETRY_STATUSES,
+  maxRetries: MAX_RETRIES,
+  maxBackoff: 30,
+  delaySource: 'header',
+  retryTransport: true,
+}
+
+// A write (a commit, a repository or a tag) retries only the statuses the
+// Hub answers before it acts. A dropped connection may come after the write
+// landed, and a resent commit would land twice.
+export const WRITE_RETRY: RetryPolicy = { ...RETRY, retryTransport: false }
+
+/** A Hub call that answered with a status the caller cannot use. */
+export class HfHubError extends ApiError {
+  declare readonly status: number
+  readonly errorCode: string
+
+  constructor(message: string, status: number, errorCode = '') {
+    super(message, status)
+    this.name = 'HfHubError'
+    this.errorCode = errorCode
+  }
+}
+
+/**
+ * A request that never reached the Hub: the connection was refused, reset or
+ * could not be resolved.
+ *
+ * undici rejects these as `TypeError: fetch failed`, the same class a
+ * programming error throws, so a caller that keeps the two apart (the
+ * freshness gate, the read probe) would take an outage for a bug and fail
+ * the whole line. The message is kept, since the executor renders it, and
+ * the original rejection rides along as `cause`. Python's aiohttp raises a
+ * `ClientError` here of its own.
+ */
+export class HfHubConnectionError extends Error {
+  constructor(cause: TypeError) {
+    super(cause.message, { cause })
+    this.name = 'HfHubConnectionError'
+  }
+}
+
+/**
+ * The fetch every Hub call rides, with a transport failure renamed.
+ *
+ * Only a `TypeError` is a transport failure; an abort, including the
+ * stall bound's `TimeoutError`, passes through as it was. The global is read
+ * per call, not captured, so a stubbed fetch is the one used.
+ */
+export const hubFetch: typeof fetch = async (input, init) => {
+  try {
+    return await fetch(input, init)
+  } catch (err) {
+    if (err instanceof TypeError) throw new HfHubConnectionError(err)
+    throw err
+  }
+}
+
+/**
+ * Auth and accept headers for one Hub call.
+ *
+ * An anonymous call is a first-class case here, unlike GitHub's: the Hub
+ * serves every public repo without a token, so a mount with no credential
+ * reads normally and only the write path needs one.
+ */
+export function hubHeaders(token: string | undefined): Record<string, string> {
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (token !== undefined && token !== '') headers.Authorization = `Bearer ${token}`
+  return headers
+}
+
+/** The /api URL for one repository-scoped endpoint. */
+export function apiUrl(endpoint: string, repoType: string, repoId: string, suffix: string): string {
+  const segment = API_SEGMENTS[repoType] ?? 'models'
+  return `${rstripSlash(endpoint)}/api/${segment}/${repoId}${suffix}`
+}
+
+/**
+ * The content URL for one file at one revision.
+ *
+ * The path is percent-encoded per segment: a Hub repo may hold a file whose
+ * name carries a space or a "#", and pasting it raw truncates the URL at the
+ * fragment.
+ */
+/**
+ * The web URL of a repository, which is what the CLI echoes.
+ *
+ * A model sits at the origin root and the other two kinds sit under a
+ * plural segment, the same split `resolveUrl` walks.
+ */
+/**
+ * One revision, encoded as a single URL path segment.
+ *
+ * A git ref may hold a slash (`feature/foo`, `refs/pr/1`), and every Hub
+ * route reads the segment after the verb as the whole revision, so an
+ * unencoded one splits: `/tree/feature/foo` names revision `feature` and
+ * subtree `foo`. The extra replace is what makes this identical to
+ * python's `quote(revision, safe="")`, which encodes the four characters
+ * `encodeURIComponent` leaves alone.
+ */
+export function revSegment(revision: string): string {
+  return encodeURIComponent(revision).replace(
+    /[!'()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+  )
+}
+
+export function repoUrl(endpoint: string, repoType: string, repoId: string): string {
+  const segment = RESOLVE_SEGMENTS[repoType] ?? ''
+  const base = `${rstripSlash(endpoint)}/${segment === '' ? '' : `${segment}/`}`
+  return `${base}${repoId}`
+}
+
+export function resolveUrl(
+  endpoint: string,
+  repoType: string,
+  repoId: string,
+  revision: string,
+  path: string,
+): string {
+  const segment = RESOLVE_SEGMENTS[repoType] ?? ''
+  const base = `${rstripSlash(endpoint)}/${segment === '' ? '' : `${segment}/`}`
+  return `${base}${repoId}/resolve/${revSegment(revision)}/${quotePath(path)}`
+}
+
+/**
+ * A repo-relative path percent-encoded per segment, with no leading slash.
+ *
+ * A Hub repo or bucket may hold a file whose name carries a space or a "#",
+ * and pasting it raw truncates the URL at the fragment.
+ */
+export function quotePath(path: string): string {
+  return lstripSlash(path)
+    .split('/')
+    .map((part) => encodeURIComponent(part))
+    .join('/')
+}
+
+/**
+ * Map a failing Hub response to the backend's own error.
+ *
+ * The Hub reports its reason in an `X-Error-Message` header as well as in the
+ * body, and the header is the one that survives a HEAD, so it is preferred.
+ */
+export function errorOf(response: Response, text: string): Error {
+  const header = response.headers.get('X-Error-Message')
+  const message = header ?? text.trim()
+  const fallback = response.statusText === '' ? 'request failed' : response.statusText
+  return new HfHubError(
+    message === '' ? fallback : message,
+    response.status,
+    response.headers.get('X-Error-Code') ?? '',
+  )
+}
+
+export async function hubGet(
+  account: HfAccountAccessor,
+  url: string,
+  params?: Record<string, string>,
+): Promise<unknown> {
+  return apiRequest('GET', url, {
+    errorOf,
+    headers: hubHeaders(account.token),
+    params,
+    retry: RETRY,
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
+  })
+}
+
+/** One GET retaining status and headers, which tree pagination reads. */
+export async function hubGetResponse(
+  account: HfAccountAccessor,
+  url: string,
+  params?: Record<string, string>,
+): Promise<ApiResponse> {
+  return (await apiRequest('GET', url, {
+    errorOf,
+    headers: hubHeaders(account.token),
+    params,
+    retry: RETRY,
+    read: 'response',
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
+  })) as ApiResponse
+}
+
+/** One JSON POST; `retry` is RETRY for a POST that only reads (paths-info,
+ * preupload) and WRITE_RETRY for one that changes the Hub. */
+export async function hubPost(
+  account: HfAccountAccessor,
+  url: string,
+  body: unknown,
+  params?: Record<string, string>,
+  retry: RetryPolicy = RETRY,
+): Promise<unknown> {
+  // fetch labels an untyped string body text/plain, and the Hub answers a
+  // paths-info body without a JSON type with 400; python's aiohttp sets it.
+  return apiRequest('POST', url, {
+    errorOf,
+    headers: { ...hubHeaders(account.token), 'Content-Type': 'application/json' },
+    params,
+    json: body,
+    retry,
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
+  })
+}
+
+/** One arbitrary JSON call, for the endpoints that are not GET or POST. */
+export async function hubRequest(
+  account: HfAccountAccessor,
+  method: string,
+  url: string,
+  body: unknown,
+  params?: Record<string, string>,
+): Promise<unknown> {
+  const options: Parameters<typeof apiRequest>[2] = {
+    errorOf,
+    headers: hubHeaders(account.token),
+    params,
+    retry: WRITE_RETRY,
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
+  }
+  if (body !== null && body !== undefined) options.json = body
+  return apiRequest(method.toUpperCase(), url, options)
+}
+
+/** One newline-delimited-JSON POST, which is the commit endpoint's shape. */
+export async function hubPostNdjson(
+  account: HfAccountAccessor,
+  url: string,
+  payload: Uint8Array<ArrayBuffer>,
+  params?: Record<string, string>,
+): Promise<unknown> {
+  return apiRequest('POST', url, {
+    errorOf,
+    headers: { ...hubHeaders(account.token), 'Content-Type': 'application/x-ndjson' },
+    params,
+    body: payload,
+    retry: WRITE_RETRY,
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
+  })
+}
+
+/**
+ * Fetch file content, optionally a byte window of it.
+ *
+ * `/resolve` answers a redirect to the CDN and fetch follows it, carrying the
+ * Range along, so a window costs no extra round trip.
+ */
+export async function hubBytes(
+  account: HfAccountAccessor,
+  url: string,
+  window?: ByteWindow,
+): Promise<Uint8Array> {
+  return (await apiRequest('GET', url, {
+    errorOf,
+    headers: hubHeaders(account.token),
+    retry: RETRY,
+    read: 'bytes',
+    window,
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
+  })) as Uint8Array
+}
+
+/**
+ * Fetch file content together with the ETag the bytes came with.
+ *
+ * The ETag is the final response's, after the redirect to the CDN: the first
+ * hop answers for the LFS object, the last one for the bytes actually served,
+ * which is the only one that can vouch for them. The ETag is `''` when none.
+ */
+export async function hubBytesTagged(
+  account: HfAccountAccessor,
+  url: string,
+  window?: ByteWindow,
+): Promise<[Uint8Array, string]> {
+  const response = (await apiRequest('GET', url, {
+    errorOf,
+    headers: hubHeaders(account.token),
+    retry: RETRY,
+    read: 'bytes_response',
+    window,
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
+  })) as ApiResponse
+  return [response.data as Uint8Array, response.headers.etag ?? '']
+}
+
+/** An ETag header's value, without the weak marker or the quotes. */
+export function etagValue(raw: string): string {
+  let value = raw.trim()
+  if (value.startsWith('W/')) value = value.slice(2)
+  return value.replace(/^"+|"+$/g, '')
+}
+
+/**
+ * Stream file content without holding it whole in memory.
+ *
+ * Routed through `apiStream`, which retries opening the response under RETRY
+ * and never once a chunk has reached the caller. `onResponse` is told the
+ * final response's headers, lower-cased, once and before the first chunk, so
+ * an empty file reports them too.
+ */
+export async function* hubStream(
+  account: HfAccountAccessor,
+  url: string,
+  onResponse?: (headers: Record<string, string>) => void,
+): AsyncIterable<Uint8Array> {
+  yield* apiStream(url, {
+    errorOf,
+    headers: hubHeaders(account.token),
+    fetchFn: hubFetch,
+    timeout: account.config.timeout,
+    retry: RETRY,
+    ...(onResponse === undefined ? {} : { onResponse }),
+  })
+}

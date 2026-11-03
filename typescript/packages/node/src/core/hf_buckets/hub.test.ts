@@ -15,7 +15,7 @@
 import { PathSpec } from '@struktoai/mirage-core/types'
 import { describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { HfHubError } from '../hf_hub/client.ts'
+import { HfHubError } from '@struktoai/mirage-core/core/hf_hub/client'
 import {
   FakeHub,
   INVALID_PATHS,

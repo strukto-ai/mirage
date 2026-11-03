@@ -14,9 +14,9 @@
 
 import type { DirListing } from '@struktoai/mirage-core/types'
 import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import * as client from './client.ts'
-import * as repo from './repo.ts'
-import { readdir } from './readdir.ts'
+import * as client from '@struktoai/mirage-core/core/hf_hub/client'
+import * as repo from '@struktoai/mirage-core/core/hf_hub/repo'
+import { readdir } from '@struktoai/mirage-core/core/hf_hub/readdir'
 import { codeOf, ps, walking } from '../../../tests/core/hf_hub/_test_util.ts'
 
 function names(listing: DirListing): string[] {

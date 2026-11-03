@@ -17,7 +17,7 @@ import { RAMFileCacheStore } from '@struktoai/mirage-core/cache/file/ram'
 import type { Evicted } from '@struktoai/mirage-core/cache/index/config'
 import { RAMIndexCacheStore } from '@struktoai/mirage-core/cache/index/ram'
 import { IndexView } from '@struktoai/mirage-core/cache/index/view'
-import { HfHubError } from './client.ts'
+import { HfHubError } from '@struktoai/mirage-core/core/hf_hub/client'
 import {
   collect,
   deletionsFor,
@@ -30,13 +30,13 @@ import {
   rowOf,
   treeRows,
   treeUrl,
-} from './tree.ts'
-import { readdir } from './readdir.ts'
+} from '@struktoai/mirage-core/core/hf_hub/tree'
+import { readdir } from '@struktoai/mirage-core/core/hf_hub/readdir'
 import { FileType, PathSpec } from '@struktoai/mirage-core/types'
 import { keepListing } from '@struktoai/mirage-core/workspace/mount/listing'
-import * as client from './client.ts'
-import * as repo from './repo.ts'
-import type { TreeEntry } from './tree_entry.ts'
+import * as client from '@struktoai/mirage-core/core/hf_hub/client'
+import * as repo from '@struktoai/mirage-core/core/hf_hub/repo'
+import type { TreeEntry } from '@struktoai/mirage-core/core/hf_hub/tree_entry'
 import { handle } from '../../../tests/core/hf_hub/_test_util.ts'
 
 // Every accessor here points at the real Hub, so the head a refill asks for

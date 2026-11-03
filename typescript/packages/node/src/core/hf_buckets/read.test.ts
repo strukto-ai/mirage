@@ -17,7 +17,7 @@ import { PathSpec } from '@struktoai/mirage-core/types'
 import { mountKey } from '@struktoai/mirage-core/utils/key_prefix'
 import { describe, expect, it } from 'vitest'
 import { HfBucketsAccessor } from '../../accessor/hf_buckets.ts'
-import { HfHubError } from '../hf_hub/client.ts'
+import { HfHubError } from '@struktoai/mirage-core/core/hf_hub/client'
 import { type FakeHub, NO_ETAG, xetHash } from '../../../tests/core/hf_hub/_test_util.ts'
 import {
   type FakeHfOperator,

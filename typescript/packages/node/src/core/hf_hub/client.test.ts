@@ -34,10 +34,10 @@ import {
   hubStream,
   resolveUrl,
   revSegment,
-} from './client.ts'
+} from '@struktoai/mirage-core/core/hf_hub/client'
 import { stallTimeout } from '@struktoai/mirage-core/core/api/client'
-import { HfAccountAccessor } from '../../accessor/hf_hub.ts'
-import { MAX_RETRIES } from './constants.ts'
+import { HfAccountAccessor } from '@struktoai/mirage-core/accessor/hf_hub'
+import { MAX_RETRIES } from '@struktoai/mirage-core/core/hf_hub/constants'
 
 /** An anonymous account whose requests give up after `timeout` seconds without progress. */
 function anonymous(timeout?: number): HfAccountAccessor {

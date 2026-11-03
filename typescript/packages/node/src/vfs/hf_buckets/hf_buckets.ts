@@ -30,8 +30,12 @@ import { stat as hfStat } from '../../core/hf_buckets/stat.ts'
 import { readStream as hfStream } from '../../core/hf_buckets/stream.ts'
 import { unlink as hfUnlink } from '../../core/hf_buckets/unlink.ts'
 import { write as hfWrite } from '../../core/hf_buckets/write.ts'
-import type { HfBucketsConfig } from './config.ts'
-import { assertHfRepoId, HF_ENDPOINT, redactHfBucketsConfig } from './config.ts'
+import type { HfBucketsConfig } from '@struktoai/mirage-core/vfs/hf_buckets/config'
+import {
+  assertHfRepoId,
+  HF_ENDPOINT,
+  redactHfBucketsConfig,
+} from '@struktoai/mirage-core/vfs/hf_buckets/config'
 
 export class HfBucketsVFS extends BaseVFS {
   override readonly name: string = VFSName.HF_BUCKETS
