@@ -1,15 +1,15 @@
-from opendal.exceptions import NotFound
-
 from mirage.accessor.nextcloud import NextcloudAccessor
-from mirage.core.nextcloud.util import nextcloud_key
-from mirage.errors.fs import enoent
+from mirage.core.nextcloud.fence import remove
 from mirage.types import PathSpec
 
 
 async def rm_r(accessor: NextcloudAccessor, path: PathSpec) -> None:
-    key = nextcloud_key(path).rstrip("/") + "/"
-    op = accessor.operator()
-    try:
-        await op.remove_all(key)
-    except NotFound as exc:
-        raise enoent(path) from exc
+    """Remove a subtree in one DELETE that the server refuses once
+    anything below has changed since the survey (:func:`remove`): what
+    changed stays, and the call raises ENOTEMPTY.
+
+    Args:
+        accessor (NextcloudAccessor): Nextcloud accessor.
+        path (PathSpec): the subtree's root.
+    """
+    await remove(accessor, path, empty=False)

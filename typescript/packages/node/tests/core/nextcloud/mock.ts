@@ -73,17 +73,6 @@ export class FakeNextcloudOperator {
     return Promise.resolve()
   }
 
-  removeAll(prefix: string): Promise<void> {
-    const stem = rstripSlash(prefix)
-    for (const key of [...this.files.keys()]) {
-      if (key === stem || key.startsWith(`${stem}/`)) this.files.delete(key)
-    }
-    for (const key of [...this.directories]) {
-      if (key === `${stem}/` || key.startsWith(`${stem}/`)) this.directories.delete(key)
-    }
-    return Promise.resolve()
-  }
-
   private hasDirectory(key: string): boolean {
     const prefix = key === '' ? '' : key.endsWith('/') ? key : `${key}/`
     if (prefix === '' || this.directories.has(prefix)) return true
@@ -167,4 +156,93 @@ export function answering(
   )
   vi.stubGlobal('fetch', fetchMock)
   return fetchMock
+}
+
+const HREF = '/remote.php/dav/files/user'
+
+function whole(ms: number): number {
+  return Math.floor(ms / 1000) * 1000
+}
+
+/**
+ * One Nextcloud folder as a fenced removal sees it: its children, a modified
+ * time in whole seconds that every arrival moves to the server's clock, and
+ * `If-Unmodified-Since` honoured on DELETE. Mirrors Python's `FakeFolder`.
+ */
+export class FakeFolder {
+  children: string[]
+  clock = Date.UTC(2026, 10, 2, 12, 0, 0)
+  modified: number
+  exists = true
+  settable = true
+  locked = false
+  busy = false
+  calls: { method: string; url: string; headers: Record<string, string> }[] = []
+  before = new Map<string, () => void>()
+
+  constructor(
+    readonly name: string,
+    children: string[] = [],
+    age = 60_000,
+  ) {
+    this.children = children
+    this.modified = whole(this.clock - age)
+  }
+
+  arrive(child: string): void {
+    this.children.push(child)
+    this.modified = whole(this.clock)
+  }
+
+  answer(status: number, body: string | null = null): Response {
+    return new Response(body, { status, headers: { Date: new Date(this.clock).toUTCString() } })
+  }
+
+  listing(depth: string): string {
+    const own = `${HREF}/${encodeURIComponent(this.name)}/`
+    const rows = [
+      `<d:response><d:href>${own}</d:href><d:propstat><d:prop>` +
+        `<d:getlastmodified>${new Date(this.modified).toUTCString()}</d:getlastmodified></d:prop>` +
+        '<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>',
+      ...(depth === '1' ? this.children : []).map(
+        (c) => `<d:response><d:href>${own}${encodeURIComponent(c)}</d:href></d:response>`,
+      ),
+    ]
+    return `<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">${rows.join('')}</d:multistatus>`
+  }
+
+  fetch = (url: string, init: RequestInit): Promise<Response> => {
+    const method = init.method ?? 'GET'
+    const headers = { ...(init.headers as Record<string, string>) }
+    this.calls.push({ method, url, headers })
+    this.clock += 300
+    const hook = this.before.get(method)
+    if (hook !== undefined) {
+      this.before.delete(method)
+      hook()
+    }
+    return Promise.resolve(this.respond(method, headers, init.body))
+  }
+
+  respond(method: string, headers: Record<string, string>, body: unknown): Response {
+    if (!this.exists) return this.answer(404)
+    if (method === 'PROPFIND') {
+      if (this.busy) this.modified = whole(this.clock)
+      return this.answer(207, this.listing(headers.Depth ?? ''))
+    }
+    if (method === 'PROPPATCH') {
+      if (!this.settable) return this.answer(207, multistatus('403 Forbidden', '<d:lastmodified/>'))
+      const seconds = /<d:lastmodified>(\d+)</.exec(String(body))
+      this.modified = Number(seconds?.[1]) * 1000
+      return this.answer(207, multistatus('200 OK', '<d:lastmodified/>'))
+    }
+    if (this.locked) return this.answer(423)
+    if (this.modified > Date.parse(headers['If-Unmodified-Since'] ?? '')) return this.answer(412)
+    this.exists = false
+    return this.answer(204)
+  }
+
+  methods(): string[] {
+    return this.calls.map((call) => call.method)
+  }
 }

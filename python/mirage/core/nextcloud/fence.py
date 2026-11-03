@@ -1,0 +1,160 @@
+from asyncio import sleep
+from datetime import datetime, timedelta
+from email.utils import format_datetime, parsedate_to_datetime
+from http import HTTPStatus
+from urllib.parse import unquote, urlsplit
+from xml.etree import ElementTree
+
+from mirage.accessor.nextcloud import NextcloudAccessor
+from mirage.core.nextcloud.dav import answered, dav_request, dav_url
+from mirage.core.nextcloud.search.xml import dav
+from mirage.core.nextcloud.set_attrs import mtime_patch
+from mirage.errors.fs import eacces, ebusy, enoent, enotempty, fs_error
+from mirage.errors.types import FsCondition
+from mirage.types import PathSpec
+
+SURVEY = (
+    b'<?xml version="1.0" encoding="utf-8"?>'
+    b'<d:propfind xmlns:d="DAV:"><d:prop><d:getlastmodified/></d:prop>'
+    b"</d:propfind>"
+)
+FENCE = timedelta(seconds=2)
+ATTEMPTS = 4
+
+
+def failure(path: PathSpec, status: int) -> OSError:
+    """The error for a status that ends a removal.
+
+    Args:
+        path (PathSpec): the collection.
+        status (int): the HTTP status.
+    """
+    if status == HTTPStatus.NOT_FOUND:
+        return enoent(path)
+    if status == HTTPStatus.FORBIDDEN:
+        return eacces(path)
+    if status == HTTPStatus.LOCKED:
+        return ebusy(path)
+    return fs_error(path, FsCondition.EIO)
+
+
+async def survey(
+    accessor: NextcloudAccessor, path: PathSpec, depth: str
+) -> tuple[bool, datetime, datetime]:
+    """Whether a collection lists a child, when it last changed and the
+    server's clock, from one PROPFIND.
+
+    Args:
+        accessor (NextcloudAccessor): Nextcloud accessor.
+        path (PathSpec): the collection.
+        depth (str): ``"1"`` to list its children, ``"0"`` for the
+            collection alone.
+    """
+    url = dav_url(accessor, path, folder=True)
+    response = await dav_request(
+        accessor,
+        "PROPFIND",
+        url,
+        headers={"Depth": depth, "Content-Type": "application/xml"},
+        content=SURVEY,
+    )
+    if response.status_code != HTTPStatus.MULTI_STATUS:
+        raise failure(path, response.status_code)
+    own = unquote(urlsplit(url).path).rstrip("/")
+    child = False
+    modified = None
+    for entry in ElementTree.fromstring(response.content).iter(
+        dav("response")
+    ):
+        if unquote(entry.findtext(dav("href"), "")).rstrip("/") != own:
+            child = True
+        else:
+            modified = answered(entry, "getlastmodified")
+    if modified is None or "Date" not in response.headers:
+        raise fs_error(path, FsCondition.EIO)
+    return (
+        child,
+        parsedate_to_datetime(modified),
+        parsedate_to_datetime(response.headers["Date"]),
+    )
+
+
+async def settle(
+    accessor: NextcloudAccessor, path: PathSpec, now: datetime
+) -> None:
+    """Move a collection's modified time out of the fence: set it
+    ``FENCE`` back from the server's clock, or wait ``FENCE`` out where
+    the server will not set it.
+
+    Args:
+        accessor (NextcloudAccessor): Nextcloud accessor.
+        path (PathSpec): the collection.
+        now (datetime): the server's clock at the last survey.
+    """
+    response = await dav_request(
+        accessor,
+        "PROPPATCH",
+        dav_url(accessor, path, folder=True),
+        headers={"Content-Type": "application/xml"},
+        content=mtime_patch(int((now - FENCE).timestamp())),
+    )
+    if (
+        response.status_code != HTTPStatus.MULTI_STATUS
+        or answered(ElementTree.fromstring(response.content), "lastmodified")
+        is None
+    ):
+        await sleep(FENCE.total_seconds())
+
+
+async def remove(
+    accessor: NextcloudAccessor, path: PathSpec, *, empty: bool
+) -> None:
+    """Delete a collection only as the survey before the DELETE saw it.
+
+    WebDAV DELETE on a collection is recursive (RFC 4918 9.6.1), so a
+    survey followed by a plain DELETE destroys what another client adds
+    in between. Nextcloud never matches a collection's ETag, but every
+    change below it (PUT, MKCOL, MOVE, COPY, DELETE, at any depth) sets
+    the collection's modified time to the server's current second, and
+    ``If-Unmodified-Since`` is honoured on a collection. So the DELETE
+    carries the modified time the survey saw and the server refuses it
+    with 412 once anything has changed. An empty-only removal then
+    surveys again, since its survey lists the children; a subtree
+    removal never listed what changed, so it keeps it and raises
+    ENOTEMPTY.
+
+    Times are whole seconds, so a change landing in the second the
+    collection last changed would not move it. The fence needs the
+    collection unchanged for ``FENCE`` by the server's clock; a younger
+    or future-dated one is settled first (:func:`settle`). A collection
+    that keeps changing for ``ATTEMPTS`` surveys is busy.
+
+    Args:
+        accessor (NextcloudAccessor): Nextcloud accessor.
+        path (PathSpec): the collection.
+        empty (bool): refuse a collection holding a child with
+            ENOTEMPTY, as rmdir does; otherwise take the whole subtree as
+            the survey saw it.
+    """
+    for _ in range(ATTEMPTS):
+        child, modified, now = await survey(
+            accessor, path, "1" if empty else "0"
+        )
+        if child:
+            raise enotempty(path)
+        if now - modified < FENCE:
+            await settle(accessor, path, now)
+            continue
+        response = await dav_request(
+            accessor,
+            "DELETE",
+            dav_url(accessor, path, folder=True),
+            headers={"If-Unmodified-Since": format_datetime(modified, True)},
+        )
+        if response.is_success:
+            return
+        if response.status_code != HTTPStatus.PRECONDITION_FAILED:
+            raise failure(path, response.status_code)
+        if not empty:
+            raise enotempty(path)
+    raise ebusy(path)

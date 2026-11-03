@@ -1,16 +1,12 @@
 import type { PathSpec } from '@struktoai/mirage-core/types'
-import { enoent } from '@struktoai/mirage-core/errors/fs'
-import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { NextcloudAccessor } from '../../accessor/nextcloud.ts'
-import { isNotFound, nextcloudKey } from './util.ts'
+import { remove } from './fence.ts'
 
+/**
+ * Remove a subtree in one DELETE that the server refuses once anything below
+ * has changed since the survey (`remove`): what changed stays, and the call
+ * throws ENOTEMPTY. Mirrors Python's `rm_r`.
+ */
 export async function rmR(accessor: NextcloudAccessor, path: PathSpec): Promise<void> {
-  const key = `${rstripSlash(nextcloudKey(path))}/`
-  const op = await accessor.operator()
-  try {
-    await op.removeAll(key)
-  } catch (error) {
-    if (isNotFound(error)) throw enoent(path)
-    throw error
-  }
+  await remove(accessor, path, false)
 }

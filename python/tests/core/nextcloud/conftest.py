@@ -1,7 +1,11 @@
+import re
+from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime, parsedate_to_datetime
 from unittest.mock import AsyncMock, patch
+from urllib.parse import quote
 
 import httpx
 import pytest
@@ -134,14 +138,6 @@ class FakeAsyncOperator:
             raise NotFound("path not found", src)
         await self.write(dst, self.files[src])
         await self.delete(src)
-
-    async def remove_all(self, prefix: str) -> None:
-        pfx = prefix.rstrip("/")
-        for f in [
-            f for f in self.files if f == pfx or f.startswith(pfx + "/")
-        ]:
-            self.files.pop(f, None)
-            self.metas.pop(f, None)
 
     async def list(self, path: str, recursive: bool = False):
         pfx = path.lstrip("/")
@@ -284,3 +280,122 @@ def answering(
             status, content=body, request=httpx.Request("GET", ROOT)
         ),
     )
+
+
+HREF = "/remote.php/dav/files/user"
+
+
+class FakeFolder:
+    """One Nextcloud folder as a fenced removal sees it: its children,
+    a modified time in whole seconds that every arrival moves to the
+    server's clock, and ``If-Unmodified-Since`` honoured on DELETE."""
+
+    def __init__(
+        self,
+        name: str,
+        children: tuple[str, ...] = (),
+        age: float = 60,
+        exists: bool = True,
+        settable: bool = True,
+    ) -> None:
+        self.name = name
+        self.children = list(children)
+        self.clock = datetime(2026, 11, 2, 12, 0, 0, tzinfo=timezone.utc)
+        self.modified = (self.clock - timedelta(seconds=age)).replace(
+            microsecond=0
+        )
+        self.exists = exists
+        self.settable = settable
+        self.locked = False
+        self.busy = False
+        self.calls: list[tuple[str, str, dict[str, str]]] = []
+        self.before: dict[str, Callable[[], None]] = {}
+
+    def arrive(self, child: str) -> None:
+        self.children.append(child)
+        self.modified = self.clock.replace(microsecond=0)
+
+    def answer(self, status: int, body: bytes = b"") -> httpx.Response:
+        return httpx.Response(
+            status,
+            content=body,
+            headers={"Date": format_datetime(self.clock, True)},
+            request=httpx.Request("GET", ROOT),
+        )
+
+    def listing(self, depth: str) -> bytes:
+        own = f"{HREF}/{quote(self.name)}/"
+        stamp = format_datetime(self.modified, True)
+        rows = [
+            f"<d:response><d:href>{own}</d:href><d:propstat><d:prop>"
+            f"<d:getlastmodified>{stamp}</d:getlastmodified></d:prop>"
+            "<d:status>HTTP/1.1 200 OK</d:status></d:propstat></d:response>"
+        ]
+        if depth == "1":
+            rows += [
+                f"<d:response><d:href>{own}{quote(c)}</d:href></d:response>"
+                for c in self.children
+            ]
+        return (
+            '<?xml version="1.0"?><d:multistatus xmlns:d="DAV:">'
+            + "".join(rows)
+            + "</d:multistatus>"
+        ).encode()
+
+    async def __call__(
+        self,
+        accessor: NextcloudAccessor,
+        method: str,
+        url: str,
+        headers: dict[str, str] | None = None,
+        content: bytes | None = None,
+    ) -> httpx.Response:
+        headers = dict(headers or {})
+        self.calls.append((method, url, headers))
+        self.clock += timedelta(milliseconds=300)
+        if method in self.before:
+            self.before.pop(method)()
+        if not self.exists:
+            return self.answer(404)
+        if method == "PROPFIND":
+            if self.busy:
+                self.modified = self.clock.replace(microsecond=0)
+            return self.answer(207, self.listing(headers["Depth"]))
+        if method == "PROPPATCH":
+            if not self.settable:
+                return self.answer(
+                    207, multistatus("403 Forbidden", "<d:lastmodified/>")
+                )
+            seconds = re.search(rb"<d:lastmodified>(\d+)<", content or b"")
+            assert seconds is not None
+            self.modified = datetime.fromtimestamp(
+                int(seconds.group(1)), timezone.utc
+            )
+            return self.answer(207, multistatus("200 OK", "<d:lastmodified/>"))
+        if self.locked:
+            return self.answer(423)
+        since = parsedate_to_datetime(headers["If-Unmodified-Since"])
+        if self.modified > since:
+            return self.answer(412)
+        self.exists = False
+        return self.answer(204)
+
+    def methods(self) -> list[str]:
+        return [method for method, _, _ in self.calls]
+
+
+def removing(folder: FakeFolder) -> AbstractContextManager[FakeFolder]:
+    """Route the fence's requests to ``folder``.
+
+    Args:
+        folder (FakeFolder): the folder answering them.
+    """
+    return patch("mirage.core.nextcloud.fence.dav_request", new=folder)
+
+
+@pytest.fixture
+def waits():
+    with patch(
+        "mirage.core.nextcloud.fence.sleep", new_callable=AsyncMock
+    ) as wait:
+        yield wait
