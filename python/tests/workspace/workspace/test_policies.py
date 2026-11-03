@@ -1412,6 +1412,51 @@ async def test_recursive_commands_enforce_admitted_path_rules(
         await ws.close()
 
 
+class SealedRecursiveCache(Policy):
+    async def pre_vfs(self, ctx: VfsContext) -> Action | None:
+        if (
+            ctx.path.virtual == "/data/src/cache"
+            or ctx.path.virtual.startswith("/data/src/cache/")
+        ):
+            return Deny("sealed")
+        return None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "exit_code"),
+    [
+        ("find /data/src", 1),
+        ("du -a /data/src", 1),
+        ("du -s /data/src", 1),
+        ("grep -r PRIVATE_SENTINEL /data/src", 2),
+        ("rg PRIVATE_SENTINEL /data/src", 2),
+    ],
+)
+async def test_recursive_commands_enforce_coded_pre_vfs_policy(
+    command, exit_code
+):
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir -p /data/src/cache")
+        await ws.vfs.write(
+            "/data/src/cache/private.txt", b"PRIVATE_SENTINEL\n"
+        )
+        await ws.vfs.write("/data/src/public.txt", b"public\n")
+        ws.create_session("restricted")
+        ws.policies.add(SealedRecursiveCache())
+
+        result = await ws.shell(command, session_id="restricted")
+
+        assert result.exit_code == exit_code
+        assert b"private.txt" not in (result.stdout or b"")
+        assert b"PRIVATE_SENTINEL" not in (result.stdout or b"")
+        assert b"/data/src/cache" in result.stderr
+        assert b"Permission denied" in result.stderr
+    finally:
+        await ws.close()
+
+
 class AskSecrets(Policy):
     async def pre_session(self, ctx: SessionContext) -> Action | None:
         return Ask("secret write") if ctx.key.startswith("SECRET") else None
