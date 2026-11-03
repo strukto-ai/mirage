@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.observe import OpRecord
-from mirage.observe.record import RecordIndex
+from mirage.observe.record import OpStatus, RecordIndex
 from mirage.workspace.types import ExecutionNode
 
 
@@ -196,8 +196,6 @@ def test_the_index_reads_each_record_once():
 
 
 def test_failed_mutation_preserves_the_read_version():
-    from mirage.observe.record import OpStatus
-
     read = _op("read", "/a")
     failed = OpRecord(
         "unlink", "/a", "ram", 0, 1, 0, status=OpStatus.FAILED, errno=13

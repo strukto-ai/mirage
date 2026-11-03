@@ -27,6 +27,7 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.context import reset_current_session, set_current_session
 from mirage.io import IOResult
 from mirage.io.types import materialize
+from mirage.observe.context import RecordingScope
 from mirage.policy import (
     Action,
     Deny,
@@ -1265,8 +1266,6 @@ async def test_failed_removal_drops_the_warm_read_and_records_its_failure(
 
 @pytest.mark.asyncio
 async def test_dispatch_records_a_default_mutation_once():
-    from mirage.observe.context import RecordingScope
-
     ws = Workspace({"/m": RAMVFS()}, mode=MountMode.WRITE)
     try:
         await ws.vfs.write("/m/a", b"x")

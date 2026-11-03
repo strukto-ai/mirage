@@ -16,6 +16,7 @@ import json
 
 from mirage.observe import LogEntry, OpRecord
 from mirage.observe.log_entry import EVENT_COMMAND
+from mirage.observe.record import OpServed, OpStatus
 
 
 def test_from_op_record():
@@ -110,8 +111,6 @@ def test_log_entry_omits_cwd_when_not_provided():
 
 
 def test_vfs_entry_serializes_the_operation_outcome():
-    from mirage.observe.record import OpServed, OpStatus
-
     rec = OpRecord(
         "unlink",
         "/m/a",

@@ -24,6 +24,7 @@ from mirage.observe.record import (
     STAMP_FINGERPRINT_OPS,
     SUBTREE_RETRACT_OPS,
     OpRecord,
+    OpStatus,
 )
 from mirage.types import FileStat, FileType
 from mirage.workspace.snapshot.drift import capture_fingerprints, check_drift
@@ -458,8 +459,6 @@ def test_a_drift_check_offers_no_hints():
 
 
 def test_failed_mutation_does_not_drop_a_snapshot_pin():
-    from mirage.observe.record import OpStatus
-
     read = _rec("read", "/s3/a", "v1")
     failed = _rec("unlink", "/s3/a")
     failed.status = OpStatus.FAILED

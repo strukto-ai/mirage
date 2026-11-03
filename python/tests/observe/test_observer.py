@@ -22,6 +22,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
+from opentelemetry.trace import StatusCode
 
 from mirage.io import IOResult
 from mirage.observe import OpRecord
@@ -29,6 +30,7 @@ from mirage.observe import observer as observer_module
 from mirage.observe.disk_store import DiskObserverStore
 from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
 from mirage.observe.observer import Observer
+from mirage.observe.record import OpServed, OpStatus
 from mirage.observe.store import RAMObserverStore
 from mirage.utils.clock import ManualClock
 
@@ -503,10 +505,6 @@ def test_bash_history_lists_lines_in_the_order_they_ended():
 def test_failed_and_partial_child_spans_export_the_outcome(
     monkeypatch, status, changed
 ):
-    from opentelemetry.trace import StatusCode
-
-    from mirage.observe.record import OpServed, OpStatus
-
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))

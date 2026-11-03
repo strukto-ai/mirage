@@ -14,6 +14,7 @@
 
 import errno
 import os
+import shutil
 
 import pytest
 
@@ -150,17 +151,12 @@ async def test_copy_never_leaks_the_host_path(accessor):
 async def test_copy_records_partial_after_bytes_were_written(
     accessor, monkeypatch
 ):
-    import errno
-
-    from mirage.core.disk import copy as module
-    from mirage.observe.context import RecordingScope
-
     (accessor.root / "src").write_bytes(b"content")
 
     def fail_metadata(src, dst):
         raise OSError(errno.EACCES, "denied")
 
-    monkeypatch.setattr(module.shutil, "copystat", fail_metadata)
+    monkeypatch.setattr(shutil, "copystat", fail_metadata)
     scope = RecordingScope()
     try:
         with pytest.raises(OSError):
