@@ -29,6 +29,7 @@ import {
 import type { RepoRef } from '../../../../core/github/repo.ts'
 import type { JsonObject, PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
+import { IOResult } from '../../../../io/types.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import {
   bodyValue,
@@ -500,6 +501,42 @@ export async function closeCmd(
   return textOut(
     `✓ Closed pull request ${ref.owner}/${ref.repo}#${String(number)} (${textValue(edited.title)})\n`,
   )
+}
+
+export async function reopenCmd(
+  accessor: GitHubAccount,
+  _paths: PathSpec[],
+  texts: string[],
+  ctx: Context,
+): Promise<CommandFnResult> {
+  const fl = new FlagView(ctx.flags)
+  const [ref, number] = target(accessor, texts, fl)
+  const transport = accessor.transport
+  const row = pull(await getPull(transport, ref, number))
+  const name = `${ref.owner}/${ref.repo}#${String(number)} (${textValue(row.title)})`
+  if (row.merged === true) {
+    return [
+      null,
+      new IOResult({
+        exitCode: 1,
+        stderr: new TextEncoder().encode(
+          `X Pull request ${name} can't be reopened because it was already merged\n`,
+        ),
+      }),
+    ]
+  }
+  if (row.closed !== true) {
+    return [
+      new Uint8Array(0),
+      new IOResult({
+        stderr: new TextEncoder().encode(`! Pull request ${name} is already open\n`),
+      }),
+    ]
+  }
+  const comment = fl.asStr('comment')
+  if (comment !== undefined && comment !== '') await commentPull(transport, ref, number, comment)
+  await editPull(transport, ref, number, { state: 'open' })
+  return textOut(`✓ Reopened pull request ${name}\n`)
 }
 
 export async function commentCmd(

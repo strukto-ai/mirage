@@ -42,6 +42,10 @@ export class Terminal extends JobConsole {
   private prefixSize = 0
   private errPrefix = new Uint8Array()
   private errPrefixSize = 0
+  // The chunks at the head of `chunks` the line's history entries took,
+  // and the bytes of each channel they took in all.
+  private taken = 0
+  private marked: [number, number] = [0, 0]
 
   /** A bounded prefix of stdout handed to the current line's reader. */
   get stdoutPrefix(): Uint8Array {
@@ -106,6 +110,8 @@ export class Terminal extends JobConsole {
     this.prefixSize = 0
     this.errPrefix = reader === null ? new Uint8Array() : new Uint8Array(CHUNK_SIZE)
     this.errPrefixSize = 0
+    this.taken = 0
+    this.marked = [0, 0]
     if (reader === null) {
       this.reader = null
       return
@@ -126,6 +132,7 @@ export class Terminal extends JobConsole {
       let chunk = this.chunks.shift()
       while (chunk !== undefined) {
         this.held -= chunk[1].byteLength
+        this.taken = Math.max(0, this.taken - 1)
         this.remember(chunk[0], chunk[1])
         await reader.emit(chunk[0], chunk[1])
         if (this.ended !== ended) return
@@ -160,18 +167,53 @@ export class Terminal extends JobConsole {
     const chunks = this.chunks
     this.chunks = []
     this.held = 0
+    this.taken = 0
     const out = concat(chunks.filter(([c]) => c === Channel.STDOUT).map(([, data]) => data))
     const err = concat(chunks.filter(([c]) => c === Channel.STDERR).map(([, data]) => data))
     return [out, err]
   }
 
-  /** Return drained output ahead of whatever arrived meanwhile. */
+  /**
+   * What reached the terminal for one history entry of the line, since the
+   * entry before it: a line bash's reader reads as several commands
+   * records each with what it wrote. With a reader attached, what it was
+   * handed, its prefix starting again for the next.
+   */
+  entry(): [Uint8Array, Uint8Array] {
+    if (this.reader !== null) {
+      const shown: [Uint8Array, Uint8Array] = [this.stdoutPrefix.slice(), this.stderrPrefix.slice()]
+      this.prefixSize = 0
+      this.errPrefixSize = 0
+      return shown
+    }
+    const fresh = this.chunks.slice(this.taken)
+    this.taken = this.chunks.length
+    const out = concat(fresh.filter(([c]) => c === Channel.STDOUT).map(([, data]) => data))
+    const err = concat(fresh.filter(([c]) => c === Channel.STDERR).map(([, data]) => data))
+    this.marked = [this.marked[0] + out.byteLength, this.marked[1] + err.byteLength]
+    return [out, err]
+  }
+
+  /**
+   * Return drained output ahead of whatever arrived meanwhile, what the
+   * line's history entries took of it first.
+   */
   putBack(out: Uint8Array, err: Uint8Array): void {
-    const returned: [Channel, Uint8Array, boolean][] = []
-    if (out.byteLength > 0) returned.push([Channel.STDOUT, out, false])
-    if (err.byteLength > 0) returned.push([Channel.STDERR, err, false])
+    const from = Math.min(this.marked[0], out.byteLength)
+    const fromErr = Math.min(this.marked[1], err.byteLength)
+    const taken: [Channel, Uint8Array, boolean][] = [
+      [Channel.STDOUT, out.subarray(0, from), false],
+      [Channel.STDERR, err.subarray(0, fromErr), false],
+    ]
+    const rest: [Channel, Uint8Array, boolean][] = [
+      [Channel.STDOUT, out.subarray(from), false],
+      [Channel.STDERR, err.subarray(fromErr), false],
+    ]
+    const returned = [...taken, ...rest].filter(([, data]) => data.byteLength > 0)
     this.chunks = [...returned, ...this.chunks]
     this.held += out.byteLength + err.byteLength
+    this.taken = taken.filter(([, data]) => data.byteLength > 0).length
+    this.marked = [from, fromErr]
   }
 
   /** End a line: its stdout and stderr, jobs' output among them. */
@@ -194,6 +236,8 @@ export class Terminal extends JobConsole {
     this.prefixSize = 0
     this.errPrefix = new Uint8Array()
     this.errPrefixSize = 0
+    this.taken = 0
+    this.marked = [0, 0]
     this.ended += 1
     this.attaching = null
     this.attached()

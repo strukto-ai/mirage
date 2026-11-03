@@ -9,6 +9,7 @@ from mirage.server.workspace_config import (
     resolve_workspace_config,
 )
 from mirage.workspace.workspace import Workspace
+from tests.fixtures.mcp_server import TITLE, TOKEN, served_mcp
 
 MINIMAL = "mounts:\n  /:\n    vfs: ram\n    mode: WRITE\n"
 
@@ -136,3 +137,26 @@ async def test_a_canceled_build_closes_the_mounts_it_made(
     with pytest.raises(asyncio.CancelledError):
         await build
     assert len(closed) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_yaml_mcp_entry_builds_its_cli(tmp_path, monkeypatch):
+    monkeypatch.setenv("FX_TOKEN", TOKEN)
+    async with served_mcp() as fake:
+        path = tmp_path / "ws.yaml"
+        path.write_text(
+            "mounts: {}\n"
+            "clis:\n"
+            "  fx:\n"
+            "    cli: mcp\n"
+            "    config:\n"
+            f"      url: {fake.url}\n"
+            "      auth: {type: bearer, token: {from: env, key: FX_TOKEN}}\n"
+        )
+        ws = await build_workspace_from_config(path)
+        try:
+            result = await ws.shell("fx --help")
+        finally:
+            await ws.close()
+    assert result.exit_code == 0
+    assert TITLE in result.stdout.decode()

@@ -12,10 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ToolMessage } from '@langchain/core/messages'
+import type { StructuredToolInterface } from '@langchain/core/tools'
 import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { Limit, MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '@struktoai/mirage-node'
+import { createFilesystemMiddleware } from 'deepagents'
 import { describe, expect, it } from 'vitest'
 import { LangchainWorkspace } from './backend.ts'
 
@@ -449,5 +452,36 @@ describe('LangchainWorkspace sessionId', () => {
     expect(listed.files?.map((f) => f.path)).not.toContain('/vault')
     expect(ran.exitCode).not.toBe(0)
     await ws.close()
+  })
+})
+
+async function callTool(name: string, args: Record<string, unknown>): Promise<ToolMessage> {
+  const ws = mkWs()
+  await ws.vfs.write('/a.txt', ENC.encode('alpha\n'))
+  const tools = createFilesystemMiddleware({ backend: new LangchainWorkspace(ws) }).tools ?? []
+  const t: StructuredToolInterface | undefined = tools.find((x) => x.name === name)
+  if (t === undefined) throw new Error(`no tool ${name}`)
+  const out: unknown = await t.invoke({ id: 'c1', name, args, type: 'tool_call' })
+  if (!(out instanceof ToolMessage)) throw new Error(`${name} returned no ToolMessage`)
+  return out
+}
+
+describe('deepagents filesystem tools over LangchainWorkspace', () => {
+  it('write_file on an existing file is an error reply', async () => {
+    const msg = await callTool('write_file', { file_path: '/a.txt', content: 'x' })
+    expect(msg.status).toBe('error')
+    expect(msg.content).toContain('already exists')
+  })
+
+  it('write_file on a new file succeeds', async () => {
+    const msg = await callTool('write_file', { file_path: '/b.txt', content: 'x' })
+    expect(msg.status).not.toBe('error')
+    expect(msg.content).toContain('Successfully wrote')
+  })
+
+  it('grep with no match stays successful', async () => {
+    const msg = await callTool('grep', { pattern: 'zzz', path: '/' })
+    expect(msg.status).not.toBe('error')
+    expect(msg.content).toContain('No matches found')
   })
 })

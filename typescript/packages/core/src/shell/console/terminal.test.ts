@@ -71,6 +71,21 @@ describe('Terminal', () => {
     expect(dec(tty.take())).toEqual(['', ''])
   })
 
+  it("an entry takes what reached the terminal since the one before, a drain's put back among it", async () => {
+    const tty = new Terminal()
+    await tty.attach(null)
+    await tty.emit(Channel.STDOUT, enc('a\n'))
+    expect(dec(tty.entry())).toEqual(['a\n', ''])
+    await tty.emit(Channel.STDOUT, enc('b\n'))
+    await tty.emit(Channel.STDERR, enc('w\n'))
+    const [out, err] = tty.drain()
+    tty.putBack(out, err)
+    await tty.emit(Channel.STDOUT, enc('c\n'))
+    expect(dec(tty.entry())).toEqual(['b\nc\n', 'w\n'])
+    expect(dec(tty.entry())).toEqual(['', ''])
+    expect(dec(tty.take())).toEqual(['a\nb\nc\n', 'w\n'])
+  })
+
   it('a job writes into the statement running, never one already left', async () => {
     const tty = new Terminal()
     const statement = new Recorder()

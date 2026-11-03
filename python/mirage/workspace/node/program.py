@@ -15,9 +15,15 @@
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
+from mirage.context.session_context import (
+    bind_caller,
+    current_caller,
+    reset_caller,
+)
 from mirage.io import IOResult
 from mirage.io.stream import async_chain, materialize
 from mirage.io.types import ByteSource
+from mirage.observe.context import active_records
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
 from mirage.runtime.types import DispatchFn
@@ -59,6 +65,7 @@ from mirage.workspace.executor.traps import (
     run_err_trap,
     run_exit_trap,
 )
+from mirage.workspace.history.line import LineHistory
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
@@ -191,6 +198,10 @@ async def _run_program(
     reader = execute_fn if node.parent is None else None
     refused = refused_row(node) if reader is not None else None
     parsed = _parse_state(session) if reader is not None else None
+    # A typed line bash's reader reads as several commands is recorded a
+    # command at a time, as its root reaches each.
+    history = current_caller().history
+    reading = history if history is not None and history.reads(node) else None
     last_row = -1
 
     i = 0
@@ -215,6 +226,8 @@ async def _run_program(
             continue
         if session.shell_options.get("noexec"):
             break
+        if reading is not None:
+            await reading.reach(child, session, active_records() or [])
         if not reread and child.start_point[0] > echoed_row:
             first = echoed_row + 1
             last = child.end_point[0]
@@ -294,6 +307,7 @@ async def _run_program(
                         statement_stdin(session, stdin, bound),
                         recorder,
                         call_stack,
+                        reading,
                     )
                 else:
                     stdout, io, last_exec = await recurse(
@@ -399,6 +413,8 @@ async def _run_program(
             break
         if reread:
             break
+    if reading is not None and i >= len(children):
+        reading.read()
 
     # Statements run in turn are one ``;`` node, so the line's tree keeps
     # every command's result; what a caller reads of the program's own
@@ -611,6 +627,7 @@ async def _read_on(
     stdin: ByteSource | None,
     sink: JobConsole | None,
     call_stack: CallStack | None,
+    reading: LineHistory | None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Read the input again from ``child`` on, as bash reads its next
     line: with the aliases as they are now, and refused there if bash
@@ -625,17 +642,36 @@ async def _read_on(
         stdin (ByteSource | None): the statement's standard input.
         sink (JobConsole | None): where its statements write.
         call_stack (CallStack | None): the program's frames.
+        reading (LineHistory | None): the line's history, when the
+            program reads its line.
     """
     original: bytes = getattr(node, "source_text", b"")
     at: int = getattr(node, "offsets", ())[child.start_byte]
     rest = original[at:]
-    io = await execute_fn(
-        decode_text(b"\n" * original.count(b"\n", 0, at) + rest),
-        session_id=session.session_id,
-        stdin=stdin,
-        sink=sink,
-        call_stack=call_stack,
-    )
+    rows = original.count(b"\n", 0, at)
+
+    async def run() -> IOResult:
+        io: IOResult = await execute_fn(
+            decode_text(b"\n" * rows + rest),
+            session_id=session.session_id,
+            stdin=stdin,
+            sink=sink,
+            call_stack=call_stack,
+        )
+        return io
+
+    if reading is None:
+        io = await run()
+    else:
+        # The root the rest is read as takes the line's history over
+        # through this call alone, never a job's root that runs meanwhile.
+        token = bind_caller(
+            current_caller().changed({"history": reading.read_on(at - rows)})
+        )
+        try:
+            io = await run()
+        finally:
+            reset_caller(token)
     return (
         io.stdout,
         io,

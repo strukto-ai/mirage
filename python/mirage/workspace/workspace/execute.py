@@ -77,6 +77,7 @@ from mirage.workspace.executor.statement import (
     snapshot_status,
 )
 from mirage.workspace.executor.traps import finish_shell, inherit_traps
+from mirage.workspace.history.line import LineHistory
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.node.explain import (
@@ -762,15 +763,8 @@ async def run_prepared_line(
     # before its newline): a blank line is skipped, while a
     # whitespace-only or comment-only line is kept.
     recorded = is_line and bool(command.strip("\n"))
+    history: LineHistory | None = None
     try:
-        # The line is recorded as it starts; how it ended follows it.
-        if recorded:
-            await ws.observer.log_command(
-                command,
-                session_id,
-                session_cwd(ws.sessions, session_id),
-                execution_scope.id,
-            )
         aliases = expanding_aliases(effective_session)
         ast = (
             parse_scope.parse(
@@ -781,6 +775,33 @@ async def run_prepared_line(
             if argv is None
             else literal_tree(argv)
         )
+        # A line bash's reader reads as several commands records each as
+        # it reaches it; any other is recorded as it starts, how it ended
+        # following it, as is one a post_execute policy sees whole before
+        # any of its output escapes.
+        if (
+            recorded
+            and argv is None
+            and not await ws.registry.policies.wants_for(
+                "post_execute", session_id
+            )
+        ):
+            history = LineHistory.open(
+                ws.observer,
+                command,
+                ast,
+                session_id,
+                effective_session,
+                execution_scope.id,
+                sink,
+            )
+        if recorded and history is None:
+            await ws.observer.log_command(
+                command,
+                session_id,
+                session_cwd(ws.sessions, session_id),
+                execution_scope.id,
+            )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
         # consulted about it. A refusal on a later line leaves the lines
@@ -832,9 +853,11 @@ async def run_prepared_line(
         # carry on its result. A session write on the line is a call of
         # the line's: its nod stands until the line ends, so a retry of a
         # line held on a later question (`x=1 cmd`, `export a=1; export
-        # b=2`) finds it.
+        # b=2`) finds it. A nested line keeps its caller's history, for
+        # the root an input read again runs as to take over.
+        caller = current_caller()
         line_token = bind_caller(
-            current_caller().changed(
+            caller.changed(
                 {
                     "refusals": note,
                     "call": (
@@ -842,6 +865,7 @@ async def run_prepared_line(
                         handed,
                         effective_session.session_id,
                     ),
+                    "history": caller.history if history is None else history,
                 }
             )
         )
@@ -957,6 +981,10 @@ async def run_prepared_line(
                                 await ws.secret_sources(),
                             ),
                         )
+                # A line a runtime runs whole is one command to it,
+                # recorded as typed.
+                if history is not None:
+                    await history.typed()
                 io = await run_with_system_clock(
                     ws.registry.system_clock,
                     run_with_egress(
@@ -1239,7 +1267,9 @@ async def run_prepared_line(
         reset_current_session(session_token)
         await ws.sessions.flush(session.session_id)
         ws.records.extend(scope.records)
-        if recorded:
+        if history is not None:
+            await history.end(io, scope.records)
+        elif recorded:
             await ws.observer.log_result(
                 await _shown(io, sink),
                 scope.records,

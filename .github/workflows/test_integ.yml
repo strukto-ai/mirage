@@ -2546,6 +2546,17 @@ jobs:
           cat /tmp/github.log
           echo "GITHUB_URL=http://127.0.0.1:5098" >> "$GITHUB_ENV"
 
+      # The mcp CLI rides one stateless MCP fake: every request is its own
+      # session, so both hosts share the one instance.
+      - name: Start fake MCP server
+        working-directory: integ
+        run: |
+          nohup ./node_modules/.bin/tsx server/mcp/main.ts --port 5110 > /tmp/mcp.log 2>&1 &
+          for i in $(seq 1 30); do grep -q "MCP_URL=" /tmp/mcp.log && break; sleep 1; done
+          cat /tmp/mcp.log
+          grep -q "MCP_URL=" /tmp/mcp.log
+          echo "MCP_URL=http://127.0.0.1:5110/mcp" >> "$GITHUB_ENV"
+
       # The ntn CLI rides the notion mock (self-started by each runner under
       # NOTION_ENABLED); the linear and trello CLIs ride the Linear and Trello
       # fakes started above.

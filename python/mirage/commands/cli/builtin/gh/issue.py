@@ -349,26 +349,21 @@ async def edit_cmd(
     return text_out(f"{edited.get('url', '')}\n")
 
 
-async def _state(
-    accessor: GitHubAccount, texts: list[str], ctx: Context, state: str
-) -> tuple[ByteSource | None, IOResult]:
-    fl = FlagView(ctx.flags)
-    ref, number = _target(accessor, texts, fl)
-    edited = _issue(await edit_issue(accessor, ref, number, {"state": state}))
-    verb = "Closed" if state == "closed" else "Reopened"
-    return text_out(
-        f"✓ {verb} issue {ref.owner}/{ref.repo}#{number} "
-        f"({edited.get('title', '')})\n"
-    )
-
-
 async def close_cmd(
     accessor: GitHubAccount,
     paths: list[PathSpec],
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await _state(accessor, texts, ctx, "closed")
+    fl = FlagView(ctx.flags)
+    ref, number = _target(accessor, texts, fl)
+    edited = _issue(
+        await edit_issue(accessor, ref, number, {"state": "closed"})
+    )
+    return text_out(
+        f"✓ Closed issue {ref.owner}/{ref.repo}#{number} "
+        f"({edited.get('title', '')})\n"
+    )
 
 
 async def reopen_cmd(
@@ -377,7 +372,19 @@ async def reopen_cmd(
     texts: list[str],
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
-    return await _state(accessor, texts, ctx, "open")
+    fl = FlagView(ctx.flags)
+    ref, number = _target(accessor, texts, fl)
+    row = _issue(await get_issue(accessor, ref, number))
+    name = f"{ref.owner}/{ref.repo}#{number} ({row.get('title', '')})"
+    if not row["closed"]:
+        return b"", IOResult(
+            stderr=f"! Issue {name} is already open\n".encode()
+        )
+    comment = fl.as_str("comment")
+    if comment:
+        await comment_issue(accessor, ref, number, comment)
+    await edit_issue(accessor, ref, number, {"state": "open"})
+    return text_out(f"✓ Reopened issue {name}\n")
 
 
 async def comment_cmd(

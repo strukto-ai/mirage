@@ -178,6 +178,31 @@ export function mergeRoutes(
 }
 
 /**
+ * `base` held also to `setting`: its layer added and its routes over the
+ * base's; `base` itself when the setting adds neither. Mirrors Python's
+ * `narrowed`, which also starts watching; a TypeScript host watches where
+ * it binds the rule.
+ */
+export function narrowed(base: NetworkRule | null, setting: NetworkSetting): NetworkRule | null {
+  const layer = networkLayer(setting)
+  const routes = networkRoutes(setting)
+  const layers = base?.layers ?? []
+  const held = base?.routes ?? {}
+  const known = layers.map((each) => JSON.stringify(each))
+  if (
+    (layer === null || known.includes(JSON.stringify(layer))) &&
+    Object.entries(routes).every(([source, target]) => held[source] === target)
+  ) {
+    return base
+  }
+  return new NetworkRule(
+    [...layers, ...(layer === null ? [] : [layer])],
+    base?.metadata ?? false,
+    mergeRoutes(held, routes),
+  )
+}
+
+/**
  * Whether two settings hold the same rule: their allowed and denied lists
  * name the same entries as written, in any order, `false` being an empty
  * allowed list and an empty denied list none at all, since it refuses

@@ -1,6 +1,6 @@
 {
   "name": "@struktoai/mirage-mastra",
-  "version": "0.0.8-alpha.2",
+  "version": "0.0.8",
   "description": "Mirage workspace tools for a Mastra Agent",
   "keywords": [
     "mirage",
@@ -49,7 +49,7 @@
     "@mastra/core": "^1.79.0"
   },
   "devDependencies": {
-    "@mastra/core": "^1.79.0",
+    "@mastra/core": "^1.81.0",
     "@struktoai/mirage-node": "workspace:*",
     "@types/node": "^22.0.0",
     "tsup": "^8.5.0",

@@ -488,6 +488,7 @@
             "pages": [
               "python/cli/index",
               "python/cli/custom",
+              "python/cli/mcp",
               {
                 "group": "CLIs",
                 "icon": "wrench",
@@ -676,6 +677,7 @@
             "pages": [
               "typescript/cli/index",
               "typescript/cli/custom",
+              "typescript/cli/mcp",
               {
                 "group": "CLIs",
                 "icon": "wrench",
