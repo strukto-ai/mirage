@@ -57,6 +57,8 @@ curl -s localhost:8787 -d '{"command": "seq 1 100 | sort -rn | head -3"}'
 
 `python3` runs on Monty in the isolate's own thread, where no timer can interrupt it, so Monty's own clock stops a run: at the line's time limit, which ends the line with exit 124, or after 30 seconds with `TimeoutError` if that comes first. A loop that never ends leaves the isolate free for the next line.
 
+A Worker cannot use a socket an earlier request opened, so a workspace kept across requests opens its `postgres` and `email` connections again for each one. `ws.shell` and `ws.dispatch` each run as a request when called outside one; to share one connection across several calls in a request, or to scope other methods, wrap the request's work in `inRequest(() => ...)`, exported from `@struktoai/mirage-edge`. `createApp` already does this.
+
 For anything else from core, import its subpaths (`@struktoai/mirage-core/vfs/registry`), not its package root: the root also imports optional packages, such as Pyodide, that an edge bundle cannot resolve.
 
 ## Serve the server API
