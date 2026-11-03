@@ -10,6 +10,7 @@ import {
 import { CommandTimeoutError } from '../../../../../errors/types.ts'
 import { materialize } from '../../../../../io/types.ts'
 import { context } from '../../../../../../tests/workspace/fixtures/context.ts'
+import { CommandSpec } from '../../../../spec/types.ts'
 import { LINEAR } from '../index.ts'
 import { add, deleteRelation, listRelations, prepareReference } from './relation.ts'
 
@@ -53,6 +54,24 @@ async function rendered(result: Awaited<ReturnType<typeof add>>) {
 }
 
 describe('issue relations', () => {
+  it('binds confirmation to the resolved command spec before deletion', async () => {
+    const { accessor, calls } = recorder([
+      { issue: A },
+      { issue: B },
+      page([ROW]),
+      { issueRelationDelete: { success: true } },
+    ])
+    await expect(
+      deleteRelation(
+        accessor,
+        [],
+        ['ENG-1', 'blocks', 'ENG-2'],
+        context({ flags: { yes: true }, spec: new CommandSpec({ name: 'delete' }) }),
+      ),
+    ).rejects.toThrow('not declared')
+    expect(calls).toHaveLength(3)
+  })
+
   it.each([
     ['BLOCKS', 'iss_a', 'iss_b', 'outgoing'],
     ['blocked-by', 'iss_b', 'iss_a', 'incoming'],
