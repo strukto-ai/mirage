@@ -12,12 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import errno
 import os
 
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.copy import copy
+from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 
 
@@ -47,6 +49,26 @@ async def test_copy_does_not_create_the_destination_parent(accessor):
             PathSpec.from_str_path("/a/b/dst"),
         )
     assert not (accessor.root / "a").exists()
+
+
+@pytest.mark.asyncio
+async def test_copy_that_wrote_nothing_records_a_failed_row(accessor):
+    scope = RecordingScope()
+    try:
+        with pytest.raises(FileNotFoundError):
+            await copy(
+                accessor,
+                PathSpec.from_str_path("/src"),
+                PathSpec.from_str_path("/a/b/dst"),
+            )
+    finally:
+        scope.close()
+    [row] = scope.records
+    assert (row.status, row.changed, row.errno) == (
+        "failed",
+        False,
+        errno.ENOENT,
+    )
 
 
 @pytest.mark.asyncio

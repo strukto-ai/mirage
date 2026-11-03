@@ -15,6 +15,7 @@
 import asyncio
 import os
 import shutil
+from pathlib import Path
 
 import aiofiles.os
 
@@ -26,6 +27,14 @@ from mirage.observe.record import OpStatus
 from mirage.types import PathSpec
 
 
+def _signature(path: Path) -> tuple[int, int, int, int] | None:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+
 async def copy(
     accessor: DiskAccessor, src_spec: PathSpec, dst_spec: PathSpec
 ) -> None:
@@ -33,6 +42,7 @@ async def copy(
     s = await resolve_inside(root, src_spec)
     d = await resolve_inside(root, dst_spec)
     timer = start_op()
+    before = await asyncio.to_thread(_signature, d)
     failure: BaseException | None = None
     try:
         try:
@@ -54,13 +64,20 @@ async def copy(
     finally:
         # Also when the copy raised: copyfile that fails part-way has
         # already written the destination, as on the object stores.
+        changed = (
+            failure is None or await asyncio.to_thread(_signature, d) != before
+        )
         record(
             "copy",
             dst_spec.virtual,
             "disk",
             0,
             timer,
-            status=OpStatus.PARTIAL if failure else OpStatus.OK,
+            status=OpStatus.OK
+            if failure is None
+            else OpStatus.PARTIAL
+            if changed
+            else OpStatus.FAILED,
             errno=getattr(failure, "errno", None),
-            changed=True,
+            changed=changed,
         )

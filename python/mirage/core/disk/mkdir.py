@@ -12,6 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import os
+from pathlib import Path
+
 import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
@@ -24,6 +28,16 @@ from mirage.types import PathSpec
 from mirage.utils.path import norm
 
 
+def _first_missing(path: Path) -> Path | None:
+    missing = None
+    while not os.path.lexists(path):
+        missing = path
+        if path.parent == path:
+            break
+        path = path.parent
+    return missing
+
+
 async def mkdir(
     accessor: DiskAccessor, path_spec: PathSpec, parents: bool = False
 ) -> None:
@@ -34,6 +48,7 @@ async def mkdir(
     if parents:
         # Not `disk_errors`: that restamps every OSError against the
         # operand, which would undo the component naming below.
+        missing = await asyncio.to_thread(_first_missing, p)
         failure: BaseException | None = None
         try:
             await aiofiles.os.makedirs(p, exist_ok=True)
@@ -54,15 +69,23 @@ async def mkdir(
         finally:
             # Also when it raised: the chain may have made its first
             # directories before a later one failed.
+            changed = failure is None or (
+                missing is not None
+                and await asyncio.to_thread(os.path.lexists, missing)
+            )
             record(
                 "mkdir",
                 path_spec.virtual,
                 "disk",
                 0,
                 timer,
-                status=OpStatus.PARTIAL if failure else OpStatus.OK,
+                status=OpStatus.OK
+                if failure is None
+                else OpStatus.PARTIAL
+                if changed
+                else OpStatus.FAILED,
                 errno=getattr(failure, "errno", None),
-                changed=True,
+                changed=changed,
             )
         return
     # An existing target is EEXIST, not success: only -p is idempotent.

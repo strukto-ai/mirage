@@ -33,11 +33,14 @@ export async function rmR(accessor: DiskAccessor, path: PathSpec): Promise<void>
     throw err
   } finally {
     // Also when the walk raised: a removal that fails part-way has
-    // already removed entries, as on the object stores.
+    // already removed entries, as on the object stores. Only a failure to
+    // read the top itself removed nothing.
+    const err = failure as NodeJS.ErrnoException | null
+    const changed = err?.path !== full || err.syscall === 'rmdir'
     const condition = classify(failure)
     record('rm_r', path.virtual, VFSName.DISK, 0, timer, {
-      status: failure === null ? 'ok' : 'partial',
-      changed: true,
+      status: failure === null ? 'ok' : changed ? 'partial' : 'failed',
+      changed,
       errno: condition === null ? null : posixErrno(condition),
     })
   }

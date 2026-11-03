@@ -15,7 +15,8 @@
 import { classify } from '@struktoai/mirage-core/errors/classify'
 import { posixErrno } from '@struktoai/mirage-core/errors/posix'
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { mkdir as fsMkdir } from 'node:fs/promises'
+import { lstat, mkdir as fsMkdir } from 'node:fs/promises'
+import { dirname } from 'node:path'
 
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -24,6 +25,23 @@ import { norm } from '@struktoai/mirage-core/utils/path'
 import { mkdirComponentError } from './dest.ts'
 import { diskError } from './errors.ts'
 import { resolveInside } from './utils.ts'
+
+async function exists(path: string): Promise<boolean> {
+  return lstat(path).then(
+    () => true,
+    () => false,
+  )
+}
+
+async function firstMissing(path: string): Promise<string | null> {
+  let missing: string | null = null
+  while (!(await exists(path))) {
+    missing = path
+    if (dirname(path) === path) break
+    path = dirname(path)
+  }
+  return missing
+}
 
 export async function mkdir(
   accessor: DiskAccessor,
@@ -34,6 +52,7 @@ export async function mkdir(
   const full = await resolveInside(root, path)
   const timer = startOp()
   if (parents) {
+    const missing = await firstMissing(full)
     let failure: unknown = null
     try {
       await fsMkdir(full, { recursive: true })
@@ -49,10 +68,11 @@ export async function mkdir(
     } finally {
       // Also when it threw: the chain may have made its first directories
       // before a later one failed.
+      const changed = failure === null || (missing !== null && (await exists(missing)))
       const condition = classify(failure)
       record('mkdir', path.virtual, VFSName.DISK, 0, timer, {
-        status: failure === null ? 'ok' : 'partial',
-        changed: true,
+        status: failure === null ? 'ok' : changed ? 'partial' : 'failed',
+        changed,
         errno: condition === null ? null : posixErrno(condition),
       })
     }

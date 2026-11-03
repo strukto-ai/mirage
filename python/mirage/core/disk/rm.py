@@ -13,7 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
 import shutil
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import aiofiles.os
 from aiofiles.os import path as aio_path
@@ -29,24 +33,42 @@ async def rm_r(accessor: DiskAccessor, path_spec: PathSpec) -> None:
     p = await resolve_inside(accessor.root, path_spec)
     timer = start_op()
     failure: BaseException | None = None
+    changed = True
+
+    def stop(
+        func: Callable[..., Any], path: str | Path, exc: BaseException
+    ) -> None:
+        nonlocal changed
+        changed = os.fspath(path) != os.fspath(p) or func is os.rmdir
+        raise exc
+
     try:
         if await aio_path.isdir(p):
-            await asyncio.to_thread(shutil.rmtree, p)
+            await asyncio.to_thread(shutil.rmtree, p, onexc=stop)
         elif await aio_path.exists(p):
-            await aiofiles.os.remove(p)
+            try:
+                await aiofiles.os.remove(p)
+            except OSError:
+                changed = False
+                raise
     except BaseException as exc:
         failure = exc
         raise
     finally:
         # Also when the walk raised: rmtree that fails part-way has
-        # already removed entries, as on the object stores.
+        # already removed entries, as on the object stores. Only a
+        # failure to open or list the top itself removed nothing.
         record(
             "rm_r",
             path_spec.virtual,
             "disk",
             0,
             timer,
-            status=OpStatus.PARTIAL if failure else OpStatus.OK,
+            status=OpStatus.OK
+            if failure is None
+            else OpStatus.PARTIAL
+            if changed
+            else OpStatus.FAILED,
             errno=getattr(failure, "errno", None),
-            changed=True,
+            changed=failure is None or changed,
         )

@@ -131,3 +131,14 @@ it('records a partial copy when copying throws after writing bytes', async () =>
     copyFile.mockRestore()
   }
 })
+
+it('records a failed copy when copying wrote nothing', async () => {
+  await writeFile(join(root, 'src'), 'content')
+  const [, records] = await runWithRecording(async () => {
+    await expect(copy(accessor, spec('/src'), spec('/a/b/dst'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+  })
+  expect(records).toHaveLength(1)
+  expect(records[0]).toMatchObject({ status: 'failed', changed: false, errno: 2 })
+})
