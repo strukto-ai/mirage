@@ -14,7 +14,8 @@
 
 import { readAsText, SESSION } from '../../accessor/postgres.ts'
 import type { PgDriver, PgQueryResult } from '../../core/postgres/_driver.ts'
-import { loadOptionalPeer } from '../../utils/optional_peer.ts'
+import { judgeSocket } from '../../io/web/network.ts'
+import { missingPeer } from '../../utils/optional_peer.ts'
 import type { resolvePostgresConfig } from './config.ts'
 
 interface PgPoolLike {
@@ -38,6 +39,31 @@ function onWorkers(): boolean {
   )
 }
 
+const DEFAULT_PORT = 5432
+
+/**
+ * The hosts and port a DSN connects to, as pg reads a URL or a list of
+ * `key=value` pairs: a `host` parameter overrides the URL's, and a comma
+ * lists several hosts.
+ */
+function dsnEndpoints(dsn: string): [string, number][] {
+  let hosts = ''
+  let port = ''
+  if (/^postgres(ql)?:\/\//i.test(dsn)) {
+    const url = new URL(dsn)
+    hosts = url.searchParams.get('host') ?? decodeURIComponent(url.hostname)
+    port = url.searchParams.get('port') ?? url.port
+  } else {
+    for (const [, key, value] of dsn.matchAll(/(\w+)\s*=\s*('(?:[^'\\]|\\.)*'|\S+)/g)) {
+      const bare = (value ?? '').replace(/^'(.*)'$/, '$1')
+      if (key === 'host' || key === 'hostaddr') hosts ||= bare
+      if (key === 'port') port = bare
+    }
+  }
+  const number = port === '' ? DEFAULT_PORT : Number(port)
+  return (hosts === '' ? 'localhost' : hosts).split(',').map((host) => [host, number])
+}
+
 export class PostgresStore implements PgDriver {
   readonly config: ReturnType<typeof resolvePostgresConfig>
   private poolPromise: Promise<PgPoolLike> | null = null
@@ -50,6 +76,9 @@ export class PostgresStore implements PgDriver {
     sql: string,
     params?: readonly unknown[],
   ): Promise<PgQueryResult<R>> {
+    // An edge isolate opens the connection past its fetch guard, so the
+    // network rule is asked here; elsewhere this is a no-op.
+    for (const [host, port] of dsnEndpoints(this.config.dsn)) judgeSocket(host, port)
     const pool = await this._pool()
     const result = await pool.query(sql, params)
     return { rows: result.rows as R[], rowCount: result.rowCount ?? 0 }
@@ -68,10 +97,9 @@ export class PostgresStore implements PgDriver {
   }
 
   protected async _connect(): Promise<PgPoolLike> {
-    const mod = await loadOptionalPeer(
-      () => import('pg') as unknown as Promise<{ default?: PgModule } & Partial<PgModule>>,
-      { feature: 'PostgresVFS', packageName: 'pg' },
-    )
+    const mod = (await import('pg').catch(
+      missingPeer({ feature: 'PostgresVFS', packageName: 'pg' }),
+    )) as unknown as { default?: PgModule } & Partial<PgModule>
     const Pool = mod.default?.Pool ?? mod.Pool
     const types = mod.default?.types ?? mod.types
     if (Pool === undefined || types === undefined) {

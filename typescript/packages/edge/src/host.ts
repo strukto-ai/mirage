@@ -35,7 +35,6 @@ import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/r
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ServerHost } from '@struktoai/mirage-server/routes'
 import './monty.ts'
-import './xml.ts'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 
 export class Workspace extends CoreWorkspace {

@@ -83,6 +83,14 @@ export function refuseUnseenAddresses(setting: NetworkSetting | undefined): void
   }
 }
 
+/** A host name as a route names it: unbracketed, without its root dot, lowercase. */
+function bareHost(host: string): string {
+  return host
+    .replace(/^\[(.*)\]$/, '$1')
+    .replace(/\.$/, '')
+    .toLowerCase()
+}
+
 /**
  * Where a page's request to `host` on `port` goes instead, null for nowhere
  * else. A page cannot tell one task's binding from another's, so every live
@@ -120,11 +128,7 @@ export function routed(input: RequestInfo | URL): RequestInfo | URL {
   if (!REACHING.has(target.protocol)) return input
   const route = routeOf(target.hostname, portOf(target))
   if (route === null) return input
-  const bare = target.hostname
-    .replace(/^\[(.*)\]$/, '$1')
-    .replace(/\.$/, '')
-    .toLowerCase()
-  if (SECURE.has(target.protocol) && route[0] !== bare) {
+  if (SECURE.has(target.protocol) && route[0] !== bareHost(target.hostname)) {
     throw new Error(
       `network: a page cannot route ${target.host} to another host and still check its TLS name`,
     )
@@ -132,6 +136,27 @@ export function routed(input: RequestInfo | URL): RequestInfo | URL {
   target.hostname = route[0].includes(':') ? `[${route[0]}]` : route[0]
   target.port = String(route[1])
   return input instanceof Request ? new Request(target, input) : target
+}
+
+/**
+ * Throw as a refused connect does when the bound rule refuses a socket to
+ * `host` on `port`. An edge isolate opens a database's or a mail server's
+ * TCP connection through its own socket API, past fetch and WebSocket, so a
+ * backend asks here before it connects. It judges by host name, as fetch
+ * does here, and refuses a route, since a backend connects where its config
+ * names. Only a host that watches the network here judges: Node's connect
+ * hook judges each socket's address itself.
+ */
+export function judgeSocket(host: string, port: number): void {
+  if (!watching || networkBound() === null) return
+  const route = routeOf(host, port)
+  const moved = route !== null && (route[0] !== bareHost(host) || route[1] !== port)
+  if (moved || !networkLets(host, '', port)) {
+    throw Object.assign(new Error(`connect EACCES ${host}:${String(port)}`), {
+      code: 'EACCES',
+      syscall: 'connect',
+    })
+  }
 }
 
 /** `input` routed where the bound rule sends it; fails as fetch does when the rule refuses it. */
