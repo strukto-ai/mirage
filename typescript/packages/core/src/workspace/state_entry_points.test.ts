@@ -3049,6 +3049,15 @@ class SealedRecursiveCache implements Policy {
   }
 }
 
+class SealedRecursiveCacheDirectory implements Policy {
+  preVfs(ctx: VfsContext): Action | null {
+    if (ctx.call.name === 'readdir' && ctx.path.virtual === '/data/src/cache') {
+      return { kind: 'deny', reason: 'sealed' }
+    }
+    return null
+  }
+}
+
 describe('admitted path rules on recursive commands', () => {
   it.each([
     ['find /data/src', 1],
@@ -3075,27 +3084,32 @@ describe('admitted path rules on recursive commands', () => {
     expect(voicedStderr(result)).toContain('Permission denied')
   })
 
-  it.each([
-    ['find /data/src', 1],
-    ['du -a /data/src', 1],
-    ['du -s /data/src', 1],
-    ['grep -r PRIVATE_SENTINEL /data/src', 2],
-    ['rg PRIVATE_SENTINEL /data/src', 2],
-  ])('recursive commands enforce coded preVfs policy: %s', async (command, exitCode) => {
-    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
-    open.push(ws)
-    await ws.shell('mkdir -p /data/src/cache')
-    await ws.vfs.write('/data/src/cache/private.txt', ENC.encode('PRIVATE_SENTINEL\n'))
-    await ws.vfs.write('/data/src/public.txt', ENC.encode('public\n'))
-    ws.createSession('restricted')
-    ws.policies.add(new SealedRecursiveCache())
+  describe.each([
+    { name: 'subtree denial', policy: SealedRecursiveCache },
+    { name: 'directory listing denial', policy: SealedRecursiveCacheDirectory },
+  ])('$name', ({ policy: PolicyType }) => {
+    it.each([
+      ['find /data/src', 1],
+      ['du -a /data/src', 1],
+      ['du -s /data/src', 1],
+      ['grep -r PRIVATE_SENTINEL /data/src', 2],
+      ['rg PRIVATE_SENTINEL /data/src', 2],
+    ])('recursive commands enforce coded preVfs policy: %s', async (command, exitCode) => {
+      const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+      open.push(ws)
+      await ws.shell('mkdir -p /data/src/cache')
+      await ws.vfs.write('/data/src/cache/private.txt', ENC.encode('PRIVATE_SENTINEL\n'))
+      await ws.vfs.write('/data/src/public.txt', ENC.encode('public\n'))
+      ws.createSession('restricted')
+      ws.policies.add(new PolicyType())
 
-    const result = await ws.shell(command, { sessionId: 'restricted' })
+      const result = await ws.shell(command, { sessionId: 'restricted' })
 
-    expect(result.exitCode).toBe(exitCode)
-    expect(stdoutStr(result)).not.toContain('private.txt')
-    expect(stdoutStr(result)).not.toContain('PRIVATE_SENTINEL')
-    expect(voicedStderr(result)).toContain('/data/src/cache')
-    expect(voicedStderr(result)).toContain('Permission denied')
+      expect(result.exitCode).toBe(exitCode)
+      expect(stdoutStr(result)).not.toContain('private.txt')
+      expect(stdoutStr(result)).not.toContain('PRIVATE_SENTINEL')
+      expect(voicedStderr(result)).toContain('/data/src/cache')
+      expect(voicedStderr(result)).toContain('Permission denied')
+    })
   })
 })
