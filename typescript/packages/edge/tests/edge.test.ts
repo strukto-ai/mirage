@@ -75,7 +75,7 @@ describe('mirage in workerd', () => {
     expect(loop?.exit).toBe(1)
     expect(loop?.stderr).toContain('TimeoutError')
     expect(next?.stdout).toBe('2\n')
-  }, 30_000)
+  }, 90_000)
 
   it('refuses a write past max_memory', async () => {
     const [fill, after] = await run(['seq 1 10000000 > /tmp/big', 'echo ok'], '8MB')

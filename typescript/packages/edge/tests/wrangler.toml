@@ -5,3 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [limits]
 cpu_ms = 60000
+
+[vars]
+MIRAGE_AUTH_MODE = "token"
+MIRAGE_AUTH_TOKEN = "edge-test-token"
