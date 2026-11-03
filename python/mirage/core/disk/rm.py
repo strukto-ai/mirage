@@ -14,50 +14,72 @@
 
 import asyncio
 import os
-import shutil
-from collections.abc import Callable
-from pathlib import Path
-from typing import Any
-
-import aiofiles.os
-from aiofiles.os import path as aio_path
+import stat
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.utils import resolve_inside
+from mirage.errors.posix import errno_of
 from mirage.observe.context import record, start_op
 from mirage.observe.record import OpStatus
 from mirage.types import PathSpec
 
 
+
 async def rm_r(accessor: DiskAccessor, path_spec: PathSpec) -> None:
-    p = await resolve_inside(accessor.root, path_spec)
+    p = os.fspath(await resolve_inside(accessor.root, path_spec))
     timer = start_op()
     failure: BaseException | None = None
-    changed = True
+    removed = False
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
-    def stop(
-        func: Callable[..., Any], path: str | Path, exc: BaseException
-    ) -> None:
-        nonlocal changed
-        changed = os.fspath(path) != os.fspath(p) or func is os.rmdir
-        raise exc
+    def empty(fd: int) -> None:
+        # By directory descriptor, as rmtree walks: a directory swapped for
+        # a link mid-walk is refused, never followed. Files go before the
+        # walk descends, as rmtree orders them.
+        nonlocal removed
+        with os.scandir(fd) as entries:
+            children = [(e.name, e.is_dir(follow_symlinks=False)) for e in entries]
+        for name in (name for name, is_dir in children if not is_dir):
+            os.unlink(name, dir_fd=fd)
+            removed = True
+        for name in (name for name, is_dir in children if is_dir):
+            child = os.open(name, flags, dir_fd=fd)
+            try:
+                empty(child)
+            finally:
+                os.close(child)
+            os.rmdir(name, dir_fd=fd)
+            removed = True
+
+    def remove() -> None:
+        nonlocal removed
+        try:
+            mode = os.lstat(p).st_mode
+        except FileNotFoundError:
+            return
+        if stat.S_ISDIR(mode):
+            top = os.open(p, flags)
+            try:
+                empty(top)
+            finally:
+                os.close(top)
+            os.rmdir(p)
+        else:
+            os.unlink(p)
+        removed = True
 
     try:
-        if await aio_path.isdir(p):
-            await asyncio.to_thread(shutil.rmtree, p, onexc=stop)
-        elif await aio_path.exists(p):
-            try:
-                await aiofiles.os.remove(p)
-            except OSError:
-                changed = False
-                raise
+        await asyncio.to_thread(remove)
     except BaseException as exc:
         failure = exc
         raise
     finally:
-        # Also when the walk raised: rmtree that fails part-way has
-        # already removed entries, as on the object stores. Only a
-        # failure to open or list the top itself removed nothing.
+        # Also when the walk raised: one that fails part-way has already
+        # removed entries, as on the object stores. A cancelled wait
+        # leaves its worker running, so it may still remove some.
+        changed = (
+            failure is None or removed or not isinstance(failure, OSError)
+        )
         record(
             "rm_r",
             path_spec.virtual,
@@ -69,6 +91,6 @@ async def rm_r(accessor: DiskAccessor, path_spec: PathSpec) -> None:
             else OpStatus.PARTIAL
             if changed
             else OpStatus.FAILED,
-            errno=getattr(failure, "errno", None),
-            changed=failure is None or changed,
+            errno=errno_of(failure),
+            changed=changed,
         )

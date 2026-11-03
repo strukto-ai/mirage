@@ -95,9 +95,9 @@ the backend: OTLP to Datadog, Honeycomb, Grafana, Langfuse and others.
 | `vfs.<call>` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes`, `mirage.vfs.status`, `mirage.vfs.changed`, `mirage.vfs.served`, and on a failure `mirage.vfs.errno` and `error.type` |
 
 A `vfs.<call>` span whose call failed, or failed after changing something, has
-error status, and `error.type` names its errno (`EACCES`). Only disk `cp`,
-`mkdir -p` and `rm -r` record a failed call so far; elsewhere a failed call
-leaves no span.
+error status, and `error.type` names its errno (`EACCES`) when it has one.
+Only disk `cp`, `mkdir -p` and `rm -r` record a failed call as failed so far;
+elsewhere a failed call leaves no span, or one without error status.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">

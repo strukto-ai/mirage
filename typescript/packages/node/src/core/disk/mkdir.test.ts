@@ -12,13 +12,20 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import * as fs from 'node:fs/promises'
+import type * as fsModule from 'node:fs/promises'
 import { readFile, stat, writeFile } from 'node:fs/promises'
 import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { spec, tmpRoot } from '../../../tests/test-utils.ts'
 import { mkdir } from './mkdir.ts'
+
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof fsModule>()
+  return { ...actual, lstat: vi.fn(actual.lstat) }
+})
 
 let root: string
 let accessor: DiskAccessor
@@ -98,6 +105,30 @@ describe('core/disk/mkdir parents rows', () => {
     })
     expect((await stat(join(root, 'x'))).isDirectory()).toBe(true)
     expect(records).toHaveLength(1)
-    expect(records[0]).toMatchObject({ status: 'partial', changed: true })
+    // ENAMETOOLONG, numbered as Linux numbers it: macOS's own is 63.
+    expect(records[0]).toMatchObject({ status: 'partial', changed: true, errno: 36 })
+  })
+
+  it('records partial when no probe could see the chain', async () => {
+    await writeFile(join(root, 'a.txt'), 'a')
+    const actual = await vi.importActual<typeof fsModule>('node:fs/promises')
+    const target = join(root, 'a.txt', 'z')
+    let seen = 0
+    // resolveInside looks once; every probe after it fails.
+    const lstat = vi.mocked(fs.lstat).mockImplementation(((at: string, options?: object) =>
+      at === target && ++seen > 1
+        ? Promise.reject(Object.assign(new Error('probe'), { code: 'EIO' }))
+        : actual.lstat(at, options)) as typeof fs.lstat)
+    try {
+      const [, records] = await runWithRecording(async () => {
+        await expect(mkdir(accessor, spec('/a.txt/z'), true)).rejects.toMatchObject({
+          code: 'ENOTDIR',
+        })
+      })
+      expect(records).toHaveLength(1)
+      expect(records[0]).toMatchObject({ status: 'partial', changed: true, errno: 20 })
+    } finally {
+      lstat.mockRestore()
+    }
   })
 })

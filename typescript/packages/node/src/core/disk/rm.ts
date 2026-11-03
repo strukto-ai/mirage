@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { classify } from '@struktoai/mirage-core/errors/classify'
-import { posixErrno } from '@struktoai/mirage-core/errors/posix'
+import { errnoOf } from '@struktoai/mirage-core/errors/posix'
 import type { DiskAccessor } from '../../accessor/disk.ts'
-import { rm } from 'node:fs/promises'
+import { lstat, readdir, rmdir, unlink } from 'node:fs/promises'
+import { join } from 'node:path'
 
 import { record, startOp } from '@struktoai/mirage-core/observe/context'
 import { VFSName } from '@struktoai/mirage-core/types'
@@ -26,22 +26,45 @@ export async function rmR(accessor: DiskAccessor, path: PathSpec): Promise<void>
   const full = await resolveInside(accessor.root, path)
   const timer = startOp()
   let failure: unknown = null
+  let removed = false
+  // Gone already is removed, as `rm -f` takes it; a link is removed, never
+  // followed. A directory's files go before the walk descends, in the order
+  // Python's rmtree takes them.
+  const remove = async (target: string, isDir: boolean): Promise<void> => {
+    if (isDir) {
+      const entries = await readdir(target, { withFileTypes: true })
+      for (const entry of entries.filter((e) => !e.isDirectory())) {
+        await remove(join(target, entry.name), false)
+      }
+      for (const entry of entries.filter((e) => e.isDirectory())) {
+        await remove(join(target, entry.name), true)
+      }
+    }
+    try {
+      await (isDir ? rmdir(target) : unlink(target))
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+      return
+    }
+    removed = true
+  }
   try {
-    await rm(full, { recursive: true, force: true })
+    const top = await lstat(full).catch((err: unknown) => {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw err
+    })
+    if (top !== null) await remove(full, top.isDirectory())
   } catch (err) {
     failure = err
     throw err
   } finally {
-    // Also when the walk raised: a removal that fails part-way has
-    // already removed entries, as on the object stores. Only a failure to
-    // read the top itself removed nothing.
-    const err = failure as NodeJS.ErrnoException | null
-    const changed = err?.path !== full || err.syscall === 'rmdir'
-    const condition = classify(failure)
+    // Also when the walk raised: one that fails part-way has already
+    // removed entries, as on the object stores.
+    const changed = failure === null || removed
     record('rm_r', path.virtual, VFSName.DISK, 0, timer, {
       status: failure === null ? 'ok' : changed ? 'partial' : 'failed',
       changed,
-      errno: condition === null ? null : posixErrno(condition),
+      errno: errnoOf(failure),
     })
   }
 }

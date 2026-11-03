@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { classify } from '@struktoai/mirage-core/errors/classify'
-import { posixErrno } from '@struktoai/mirage-core/errors/posix'
+import { errnoOf } from '@struktoai/mirage-core/errors/posix'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { access, constants, copyFile, stat } from 'node:fs/promises'
 
@@ -25,13 +24,31 @@ import { resolveInside } from './utils.ts'
 
 export const logger: { debug?: (message: string) => void } = {}
 
+/**
+ * What is at the destination, null when nothing is. Rejects when the stat
+ * cannot tell, which proves nothing either way.
+ */
 async function signature(path: string): Promise<string | null> {
   try {
     const st = await stat(path, { bigint: true })
     return `${String(st.ino)}:${String(st.size)}:${String(st.mtimeNs)}:${String(st.ctimeNs)}`
   } catch (err) {
-    logger.debug?.(`copy destination ${path} not statable: ${String(err)}`)
-    return null
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === 'ENOENT' || code === 'ENOTDIR') return null
+    throw err
+  }
+}
+
+/**
+ * Whether a failed copy may have changed the destination: unless a second
+ * probe finds it as the first did, it may have.
+ */
+async function changedSince(path: string, before: string | null): Promise<boolean> {
+  try {
+    return (await signature(path)) !== before
+  } catch (err) {
+    logger.debug?.(`copy destination ${path} not probed: ${String(err)}`)
+    return true
   }
 }
 
@@ -39,12 +56,21 @@ export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec)
   const s = await resolveInside(accessor.root, src)
   const d = await resolveInside(accessor.root, dst)
   const timer = startOp()
-  const before = await signature(d)
+  let seen = true
+  let before: string | null = null
+  try {
+    before = await signature(d)
+  } catch (err) {
+    logger.debug?.(`copy destination ${d} not probed: ${String(err)}`)
+    seen = false
+  }
   let failure: unknown = null
+  let raw: unknown = null
   try {
     try {
       await copyFile(s, d)
     } catch (err) {
+      raw = err
       // copyFile reports ENOENT and EACCES for either operand, so the operand
       // to blame is only knowable after the failure: probe whether the source
       // reads to tell them apart.
@@ -64,13 +90,13 @@ export async function copy(accessor: DiskAccessor, src: PathSpec, dst: PathSpec)
     throw err
   } finally {
     // Also when the copy raised: copyFile that fails part-way has already
-    // written the destination, as on the object stores.
-    const changed = failure === null || (await signature(d)) !== before
-    const condition = classify(failure)
+    // written the destination, as on the object stores. A copy either probe
+    // could not see may have changed it too.
+    const changed = failure === null || !seen || (await changedSince(d, before))
     record('copy', dst.virtual, VFSName.DISK, 0, timer, {
       status: failure === null ? 'ok' : changed ? 'partial' : 'failed',
       changed,
-      errno: condition === null ? null : posixErrno(condition),
+      errno: errnoOf(raw ?? failure),
     })
   }
 }

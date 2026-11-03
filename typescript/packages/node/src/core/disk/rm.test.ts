@@ -73,8 +73,38 @@ describe.skipIf(process.getuid?.() === 0)('core/disk/rm.rmR rows', () => {
     expect(row).toMatchObject({ status: 'failed', changed: false, errno: 13 })
   })
 
-  it('records partial once it got inside', async () => {
+  it('records partial once it removed an entry', async () => {
     const row = await rmRow('d/s', 0o500)
+    await expect(access(join(root, 'd', 'f'))).rejects.toMatchObject({ code: 'ENOENT' })
     expect(row).toMatchObject({ status: 'partial', changed: true, errno: 13 })
+  })
+
+  it('records failed when its first unlink is refused', async () => {
+    await mkdir(join(root, 'e'))
+    await writeFile(join(root, 'e', 'f'), 'f')
+    await chmod(join(root, 'e'), 0o500)
+    try {
+      const [, records] = await runWithRecording(async () => {
+        await expect(rmR(accessor, spec('/e'))).rejects.toMatchObject({ code: 'EACCES' })
+      })
+      await expect(access(join(root, 'e', 'f'))).resolves.toBeUndefined()
+      expect(records).toMatchObject([{ status: 'failed', changed: false, errno: 13 }])
+    } finally {
+      await chmod(join(root, 'e'), 0o700)
+    }
+  })
+
+  it('records failed for an empty directory its parent keeps', async () => {
+    await mkdir(join(root, 'x', 'e'), { recursive: true })
+    await chmod(join(root, 'x'), 0o500)
+    try {
+      const [, records] = await runWithRecording(async () => {
+        await expect(rmR(accessor, spec('/x/e'))).rejects.toMatchObject({ code: 'EACCES' })
+      })
+      await expect(access(join(root, 'x', 'e'))).resolves.toBeUndefined()
+      expect(records).toMatchObject([{ status: 'failed', changed: false, errno: 13 }])
+    } finally {
+      await chmod(join(root, 'x'), 0o700)
+    }
   })
 })
