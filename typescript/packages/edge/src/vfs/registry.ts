@@ -21,6 +21,7 @@ import {
   DIRECT_REGISTRY,
   knownVfsNames as knownCoreVfsNames,
 } from '@struktoai/mirage-core/vfs/registry'
+import '../xml.ts'
 
 /**
  * Every name an edge host builds: core's backends, whatever `registerVfs`

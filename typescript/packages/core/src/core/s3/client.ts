@@ -15,7 +15,7 @@
 import { concat } from '../../utils/bytes.ts'
 import { DEFAULT_TIMEOUT } from '../api/constants.ts'
 import type { S3Client } from '@aws-sdk/client-s3'
-import { loadOptionalPeer } from '../../utils/optional_peer.ts'
+import { missingPeer } from '../../utils/optional_peer.ts'
 import * as kp from '../../utils/key_prefix.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
 import type { S3Module, S3SendClient } from './types.ts'
@@ -53,14 +53,13 @@ export async function loadS3Module(config?: S3Config): Promise<S3Module> {
     const { BROWSER_S3_MODULE } = await import('./client_browser.ts')
     return BROWSER_S3_MODULE
   }
-  cachedModule ??= loadOptionalPeer(
-    () => import('@aws-sdk/client-s3') as unknown as Promise<S3Module>,
-    {
+  cachedModule ??= import('@aws-sdk/client-s3').catch(
+    missingPeer({
       feature: 'S3VFS',
       packageName: '@aws-sdk/client-s3',
       docsUrl: 'https://mirage.dev/typescript/install',
-    },
-  )
+    }),
+  ) as unknown as Promise<S3Module>
   return cachedModule
 }
 
