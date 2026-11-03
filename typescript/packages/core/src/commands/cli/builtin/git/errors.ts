@@ -921,6 +921,57 @@ export class UnmergedPathError extends GitError {
 }
 
 /**
+ * Tree paths a checkout, restore or reset meets that git refuses to write, by
+ * the rule `validPath` holds.
+ *
+ * One line per path and nothing written, exit 1, pinned against git 2.47.3.
+ * Where git goes on to refuse the line in other words (an unmatched pathspec,
+ * reset's `make_cache_entry`), those follow, and the last one sets the exit
+ * code. Its text also words restore's note for the paths it skips.
+ */
+export class InvalidPathError extends GitError {
+  override readonly prefix = 'error'
+  override readonly exitCode: number
+  readonly paths: readonly string[]
+
+  constructor(paths: readonly string[], then: readonly GitError[] = []) {
+    const sorted = [...paths].sort(compareCodePoints)
+    // Each line after the first carries its prefix; the renderer writes one.
+    super(
+      sorted.map((path) => `invalid path '${path}'`).join('\nerror: ') +
+        then
+          .map((after) =>
+            after.prefix === null ? `\n${after.message}` : `\n${after.prefix}: ${after.message}`,
+          )
+          .join(''),
+    )
+    this.paths = sorted
+    this.exitCode = then.at(-1)?.exitCode ?? 1
+  }
+}
+
+/**
+ * `clone` whose checkout refused a path: the repository stays, the working
+ * tree stays empty, exit 128.
+ *
+ * git names the first refused path only and says the clone itself succeeded,
+ * pinned against git 2.47.3.
+ */
+export class CloneCheckoutError extends GitError {
+  override readonly prefix = null
+
+  constructor(notes: string, path: string) {
+    super(
+      `${notes}error: ${new InvalidPathError([path]).message}\n` +
+        'fatal: unable to checkout working tree\n' +
+        'warning: Clone succeeded, but checkout failed.\n' +
+        "You can inspect what was checked out with 'git status'\n" +
+        "and retry with 'git restore --source=HEAD :/'\n",
+    )
+  }
+}
+
+/**
  * A refusal parse-options words in full, exit 129.
  *
  * Already worded, the verb's usage block included where git prints one: after

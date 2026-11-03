@@ -37,6 +37,7 @@ import {
   DetachWithCreateError,
   GitError,
   InvalidBranchNameError,
+  InvalidPathError,
   InvalidReferenceError,
   PathsWithBranchError,
   RefLockError,
@@ -77,7 +78,7 @@ import { indexLocked, opened } from './session.ts'
 import { noteAmbiguity, refsNamed, resolveCommit } from './revparse.ts'
 import { restorePaths, sourceTree } from './restore.ts'
 import { restored } from './reset.ts'
-import { commitEntries, type TreeEntry } from './tree.ts'
+import { commitEntries, validPath, type TreeEntry } from './tree.ts'
 import type { HeadRef, IndexEntry, ReadOnlyRefusal, Track } from './types.ts'
 import type { Files } from '../../../../workspace/files.ts'
 import { checkSwitches, splitMarked, startPoint as lineStart, requireVfs } from './util.ts'
@@ -299,6 +300,11 @@ export async function switchTo(
   after: ReadonlyMap<string, TreeEntry>,
 ): Promise<string[]> {
   const changed = written(before, after)
+  // Every path git refuses to check out is named before anything is written.
+  const invalid = [...changed]
+    .filter(([path, entry]) => !validPath(path, entry.mode))
+    .map(([path]) => path)
+  if (invalid.length > 0) throw new InvalidPathError(invalid)
   // A gitlink is not written into the working tree at all, so it is neither
   // read as a blob nor allowed to clear what stands at the name; keepGitlink is
   // the whole of what the entry asks for.
