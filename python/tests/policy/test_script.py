@@ -579,10 +579,7 @@ async def test_a_program_without_the_methods_function_fails_closed():
         Programs({"pre_command": (_entry(source="print('x')"),)})
     )
     assert await policy.pre_command(_ctx()) == (
-        Deny(
-            "profile 'release' policy defines no pre_command(ctx)",
-            failed=True,
-        ),
+        Deny("profile 'release' policy defines no pre_command(ctx)"),
     )
 
 
