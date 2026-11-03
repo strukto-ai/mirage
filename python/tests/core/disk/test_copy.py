@@ -17,6 +17,7 @@ import errno
 import os
 import shutil
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -209,3 +210,81 @@ async def test_a_cancelled_copy_records_partial_without_probing(
         scope.close()
     [row] = scope.records
     assert (row.status, row.changed) == ("partial", True)
+
+
+def _unprobeable(monkeypatch, path: Path) -> None:
+    real = os.stat
+
+    def stat(target, *args, **kwargs):
+        if Path(target) == path:
+            raise OSError(errno.EIO, "probe")
+        return real(target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", stat)
+
+
+def _fills_then_fails(src, dst):
+    Path(dst).write_bytes(b"half")
+    raise OSError(errno.ENOSPC, "No space left on device")
+
+
+@pytest.mark.asyncio
+async def test_a_copy_neither_probe_could_see_records_partial(
+    accessor, monkeypatch
+):
+    dst = accessor.root / "dst"
+    _unprobeable(monkeypatch, dst)
+    monkeypatch.setattr(shutil, "copyfile", _fills_then_fails)
+    scope = RecordingScope()
+    try:
+        with pytest.raises(OSError):
+            await copy(
+                accessor,
+                PathSpec.from_str_path("/src"),
+                PathSpec.from_str_path("/dst"),
+            )
+    finally:
+        scope.close()
+    assert dst.read_bytes() == b"half"
+    [row] = scope.records
+    assert (row.status, row.changed, row.errno) == ("partial", True, 28)
+
+
+@pytest.mark.asyncio
+async def test_a_copy_cancelled_while_probing_still_records_its_row(
+    accessor, monkeypatch
+):
+    dst = accessor.root / "dst"
+    entered, release = threading.Event(), threading.Event()
+    real = os.stat
+    calls = 0
+
+    def stat(target, *args, **kwargs):
+        nonlocal calls
+        if Path(target) == dst:
+            calls += 1
+            if calls == 2:
+                entered.set()
+                release.wait()
+        return real(target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", stat)
+    monkeypatch.setattr(shutil, "copyfile", _fills_then_fails)
+    scope = RecordingScope()
+    try:
+        task = asyncio.create_task(
+            copy(
+                accessor,
+                PathSpec.from_str_path("/src"),
+                PathSpec.from_str_path("/dst"),
+            )
+        )
+        await asyncio.to_thread(entered.wait)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release.set()
+        scope.close()
+    [row] = scope.records
+    assert (row.status, row.changed, row.errno) == ("partial", True, 28)

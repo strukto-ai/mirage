@@ -25,7 +25,7 @@ import { copy } from './copy.ts'
 
 vi.mock('node:fs/promises', async (original) => {
   const actual = await original<typeof fsModule>()
-  return { ...actual, copyFile: vi.fn(actual.copyFile) }
+  return { ...actual, copyFile: vi.fn(actual.copyFile), stat: vi.fn(actual.stat) }
 })
 
 let root: string
@@ -141,4 +141,29 @@ it('records a failed copy when copying wrote nothing', async () => {
   })
   expect(records).toHaveLength(1)
   expect(records[0]).toMatchObject({ status: 'failed', changed: false, errno: 2 })
+})
+
+it('records partial when neither probe could see the destination', async () => {
+  const actual = await vi.importActual<typeof fsModule>('node:fs/promises')
+  const dst = join(root, 'dst')
+  const stat = vi.mocked(fs.stat).mockImplementation(((target: string, options?: object) =>
+    target === dst
+      ? Promise.reject(Object.assign(new Error('probe'), { code: 'EIO' }))
+      : actual.stat(target, options)) as typeof fs.stat)
+  const copyFile = vi.mocked(fs.copyFile).mockImplementationOnce(async (_src, target) => {
+    await writeFile(target, 'half')
+    throw Object.assign(new Error('no space'), { code: 'ENOSPC' })
+  })
+  try {
+    await writeFile(join(root, 'src'), 'content')
+    const [, records] = await runWithRecording(async () => {
+      await expect(copy(accessor, spec('/src'), spec('/dst'))).rejects.toThrow()
+    })
+    expect(await readFile(dst, 'utf8')).toBe('half')
+    expect(records).toHaveLength(1)
+    expect(records[0]).toMatchObject({ status: 'partial', changed: true, errno: 28 })
+  } finally {
+    copyFile.mockRestore()
+    stat.mockRestore()
+  }
 })

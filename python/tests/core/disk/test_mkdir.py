@@ -19,6 +19,7 @@ import aiofiles.os
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.core.disk import mkdir as mkdir_module
 from mirage.core.disk.mkdir import mkdir
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
@@ -124,7 +125,8 @@ async def test_mkdir_parents_records_partial_once_it_made_a_directory(
         scope.close()
     assert (tmp_path / "x").is_dir()
     [row] = scope.records
-    assert (row.status, row.changed) == ("partial", True)
+    # Linux's number on every host: macOS's own ENAMETOOLONG is 63.
+    assert (row.status, row.changed, row.errno) == ("partial", True, 36)
 
 
 @pytest.mark.asyncio
@@ -150,3 +152,23 @@ async def test_a_cancelled_mkdir_parents_records_partial_without_probing(
         scope.close()
     [row] = scope.records
     assert (row.status, row.changed) == ("partial", True)
+
+
+@pytest.mark.asyncio
+async def test_mkdir_parents_whose_chain_no_probe_could_see_records_partial(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "a.txt").write_bytes(b"a")
+
+    def unprobeable(path):
+        raise OSError(errno.EIO, "probe")
+
+    monkeypatch.setattr(mkdir_module, "_first_missing", unprobeable)
+    scope = RecordingScope()
+    try:
+        with pytest.raises(NotADirectoryError):
+            await mkdir(DiskAccessor(tmp_path), spec("/a.txt/z"), parents=True)
+    finally:
+        scope.close()
+    [row] = scope.records
+    assert (row.status, row.changed, row.errno) == ("partial", True, 20)

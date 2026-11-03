@@ -15,8 +15,8 @@
 import asyncio
 import errno
 import os
-import shutil
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -31,26 +31,24 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-async def _rm_r_row(tmp_path, locked: str) -> OpRecord:
-    d = tmp_path / "d"
-    (d / "s").mkdir(parents=True)
-    (d / "f").write_bytes(b"f")
-    (d / "s" / "g").write_bytes(b"g")
-    os.chmod(tmp_path / locked, 0o500 if locked != "d" else 0)
+async def _rm_r_row(root: Path, target: str, locked: Path, mode: int) -> OpRecord:
+    os.chmod(locked, mode)
     scope = RecordingScope()
     try:
         with pytest.raises(PermissionError):
-            await rm_r(DiskAccessor(tmp_path), PathSpec.from_str_path("/d"))
+            await rm_r(DiskAccessor(root), PathSpec.from_str_path(target))
     finally:
         scope.close()
-        os.chmod(tmp_path / locked, 0o700)
+        os.chmod(locked, 0o700)
     [row] = scope.records
     return row
 
 
 @pytest.mark.asyncio
-async def test_rm_r_that_removed_nothing_records_a_failed_row(tmp_path):
-    row = await _rm_r_row(tmp_path, "d")
+async def test_rm_r_of_an_unreadable_directory_records_a_failed_row(tmp_path):
+    (tmp_path / "d").mkdir()
+    (tmp_path / "d" / "f").write_bytes(b"f")
+    row = await _rm_r_row(tmp_path, "/d", tmp_path / "d", 0)
     assert (tmp_path / "d" / "f").exists()
     assert (row.status, row.changed, row.errno) == (
         "failed",
@@ -60,8 +58,33 @@ async def test_rm_r_that_removed_nothing_records_a_failed_row(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_rm_r_records_partial_once_it_got_inside(tmp_path):
-    row = await _rm_r_row(tmp_path, "d/s")
+async def test_rm_r_whose_first_unlink_is_refused_records_a_failed_row(
+    tmp_path,
+):
+    (tmp_path / "d").mkdir()
+    (tmp_path / "d" / "f").write_bytes(b"f")
+    row = await _rm_r_row(tmp_path, "/d", tmp_path / "d", 0o500)
+    assert (tmp_path / "d" / "f").exists()
+    assert (row.status, row.changed) == ("failed", False)
+
+
+@pytest.mark.asyncio
+async def test_rm_r_of_an_empty_directory_its_parent_keeps_records_failed(
+    tmp_path,
+):
+    (tmp_path / "x" / "d").mkdir(parents=True)
+    row = await _rm_r_row(tmp_path, "/x/d", tmp_path / "x", 0o500)
+    assert (tmp_path / "x" / "d").is_dir()
+    assert (row.status, row.changed) == ("failed", False)
+
+
+@pytest.mark.asyncio
+async def test_rm_r_records_partial_once_it_removed_an_entry(tmp_path):
+    (tmp_path / "x" / "d").mkdir(parents=True)
+    (tmp_path / "x" / "d" / "f").write_bytes(b"f")
+    row = await _rm_r_row(tmp_path, "/x/d", tmp_path / "x", 0o500)
+    assert not (tmp_path / "x" / "d" / "f").exists()
+    assert (tmp_path / "x" / "d").is_dir()
     assert (row.status, row.changed, row.errno) == (
         "partial",
         True,
@@ -74,11 +97,11 @@ async def test_a_cancelled_rm_r_records_partial(tmp_path, monkeypatch):
     (tmp_path / "d").mkdir()
     entered, release = threading.Event(), threading.Event()
 
-    def stalled(path, onexc=None):
+    def stalled(path, *, dir_fd=None):
         entered.set()
         release.wait()
 
-    monkeypatch.setattr(shutil, "rmtree", stalled)
+    monkeypatch.setattr(os, "rmdir", stalled)
     scope = RecordingScope()
     try:
         task = asyncio.create_task(

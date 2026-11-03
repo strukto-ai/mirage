@@ -12,8 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { classify } from '@struktoai/mirage-core/errors/classify'
-import { posixErrno } from '@struktoai/mirage-core/errors/posix'
+import { errnoOf } from '@struktoai/mirage-core/errors/posix'
 import type { DiskAccessor } from '../../accessor/disk.ts'
 import { lstat, mkdir as fsMkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
@@ -28,20 +27,37 @@ import { resolveInside } from './utils.ts'
 
 export const logger: { debug?: (message: string) => void } = {}
 
+/**
+ * The topmost missing directory of the chain, null when it all exists.
+ * Rejects when an lstat cannot tell, which proves nothing either way.
+ */
 async function firstMissing(path: string): Promise<string | null> {
   let missing: string | null = null
   for (;;) {
     try {
       await lstat(path)
-      break
+      return missing
     } catch (err) {
-      logger.debug?.(`mkdir -p ancestor ${path} missing: ${String(err)}`)
+      const code = (err as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') throw err
     }
     missing = path
-    if (dirname(path) === path) break
+    if (dirname(path) === path) return missing
     path = dirname(path)
   }
-  return missing
+}
+
+/**
+ * Whether a failed `mkdir -p` may have made part of the chain: unless a
+ * second probe finds it as the first did, it may have.
+ */
+async function changedSince(path: string, missing: string | null): Promise<boolean> {
+  try {
+    return (await firstMissing(path)) !== missing
+  } catch (err) {
+    logger.debug?.(`mkdir -p chain ${path} not probed: ${String(err)}`)
+    return true
+  }
 }
 
 export async function mkdir(
@@ -53,7 +69,14 @@ export async function mkdir(
   const full = await resolveInside(root, path)
   const timer = startOp()
   if (parents) {
-    const missing = await firstMissing(full)
+    let seen = true
+    let missing: string | null = null
+    try {
+      missing = await firstMissing(full)
+    } catch (err) {
+      logger.debug?.(`mkdir -p chain ${full} not probed: ${String(err)}`)
+      seen = false
+    }
     let failure: unknown = null
     try {
       await fsMkdir(full, { recursive: true })
@@ -68,13 +91,13 @@ export async function mkdir(
       throw named ?? diskError(err, path)
     } finally {
       // Also when it threw: the chain may have made its first directories
-      // before a later one failed.
-      const changed = failure === null || (await firstMissing(full)) !== missing
-      const condition = classify(failure)
+      // before a later one failed, and so may a chain either probe could
+      // not see.
+      const changed = failure === null || !seen || (await changedSince(full, missing))
       record('mkdir', path.virtual, VFSName.DISK, 0, timer, {
         status: failure === null ? 'ok' : changed ? 'partial' : 'failed',
         changed,
-        errno: condition === null ? null : posixErrno(condition),
+        errno: errnoOf(failure),
       })
     }
     return

@@ -339,8 +339,11 @@ line made to a mount is a `vfs` entry between them.
 Each `vfs` entry says how the call ended: `status` is `ok`, `failed` or
 `partial`, `changed` whether it changed anything, `served` the layer that
 answered (`backend`, `cache`, `index` or `namespace`), and a failed call adds
-`errno`, its POSIX errno. Only disk `cp`, `mkdir -p` and `rm -r` record a
-failed call so far; elsewhere a failed call leaves no `vfs` entry.
+`errno` when its error carries one, numbered as Linux numbers it on every
+host. `changed` is what the call's writer states: a call that cannot tell
+whether it changed anything, such as a cancelled one, says it did. Only disk
+`cp`, `mkdir -p` and `rm -r` record a failed call as `failed` or `partial` so
+far; elsewhere a failed call leaves no `vfs` entry, or an `ok` one.
 
 `stdout` and `stderr` keep their first 4096 characters.
 
