@@ -4098,6 +4098,7 @@ class SlowStreamRAM extends RAMVFS {
   }
 
   private async *slow(): AsyncIterable<Uint8Array> {
+    await Promise.resolve()
     yield new TextEncoder().encode('a')
     this.clock.advance(5)
     yield new TextEncoder().encode('b')
