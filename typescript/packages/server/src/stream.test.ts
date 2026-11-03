@@ -219,6 +219,53 @@ it('disconnect cancels the job and joins its cleanup before closing the transpor
   await table.close()
 })
 
+it('a cancelled body stops a line that has printed nothing yet', async () => {
+  const started = gate()
+  const table = new ExecutionTable()
+  let opened!: (shell: ShellExecution) => void
+  const execution = new Promise<ShellExecution | null>((resolve) => {
+    opened = resolve
+  })
+  const job = table.submit(
+    'workspace',
+    'quiet',
+    async (signal, scope) => {
+      await scope.start()
+      const shell = new ShellExecution(
+        async (_sink, stop) => {
+          started.release()
+          await new Promise<void>((resolve) => {
+            stop.addEventListener(
+              'abort',
+              () => {
+                resolve()
+              },
+              { once: true },
+            )
+          })
+          return finished()
+        },
+        scope,
+        signal,
+      )
+      opened(shell)
+      await shell.wait()
+      return null
+    },
+    'session',
+  )
+  await started.wait
+  const { reply, body, closed } = replyFor()
+  shellResponse(execution, table, job, reply, closed.signal, Promise.resolve(undefined), undefined)
+  const reader = body().getReader()
+  const read = reader.read()
+  await reader.cancel()
+  await read
+  expect(closed.signal.aborted).toBe(false)
+  expect(table.get(job.id)?.status).toBe(ExecutionStatus.CANCELED)
+  await table.close()
+})
+
 it('the final record does not wait for stdin to end', async () => {
   const uploaded = gate()
   const table = new ExecutionTable()

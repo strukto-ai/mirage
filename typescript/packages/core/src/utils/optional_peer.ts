@@ -25,13 +25,22 @@ export interface OptionalPeerConfig {
   systemHint?: string
 }
 
-export async function loadOptionalPeer<T>(
+export function loadOptionalPeer<T>(
   importer: () => Promise<T>,
   config: OptionalPeerConfig,
 ): Promise<T> {
-  try {
-    return await importer()
-  } catch (err) {
+  return importer().catch(missingPeer(config))
+}
+
+/**
+ * What a failed import of an optional peer throws: an install hint when
+ * the package does not resolve, else the load failure. Handed to the
+ * import itself, `import('x').catch(missingPeer(...))`, a bundler leaves a
+ * peer that is not installed to fail here at run time rather than failing
+ * the build of every app that never uses it.
+ */
+export function missingPeer(config: OptionalPeerConfig): (err: unknown) => never {
+  return (err) => {
     const code = (err as { code?: string } | null)?.code
     const docsLine = config.docsUrl !== undefined ? `\nSee ${config.docsUrl} for details.` : ''
     if (code === 'ERR_MODULE_NOT_FOUND' || code === 'MODULE_NOT_FOUND') {

@@ -14,7 +14,7 @@
 
 import type { QdrantClient } from '@qdrant/js-client-rest'
 import type { QdrantRow } from '../core/qdrant/types.ts'
-import { loadOptionalPeer } from '../utils/optional_peer.ts'
+import { missingPeer } from '../utils/optional_peer.ts'
 import type { resolveQdrantConfig } from '../vfs/qdrant/config.ts'
 import { Accessor } from './base.ts'
 import { ResponseCache } from './responses.ts'
@@ -46,9 +46,8 @@ export class QdrantAccessor extends Accessor {
   /** The mount's client, opened on first use. */
   async client(): Promise<QdrantClient> {
     if (this.opened === null) {
-      const mod = (await loadOptionalPeer(
-        () => import(/* @vite-ignore */ '@qdrant/js-client-rest'),
-        { feature: 'QdrantVFS', packageName: '@qdrant/js-client-rest' },
+      const mod = (await import(/* @vite-ignore */ '@qdrant/js-client-rest').catch(
+        missingPeer({ feature: 'QdrantVFS', packageName: '@qdrant/js-client-rest' }),
       )) as { QdrantClient: QdrantClientCtor }
       const common = {
         timeout: this.config.timeout * 1000,

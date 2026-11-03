@@ -155,8 +155,16 @@ export interface ServerHost {
   ): Promise<void>
 }
 
-/** A web stream of what `source` yields, for a reply on any host. */
-export function streamOf(source: AsyncIterable<Uint8Array>): ReadableStream<Uint8Array> {
+/**
+ * A web stream of what `source` yields, for a reply on any host. A reader
+ * that cancels calls `stop` first: the iterator's return waits behind a
+ * read still pending (a line that has printed nothing yet), so `stop` is
+ * what ends that read rather than the source's own end.
+ */
+export function streamOf(
+  source: AsyncIterable<Uint8Array>,
+  stop?: () => void,
+): ReadableStream<Uint8Array> {
   const iterator = source[Symbol.asyncIterator]()
   return new ReadableStream<Uint8Array>({
     async pull(controller) {
@@ -165,6 +173,7 @@ export function streamOf(source: AsyncIterable<Uint8Array>): ReadableStream<Uint
       else controller.enqueue(next.value)
     },
     async cancel(reason) {
+      stop?.()
       await iterator.return?.(reason)
     },
   })
