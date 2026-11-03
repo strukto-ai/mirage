@@ -16,7 +16,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif 'secret' in ctx['line']:\n    print(json.dumps({\"kind\": \"deny\", \"reason\": \"sealed\"}))\n",
+          "script": "def pre_execute(ctx):\n    if 'secret' in ctx['line']:\n        return {\"kind\": \"deny\", \"reason\": \"sealed\"}\n",
           "runtime": "monty"
         }
       },

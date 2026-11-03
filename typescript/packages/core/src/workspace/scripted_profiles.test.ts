@@ -7,33 +7,23 @@ import { Workspace } from './workspace/workspace.ts'
 // Mirrors the profile policy cases in
 // python/tests/workspace/workspace/test_policies.py.
 
-// What every policy program starts with: its context, as JSON.
-const CONTEXT = `\
-import json
-import os
-
-ctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])
-`
-
 // A per-command judge: deny cat under /data/sealed/ with a computed
 // reason, take shred to the approval ledger, stay silent otherwise. A
-// program prints its answer, and null is silence.
-const JUDGE = `${CONTEXT}
-def answer():
+// program returns its answer, and None is silence.
+const JUDGE = `
+def pre_command(ctx):
     for p in ctx['paths']:
         if ctx['command'] == 'cat' and p.startswith('/data/sealed/'):
             return {'kind': 'deny', 'reason': 'sealed by ' + ctx['profile']}
     if ctx['command'] == 'shred':
         return {'kind': 'ask', 'reason': 'sign-off'}
     return None
-
-print(json.dumps(answer()))
 `
 
 // A judge that reads what the operand holds, not what it is called:
 // the shape a content policy takes when it is a program.
-const READER = `${CONTEXT}
-def answer():
+const READER = `
+def pre_command(ctx):
     for p in ctx['paths']:
         try:
             body = open(p).read()
@@ -42,19 +32,18 @@ def answer():
         if 'payload' in body:
             return {'kind': 'ask', 'reason': 'sign-off on payload'}
     return None
-
-print(json.dumps(answer()))
 `
 
 // A program that denies with what its caller says: the same session id
 // and working directory a coded policy reads off `ctx.caller`.
-const CALLER = `${CONTEXT}
-caller = ctx['caller']['session']
-if ctx['command'] == 'cat':
-    print(json.dumps({
-        'kind': 'deny',
-        'reason': caller['session_id'] + ' in ' + caller['cwd'],
-    }))
+const CALLER = `
+def pre_command(ctx):
+    caller = ctx['caller']['session']
+    if ctx['command'] == 'cat':
+        return {
+            'kind': 'deny',
+            'reason': caller['session_id'] + ' in ' + caller['cwd'],
+        }
 `
 
 type Method = 'preExecute' | 'preCommand' | 'preVfs' | 'preSession'
@@ -245,7 +234,9 @@ describe('profile policies', () => {
   it('a broken policy fails closed per command', async () => {
     // Silence on failure would run exactly the commands the policy
     // existed to judge.
-    const ws = build(scripted({ preCommand: "raise ValueError('boom')" }))
+    const ws = build(
+      scripted({ preCommand: "def pre_command(ctx):\n    raise ValueError('boom')" }),
+    )
     try {
       ws.createSession('s', { profile: 'release' })
       const refused = await ws.shell('echo hi', { sessionId: 's' })
@@ -273,16 +264,15 @@ describe('profile policies', () => {
     }
   })
 
-  it('a program printing something else fails closed', async () => {
-    // stdout is the answer: anything but one JSON answer or nothing is
-    // refused rather than guessed at.
-    const ws = build(scripted({ preCommand: "print('looks fine to me')" }))
+  it('a program returning something else fails closed', async () => {
+    // Anything but an answer or None is refused rather than guessed at.
+    const ws = build(scripted({ preCommand: "def pre_command(ctx):\n    return 'looks fine'" }))
     try {
       ws.createSession('s', { profile: 'release' })
       const refused = await ws.shell('echo hi', { sessionId: 's' })
       expect(refused.exitCode).toBe(126)
       expect(refused.refusal?.reason).toMatch(
-        /^profile 'release' policy must return or print a JSON answer at pre_command/,
+        /^profile 'release' policy must return an answer at pre_command/,
       )
     } finally {
       await ws.close()
@@ -373,14 +363,15 @@ describe('profile policies', () => {
 
 // Programs at the op and session views and nowhere else: writes under
 // /data/frozen and AWS_* variables are refused, and no command is judged.
-const FROZEN = `${CONTEXT}
-if ctx['write'] and ctx['path'].startswith('/data/frozen/'):
-    print(json.dumps({'kind': 'deny', 'reason': 'frozen by ' + ctx['profile']}))
+const FROZEN = `
+def pre_vfs(ctx):
+    if ctx['write'] and ctx['path'].startswith('/data/frozen/'):
+        return {'kind': 'deny', 'reason': 'frozen by ' + ctx['profile']}
 `
-const CREDENTIALS = `${CONTEXT}
-if ctx['key'].startswith('AWS_'):
-    reason = 'credentials are set by the operator'
-    print(json.dumps({'kind': 'deny', 'reason': reason}))
+const CREDENTIALS = `
+def pre_session(ctx):
+    if ctx['key'].startswith('AWS_'):
+        return {'kind': 'deny', 'reason': 'credentials are set by the operator'}
 `
 const GATES = { preVfs: FROZEN, preSession: CREDENTIALS }
 
@@ -446,12 +437,13 @@ describe('profile policies at the op and session views', () => {
 
 // A judge that reads one fixed file and refuses when it can, so what it
 // sees is what the session it judges for may see.
-const PEEK = `${CONTEXT}
-try:
-    body = open('/data/secret/k').read()
-    print(json.dumps({'kind': 'deny', 'reason': 'saw ' + body.strip()}))
-except OSError:
-    pass
+const PEEK = `
+def pre_command(ctx):
+    try:
+        body = open('/data/secret/k').read()
+    except OSError:
+        return None
+    return {'kind': 'deny', 'reason': 'saw ' + body.strip()}
 `
 
 describe('a profile policy reads as the session it judges for', () => {
@@ -486,9 +478,10 @@ describe('a profile policy reads as the session it judges for', () => {
 describe('policy functions', () => {
   it('a copy and a restore keep them', async () => {
     const directory = (command: string): Promise<boolean> => Promise.resolve(command === 'rm')
-    const source = `${CONTEXT}
-if await directory(ctx['command']):
-    print(json.dumps({'kind': 'deny', 'reason': 'directory says no'}))
+    const source = `
+async def pre_command(ctx):
+    if await directory(ctx['command']):
+        return {'kind': 'deny', 'reason': 'directory says no'}
 `
     const ws = new Workspace(
       { '/data/': new RAMVFS() },

@@ -198,22 +198,26 @@ def script_context(
 
 def program_source(source: str, method: str) -> str:
     """The program a runtime runs at one method: the source as written,
-    and when it defines a function named for the method at its top level
-    (``def pre_command(ctx)``, or ``async def``), a call to it after,
-    with the context, printing what it returns as the answer.
+    then a call to the function it defines for the method at its top
+    level (``def pre_command(ctx)``, or ``async def``), with the
+    context, printing what it returns as the answer.
 
     The call is appended, so the program's own lines keep their numbers
-    in a traceback, and a program without the function runs unedited.
+    in a traceback.
 
     Args:
         source (str): the program.
         method (str): the method it answers at.
+
+    Raises:
+        ValueError: the program defines no function for the method, as
+            a clause about "script".
     """
     found = re.search(
         rf"^(async[ \t]+)?def[ \t]+{method}[ \t]*\(", source, re.MULTILINE
     )
     if found is None:
-        return source
+        raise ValueError(f"script defines no {method}(ctx)")
     call = f'{method}(_mirage_json.loads(_mirage_os.environ["{CTX_ENV}"]))'
     if found.group(1):
         call = f"await {call}"
@@ -225,14 +229,15 @@ def program_source(source: str, method: str) -> str:
 
 
 def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:
-    """The answer a policy program printed at one method.
+    """The answer a policy program's function returned at one method,
+    as ``program_source`` printed it.
 
-    Nothing (or ``null``) is no opinion. Anything else is one JSON
-    answer (``Answer``): ``{"kind": "deny", "reason": ...}``,
-    ``{"kind": "ask", "reason": ...}``, or at ``pre_execute``
+    ``null`` (the function returned ``None``) is no opinion. Anything
+    else is one JSON answer (``Answer``): ``{"kind": "deny", "reason":
+    ...}``, ``{"kind": "ask", "reason": ...}``, or at ``pre_execute``
     ``{"kind": "route", "runtime": ..., "reason": ...}``, its reason
-    optional. A deny or an ask without a
-    reason carries the document's default one.
+    optional. A deny or an ask without a reason carries the document's
+    default one.
 
     Args:
         output (bytes): what the program wrote to stdout.
@@ -250,8 +255,8 @@ def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:
         answer = Answer.model_validate_json(text)
     except ValidationError as exc:
         raise ValueError(
-            f"script must return or print a JSON answer at {method}, "
-            f'{{"kind": "deny" | "ask" | "route", ...}}'
+            f"script must return an answer at {method}, "
+            f'{{"kind": "deny" | "ask" | "route", ...}}, or None'
         ) from exc
     if answer.kind not in VALIDITY[method]:
         raise ValueError(f"script cannot answer {answer.kind} at {method}")
@@ -282,18 +287,19 @@ class ScriptPolicy(Policy, SessionScopedMixin):
 
     A program runs as any program does on its runtime: in the session's
     cwd, with the context as JSON (``script_context``) in ``CTX_ENV``
-    and on stdin, and its answer printed on stdout (``script_action``),
-    never edited but for the call to the function it defines for the
-    method, whose return value is that answer (``program_source``).
+    and on stdin, and the call to the function it defines for the method
+    appended (``program_source``), which prints what the function returns
+    on stdout as its answer (``script_action``).
     Beside ``CTX_ENV`` it is passed only its entry's own ``env``, a
     pointer read from the workspace's sources on the entry's first run
     and kept: the session's variables are in the context, so none the
     agent sets changes how the program starts, and on wasi it runs with
     ``-P`` (``PROGRAM_FLAGS``), so no file the agent writes stands in
     for a module it imports. Every failure fails closed: a program that
-    exits non-zero, runs past the timeout, answers something else, or
-    names a runtime that cannot be built refuses the action with a
-    reason naming the profile, and is logged. The workspace's
+    defines no function for the method, exits non-zero, runs past the
+    timeout, returns something else, or names a runtime that cannot be
+    built refuses the action with a reason naming the profile, and is
+    logged. The workspace's
     ``route_policy`` program runs here too (``run``), outside any
     profile.
 
@@ -548,6 +554,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         Raises:
             ValueError: the program failed, as a clause about "script".
         """
+        source = program_source(entry.script.source, method)
         engine, lock = self._engine(entry)
         try:
             env = await self._env(entry)
@@ -558,9 +565,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
                         [],
                         Context(
                             flags={
-                                "c": program_source(
-                                    entry.script.source, method
-                                ),
+                                "c": source,
                                 **PROGRAM_FLAGS.get(entry.runtime, {}),
                             },
                             cwd=PathSpec.from_str_path(cwd),

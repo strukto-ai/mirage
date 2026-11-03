@@ -3666,7 +3666,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nfor p in ctx['paths']:\n    if ctx['command'] == 'cat' and p.startswith('/repo/sealed/'):\n        print(json.dumps({'kind': 'deny', 'reason': 'written by ' + ctx['profile']}))\n        break\n"
+                  "source": "def pre_command(ctx):\n    for p in ctx['paths']:\n        if ctx['command'] == 'cat' and p.startswith('/repo/sealed/'):\n            return {'kind': 'deny', 'reason': 'written by ' + ctx['profile']}\n"
                 },
                 "runtime": "monty"
               }
@@ -3679,7 +3679,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nfor p in ctx['paths']:\n    if ctx['command'] == 'rm' and p.startswith('/scratch/askme/'):\n        print(json.dumps({'kind': 'ask', 'reason': 'scripted sign-off'}))\n        break\n"
+                  "source": "def pre_command(ctx):\n    for p in ctx['paths']:\n        if ctx['command'] == 'rm' and p.startswith('/scratch/askme/'):\n            return {'kind': 'ask', 'reason': 'scripted sign-off'}\n"
                 },
                 "runtime": "monty"
               }
@@ -3692,7 +3692,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\ndef contents(path):\n    try:\n        return open(path).read()\n    except OSError:\n        return ''\n\nfor p in ctx['paths']:\n    if 'marker' in contents(p):\n        print(json.dumps({'kind': 'deny', 'reason': 'marked by ' + ctx['profile']}))\n        break\n"
+                  "source": "def pre_command(ctx):\n    def contents(path):\n        try:\n            return open(path).read()\n        except OSError:\n            return ''\n\n    for p in ctx['paths']:\n        if 'marker' in contents(p):\n            return {'kind': 'deny', 'reason': 'marked by ' + ctx['profile']}\n"
                 },
                 "runtime": "monty"
               }
@@ -3701,7 +3701,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nname = ctx['call']['name']\nby = ctx['profile']\nreason = None\nif ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n    reason = 'cold by ' + by\nelif name == 'read' and ctx['path'].startswith('/scratch/drop/'):\n    reason = 'drop box by ' + by\nelif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n    reason = 'vault by ' + by\nif reason is not None:\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                  "source": "def pre_vfs(ctx):\n    name = ctx['call']['name']\n    by = ctx['profile']\n    reason = None\n    if ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n        reason = 'cold by ' + by\n    elif name == 'read' and ctx['path'].startswith('/scratch/drop/'):\n        reason = 'drop box by ' + by\n    elif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n        reason = 'vault by ' + by\n    if reason is not None:\n        return {'kind': 'deny', 'reason': reason}\n"
                 },
                 "runtime": "monty"
               }
@@ -3710,7 +3710,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['key'].startswith('AWS_'):\n    reason = 'credentials are set by the operator'\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                  "source": "def pre_session(ctx):\n    if ctx['key'].startswith('AWS_'):\n        reason = 'credentials are set by the operator'\n        return {'kind': 'deny', 'reason': reason}\n"
                 },
                 "runtime": "monty"
               }
@@ -3892,7 +3892,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\nimport shlex\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nfor p in ctx['paths']:\n    if ctx['command'] == 'cat' and p.startswith('/repo/sealed/'):\n        reason = 'written by ' + ctx['profile'] + ' for ' + shlex.join(ctx['argv'])\n        print(json.dumps({'kind': 'deny', 'reason': reason}))\n        break\n"
+                  "source": "import shlex\n\ndef pre_command(ctx):\n    for p in ctx['paths']:\n        if ctx['command'] == 'cat' and p.startswith('/repo/sealed/'):\n            reason = 'written by ' + ctx['profile'] + ' for ' + shlex.join(ctx['argv'])\n            return {'kind': 'deny', 'reason': reason}\n"
                 },
                 "runtime": "wasi"
               }
@@ -3905,7 +3905,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nname = ctx['call']['name']\nby = ctx['profile']\nreason = None\nif ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n    reason = 'cold by ' + by\nelif name == 'read' and ctx['path'].startswith('/scratch/drop/'):\n    reason = 'drop box by ' + by\nelif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n    reason = 'vault by ' + by\nif reason is not None:\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                  "source": "def pre_vfs(ctx):\n    name = ctx['call']['name']\n    by = ctx['profile']\n    reason = None\n    if ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n        reason = 'cold by ' + by\n    elif name == 'read' and ctx['path'].startswith('/scratch/drop/'):\n        reason = 'drop box by ' + by\n    elif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n        reason = 'vault by ' + by\n    if reason is not None:\n        return {'kind': 'deny', 'reason': reason}\n"
                 },
                 "runtime": "wasi"
               }
@@ -3914,7 +3914,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['key'].startswith('AWS_'):\n    reason = 'credentials are set by the operator'\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                  "source": "def pre_session(ctx):\n    if ctx['key'].startswith('AWS_'):\n        reason = 'credentials are set by the operator'\n        return {'kind': 'deny', 'reason': reason}\n"
                 },
                 "runtime": "wasi"
               }
@@ -3965,7 +3965,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\nimport shlex\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nfor p in ctx['paths']:\n    if ctx['command'] == 'cat' and p.startswith('/repo/sealed/'):\n        reason = 'written by ' + ctx['profile'] + ' for ' + shlex.join(ctx['argv'])\n        print(json.dumps({'kind': 'deny', 'reason': reason}))\n        break\n"
+                  "source": "import shlex\n\ndef pre_command(ctx):\n    for p in ctx['paths']:\n        if ctx['command'] == 'cat' and p.startswith('/repo/sealed/'):\n            reason = 'written by ' + ctx['profile'] + ' for ' + shlex.join(ctx['argv'])\n            return {'kind': 'deny', 'reason': reason}\n"
                 },
                 "runtime": "pyodide"
               }
@@ -3978,7 +3978,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nname = ctx['call']['name']\nby = ctx['profile']\nreason = None\nif ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n    reason = 'cold by ' + by\nelif name == 'read' and ctx['path'].startswith('/scratch/drop/'):\n    reason = 'drop box by ' + by\nelif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n    reason = 'vault by ' + by\nif reason is not None:\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                  "source": "def pre_vfs(ctx):\n    name = ctx['call']['name']\n    by = ctx['profile']\n    reason = None\n    if ctx['write'] and ctx['path'].startswith('/scratch/cold/'):\n        reason = 'cold by ' + by\n    elif name == 'read' and ctx['path'].startswith('/scratch/drop/'):\n        reason = 'drop box by ' + by\n    elif name == 'readdir' and ctx['path'].startswith('/scratch/vault'):\n        reason = 'vault by ' + by\n    if reason is not None:\n        return {'kind': 'deny', 'reason': reason}\n"
                 },
                 "runtime": "pyodide"
               }
@@ -3987,7 +3987,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "import json\nimport os\n\nctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])\nif ctx['key'].startswith('AWS_'):\n    reason = 'credentials are set by the operator'\n    print(json.dumps({'kind': 'deny', 'reason': reason}))\n"
+                  "source": "def pre_session(ctx):\n    if ctx['key'].startswith('AWS_'):\n        reason = 'credentials are set by the operator'\n        return {'kind': 'deny', 'reason': reason}\n"
                 },
                 "runtime": "pyodide"
               }

@@ -2206,12 +2206,9 @@ describe('declared source instances', () => {
 // first is a session-write gate, and only for the sessions under its
 // profile.
 const SESSION_GATE = `\
-import json
-import os
-
-ctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])
-if ctx['key'].startswith('AWS_'):
-    print(json.dumps({'kind': 'deny'}))
+def pre_session(ctx):
+    if ctx['key'].startswith('AWS_'):
+        return {'kind': 'deny'}
 `
 
 function scriptedWs(
@@ -2263,7 +2260,7 @@ describe('fillEnv under a profile policy', () => {
     const ws = scriptedWs(
       { TOKEN: { from: 'fake-scripted-judge', ref: 'r' } },
       'preCommand',
-      'pass\n',
+      'def pre_command(ctx):\n    pass\n',
     )
     try {
       const io = await ws.shell('TOKEN=local; printenv TOKEN')

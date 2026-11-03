@@ -87,13 +87,13 @@ describe('a method without task isolation', () => {
     // explain.shell runs no policy for real: a coded method reads and a
     // profile's program reads, and neither one's write lands.
     const source =
-      'import json\n' +
-      "value = open('/data/rule').read()\n" +
-      'try:\n' +
-      "    open('/data/mark', 'w').write('x')\n" +
-      'except OSError:\n' +
-      '    pass\n' +
-      "print(json.dumps({'kind': 'deny', 'reason': value}))"
+      'def pre_command(ctx):\n' +
+      "    value = open('/data/rule').read()\n" +
+      '    try:\n' +
+      "        open('/data/mark', 'w').write('x')\n" +
+      '    except OSError:\n' +
+      '        pass\n' +
+      "    return {'kind': 'deny', 'reason': value}"
     const read: string[] = []
     const refused: string[] = []
     const coded: Policy = {
@@ -394,7 +394,7 @@ describe('a method without task isolation', () => {
 
 it('carries the script issuer through postVfs without task isolation', async () => {
   const source =
-    "import json\nvalue = open('/data/rule').read()\nprint(json.dumps({'kind': 'deny', 'reason': value}))"
+    "def post_vfs(ctx):\n    value = open('/data/rule').read()\n    return {'kind': 'deny', 'reason': value}"
   const ws = new Workspace(
     { '/data': new RAMVFS() },
     {

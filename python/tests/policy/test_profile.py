@@ -1646,13 +1646,10 @@ async def test_a_whole_line_runtime_is_gated_like_the_tree():
         await ws.close()
 
 
-AFTER_ECHO = """import json
-import os
-
-ctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])
-if ctx['command'] == 'echo':
-    reason = 'no echo after ' + str(ctx['exit_code'])
-    print(json.dumps({'kind': 'deny', 'reason': reason}))
+AFTER_ECHO = """
+def post_command(ctx):
+    if ctx['command'] == 'echo':
+        return {'kind': 'deny', 'reason': 'no echo after ' + str(ctx['exit_code'])}
 """
 
 

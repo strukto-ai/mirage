@@ -189,10 +189,9 @@ describe('the server API in workerd', () => {
 
   it('runs a Python policy program on monty', async () => {
     const guard = [
-      'import json, os',
-      'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
-      'if ctx["command"] == "cat":',
-      '    print(json.dumps({"kind": "deny", "reason": "no cat here"}))',
+      'def pre_command(ctx):',
+      '    if ctx["command"] == "cat":',
+      '        return {"kind": "deny", "reason": "no cat here"}',
     ].join('\n')
     const created = await call('POST', '/v1/workspaces', {
       id: 'guarded',
@@ -235,10 +234,9 @@ describe('the server API in workerd', () => {
 
   it('asks a Python pre_network program before a line connects', async () => {
     const guard = [
-      'import json, os',
-      'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
-      'if ctx["host"] == "example.com":',
-      '    print(json.dumps({"kind": "deny", "reason": "not this host"}))',
+      'def pre_network(ctx):',
+      '    if ctx["host"] == "example.com":',
+      '        return {"kind": "deny", "reason": "not this host"}',
     ].join('\n')
     await call('POST', '/v1/workspaces', {
       id: 'netguard',
