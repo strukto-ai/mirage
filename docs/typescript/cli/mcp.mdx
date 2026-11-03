@@ -33,7 +33,8 @@ issues search-issues '{"query": "login bug"}'
 A tool named `search_issues` becomes the subcommand `search-issues`; its
 `--help` prints the tool's description and the JSON schema of its
 arguments. `mcpCli` rejects with `MCPToolsError` when the server cannot be
-listed or its tools cannot all become distinct subcommands.
+listed, it lists more than 1024 tools or more than 16 MiB of them, or
+its tools cannot all become distinct subcommands.
 
 The tool list is read once, at registration. To pick up tools the server
 added later, list them again, then remove the CLI and register the new one:
@@ -91,6 +92,7 @@ clis:
 | the tool reports an error | its text on stderr, exit 1 |
 | the server cannot be reached | `search-issues: MCP server failed: <reason>`, exit 1 |
 | the server gives no answer within 5 minutes | `search-issues: MCP server timed out`, exit 1 |
+| the answer is larger than 16 MiB | `search-issues: MCP server reply exceeds 16777216 bytes`, exit 1 |
 | the operand is not one JSON object | `search-issues: invalid JSON`, `JSON must be an object` or `takes one JSON object`, exit 2, nothing sent |
 
 Text content prints as text; any other content prints as one line of

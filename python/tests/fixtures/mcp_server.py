@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import gzip
 import json
+import zlib
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -27,6 +29,7 @@ from mcp.server.lowlevel import Server
 from mcp.shared.exceptions import MCPError
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from mirage.core.mcp.constants import MAX_REPLY
 from mirage.types import JsonValue
 
 TOKEN = "fixture-token"
@@ -75,8 +78,8 @@ class FakeMCP:
     Args:
         url (str): the streamable-HTTP endpoint.
         requests (list[dict[str, str]]): one entry per HTTP request,
-            with its method, MCP method, MCP session id and the auth
-            headers it carried.
+            with its method, MCP method, MCP session id, the auth
+            headers it carried and the encodings it accepts.
         started (list[str]): tools whose call began.
         cancelled (list[str]): tools whose call was abandoned.
         expired (set[str]): MCP session ids answered 404 from now on.
@@ -85,6 +88,15 @@ class FakeMCP:
         repeating (bool): every tool page is the first, naming itself
             as the next.
         down (bool): every request is answered 503.
+        oversized (dict[str, str]): MCP methods answered with a body
+            past the reply cap, of the content type each maps to.
+        encoding (str | None): ``tools/call`` is answered with the
+            text ``inflated``, gzip-compressed and labelled with this
+            content encoding, whatever the client accepts.
+        padding (int): bytes of ``_meta`` padding in that answer, which
+            no rendering prints.
+        damage (str | None): ``truncated`` or ``garbled`` spoils that
+            answer's compressed body.
     """
 
     url: str
@@ -95,6 +107,10 @@ class FakeMCP:
     pages: int | None = None
     repeating: bool = False
     down: bool = False
+    oversized: dict[str, str] = field(default_factory=dict)
+    encoding: str | None = None
+    padding: int = 0
+    damage: str | None = None
 
     def opens(self) -> int:
         """How many clients connected: each probes ``server/discover``
@@ -173,6 +189,69 @@ async def _answer(send: Send, status: int, body: bytes) -> None:
     await send({"type": "http.response.body", "body": body})
 
 
+async def _flood(send: Send, content_type: str) -> None:
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [(b"content-type", content_type.encode())],
+        }
+    )
+    chunk = b"x" * (1024 * 1024)
+    await send(
+        {
+            "type": "http.response.body",
+            "body": b"event: message\ndata: ",
+            "more_body": True,
+        }
+    )
+    for _ in range(MAX_REPLY // len(chunk) + 1):
+        await send(
+            {"type": "http.response.body", "body": chunk, "more_body": True}
+        )
+    await send({"type": "http.response.body", "body": b"\n\n"})
+
+
+async def _encoded(fake: FakeMCP, receive: Receive, send: Send) -> None:
+    body = b""
+    while True:
+        message = await receive()
+        body += message.get("body", b"")
+        if not message.get("more_body"):
+            break
+    reply = {
+        "jsonrpc": "2.0",
+        "id": json.loads(body)["id"],
+        "result": {
+            "content": [{"type": "text", "text": "inflated"}],
+            "_meta": {"padding": "x" * fake.padding},
+            "resultType": "complete",
+        },
+    }
+    pack = zlib.compress if fake.encoding == "deflate" else gzip.compress
+    packed = pack(json.dumps(reply).encode())
+    if fake.damage == "truncated":
+        packed = packed[: len(packed) // 2]
+    elif fake.damage == "garbled":
+        packed = packed[:10] + b"\xff" * 32
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 200,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-encoding", str(fake.encoding).encode()),
+            ],
+        }
+    )
+    await send(
+        {
+            "type": "http.response.body",
+            "body": packed,
+        }
+    )
+
+
 def _guard(app: ASGIApp, fake: FakeMCP, legacy: bool) -> ASGIApp:
     async def guarded(scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -188,6 +267,7 @@ def _guard(app: ASGIApp, fake: FakeMCP, legacy: bool) -> ASGIApp:
                 "session": session,
                 "authorization": headers.get("authorization", ""),
                 "x-api-key": headers.get("x-api-key", ""),
+                "accept-encoding": headers.get("accept-encoding", ""),
             }
         )
         if fake.down:
@@ -199,6 +279,10 @@ def _guard(app: ASGIApp, fake: FakeMCP, legacy: bool) -> ASGIApp:
             await _answer(send, 401, b"denied")
         elif session in fake.expired:
             await _answer(send, 404, b"expired")
+        elif mcp in fake.oversized:
+            await _flood(send, fake.oversized[mcp])
+        elif fake.encoding is not None and mcp == "tools/call":
+            await _encoded(fake, receive, send)
         elif legacy and mcp == "server/discover":
             await _answer(send, 400, b"legacy")
         else:

@@ -745,6 +745,11 @@
     "DaemonMcpServer": "A Python Session call runs on the workspace runner's loop, so the daemon serves MCP with a subclass whose hop does it, as DaemonRpcServer does for RPC; TypeScript has one loop and hands its tool table to createMirageMcpServer."
    }
   },
+  "accessor/mcp": {
+   "python_only": {
+    "CappedStream": "An httpx2 response hook can replace response.stream only with an AsyncByteStream, so Python's reply cap is a class; TypeScript pipes the fetch body through a TransformStream built inline in replyCap."
+   }
+  },
   "commands/cli/mcp/call": {
    "python_only": {
     "_whole": "json.loads reads whole numbers through parse_int, apart from floats; the TypeScript JSON.parse reviver sees both as numbers in finite."
@@ -757,7 +762,9 @@
   },
   "core/mcp/constants": {
    "python_only": {
-    "CONNECT_TIMEOUT": "httpx takes connect, write and pool timeouts of its own; fetch takes none, so TypeScript leaves them to the runtime's defaults."
+    "CONNECT_TIMEOUT": "httpx takes connect, write and pool timeouts of its own; fetch takes none, so TypeScript leaves them to the runtime's defaults.",
+    "INFLATED": "Python's reply cap inflates a gzip or deflate body itself so it counts inflated bytes; fetch inflates every body before TypeScript's replyCap reads it.",
+    "INFLATE_CHUNK": "Python's reply cap inflates a body in bounded steps with zlib; fetch inflates every body before TypeScript's replyCap reads it."
    }
   },
   "commands/cli/builtin/git/cat_file": {

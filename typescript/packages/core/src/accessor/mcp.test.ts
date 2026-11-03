@@ -18,7 +18,7 @@ import {
   METHOD_NOT_FOUND,
   ProtocolError,
 } from '@modelcontextprotocol/client'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   bearerConfig,
   API_KEY,
@@ -32,8 +32,8 @@ import { MCPConfig } from '../core/mcp/config.ts'
 import { parseConfigWithSchema } from '../vfs/secrets.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
-import { TIMEOUT } from '../core/mcp/constants.ts'
-import { answered, MCPAccessor } from './mcp.ts'
+import { MAX_REPLY, REPLY_ENCODING, REPLY_TOO_LARGE, TIMEOUT } from '../core/mcp/constants.ts'
+import { answered, MCPAccessor, refusal, replyCap } from './mcp.ts'
 
 async function kept(use: (ws: Workspace, fake: FakeMCP) => Promise<void>): Promise<FakeMCP> {
   const fake = await servedMcp()
@@ -141,6 +141,16 @@ describe('MCPAccessor', () => {
     [new Error('x'), false],
   ])('keeps the client only for an error the server answered: %s', async (error, kept) => {
     expect(await answered(error)).toBe(kept)
+  })
+
+  it.each([
+    [new ProtocolError(-32603, REPLY_TOO_LARGE), REPLY_TOO_LARGE],
+    [new Error(`x: ${REPLY_ENCODING}`), REPLY_ENCODING],
+    [new AggregateError([new Error('x'), new Error(REPLY_TOO_LARGE)]), REPLY_TOO_LARGE],
+    [new AggregateError([new Error('x')]), undefined],
+    [new ProtocolError(-32000, 'x'), undefined],
+  ])('finds a refused reply inside any aggregate: %s', (error, reason) => {
+    expect(refusal(error)).toBe(reason)
   })
 
   it('joins a dropped client still closing when it closes', async () => {
@@ -256,5 +266,29 @@ describe('MCPAccessor', () => {
     })
     expect(opens(fake)).toBe(1)
     expect(fake.cancelled).toEqual(['wait_forever'])
+  })
+})
+
+describe('replyCap', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  async function read(size: number): Promise<ArrayBuffer> {
+    vi.stubGlobal('fetch', () =>
+      Promise.resolve(
+        new Response(new Uint8Array(size), { headers: { 'content-type': 'application/json' } }),
+      ),
+    )
+    const response = await replyCap(false)('http://x/mcp', { method: 'POST', body: '{"id":1}' })
+    return response.arrayBuffer()
+  }
+
+  it('passes a body of exactly the cap', async () => {
+    expect((await read(MAX_REPLY)).byteLength).toBe(MAX_REPLY)
+  })
+
+  it('refuses the first byte past the cap', async () => {
+    await expect(read(MAX_REPLY + 1)).rejects.toThrow(REPLY_TOO_LARGE)
   })
 })

@@ -22,6 +22,7 @@ from mcp import types
 from mirage import Workspace
 from mirage.commands.cli.mcp import mcp_cli
 from mirage.commands.cli.mcp.call import render
+from mirage.core.mcp.constants import MAX_REPLY, REPLY_ENCODING
 from mirage.policy import NetworkContext, Policy
 from mirage.vfs.ram import RAMVFS
 from tests.fixtures.mcp_server import TOKEN, FakeMCP, served_mcp
@@ -162,6 +163,71 @@ async def test_a_server_that_never_opens_a_session_times_out(monkeypatch):
     assert (result.exit_code, result.stderr) == (
         1,
         b"list-items: MCP server timed out\n",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("policy", [None, _Listening()], ids=["kept", "own"])
+@pytest.mark.parametrize(
+    "content_type", ["application/json", "text/event-stream"]
+)
+async def test_a_reply_past_the_cap_exits_1_and_says_so(
+    monkeypatch, policy, content_type
+):
+    monkeypatch.setattr("mirage.accessor.mcp.TIMEOUT", 20.0)
+    async with installed(policy) as (ws, fake):
+        fake.oversized["tools/call"] = content_type
+        result = await ws.shell("fx list-items")
+        fake.oversized.clear()
+        after = await ws.shell("fx list-items")
+    assert (result.exit_code, result.stdout, result.stderr) == (
+        1,
+        b"",
+        f"list-items: MCP server reply exceeds {MAX_REPLY} bytes\n".encode(),
+    )
+    assert after.stdout == b"apple\nbanana\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("encoding", ["gzip", "deflate"])
+async def test_a_compressed_reply_is_inflated_once(encoding):
+    async with installed() as (ws, fake):
+        fake.encoding = encoding
+        result = await ws.shell("fx list-items")
+    assert (result.exit_code, result.stdout) == (0, b"inflated\n")
+    assert {r["accept-encoding"] for r in fake.requests} == {"identity"}
+
+
+@pytest.mark.asyncio
+async def test_a_compressed_reply_is_capped_once_inflated():
+    async with installed() as (ws, fake):
+        fake.encoding, fake.padding = "gzip", MAX_REPLY
+        result = await ws.shell("fx list-items")
+    assert (result.exit_code, result.stdout, result.stderr) == (
+        1,
+        b"",
+        f"list-items: MCP server reply exceeds {MAX_REPLY} bytes\n".encode(),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "encoding, damage",
+    [
+        ("br", None),
+        ("gzip, br", None),
+        ("gzip", "truncated"),
+        ("gzip", "garbled"),
+    ],
+)
+async def test_a_reply_the_client_cannot_inflate_exits_1(encoding, damage):
+    async with installed() as (ws, fake):
+        fake.encoding, fake.damage = encoding, damage
+        result = await ws.shell("fx list-items")
+    assert (result.exit_code, result.stdout, result.stderr) == (
+        1,
+        b"",
+        f"list-items: {REPLY_ENCODING}\n".encode(),
     )
 
 

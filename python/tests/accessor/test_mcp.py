@@ -16,14 +16,22 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx2
 import pytest
 from mcp import types
 from mcp.shared.exceptions import MCPError
 
 from mirage import Workspace
-from mirage.accessor.mcp import MCPAccessor, answered, timed_out
+from mirage.accessor.mcp import (
+    CappedStream,
+    MCPAccessor,
+    answered,
+    refusal,
+    timed_out,
+)
 from mirage.commands.cli.mcp import build_cli, mcp_cli
 from mirage.core.mcp.config import MCPConfig
+from mirage.core.mcp.constants import REPLY_ENCODING, REPLY_TOO_LARGE
 from mirage.policy import Deny, NetworkContext, Policy
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
@@ -178,6 +186,50 @@ def test_only_an_error_the_server_answered_keeps_the_client(error, kept):
 )
 def test_a_timeout_is_found_inside_any_exception_group(error, expired):
     assert timed_out(error) is expired
+
+
+@pytest.mark.parametrize(
+    "error, reason",
+    [
+        (
+            MCPError(-32603, f"SSE stream failed: {REPLY_TOO_LARGE}"),
+            REPLY_TOO_LARGE,
+        ),
+        (
+            MCPError(
+                -32700, f"Failed to parse JSON response: {REPLY_ENCODING}"
+            ),
+            REPLY_ENCODING,
+        ),
+        (
+            ExceptionGroup(
+                "g", [ValueError("x"), ValueError(REPLY_TOO_LARGE)]
+            ),
+            REPLY_TOO_LARGE,
+        ),
+        (ExceptionGroup("g", [ValueError("x")]), None),
+        (MCPError(-32000, "x"), None),
+    ],
+)
+def test_a_refused_reply_is_found_inside_any_exception_group(error, reason):
+    assert refusal(error) == reason
+
+
+@pytest.mark.asyncio
+async def test_a_capped_stream_passes_a_body_of_exactly_its_cap():
+    stream = CappedStream(
+        httpx2.ByteStream(b"x" * 10), [10], httpx2.StreamError
+    )
+    assert b"".join([chunk async for chunk in stream]) == b"x" * 10
+
+
+@pytest.mark.asyncio
+async def test_a_capped_stream_refuses_the_first_byte_past_its_cap():
+    stream = CappedStream(
+        httpx2.ByteStream(b"x" * 11), [10], httpx2.StreamError
+    )
+    with pytest.raises(httpx2.StreamError, match=REPLY_TOO_LARGE):
+        _ = [chunk async for chunk in stream]
 
 
 @pytest.mark.asyncio

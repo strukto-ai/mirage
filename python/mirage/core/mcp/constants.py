@@ -18,3 +18,13 @@ CONNECT_TIMEOUT = 60.0
 TIMEOUT = 300.0
 # Pages of tools read before the listing is refused.
 MAX_PAGES = 64
+# Bytes one MCP reply may carry, and a whole tool listing across its pages.
+MAX_REPLY = 16 * 1024 * 1024
+# Tools one MCP server may list.
+MAX_TOOLS = 1024
+REPLY_TOO_LARGE = f"MCP server reply exceeds {MAX_REPLY} bytes"
+# Content encodings a reply may arrive in; it is inflated before it counts.
+INFLATED = frozenset({"gzip", "x-gzip", "deflate"})
+# Bytes inflated from a reply at a time.
+INFLATE_CHUNK = 64 * 1024
+REPLY_ENCODING = "MCP server reply uses an encoding the client cannot read"

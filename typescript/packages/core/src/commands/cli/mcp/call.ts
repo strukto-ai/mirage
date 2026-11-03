@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { CallToolResult } from '@modelcontextprotocol/client'
-import { type MCPAccessor, timedOut } from '../../../accessor/mcp.ts'
+import { type MCPAccessor, refusal, timedOut } from '../../../accessor/mcp.ts'
 import { compactJsonText } from '../../../core/render/json.ts'
 import { IOResult, type CommandOutput } from '../../../io/types.ts'
 import type { JsonValue, PathSpec } from '../../../types.ts'
@@ -89,6 +89,8 @@ export async function callTool(
   } catch (error) {
     if (ctx.signal?.aborted === true) throw error
     if (await timedOut(error)) return refuse(`${command}: MCP server timed out`, 1)
+    const refused = refusal(error)
+    if (refused !== undefined) return refuse(`${command}: ${refused}`, 1)
     return refuse(`${command}: MCP server failed: ${causes(error).join('; ')}`, 1)
   }
   const out = ENCODER.encode(render(result))

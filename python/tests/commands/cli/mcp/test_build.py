@@ -16,6 +16,7 @@ import subprocess
 import sys
 
 import pytest
+from mcp import types
 
 from mirage.accessor.mcp import MCPAccessor
 from mirage.commands.cli.mcp import (
@@ -26,6 +27,7 @@ from mirage.commands.cli.mcp import (
     mcp_cli,
 )
 from mirage.core.mcp.config import MCPConfig
+from mirage.core.mcp.constants import MAX_REPLY, MAX_TOOLS
 from tests.fixtures.mcp_server import TITLE, served_mcp
 
 SCHEMA = {
@@ -96,6 +98,48 @@ def test_a_tool_list_no_cli_can_be_made_from_is_refused(names, wording):
     source = MCPSource(title="t", tools=tuple(_tool(n) for n in names))
     with pytest.raises(MCPToolsError, match=wording):
         build_cli(source)
+
+
+def test_a_tool_list_past_the_tool_cap_is_refused():
+    names = [f"t{i}" for i in range(MAX_TOOLS + 1)]
+    assert len(
+        build_cli(MCPSource("t", tuple(map(_tool, names[1:])))).handlers
+    )
+    with pytest.raises(
+        MCPToolsError, match=f"the server lists more than {MAX_TOOLS} tools"
+    ):
+        build_cli(MCPSource(title="t", tools=tuple(map(_tool, names))))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content_type", ["application/json", "text/event-stream"]
+)
+async def test_a_tool_list_past_the_reply_cap_is_refused(content_type):
+    async with served_mcp() as fake:
+        fake.oversized["tools/list"] = content_type
+        with pytest.raises(MCPToolsError) as caught:
+            await mcp_cli(fake.bearer_config())
+    assert str(caught.value) == (
+        f"cannot list the server's tools: "
+        f"MCP server reply exceeds {MAX_REPLY} bytes"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_reply_cap_spans_every_page_of_a_tool_list():
+    third = "x" * (MAX_REPLY // 3)
+    tools = [
+        types.Tool(
+            name=f"t{i}", description=third, input_schema={"type": "object"}
+        )
+        for i in range(3)
+    ]
+    async with served_mcp(tools[:2]) as fake:
+        assert len((await mcp_cli(fake.bearer_config())).handlers) == 2
+    async with served_mcp(tools) as fake:
+        with pytest.raises(MCPToolsError, match="reply exceeds"):
+            await mcp_cli(fake.bearer_config())
 
 
 @pytest.mark.asyncio

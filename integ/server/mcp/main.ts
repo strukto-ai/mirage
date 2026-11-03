@@ -48,6 +48,11 @@ const TOOLS: Tool[] = [
   },
   { name: 'fail_always', description: 'Always fails.', inputSchema: { type: 'object' } },
   { name: 'echo_args', description: 'Echo the arguments back.', inputSchema: { type: 'object' } },
+  {
+    name: 'repeat_x',
+    description: 'Answer with x repeated count times.',
+    inputSchema: { type: 'object', properties: { count: { type: 'integer' } } },
+  },
 ]
 
 function text(value: string, isError = false): CallToolResult {
@@ -88,6 +93,8 @@ function mcpServer(): Server {
         return text(`added ${String(args.name)}`)
       case 'fail_always':
         return text('boom', true)
+      case 'repeat_x':
+        return text('x'.repeat(Number(args.count)))
       default:
         return text(JSON.stringify(sorted(args)))
     }

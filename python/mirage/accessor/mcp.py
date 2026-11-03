@@ -15,8 +15,9 @@
 import asyncio
 import contextvars
 import logging
+import zlib
 from collections import Counter
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
 import httpx2
@@ -27,7 +28,16 @@ from mcp.shared.exceptions import MCPError
 
 from mirage.accessor.base import Accessor
 from mirage.core.mcp.config import MCPConfig
-from mirage.core.mcp.constants import CONNECT_TIMEOUT, MAX_PAGES, TIMEOUT
+from mirage.core.mcp.constants import (
+    CONNECT_TIMEOUT,
+    INFLATE_CHUNK,
+    INFLATED,
+    MAX_PAGES,
+    MAX_REPLY,
+    REPLY_ENCODING,
+    REPLY_TOO_LARGE,
+    TIMEOUT,
+)
 from mirage.io.gateway import live_egress
 from mirage.io.network import NetworkRule, network_bound, run_with_network
 from mirage.types import JsonValue
@@ -61,6 +71,117 @@ def timed_out(error: BaseException) -> bool:
     if isinstance(error, BaseExceptionGroup):
         return any(timed_out(inner) for inner in error.exceptions)
     return isinstance(error, MCPError) and error.code == types.REQUEST_TIMEOUT
+
+
+def refusal(error: BaseException) -> str | None:
+    """Which reply refusal a call failed with, ``REPLY_TOO_LARGE`` or
+    ``REPLY_ENCODING``, found through any exception group it raised;
+    None for any other failure.
+
+    Args:
+        error (BaseException): what the call raised.
+    """
+    if isinstance(error, BaseExceptionGroup):
+        found = (refusal(inner) for inner in error.exceptions)
+        return next((reason for reason in found if reason), None)
+    text = str(error)
+    return next(
+        (
+            reason
+            for reason in (REPLY_TOO_LARGE, REPLY_ENCODING)
+            if reason in text
+        ),
+        None,
+    )
+
+
+class CappedStream(httpx2.AsyncByteStream):
+    """A response body, inflated when ``encoding`` asks for it, that
+    raises ``error`` once its inflated bytes run past ``left``.
+
+    Args:
+        stream (httpx2.AsyncByteStream): the body as received.
+        left (list[int]): bytes left to read, one cell shared by every
+            body that counts against the same cap.
+        error (type[httpx2.SSEError] | type[httpx2.StreamError]): what
+            the SDK turns into an answer to the request at once.
+        encoding (str): the body's content encoding; one outside
+            ``INFLATED`` and identity is refused.
+    """
+
+    def __init__(
+        self,
+        stream: httpx2.AsyncByteStream,
+        left: list[int],
+        error: type[httpx2.SSEError] | type[httpx2.StreamError],
+        encoding: str = "",
+    ) -> None:
+        self._stream = stream
+        self._left = left
+        self._error = error
+        self._encoding = encoding
+
+    def _counted(self, chunk: bytes) -> bytes:
+        self._left[0] -= len(chunk)
+        if self._left[0] < 0:
+            raise self._error(REPLY_TOO_LARGE)
+        return chunk
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        if self._encoding in ("", "identity"):
+            async for chunk in self._stream:
+                yield self._counted(chunk)
+            return
+        if self._encoding not in INFLATED:
+            raise self._error(REPLY_ENCODING)
+        inflate = zlib.decompressobj(zlib.MAX_WBITS | 32)
+        try:
+            async for data in self._stream:
+                while data:
+                    chunk = inflate.decompress(data, INFLATE_CHUNK)
+                    data = inflate.unconsumed_tail
+                    yield self._counted(chunk)
+            tail = inflate.flush()
+        except zlib.error as error:
+            raise self._error(REPLY_ENCODING) from error
+        if not inflate.eof or inflate.unused_data:
+            raise self._error(REPLY_ENCODING)
+        yield self._counted(tail)
+
+    async def aclose(self) -> None:
+        await self._stream.aclose()
+
+
+def reply_cap(
+    shared: bool,
+) -> Callable[[httpx2.Response], Awaitable[None]]:
+    """An httpx2 response hook that cuts each body at ``MAX_REPLY``
+    bytes, or every body together when ``shared``.
+
+    The client asks for no content encoding; a body a server gzips or
+    deflates anyway is inflated here, so the cap counts inflated bytes
+    and httpx2 does not inflate it again.
+
+    Args:
+        shared (bool): one cap across every response, as a listing's
+            pages share one.
+    """
+    left = [MAX_REPLY]
+
+    async def cap(response: httpx2.Response) -> None:
+        assert isinstance(response.stream, httpx2.AsyncByteStream)
+        encoding = response.headers.pop("content-encoding", "")
+        sse = response.headers.get("content-type", "").lower()
+        response.stream = CappedStream(
+            response.stream,
+            left if shared else [MAX_REPLY],
+            httpx2.SSEError
+            if sse.startswith("text/event-stream")
+            else httpx2.StreamError,
+            encoding.strip().lower(),
+        )
+
+    return cap
 
 
 class MCPAccessor(Accessor):
@@ -100,17 +221,24 @@ class MCPAccessor(Accessor):
         return {str(auth.name): token}
 
     @asynccontextmanager
-    async def session(self) -> AsyncIterator[Client]:
-        """An initialized client, closed when the block ends."""
+    async def session(self, shared: bool = False) -> AsyncIterator[Client]:
+        """An initialized client, closed when the block ends.
+
+        Args:
+            shared (bool): hold every reply to one ``MAX_REPLY`` cap.
+        """
         async with httpx2.AsyncClient(
-            headers=self.headers(),
+            headers={"Accept-Encoding": "identity", **self.headers()},
+            event_hooks={"response": [reply_cap(shared)]},
             # Outlasts discover plus a request, so a stall ends as the SDK's timeout.
             timeout=httpx2.Timeout(
                 CONNECT_TIMEOUT, read=DISCOVER_TIMEOUT_SECONDS + TIMEOUT + 1
             ),
         ) as http:
             transport = streamable_http_client(
-                self.config.url, http_client=http
+                self.config.url,
+                http_client=http,
+                max_sse_event_size=MAX_REPLY,
             )
             async with Client(
                 transport, read_timeout_seconds=TIMEOUT
@@ -118,8 +246,9 @@ class MCPAccessor(Accessor):
                 yield client
 
     async def list_tools(self) -> tuple[str, list[types.Tool]]:
-        """The server's title and every tool it lists, page by page."""
-        async with self.session() as client:
+        """The server's title and every tool it lists, page by page,
+        all its pages held to one reply cap."""
+        async with self.session(shared=True) as client:
             page = await client.list_tools()
             tools = list(page.tools)
             pages = 1
