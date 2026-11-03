@@ -215,6 +215,7 @@ class OpReport:
         detached (bool): Collect the row here when async tasks share their context.
         record (OpRecord | None): The detached caller's row, delivered at close.
         driver_recorded (bool): Rows below the dispatcher already account for this call.
+        driver_rows (list[OpRecord]): The rows the backend recorded for this call.
         metadata_rows (bool): Record the default row of a metadata op or
             a listing too, as a host call on the ledger does.
         fingerprint (str | None): The token accompanying a cache answer.
@@ -236,6 +237,7 @@ class OpReport:
     fingerprint: str | None = None
     stream_records: "list[OpRecord] | None" = None
     driver_recorded: bool = False
+    driver_rows: "list[OpRecord]" = field(default_factory=list)
     metadata_rows: bool = False
     answerer: "OpServed | None" = None
     completed: bool = False

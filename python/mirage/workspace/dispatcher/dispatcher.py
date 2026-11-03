@@ -23,6 +23,7 @@ from collections.abc import (
     Awaitable,
     Callable,
     Collection,
+    Iterable,
     Mapping,
 )
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
@@ -700,6 +701,48 @@ def _payload_bytes(result: Any, kwargs: Mapping[str, Any]) -> int:
     )
 
 
+def _settle_failed(rows: Iterable[OpRecord], failure: BaseException) -> None:
+    """Hand a call's failure to the rows it recorded before it raised:
+    one whose change may have landed is partial, any other failed.
+
+    Args:
+        rows (Iterable[OpRecord]): the rows the call recorded.
+        failure (BaseException): what the call raised.
+    """
+    condition = classify(failure)
+    code = (
+        posix_errno(condition)
+        if condition is not None
+        else getattr(failure, "errno", None)
+    )
+    for row in rows:
+        if row.status is OpStatus.OK:
+            row.status = OpStatus.PARTIAL if row.changed else OpStatus.FAILED
+            row.errno = code
+
+
+async def _settle_on_error(
+    source: AsyncIterator[bytes], rows: Iterable[OpRecord]
+) -> AsyncIterator[bytes]:
+    """Pass a read through, settling the rows its backend recorded when
+    a later pull raises. Primed with an empty chunk, so a close before
+    the first pull still closes ``source``.
+
+    Args:
+        source (AsyncIterator[bytes]): the already opened read.
+        rows (Iterable[OpRecord]): the rows its backend recorded.
+    """
+    try:
+        yield b""
+        async for chunk in source:
+            yield chunk
+    except Exception as exc:
+        _settle_failed(rows, exc)
+        raise
+    finally:
+        await close_quietly(source)
+
+
 def _retracted(virtual: str) -> bool:
     """Whether the running line's newest word on ``virtual`` is that a
     change it made took the path's version (a copy, a move, a removal).
@@ -1308,11 +1351,27 @@ class Dispatcher:
                             else observed
                         )
                     streaming = True
+                rows = (*mine, *report.driver_rows)
+                if (
+                    name in DISPATCH_READ_OPS
+                    and hasattr(answer, "__aiter__")
+                    and not streaming
+                    and rows
+                ):
+                    settled = _settle_on_error(answer, rows)
+                    await anext(settled)
+                    answer = (
+                        PipeStream(settled, answer.path, answer.end)
+                        if isinstance(answer, PipeStream)
+                        else settled
+                    )
                 return answer, io
             except BaseException as exc:
                 failure = exc
                 raise
             finally:
+                if failure is not None:
+                    _settle_failed((*mine, *report.driver_rows), failure)
                 if (
                     not skip
                     and not streaming
@@ -1673,6 +1732,7 @@ class Dispatcher:
                 finally:
                     if report is not None:
                         report.driver_recorded = bool(records)
+                        report.driver_rows = records
                     if enclosing is not None and enclosing[0] is not None:
                         enclosing[0].extend(records)
             if not call.read_records:

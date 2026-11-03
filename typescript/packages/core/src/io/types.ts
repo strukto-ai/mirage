@@ -109,6 +109,7 @@ export async function materialize(source: ByteSource | null | undefined): Promis
  * `detached` keeps the default row on `record` for a file caller whose
  * shared browser context cannot attribute driver rows to overlapping calls.
  * `driverRecorded` says rows below the dispatcher already account for the call.
+ * `driverRows` holds the rows the backend recorded for the call.
  * `metadataRows` records a metadata op's default row too, as a host call
  * on the ledger does.
  * `fingerprint` carries the token accompanying a cache answer.
@@ -125,6 +126,7 @@ export class OpReport {
   fingerprint: string | null = null
   streamRecords: OpRecord[] | null = null
   driverRecorded = false
+  driverRows: OpRecord[] = []
   metadataRows = false
   answerer: OpServed = 'backend'
   completed = false

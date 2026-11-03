@@ -41,7 +41,12 @@ from mirage.errors.types import (
 )
 from mirage.io import OpReport
 from mirage.io.stream import yield_bytes
-from mirage.observe.context import RecordingScope, record, start_op
+from mirage.observe.context import (
+    RecordingScope,
+    record,
+    record_stream,
+    start_op,
+)
 from mirage.policy import (
     Action,
     AdmissionRules,
@@ -4159,5 +4164,55 @@ async def test_a_policy_refusing_reads_refuses_their_shortcuts():
                     name, PathSpec.from_str_path("/m/cold"), **kwargs
                 )
         assert vfs.asked == []
+    finally:
+        await ws.close()
+
+
+class _SettledThenLostRAM(RAMVFS):
+    async def copy(self, src: PathSpec, dst: PathSpec) -> None:
+        record("copy", dst.virtual, "ram", 0, start_op())
+        raise OSError(errno.EIO, "lost", dst.virtual)
+
+    def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> Any:
+        if offset or size is not None:
+            return super().read(path, offset, size)
+        return self._pulled(path)
+
+    async def _pulled(self, path: PathSpec) -> AsyncIterator[bytes]:
+        rec = record_stream("read", path.virtual, "ram")
+        if rec is not None:
+            rec.bytes += 1
+        yield b"a"
+        raise OSError(errno.EIO, "lost", path.virtual)
+
+
+@pytest.mark.asyncio
+async def test_a_backend_row_takes_the_failure_of_the_call_that_raised():
+    ws = Workspace({"/m": _SettledThenLostRAM()}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/m/a", b"a")
+        start = len(ws.vfs.records)
+        assert (await ws.shell("cp /m/a /m/b")).exit_code == 1
+        rows = [r for r in ws.vfs.records[start:] if r.op == "copy"]
+        assert [(r.status, r.changed, r.errno) for r in rows] == [
+            ("partial", True, errno.EIO)
+        ]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_streamed_backend_row_takes_the_failure_of_a_later_pull():
+    ws = Workspace({"/m": _SettledThenLostRAM()}, mode=MountMode.WRITE)
+    try:
+        await ws.vfs.write("/m/a", b"ab")
+        start = len(ws.vfs.records)
+        assert (await ws.shell("cat /m/a")).exit_code == 1
+        rows = [r for r in ws.vfs.records[start:] if r.op == "read"]
+        assert [(r.status, r.changed, r.errno) for r in rows] == [
+            ("failed", False, errno.EIO)
+        ]
     finally:
         await ws.close()

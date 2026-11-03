@@ -24,7 +24,13 @@ import type { IOResult } from '../../io/types.ts'
 import { describe, expect, it, vi } from 'vitest'
 import { materialize, OpReport, type ByteSource } from '../../io/types.ts'
 import { runWithSession } from '../../context/session_context.ts'
-import { record, revisionFor, runWithRecording, startOp } from '../../observe/context.ts'
+import {
+  record,
+  recordStream,
+  revisionFor,
+  runWithRecording,
+  startOp,
+} from '../../observe/context.ts'
 import { MountEntry } from '../mount/mount.ts'
 import { Dispatcher } from './dispatcher.ts'
 import { BatchedRAM, dispatched, render } from '../../test-utils.ts'
@@ -3983,3 +3989,57 @@ it.each([false, true])(
     }
   },
 )
+
+class SettledThenLostRAM extends RAMVFS {
+  override async copy(_src: PathSpec, dst: PathSpec): Promise<void> {
+    record('copy', dst.virtual, 'ram', 0, startOp())
+    await Promise.resolve()
+    throw Object.assign(new Error('lost'), { code: 'EIO' })
+  }
+
+  override read(
+    path: PathSpec,
+    handed?: Handed,
+    offset = 0,
+    size: number | null = null,
+  ): Promise<ByteSource> | AsyncIterable<Uint8Array> {
+    if (offset !== 0 || size !== null) return super.read(path, handed, offset, size)
+    return this.pulled(path)
+  }
+
+  private async *pulled(path: PathSpec): AsyncIterable<Uint8Array> {
+    const rec = recordStream('read', path.virtual, 'ram')
+    if (rec !== null) rec.bytes += 1
+    yield new TextEncoder().encode('a')
+    await Promise.resolve()
+    throw Object.assign(new Error('lost'), { code: 'EIO' })
+  }
+}
+
+describe('a backend row of a call that raised', () => {
+  it('takes the failure of the call', async () => {
+    const ws = new Workspace({ '/m': new SettledThenLostRAM() }, { mode: MountMode.WRITE })
+    try {
+      await ws.vfs.write('/m/a', 'a')
+      const start = ws.records.length
+      expect((await ws.shell('cp /m/a /m/b')).exitCode).toBe(1)
+      const rows = ws.records.slice(start).filter((r) => r.op === 'copy')
+      expect(rows.map((r) => [r.status, r.changed, r.errno])).toEqual([['partial', true, 5]])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('takes the failure of a later pull of its stream', async () => {
+    const ws = new Workspace({ '/m': new SettledThenLostRAM() }, { mode: MountMode.WRITE })
+    try {
+      await ws.vfs.write('/m/a', 'ab')
+      const start = ws.records.length
+      expect((await ws.shell('cat /m/a')).exitCode).toBe(1)
+      const rows = ws.records.slice(start).filter((r) => r.op === 'read')
+      expect(rows.map((r) => [r.status, r.changed, r.errno])).toEqual([['failed', false, 5]])
+    } finally {
+      await ws.close()
+    }
+  })
+})

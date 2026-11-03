@@ -428,6 +428,45 @@ function judge(gate: EntryGate, ...paths: readonly unknown[]): void {
  * be running, and the path is evicted only once the op ends. A read or write
  * since stamps a newer record. Mirrors Python's `_retracted`.
  */
+/**
+ * Hand a call's failure to the rows it recorded before it raised: one whose
+ * change may have landed is partial, any other failed. Mirrors Python's
+ * `_settle_failed`.
+ */
+function settleFailed(rows: Iterable<OpRecord>, failure: unknown): void {
+  const condition = classify(failure)
+  for (const row of rows) {
+    if (row.status !== 'ok') continue
+    row.status = row.changed ? 'partial' : 'failed'
+    row.errno = condition === null ? null : posixErrno(condition)
+  }
+}
+
+/**
+ * Pass a read through, settling the rows its backend recorded when a later
+ * pull raises. Primed with an empty chunk, so a close before the first pull
+ * still closes `source`. Mirrors Python's `_settle_on_error`.
+ */
+async function* settleOnError(
+  source: AsyncIterable<Uint8Array>,
+  rows: Iterable<OpRecord>,
+): AsyncGenerator<Uint8Array> {
+  const iterator = source[Symbol.asyncIterator]()
+  try {
+    yield new Uint8Array()
+    for (;;) {
+      const next = await iterator.next()
+      if (next.done === true) break
+      yield next.value
+    }
+  } catch (err) {
+    settleFailed(rows, err)
+    throw err
+  } finally {
+    await iterator.return?.()
+  }
+}
+
 function retracted(virtual: string): boolean {
   const records = activeRecords()
   if (records === undefined) return false
@@ -953,11 +992,28 @@ export class Dispatcher {
           }
           streaming = true
         }
+        const rows = [...mine, ...report.driverRows]
+        if (
+          DISPATCH_READ_OPS.has(name) &&
+          !streaming &&
+          rows.length > 0 &&
+          result !== null &&
+          typeof result === 'object' &&
+          Symbol.asyncIterator in result
+        ) {
+          const settled = settleOnError(result as AsyncIterable<Uint8Array>, rows)
+          await settled.next()
+          answer =
+            result instanceof PipeStream
+              ? new PipeStream(settled, result.path, result.end)
+              : settled
+        }
         return [answer, io]
       } catch (err) {
         failure = err
         throw err
       } finally {
+        if (failure !== null) settleFailed([...mine, ...report.driverRows], failure)
         if (
           !skip &&
           !streaming &&
@@ -1338,7 +1394,10 @@ export class Dispatcher {
             mine,
           ] as const
         } finally {
-          if (report !== undefined) report.driverRecorded = mine.length > 0
+          if (report !== undefined) {
+            report.driverRecorded = mine.length > 0
+            report.driverRows = mine
+          }
           enclosing?.push(...mine)
           if (call.readRecords.length === 0) call.readRecords = mine
         }
