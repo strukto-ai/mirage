@@ -12,6 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { configToWorkspaceArgs, WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
+import type { CLI } from '@struktoai/mirage-core/commands/cli/types'
+import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
+import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
+import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import type { MountBackend } from '@struktoai/mirage-core/types'
+import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
+import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { FastifyInstance, RouteHandlerMethod } from 'fastify'
 
 /**
@@ -101,6 +109,42 @@ export interface RouteApp {
   patch: RouteMethod
   delete: RouteMethod
   route<S extends RouteShape = RouteShape>(options: RouteOptions<S>): void
+}
+
+/**
+ * What the routes need from the host they run on: its workspace class (each
+ * host rebuilds a saved mount from its own VFS table), the mounts and options
+ * a config names, its CLIs, a profile's policy files, the store the server
+ * keeps workspaces' state in, and the network watch a rule needs. Node
+ * builds these from `@struktoai/mirage-node`; a Cloudflare Worker from core.
+ */
+export interface ServerHost {
+  readonly Workspace: typeof Workspace
+  workspaceArgs(cfg: WorkspaceConfigRaw): ReturnType<typeof configToWorkspaceArgs>
+  buildVfs(
+    name: string,
+    config: Record<string, unknown>,
+    sources?: Readonly<Record<string, ResolvedSource>>,
+  ): Promise<BaseVFS>
+  buildCliEntries(
+    clis: Readonly<Record<string, unknown>>,
+    sources?: Readonly<Record<string, ResolvedSource>>,
+  ): Promise<Record<string, [string | CLI, Record<string, unknown> | null]>>
+  loadProfile(profile: SessionProfile): SessionProfile
+  /** A fresh handle on the store workspaces keep their state in; the caller closes it. */
+  stateStore(): WorkspaceStateStore
+  /** An account's name as one path segment of a snapshot key. */
+  quoteName(name: string): string
+  /** The ids no workspace may take. */
+  readonly reservedIds: ReadonlySet<string>
+  watchNetwork(): void
+  /** Mount `prefix` at a kernel mountpoint (FUSE, FSKit); a host with no kernel refuses. */
+  mountKernel(
+    ws: Workspace,
+    prefix: string,
+    mountpoint: string | undefined,
+    backend: MountBackend,
+  ): Promise<void>
 }
 
 /** A web stream of what `source` yields, for a reply on any host. */

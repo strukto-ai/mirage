@@ -23,7 +23,7 @@ import { coerceWritePolicy } from '@struktoai/mirage-core/workspace/mount/write_
 import { parseCommandLimits } from '@struktoai/mirage-core/policy/builtin/output_cap'
 import type { SecretEntries } from '@struktoai/mirage-core/secrets/config'
 import { resolveSourcesFor } from '@struktoai/mirage-core/secrets/sources'
-import { Workspace, buildVfs } from '@struktoai/mirage-node'
+import type { ServerHost } from './routes.ts'
 
 interface OverrideMountBlock {
   vfs: string
@@ -51,6 +51,7 @@ export interface OverrideShape {
 export async function buildOverrideMounts(
   override: OverrideShape | null,
   declared: unknown,
+  buildVfs: ServerHost['buildVfs'],
 ): Promise<Record<string, BaseVFS | Mount>> {
   const mounts = override?.mounts
   if (mounts === undefined) return {}
@@ -97,11 +98,16 @@ function existingRedactedMounts(
 export async function cloneWorkspaceWithOverride(
   src: CoreWorkspace,
   override: OverrideShape | null,
-): Promise<Workspace> {
-  return src.quiesced(() => clone(src, override))
+  host: ServerHost,
+): Promise<CoreWorkspace> {
+  return src.quiesced(() => clone(src, override, host))
 }
 
-async function clone(src: CoreWorkspace, override: OverrideShape | null): Promise<Workspace> {
+async function clone(
+  src: CoreWorkspace,
+  override: OverrideShape | null,
+  host: ServerHost,
+): Promise<CoreWorkspace> {
   const state = await toStateDict(src)
   // Same-process, so the declarations travel with the clone the way a
   // reused remote VFS does: the state carries the env pointers
@@ -109,10 +115,10 @@ async function clone(src: CoreWorkspace, override: OverrideShape | null): Promis
   // own wins, the way a mount override does, so a staging clone does
   // not keep reading production accounts.
   const secrets = override?.secrets ?? src.declaredSources
-  const overrideMounts = await buildOverrideMounts(override, secrets)
+  const overrideMounts = await buildOverrideMounts(override, secrets, host.buildVfs)
   const existing = existingRedactedMounts(src, state, new Set(Object.keys(overrideMounts)))
   const merged = { ...existing, ...overrideMounts }
   // The clone shares the source's remote mounts, whose clients run on the
   // source's clock, so it runs on that clock too.
-  return Workspace.fromState(state, { secrets, clock: src.clock }, merged)
+  return host.Workspace.fromState(state, { secrets, clock: src.clock }, merged)
 }

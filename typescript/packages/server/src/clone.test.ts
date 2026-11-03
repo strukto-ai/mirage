@@ -22,6 +22,7 @@ import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { SecretEntries } from '@struktoai/mirage-core/secrets/config'
 import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 import { buildOverrideMounts, cloneWorkspaceWithOverride } from './clone.ts'
+import type { ServerHost } from './routes.ts'
 import { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { toStateDict } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { WorkspaceStateDict } from '@struktoai/mirage-core/workspace/snapshot/types'
@@ -79,13 +80,15 @@ function capped(): Mount {
   })
 }
 
+const HOST = { Workspace, buildVfs } as unknown as ServerHost
+
 describe('cloneWorkspaceWithOverride', () => {
   it('runs the clone on the source clock', async () => {
     const vfs = new GoogleDriveVFS({ clientId: 'c', refreshToken: 'r' })
     const clock = new ManualClock()
     const src = new Workspace({ '/g': vfs }, { mode: MountMode.WRITE, clock })
     try {
-      const clone = await cloneWorkspaceWithOverride(src, null)
+      const clone = await cloneWorkspaceWithOverride(src, null, HOST)
       try {
         expect(clone.clock).toBe(clock)
         expect(vfs.accessor.tokenManager.clock).toBe(clock)
@@ -100,7 +103,7 @@ describe('cloneWorkspaceWithOverride', () => {
   it('produces an independent workspace whose writes do not touch the source', async () => {
     const src = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     await src.shell('echo source-only > /file.txt')
-    const clone = await cloneWorkspaceWithOverride(src, null)
+    const clone = await cloneWorkspaceWithOverride(src, null, HOST)
     await clone.shell('echo clone-write > /file.txt')
     const srcRead = await src.shell('cat /file.txt')
     expect(srcRead.stdoutText.trim()).toBe('source-only')
@@ -112,7 +115,7 @@ describe('cloneWorkspaceWithOverride', () => {
 
   it('leaves a null override write to the saved policy', async () => {
     // null means absent, as on every other entry point.
-    const built = await buildOverrideMounts({ mounts: { '/r': { vfs: 'ram', write: null } } }, null)
+    const built = await buildOverrideMounts({ mounts: { '/r': { vfs: 'ram', write: null } } }, null, buildVfs)
     expect((built['/r/'] as Mount).options.write).toBeUndefined()
   })
 
@@ -120,6 +123,7 @@ describe('cloneWorkspaceWithOverride', () => {
     const built = await buildOverrideMounts(
       { mounts: { '/d': { vfs: 'ram', config: { capacity: '1KB' } } } },
       null,
+      buildVfs,
     )
     const vfs = (built['/d/'] as Mount).vfs
     expect(vfs instanceof RAMVFS ? vfs.usage?.limit : undefined).toBe(1024)
@@ -130,7 +134,7 @@ describe('cloneWorkspaceWithOverride', () => {
     try {
       const clone = await cloneWorkspaceWithOverride(src, {
         mounts: { '/b': { vfs: 'ram', command_limits: { [ALL_COMMANDS]: { walk_limit: 5 } } } },
-      })
+      }, HOST)
       try {
         expect(['/a/', '/b/'].map((p) => clone.mount(p).vfs.walkLimit)).toEqual([3, 5])
       } finally {
@@ -156,7 +160,7 @@ describe('cloneWorkspaceWithOverride', () => {
         env: { TOKEN: { from: 'prod', ref: 'r', key: 'credential' } },
       },
     )
-    const clone = await cloneWorkspaceWithOverride(src, null)
+    const clone = await cloneWorkspaceWithOverride(src, null, HOST)
     const read = await clone.shell('echo "$TOKEN"')
     expect(read.exitCode).toBe(0)
     expect(read.stdoutText.trim()).toBe('a1:r')
@@ -180,7 +184,7 @@ describe('cloneWorkspaceWithOverride', () => {
     )
     const clone = await cloneWorkspaceWithOverride(src, {
       secrets: { prod: { source: 'acct-override', config: { account: 'staging' } } },
-    })
+    }, HOST)
     expect((await clone.shell('echo "$TOKEN"')).stdoutText.trim()).toBe('staging:r')
     await src.close()
     await clone.close()
@@ -206,7 +210,7 @@ describe('cloneWorkspaceWithOverride', () => {
           config: { token: { from: 'prod', ref: 'bot', key: 'credential' } },
         },
       },
-    })
+    }, HOST)
     const mounted = clone.mount('/slack').vfs as SlackVFS
     expect(mounted.config.token).toBe('live:bot')
     await src.close()
@@ -223,12 +227,12 @@ describe('cloneWorkspaceWithOverride', () => {
       { '/': new RAMVFS() },
       { mode: MountMode.WRITE, secrets: brokenBootstrap('acct-lazy') },
     )
-    const clone = await cloneWorkspaceWithOverride(src, null)
+    const clone = await cloneWorkspaceWithOverride(src, null, HOST)
     expect(Object.keys(clone.declaredSources)).toEqual(['prod'])
     await clone.close()
     // An override that swaps a mount without naming a pointer is the
     // same case.
-    const swapped = await cloneWorkspaceWithOverride(src, { mounts: { '/': { vfs: 'ram' } } })
+    const swapped = await cloneWorkspaceWithOverride(src, { mounts: { '/': { vfs: 'ram' } } }, HOST)
     await swapped.close()
     await src.close()
   })
@@ -247,7 +251,7 @@ describe('cloneWorkspaceWithOverride', () => {
             config: { token: { from: 'prod', ref: 'bot', key: 'credential' } },
           },
         },
-      }),
+      }, HOST),
     ).rejects.toThrow('secrets.prod.config.account')
     await src.close()
   })
@@ -259,7 +263,7 @@ describe('cloneWorkspaceWithOverride', () => {
     const src = await rootOnLive(live())
     try {
       expect((await src.shell('echo hi > /f')).exitCode).toBe(0)
-      const cloned = await cloneWorkspaceWithOverride(src, null)
+      const cloned = await cloneWorkspaceWithOverride(src, null, HOST)
       try {
         expect(cloned.mount('/').vfs).toBe(src.mount('/').vfs)
         expect((await cloned.shell('cat /f')).stdoutText).toBe('hi\n')
@@ -276,7 +280,7 @@ describe('cloneWorkspaceWithOverride', () => {
     const src = new Workspace({ '/a': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       expect((await src.shell('echo hi > /f')).exitCode).toBe(0)
-      const cloned = await cloneWorkspaceWithOverride(src, { mounts: { '/': { vfs: 'ram' } } })
+      const cloned = await cloneWorkspaceWithOverride(src, { mounts: { '/': { vfs: 'ram' } } }, HOST)
       try {
         expect((await cloned.shell('cat /f')).stdoutText).toBe('hi\n')
         expect(cloned.syntheticRoot).toBe(true)

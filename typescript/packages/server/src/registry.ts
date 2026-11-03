@@ -30,8 +30,8 @@ import {
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
-import { loadPolicyFile, type DiskRecordClient, type Workspace } from '@struktoai/mirage-node'
-import { watchNetwork } from '@struktoai/mirage-node/io/network'
+import type { RecordClient } from '@struktoai/mirage-core/workspace/record/types'
+import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { resolve } from 'node:path'
 import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
 import {
@@ -168,6 +168,7 @@ export function resolveGracefulTimeout(
  * `resolve_policy_file`.
  */
 export function resolvePolicyFile(
+  load: (path: string) => ProfileScripts,
   policyFile?: string,
   env: Record<string, string | undefined> = process.env,
 ): ProfileScripts {
@@ -177,7 +178,7 @@ export function resolvePolicyFile(
     if (named === undefined || named === '') return {}
     path = resolve(mirageHome(env), named)
   }
-  return loadPolicyFile(path)
+  return load(path)
 }
 
 /** The server's policy programs, which every session answers to. */
@@ -196,9 +197,10 @@ export class WorkspaceRegistry {
   private readonly creates = new Map<string, { digest: string; done: Promise<unknown> }>()
   private readonly idleGraceSeconds: number
   private readonly onIdleExit: (() => void) | null
-  private idleTimer: NodeJS.Timeout | null = null
+  private idleTimer: ReturnType<typeof setTimeout> | null = null
   accountsRequired: boolean
-  private readonly owners: DiskRecordClient | null
+  private readonly owners: RecordClient | null
+  private readonly watchNetwork: () => void
   readonly maxWorkspaces: number | null
   readonly maxSessions: number | null
   readonly policies: readonly Policy[]
@@ -220,7 +222,9 @@ export class WorkspaceRegistry {
        * a stored workspace is only ever reopened by its owner. Absent keeps
        * ownership in memory.
        */
-      owners?: DiskRecordClient
+      owners?: RecordClient
+      /** Start watching the host's sockets, once a workspace is held to a network rule. */
+      watchNetwork?: () => void
       /** The most workspaces held at once, those being built among them; null for no cap. */
       maxWorkspaces?: number | null
       /**
@@ -246,6 +250,7 @@ export class WorkspaceRegistry {
     this.onIdleExit = options.onIdleExit ?? null
     this.accountsRequired = options.accountsRequired ?? false
     this.owners = options.owners ?? null
+    this.watchNetwork = options.watchNetwork ?? (() => undefined)
   }
 
   /**
@@ -256,7 +261,7 @@ export class WorkspaceRegistry {
    */
   ruleFor(setting: NetworkSetting = true): NetworkRule | null {
     const rule = networkRule(setting, this.accountsRequired)
-    if (rule !== null) watchNetwork()
+    if (rule !== null) this.watchNetwork()
     return rule
   }
 

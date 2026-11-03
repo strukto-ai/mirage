@@ -15,7 +15,18 @@
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import Fastify from 'fastify'
-import { DiskRecordClient } from '@struktoai/mirage-node'
+import {
+  buildVfs,
+  configToWorkspaceArgs,
+  DiskRecordClient,
+  DiskWorkspaceStateStore,
+  DOT_IDS,
+  loadPolicyFile,
+  Workspace,
+} from '@struktoai/mirage-node'
+import { buildCliEntries } from '@struktoai/mirage-node/config'
+import { watchNetwork } from '@struktoai/mirage-node/io/network'
+import { quoteName } from '@struktoai/mirage-node/workspace/record/disk'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { registerMetrics } from './metrics.ts'
 import { type RateLimit, registerRateLimits, resolveRateLimits } from './rate_limit.ts'
@@ -53,7 +64,7 @@ import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { resolveSSHConfig, type SSHConfig } from './ssh/config.ts'
 import type { SSHEndpoint } from './ssh/types.ts'
 import websocket from '@fastify/websocket'
-import { fastifyRoutes } from './routes.ts'
+import { fastifyRoutes, type ServerHost } from './routes.ts'
 import { loadProfilePolicy } from '@struktoai/mirage-node'
 
 export interface BuildAppOptions {
@@ -146,6 +157,22 @@ export function buildApp(options: BuildAppOptions = {}) {
   const exitFn = options.onIdleExit ?? noop
   const authConfig = options.authConfig ?? resolveAuthConfig()
   const stateRoot = stateRootPath(options.stateRoot)
+  const host: ServerHost = {
+    Workspace,
+    workspaceArgs: configToWorkspaceArgs,
+    buildVfs,
+    buildCliEntries,
+    loadProfile: loadProfilePolicy,
+    // Daemon default is disk (a created workspace survives restart with
+    // zero infrastructure, like git init); the library default stays ram.
+    stateStore: () => new DiskWorkspaceStateStore({ root: stateRoot }),
+    quoteName,
+    reservedIds: DOT_IDS,
+    watchNetwork,
+    mountKernel: async (ws, prefix, mountpoint, backend) => {
+      await (ws as Workspace).addFuseMount(prefix, mountpoint, undefined, backend)
+    },
+  }
   const registry = new WorkspaceRegistry({
     ...(options.idleGraceSeconds !== undefined
       ? { idleGraceSeconds: options.idleGraceSeconds }
@@ -153,9 +180,10 @@ export function buildApp(options: BuildAppOptions = {}) {
     onIdleExit: exitFn,
     accountsRequired: authConfig.mode === AuthMode.Jwt,
     owners: new DiskRecordClient(stateRoot, OWNERS_PREFIX),
+    watchNetwork,
     maxWorkspaces: resolveMaxWorkspaces(options.maxWorkspaces),
     policies: options.policies ?? [],
-    programs: resolvePolicyFile(options.policyFile),
+    programs: resolvePolicyFile(loadPolicyFile, options.policyFile),
     maxSessions: resolveMaxSessions(options.maxSessions),
   })
   const gracefulTimeout = resolveGracefulTimeout(options.gracefulTimeout)
@@ -204,8 +232,8 @@ export function buildApp(options: BuildAppOptions = {}) {
   const routes = fastifyRoutes(app)
   registerHealthRoutes(routes, { registry, startedAt, exit: exitFn })
   registerOAuthRoutes(routes, { auth: authConfig })
-  registerWorkspacesRoutes(routes, { registry, stateRoot, snapshotStore: options.snapshotStore })
-  registerSessionsRoutes(routes, { registry, loadProfile: loadProfilePolicy })
+  registerWorkspacesRoutes(routes, { registry, host, snapshotStore: options.snapshotStore })
+  registerSessionsRoutes(routes, { registry, loadProfile: host.loadProfile })
   registerDocumentsRoutes(routes, { registry })
   registerAsksRoutes(routes, { registry })
   registerShellRoutes(routes, { registry, jobs })
