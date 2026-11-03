@@ -53,13 +53,19 @@ PY_HEAVY = (
 )
 
 # `.` is the barrel and is *meant* to be heavy; `./bin/daemon` is a program,
-# not a module anyone imports for a symbol.
+# not a module anyone imports for a symbol. `./api`, `./routes`, `./registry`
+# and `./auth/middleware` are what a host serving the API builds it from
+# (@struktoai/mirage-edge); no CLI imports them.
 UNGATED_SUBPATHS = (
     ".",
     "./package.json",
     "./bin/daemon",
     "./mcp",
     "./rpc",
+    "./api",
+    "./routes",
+    "./registry",
+    "./auth/middleware",
 )
 
 # One pattern for every static form, because the first version of this gate

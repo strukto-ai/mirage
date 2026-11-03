@@ -13,6 +13,10 @@
     },
     "packages/browser": {
       "entry": ["scripts/*.mjs"]
+    },
+    "packages/edge": {
+      "entry": ["scripts/*.mjs"],
+      "ignoreDependencies": ["@bytecodealliance/preview2-shim", "@opentelemetry/api-logs"]
     }
   }
 }

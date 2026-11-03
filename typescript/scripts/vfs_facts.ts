@@ -498,6 +498,25 @@ function refuses(node: ts.Node): boolean {
 }
 
 /**
+ * The registry file a `...REGISTRY` spread in a host's table reads from:
+ * node and browser lay their own entries over core's.
+ */
+function spreadRegistry(
+  source: ts.SourceFile,
+  prop: ts.SpreadAssignment,
+  packagesRoot: string,
+): string {
+  const local = prop.expression.getText(source)
+  const origin = ts.isIdentifier(prop.expression)
+    ? importOrigin(source, local, packagesRoot)
+    : undefined
+  if (origin?.exported !== 'REGISTRY') {
+    throw new Error(`${source.fileName}: cannot follow the spread of ${local} in REGISTRY`)
+  }
+  return origin.file
+}
+
+/**
  * Registry name to the class its factory constructs.
  *
  * Read from `registry.ts` rather than guessed from directory names: the
@@ -525,6 +544,11 @@ export function registryClasses(
       ts.isObjectLiteralExpression(node.initializer)
     ) {
       for (const prop of node.initializer.properties) {
+        if (ts.isSpreadAssignment(prop)) {
+          const spread = spreadRegistry(source, prop, packagesRoot)
+          for (const [name, cls] of registryClasses(spread, packagesRoot)) out.set(name, cls)
+          continue
+        }
         if (!ts.isPropertyAssignment(prop)) continue
         const name = prop.name.getText(source).replace(/^['"]|['"]$/g, '')
         const classes = new Set<string>()
@@ -689,6 +713,11 @@ function registryConfigs(
       ts.isObjectLiteralExpression(node.initializer)
     ) {
       for (const prop of node.initializer.properties) {
+        if (ts.isSpreadAssignment(prop)) {
+          const spread = spreadRegistry(source, prop, packagesRoot)
+          for (const [name, config] of registryConfigs(spread, packagesRoot)) out.set(name, config)
+          continue
+        }
         if (!ts.isPropertyAssignment(prop)) continue
         const name = prop.name.getText(source).replace(/^['"]|['"]$/g, '')
         let found: { file: string; name: string } | null = null
