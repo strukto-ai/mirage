@@ -167,11 +167,17 @@ describe('conflictOf', () => {
   })
 })
 
-it.each([false, true])(
-  'upload session commits conditionally and aborts on failure: %s',
-  async (fail) => {
+it.each([
+  [false, true],
+  [false, false],
+  [true, true],
+])(
+  'upload session commits conditionally and aborts on failure: %s, spooled %s',
+  async (fail, spooled) => {
+    const payload = new TextEncoder().encode('abcdefg')
     const spool = new ByteSpool()
-    await spool.append(new TextEncoder().encode('abcdefg'))
+    await spool.append(payload)
+    const read = vi.spyOn(spool, 'read')
     const base = 'https://example.test/session'
     const fake = vi
       .fn()
@@ -194,19 +200,26 @@ it.each([false, true])(
         new BoxTokenManager({ accessToken: 'token' }),
         base,
         {},
-        spool,
+        spooled ? spool : payload,
         '"version"',
       )
       if (fail) await expect(result).rejects.toThrow()
       else await expect(result).resolves.toEqual({ entries: [{ id: 'done' }] })
       const calls = fake.mock.calls as [string, RequestInit][]
+      expect(JSON.parse(calls[0]?.[1].body as string)).toEqual({ file_size: 7 })
       expect(new TextDecoder().decode(calls[1]?.[1].body as Uint8Array)).toBe('abcd')
       expect(new TextDecoder().decode(calls[2]?.[1].body as Uint8Array)).toBe('efg')
+      expect([calls[1]?.[1].headers, calls[2]?.[1].headers]).toMatchObject([
+        { 'Content-Range': 'bytes 0-3/7' },
+        { 'Content-Range': 'bytes 4-6/7' },
+      ])
       expect(calls[3]?.[1].headers).toMatchObject({
         'If-Match': '"version"',
         Digest: 'sha=L7XhNBn8iSRoZeejJPR27GJOh0A=',
       })
       expect(calls.length).toBe(fail ? 5 : 4)
+      // One part per read: the spool is never loaded whole.
+      expect(read.mock.calls.every(([, size]) => size <= 4)).toBe(true)
     } finally {
       globalThis.fetch = previous
       await spool.close()

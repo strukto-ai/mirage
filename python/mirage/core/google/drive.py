@@ -31,7 +31,8 @@ from mirage.core.google.client import (
     google_resumable,
     google_send_bytes,
 )
-from mirage.io.spool import ByteSpool
+from mirage.core.google.constants import SIMPLE_UPLOAD_MAX
+from mirage.io.spool import ByteSpool, size_of
 from mirage.utils.ranges import ByteWindow
 
 
@@ -623,30 +624,30 @@ async def upload_file(
 ) -> dict[str, Any]:
     """Create a Drive file with content via a multipart upload.
 
-    Large spooled payloads use the resumable protocol.
+    A payload past ``SIMPLE_UPLOAD_MAX`` uses the resumable protocol.
 
     Args:
         token_manager (TokenManager): OAuth2 token manager.
         name (str): file name.
         parent_id (str): parent folder ID.
-        data (bytes): file content.
+        data (bytes | ByteSpool): file content.
         mime_type (str): content MIME type.
 
     Returns:
         dict: created file metadata.
     """
     metadata = {"name": name, "parents": [parent_id]}
+    if size_of(data) > SIMPLE_UPLOAD_MAX:
+        return await google_resumable(
+            token_manager,
+            "POST",
+            f"{drive_upload_base(token_manager)}/files",
+            metadata,
+            data,
+            mime_type,
+            {"supportsAllDrives": "true", "fields": ITEM_FIELDS},
+        )
     if isinstance(data, ByteSpool):
-        if data.size > 4 * 1024 * 1024:
-            return await google_resumable(
-                token_manager,
-                "POST",
-                f"{drive_upload_base(token_manager)}/files",
-                metadata,
-                data,
-                mime_type,
-                {"supportsAllDrives": "true", "fields": ITEM_FIELDS},
-            )
         data = await data.read(0, data.size)
 
     body, content_type = _multipart_related(metadata, data, mime_type)
@@ -673,26 +674,28 @@ async def update_file_content(
 ) -> dict[str, Any]:
     """Replace an existing Drive file's content.
 
+    A payload past ``SIMPLE_UPLOAD_MAX`` uses the resumable protocol.
+
     Args:
         token_manager (TokenManager): OAuth2 token manager.
         file_id (str): file ID.
-        data (bytes): new content.
+        data (bytes | ByteSpool): new content.
         mime_type (str): content MIME type.
 
     Returns:
         dict: updated file metadata.
     """
+    if size_of(data) > SIMPLE_UPLOAD_MAX:
+        return await google_resumable(
+            token_manager,
+            "PATCH",
+            f"{drive_upload_base(token_manager)}/files/{file_id}",
+            {},
+            data,
+            mime_type,
+            {"supportsAllDrives": "true", "fields": ITEM_FIELDS},
+        )
     if isinstance(data, ByteSpool):
-        if data.size > 4 * 1024 * 1024:
-            return await google_resumable(
-                token_manager,
-                "PATCH",
-                f"{drive_upload_base(token_manager)}/files/{file_id}",
-                {},
-                data,
-                mime_type,
-                {"supportsAllDrives": "true", "fields": ITEM_FIELDS},
-            )
         data = await data.read(0, data.size)
     url = f"{drive_upload_base(token_manager)}/files/{file_id}"
     return await google_send_bytes(

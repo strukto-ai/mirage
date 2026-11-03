@@ -480,9 +480,10 @@ async function vfsMd(name: string, fields: Record<string, { required: boolean }>
     )
   const vfs = await buildVfs(name, config)
   const ws = new Workspace({ [PLACEHOLDER]: [vfs, MountMode.WRITE] }, { mode: MountMode.WRITE })
-  // The scratch root every workspace adds is no part of this VFS, and the
-  // agent's opening paragraph is no part of a docs page.
+  // The scratch root and /dev every workspace adds are no part of this VFS,
+  // and the agent's opening paragraph is no part of a docs page.
   ws.mount('/').visible = () => false
+  ws.mount('/dev').visible = () => false
   try {
     return (await ws.vfsMd()).replace(`${INTRO}\n\n`, '').replace(/\n+$/, '')
   } finally {

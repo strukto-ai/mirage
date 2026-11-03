@@ -26,7 +26,7 @@ from mirage.core.dropbox.constants import CONDITION_SUPPORT
 from mirage.core.dropbox.fingerprint import live_of
 from mirage.core.dropbox.paths import check_path, dropbox_path_of
 from mirage.core.dropbox.readdir import stat_from_entry
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, size_of
 from mirage.io.stream import close_quietly
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
@@ -37,7 +37,7 @@ from mirage.utils.upload import upload_stat
 async def write(
     accessor: DropboxAccessor, path: PathSpec, data: ByteSource | ByteSpool
 ) -> FileStat | None:
-    """Upload a body, using sessions for large spooled inputs.
+    """Upload a body, using a session past ``SIMPLE_UPLOAD_MAX``.
 
     A held version costs one get_metadata and goes out as the file's rev
     in ``update`` mode.
@@ -110,7 +110,7 @@ async def upload_prepared(
         "write",
         path.virtual,
         "dropbox",
-        data.size if isinstance(data, ByteSpool) else len(data),
+        size_of(data),
         timer,
         fingerprint=None if stored is None else stored.fingerprint,
     )

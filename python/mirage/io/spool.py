@@ -220,6 +220,28 @@ class ByteSpool:
         await self.close()
 
 
+def size_of(data: bytes | ByteSpool) -> int:
+    """The byte length of a payload held whole or in a spool.
+
+    Args:
+        data (bytes | ByteSpool): the payload.
+    """
+    return data.size if isinstance(data, ByteSpool) else len(data)
+
+
+async def slice_of(data: bytes | ByteSpool, start: int, size: int) -> bytes:
+    """``size`` bytes of a payload from ``start``, fewer at its end.
+
+    Args:
+        data (bytes | ByteSpool): the payload.
+        start (int): the first byte.
+        size (int): how many bytes.
+    """
+    if isinstance(data, ByteSpool):
+        return await data.read(start, size)
+    return data[start : start + size]
+
+
 async def spooled(source: ByteSource | None) -> ByteSource | None:
     """Hold ``source`` in a spool: its bytes when they fit in memory, a
     stream that owns the spool past that, None when it is empty.

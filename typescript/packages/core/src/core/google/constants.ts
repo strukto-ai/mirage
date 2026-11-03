@@ -24,6 +24,9 @@ export const CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3'
 export const FORMS_API_BASE = 'https://forms.googleapis.com/v1'
 export const DRIVE_UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3'
 export const TOKEN_BUFFER_SECONDS = 300
+// Drive takes 5 MB per request; past this, resumable in 256 KiB multiples.
+export const SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024
+export const UPLOAD_CHUNK = 8 * 1024 * 1024
 
 // The statuses Google's API guides ask a client to back off on: 429, the
 // transient 5xx, and a 403 whose error reason says the caller is being

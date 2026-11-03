@@ -45,7 +45,7 @@ from mirage.core.tidb_filesystem.errors import (
     has_status,
 )
 from mirage.core.tidb_filesystem.types import Entry
-from mirage.io.spool import ByteSpool
+from mirage.io.spool import ByteSpool, size_of, slice_of
 from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow
 
@@ -129,16 +129,6 @@ def _mtime_of(value: str | None) -> int | None:
     if value is None or not value.isdigit():
         return None
     return int(value)
-
-
-def _size_of(data: bytes | ByteSpool) -> int:
-    return data.size if isinstance(data, ByteSpool) else len(data)
-
-
-async def _slice_of(data: bytes | ByteSpool, start: int, size: int) -> bytes:
-    if isinstance(data, ByteSpool):
-        return await data.read(start, size)
-    return data[start : start + size]
 
 
 async def _request(
@@ -351,7 +341,7 @@ async def _upload_parts(
 
     async def put(part: _PresignedPart) -> JsonValue:
         start = (part.number - 1) * upload.part_size
-        body = await _slice_of(data, start, part.size)
+        body = await slice_of(data, start, part.size)
         return {
             "number": part.number,
             "etag": await _put_part(accessor, part, body),
@@ -383,7 +373,7 @@ async def _upload_multipart(
         accessor,
         "POST",
         f"{host}/v2/uploads/initiate",
-        json_body={"path": remote_path, "total_size": _size_of(data)},
+        json_body={"path": remote_path, "total_size": size_of(data)},
     )
     upload = _Upload.model_validate(raw)
     try:
@@ -416,7 +406,7 @@ async def upload(
         remote_path (str): the file in the file system.
         data (bytes | ByteSpool): its new content.
     """
-    size = _size_of(data)
+    size = size_of(data)
     if size >= SMALL_FILE_LIMIT:
         await _upload_multipart(accessor, remote_path, data)
         return
@@ -425,7 +415,7 @@ async def upload(
         "PUT",
         _url(accessor, remote_path),
         headers={"Content-Type": "application/octet-stream"},
-        data=await _slice_of(data, 0, size),
+        data=await slice_of(data, 0, size),
         read="none",
     )
 
@@ -453,7 +443,7 @@ async def append_to(
             any size.
     """
     host = accessor.config.host
-    size = _size_of(data)
+    size = size_of(data)
     try:
         raw = await _request(
             accessor,
@@ -487,7 +477,7 @@ async def append_to(
         original = await _read_part(accessor, part) if own else b""
         start = (part.number - 1) * plan.part_size + own - plan.base_size
         added = (
-            await _slice_of(data, start, part.size - own)
+            await slice_of(data, start, part.size - own)
             if part.size > own
             else b""
         )

@@ -19,6 +19,8 @@ import pytest
 from mirage.core.google.client import TokenManager
 from mirage.core.google.config import GoogleConfig
 from mirage.core.google.drive import (
+    DEFAULT_UPLOAD_MIME,
+    ITEM_FIELDS,
     _multipart_related,
     delete_file,
     download_file,
@@ -29,7 +31,10 @@ from mirage.core.google.drive import (
     list_shared_drives,
     search_files,
     storage_quota,
+    update_file_content,
+    upload_file,
 )
+from mirage.io.spool import ByteSpool
 
 
 @pytest.fixture
@@ -445,3 +450,64 @@ def test_multipart_boundary_depends_only_on_the_parts():
     assert len(boundary) == 32
     assert boundary.encode() not in b"payload"
     assert first.count(f"--{boundary}".encode()) == 3
+
+
+UPLOAD = "https://www.googleapis.com/upload/drive/v3/files"
+MIB = 1024 * 1024
+
+
+# Drive takes at most 5 MB in one multipart or media request (its upload
+# guide, not probed), so past 4 MiB an upload goes resumable whatever holds
+# the bytes.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("updating", [False, True], ids=["create", "update"])
+@pytest.mark.parametrize("spooled", [False, True], ids=["bytes", "spool"])
+@pytest.mark.parametrize("size", [4 * MIB, 4 * MIB + 1])
+async def test_a_drive_upload_past_4_mib_goes_resumable(
+    token_manager, updating, spooled, size
+):
+    payload = b"a" * size
+    async with ByteSpool() as spool:
+        await spool.append(payload)
+        data = spool if spooled else payload
+        with (
+            patch(
+                "mirage.core.google.drive.google_resumable",
+                new_callable=AsyncMock,
+                return_value={"id": "resumed"},
+            ) as resumable,
+            patch(
+                "mirage.core.google.drive.google_send_bytes",
+                new_callable=AsyncMock,
+                return_value={"id": "sent"},
+            ) as single,
+        ):
+            if updating:
+                reply = await update_file_content(token_manager, "f1", data)
+            else:
+                reply = await upload_file(token_manager, "a.txt", "p1", data)
+    if size <= 4 * MIB:
+        assert reply == {"id": "sent"}
+        resumable.assert_not_awaited()
+        body = single.await_args.args[3]
+        assert body == payload if updating else payload in body
+        return
+    assert reply == {"id": "resumed"}
+    single.assert_not_awaited()
+    args = resumable.await_args.args
+    assert args[:4] == (
+        (token_manager, "PATCH", f"{UPLOAD}/f1", {})
+        if updating
+        else (
+            token_manager,
+            "POST",
+            UPLOAD,
+            {"name": "a.txt", "parents": ["p1"]},
+        )
+    )
+    # The input itself: a spool is streamed from, never read into memory.
+    assert args[4] is data
+    assert args[5:] == (
+        DEFAULT_UPLOAD_MIME,
+        {"supportsAllDrives": "true", "fields": ITEM_FIELDS},
+    )

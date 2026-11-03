@@ -16,7 +16,8 @@ import { z } from 'zod'
 import type { TiDBFilesystemAccessor } from '../../accessor/tidb_filesystem.ts'
 import { boundedMap } from '../../concurrency/limiter.ts'
 import { DEFAULT_TIMEOUT } from '../api/constants.ts'
-import { ByteSpool } from '../../io/spool.ts'
+import type { ByteSpool } from '../../io/spool.ts'
+import { sizeOf, sliceOf } from '../../io/spool.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
 import type { ByteWindow } from '../../utils/ranges.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -99,18 +100,6 @@ function nameOf(remotePath: string): string {
 
 function mtimeOf(value: string | undefined): number | null {
   return value !== undefined && /^\d+$/.test(value) ? Number(value) : null
-}
-
-function sizeOf(data: Uint8Array | ByteSpool): number {
-  return data instanceof ByteSpool ? data.size : data.byteLength
-}
-
-async function sliceOf(
-  data: Uint8Array | ByteSpool,
-  start: number,
-  size: number,
-): Promise<Uint8Array> {
-  return data instanceof ByteSpool ? data.read(start, size) : data.slice(start, start + size)
 }
 
 function request(
