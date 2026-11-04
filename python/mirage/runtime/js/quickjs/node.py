@@ -989,10 +989,11 @@ NODE_SHIM = r""";(function (argv, script) {
     }
   }
   // Listeners on target, and the pump that feeds them, started by the
-  // first listener or by resume() and run one step a timer until it
-  // answers false. A pump steps aside once an async loop takes the
-  // stream: the loop reads only as it asks, so nothing reads ahead of
-  // it or is left reading after it ends.
+  // first listener for what it delivers (an error listener reads nothing)
+  // or by resume(), and run one step a timer until it answers false. A
+  // pump steps aside once an async loop takes the stream: the loop reads
+  // only as it asks, so nothing reads ahead of it or is left reading
+  // after it ends.
   function emitter(target, pump) {
     const listeners = {}
     let scheduled = false
@@ -1007,7 +1008,7 @@ NODE_SHIM = r""";(function (argv, script) {
     }
     const on = (event, fn) => {
       ;(listeners[event] = listeners[event] || []).push(fn)
-      start()
+      if (event !== 'error') start()
       return target
     }
     const off = (event, fn) => {
@@ -1031,7 +1032,8 @@ NODE_SHIM = r""";(function (argv, script) {
     const emit = (event, ...args) => {
       for (const fn of (listeners[event] || []).slice()) fn(...args)
     }
-    return { emit, start }
+    const has = (event) => (listeners[event] || []).length > 0
+    return { emit, start, has }
   }
   let decoder = null
   let pending = null
@@ -1082,10 +1084,12 @@ NODE_SHIM = r""";(function (argv, script) {
     pending = value
     events.emit('readable')
     pending = null
-    events.emit('data', value)
+    if (!paused) events.emit('data', value)
   }
+  // Paused, the stream still reads for a readable listener, which takes
+  // input through read(); only data waits for resume().
   const events = emitter(input, () => {
-    if (iterating || paused) return false
+    if (iterating || (paused && !events.has('readable'))) return false
     const chunk = stdinChunk()
     if (chunk === null) {
       if (decoder !== null) deliver(decoder(null))

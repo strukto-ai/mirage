@@ -326,6 +326,22 @@
             "stdout": "closed\nended\n",
             "stderr": ""
           }
+        },
+        {
+          "command": "printf 'a\\nb\\n' | node -e \"process.stdin.on('error', () => {}); setTimeout(() => { require('readline').createInterface({ input: process.stdin }).on('line', (l) => console.log('line', l)) }, 30)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "line a\nline b\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'x\\ny\\n' | node -e \"process.stdin.pause(); let got = ''; process.stdin.on('readable', () => { let c; while ((c = process.stdin.read()) !== null) got += c }); process.stdin.on('end', () => console.log(JSON.stringify(got)))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"x\\ny\\n\"\n",
+            "stderr": ""
+          }
         }
       ]
     },
