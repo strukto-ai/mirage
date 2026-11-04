@@ -983,6 +983,7 @@
     },
     pause() {
       flowing = false
+      resumeScheduled = false
       return input
     },
     // A read that takes the last of ended input ends the stream once its
@@ -1024,7 +1025,8 @@
       const readable = events.has('readable')
       // As node's, once the last readable listener has gone, the stream
       // flows on only for a data listener still on or a resume() since the
-      // last step, and otherwise keeps its input for the next reader.
+      // last step that no pause() has undone, and otherwise keeps its input
+      // for the next reader.
       if (readableListening && !readable) {
         flowing = resumeScheduled || events.has('data') ? true : null
       }
