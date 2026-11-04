@@ -1636,7 +1636,7 @@ async def test_kill_reaches_a_grandchild_past_the_job_between_them():
     ],
     ids=["closed-after", "closed-before", "ran"],
 )
-async def test_a_job_that_never_runs_lets_go_of_its_readers(monkeypatch, line):
+async def test_a_background_job_lets_go_of_its_readers_once(monkeypatch, line):
     held: list[SharedInput] = []
 
     def hold(inputs: list[SharedInput]) -> list[SharedInput]:

@@ -70,6 +70,8 @@ import type { ExecuteNodeFn, ExecuteNodeOpts } from './command/types.ts'
 import { answerClosed, failedRead, statementStdin } from './statement.ts'
 import { inheritTraps } from './traps.ts'
 
+// Opt in by assigning a debug sink, as Python's module logger is off until
+// configured.
 export const logger: { debug?: (message: string) => void } = {}
 
 /**
