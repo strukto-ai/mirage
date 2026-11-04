@@ -15,7 +15,7 @@
 from typing import TypedDict
 
 from mirage.accessor.sql import SqlAccessor
-from mirage.core.sql.constants import CLEAR, ROOT_INO, SQL
+from mirage.core.sql.constants import CLEAR, DIR, FILE, ROOT_INO, SQL
 from mirage.core.sql.data import place_bytes, read_bytes
 from mirage.core.sql.inode import (
     InoRef,
@@ -30,18 +30,17 @@ from mirage.core.sql.inode import (
     stamp_of,
 )
 from mirage.utils.path import gnu_basename, parent
-from mirage.utils.stat_view import ALL_MODE_BITS, DIR_MODE, FILE_MODE, S_IFMT
-from mirage.vfs.sql.types import SqlStatement, SqlValue
+from mirage.vfs.sql.types import SqlStatement
 
 
 class SqlSnapshot(TypedDict):
     """What a snapshot keeps of a sql mount: each file's bytes and each
-    directory, by mount path, with the mode, owner, atime and mtime of
-    each. Mirrors TypeScript's ``SqlSnapshot``."""
+    directory, by mount path, with the mtime of each. A path's mode and
+    owner are the namespace's, which the workspace snapshots itself.
+    Mirrors TypeScript's ``SqlSnapshot``."""
 
     files: dict[str, bytes]
     dirs: list[str]
-    attrs: dict[str, dict[str, str]]
     modified: dict[str, str]
 
 
@@ -55,7 +54,6 @@ def snapshot(accessor: SqlAccessor) -> SqlSnapshot:
     ``snapshot``."""
     files: dict[str, bytes] = {}
     dirs = ["/"]
-    attrs: dict[str, dict[str, str]] = {}
     modified: dict[str, str] = {}
     for row in accessor.query(SQL["subtree"], (ROOT_INO,)):
         node = inode_of(row)
@@ -67,15 +65,7 @@ def snapshot(accessor: SqlAccessor) -> SqlSnapshot:
         else:
             files[p] = read_bytes(accessor, node)
         modified[p] = iso_of(node.mtime, node.mtime_nsec)
-        attrs[p] = {
-            "mode": str(node.mode & ALL_MODE_BITS),
-            "atime": iso_of(node.atime, node.atime_nsec),
-            **({"uid": str(node.uid)} if node.uid else {}),
-            **({"gid": str(node.gid)} if node.gid else {}),
-        }
-    return SqlSnapshot(
-        files=files, dirs=sorted(dirs), attrs=attrs, modified=modified
-    )
+    return SqlSnapshot(files=files, dirs=sorted(dirs), modified=modified)
 
 
 def restore(
@@ -83,7 +73,6 @@ def restore(
     *,
     files: dict[str, bytes],
     dirs: list[str],
-    attrs: dict[str, dict[str, str]],
     modified: dict[str, str],
 ) -> None:
     """Replace everything the database holds with a snapshot, in one
@@ -99,8 +88,6 @@ def restore(
         if up is None:
             return
         name = gnu_basename(p)
-        kept = attrs.get(p, {})
-        bits = int(kept["mode"]) if "mode" in kept else mode
         ref = by_entry(up, name)
         stamp = stamp_of(modified[p]) if p in modified else now
         statements.extend(
@@ -108,38 +95,20 @@ def restore(
                 accessor,
                 up,
                 name,
-                (mode & S_IFMT) | (bits & ALL_MODE_BITS),
+                mode,
                 len(data) if data is not None else 0,
                 stamp,
             )
         )
         if data is not None:
             statements.extend(place_bytes(accessor, ref, None, 0, data))
-        sets: list[str] = []
-        params: list[SqlValue] = []
-        for key in ("uid", "gid"):
-            value = kept.get(key)
-            if value is not None and value.isdigit():
-                sets.append(f"{key} = ?")
-                params.append(int(value))
-        if "atime" in kept:
-            sets += ["atime = ?", "atime_nsec = ?"]
-            params += list(stamp_of(kept["atime"]))
-        if sets:
-            statements.append(
-                SqlStatement(
-                    f"UPDATE fs_inode SET {', '.join(sets)}"
-                    f" WHERE ino = {ref.sql}",
-                    (*params, *ref.params),
-                )
-            )
         if data is None:
             refs[p] = ref
 
     for p in sorted(
         (d for d in dirs if d != "/"), key=lambda d: (depth(d), d)
     ):
-        place(p, DIR_MODE, None)
+        place(p, DIR, None)
     for p, data in files.items():
-        place(p, FILE_MODE, data)
+        place(p, FILE, data)
     accessor.batch(statements)

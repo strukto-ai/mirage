@@ -23,7 +23,6 @@ import { readdir as sqlReaddir, tree as sqlTree } from '../../core/sql/readdir.t
 import { rename as sqlRename } from '../../core/sql/rename.ts'
 import { rmR as sqlRmR } from '../../core/sql/rm.ts'
 import { rmdir as sqlRmdir } from '../../core/sql/rmdir.ts'
-import { setAttrs as sqlSetAttrs } from '../../core/sql/set_attrs.ts'
 import { restore, snapshot, type SqlSnapshot } from '../../core/sql/snapshot.ts'
 import { stat as sqlStat } from '../../core/sql/stat.ts'
 import { readStream as sqlStream } from '../../core/sql/stream.ts'
@@ -37,7 +36,6 @@ import {
   type CapacityResult,
   type FileStat,
   type PathSpec,
-  type SetAttrFields,
 } from '../../types.ts'
 import { BaseVFS } from '../base.ts'
 import { charge, storageUsage, type Charge, type StorageUsage } from '../capacity.ts'
@@ -55,12 +53,13 @@ export interface SqlVFSOptions {
  * A filesystem kept in SQL tables, over whatever driver it is given: a SQLite
  * file, a Postgres server, a Durable Object's own storage, a D1 database.
  *
- * The tables are AgentFS's: an inode per file and directory, an entry naming
- * each under its parent, and a file's bytes in rows of the database's chunk
- * size, so a database AgentFS made mounts here and one this mount made
- * mounts there. Each op resolves its path in one query and lands its change
- * in one transaction. One database holds one filesystem. Mirrors Python's
- * `SqlVFS`.
+ * The tables hold the files alone, laid out as AgentFS's: an inode per file
+ * and directory, an entry naming each under its parent, and a file's bytes in
+ * rows of the database's chunk size. A path's mode, owner and symlinks are
+ * the namespace's, and a session's env and cwd the workspace store's, as on
+ * any mount that keeps no attributes; the mount answers no `setattr`. Each op
+ * resolves its path in one query and lands its change in one transaction.
+ * One database holds one filesystem. Mirrors Python's `SqlVFS`.
  */
 export class SqlVFS extends BaseVFS<SqlAccessor> {
   override readonly name: string = VFSName.SQL
@@ -205,13 +204,6 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
     return this.usage.report()
   }
 
-  override setattr(
-    path: PathSpec,
-    fields: SetAttrFields,
-  ): Promise<Record<string, number | string>> {
-    return sqlSetAttrs(this.accessor, path, fields)
-  }
-
   override async getState(): Promise<
     SqlSnapshot & { type: string; config: { capacity?: number } }
   > {
@@ -226,7 +218,6 @@ export class SqlVFS extends BaseVFS<SqlAccessor> {
     await restore(this.accessor, {
       files: state.files ?? {},
       dirs: state.dirs ?? ['/'],
-      attrs: state.attrs ?? {},
       modified: state.modified ?? {},
     })
     this.usage?.stale()

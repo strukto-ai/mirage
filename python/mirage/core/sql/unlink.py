@@ -14,7 +14,7 @@
 
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import SQL
-from mirage.core.sql.inode import is_dir, reap
+from mirage.core.sql.inode import drop_inodes, is_dir
 from mirage.core.sql.path import found, leaf, parent_of, walk
 from mirage.errors.fs import eisdir
 from mirage.types import PathSpec
@@ -35,6 +35,6 @@ async def unlink(accessor: SqlAccessor, path: PathSpec) -> None:
                 SQL["remove_entry"],
                 (parent.ino if parent is not None else None, leaf(w)),
             ),
-            *reap([node.ino]),
+            *drop_inodes([node.ino]),
         ]
     )

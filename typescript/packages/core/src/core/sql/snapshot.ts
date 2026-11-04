@@ -15,9 +15,8 @@
 import type { SqlAccessor } from '../../accessor/sql.ts'
 import { gnuBasename, parent } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import { ALL_MODE_BITS, DIR_MODE, FILE_MODE, S_IFMT } from '../../utils/stat_view.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
-import { CLEAR, ROOT_INO, SQL } from './constants.ts'
+import { CLEAR, DIR, FILE, ROOT_INO, SQL } from './constants.ts'
 import { placeBytes, readBytes } from './data.ts'
 import {
   byEntry,
@@ -34,13 +33,13 @@ import {
 
 /**
  * What a snapshot keeps of a sql mount: each file's bytes and each
- * directory, by mount path, with the mode, owner, atime and mtime of each.
- * Mirrors Python's snapshot dict.
+ * directory, by mount path, with the mtime of each. A path's mode and owner
+ * are the namespace's, which the workspace snapshots itself. Mirrors
+ * Python's snapshot dict.
  */
 export interface SqlSnapshot {
   files: Record<string, Uint8Array>
   dirs: string[]
-  attrs: Record<string, Record<string, string>>
   modified: Record<string, string>
 }
 
@@ -50,7 +49,7 @@ function depth(p: string): number {
 
 /** Every file and directory of the database, read in one walk of the tree. */
 export async function snapshot(accessor: SqlAccessor): Promise<SqlSnapshot> {
-  const out: SqlSnapshot = { files: {}, dirs: ['/'], attrs: {}, modified: {} }
+  const out: SqlSnapshot = { files: {}, dirs: ['/'], modified: {} }
   for (const row of await accessor.query(SQL.subtree, [ROOT_INO])) {
     const node = inodeOf(row)
     if (node === null || !(isDir(node) || isFile(node))) continue
@@ -58,12 +57,6 @@ export async function snapshot(accessor: SqlAccessor): Promise<SqlSnapshot> {
     if (isDir(node)) out.dirs.push(p)
     else out.files[p] = await readBytes(accessor, node)
     out.modified[p] = isoOf(node.mtime, node.mtimeNsec)
-    out.attrs[p] = {
-      mode: String(node.mode & ALL_MODE_BITS),
-      atime: isoOf(node.atime, node.atimeNsec),
-      ...(node.uid !== 0 ? { uid: String(node.uid) } : {}),
-      ...(node.gid !== 0 ? { gid: String(node.gid) } : {}),
-    }
   }
   out.dirs.sort(compareCodePoints)
   return out
@@ -82,46 +75,24 @@ export async function restore(accessor: SqlAccessor, state: SqlSnapshot): Promis
     const up = refs.get(parent(p))
     if (up === undefined) return
     const name = gnuBasename(p)
-    const attrs = state.attrs[p] ?? {}
     const modified = state.modified[p]
-    const bits =
-      attrs.mode !== undefined ? Number(attrs.mode) & ALL_MODE_BITS : mode & ALL_MODE_BITS
     const ref = byEntry(up, name)
     statements.push(
       ...makeNode(
         accessor,
         up,
         name,
-        (mode & S_IFMT) | bits,
+        mode,
         data?.byteLength ?? 0,
         modified !== undefined ? stampOf(modified) : now,
       ),
     )
     if (data !== null) statements.push(...(await placeBytes(accessor, ref, null, 0, data)))
-    const sets: string[] = []
-    const params: (number | string)[] = []
-    for (const key of ['uid', 'gid'] as const) {
-      const value = attrs[key]
-      if (value !== undefined && /^\d+$/.test(value)) {
-        sets.push(`${key} = ?`)
-        params.push(Number(value))
-      }
-    }
-    if (attrs.atime !== undefined) {
-      sets.push('atime = ?', 'atime_nsec = ?')
-      params.push(...stampOf(attrs.atime))
-    }
-    if (sets.length > 0) {
-      statements.push({
-        sql: `UPDATE fs_inode SET ${sets.join(', ')} WHERE ino = ${ref.sql}`,
-        params: [...params, ...ref.params],
-      })
-    }
     if (data === null) refs.set(p, ref)
   }
   const dirs = state.dirs.filter((p) => p !== '/')
   dirs.sort((a, b) => depth(a) - depth(b) || compareCodePoints(a, b))
-  for (const p of dirs) await place(p, DIR_MODE, null)
-  for (const [p, data] of Object.entries(state.files)) await place(p, FILE_MODE, data)
+  for (const p of dirs) await place(p, DIR, null)
+  for (const [p, data] of Object.entries(state.files)) await place(p, FILE, data)
   await accessor.batch(statements)
 }

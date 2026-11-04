@@ -14,7 +14,7 @@
 
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import SQL
-from mirage.core.sql.inode import by_ino, is_dir, now_stamp, reap
+from mirage.core.sql.inode import drop_inodes, is_dir
 from mirage.core.sql.path import (
     check_dest_parents,
     found,
@@ -59,23 +59,17 @@ async def rename(accessor: SqlAccessor, src: PathSpec, dst: PathSpec) -> None:
             raise enotempty(dst)
     elif there is not None and is_dir(there):
         raise eisdir(dst)
-    seconds, nanoseconds = now_stamp()
     statements: list[SqlStatement] = []
     if there is not None:
         statements.append(
             SqlStatement(SQL["remove_entry"], (to_parent.ino, leaf(to)))
         )
-    statements += [
+    statements.append(
         SqlStatement(
             SQL["move_entry"],
             (to_parent.ino, leaf(to), from_parent.ino, leaf(frm)),
-        ),
-        SqlStatement(
-            "UPDATE fs_inode SET ctime = ?, ctime_nsec = ?"
-            f" WHERE ino = {by_ino(node.ino).sql}",
-            (seconds, nanoseconds),
-        ),
-    ]
+        )
+    )
     if there is not None:
-        statements += reap([there.ino])
+        statements += drop_inodes([there.ino])
     accessor.batch(statements)

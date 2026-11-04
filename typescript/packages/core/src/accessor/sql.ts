@@ -46,7 +46,7 @@ export class SqlAccessor extends Accessor {
     const now = Math.floor(systemDate().getTime() / 1000)
     await this.driver.batch([
       ...SCHEMA[this.driver.dialect].map((sql) => ({ sql })),
-      { sql: SQL.seedRoot, params: [now, now, now] },
+      { sql: SQL.seedRoot, params: [now] },
     ])
     const row = (await this.driver.query(SQL.chunkSize))[0]
     return Number(row?.value) || DEFAULT_CHUNK_SIZE

@@ -16,9 +16,8 @@ import type { SqlAccessor } from '../../accessor/sql.ts'
 import { eexist, enotdir } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { mountedPath } from '../../utils/key_prefix.ts'
-import { DIR_MODE } from '../../utils/stat_view.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
-import { ROOT_INO } from './constants.ts'
+import { DIR, ROOT_INO } from './constants.ts'
 import { byEntry, byIno, isDir, makeNode, nowStamp } from './inode.ts'
 import { checkDestParents, leaf, parentRef, target, walk } from './path.ts'
 
@@ -36,7 +35,7 @@ export async function mkdir(accessor: SqlAccessor, path: PathSpec, parents = fal
   if (!parents) {
     if (target(w) !== null) throw eexist(path)
     checkDestParents(w, path)
-    await accessor.batch(makeNode(accessor, parentRef(w), leaf(w), DIR_MODE, 0, now))
+    await accessor.batch(makeNode(accessor, parentRef(w), leaf(w), DIR, 0, now))
     return
   }
   const statements: SqlStatement[] = []
@@ -44,7 +43,7 @@ export async function mkdir(accessor: SqlAccessor, path: PathSpec, parents = fal
   w.names.forEach((name, i) => {
     const node = w.chain[i + 1] ?? null
     if (node === null) {
-      statements.push(...makeNode(accessor, parent, name, DIR_MODE, 0, now))
+      statements.push(...makeNode(accessor, parent, name, DIR, 0, now))
       parent = byEntry(parent, name)
       return
     }

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sql import SqlAccessor
+from mirage.core.sql.constants import FILE
 from mirage.core.sql.data import cut_bytes, place_bytes, read_bytes
 from mirage.core.sql.inode import Inode, by_ino
 from mirage.vfs.sql.driver import SqliteDriver
@@ -39,20 +40,7 @@ def _accessor(chunk_size: int) -> SqlAccessor:
 
 
 def _file(size: int) -> Inode:
-    return Inode(
-        ino=7,
-        mode=0o100644,
-        nlink=1,
-        uid=0,
-        gid=0,
-        size=size,
-        atime=0,
-        atime_nsec=0,
-        mtime=0,
-        mtime_nsec=0,
-        ctime=0,
-        ctime_nsec=0,
-    )
+    return Inode(ino=7, mode=FILE, size=size, mtime=0, mtime_nsec=0)
 
 
 def _rows(accessor: SqlAccessor) -> list[bytes]:

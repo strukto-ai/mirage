@@ -17,16 +17,14 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from stat import S_IFDIR, S_IFLNK, S_IFREG
 
 from mirage.accessor.sql import SqlAccessor
-from mirage.core.sql.constants import LAST_INO, MAX_PARAMS, SQL
+from mirage.core.sql.constants import DIR, FILE, LAST_INO, MAX_PARAMS, SQL
 from mirage.types import FileStat, FileType
 from mirage.utils.clock import system_date
 from mirage.utils.dates import to_iso_z
 from mirage.utils.filetype import content_type_for_path
 from mirage.utils.path import gnu_basename
-from mirage.utils.stat_view import ALL_MODE_BITS, S_IFMT
 from mirage.vfs.sql.types import SqlRow, SqlStatement, SqlValue
 
 # A time as ``fs_inode`` keeps it: whole seconds since the epoch and the
@@ -39,17 +37,11 @@ class Inode:
     """One ``fs_inode`` row. Mirrors TypeScript's ``Inode``."""
 
     ino: int
+    # The type bits: ``DIR`` or ``FILE``.
     mode: int
-    nlink: int
-    uid: int
-    gid: int
     size: int
-    atime: int
-    atime_nsec: int
     mtime: int
     mtime_nsec: int
-    ctime: int
-    ctime_nsec: int
 
 
 def inode_of(row: SqlRow | None, prefix: str = "") -> Inode | None:
@@ -62,11 +54,11 @@ def inode_of(row: SqlRow | None, prefix: str = "") -> Inode | None:
 
 
 def is_dir(node: Inode) -> bool:
-    return node.mode & S_IFMT == S_IFDIR
+    return node.mode == DIR
 
 
 def is_file(node: Inode) -> bool:
-    return node.mode & S_IFMT == S_IFREG
+    return node.mode == FILE
 
 
 def now_stamp() -> Stamp:
@@ -93,30 +85,20 @@ def iso_of(seconds: int, nanoseconds: int) -> str:
 
 
 def inode_stat(p: str, node: Inode) -> FileStat:
-    """What ``stat`` answers for the inode at mount path ``p``. AgentFS
-    records owner 0 for a file nobody chowned, so 0 reads as no owner,
-    and ``ls -l`` shows the session's user as it does on a mount that
-    keeps none. Mirrors TypeScript's ``inodeStat``."""
-    kind = node.mode & S_IFMT
-    if kind == S_IFDIR:
-        file_type = FileType.DIRECTORY
-    elif kind == S_IFLNK:
-        file_type = FileType.SYMLINK
-    else:
-        file_type = FileType.FILE
+    """What ``stat`` answers for the inode at mount path ``p``: its type,
+    size and mtime. The namespace overlay adds a mode, owner or atime set
+    on the path. Mirrors TypeScript's ``inodeStat``."""
+    modified = iso_of(node.mtime, node.mtime_nsec)
+    if is_dir(node):
+        return FileStat(
+            name=gnu_basename(p), modified=modified, type=FileType.DIRECTORY
+        )
     return FileStat(
         name=gnu_basename(p),
-        size=None if file_type == FileType.DIRECTORY else node.size,
-        modified=iso_of(node.mtime, node.mtime_nsec),
-        type=file_type,
-        content=(
-            content_type_for_path(p) if file_type == FileType.FILE else None
-        ),
-        mode=node.mode & ALL_MODE_BITS,
-        uid=node.uid or None,
-        gid=node.gid or None,
-        atime=iso_of(node.atime, node.atime_nsec),
-        ctime=iso_of(node.ctime, node.ctime_nsec),
+        size=node.size,
+        modified=modified,
+        type=FileType.FILE,
+        content=content_type_for_path(p),
     )
 
 
@@ -158,19 +140,7 @@ def make_node(
     the entry takes the number the inode was just given."""
     seconds, nanoseconds = stamp
     return [
-        SqlStatement(
-            SQL["new_inode"],
-            (
-                mode,
-                size,
-                seconds,
-                nanoseconds,
-                seconds,
-                nanoseconds,
-                seconds,
-                nanoseconds,
-            ),
-        ),
+        SqlStatement(SQL["new_inode"], (mode, size, seconds, nanoseconds)),
         SqlStatement(
             "INSERT INTO fs_dentry (name, parent_ino, ino) VALUES"
             f" (?, {parent.sql}, {LAST_INO[accessor.driver.dialect]})",
@@ -180,12 +150,12 @@ def make_node(
 
 
 def resized(ino: InoRef, size: int, stamp: Stamp) -> SqlStatement:
-    """Set the inode's size, and its mtime and ctime to ``stamp``."""
+    """Set the inode's size, and its mtime to ``stamp``."""
     seconds, nanoseconds = stamp
     return SqlStatement(
-        "UPDATE fs_inode SET size = ?, mtime = ?, mtime_nsec = ?,"
-        f" ctime = ?, ctime_nsec = ? WHERE ino = {ino.sql}",
-        (size, seconds, nanoseconds, seconds, nanoseconds, *ino.params),
+        "UPDATE fs_inode SET size = ?, mtime = ?, mtime_nsec = ?"
+        f" WHERE ino = {ino.sql}",
+        (size, seconds, nanoseconds, *ino.params),
     )
 
 
@@ -211,27 +181,19 @@ def insert_rows(
     return out
 
 
-def reap(inos: Sequence[int]) -> list[SqlStatement]:
-    """After entries naming ``inos`` were removed: count each one's links
-    afresh and drop each that has none left, its bytes and link target
-    with it. A file another entry still names (a hard link) keeps
-    everything."""
+def drop_inodes(inos: Sequence[int]) -> list[SqlStatement]:
+    """After the entries naming ``inos`` were removed: the inodes, and a
+    file's bytes. A directory something was written under since keeps its
+    inode, as the guard that removed its entry kept that too."""
     out: list[SqlStatement] = []
     for i in range(0, len(inos), 500):
         listed = ", ".join(by_ino(ino).sql for ino in inos[i : i + 500])
-        gone = (
-            f"SELECT ino FROM fs_inode WHERE ino IN ({listed}) AND nlink = 0"
-        )
         out += [
+            SqlStatement(f"DELETE FROM fs_data WHERE ino IN ({listed})"),
             SqlStatement(
-                "UPDATE fs_inode SET nlink = (SELECT COUNT(*) FROM"
-                " fs_dentry d WHERE d.ino = fs_inode.ino)"
-                f" WHERE ino IN ({listed})"
-            ),
-            SqlStatement(f"DELETE FROM fs_data WHERE ino IN ({gone})"),
-            SqlStatement(f"DELETE FROM fs_symlink WHERE ino IN ({gone})"),
-            SqlStatement(
-                f"DELETE FROM fs_inode WHERE ino IN ({listed}) AND nlink = 0"
+                f"DELETE FROM fs_inode WHERE ino IN ({listed})"
+                " AND NOT EXISTS (SELECT 1 FROM fs_dentry c"
+                " WHERE c.parent_ino = fs_inode.ino)"
             ),
         ]
     return out

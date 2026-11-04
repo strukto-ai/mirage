@@ -18,9 +18,8 @@ import { materialize, type ByteSource } from '../../io/types.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
-import { FILE_MODE } from '../../utils/stat_view.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
-import { FLUSH_BYTES } from './constants.ts'
+import { FILE, FLUSH_BYTES } from './constants.ts'
 import { placeBytes } from './data.ts'
 import { byEntry, byIno, makeNode, nowStamp, resized, type Inode } from './inode.ts'
 import {
@@ -47,7 +46,7 @@ async function landing(
   if (node === null) {
     const ref = byEntry(parentRef(w), leaf(w))
     return [
-      ...makeNode(accessor, parentRef(w), leaf(w), FILE_MODE, data.byteLength, now),
+      ...makeNode(accessor, parentRef(w), leaf(w), FILE, data.byteLength, now),
       ...(await placeBytes(accessor, ref, null, 0, data)),
     ]
   }

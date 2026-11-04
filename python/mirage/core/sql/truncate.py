@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sql import SqlAccessor
+from mirage.core.sql.constants import FILE
 from mirage.core.sql.data import cut_bytes
 from mirage.core.sql.inode import by_ino, make_node, now_stamp, resized
 from mirage.core.sql.path import (
@@ -25,7 +26,6 @@ from mirage.core.sql.path import (
 )
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec, VFSName
-from mirage.utils.stat_view import FILE_MODE
 
 
 async def truncate(
@@ -47,7 +47,7 @@ async def truncate(
         if no_create:
             return
         accessor.batch(
-            make_node(accessor, parent_ref(w), leaf(w), FILE_MODE, length, now)
+            make_node(accessor, parent_ref(w), leaf(w), FILE, length, now)
         )
     else:
         accessor.batch(

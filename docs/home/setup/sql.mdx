@@ -5,9 +5,10 @@ description: Store workspace files in SQL tables.
 ---
 
 SQL stores workspace files in a database's tables. The files last as long as
-the database does. The tables follow [AgentFS](https://github.com/tursodatabase/agentfs):
-a database AgentFS made mounts here, and AgentFS reads one this mount made.
-One database holds one filesystem.
+the database does. The tables hold the files alone, laid out as
+[AgentFS](https://github.com/tursodatabase/agentfs)'s: a path's mode, owner and
+symlinks are the [namespace](/home/infrastructure/namespace)'s, and a session's env and cwd its
+[workspace store](/home/infrastructure/sessions)'s. One database holds one filesystem.
 
 ## Configuration
 

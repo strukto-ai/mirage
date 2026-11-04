@@ -17,13 +17,12 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 
-from mirage.core.sql.constants import DEFAULT_CHUNK_SIZE
+from mirage.core.sql.constants import DEFAULT_CHUNK_SIZE, DIR, FILE
 from mirage.io.stream import materialize
 from mirage.observe.context import RecordingScope
 from mirage.types import CapacityState, FileType, MountMode, PathSpec
 from mirage.vfs.sql.driver import SqliteDriver
 from mirage.vfs.sql.sql import SqlVFS
-from mirage.vfs.sql.types import SqlStatement
 from mirage.vfs.testing import MutationFixture, check_mutation_contract
 from mirage.workspace import Workspace
 from mirage.workspace.record.sql import SqlRecordClient
@@ -123,119 +122,57 @@ async def test_copy_stays_inside_the_database(vfs: SqlVFS):
 
 
 @pytest.mark.asyncio
-async def test_a_numeric_owner_is_kept_and_a_name_goes_to_the_overlay(
+async def test_it_keeps_no_attributes_so_the_namespace_keeps_them(
     vfs: SqlVFS,
 ):
-    await vfs.write(at("/o"), b"x")
-    residual = await vfs.setattr(at("/o"), mode=0o600, uid=1000, gid="staff")
-    assert residual == {"gid": "staff"}
-    st = await vfs.stat(at("/o"))
-    assert (st.mode, st.uid, st.gid) == (0o600, 1000, None)
+    assert not vfs.supports("setattr")
 
 
 @pytest.mark.asyncio
-async def test_a_database_agentfs_made_mounts_at_its_own_chunk_size():
+async def test_its_tables_hold_the_tree_and_the_bytes_alone():
     driver = SqliteDriver()
-    driver.batch(
-        [
-            SqlStatement(
-                "CREATE TABLE fs_config (key TEXT PRIMARY KEY,"
-                " value TEXT NOT NULL)"
-            ),
-            SqlStatement("INSERT INTO fs_config VALUES ('chunk_size', '4')"),
-            SqlStatement(
-                "CREATE TABLE fs_inode (ino INTEGER PRIMARY KEY AUTOINCREMENT,"
-                " mode INTEGER NOT NULL, nlink INTEGER NOT NULL DEFAULT 0,"
-                " uid INTEGER NOT NULL DEFAULT 0, gid INTEGER NOT NULL DEFAULT 0,"
-                " size INTEGER NOT NULL DEFAULT 0, atime INTEGER NOT NULL,"
-                " mtime INTEGER NOT NULL, ctime INTEGER NOT NULL,"
-                " rdev INTEGER NOT NULL DEFAULT 0,"
-                " atime_nsec INTEGER NOT NULL DEFAULT 0,"
-                " mtime_nsec INTEGER NOT NULL DEFAULT 0,"
-                " ctime_nsec INTEGER NOT NULL DEFAULT 0)"
-            ),
-            SqlStatement(
-                "CREATE TABLE fs_dentry (id INTEGER PRIMARY KEY AUTOINCREMENT,"
-                " name TEXT NOT NULL, parent_ino INTEGER NOT NULL,"
-                " ino INTEGER NOT NULL, UNIQUE(parent_ino, name))"
-            ),
-            SqlStatement(
-                "CREATE TABLE fs_data (ino INTEGER NOT NULL,"
-                " chunk_index INTEGER NOT NULL, data BLOB NOT NULL,"
-                " PRIMARY KEY (ino, chunk_index))"
-            ),
-            SqlStatement(
-                "CREATE TABLE fs_symlink (ino INTEGER PRIMARY KEY,"
-                " target TEXT NOT NULL)"
-            ),
-            SqlStatement(
-                "INSERT INTO fs_inode (ino, mode, nlink, atime, mtime,"
-                " ctime) VALUES (1, 16877, 1, 0, 0, 0)"
-            ),
-            SqlStatement(
-                "INSERT INTO fs_inode (ino, mode, nlink, size, atime,"
-                " mtime, ctime) VALUES (2, 33188, 2, 10, 0, 0, 0)"
-            ),
-            SqlStatement(
-                "INSERT INTO fs_dentry (name, parent_ino, ino)"
-                " VALUES ('notes.txt', 1, 2)"
-            ),
-            SqlStatement(
-                "INSERT INTO fs_dentry (name, parent_ino, ino)"
-                " VALUES ('link.txt', 1, 2)"
-            ),
-            SqlStatement(
-                "INSERT INTO fs_data VALUES (2, 0, x'68656c6c'),"
-                " (2, 1, x'6f20776f'), (2, 2, x'726c')"
-            ),
-        ]
-    )
     vfs = SqlVFS(driver=driver)
     try:
-        assert await whole(vfs, "/notes.txt") == b"hello worl"
-        await vfs.append(at("/notes.txt"), b"d!")
-        assert await whole(vfs, "/link.txt") == b"hello world!"
-        rows = driver.query(
-            "SELECT length(data) AS n FROM fs_data"
-            " WHERE ino = 2 ORDER BY chunk_index"
+        await vfs.mkdir(at("/d"))
+        await vfs.write(at("/d/f"), b"hi")
+        tables = driver.query(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+            " AND name LIKE 'fs_%' ORDER BY name"
         )
-        assert [r["n"] for r in rows] == [4, 4, 4]
-        await vfs.unlink(at("/notes.txt"))
-        assert await whole(vfs, "/link.txt") == b"hello world!"
-        assert (
-            driver.query("SELECT nlink FROM fs_inode WHERE ino = 2")[0][
-                "nlink"
-            ]
-            == 1
+        assert [t["name"] for t in tables] == [
+            "fs_config",
+            "fs_data",
+            "fs_dentry",
+            "fs_inode",
+        ]
+        assert driver.query("SELECT key, value FROM fs_config") == [
+            {"key": "chunk_size", "value": str(CS)}
+        ]
+        tree = driver.query(
+            "SELECT d.name, i.mode, i.size FROM fs_dentry d"
+            " JOIN fs_inode i ON i.ino = d.ino ORDER BY d.name"
         )
+        assert tree == [
+            {"name": "d", "mode": DIR, "size": 0},
+            {"name": "f", "mode": FILE, "size": 2},
+        ]
     finally:
         await vfs.close()
         driver.close()
 
 
 @pytest.mark.asyncio
-async def test_it_writes_the_tables_agentfs_reads():
+async def test_chmod_lands_in_the_namespace_not_the_tables():
     driver = SqliteDriver()
-    vfs = SqlVFS(driver=driver)
+    ws = Workspace({"/w": SqlVFS(driver=driver)}, mode=MountMode.WRITE)
     try:
-        await vfs.mkdir(at("/d"))
-        await vfs.write(at("/d/f"), b"hi")
-        config = driver.query("SELECT key, value FROM fs_config ORDER BY key")
-        assert config == [
-            {"key": "chunk_size", "value": str(CS)},
-            {"key": "schema_version", "value": "0.4"},
+        r = await ws.shell("touch /w/f && chmod 600 /w/f && stat -c %a /w/f")
+        assert await r.stdout_str() == "600\n"
+        assert driver.query("SELECT mode FROM fs_inode WHERE ino > 1") == [
+            {"mode": FILE}
         ]
-        tree = driver.query(
-            "SELECT d.name, i.mode, i.nlink, i.size FROM fs_dentry d"
-            " JOIN fs_inode i ON i.ino = d.ino ORDER BY d.name"
-        )
-        assert tree == [
-            {"name": "d", "mode": 0o40755, "nlink": 1, "size": 0},
-            {"name": "f", "mode": 0o100644, "nlink": 1, "size": 2},
-        ]
-        assert (await vfs.stat(at("/d/f"))).type == FileType.FILE
     finally:
-        await vfs.close()
+        await ws.close()
         driver.close()
 
 
@@ -311,9 +248,7 @@ async def test_a_snapshot_carries_the_files_into_a_fresh_mount():
     source = SqlVFS()
     ws = Workspace({"/w": source}, mode=MountMode.WRITE)
     try:
-        r = await ws.shell(
-            "mkdir -p /w/d && printf hi > /w/d/f && chmod 600 /w/d/f"
-        )
+        r = await ws.shell("mkdir -p /w/d && printf hi > /w/d/f")
         assert r.exit_code == 0
         state = source.get_state()
     finally:
@@ -325,7 +260,6 @@ async def test_a_snapshot_carries_the_files_into_a_fresh_mount():
     copy.load_state(state)
     try:
         assert await whole(copy, "/d/f") == b"hi"
-        assert (await copy.stat(at("/d/f"))).mode == 0o600
         assert (await copy.stat(at("/d"))).type == FileType.DIRECTORY
     finally:
         await copy.close()

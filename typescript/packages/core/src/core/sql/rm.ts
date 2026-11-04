@@ -17,7 +17,7 @@ import { enotempty } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
 import { SQL } from './constants.ts'
-import { byIno, inodeOf, isDir, reap } from './inode.ts'
+import { byIno, dropInodes, inodeOf, isDir } from './inode.ts'
 import { leaf, parentOf, target, walk } from './path.ts'
 
 /**
@@ -64,7 +64,7 @@ export async function rmR(accessor: SqlAccessor, path: PathSpec): Promise<void> 
     })
     inos.push(node.ino)
   }
-  await accessor.batch([...statements, ...reap(inos)])
+  await accessor.batch([...statements, ...dropInodes(inos)])
   if (parent !== null && (await accessor.query(SQL.hasEntry, [parent.ino, leaf(w)])).length > 0) {
     throw enotempty(path)
   }

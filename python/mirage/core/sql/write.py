@@ -16,7 +16,7 @@ from contextlib import aclosing
 from dataclasses import replace
 
 from mirage.accessor.sql import SqlAccessor
-from mirage.core.sql.constants import FLUSH_BYTES
+from mirage.core.sql.constants import FILE, FLUSH_BYTES
 from mirage.core.sql.data import place_bytes
 from mirage.core.sql.inode import (
     Inode,
@@ -41,7 +41,6 @@ from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec, VFSName
-from mirage.utils.stat_view import FILE_MODE
 from mirage.vfs.sql.types import SqlStatement
 
 
@@ -58,9 +57,7 @@ def _landing(
     if node is None:
         ref = by_entry(parent_ref(w), leaf(w))
         return [
-            *make_node(
-                accessor, parent_ref(w), leaf(w), FILE_MODE, len(data), now
-            ),
+            *make_node(accessor, parent_ref(w), leaf(w), FILE, len(data), now),
             *place_bytes(accessor, ref, None, 0, data),
         ]
     ino = by_ino(node.ino)

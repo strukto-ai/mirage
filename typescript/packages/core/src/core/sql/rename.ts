@@ -17,7 +17,7 @@ import { ebusy, einval, eisdir, enotdir, enotempty } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
 import { SQL } from './constants.ts'
-import { byIno, isDir, nowStamp, reap } from './inode.ts'
+import { dropInodes, isDir } from './inode.ts'
 import { checkDestParents, found, leaf, parentOf, target, walk } from './path.ts'
 
 /**
@@ -48,16 +48,12 @@ export async function rename(accessor: SqlAccessor, src: PathSpec, dst: PathSpec
   } else if (there !== null && isDir(there)) {
     throw eisdir(dst)
   }
-  const [seconds, nanoseconds] = nowStamp()
   const statements: SqlStatement[] = []
   if (there !== null) statements.push({ sql: SQL.removeEntry, params: [toParent.ino, leaf(to)] })
-  statements.push(
-    { sql: SQL.moveEntry, params: [toParent.ino, leaf(to), fromParent.ino, leaf(from)] },
-    {
-      sql: `UPDATE fs_inode SET ctime = ?, ctime_nsec = ? WHERE ino = ${byIno(node.ino).sql}`,
-      params: [seconds, nanoseconds],
-    },
-  )
-  if (there !== null) statements.push(...reap([there.ino]))
+  statements.push({
+    sql: SQL.moveEntry,
+    params: [toParent.ino, leaf(to), fromParent.ino, leaf(from)],
+  })
+  if (there !== null) statements.push(...dropInodes([there.ino]))
   await accessor.batch(statements)
 }
