@@ -14,6 +14,7 @@
 
 import {
   trace,
+  type Attributes,
   type Span,
   type SpanOptions,
   type Tracer,
@@ -21,6 +22,8 @@ import {
 } from '@opentelemetry/api'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../io/types.ts'
+import type { Policy } from '../policy/base.ts'
+import { MountMode } from '../types.ts'
 import { ManualClock } from '../utils/clock.ts'
 import { EVENT_COMMAND, LogEntry } from './log_entry.ts'
 import {
@@ -32,8 +35,30 @@ import {
 } from './observer.ts'
 import { OpRecord } from './record.ts'
 import { RAMObserverStore } from './store.ts'
+import { RAMVFS } from '../vfs/ram/ram.ts'
+import { Workspace } from '../workspace/workspace/workspace.ts'
 
 const NEW_YEAR = 1_609_459_200
+
+/** Take every span the observer starts, its name and attributes. Mirrors Python's `_exported`. */
+function exported(): { name: string; attributes: Attributes }[] {
+  const spans: { name: string; attributes: Attributes }[] = []
+  const fake = {
+    startSpan(name: string, options: SpanOptions = {}) {
+      spans.push({ name, attributes: options.attributes ?? {} })
+      return { isRecording: () => true, end: () => undefined } as unknown as Span
+    },
+  } as unknown as Tracer
+  trace.setGlobalTracerProvider({ getTracer: () => fake })
+  return spans
+}
+
+/** A postExecute policy that lets every line's output through. */
+class SeesOutput implements Policy {
+  postExecute(): null {
+    return null
+  }
+}
 
 function logEntry(o: Observer, entry: LogEntry): Promise<void> {
   return (o as unknown as { log: (e: LogEntry) => Promise<void> }).log(entry)
@@ -484,6 +509,8 @@ describe('a damaged history file', () => {
         'mirage.session.id': 's1',
         'mirage.command': 'cat /d/a',
         'mirage.exit_code': 1,
+        'mirage.timestamp': start,
+        'mirage.duration_ms': 1000,
         'mirage.stdout': 'x'.repeat(TRACE_CONTENT_MAX_BYTES),
         'mirage.stderr': 'cat: /d/b: No such file\n',
         'mirage.workspace.id': 'w',
@@ -494,7 +521,13 @@ describe('a damaged history file', () => {
     ])
     expect([call?.name, call?.options.attributes, call?.options.startTime, call?.end]).toEqual([
       'vfs.read',
-      { 'mirage.vfs.path': '/d/a', 'mirage.vfs.source': 's3', 'mirage.vfs.bytes': 6 },
+      {
+        'mirage.vfs.path': '/d/a',
+        'mirage.vfs.source': 's3',
+        'mirage.vfs.bytes': 6,
+        'mirage.vfs.timestamp': start + 5,
+        'mirage.vfs.duration_ms': 12,
+      },
       start - 7,
       start + 5,
     ])
@@ -516,10 +549,58 @@ describe('a damaged history file', () => {
     trace.setGlobalTracerProvider({ getTracer: () => fake })
     const o = new Observer(new RAMObserverStore(), new ManualClock(NEW_YEAR))
     await o.logCommand('echo', 's1', '/', 'L')
-    // Two bytes a character: five bytes end inside the third.
+    // Two bytes a character: five bytes end inside the third, which is
+    // left out rather than shown as U+FFFD.
     const io = new IOResult({ stdout: new TextEncoder().encode('ééé') })
     await o.logResult(io, [], 's1', '/', 'L')
-    expect(spans[0]?.attributes?.['mirage.stdout']).toBe('éé�')
+    expect(spans[0]?.attributes?.['mirage.stdout']).toBe('éé')
+  })
+
+  it('keeps span output that is not UTF-8 within its bytes', async () => {
+    const spans = exported()
+    const o = new Observer(new RAMObserverStore(), new ManualClock(NEW_YEAR))
+    await o.logCommand('cat blob', 's1', '/', 'L')
+    // Each byte reads as U+FFFD, three bytes in UTF-8.
+    const io = new IOResult({ stdout: new Uint8Array(TRACE_CONTENT_MAX_BYTES).fill(0xff) })
+    await o.logResult(io, [], 's1', '/', 'L')
+    expect(spans[0]?.attributes['mirage.stdout']).toBe(
+      '\ufffd'.repeat(Math.floor(TRACE_CONTENT_MAX_BYTES / 3)),
+    )
+  })
+
+  it('keeps the cwd a line was given on its span', async () => {
+    const spans = exported()
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    let history: Awaited<ReturnType<Workspace['history']>>
+    try {
+      // A postExecute policy has the line recorded whole, as one entry.
+      ws.policies.add(new SeesOutput())
+      await ws.shell('pwd', { cwd: '/data' })
+      history = await ws.history()
+    } finally {
+      await ws.close()
+    }
+    const lines = spans.filter((s) => s.name === 'command')
+    expect(lines.map((s) => s.attributes['mirage.cwd'])).toEqual(['/data'])
+    expect(history.map((e) => e.cwd)).toEqual(['/data', '/data'])
+  })
+
+  it('takes output past the terminal chunk into its span', async () => {
+    vi.stubEnv(TRACE_CONTENT_MAX_BYTES_ENV, '20000')
+    const spans = exported()
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+    let history: Awaited<ReturnType<Workspace['history']>>
+    try {
+      await ws.shell('seq 1 10000')
+      history = await ws.history()
+    } finally {
+      await ws.close()
+    }
+    const lines = spans.filter((s) => s.name === 'command')
+    expect(lines.map((s) => String(s.attributes['mirage.stdout']).length)).toEqual([20000])
+    // The history keeps its own cut.
+    const results = history.filter((e) => e.type === 'result')
+    expect(results.map((e) => String(e.stdout).length)).toEqual([4096])
   })
 
   it('keeps output and vfs calls out of spans when told to', async () => {
@@ -551,6 +632,8 @@ describe('a damaged history file', () => {
           'mirage.session.id': 's1',
           'mirage.command': 'cat /d/a',
           'mirage.exit_code': 0,
+          'mirage.timestamp': NEW_YEAR * 1000,
+          'mirage.duration_ms': 0,
           'mirage.workspace.id': 'w',
           'mirage.cwd': '/d',
         },

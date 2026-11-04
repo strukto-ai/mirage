@@ -22,6 +22,7 @@ from urllib.parse import quote
 
 from opentelemetry import trace
 
+from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.observe.log_entry import (
@@ -84,6 +85,35 @@ def _trace_content_max_bytes() -> int:
     return limit if limit > 0 else TRACE_CONTENT_MAX_BYTES
 
 
+def kept_output_bytes() -> int:
+    """The bytes of each stream a line's terminal keeps for its record
+    while a reader takes the line: ``CHUNK_SIZE``, or the span's cap
+    when content is traced and the cap is larger. Mirrors TypeScript's
+    ``keptOutputBytes``."""
+    if not _trace_content():
+        return CHUNK_SIZE
+    return max(CHUNK_SIZE, _trace_content_max_bytes())
+
+
+def _traced_output(raw: bytes, limit: int) -> str:
+    """The start of ``raw`` as text of at most ``limit`` bytes in UTF-8.
+    A byte that isn't UTF-8 reads as U+FFFD, three bytes, so the text is
+    cut again after decoding, before the character that would cross
+    ``limit``. Mirrors TypeScript's ``tracedOutput``.
+
+    Args:
+        raw (bytes): a stream as the line wrote it.
+        limit (int): the most bytes the text may take.
+    """
+    text = raw[:limit].decode(errors="replace")
+    encoded = text.encode()
+    if len(encoded) <= limit:
+        return text
+    # The text is UTF-8, so only the character ``limit`` cuts through is
+    # left incomplete, and it is dropped.
+    return encoded[:limit].decode(errors="ignore")
+
+
 def _session_file(session: str) -> str:
     """The name a session's log goes under in each day: its id
     percent-quoted, so no id spans folders or ends like another's. One
@@ -120,7 +150,10 @@ def _trace_line(
     """Send a finished line to OpenTelemetry: a ``command`` span over its
     run, with the cwd it started in and the start of its stdout and
     stderr, and under it a ``vfs.<call>`` span for each call it made to a
-    mount. ``TRACE_CONTENT_ENV`` leaves out the output and the calls.
+    mount. Each span also carries its start or end and its length in
+    milliseconds, as the history's entries have them, for a tracer that
+    can't be given a span's times. ``TRACE_CONTENT_ENV`` leaves out the
+    output and the calls.
 
     Args:
         workspace_id (str | None): the workspace the line ran in.
@@ -139,16 +172,13 @@ def _trace_line(
         "mirage.session.id": session,
         "mirage.command": command,
         "mirage.exit_code": exit_code,
+        "mirage.timestamp": span[0],
+        "mirage.duration_ms": span[1] - span[0],
     }
     if content:
-        # A cut through a character decodes as U+FFFD.
         limit = _trace_content_max_bytes()
-        attributes["mirage.stdout"] = output[0][:limit].decode(
-            errors="replace"
-        )
-        attributes["mirage.stderr"] = output[1][:limit].decode(
-            errors="replace"
-        )
+        attributes["mirage.stdout"] = _traced_output(output[0], limit)
+        attributes["mirage.stderr"] = _traced_output(output[1], limit)
     if workspace_id is not None:
         attributes["mirage.workspace.id"] = workspace_id
     if cwd is not None:
@@ -167,6 +197,8 @@ def _trace_line(
                     "mirage.vfs.path": rec.path,
                     "mirage.vfs.source": rec.source,
                     "mirage.vfs.bytes": rec.bytes,
+                    "mirage.vfs.timestamp": rec.timestamp,
+                    "mirage.vfs.duration_ms": rec.duration_ms,
                 },
             )
             call.end(end_time=rec.timestamp * _NS_PER_MS)
