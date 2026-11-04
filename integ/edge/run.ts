@@ -544,10 +544,16 @@ async function startFakes(dir: string): Promise<ChildProcess> {
     'MEM0_URL',
     'GWS_URL',
   ]
+  // Only this child's announcements count: a URL already exported names
+  // another run's fake.
+  const announced = new Set<string>()
   for await (const line of lines) {
     const at = line.indexOf('=')
-    if (at > 0) process.env[line.slice(0, at)] = line.slice(at + 1)
-    if (wanted.every((name) => process.env[name] !== undefined)) return child
+    if (at > 0) {
+      process.env[line.slice(0, at)] = line.slice(at + 1)
+      announced.add(line.slice(0, at))
+    }
+    if (wanted.every((name) => announced.has(name))) return child
   }
   child.kill()
   throw new Error('the fakes exited before announcing their URLs')
