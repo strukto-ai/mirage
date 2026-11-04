@@ -1036,8 +1036,10 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
     return { emit, start, has }
   }
   let decoder = null
-  let pending = null
-  let paused = false
+  let buffered = null
+  let ended = false
+  // As node's: null until a data listener or resume() starts the flow.
+  let flowing = null
   let iterating = false
   let finished = false
   const finish = () => {
@@ -1055,21 +1057,29 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
       return input
     },
     resume() {
-      paused = false
+      flowing = true
       events.start()
       return input
     },
     pause() {
-      paused = true
+      flowing = false
       return input
     },
+    // A read that takes the last of ended input ends the stream once its
+    // caller is done with what it took.
     read() {
-      const chunk = pending
-      pending = null
+      const chunk = buffered
+      buffered = null
+      if (chunk !== null) events.emit('data', chunk)
+      if (ended) queueMicrotask(finish)
+      else events.start()
       return chunk
     },
     async *[Symbol.asyncIterator]() {
       iterating = true
+      const held = buffered
+      buffered = null
+      if (held !== null) yield held
       for (let c = stdinChunk(); c !== null; c = stdinChunk()) {
         const value = decoder === null ? c : decoder(c)
         if (value.length) yield value
@@ -1079,25 +1089,32 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
       finish()
     },
   }
-  const deliver = (value) => {
-    if (!value.length) return
-    pending = value
-    events.emit('readable')
-    pending = null
-    if (!paused) events.emit('data', value)
-  }
-  // Paused, the stream still reads for a readable listener, which takes
-  // input through read(); only data waits for resume().
-  const events = emitter(input, () => {
-    if (iterating || (paused && !events.has('readable'))) return false
+  // The next chunk as the encoding reads it, null once input has ended.
+  const next = () => {
     const chunk = stdinChunk()
-    if (chunk === null) {
-      if (decoder !== null) deliver(decoder(null))
-      finish()
+    if (chunk === null) ended = true
+    return decoder === null ? chunk : decoder(chunk)
+  }
+  // With a readable listener, as in node, a chunk waits until read()
+  // takes it, nothing more is read while it waits, and data comes only
+  // from read(); without one, chunks flow to data while the stream flows.
+  const events = emitter(input, () => {
+    const readable = events.has('readable')
+    const flows = flowing === true || (flowing === null && events.has('data'))
+    if (iterating || finished || (readable ? buffered !== null : !flows)) {
       return false
     }
-    deliver(decoder === null ? chunk : decoder(chunk))
-    return true
+    let value = buffered
+    buffered = null
+    if (value === null && !ended) value = next()
+    if (value !== null && value.length) {
+      if (readable) {
+        buffered = value
+        events.emit('readable')
+      } else events.emit('data', value)
+    } else if (readable && ended) events.emit('readable')
+    if (ended && buffered === null) finish()
+    return !ended
   })
   const readline = {
     createInterface() {
