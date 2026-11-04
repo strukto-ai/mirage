@@ -441,7 +441,7 @@ class MountingE2BRuntime(E2BRuntime):
 
     def __init__(self, **options):
         super().__init__(**options)
-        self.table: dict[str, str] = {}
+        self.table: dict[str, tuple[str, str]] = {}
         self.lines: list[str] = []
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
@@ -451,12 +451,16 @@ class MountingE2BRuntime(E2BRuntime):
 
     async def exec_line(self, line, stdin, env, cwd):
         self.lines.append(line)
-        rows = "".join(f"src {p} {t} rw 0 0\n" for p, t in self.table.items())
+        rows = "".join(
+            f"{source} {p} {t} rw 0 0\n"
+            for p, (source, t) in self.table.items()
+        )
         stdout = rows if line == "cat /proc/mounts" else ""
         return RunResult(stdout=stdout.encode(), stderr=None, exit_code=0)
 
     async def open_pipe(self, command):
-        self.table[shlex.split(command)[6]] = "fuse.sshfs"
+        source, prefix = shlex.split(command)[5:7]
+        self.table[prefix] = (source, "fuse.sshfs")
         requests = asyncio.StreamReader()
 
         async def stop() -> None:
@@ -526,6 +530,7 @@ async def test_ssh_mounts_serve_a_restricted_session_its_files(profile):
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("tool run")
     assert result.exit_code == 0
-    assert runtime.table == {"/data": "fuse.sshfs"}
+    assert [kind for _, kind in runtime.table.values()] == ["fuse.sshfs"]
+    assert list(runtime.table) == ["/data"]
     assert "tool run" in runtime.lines
     await ws.close()

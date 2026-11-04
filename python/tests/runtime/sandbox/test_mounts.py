@@ -14,7 +14,11 @@
 
 import asyncio
 import io
+import os
+import re
 import shlex
+import shutil
+import subprocess
 import sys
 
 import pytest
@@ -31,7 +35,11 @@ from mirage.runtime.sandbox import mounts
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import PIPE_SERVER_HINT, SSHFS_OPTIONS
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
-from mirage.runtime.sandbox.mounts import mount_table, top_prefixes
+from mirage.runtime.sandbox.mounts import (
+    mount_table,
+    running_line,
+    top_prefixes,
+)
 from mirage.runtime.types import RunResult, SandboxPipe
 from mirage.types import Limit
 
@@ -72,10 +80,12 @@ class FakeSandbox(RemoteSandbox, PipeTransportMixin):
         super().__init__(
             captures=["python3"], config={"mount_type": mount_type}
         )
-        self.table = {prefix: "tmpfs" for prefix in own}
+        self.table = {prefix: ("tmpfs", "tmpfs") for prefix in own}
+        self.running: set[str] = set()
         self.sshfs = sshfs
         self.sshfs_mounts = sshfs_mounts
         self.fail_unmount = False
+        self.fail_table = False
         self.commands: list[str] = []
         self.pipes: list[str] = []
         self.requests: dict[str, asyncio.StreamReader] = {}
@@ -91,12 +101,23 @@ class FakeSandbox(RemoteSandbox, PipeTransportMixin):
 
     async def exec_line(self, line, stdin, env, cwd):
         self.commands.append(line)
+        if line == "cat /proc/mounts" and self.fail_table:
+            return RunResult(stdout=b"", stderr=b"gone\n", exit_code=1)
         if line == "cat /proc/mounts":
             rows = "".join(
-                f"src {p.replace(' ', chr(92) + '040')} {kind} rw 0 0\n"
-                for p, kind in self.table.items()
+                f"{escaped(source)} {escaped(p)} {kind} rw 0 0\n"
+                for p, (source, kind) in self.table.items()
             )
             return RunResult(stdout=rows.encode(), stderr=None, exit_code=0)
+        if line.startswith("cat /proc/[0-9]*/cmdline"):
+            source = next(
+                w[2:] for w in shlex.split(line) if w.startswith("S=")
+            )
+            return RunResult(
+                stdout=b"",
+                stderr=None,
+                exit_code=0 if source in self.running else 1,
+            )
         if line == "command -v sshfs":
             return RunResult(
                 stdout=b"", stderr=None, exit_code=0 if self.sshfs else 1
@@ -106,14 +127,16 @@ class FakeSandbox(RemoteSandbox, PipeTransportMixin):
         if line.startswith("fusermount3 -uz "):
             if self.fail_unmount:
                 raise RuntimeError("the sandbox went away")
-            self.table.pop(shlex.split(line)[2], None)
+            source, _ = self.table.pop(shlex.split(line)[2], (None, None))
+            self.running.discard(source)
         return RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
 
     async def open_pipe(self, command):
         self.pipes.append(command)
-        prefix = shlex.split(command)[6]
+        source, prefix = shlex.split(command)[5:7]
         if self.sshfs_mounts:
-            self.table[prefix] = "fuse.sshfs"
+            self.table[prefix] = (source, "fuse.sshfs")
+            self.running.add(source)
         requests = asyncio.StreamReader()
         self.requests[prefix] = requests
 
@@ -122,6 +145,24 @@ class FakeSandbox(RemoteSandbox, PipeTransportMixin):
             requests.feed_eof()
 
         return SandboxPipe(requests, Sink(), stop)
+
+    def sshfs_exits(self, prefix):
+        """End ``prefix``'s server: its sshfs then unmounts itself."""
+        self.requests[prefix].feed_eof()
+        source, _ = self.table.pop(prefix)
+        self.running.discard(source)
+
+
+def escaped(text):
+    return text.replace(" ", "\\040")
+
+
+def sharing(sandbox, mount_type):
+    """Another workspace's runtime on the same sandbox."""
+    other = FakeSandbox(mount_type)
+    other.table = sandbox.table
+    other.running = sandbox.running
+    return other
 
 
 def workspace(runtime, hide=(), modes=None, **options):
@@ -149,10 +190,63 @@ def served(sandbox):
 def test_mount_table_unescapes_paths_and_keeps_the_top_entry():
     table = mount_table(
         "tmpfs /data tmpfs rw 0 0\n"
-        "mirage:/data /data fuse.sshfs rw 0 0\n"
-        "x /my\\040notes tmpfs rw 0 0\n"
+        "mirage-ab:/data /data fuse.sshfs rw 0 0\n"
+        "mirage-ab:/my\\040notes /my\\040notes fuse.sshfs rw 0 0\n"
     )
-    assert table == {"/data": "fuse.sshfs", "/my notes": "tmpfs"}
+    assert table == {
+        "/data": ("mirage-ab:/data", "fuse.sshfs"),
+        "/my notes": ("mirage-ab:/my notes", "fuse.sshfs"),
+    }
+
+
+# A program carrying the source as an argument serves it, as sshfs does;
+# a shorter or another source is not it.
+@pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="needs /proc")
+def test_the_running_line_finds_a_program_carrying_the_source():
+    program = subprocess.Popen(
+        [
+            "/bin/sh",
+            "-c",
+            "echo ready; while :; do sleep 1; done",
+            "sh",
+            "mirage-x:/my notes",
+        ],
+        stdout=subprocess.PIPE,
+    )
+    assert program.stdout is not None
+    try:
+        assert program.stdout.readline() == b"ready\n"
+        codes = [
+            subprocess.run(
+                ["/bin/sh", "-c", running_line(source)],
+                check=False,
+                timeout=10,
+            ).returncode
+            for source in (
+                "mirage-x:/my notes",
+                "mirage-x:/my",
+                "mirage-y:/data",
+            )
+        ]
+        assert codes == [0, 1, 1]
+    finally:
+        program.kill()
+        program.wait()
+        program.stdout.close()
+
+
+# With no process to read, the line cannot tell rather than answer that
+# nothing serves the source.
+def test_the_running_line_cannot_tell_without_a_process_list(tmp_path):
+    for tool in ("tr", "awk"):
+        os.symlink(shutil.which(tool), tmp_path / tool)
+    done = subprocess.run(
+        ["/bin/sh", "-c", running_line("mirage-x:/data")],
+        env={"PATH": str(tmp_path)},
+        check=False,
+        timeout=10,
+    )
+    assert done.returncode == 2
 
 
 def test_top_prefixes_leave_out_the_root_devices_and_nested_mounts():
@@ -167,9 +261,11 @@ async def test_ssh_serves_every_prefix_the_session_sees():
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("python3 job.py")
     assert (result.exit_code, await result.stdout_str()) == (0, "ran\n")
+    name = shlex.split(sandbox.pipes[0])[5].split(":")[0]
+    assert re.fullmatch("mirage-[0-9a-f]{32}", name)
     assert [p.split(" 2>")[0] for p in sandbox.pipes] == [
-        f"exec sshfs -f -o {SSHFS_OPTIONS} 'mirage:/data' '/data'",
-        f"exec sshfs -f -o {SSHFS_OPTIONS} 'mirage:/my notes' '/my notes'",
+        f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}:/data' '/data'",
+        f"exec sshfs -f -o {SSHFS_OPTIONS} '{name}:/my notes' '/my notes'",
     ]
     await agent.shell("python3 again.py")
     assert len(sandbox.pipes) == 2
@@ -268,7 +364,7 @@ async def test_a_mount_the_sandbox_makes_later_under_a_rule_refuses_the_line():
     ws = workspace(sandbox, hide=["/data/secret.csv"])
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 126
-    sandbox.table["/data"] = "fuse"
+    sandbox.table["/data"] = ("x", "fuse")
     result = await agent.shell("python3 job.py")
     assert result.exit_code == 126
     assert await result.stderr_str() == "fake: Permission denied\n"
@@ -303,9 +399,9 @@ async def test_a_sandbox_without_sshfs_fails_loud():
 
 
 @pytest.mark.asyncio
-async def test_a_stale_sshfs_mount_is_dropped_before_serving():
+async def test_a_dead_sshfs_mount_is_dropped_before_serving():
     sandbox = FakeSandbox("ssh")
-    sandbox.table["/data"] = "fuse.sshfs"
+    sandbox.table["/data"] = ("mirage-gone:/data", "fuse.sshfs")
     ws = workspace(sandbox)
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0
@@ -315,6 +411,70 @@ async def test_a_stale_sshfs_mount_is_dropped_before_serving():
         "sudo -n chown \"$(id -u):$(id -g)\" '/data'; }"
     )
     await ws.close()
+
+
+FOREIGN = (
+    "fake: another sshfs serves /data in this sandbox; "
+    "give this workspace a sandbox of its own\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_a_second_workspace_on_the_sandbox_unmounts_nothing():
+    first = FakeSandbox("ssh")
+    second = sharing(first, "ssh")
+    ws1, ws2 = workspace(first), workspace(second)
+    one = await ws1.session("agent", profile="agent")
+    two = await ws2.session("agent", profile="agent")
+    assert (await one.shell("python3 job.py")).exit_code == 0
+    mounted = dict(first.table)
+    result = await two.shell("python3 job.py")
+    assert result.exit_code == 1
+    assert await result.stderr_str() == FOREIGN
+    assert second.pipes == []
+    assert first.table == mounted
+    assert (await one.shell("python3 job.py")).exit_code == 0
+    await ws2.close()
+    assert first.table == mounted
+    await ws1.close()
+    assert first.table == {}
+
+
+@pytest.mark.asyncio
+async def test_dropping_an_ended_server_leaves_the_mount_that_replaced_it():
+    first = FakeSandbox("ssh")
+    second = sharing(first, "ssh")
+    ws1, ws2 = workspace(first), workspace(second)
+    one = await ws1.session("agent", profile="agent")
+    two = await ws2.session("agent", profile="agent")
+    assert (await one.shell("python3 job.py")).exit_code == 0
+    first.sshfs_exits("/data")
+    first.sshfs_exits("/my notes")
+    assert (await two.shell("python3 job.py")).exit_code == 0
+    mounted = dict(first.table)
+    for _ in range(2):
+        result = await one.shell("python3 job.py")
+        assert result.exit_code == 1
+        assert await result.stderr_str() == FOREIGN
+    assert first.table == mounted
+    await ws1.close()
+    assert first.table == mounted
+    await ws2.close()
+
+
+@pytest.mark.asyncio
+async def test_both_takes_no_other_workspaces_sshfs_for_its_own():
+    first = FakeSandbox("ssh")
+    second = sharing(first, "both")
+    ws1, ws2 = workspace(first), workspace(second)
+    one = await ws1.session("agent", profile="agent")
+    two = await ws2.session("agent", profile="agent")
+    assert (await one.shell("python3 job.py")).exit_code == 0
+    result = await two.shell("python3 job.py")
+    assert result.exit_code == 1
+    assert await result.stderr_str() == FOREIGN
+    await ws2.close()
+    await ws1.close()
 
 
 @pytest.mark.asyncio
@@ -516,6 +676,18 @@ async def test_a_failed_unmount_still_stops_its_pipe():
     assert (await agent.shell("python3 job.py")).exit_code == 0
     sandbox.fail_unmount = True
     await ws.close()
+    assert sandbox.stopped == ["/data", "/my notes"]
+
+
+@pytest.mark.asyncio
+async def test_close_unmounts_when_the_mount_table_cannot_be_read():
+    sandbox = FakeSandbox("ssh")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    sandbox.fail_table = True
+    await ws.close()
+    assert sandbox.table == {}
     assert sandbox.stopped == ["/data", "/my notes"]
 
 

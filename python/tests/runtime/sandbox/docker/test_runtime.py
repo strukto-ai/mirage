@@ -136,19 +136,21 @@ class MountingDockerRuntime(FakeDockerRuntime):
 
     def __init__(self, **options):
         super().__init__(**options)
-        self.table: dict[str, str] = {}
+        self.table: dict[str, tuple[str, str]] = {}
 
     async def _docker(self, args, stdin=None, output=None, errors=None):
         if args[-1] == "cat /proc/mounts":
             self.calls.append((list(args), stdin))
             rows = "".join(
-                f"src {p} {t} rw 0 0\n" for p, t in self.table.items()
+                f"{source} {p} {t} rw 0 0\n"
+                for p, (source, t) in self.table.items()
             )
             return RunResult(rows.encode(), None, 0)
         return await super()._docker(args, stdin, output)
 
     async def open_pipe(self, command):
-        self.table[shlex.split(command)[6]] = "fuse.sshfs"
+        source, prefix = shlex.split(command)[5:7]
+        self.table[prefix] = (source, "fuse.sshfs")
         requests = asyncio.StreamReader()
 
         async def stop() -> None:
@@ -223,6 +225,7 @@ async def test_ssh_mounts_serve_a_restricted_session_its_files(profile):
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("tool run")
     assert result.exit_code == 0
-    assert runtime.table == {"/data": "fuse.sshfs"}
+    assert [kind for _, kind in runtime.table.values()] == ["fuse.sshfs"]
+    assert list(runtime.table) == ["/data"]
     assert ran(runtime, "tool run")
     await ws.close()

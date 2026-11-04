@@ -74,6 +74,10 @@ export const SSHFS_OPTIONS =
 // stdout is the SFTP stream, so its stderr cannot share the pipe.
 export const SSHFS_LOG_PREFIX = '/tmp/.mirage_sshfs'
 
+// How an sshfs source names the mirage serving it: `mirage-<id>:<prefix>`,
+// so each instance knows its own mounts from another's on the same sandbox.
+export const SSHFS_SOURCE_PREFIX = 'mirage-'
+
 export const SSHFS_HINT =
   'serving the workspace into a sandbox needs sshfs there; install it in the image (apt-get install sshfs)'
 export const PIPE_SERVER_HINT =
