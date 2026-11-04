@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { decodeBase64 } from '../../utils/base64.ts'
-import { type TokenManager, gmailBase, googleGet } from '../google/client.ts'
+import { type TokenManager, gmailBase, googleGet, googleRequest } from '../google/client.ts'
 import { compactJsonBytes } from '../render/json.ts'
 
 export interface GmailHeader {
@@ -154,9 +154,12 @@ export async function getAttachment(
   tokenManager: TokenManager,
   messageId: string,
   attachmentId: string,
+  size: number,
 ): Promise<Uint8Array> {
   const url = `${gmailBase(tokenManager)}/users/me/messages/${messageId}/attachments/${attachmentId}`
-  const data = (await googleGet(tokenManager, url)) as { data?: string }
+  const data = (await googleRequest(tokenManager, 'GET', url, {
+    maxBodyBytes: Math.ceil((size * 4) / 3) + 1024,
+  })) as { data?: string }
   const raw = data.data ?? ''
   return base64UrlDecodeToBytes(raw)
 }

@@ -55,7 +55,7 @@ const DELEGATIONS: { [K in keyof GmailApi]: Delegation & { args: Parameters<Gmai
     sent: [{ labelId: 'L1', query: 'q', maxResults: 5 }],
   },
   getMessageRaw: { args: ['m1'], wire: messages.getMessageRaw, sent: ['m1'] },
-  getAttachment: { args: ['m1', 'a1'], wire: messages.getAttachment, sent: ['m1', 'a1'] },
+  getAttachment: { args: ['m1', 'a1', 11], wire: messages.getAttachment, sent: ['m1', 'a1', 11] },
   currentHistoryId: { args: [], wire: history.currentHistoryId, sent: [] },
   listHistory: { args: ['h1'], wire: history.listHistory, sent: ['h1'] },
 }

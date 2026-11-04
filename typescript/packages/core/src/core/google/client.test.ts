@@ -87,13 +87,8 @@ describe('refreshAccessToken — clientSecret optionality', () => {
     globalThis.fetch = originalFetch
   })
 
-  function fakeOk(body: object): typeof fetch {
-    return vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(body),
-      text: () => Promise.resolve(JSON.stringify(body)),
-    } as unknown as Response) as unknown as typeof fetch
+  function fakeOk(body: unknown): typeof fetch {
+    return vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(body)))
   }
 
   function bodyAsParams(fakeFetch: typeof fetch): URLSearchParams {
@@ -161,12 +156,11 @@ describe('TokenManager.refreshFn delegation', () => {
   })
 
   it('falls back to Google when refreshFn is absent', async () => {
-    const fakeFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({ access_token: 'direct-tok', expires_in: 3600 }),
-      text: () => Promise.resolve(JSON.stringify({ access_token: 'direct-tok', expires_in: 3600 })),
-    } as unknown as Response) as unknown as typeof fetch
+    const fakeFetch = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ access_token: 'direct-tok', expires_in: 3600 })),
+      )
     globalThis.fetch = fakeFetch
     const tm = new TokenManager({ clientId: 'id', clientSecret: 's', refreshToken: 'rt' })
     const got = await tm.getToken()

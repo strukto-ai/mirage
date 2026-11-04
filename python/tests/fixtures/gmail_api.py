@@ -216,7 +216,7 @@ class FakeGmail:
     async def get_message_raw(self, message_id):
         return next(m for m in MESSAGES if m["id"] == message_id)
 
-    async def get_attachment(self, message_id, attachment_id):
+    async def get_attachment(self, message_id, attachment_id, size):
         return b"plan\n"
 
 

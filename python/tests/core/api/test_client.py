@@ -27,6 +27,7 @@ from multidict import CIMultiDict, CIMultiDictProxy
 from yarl import URL
 
 from mirage.core.api.client import (
+    ERROR_BODY_BYTES,
     MAX_BODY_BYTES,
     NO_RETRY,
     RetryPolicy,
@@ -41,6 +42,8 @@ from mirage.core.api.client import (
     status_error,
 )
 from mirage.core.api.errors import ApiError, ResponseTooLargeError
+from mirage.io.errors import MemoryExhausted
+from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.utils.ranges import ByteWindow
 
 TARGET = "https://api.test/v1/thing"
@@ -1043,7 +1046,8 @@ async def test_ignored_body_is_never_materialized(mode):
 
 
 @pytest.mark.asyncio
-async def test_binary_limit_counts_decompressed_bytes():
+@pytest.mark.parametrize("mode", ["bytes", "json", "text", "response"])
+async def test_binary_limit_counts_decompressed_bytes(mode):
     compressed = gzip.compress(b"x" * 8192)
 
     async def answer(request):
@@ -1059,7 +1063,7 @@ async def test_binary_limit_counts_decompressed_bytes():
                 "GET",
                 str(server.make_url("/compressed")),
                 error_of=_error_of,
-                read="bytes",
+                read=mode,
                 max_body_bytes=1024,
             )
     assert len(compressed) < 1024
@@ -1148,3 +1152,239 @@ async def test_a_stream_that_stops_flowing_fails_at_the_stall_bound():
                 f"http://127.0.0.1:{port}/", error_of=_error_of, timeout=0.3
             ):
                 pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["json", "text", "response"])
+async def test_text_modes_bound_decoded_bytes_and_cancel(mode):
+    raw = b'{"ok":true}'
+    session, _, pulled = _binary_session([raw[:4], raw[4:]])
+    result = await api_request(
+        "GET",
+        TARGET,
+        error_of=_error_of,
+        read=mode,
+        max_body_bytes=len(raw),
+        session=session,
+    )
+    assert (result.data if mode == "response" else result) == (
+        raw.decode() if mode == "text" else {"ok": True}
+    )
+    session, _, pulled = _binary_session([raw, b" ", b"never"])
+    with pytest.raises(ResponseTooLargeError):
+        await api_request(
+            "GET",
+            TARGET,
+            error_of=_error_of,
+            read=mode,
+            max_body_bytes=len(raw),
+            session=session,
+            retry=RetryPolicy(max_retries=2, retry_transport=True),
+        )
+    assert pulled == [raw, b" "]
+    session.request.assert_called_once()
+    session.request.return_value.__aexit__.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["json", "text", "response"])
+async def test_text_modes_strip_bom_and_decode_split_utf8(mode):
+    raw = b'\xef\xbb\xbf"\xe2\x82\xac"'
+    session, _, _ = _binary_session([raw[:5], raw[5:]])
+    result = await api_request(
+        "GET",
+        TARGET,
+        error_of=_error_of,
+        read=mode,
+        max_body_bytes=len(raw),
+        session=session,
+    )
+    assert (result.data if mode == "response" else result) == (
+        '"€"' if mode == "text" else "€"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("encoded", [False, True])
+async def test_text_length_header_fails_before_read_unless_encoded(encoded):
+    session, response, pulled = _binary_session([b'"ok"'])
+    response.headers = CIMultiDictProxy(
+        CIMultiDict(
+            {
+                "Content-Length": "999",
+                **({"Content-Encoding": "gzip"} if encoded else {}),
+            }
+        )
+    )
+    call = api_request(
+        "GET", TARGET, error_of=_error_of, session=session, max_body_bytes=4
+    )
+    if encoded:
+        assert await call == "ok"
+    else:
+        with pytest.raises(ResponseTooLargeError):
+            await call
+        assert pulled == []
+        response.close.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_workspace_memory_bounds_body_but_outside_workspace_succeeds():
+    raw = b'"' + b"x" * (2 * 1024 * 1024 - 2) + b'"'
+    session, _, _ = _binary_session([raw])
+    with pytest.raises(MemoryExhausted):
+        await run_with_memory(
+            MemoryBudget(1024 * 1024, lambda: 0),
+            api_request(
+                "GET",
+                TARGET,
+                error_of=_error_of,
+                session=session,
+                retry=RetryPolicy(max_retries=2, retry_transport=True),
+            ),
+        )
+    session.request.assert_called_once()
+    session, _, _ = _binary_session([raw])
+    assert (
+        len(
+            await api_request(
+                "GET", TARGET, error_of=_error_of, session=session
+            )
+        )
+        == len(raw) - 2
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "per_call, expected", [(None, 1048576), (2097152, 1048576), (16, 16)]
+)
+async def test_workspace_body_limit_and_lower_call_cap(per_call, expected):
+    raw = b'"' + b"x" * (1048576 - 1) + b'"'
+    session, _, _ = _binary_session([raw])
+    with pytest.raises(ResponseTooLargeError) as exc:
+        await run_with_memory(
+            MemoryBudget(8 * 1048576, lambda: 0),
+            api_request(
+                "GET",
+                TARGET,
+                error_of=_error_of,
+                session=session,
+                max_body_bytes=per_call,
+            ),
+            body=1048576,
+        )
+    assert exc.value.limit == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stream", [False, True])
+async def test_large_error_keeps_only_lossy_prefix(stream):
+    raw = b"\xff" + b"x" * (1048576 - 1)
+
+    async def answer(request):
+        return web.Response(status=404, body=raw)
+
+    app = web.Application()
+    app.router.add_get("/", answer)
+    async with TestServer(app) as server:
+        url = str(server.make_url("/"))
+        with pytest.raises(_Boom) as exc:
+            if stream:
+                async for _ in api_stream(url, error_of=_error_of):
+                    pytest.fail("error response yielded data")
+            else:
+                await api_request("GET", url, error_of=_error_of)
+    assert exc.value.status == 404
+    assert exc.value.body == "\ufffd" + "x" * (ERROR_BODY_BYTES - 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source, delay", [("header", 3), ("body", 1)])
+async def test_large_retry_body_keeps_header_and_falls_back_past_prefix(
+    source, delay
+):
+    raw = '{"pad":"' + "x" * 1048576 + '","retry_after":9}'
+    wait = AsyncMock()
+    hits = []
+
+    async def answer(request):
+        hits.append(1)
+        if len(hits) == 1:
+            return web.Response(
+                status=429, text=raw, headers={"Retry-After": "3"}
+            )
+        return web.json_response({"ok": True})
+
+    app = web.Application()
+    app.router.add_get("/", answer)
+    async with TestServer(app) as server:
+        assert await api_request(
+            "GET",
+            str(server.make_url("/")),
+            error_of=_error_of,
+            retry=RetryPolicy(
+                statuses=frozenset({429}), max_retries=1, delay_source=source
+            ),
+            sleep=wait,
+        ) == {"ok": True}
+    wait.assert_awaited_once_with(delay)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["json", "text", "response"])
+async def test_oversized_text_closes_real_server_before_tail(mode):
+    stopped = asyncio.Event()
+    sent = []
+
+    async def answer(request):
+        response = web.StreamResponse()
+        await response.prepare(request)
+        try:
+            for _ in range(100):
+                await response.write(b"x" * 8)
+                sent.append(8)
+                await asyncio.sleep(0.002)
+        except (ConnectionResetError, aiohttp.ClientConnectionError):
+            assert request.transport is None or request.transport.is_closing()
+        finally:
+            stopped.set()
+        return response
+
+    app = web.Application()
+    app.router.add_get("/", answer)
+    async with TestServer(app) as server:
+        with pytest.raises(ResponseTooLargeError):
+            await api_request(
+                "GET",
+                str(server.make_url("/")),
+                error_of=_error_of,
+                read=mode,
+                max_body_bytes=16,
+            )
+        await asyncio.wait_for(stopped.wait(), 2)
+    assert sum(sent) < 800
+
+
+@pytest.mark.asyncio
+async def test_gzip_text_ignores_compressed_length_over_decoded_cap():
+    compressed = gzip.compress(b'"ok"')
+
+    async def answer(request):
+        return web.Response(
+            body=compressed, headers={"Content-Encoding": "gzip"}
+        )
+
+    app = web.Application()
+    app.router.add_get("/", answer)
+    async with TestServer(app) as server:
+        assert (
+            await api_request(
+                "GET",
+                str(server.make_url("/")),
+                error_of=_error_of,
+                max_body_bytes=4,
+            )
+            == "ok"
+        )
+    assert len(compressed) > 4

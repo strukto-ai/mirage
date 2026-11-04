@@ -15,7 +15,12 @@
 import base64
 from typing import Any, cast
 
-from mirage.core.google.client import TokenManager, gmail_base, google_get
+from mirage.core.google.client import (
+    TokenManager,
+    gmail_base,
+    google_get,
+    google_request,
+)
 from mirage.core.render.json import compact_json_bytes
 
 
@@ -132,6 +137,7 @@ async def get_attachment(
     token_manager: TokenManager,
     message_id: str,
     attachment_id: str,
+    size: int,
 ) -> bytes:
     """Fetch and decode an attachment.
 
@@ -139,6 +145,7 @@ async def get_attachment(
         token_manager (TokenManager): manages OAuth2 tokens.
         message_id (str): Gmail message ID.
         attachment_id (str): Gmail attachment ID.
+        size (int): decoded attachment size, used to bound its base64 JSON.
 
     Returns:
         bytes: decoded attachment content.
@@ -147,7 +154,9 @@ async def get_attachment(
         f"{gmail_base(token_manager)}/users/me/messages"
         f"/{message_id}/attachments/{attachment_id}"
     )
-    data = await google_get(token_manager, url)
+    data = await google_request(
+        token_manager, "GET", url, max_body_bytes=(size * 4 + 2) // 3 + 1024
+    )
     raw = data.get("data", "")
     return base64.urlsafe_b64decode(raw + "==")
 

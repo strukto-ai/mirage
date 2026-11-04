@@ -39,7 +39,7 @@ class GmailApi(Protocol):
     async def get_message_raw(self, message_id: str) -> dict[str, Any]: ...
 
     async def get_attachment(
-        self, message_id: str, attachment_id: str
+        self, message_id: str, attachment_id: str, size: int
     ) -> bytes: ...
 
     async def current_history_id(self) -> str: ...
@@ -73,10 +73,10 @@ class GmailClient:
         return await messages.get_message_raw(self.token_manager, message_id)
 
     async def get_attachment(
-        self, message_id: str, attachment_id: str
+        self, message_id: str, attachment_id: str, size: int
     ) -> bytes:
         return await messages.get_attachment(
-            self.token_manager, message_id, attachment_id
+            self.token_manager, message_id, attachment_id, size
         )
 
     async def current_history_id(self) -> str:

@@ -18,6 +18,7 @@ import os
 
 import pytest
 
+from mirage.core.api.errors import ResponseTooLargeError
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.fs import edquot, exdev, no_mount
 from mirage.mount.errors import classify_error
@@ -36,6 +37,7 @@ from mirage.utils.path import CycleError
         (FileNotFoundError("x"), errno.ENOENT),
         (no_mount("/x"), errno.ENOENT),
         (edquot("/x"), errno.EDQUOT),
+        (ResponseTooLargeError(1024), errno.EFBIG),
     ],
 )
 def test_exception_class_wins(err, expected):

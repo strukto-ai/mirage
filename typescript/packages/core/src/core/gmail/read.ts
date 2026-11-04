@@ -44,6 +44,7 @@ async function readAttachment(
   return accessor.gmail.getAttachment(
     match.slots.message_id ?? '',
     String(entry.extra.attachment_id),
+    entry.size ?? 0,
   )
 }
 

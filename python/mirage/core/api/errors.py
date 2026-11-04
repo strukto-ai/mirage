@@ -13,6 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from mirage.errors.types import FileTooLargeError
+
+
 class ApiError(Exception):
     """A service answered a call with an error.
 
@@ -52,8 +55,11 @@ class PaginationStalledError(RuntimeError):
         self.cursor = cursor
 
 
-class ResponseTooLargeError(ValueError):
-    """A buffered binary response exceeded its retained-byte limit.
+class ResponseTooLargeError(FileTooLargeError):
+    """A buffered response exceeded its decoded-byte limit.
+
+    The workspace max_body_bytes bounds the per-call cap; the workspace
+    memory budget applies independently.
 
     Args:
         limit (int): the maximum bytes the read was allowed to retain.

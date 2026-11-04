@@ -12,9 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { createServer } from 'node:http'
+import { gzipSync } from 'node:zlib'
+import { MemoryBudget, runWithMemory } from '../../io/memory.ts'
+import { MemoryExhausted } from '../../io/errors.ts'
 import { describe, expect, it, vi } from 'vitest'
 import {
   MAX_BODY_BYTES,
+  ERROR_BODY_BYTES,
   NO_RETRY,
   apiRequest,
   apiStream,
@@ -1098,4 +1103,228 @@ describe("the call's signal", () => {
     )
     expect(got).toEqual({ ok: true })
   })
+})
+
+describe('bounded text bodies', () => {
+  it.each(['json', 'text', 'response'] as const)(
+    'bounds %s and preserves exact-cap values',
+    async (read) => {
+      const raw = new TextEncoder().encode('{"ok":true}')
+      const source = chunkedResponse([raw.subarray(0, 4), raw.subarray(4)])
+      const result = await apiRequest('GET', TARGET, {
+        errorOf,
+        read,
+        maxBodyBytes: raw.length,
+        fetchFn: vi.fn<typeof fetch>().mockResolvedValue(source.response),
+      })
+      expect(read === 'response' ? (result as { data: unknown }).data : result).toEqual(
+        read === 'text' ? '{"ok":true}' : { ok: true },
+      )
+      const over = chunkedResponse([raw, new TextEncoder().encode(' '), raw])
+      const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(over.response)
+      await expect(
+        apiRequest('GET', TARGET, {
+          errorOf,
+          read,
+          maxBodyBytes: raw.length,
+          fetchFn,
+          retry: { ...NO_RETRY, retryTransport: true, maxRetries: 2 },
+          sleep: noWait,
+        }),
+      ).rejects.toBeInstanceOf(ResponseTooLargeError)
+      expect(fetchFn).toHaveBeenCalledOnce()
+      expect(over.pull).toHaveBeenCalledTimes(2)
+      expect(over.cancel).toHaveBeenCalledOnce()
+    },
+  )
+
+  it.each(['json', 'text', 'response'] as const)(
+    'strips BOM and decodes split UTF-8 for %s',
+    async (read) => {
+      const raw = new TextEncoder().encode('\ufeff"€"')
+      const source = chunkedResponse([raw.subarray(0, 5), raw.subarray(5)])
+      const result = await apiRequest('GET', TARGET, {
+        errorOf,
+        read,
+        maxBodyBytes: raw.length,
+        fetchFn: vi.fn<typeof fetch>().mockResolvedValue(source.response),
+      })
+      expect(read === 'response' ? (result as { data: unknown }).data : result).toBe(
+        read === 'text' ? '"€"' : '€',
+      )
+    },
+  )
+
+  it.each([false, true])(
+    'checks Content-Length before pulling unless encoded: %s',
+    async (encoded) => {
+      const source = chunkedResponse([new TextEncoder().encode('"ok"')], {
+        headers: { 'Content-Length': '999', ...(encoded ? { 'Content-Encoding': 'gzip' } : {}) },
+      })
+      const call = apiRequest('GET', TARGET, {
+        errorOf,
+        maxBodyBytes: 4,
+        fetchFn: vi.fn<typeof fetch>().mockResolvedValue(source.response),
+      })
+      if (encoded) expect(await call).toBe('ok')
+      else {
+        await expect(call).rejects.toBeInstanceOf(ResponseTooLargeError)
+        expect(source.pull).not.toHaveBeenCalled()
+        expect(source.cancel).toHaveBeenCalledOnce()
+      }
+    },
+  )
+
+  it('checks workspace memory without retrying, but succeeds outside it', async () => {
+    const raw = '"' + 'x'.repeat(2 * 1024 * 1024 - 2) + '"'
+    const fetchFn = vi.fn<typeof fetch>(() => Promise.resolve(new Response(raw)))
+    await expect(
+      runWithMemory(new MemoryBudget(1048576, () => 0), () =>
+        apiRequest('GET', TARGET, {
+          errorOf,
+          fetchFn,
+          retry: { ...NO_RETRY, retryTransport: true, maxRetries: 2 },
+          sleep: noWait,
+        }),
+      ),
+    ).rejects.toBeInstanceOf(MemoryExhausted)
+    expect(fetchFn).toHaveBeenCalledOnce()
+    expect(((await apiRequest('GET', TARGET, { errorOf, fetchFn })) as string).length).toBe(
+      raw.length - 2,
+    )
+  })
+
+  it.each([
+    [undefined, 1048576],
+    [2097152, 1048576],
+    [16, 16],
+  ])('bounds per-call %s at %s', async (maxBodyBytes, limit) => {
+    const raw = '"' + 'x'.repeat(1048576 - 1) + '"'
+    await expect(
+      runWithMemory(
+        new MemoryBudget(8 * 1048576, () => 0),
+        () =>
+          apiRequest('GET', TARGET, {
+            errorOf,
+            maxBodyBytes,
+            fetchFn: vi.fn<typeof fetch>(() => Promise.resolve(new Response(raw))),
+          }),
+        1048576,
+      ),
+    ).rejects.toMatchObject({ limit })
+  })
+
+  it.each([false, true])('keeps a lossy 64 KiB error prefix (stream: %s)', async (stream) => {
+    const source = chunkedResponse([new Uint8Array([255]), new Uint8Array(1048576).fill(120)], {
+      status: 404,
+    })
+    const options = { errorOf, fetchFn: vi.fn<typeof fetch>().mockResolvedValue(source.response) }
+    const call = stream ? apiStream(TARGET, options).next() : apiRequest('GET', TARGET, options)
+    await expect(call).rejects.toMatchObject({
+      status: 404,
+      body: '\ufffd' + 'x'.repeat(ERROR_BODY_BYTES - 1),
+    })
+    expect(source.cancel).toHaveBeenCalledOnce()
+  })
+
+  it.each(['header', 'body'] as const)(
+    'retries a large error with %s delay',
+    async (delaySource) => {
+      const sleep = vi.fn(noWait)
+      const fetchFn = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(
+          new Response('{"pad":"' + 'x'.repeat(1048576) + '","retry_after":9}', {
+            status: 429,
+            headers: { 'Retry-After': '3' },
+          }),
+        )
+        .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      expect(
+        await apiRequest('GET', TARGET, {
+          errorOf,
+          fetchFn,
+          sleep,
+          retry: { ...NO_RETRY, statuses: new Set([429]), maxRetries: 1, delaySource },
+        }),
+      ).toEqual({ ok: true })
+      expect(sleep).toHaveBeenCalledWith(delaySource === 'header' ? 3 : 1)
+    },
+  )
+
+  it.each(['json', 'text', 'response'] as const)(
+    'closes a real oversized %s reply before its tail',
+    async (read) => {
+      let sent = 0
+      let stopped!: () => void
+      const closed = new Promise<void>((resolve) => {
+        stopped = resolve
+      })
+      const server = createServer((_request, response) => {
+        const timer = setInterval(() => {
+          response.write('xxxxxxxx')
+          sent += 8
+          if (sent === 800) {
+            clearInterval(timer)
+            response.end()
+          }
+        }, 2)
+        response.on('close', () => {
+          clearInterval(timer)
+          stopped()
+        })
+      })
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+      try {
+        const address = server.address()
+        if (address === null || typeof address === 'string') throw new Error('missing port')
+        await expect(
+          apiRequest('GET', `http://127.0.0.1:${String(address.port)}`, {
+            errorOf,
+            read,
+            maxBodyBytes: 16,
+          }),
+        ).rejects.toBeInstanceOf(ResponseTooLargeError)
+        await closed
+        expect(sent).toBeLessThan(800)
+      } finally {
+        server.closeAllConnections()
+        await new Promise<void>((resolve, reject) =>
+          server.close((err) => {
+            if (err) reject(err)
+            else resolve()
+          }),
+        )
+      }
+    },
+  )
+})
+
+it('ignores a gzip Content-Length larger than the decoded text cap', async () => {
+  const compressed = gzipSync('"ok"')
+  const server = createServer((_request, response) => {
+    response.setHeader('Content-Encoding', 'gzip')
+    response.setHeader('Content-Length', compressed.byteLength)
+    response.end(compressed)
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  try {
+    const address = server.address()
+    if (address === null || typeof address === 'string') throw new Error('missing fixture port')
+    expect(
+      await apiRequest('GET', `http://127.0.0.1:${String(address.port)}`, {
+        errorOf,
+        maxBodyBytes: 4,
+      }),
+    ).toBe('ok')
+    expect(compressed.byteLength).toBeGreaterThan(4)
+  } finally {
+    server.closeAllConnections()
+    await new Promise<void>((resolve, reject) =>
+      server.close((err) => {
+        if (err) reject(err)
+        else resolve()
+      }),
+    )
+  }
 })
