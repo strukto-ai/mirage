@@ -15,7 +15,7 @@
 import type { KeyHold } from '../../cache/lock.ts'
 import { ensureStream, OutputStream } from '../../io/stream.ts'
 import { type MemoryBudget, runWithMemory } from '../../io/memory.ts'
-import type { ByteSource, OpReport } from '../../io/types.ts'
+import { type ByteSource, type OpReport, PipeStream } from '../../io/types.ts'
 import { VFSName } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
 
@@ -164,7 +164,7 @@ export function withMemory(
       yield step.value
     }
   }
-  return new OutputStream(pulled(), async () => {
+  const bound = new OutputStream(pulled(), async () => {
     await runWithMemory(
       memory,
       async () => {
@@ -173,4 +173,5 @@ export function withMemory(
       body,
     )
   })
+  return source instanceof PipeStream ? new PipeStream(bound, source.path, source.end) : bound
 }

@@ -4215,9 +4215,10 @@ async def test_deferred_mount_reads_retain_body_and_memory(
     body, memory, failure
 ):
     seen = []
+    reply = b"x" * 2048
 
     async def answer(request):
-        return web.Response(body=b"x" * 2048)
+        return web.Response(body=reply)
 
     app = web.Application()
     app.router.add_get("/", answer)

@@ -20,7 +20,7 @@ from mirage.cache.lock import KeyHold
 from mirage.io import OpReport
 from mirage.io.memory import MemoryBudget, run_with_memory
 from mirage.io.stream import OutputStream, close_quietly, ensure_stream
-from mirage.io.types import ByteSource
+from mirage.io.types import ByteSource, PipeStream
 from mirage.types import VFSName
 
 
@@ -201,4 +201,9 @@ def _with_memory(
         if aclose is not None:
             await run_with_memory(memory, aclose(), body)
 
-    return OutputStream(pulled(), close)
+    bound = OutputStream(pulled(), close)
+    return (
+        PipeStream(bound, source.path, source.end)
+        if isinstance(source, PipeStream)
+        else bound
+    )
