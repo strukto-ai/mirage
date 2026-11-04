@@ -86,8 +86,7 @@ def iso_of(seconds: int, nanoseconds: int) -> str:
 
 def inode_stat(p: str, node: Inode) -> FileStat:
     """What ``stat`` answers for the inode at mount path ``p``: its type,
-    size and mtime. The namespace overlay adds a mode, owner or atime set
-    on the path. Mirrors TypeScript's ``inodeStat``."""
+    size and mtime. Mirrors TypeScript's ``inodeStat``."""
     modified = iso_of(node.mtime, node.mtime_nsec)
     if is_dir(node):
         return FileStat(

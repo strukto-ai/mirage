@@ -25,11 +25,7 @@ export const ROOT_INO = 1
  */
 export const DEFAULT_CHUNK_SIZE = 4096
 
-/**
- * What `fs_inode.mode` holds: the type bits alone. A path's permissions,
- * owner and other times are the namespace overlay's, as on any mount that
- * keeps no attributes, so the mount stores only its tree and bytes.
- */
+/** What `fs_inode.mode` holds: the type bits alone. */
 export const DIR = S_IFDIR
 export const FILE = S_IFREG
 
@@ -56,10 +52,8 @@ const SEED = `INSERT INTO fs_config (key, value) SELECT 'chunk_size', '${String(
  * The tables a database holds a filesystem in, by dialect, laid out as
  * AgentFS's: an inode is one file or directory, with its size and mtime; a
  * dentry names it under its parent; a file's bytes are its `fs_data` rows,
- * `chunk_size` bytes each. The rest of what a path carries (mode, owner,
- * atime, symlinks) is Mirage's namespace, and a session's env and cwd its
- * workspace store, so neither is here. The index on `fs_dentry(ino)` lets a
- * removal ask whether any entry still names an inode without reading others.
+ * `chunk_size` bytes each. The index on `fs_dentry(ino)` lets a removal ask
+ * whether any entry still names an inode without reading others.
  */
 export const SCHEMA: Readonly<Record<SqlDialect, readonly string[]>> = {
   [SqlDialect.SQLITE]: [

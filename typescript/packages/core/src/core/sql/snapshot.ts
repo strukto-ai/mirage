@@ -22,9 +22,8 @@ import { byIno, inodeOf, isDir, isFile, isoOf, nowStamp, stampOf, type InoRef } 
 
 /**
  * What a snapshot keeps of a sql mount: each file's bytes and each
- * directory, by mount path, with the mtime of each. A path's mode and owner
- * are the namespace's, which the workspace snapshots itself. Mirrors
- * Python's snapshot dict.
+ * directory, by mount path, with the mtime of each. Mirrors Python's
+ * snapshot dict.
  */
 export interface SqlSnapshot {
   files: Record<string, Uint8Array>
