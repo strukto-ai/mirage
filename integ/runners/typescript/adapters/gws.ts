@@ -234,4 +234,3 @@ export async function seedGwsWorld(
   if (calendar !== undefined) await seedGwsCalendar(base, calendar.events)
   return { base, folderIds }
 }
-
