@@ -100,6 +100,9 @@ Mirage, so the container must see the mounts there. `mount_type` picks how:
   data on the container's own mounts.
 - The container shows one session's view, the first that runs a line there.
   Give each agent its own container.
+- An sshfs still serving a path Mirage serves, another workspace's or one
+  of your own, is left alone and the line exits 1. Give each workspace its
+  own container.
 - The root mount and `/dev` are not served.
 
 ### fuse

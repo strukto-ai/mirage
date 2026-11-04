@@ -103,6 +103,9 @@ Mirage, so the sandbox must see the mounts there. `mount_type` picks how:
   mounts.
 - The sandbox shows one session's view, the first that runs a line there.
   Give each agent its own sandbox.
+- An sshfs still serving a path Mirage serves, another workspace's or one
+  of your own, is left alone and the line exits 1. Give each workspace its
+  own sandbox.
 - The root mount and `/dev` are not served.
 
 ### fuse
