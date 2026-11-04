@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from contextlib import nullcontext
 from typing import Any
 
 import httpx
@@ -22,10 +23,14 @@ from typer.testing import CliRunner
 from mirage.cli import api
 from mirage.cli.main import app
 
+TAR = b"\x00\xffTAR\x80"
+NDJSON = b'{"stream": "stdout", "data": "aGkK"}\n{"status": "done"}\n'
+
 
 class _Client:
-    """A server double: a 204 for a DELETE, a 404 under /missing, and
-    every other request answered with what it got."""
+    """A server double: a 204 for a DELETE, a 404 under /missing, a tar
+    under /snapshot, NDJSON under /stream, and every other request
+    answered with what it got."""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -39,14 +44,27 @@ class _Client:
     def ensure_running(self, allow_spawn: bool = True) -> None:
         return None
 
-    def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        got = {"method": method, "path": path, **kwargs}
-        self.calls.append(got)
+    def stream(self, method: str, path: str, **kwargs: Any):
+        self.calls.append(
+            {"method": method, "path": path, "json": kwargs.get("json")}
+        )
         if method == "DELETE":
-            return httpx.Response(204)
-        if path.startswith("/missing"):
-            return httpx.Response(404, json={"detail": "not found"})
-        return httpx.Response(200, json={"method": method, "path": path})
+            answer = httpx.Response(204)
+        elif path.startswith("/missing"):
+            answer = httpx.Response(404, json={"detail": "not found"})
+        elif path.endswith("/snapshot"):
+            answer = httpx.Response(
+                200, content=TAR, headers={"content-type": "application/x-tar"}
+            )
+        elif path.endswith("/stream"):
+            answer = httpx.Response(
+                200,
+                content=NDJSON,
+                headers={"content-type": "application/x-ndjson"},
+            )
+        else:
+            answer = httpx.Response(200, json={"method": method, "path": path})
+        return nullcontext(answer)
 
 
 @pytest.fixture
@@ -107,18 +125,34 @@ def test_a_yaml_file_is_the_body_and_a_get_has_none(client, tmp_path):
     assert client.calls[1] == {
         "method": "GET",
         "path": "/v1/workspaces",
-        "params": [],
+        "json": None,
+    }
+
+
+def test_yaml_keeps_timestamps_as_text(client, tmp_path):
+    body = tmp_path / "workspace.yaml"
+    body.write_text("config:\n  system_time: 2026-03-02T09:00:00Z\n")
+    assert _run("/v1/workspaces", "--input", str(body)).exit_code == 0
+    assert client.calls[0]["json"] == {
+        "config": {"system_time": "2026-03-02T09:00:00Z"}
     }
 
 
 def test_a_get_puts_its_fields_in_the_query_and_a_204_prints_nothing(client):
     r = _run("/v1/vfs", "--q", "gh", "-X", "get", "--type=github", "--live")
     assert r.exit_code == 0
-    assert client.calls[0]["params"] == [
-        ("q", "gh"),
-        ("type", "github"),
-        ("live", "true"),
-    ]
+    assert client.calls[0] == {
+        "method": "GET",
+        "path": "/v1/vfs?q=gh&type=github&live=true",
+        "json": None,
+    }
+    kept = _run(
+        "/v1/workspaces/w/history?session_id=s1", "--last=1", "-X", "GET"
+    )
+    assert kept.exit_code == 0
+    assert client.calls[1]["path"] == (
+        "/v1/workspaces/w/history?session_id=s1&last=1"
+    )
     gone = _run("/v1/vfs/gh", "-X", "DELETE")
     assert (gone.exit_code, gone.output) == (0, "")
 
@@ -134,6 +168,8 @@ def test_a_get_puts_its_fields_in_the_query_and_a_204_prints_nothing(client):
         ["/v1/x", "--fields", "{token: 1}"],
         ["/v1/x", "--a", "1", "--input", "body.json"],
         ["/v1/x", "-X", "GET", "--input", "body.json"],
+        ["/v1/x", "--source", "@latin1.txt"],
+        ["/v1/x", "--input", "latin1.txt"],
     ],
 )
 def test_a_bad_call_exits_two_before_sending(
@@ -141,8 +177,18 @@ def test_a_bad_call_exits_two_before_sending(
 ):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "body.json").write_text("{}")
-    assert _run(*args).exit_code == 2
+    (tmp_path / "latin1.txt").write_bytes(b"caf\xe9")
+    r = _run(*args)
+    assert r.exit_code == 2
+    assert r.exception is None or isinstance(r.exception, SystemExit)
     assert client.calls == []
+
+
+def test_other_answers_print_byte_for_byte(client):
+    tar = _run("/v1/workspaces/w/snapshot")
+    assert (tar.exit_code, tar.stdout_bytes) == (0, TAR)
+    lines = _run("/v1/workspaces/w/shell/stream", "--command", "echo hi")
+    assert (lines.exit_code, lines.stdout_bytes) == (0, NDJSON)
 
 
 def test_an_error_answer_exits_two_with_its_detail(client):

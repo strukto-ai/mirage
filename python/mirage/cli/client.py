@@ -19,6 +19,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import AbstractContextManager
 from types import TracebackType
 from typing import Any
 from urllib.parse import urlparse
@@ -114,6 +115,12 @@ class DaemonClient:
     def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         headers = {**self._headers(), **kwargs.pop("headers", {})}
         return self._client.request(method, path, headers=headers, **kwargs)
+
+    def stream(
+        self, method: str, path: str, **kwargs: Any
+    ) -> AbstractContextManager[httpx.Response]:
+        headers = {**self._headers(), **kwargs.pop("headers", {})}
+        return self._client.stream(method, path, headers=headers, **kwargs)
 
     def is_reachable(self, timeout: float = 0.5) -> bool:
         try:

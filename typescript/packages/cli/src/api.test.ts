@@ -35,9 +35,13 @@ interface Seen {
   body: string
 }
 
+const TAR = Buffer.from([0, 0xff, 0x54, 0x41, 0x52, 0x80])
+const NDJSON = '{"stream": "stdout", "data": "aGkK"}\n{"status": "done"}\n'
+
 /**
  * A server double: answers health, a 204 for a DELETE, a 404 under /missing,
- * and every other request with what it got, as JSON.
+ * a tar under /snapshot, NDJSON under /stream, and every other request with
+ * what it got, as JSON.
  */
 async function fakeServer(): Promise<{ url: string; seen: Seen[]; server: Server }> {
   const seen: Seen[] = []
@@ -60,6 +64,10 @@ async function fakeServer(): Promise<{ url: string; seen: Seen[]; server: Server
       if (req.method === 'DELETE') res.writeHead(204).end()
       else if (url.startsWith('/missing'))
         res.writeHead(404, { 'content-type': 'application/json' }).end('{"detail":"not found"}')
+      else if (url.endsWith('/snapshot'))
+        res.writeHead(200, { 'content-type': 'application/x-tar' }).end(TAR)
+      else if (url.endsWith('/stream'))
+        res.writeHead(200, { 'content-type': 'application/x-ndjson' }).end(NDJSON)
       else res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(got))
     })
   })
@@ -72,7 +80,7 @@ async function api(
   url: string,
   home: string,
   ...args: string[]
-): Promise<{ code: number | null; stdout: string; stderr: string }> {
+): Promise<{ code: number | null; stdout: string; bytes: Buffer; stderr: string }> {
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     MIRAGE_HOME: home,
@@ -80,12 +88,13 @@ async function api(
     MIRAGE_TOKEN: 'tk',
   }
   const child = spawn(process.execPath, [BIN, 'api', ...args], { env })
-  let stdout = ''
+  const out: Buffer[] = []
   let stderr = ''
-  child.stdout.on('data', (c: Buffer) => (stdout += c.toString()))
+  child.stdout.on('data', (c: Buffer) => out.push(c))
   child.stderr.on('data', (c: Buffer) => (stderr += c.toString()))
   const code = await new Promise<number | null>((resolve) => child.on('close', resolve))
-  return { code, stdout, stderr }
+  const bytes = Buffer.concat(out)
+  return { code, stdout: bytes.toString(), bytes, stderr }
 }
 
 async function withServer(
@@ -151,15 +160,39 @@ describe('mirage api', () => {
     })
   })
 
+  it('keeps YAML timestamps as text', async () => {
+    await withServer(async (url, dir, seen) => {
+      const input = join(dir, 'workspace.yaml')
+      writeFileSync(input, 'config:\n  system_time: 2026-03-02T09:00:00Z\n')
+      expect((await api(url, dir, '/v1/workspaces', '--input', input)).code).toBe(0)
+      expect(JSON.parse(seen[0]?.body ?? '')).toEqual({
+        config: { system_time: '2026-03-02T09:00:00Z' },
+      })
+    })
+  })
+
+  it('prints any other answer byte for byte', async () => {
+    await withServer(async (url, dir) => {
+      const tar = await api(url, dir, '/v1/workspaces/w/snapshot')
+      expect(tar.code).toBe(0)
+      expect(tar.bytes.equals(TAR)).toBe(true)
+      const lines = await api(url, dir, '/v1/workspaces/w/shell/stream', '--command', 'echo hi')
+      expect(lines).toMatchObject({ code: 0, stdout: NDJSON })
+    })
+  })
+
   it("puts a GET's fields in its query, and prints nothing for a 204", async () => {
     await withServer(async (url, dir, seen) => {
       expect(
         (await api(url, dir, '/v1/vfs', '--q', 'gh', '-X', 'get', '--type=github', '--live')).code,
       ).toBe(0)
       expect(seen[0]?.url).toBe('/v1/vfs?q=gh&type=github&live=true')
+      const kept = await api(url, dir, '/v1/w/history?session_id=s1', '--last=1', '-X', 'GET')
+      expect(kept.code).toBe(0)
+      expect(seen.at(-1)?.url).toBe('/v1/w/history?session_id=s1&last=1')
       const gone = await api(url, dir, '/v1/vfs/gh', '-X', 'DELETE')
       expect(gone).toMatchObject({ code: 0, stdout: '' })
-      expect(seen[1]).toMatchObject({ method: 'DELETE', url: '/v1/vfs/gh' })
+      expect(seen.at(-1)).toMatchObject({ method: 'DELETE', url: '/v1/vfs/gh' })
     })
   })
 
@@ -170,6 +203,8 @@ describe('mirage api', () => {
       expect(missing.stderr).toContain('404: not found')
       const input = join(dir, 'b.json')
       writeFileSync(input, '{}')
+      const latin1 = join(dir, 'latin1.txt')
+      writeFileSync(latin1, Buffer.from([0x63, 0x61, 0x66, 0xe9]))
       for (const args of [
         ['https://elsewhere.example/v1/x'],
         ['--name', 'x', '/v1/x'],
@@ -179,8 +214,12 @@ describe('mirage api', () => {
         ['/v1/x', '--fields', '{token: 1}'],
         ['/v1/x', '--a', '1', '--input', input],
         ['/v1/x', '-X', 'GET', '--input', input],
+        ['/v1/x', '--source', `@${latin1}`],
+        ['/v1/x', '--input', latin1],
       ]) {
-        expect((await api(url, dir, ...args)).code, args.join(' ')).toBe(2)
+        const r = await api(url, dir, ...args)
+        expect(r.code, args.join(' ')).toBe(2)
+        expect(r.stderr, args.join(' ')).not.toContain('    at ')
       }
       expect(seen).toHaveLength(1)
     })
