@@ -514,11 +514,12 @@ dev`, builds each target's mounts and CLIs as a config the way the node
 adapters build instances, and sends every line over the server API, checked
 against the same goldens. A case's `session_profiles` are put on its sessions
 over the API. What needs more than the shell stays on the node battery: stat
-checks, faults, decisions, documents, fresh reads and capacity are skipped and
+checks, faults, decisions, fresh reads and capacity are skipped and
 counted, and so is a target whose sessions layer inline permissions onto a
 default profile (`ram-commands`), since the API takes a session's profile by
-name. A `clear_cache` case runs warm, so the write it makes still lands; when
-what it checks needs the cold cache the API cannot give, it is counted apart.
+name. A `clear_cache` case runs warm, so the write it makes still lands; the
+few that check a size a warm cache already knows are named in `edge/run.ts`
+and counted apart, and any other `clear_cache` failure fails the run.
 Run it locally with `cd integ && pnpm exec tsx edge/run.ts`, optionally naming
 target ids, after building TypeScript and generating the fakes' Prisma clients.
 

@@ -42,7 +42,7 @@ import {
 // `wrangler dev`) over the server API, its mounts and CLIs built from a
 // config the way the node adapters build their instances. A case that needs
 // more of a workspace than its shell (sessions, policy checks, faults, stat
-// checks, cache control) is skipped and counted.
+// checks) is skipped and counted.
 
 const here = dirname(fileURLToPath(import.meta.url))
 const root = resolve(here, '..')
@@ -383,6 +383,17 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
 const OVER_ISOLATE_MEMORY = new Set([
   'jq_from_entries_builds_a_large_object',
   'jq_del_of_every_key',
+])
+// The `clear_cache` cases that check a size before its first read, which a
+// warm cache already knows: they pass only with that size known.
+const COLD_CACHE = new Set([
+  'notion_head_does_not_populate_render_cache',
+  'notion_unknown_size_find_direct_and_walk',
+  'notion_head_lines_then_full_read',
+  'notion_grep_early_then_full_read',
+  'sz_notion_page_json_is_size_unknown_until_read',
+  'g_native_tree_walk_sizes_from_the_read',
+  'sz_trello_comments_jsonl_is_size_unknown_until_read',
 ])
 
 function needsMore(c: Case): boolean {
@@ -741,9 +752,11 @@ async function main(): Promise<void> {
             clear_cache: false,
           }
           let diffs: string[]
+          let ran = false
           try {
             if (profiles !== undefined) await applyProfiles(base, id, profiles)
             const { exitCode, out, err, elapsed, notes } = await runCase(ws, bound)
+            ran = true
             diffs = compare(bound, exitCode, out, err, elapsed, null, notes)
           } catch (e) {
             diffs = [String(e)]
@@ -760,7 +773,7 @@ async function main(): Promise<void> {
             diffs.some((d) => d.includes('jq: memory exhausted'))
           ) {
             heavy++
-          } else if (c.clear_cache === true) {
+          } else if (ran && COLD_CACHE.has(c.id)) {
             // It ran for the writes later goldens count on; what it checks
             // reads a cold cache, which the API cannot give it.
             warm++
