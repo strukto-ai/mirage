@@ -192,8 +192,13 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
         : {}),
     }
   },
-  // git (and search) on RAM mounts: nothing to reach.
-  '': (target) => Promise.resolve({ mounts: mounts(target, () => ({})), ...localClis(target) }),
+  // RAM mounts, and git on them: nothing to reach.
+  '': (target) =>
+    Promise.resolve({
+      mounts: mounts(target, () => ({})),
+      ...localClis(target),
+      ...(target.system_time !== undefined ? { system_time: target.system_time } : {}),
+    }),
   github: async (target) => {
     const base = await scopedRun('GITHUB_URL', {
       fixture: target.clis?.includes('gh') === true ? 'cli' : 'v1',
@@ -208,7 +213,12 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
             clis: {
               gh: {
                 cli: 'gh',
-                config: { token: 'ghp-integ', base_url: base, repo: 'integ/repo-cli', branch: 'main' },
+                config: {
+                  token: 'ghp-integ',
+                  base_url: base,
+                  repo: 'integ/repo-cli',
+                  branch: 'main',
+                },
               },
             },
           }
@@ -341,7 +351,10 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
             clis: {
               gws: {
                 cli: 'gws',
-                config: { ...auth, ...(scope !== undefined ? { folder_id: folderIds[scope] } : {}) },
+                config: {
+                  ...auth,
+                  ...(scope !== undefined ? { folder_id: folderIds[scope] } : {}),
+                },
               },
             },
           }
@@ -361,13 +374,19 @@ const OPENERS: Record<string, (target: Target) => Promise<Config>> = {
   },
 }
 
-// What a case may ask of a workspace beyond its shell, which an edge
-// workspace reached over the API does not offer here. A `clear_cache` case
-// still runs, against warm caches: skipping it would skip the write it may
-// make, and every later golden counts on that write.
+// What a case may ask of a workspace beyond its shell and its documents,
+// which an edge workspace reached over the API does not offer here. A
+// `clear_cache` case still runs, against warm caches: skipping it would skip
+// the write it may make, and every later golden counts on that write.
+// Cases whose object outgrows a Worker's 128 MB, where jq refuses it as it
+// refuses one past a workspace's max_memory: they pass only with that refusal.
+const OVER_ISOLATE_MEMORY = new Set([
+  'jq_from_entries_builds_a_large_object',
+  'jq_del_of_every_key',
+])
+
 function needsMore(c: Case): boolean {
   return (
-    c.documents !== undefined ||
     c.check !== undefined ||
     c.answer !== undefined ||
     c.faults !== undefined ||
@@ -438,11 +457,13 @@ function edgeWorkspace(base: string, id: string): ExecWorkspace {
         Authorization: `Bearer ${TOKEN}`,
       },
     })
-    const answer = (await response.json()) as {
-      stdout?: string
-      stderr?: string
-      exit_code?: number
-      detail?: unknown
+    const text = await response.text()
+    let answer: { stdout?: string; stderr?: string; exit_code?: number; detail?: unknown }
+    try {
+      answer = JSON.parse(text) as typeof answer
+    } catch {
+      // workerd answers in plain text when it ends the isolate.
+      throw new Error(`${command}: ${String(response.status)} ${text.slice(0, 300)}`)
     }
     if (!response.ok)
       throw new Error(`${command}: ${String(response.status)} ${JSON.stringify(answer.detail)}`)
@@ -451,6 +472,23 @@ function edgeWorkspace(base: string, id: string): ExecWorkspace {
       stderr: enc.encode(answer.stderr ?? ''),
       exitCode: answer.exit_code ?? -1,
     } as Awaited<ReturnType<ExecWorkspace['shell']>>
+  }
+  // A document a case reads, or puts at `path` for its session's shell to find.
+  const document = async (
+    kind: 'vfs' | 'skill',
+    path: string | undefined,
+    sessionId: string | undefined,
+  ): Promise<string> => {
+    const scope = sessionId === undefined ? '' : `/sessions/${encodeURIComponent(sessionId)}`
+    const response = await fetch(`${base}/v1/workspaces/${id}${scope}/${kind}-md`, {
+      method: path === undefined ? 'GET' : 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+      ...(path === undefined ? {} : { body: JSON.stringify({ path }) }),
+    })
+    const text = await response.text()
+    if (!response.ok)
+      throw new Error(`${kind}-md ${path ?? ''}: ${String(response.status)} ${text}`)
+    return text
   }
   return {
     shell,
@@ -462,8 +500,10 @@ function edgeWorkspace(base: string, id: string): ExecWorkspace {
     createSession: () => unsupported('sessions'),
     listSessions: () => [],
     setSessionProfile: () => unsupported('sessions'),
-    vfsMd: () => unsupported('VFS.md'),
-    skillMd: () => unsupported('SKILL.md'),
+    vfsMd: (path?: string, options?: { sessionId?: string }) =>
+      document('vfs', path, options?.sessionId),
+    skillMd: (path?: string, options?: { sessionId?: string }) =>
+      document('skill', path, options?.sessionId),
     decisions: { pending: () => [], answer: () => unsupported('decisions') },
     explain: () => unsupported('explain'),
     close: async () => {
@@ -553,11 +593,19 @@ function layersSessions(t: Target): boolean {
   )
 }
 
-/** Whether the battery runs a target here: a service it opens, or git on RAM. */
+/**
+ * Whether the battery runs a target here: a service it opens, or RAM mounts
+ * alone, with no secrets channel and no policy program on Pyodide, which an
+ * edge isolate cannot load.
+ */
 function runsHere(t: Target): boolean {
   if (layersSessions(t)) return false
-  if (t.service === undefined) return t.clis?.includes('git') === true
-  return OPENERS[t.service] !== undefined
+  if (t.service !== undefined) return OPENERS[t.service] !== undefined
+  return (
+    t.mounts.every((m) => m.vfs === 'ram' && (m.backend ?? 'memory') === 'memory') &&
+    t.secrets === undefined &&
+    !JSON.stringify(t.profiles ?? {}).includes('"runtime":"pyodide"')
+  )
 }
 
 /** The edge test worker under `wrangler dev`, answering on `port`. */
@@ -613,6 +661,8 @@ async function main(): Promise<void> {
   let failed = 0
   let skipped = 0
   let warm = 0
+  let lost = 0
+  let heavy = 0
   try {
     fakes = await startFakes(dir)
     mcp = await startMcp()
@@ -633,24 +683,23 @@ async function main(): Promise<void> {
       if (target.profile !== undefined) config.profile = target.profile
       if (target.env !== undefined) config.env = target.env
       const id = `integ-${target.id}-${runId()}`
-      const created = await fetch(`${base}/v1/workspaces`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
-        body: JSON.stringify({ id, config }),
-      })
-      if (created.status !== 201) {
-        failed++
-        console.log(
-          `FAIL ${target.id}: create answered ${String(created.status)} ${await created.text()}`,
-        )
-        continue
-      }
       const ws = edgeWorkspace(base, id)
-      try {
+      const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }
+      // The workspace, its sessions and its seeds; again after workerd ends
+      // an isolate, which takes every workspace it held with it.
+      const open = async (): Promise<void> => {
+        const created = await fetch(`${base}/v1/workspaces`, {
+          method: 'POST',
+          headers: auth,
+          body: JSON.stringify({ id, config }),
+        })
+        if (created.status !== 201) {
+          throw new Error(`create answered ${String(created.status)} ${await created.text()}`)
+        }
         for (const [sid, profile] of sessions) {
           const opened = await fetch(`${base}/v1/workspaces/${id}/sessions`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
+            headers: auth,
             body: JSON.stringify({ session_id: sid, ...(profile !== null ? { profile } : {}) }),
           })
           if (opened.status !== 201) throw new Error(`session ${sid}: ${await opened.text()}`)
@@ -664,6 +713,17 @@ async function main(): Promise<void> {
           await seedFixture(ws, mount.fixture, mount.path, root)
           if (mount.seed_root) await seedMountRoot(ws, mount.path)
         }
+      }
+      const alive = async (): Promise<boolean> =>
+        (await fetch(`${base}/v1/workspaces/${id}`, { headers: auth })).status !== 404
+      try {
+        await open()
+      } catch (e) {
+        failed++
+        console.log(`FAIL ${target.id}: ${String(e)}`)
+        continue
+      }
+      try {
         for (const c of cases) {
           if (!c.targets.includes(target.id)) continue
           if (needsMore(c)) {
@@ -681,9 +741,19 @@ async function main(): Promise<void> {
             diffs = compare(bound, exitCode, out, err, elapsed, null, notes)
           } catch (e) {
             diffs = [String(e)]
+            if (!(await alive())) {
+              lost++
+              console.log(`LOST ${target.id}/${c.id}: the isolate ended; reopening`)
+              await open()
+            }
           }
           if (diffs.length === 0) {
             passed++
+          } else if (
+            OVER_ISOLATE_MEMORY.has(c.id) &&
+            diffs.some((d) => d.includes('jq: memory exhausted'))
+          ) {
+            heavy++
           } else if (c.clear_cache === true) {
             // It ran for the writes later goldens count on; what it checks
             // reads a cold cache, which the API cannot give it.
@@ -706,7 +776,8 @@ async function main(): Promise<void> {
   }
   console.log(
     `\nedge: ${String(passed)} passed, ${String(failed)} failed, ${String(skipped)} skipped, ` +
-      `${String(warm)} cold-cache checks unmet on a warm cache`,
+      `${String(warm)} cold-cache checks unmet on a warm cache, ` +
+      `${String(heavy)} refused past the isolate's memory, ${String(lost)} isolates lost`,
   )
   // A run that passed nothing proved nothing.
   if (failed > 0 || passed === 0) process.exitCode = 1
