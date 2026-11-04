@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Awaitable, Callable
 from contextlib import aclosing
 from dataclasses import replace
 
@@ -25,6 +26,7 @@ from mirage.core.sql.inode import (
     make_node,
     now_stamp,
     resized,
+    resized_from,
 )
 from mirage.core.sql.path import (
     Walk,
@@ -42,6 +44,38 @@ from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec, VFSName
 from mirage.vfs.sql.types import SqlStatement
+
+# The tries a write that read a file gets when other writers keep
+# changing it.
+_TRIES = 3
+
+
+async def _land_fresh(
+    accessor: SqlAccessor,
+    path: PathSpec,
+    node: Inode,
+    build: Callable[[Inode], Awaitable[list[SqlStatement]]],
+) -> Inode:
+    """Land what ``build`` makes of the file as last read, reading it
+    again and building afresh when another writer changed it since (the
+    guard in ``resized_from`` failed the batch whole); the file as the
+    batch found it."""
+    tries = 1
+    while True:
+        try:
+            await accessor.batch(await build(node))
+            return node
+        except Exception:
+            fresh = target(await walk(accessor, path))
+            same = fresh is not None and (
+                fresh.size,
+                fresh.mtime,
+                fresh.mtime_nsec,
+            ) == (node.size, node.mtime, node.mtime_nsec)
+            if tries == _TRIES or fresh is None or same:
+                raise
+            node = fresh
+            tries += 1
 
 
 async def _landing(
@@ -64,7 +98,7 @@ async def _landing(
     if append:
         return [
             *await place_bytes(accessor, ino, node, node.size, data),
-            resized(ino, node.size + len(data), now),
+            resized_from(node, node.size + len(data), now),
         ]
     return [
         SqlStatement(f"DELETE FROM fs_data WHERE ino = {ino.sql}"),
@@ -106,9 +140,16 @@ async def write(
         whole = await materialize(data)
         if append and not whole and existing is not None:
             return
-        await accessor.batch(
-            await _landing(accessor, w, existing, whole, append)
-        )
+        if append and existing is not None:
+
+            async def appended(n: Inode) -> list[SqlStatement]:
+                return await _landing(accessor, w, n, whole, True)
+
+            await _land_fresh(accessor, path, existing, appended)
+        else:
+            await accessor.batch(
+                await _landing(accessor, w, existing, whole, append)
+            )
         record(op, path.virtual, VFSName.SQL, len(whole), timer)
         return
     if existing is None or not append:
@@ -118,21 +159,29 @@ async def write(
     pending = bytearray()
     written = 0
 
+    # Each block lands on the file as it is now: an append at its end,
+    # which another writer may have moved.
     async def flush() -> None:
         nonlocal node, offset, written
         if not pending:
             return
         block = bytes(pending)
-        ino = by_ino(node.ino)
-        size = max(node.size, offset + len(block))
-        await accessor.batch(
-            [
-                *await place_bytes(accessor, ino, node, offset, block),
-                resized(ino, size, now_stamp()),
+        stamp = now_stamp()
+        at = offset
+        size = 0
+
+        async def placed(n: Inode) -> list[SqlStatement]:
+            nonlocal at, size
+            at = n.size if append else offset
+            size = max(n.size, at + len(block))
+            return [
+                *await place_bytes(accessor, by_ino(n.ino), n, at, block),
+                resized_from(n, size, stamp),
             ]
-        )
-        node = replace(node, size=size)
-        offset += len(block)
+
+        used = await _land_fresh(accessor, path, node, placed)
+        node = replace(used, size=size, mtime=stamp[0], mtime_nsec=stamp[1])
+        offset = at + len(block)
         written += len(block)
         pending.clear()
 

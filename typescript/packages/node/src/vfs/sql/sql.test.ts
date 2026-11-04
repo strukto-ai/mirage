@@ -45,15 +45,16 @@ async function bytes(
   return materialize(await vfs.read(at(p), undefined, offset, size))
 }
 
-// A writer racing the next op: `sql` lands just before the op's own batch,
-// after its lookups.
-function racing(driver: SqlDriver, sql: readonly string[]): void {
+// A writer racing the next op: `other` (statements, or another mount's op)
+// lands just before the op's own batch, after its lookups.
+function racing(driver: SqlDriver, other: readonly string[] | (() => Promise<void>)): void {
   const batch = driver.batch.bind(driver)
   let pending = true
   driver.batch = async (statements) => {
     if (pending) {
       pending = false
-      await batch(sql.map((s) => ({ sql: s })))
+      if (typeof other === 'function') await other()
+      else await batch(other.map((s) => ({ sql: s })))
     }
     await batch(statements)
   }
@@ -167,6 +168,14 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
     await expect(ops(vfs).write(at('/d/f'), enc.encode('x'))).rejects.toThrow()
     const inodes = await driver.query('SELECT ino FROM fs_inode')
     expect(inodes.map((r) => Number(r.ino))).toEqual([1])
+  })
+
+  it('lands an append another mount raced at the end that one left', async () => {
+    await ops(vfs).write(at('/f'), enc.encode('a'))
+    const other = new SqlVFS({ driver })
+    racing(driver, () => ops(other).append(at('/f'), enc.encode('b')))
+    await ops(vfs).append(at('/f'), enc.encode('c'))
+    expect(dec.decode(await bytes(vfs, '/f'))).toBe('abc')
   })
 
   it('keeps no attributes, so the namespace keeps them', () => {

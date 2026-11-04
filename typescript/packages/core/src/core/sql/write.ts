@@ -21,7 +21,7 @@ import { concat } from '../../utils/bytes.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
 import { FILE, FLUSH_BYTES } from './constants.ts'
 import { placeBytes } from './data.ts'
-import { byEntry, byIno, makeNode, nowStamp, resized, type Inode } from './inode.ts'
+import { byEntry, byIno, makeNode, nowStamp, resized, resizedFrom, type Inode } from './inode.ts'
 import {
   checkDestParents,
   checkWriteTarget,
@@ -32,6 +32,35 @@ import {
   walk,
   type Walk,
 } from './path.ts'
+
+// The tries a write that read a file gets when other writers keep changing it.
+const TRIES = 3
+
+// Land what `build` makes of the file as last read, reading it again and
+// building afresh when another writer changed it since (the guard in
+// `resizedFrom` failed the batch whole); the file as the batch found it.
+async function landFresh(
+  accessor: SqlAccessor,
+  path: PathSpec,
+  node: Inode,
+  build: (node: Inode) => Promise<SqlStatement[]>,
+): Promise<Inode> {
+  for (let tries = 1; ; tries++) {
+    try {
+      await accessor.batch(await build(node))
+      return node
+    } catch (err) {
+      const fresh = target(await walk(accessor, path))
+      const same =
+        fresh !== null &&
+        fresh.size === node.size &&
+        fresh.mtime === node.mtime &&
+        fresh.mtimeNsec === node.mtimeNsec
+      if (tries === TRIES || fresh === null || same) throw err
+      node = fresh
+    }
+  }
+}
 
 // The statements that land `data` whole: a new file made with it, an existing
 // one's rows replaced, or `data` added at its end.
@@ -54,7 +83,7 @@ async function landing(
   if (append) {
     return [
       ...(await placeBytes(accessor, ino, node, node.size, data)),
-      resized(ino, node.size + data.byteLength, now),
+      resizedFrom(node, node.size + data.byteLength, now),
     ]
   }
   return [
@@ -88,7 +117,11 @@ export async function write(
   if (data instanceof Uint8Array || atomic) {
     const whole = await materialize(data)
     if (append && whole.byteLength === 0 && existing !== null) return
-    await accessor.batch(await landing(accessor, w, existing, whole, append))
+    if (append && existing !== null) {
+      await landFresh(accessor, path, existing, (n) => landing(accessor, w, n, whole, true))
+    } else {
+      await accessor.batch(await landing(accessor, w, existing, whole, append))
+    }
     record(op, path.virtual, VFSName.SQL, whole.byteLength, timer)
     return
   }
@@ -100,17 +133,24 @@ export async function write(
   let pending: Uint8Array[] = []
   let held = 0
   let written = 0
+  // Each block lands on the file as it is now: an append at its end, which
+  // another writer may have moved.
   const flush = async (): Promise<void> => {
     if (held === 0) return
     const block = concat(pending)
-    const ino = byIno(node.ino)
-    const size = Math.max(node.size, offset + block.byteLength)
-    await accessor.batch([
-      ...(await placeBytes(accessor, ino, node, offset, block)),
-      resized(ino, size, nowStamp()),
-    ])
-    node = { ...node, size }
-    offset += block.byteLength
+    const stamp = nowStamp()
+    let at = offset
+    let size = 0
+    const used = await landFresh(accessor, path, node, async (n) => {
+      at = append ? n.size : offset
+      size = Math.max(n.size, at + block.byteLength)
+      return [
+        ...(await placeBytes(accessor, byIno(n.ino), n, at, block)),
+        resizedFrom(n, size, stamp),
+      ]
+    })
+    node = { ...used, size, mtime: stamp[0], mtimeNsec: stamp[1] }
+    offset = at + block.byteLength
     written += block.byteLength
     pending = []
     held = 0

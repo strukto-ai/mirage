@@ -157,6 +157,24 @@ export function resized(ino: InoRef, size: number, [seconds, nanoseconds]: Stamp
 }
 
 /**
+ * `resized`, landing only on the inode as `node` read it: a size or mtime
+ * another writer changed since leaves the size NULL, which its column
+ * refuses, so the batch fails whole and the caller reads the file again.
+ */
+export function resizedFrom(
+  node: Inode,
+  size: number,
+  [seconds, nanoseconds]: Stamp,
+): SqlStatement {
+  return {
+    sql: `UPDATE fs_inode SET
+      size = CASE WHEN size = ? AND mtime = ? AND mtime_nsec = ? THEN CAST(? AS BIGINT) END,
+      mtime = ?, mtime_nsec = ? WHERE ino = ${byIno(node.ino).sql}`,
+    params: [node.size, node.mtime, node.mtimeNsec, size, seconds, nanoseconds],
+  }
+}
+
+/**
  * One multi-row INSERT per run of `rows` that fits `MAX_PARAMS`: `head` is the
  * statement up to VALUES, `row` one row's placeholders, and each entry of
  * `rows` that row's parameters.
