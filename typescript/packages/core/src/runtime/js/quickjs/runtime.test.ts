@@ -215,8 +215,9 @@ it('answers the descriptor and byte calls as qjs on WASI does', async () => {
         "console.log(std.loadFile('/data/z'))",
       ].join('\n'),
     )
+    // A bigint offset seeks to a bigint, which console.log shows as node does.
     expect(new TextDecoder().decode(result.stdout)).toBe(
-      '4 2 0 -28\n2 104,105 0 -8 false\n104 65 3\nhiA\n',
+      '4 2 0n -28\n2 104,105 0 -8 false\n104 65 3\nhiA\n',
     )
   } finally {
     await ws.close()
@@ -237,9 +238,9 @@ describe('QuickJS compatibility', () => {
       '',
       200,
     ],
-    ["throw 'plain'", '', 'plain\n    at <eval> (<cmdline>:1:6)\n\n', 1],
-    ['throw 42', '', '42\n    at <eval> (<cmdline>:1:6)\n\n', 1],
-    ['throw new Error()', '', 'Error\n    at <eval> (<cmdline>:1:11)\n\n', 1],
+    ["throw 'plain'", '', 'plain\n    at <eval> (<evalScript>:1:6)\n\n', 1],
+    ['throw 42', '', '42\n    at <eval> (<evalScript>:1:6)\n\n', 1],
+    ['throw new Error()', '', 'Error\n    at <eval> (<evalScript>:1:11)\n\n', 1],
     ["print(std.getenv('toString'))", 'undefined\n', '', 0],
     ["print(std.out.printf('é%s', 'é')); print(std.out.printf('%d', 2**40))", 'éé4\n01\n', '', 0],
     [
