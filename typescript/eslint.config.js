@@ -159,6 +159,33 @@ export default tseslint.config(
     languageOptions: { parserOptions: { projectService: false } },
   },
   {
+    // QuickJS's Node shim is guest code, embedded as text and evaluated
+    // inside the engine, so no program covers it either: the syntactic
+    // rules run, against the engine's globals instead of node's. Its value
+    // is the function it ends on, which is what evalScript hands back. It
+    // is JavaScript, with no readonly fields to spell a getter as, and its
+    // require.cache is node's plain object, which a failed load deletes
+    // from.
+    ...tseslint.configs.disableTypeChecked,
+    files: ['packages/core/src/runtime/js/quickjs/shim.js'],
+    languageOptions: {
+      parserOptions: { projectService: false },
+      sourceType: 'script',
+      globals: Object.fromEntries(
+        ['std', 'os', 'console', 'queueMicrotask', 'atob', 'btoa'].map((name) => [
+          name,
+          'readonly',
+        ]),
+      ),
+    },
+    rules: {
+      ...tseslint.configs.disableTypeChecked.rules,
+      '@typescript-eslint/no-unused-expressions': 'off',
+      '@typescript-eslint/class-literal-property-style': 'off',
+      '@typescript-eslint/no-dynamic-delete': 'off',
+    },
+  },
+  {
     files: ['packages/*/src/**/*.ts', 'scripts/**/*.ts'],
     ignores: ['packages/*/src/**/*.test.ts'],
     rules: {

@@ -49,7 +49,7 @@ const DEC = new TextDecoder()
  *
  * A modern JS engine (ES2023 syntax, ES modules, `JSON`, regex,
  * `Promise`, top-level await) inside a wasm sandbox, with Node's common
- * APIs laid over its own (`node.ts`: fs, path, process, Buffer, `require`,
+ * APIs laid over its own (`shim.js`: fs, path, process, Buffer, `require`,
  * the timers, node's console): no npm, no network. The `std`/`os` globals
  * are exposed (quickjs-ng `--std`), so scripts read stdin with
  * `std.in.readAsString()` and reach files with `std.open`/`os.readdir`.
