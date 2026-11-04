@@ -41,5 +41,10 @@ export async function buildVfs(
   sources?: Readonly<Record<string, ResolvedSource>>,
 ): Promise<BaseVFS> {
   if (name in DIRECT_REGISTRY) return buildVfsFrom(DIRECT_REGISTRY, {}, name, config, sources)
+  // Core's refusal would list only its own table, leaving out the direct ones.
+  const known = knownVfsNames()
+  if (!known.includes(name)) {
+    throw new Error(`unknown VFS ${JSON.stringify(name)}; known: ${known.join(', ')}`)
+  }
   return buildCoreVfs(name, config, sources)
 }
