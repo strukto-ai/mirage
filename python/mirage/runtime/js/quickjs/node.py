@@ -16,7 +16,8 @@ import json
 from importlib.resources import files
 
 # Node's common APIs over qjs's std and os, as a function that takes the
-# program's argv and script path (shim.js).
+# program's argv and script path. shim.js has a twin in the typescript
+# package that must stay byte-identical (test_node.py).
 NODE_SHIM = (files("mirage.runtime.js.quickjs") / "shim.js").read_text(
     encoding="utf-8"
 )
