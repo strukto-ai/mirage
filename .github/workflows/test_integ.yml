@@ -401,10 +401,13 @@ jobs:
   integ-edge:
     needs: [changes, typescript-build]
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
-    name: integ-edge
+    name: integ-edge (${{ matrix.group }})
     runs-on: ubuntu-latest
-    # The whole battery takes about 17 minutes locally, more on a runner.
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        group: [ram, gdrive, gdrive-folder, rest]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-node-pnpm
@@ -427,9 +430,15 @@ jobs:
         run: node scripts/bundle-monty.mjs
       # The corpus's targets for every built-in CLI on an edge worker
       # (workerd under wrangler dev), each line over the server API.
+      - name: Assert the edge groups preserve full coverage
+        if: matrix.group == 'ram'
+        working-directory: integ
+        run: pnpm exec tsx edge/run.ts --check-groups
       - name: Run the corpus on the edge host
         working-directory: integ
-        run: pnpm exec tsx edge/run.ts
+        env:
+          EDGE_GROUP: ${{ matrix.group }}
+        run: pnpm exec tsx edge/run.ts --group "$EDGE_GROUP"
 
   integ:
     needs: changes
@@ -1872,7 +1881,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        leg: [a, b, c, d, e, f, g, h]
+        leg: [a, b, c1, c2, c3, d, e, f, g1, g2, g3, h1, h2, h3]
     services:
       redis:
         image: redis:7
@@ -1913,21 +1922,24 @@ jobs:
       # broken build download cannot silently drop wasi/quickjs/docker
       # coverage.
       INTEG_RUNTIME_STRICT: "1"
-      # cli.sh runs both hosts at once, each over two lanes that take the
-      # next suite nobody has claimed, so a leg costs about half of
-      # max(python, typescript) rather than their sum. The JSON drivers run
-      # each case on every backend it lists, so they cost more than cli.sh,
-      # mostly Pyodide starting a fresh interpreter for each run (about 2 s
-      # on a runner). Run 40993380901 left write and dir last; their longest
-      # JSON suites now ride the shorter policy and open legs. Use job times,
-      # the CLI's per-suite timings and streamed JSON output to rebalance.
+      # Every leg keeps the complete SDK and CLI matrices for its suites.
+      # Split the long open, policy/program/write and runtime-specific legs
+      # at suite boundaries; setup and fresh interpreters still count toward
+      # their wall time. MongoDB and sandbox mount host ordering stays in
+      # parallel.sh. The last leg takes every otherwise-unclaimed suite.
       LEG_A_SUITES: "path/cwd path/rename path/stat"
       LEG_B_SUITES: "path/exists path/link path/remove path/symlink path/unlink path/utime path/xattr"
-      LEG_C_SUITES: "open dir/readdir"
+      LEG_C1_SUITES: "dir/readdir open/a+ open/mode open/view"
+      LEG_C2_SUITES: "open/a open/r open/x"
+      LEG_C3_SUITES: "open/r+ open/w open/w+"
       LEG_D_SUITES: "dir/glob dir/mkdir dir/rmdir dir/walk facade"
       LEG_E_SUITES: "read routing workspace"
       LEG_F_SUITES: "write/capacity write/exit write/fd write/order write/parallel write/pwrite write/sync write/truncate write/writev"
-      LEG_G_SUITES: "policy program quickjs write/write"
+      LEG_G1_SUITES: "policy"
+      LEG_G2_SUITES: "program quickjs"
+      LEG_G3_SUITES: "write/write"
+      LEG_H1_SUITES: "pyodide"
+      LEG_H2_SUITES: "sandbox host"
     steps:
       - uses: actions/checkout@v7
 
@@ -1936,6 +1948,7 @@ jobs:
           LEG: ${{ matrix.leg }}
         run: |
           set -euo pipefail
+          python3 integ/runtime/check_partition.py --selftest
           # Collation for sort/comm, and for the name pattern below.
           export LC_ALL=C
           # A suite is named by its path under integ/runtime, without
@@ -1986,7 +1999,7 @@ jobs:
           # match as plain strings, since a suite name may hold a `+`.
           select_suites() {
             local wanted unknown
-            wanted=$(printf '%s' "$1" | tr ' ' '\n' | grep -v '^$' | sort -u)
+            wanted=$(printf '%s' "$1" | tr ' ' '\n' | grep -v '^$' | sort)
             unknown=$(comm -13 <(printf '%s\n%s\n' "$folders" "$all" | sort -u) <(printf '%s\n' "$wanted"))
             if [ -n "$unknown" ]; then
               echo "leg names no folder or suite: $unknown" >&2
@@ -1994,11 +2007,11 @@ jobs:
             fi
             awk -v wanted="$(tr '\n' ' ' <<<"$wanted")" '
               BEGIN { n = split(wanted, entries, " ") }
-              { for (i = 1; i <= n; i++) if ($0 == entries[i] || index($0, entries[i] "/") == 1) { print; next } }
+              { for (i = 1; i <= n; i++) if ($0 == entries[i] || index($0, entries[i] "/") == 1) { print } }
             ' <<<"$all"
           }
           named=""
-          for leg in A B C D E F G; do
+          for leg in A B C1 C2 C3 D E F G1 G2 G3 H1 H2; do
             var="LEG_${leg}_SUITES"
             picked=$(select_suites "${!var:-}")
             if [ -z "$picked" ]; then
@@ -2010,21 +2023,24 @@ jobs:
           named=$(grep -v '^$' <<<"$named" | sort)
           overlap=$(uniq -d <<<"$named")
           if [ -n "$overlap" ]; then
-            echo "suites claimed by two legs: $overlap" >&2
+            echo "suites claimed more than once: $overlap" >&2
             exit 1
           fi
           rest=$(comm -23 <(printf '%s\n' "$all") <(printf '%s\n' "$named"))
           if [ -z "$rest" ]; then
-            echo "leg H is empty" >&2
+            echo "leg H3 is empty" >&2
             exit 1
           fi
           # Refuse a matrix leg with no corresponding suite selection.
           case "$LEG" in
-            [a-g])
-              var="LEG_$(tr a-g A-G <<<"$LEG")_SUITES"
+            h3) suites="$rest" ;;
+            *)
+              var="LEG_$(tr '[:lower:]' '[:upper:]' <<<"$LEG")_SUITES"
+              if [ -z "${!var:-}" ]; then
+                echo "no suite list for leg '$LEG'" >&2
+                exit 1
+              fi
               suites=$(select_suites "${!var}") ;;
-            h) suites="$rest" ;;
-            *) echo "no suite list for leg '$LEG'" >&2; exit 1 ;;
           esac
           echo "SUITES=$(printf '%s' "$suites" | tr '\n' ' ')" >> "$GITHUB_ENV"
           # Provision only what this leg's suites ask for, keyed on the
@@ -2741,7 +2757,7 @@ jobs:
     name: integ-gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [changes, typescript-build, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-tidb-filesystem, integ-events, integ-fuse, integ-observability, integ-facets, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
+    needs: [changes, typescript-build, integ-edge, integ, integ-ts, integ-shared-py, integ-shared-ts, integ-selftests, integ-shared-parity, integ-database, integ-data, integ-tidb-filesystem, integ-events, integ-fuse, integ-observability, integ-facets, integ-runtime, integ-e2b, integ-wandb, integ-shell-coverage]
     if: always()
     steps:
       - name: Check required jobs
