@@ -509,9 +509,9 @@ building TypeScript; append `python` or `typescript` to select one host.
 host: git on RAM, gh and github, gws and the Google mounts, hf, himalaya and
 email, slack, discord, ntn, linear, trello, airtable, mcp, and search over
 dify and mem0. `edge/run.ts` starts their fakes through the launcher (the mcp
-fake as a process of its own), starts the edge test worker under `wrangler
-dev`, builds each target's mounts and CLIs as a config the way the node
-adapters build instances, and sends every line over the server API, checked
+fake as a process of its own), starts the edge test worker under
+`wrangler dev`, builds each target's mounts and CLIs as a config the way the
+node adapters build instances, and sends every line over the server API, checked
 against the same goldens. A case's `session_profiles` are put on its sessions
 over the API. What needs more than the shell stays on the node battery: stat
 checks, faults, decisions, fresh reads and capacity are skipped and
