@@ -49,6 +49,7 @@ async def _read_attachment(
     return await accessor.gmail.get_attachment(
         match.slots["message_id"],
         str(entry.extra["attachment_id"]),
+        entry.size or 0,
     )
 
 

@@ -17,10 +17,13 @@ import { mergeSignals, sleep } from '../../utils/abort.ts'
 import { type ByteWindow, rangeHeader } from '../../utils/ranges.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { CHUNK_SIZE, chunks } from '../../io/cooperative.ts'
+import { bodyLimit, checkMemory, memoryRoom } from '../../io/memory.ts'
+import { MemoryExhausted } from '../../io/errors.ts'
 import { DEFAULT_TIMEOUT } from './constants.ts'
 import { ResponseTooLargeError } from './errors.ts'
 
-export const MAX_BODY_BYTES = 64 * 1024 * 1024
+export { MAX_BODY_BYTES } from '../../io/memory.ts'
+export const ERROR_BODY_BYTES = 64 * 1024
 
 // How a >= 400 API response and its body text become the backend's own
 // error; the engine here calls it, each backend supplies one.
@@ -159,7 +162,7 @@ export async function* apiStream(
     // Reading the error body or the first chunk is still opening the
     // response: nothing has reached the caller, so a drop here retries.
     try {
-      if (response.status >= 400) text = await response.text()
+      if (response.status >= 400) text = await readPrefix(response, ERROR_BODY_BYTES)
       else if (response.body !== null) {
         chunksOf = bodyChunks(response.body, signal)
         first = await chunksOf.next()
@@ -341,9 +344,9 @@ export interface ApiRequestOptions {
   /** The byte range to request; the Range header and the trim-if-unranged
    * guard both come from it. */
   window?: ByteWindow | undefined
-  /** Maximum decoded bytes retained by successful bytes/bytes_response reads.
-   * Defaults to 64 MiB; use a stream for larger downloads. Ignored Range
-   * prefixes do not count, and overflow fails rather than truncates. */
+  /** Maximum decoded bytes retained by any successful buffered read, bounded
+   * by the workspace max_body_bytes (default 64 MiB) and memory budget.
+   * Ignored Range prefixes do not count; overflow fails without retrying. */
   maxBodyBytes?: number | undefined
   /** Seconds a request may wait to connect, or between two reads of its
    * response, before it fails (`stallTimeout`); absent is `DEFAULT_TIMEOUT`. */
@@ -421,9 +424,10 @@ function retryDelay(response: Response, text: string, attempt: number, retry: Re
 export async function readBytes(
   response: Pick<Response, 'body' | 'status'>,
   window: ByteWindow | undefined,
-  maxBodyBytes: number,
+  maxBodyBytes: number = bodyLimit(),
 ): Promise<Uint8Array<ArrayBuffer>> {
   if (response.body === null) return new Uint8Array()
+  maxBodyBytes = Math.min(maxBodyBytes, bodyLimit())
   const ranged = response.status === 206
   let skip = ranged ? 0 : (window?.offset ?? 0)
   const size = window?.size
@@ -439,8 +443,13 @@ export async function readBytes(
     if (length + take > limit) throw new ResponseTooLargeError(limit)
     if (take > 0) {
       const needed = length + take
+      checkMemory(needed)
       if (needed > data.length) {
-        const capacity = Math.min(limit, Math.max(CHUNK_SIZE, needed, data.length * 2))
+        const capacity = Math.min(
+          limit,
+          memoryRoom() ?? Infinity,
+          Math.max(CHUNK_SIZE, needed, data.length * 2),
+        )
         const grown = new Uint8Array(capacity)
         grown.set(data)
         data = grown
@@ -450,7 +459,32 @@ export async function readBytes(
     }
     if (!ranged && size != null && length === size) break
   }
-  return data.slice(0, length)
+  return data.subarray(0, length)
+}
+
+/** Keep a lossy UTF-8 prefix and cancel the unread error body. */
+export async function readPrefix(response: Pick<Response, 'body'>, limit: number): Promise<string> {
+  if (response.body === null) return ''
+  const data = new Uint8Array(limit)
+  let length = 0
+  for await (const chunk of bodyChunks(response.body)) {
+    const take = Math.min(chunk.length, limit - length)
+    data.set(chunk.subarray(0, take), length)
+    length += take
+    if (length === limit) break
+  }
+  return new TextDecoder().decode(data.subarray(0, length))
+}
+
+/** Decode a bounded success body without copying its retained bytes. */
+async function readText(response: Response, maxBodyBytes: number): Promise<string> {
+  const limit = Math.min(maxBodyBytes, bodyLimit())
+  const length = response.headers.get('Content-Length')
+  if (!response.headers.has('Content-Encoding') && length !== null && Number(length) > limit) {
+    await response.body?.cancel()
+    throw new ResponseTooLargeError(limit)
+  }
+  return new TextDecoder().decode(await readBytes(response, undefined, limit))
 }
 
 /**
@@ -463,7 +497,7 @@ export async function apiRequest(
   url: string,
   options: ApiRequestOptions,
 ): Promise<unknown> {
-  const { maxBodyBytes = MAX_BODY_BYTES } = options
+  const { maxBodyBytes = bodyLimit() } = options
   if (!Number.isSafeInteger(maxBodyBytes) || maxBodyBytes < 0) {
     throw new RangeError('max_body_bytes must be a non-negative safe integer')
   }
@@ -511,11 +545,13 @@ export async function apiRequest(
     // must never repeat rides a policy without it. Nothing past this block
     // touches the network.
     try {
-      if (response.status >= 400 || (!asBytes && !discard)) text = await response.text()
+      if (response.status >= 400 || retry.statuses.has(response.status)) {
+        text = await readPrefix(response, ERROR_BODY_BYTES)
+      } else if (!asBytes && !discard) text = await readText(response, maxBodyBytes)
       else if (discard) await response.body?.cancel()
       else data = await readBytes(response, options.window, maxBodyBytes)
     } catch (err) {
-      if (err instanceof ResponseTooLargeError) throw err
+      if (err instanceof ResponseTooLargeError || err instanceof MemoryExhausted) throw err
       if (signal?.aborted !== true && retry.retryTransport === true && attempt < retry.maxRetries) {
         await wait(Math.min(2 ** attempt, retry.maxBackoff))
         attempt += 1

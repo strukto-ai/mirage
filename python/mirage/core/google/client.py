@@ -296,6 +296,7 @@ async def google_request(
     window: ByteWindow | None = None,
     retry: RetryPolicy | None = None,
     error_of: ErrorOf = _error_of,
+    max_body_bytes: int | None = None,
 ) -> Any:
     """One Google API call: the door every request but a stream takes.
 
@@ -316,6 +317,8 @@ async def google_request(
         window (ByteWindow | None): the byte range to request.
         retry (RetryPolicy | None): None picks by method.
         error_of (ErrorOf): maps a failed response to the raised error.
+        max_body_bytes (int | None): per-call decoded body ceiling, bounded
+            by the workspace max_body_bytes and memory budget.
     """
     if retry is None:
         retry = (
@@ -325,6 +328,7 @@ async def google_request(
         method,
         url,
         error_of=error_of,
+        max_body_bytes=max_body_bytes,
         headers={**await google_headers(token_manager), **(headers or {})},
         params=params,
         json_body=json_body,

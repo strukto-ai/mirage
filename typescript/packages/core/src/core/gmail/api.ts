@@ -27,7 +27,7 @@ export interface GmailApi {
   listLabels(): Promise<GmailLabel[]>
   listMessages(opts?: ListMessagesOptions): Promise<GmailMessageStub[]>
   getMessageRaw(messageId: string): Promise<GmailMessageRaw>
-  getAttachment(messageId: string, attachmentId: string): Promise<Uint8Array>
+  getAttachment(messageId: string, attachmentId: string, size: number): Promise<Uint8Array>
   currentHistoryId(): Promise<string>
   listHistory(start: string): Promise<[Record<string, unknown>[], string]>
 }
@@ -52,8 +52,8 @@ export class GmailClient implements GmailApi {
     return messages.getMessageRaw(this.tokenManager, messageId)
   }
 
-  getAttachment(messageId: string, attachmentId: string): Promise<Uint8Array> {
-    return messages.getAttachment(this.tokenManager, messageId, attachmentId)
+  getAttachment(messageId: string, attachmentId: string, size: number): Promise<Uint8Array> {
+    return messages.getAttachment(this.tokenManager, messageId, attachmentId, size)
   }
 
   currentHistoryId(): Promise<string> {

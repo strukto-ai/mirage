@@ -47,8 +47,10 @@ export class PaginationStalledError extends Error {
   }
 }
 
-/** A buffered binary response exceeded its explicit or default byte budget. */
+/** A buffered response exceeded its decoded-byte limit, bounded by workspace
+ * max_body_bytes. The workspace memory budget applies independently. */
 export class ResponseTooLargeError extends Error {
+  readonly code = 'EFBIG'
   readonly limit: number
 
   constructor(limit: number) {

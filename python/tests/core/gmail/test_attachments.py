@@ -72,9 +72,15 @@ async def test_get_attachment():
         GoogleConfig(client_id="x", refresh_token="y")
     )
     with patch(
-        "mirage.core.gmail.messages.google_get",
+        "mirage.core.gmail.messages.google_request",
         new_callable=AsyncMock,
         return_value={"data": encoded},
-    ):
-        result = await get_attachment(token_manager, "msg1", "att1")
+    ) as request:
+        result = await get_attachment(token_manager, "msg1", "att1", 11)
+        request.assert_awaited_once_with(
+            token_manager,
+            "GET",
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages/msg1/attachments/att1",
+            max_body_bytes=1039,
+        )
         assert result == b"hello world"

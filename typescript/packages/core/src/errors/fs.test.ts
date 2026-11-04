@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ResponseTooLargeError } from '../core/api/errors.ts'
 import { describe, expect, it } from 'vitest'
 import { classify } from './classify.ts'
 import { OPERAND_CONDITIONS } from './constants.ts'
@@ -275,4 +276,8 @@ describe('strerrorOf', () => {
   ])('words %s', (_name, err, said) => {
     expect(strerrorOf(err)).toBe(said)
   })
+})
+
+it('classifies an oversized API response as EFBIG', () => {
+  expect(fsStrerror(new ResponseTooLargeError(1024))).toBe('File too large')
 })

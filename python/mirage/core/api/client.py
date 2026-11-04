@@ -35,12 +35,14 @@ from tenacity import (
 from mirage.core.api.constants import DEFAULT_TIMEOUT
 from mirage.core.api.errors import ApiError, ResponseTooLargeError
 from mirage.io.cooperative import CHUNK_SIZE, chunks
+from mirage.io.memory import MAX_BODY_BYTES as MAX_BODY_BYTES
+from mirage.io.memory import body_limit, check_memory
 from mirage.types import JsonValue
 from mirage.utils.ranges import ByteWindow, range_header
 
 logger = logging.getLogger(__name__)
 
-MAX_BODY_BYTES = 64 * 1024 * 1024
+ERROR_BODY_BYTES = 64 * 1024
 
 # How a >= 400 API response and its body text become the backend's own
 # exception; the engine here calls it, each backend supplies one.
@@ -250,7 +252,7 @@ async def api_stream(
             try:
                 async with sess.get(url, headers=headers) as response:
                     if response.status >= 400:
-                        text = await response.text()
+                        text = await _read_prefix(response, ERROR_BODY_BYTES)
                         if last or not _worth_retrying(
                             response.status, text, retry
                         ):
@@ -465,7 +467,7 @@ async def _read_bytes(
     resp: aiohttp.ClientResponse,
     window: ByteWindow | None,
     max_body_bytes: int,
-) -> bytes:
+) -> bytearray:
     """Retain a bounded binary body, skipping an ignored range incrementally.
 
     A finite window on a full response stops at its requested end. A 206
@@ -478,25 +480,74 @@ async def _read_bytes(
         window (ByteWindow | None): the requested byte range, if any.
         max_body_bytes (int): maximum retained bytes, counted after decoding.
     """
+    max_body_bytes = min(max_body_bytes, body_limit())
     skip = 0 if window is None or resp.status == 206 else window.offset
     size = None if window is None else window.size
     limit = max_body_bytes if size is None else min(size, max_body_bytes)
     data = bytearray()
-    async with aclosing(
-        chunks(resp.content.iter_chunked(CHUNK_SIZE))
-    ) as source:
-        async for chunk in source:
-            skipped = min(skip, len(chunk))
-            skip -= skipped
-            chunk = chunk[skipped:]
-            if resp.status != 206 and size is not None:
-                chunk = chunk[: size - len(data)]
-            if len(data) + len(chunk) > limit:
-                raise ResponseTooLargeError(limit)
-            data.extend(chunk)
-            if resp.status != 206 and size is not None and len(data) == size:
+    try:
+        async with aclosing(
+            chunks(resp.content.iter_chunked(CHUNK_SIZE))
+        ) as source:
+            async for chunk in source:
+                skipped = min(skip, len(chunk))
+                skip -= skipped
+                chunk = chunk[skipped:]
+                if resp.status != 206 and size is not None:
+                    chunk = chunk[: size - len(data)]
+                if len(data) + len(chunk) > limit:
+                    raise ResponseTooLargeError(limit)
+                check_memory(len(data) + len(chunk))
+                data.extend(chunk)
+                if (
+                    resp.status != 206
+                    and size is not None
+                    and len(data) == size
+                ):
+                    break
+    except BaseException:
+        resp.close()
+        raise
+    return data
+
+
+async def _read_prefix(resp: aiohttp.ClientResponse, limit: int) -> str:
+    """Keep a lossy UTF-8 prefix and close the unread error body.
+
+    Args:
+        resp (aiohttp.ClientResponse): the failed response.
+        limit (int): maximum bytes to retain.
+    """
+    data = bytearray()
+    try:
+        async for chunk in resp.content.iter_chunked(CHUNK_SIZE):
+            data.extend(chunk[: limit - len(data)])
+            if len(data) == limit:
                 break
-    return bytes(data)
+    finally:
+        resp.close()
+    return data.decode("utf-8-sig", errors="replace")
+
+
+async def _read_text(resp: aiohttp.ClientResponse, max_body_bytes: int) -> str:
+    """Decode a bounded success body without copying its retained bytes.
+
+    Args:
+        resp (aiohttp.ClientResponse): the successful response.
+        max_body_bytes (int): per-call ceiling, bounded by the workspace's
+            max_body_bytes and memory budget.
+    """
+    limit = min(max_body_bytes, body_limit())
+    length = resp.headers.get("Content-Length")
+    if (
+        "Content-Encoding" not in resp.headers
+        and length is not None
+        and int(length) > limit
+    ):
+        resp.close()
+        raise ResponseTooLargeError(limit)
+    data = await _read_bytes(resp, None, limit)
+    return data.decode("utf-8-sig")
 
 
 async def _attempt(
@@ -541,27 +592,27 @@ async def _attempt(
         )
     async with request as resp:
         if resp.status in retry.statuses:
-            text = await resp.text()
+            text = await _read_prefix(resp, ERROR_BODY_BYTES)
             if _worth_retrying(resp.status, text, retry):
                 raise _RetryableStatus(resp, text)
             raise error_of(resp, text)
         if resp.status >= 400:
-            raise error_of(resp, await resp.text())
+            raise error_of(resp, await _read_prefix(resp, ERROR_BODY_BYTES))
         if read == "none":
             return None
         if read == "bytes":
-            return await _read_bytes(resp, window, max_body_bytes)
+            return bytes(await _read_bytes(resp, window, max_body_bytes))
         if read == "bytes_response":
             return ApiResponse(
-                await _read_bytes(resp, window, max_body_bytes),
+                bytes(await _read_bytes(resp, window, max_body_bytes)),
                 resp.status,
                 lowered_headers(resp.headers),
             )
         if read == "text":
-            return await resp.text()
+            return await _read_text(resp, max_body_bytes)
         if read == "location":
             return resp.headers.get("Location")
-        text = await resp.text()
+        text = await _read_text(resp, max_body_bytes)
         if not text:
             # 204 and an empty 2xx have nothing to decode; the caller gets
             # None rather than a parse error on a call that worked
@@ -593,7 +644,7 @@ async def api_request(
     retry: RetryPolicy = NO_RETRY,
     read: ReadMode = "json",
     window: ByteWindow | None = None,
-    max_body_bytes: int = MAX_BODY_BYTES,
+    max_body_bytes: int | None = None,
     session: SessionArg = None,
     timeout: float = DEFAULT_TIMEOUT,
     sleep: Callable[[float], Awaitable[None]] | None = None,
@@ -627,11 +678,11 @@ async def api_request(
             response carries.
         window (ByteWindow | None): the byte range to request; the Range
             header and the trim-if-unranged guard both come from it.
-        max_body_bytes (int): maximum decoded bytes retained by a successful
-            "bytes" or "bytes_response" read; defaults to 64 MiB. A finite
-            non-negative safe integer. Excess raises ResponseTooLargeError
-            without retrying. Ignored-range prefixes do not count; text,
-            JSON and HTTP error bodies are not covered by this binary limit.
+        max_body_bytes (int | None): maximum decoded bytes retained by any
+            successful buffered read, bounded by the workspace max_body_bytes
+            (default 64 MiB) and memory budget. A finite non-negative safe
+            integer. Excess raises ResponseTooLargeError without retrying.
+            Ignored-range prefixes do not count.
         session (SessionArg): a live session to reuse across calls, or
             the SessionPool it should come from -- a pool materializes
             its session only here, when the request actually sends; the
@@ -643,6 +694,8 @@ async def api_request(
             simulated clock spends no real time; None is ``asyncio.sleep``.
     """
 
+    if max_body_bytes is None:
+        max_body_bytes = body_limit()
     if (
         isinstance(max_body_bytes, bool)
         or not isinstance(max_body_bytes, int)

@@ -38,7 +38,7 @@ DELEGATIONS = [
     Delegation("list_labels", (), ()),
     Delegation("list_messages", ("L1", "q", 5), ("L1", "q", 5)),
     Delegation("get_message_raw", ("m1",), ("m1",)),
-    Delegation("get_attachment", ("m1", "a1"), ("m1", "a1")),
+    Delegation("get_attachment", ("m1", "a1", 11), ("m1", "a1", 11)),
     Delegation("current_history_id", (), ()),
     Delegation("list_history", ("h1",), ("h1",)),
 ]
