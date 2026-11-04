@@ -421,7 +421,7 @@ function retryDelay(response: Response, text: string, attempt: number, retry: Re
 }
 
 /** Collect a bounded byte response, discarding an ignored Range prefix. */
-export async function readBytes(
+async function readBuffer(
   response: Pick<Response, 'body' | 'status'>,
   window: ByteWindow | undefined,
   maxBodyBytes: number = bodyLimit(),
@@ -462,6 +462,16 @@ export async function readBytes(
   return data.subarray(0, length)
 }
 
+/** Return binary bytes without retaining unused buffer capacity. */
+export async function readBytes(
+  response: Pick<Response, 'body' | 'status'>,
+  window: ByteWindow | undefined,
+  maxBodyBytes: number = bodyLimit(),
+): Promise<Uint8Array<ArrayBuffer>> {
+  const view = await readBuffer(response, window, maxBodyBytes)
+  return view.buffer.byteLength > view.length ? view.slice() : view
+}
+
 /** Keep a lossy UTF-8 prefix and cancel the unread error body. */
 export async function readPrefix(response: Pick<Response, 'body'>, limit: number): Promise<string> {
   if (response.body === null) return ''
@@ -477,14 +487,19 @@ export async function readPrefix(response: Pick<Response, 'body'>, limit: number
 }
 
 /** Decode a bounded success body without copying its retained bytes. */
-async function readText(response: Response, maxBodyBytes: number): Promise<string> {
+async function readText(response: Response, maxBodyBytes: number, method: string): Promise<string> {
   const limit = Math.min(maxBodyBytes, bodyLimit())
   const length = response.headers.get('Content-Length')
-  if (!response.headers.has('Content-Encoding') && length !== null && Number(length) > limit) {
+  if (
+    method.toUpperCase() !== 'HEAD' &&
+    !response.headers.has('Content-Encoding') &&
+    length !== null &&
+    Number(length) > limit
+  ) {
     await response.body?.cancel()
     throw new ResponseTooLargeError(limit)
   }
-  return new TextDecoder().decode(await readBytes(response, undefined, limit))
+  return new TextDecoder().decode(await readBuffer(response, undefined, limit))
 }
 
 /**
@@ -547,11 +562,10 @@ export async function apiRequest(
     try {
       if (response.status >= 400 || retry.statuses.has(response.status)) {
         text = await readPrefix(response, ERROR_BODY_BYTES)
-      } else if (!asBytes && !discard) text = await readText(response, maxBodyBytes)
+      } else if (!asBytes && !discard) text = await readText(response, maxBodyBytes, method)
       else if (discard) await response.body?.cancel()
       else {
-        const view = await readBytes(response, options.window, maxBodyBytes)
-        data = view.buffer.byteLength > view.length ? view.slice() : view
+        data = await readBytes(response, options.window, maxBodyBytes)
       }
     } catch (err) {
       if (err instanceof ResponseTooLargeError || err instanceof MemoryExhausted) throw err

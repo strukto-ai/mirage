@@ -33,6 +33,8 @@ import { POLICY_WRITE_OPS, READ_AHEAD_BYTES } from './constants.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { apiRequest } from '../../core/api/client.ts'
+import { MemoryExhausted } from '../../io/errors.ts'
+import { ResponseTooLargeError } from '../../core/api/errors.ts'
 import { bodyLimit, memoryRoom } from '../../io/memory.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import type { Handed } from '../../vfs/types.ts'
@@ -4018,5 +4020,45 @@ it('direct mount API reads keep two workspace contexts apart', async () => {
   } finally {
     await small.close()
     await large.close()
+  }
+})
+
+it.each([
+  [1024, 8192, ResponseTooLargeError],
+  [4096, 1024, MemoryExhausted],
+] as const)('deferred mount reads retain body %s and memory %s', async (body, memory, failure) => {
+  const seen: (readonly [string, number, number | null])[] = []
+  class ReplyTape extends Tape {
+    override readonly cachesReads: boolean = false
+    override read(): Promise<ByteSource> {
+      async function* pages(): AsyncGenerator<Uint8Array> {
+        try {
+          yield ENC.encode('x')
+          seen.push(['page', bodyLimit(), memoryRoom()])
+          const result = await apiRequest('GET', 'https://body.test/page', {
+            read: 'bytes',
+            errorOf: () => new Error('unexpected status'),
+            fetchFn: () => Promise.resolve(new Response('x'.repeat(2048))),
+          })
+          if (!(result instanceof Uint8Array)) throw new Error('expected bytes')
+          yield result
+        } finally {
+          seen.push(['close', bodyLimit(), memoryRoom()])
+        }
+      }
+      return Promise.resolve(pages())
+    }
+  }
+  const ws = new Workspace({ '/body': new ReplyTape() }, { maxBodyBytes: body, maxMemory: memory })
+  try {
+    const result = await ws.vfs.read('/body/a.txt', { stream: true })
+    if (result instanceof Uint8Array) throw new Error('expected stream')
+    await expect(pullAll(result)).rejects.toBeInstanceOf(failure)
+    expect(seen).toEqual([
+      ['page', body, memory],
+      ['close', body, memory],
+    ])
+  } finally {
+    await ws.close()
   }
 })

@@ -23,6 +23,7 @@ import {
   ERROR_BODY_BYTES,
   NO_RETRY,
   apiRequest,
+  readBytes,
   apiStream,
   stallTimeout,
   bodyDelay,
@@ -1415,4 +1416,22 @@ it('ignores a gzip Content-Length larger than the decoded text cap', async () =>
       }),
     )
   }
+})
+
+it('keeps HEAD metadata when the represented body exceeds the cap', async () => {
+  const response = new Response(null, { headers: { 'Content-Length': '999' } })
+  const result = await apiRequest('HEAD', TARGET, {
+    errorOf,
+    read: 'response',
+    maxBodyBytes: 4,
+    fetchFn: vi.fn<typeof fetch>().mockResolvedValue(response),
+  })
+  expect(result).toMatchObject({ data: null, status: 200, headers: { 'content-length': '999' } })
+})
+
+it.each([1, CHUNK_SIZE + 1])('direct binary reads retain exactly %s bytes', async (size) => {
+  const raw = new Uint8Array(size).fill(120)
+  const result = await readBytes(chunkedResponse([raw]).response, undefined)
+  expect(result).toEqual(raw)
+  expect(result.buffer.byteLength).toBe(size)
 })

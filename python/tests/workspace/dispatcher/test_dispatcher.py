@@ -35,6 +35,7 @@ from mirage.context import (
     set_current_session,
 )
 from mirage.core.api.client import api_request, status_error
+from mirage.core.api.errors import ResponseTooLargeError
 from mirage.core.time_range import followed_day
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.fs import erofs
@@ -43,6 +44,7 @@ from mirage.errors.types import (
     WalkDeclinedError,
 )
 from mirage.io import OpReport
+from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import body_limit, memory_room
 from mirage.io.stream import yield_bytes
 from mirage.observe.context import RecordingScope, record, start_op
@@ -4202,3 +4204,47 @@ async def test_direct_mount_api_reads_keep_two_workspace_contexts_apart():
         finally:
             await small.close()
             await large.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("body", "memory", "failure"),
+    [(1024, 8192, ResponseTooLargeError), (4096, 1024, MemoryExhausted)],
+)
+async def test_deferred_mount_reads_retain_body_and_memory(
+    body, memory, failure
+):
+    seen = []
+
+    async def answer(request):
+        return web.Response(body=b"x" * 2048)
+
+    app = web.Application()
+    app.router.add_get("/", answer)
+    async with TestServer(app) as server:
+        url = str(server.make_url("/"))
+
+        class ReplyTape(Tape):
+            caches_reads = False
+
+            async def read(self, path, offset=0, size=None):
+                try:
+                    yield b"x"
+                    seen.append(("page", body_limit(), memory_room()))
+                    yield await api_request(
+                        "GET", url, error_of=status_error, read="bytes"
+                    )
+                finally:
+                    seen.append(("close", body_limit(), memory_room()))
+
+        ws = Workspace(
+            {"/body": ReplyTape()}, max_body_bytes=body, max_memory=memory
+        )
+        try:
+            result = await ws.vfs.read("/body/a.txt", stream=True)
+            with pytest.raises(failure):
+                async for _ in result:
+                    pass
+            assert seen == [("page", body, memory), ("close", body, memory)]
+        finally:
+            await ws.close()

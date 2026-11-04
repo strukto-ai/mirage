@@ -160,7 +160,7 @@ import {
   XATTR_OPS,
 } from './constants.ts'
 import { sees } from './reader.ts'
-import { LentPayload, memoryAnswered, primed, served } from './stream.ts'
+import { LentPayload, memoryAnswered, primed, served, withMemory } from './stream.ts'
 
 /**
  * Whether a completed write op was an append of no bytes. That is an open for
@@ -822,14 +822,24 @@ export class Dispatcher {
             runWithMemory(
               this.namespace.memory,
               () =>
-                runWithSystemClock(this.namespace.systemClock, () =>
-                  name === 'read' &&
+                runWithSystemClock(this.namespace.systemClock, async () => {
+                  const [result, io] = await (name === 'read' &&
                   kwargs?.warm !== true &&
                   kwargs?.admit_only !== true &&
                   !('retained' in (kwargs ?? {}))
                     ? this.readRefusingDirs(path, args, kwargs, report)
-                    : this.dispatchAdmitted(name, path, args, kwargs, report),
-                ),
+                    : this.dispatchAdmitted(name, path, args, kwargs, report))
+                  return [
+                    result !== null && typeof result === 'object' && Symbol.asyncIterator in result
+                      ? withMemory(
+                          result as AsyncIterable<Uint8Array>,
+                          this.namespace.memory,
+                          this.namespace.bodyLimit,
+                        )
+                      : result,
+                    io,
+                  ]
+                }),
               this.namespace.bodyLimit,
             ),
           this.access?.sessionId ?? this.caller?.session?.sessionId ?? null,
