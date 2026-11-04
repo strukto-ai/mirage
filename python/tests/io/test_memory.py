@@ -16,7 +16,9 @@ import pytest
 
 from mirage.io.errors import MemoryExhausted
 from mirage.io.memory import (
+    MAX_BODY_BYTES,
     MemoryBudget,
+    body_limit,
     check_memory,
     memory_room,
     run_with_memory,
@@ -50,3 +52,22 @@ async def test_no_budget_caps_nothing():
         check_memory(1 << 40)
 
     await run_with_memory(None, hold())
+
+
+@pytest.mark.asyncio
+async def test_body_limit_is_bound_even_without_a_memory_cap_and_restored():
+    expected = 17
+
+    async def inside():
+        assert body_limit() == expected
+        larger = 99
+
+        async def nested():
+            assert body_limit() == larger
+
+        await run_with_memory(None, nested(), body=larger)
+        assert body_limit() == expected
+
+    assert body_limit() == MAX_BODY_BYTES
+    await run_with_memory(None, inside(), body=17)
+    assert body_limit() == MAX_BODY_BYTES

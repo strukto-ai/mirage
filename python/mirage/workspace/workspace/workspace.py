@@ -67,7 +67,7 @@ from mirage.events.base import EventRuntime
 from mirage.execution.context import new_execution_id
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
-from mirage.io.memory import MAX_MEMORY, MemoryBudget
+from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget
 from mirage.io.network import NetworkSetting, network_rule, run_with_network
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -265,6 +265,7 @@ class Workspace:
         mounts: dict[str, VFSMount],
         cache_limit: str | int = "32MB",
         max_memory: str | int | None = MAX_MEMORY,
+        max_body_bytes: str | int | None = None,
         network: NetworkSetting = True,
         system_time: str | None = None,
         cache: CacheConfig | None = None,
@@ -325,6 +326,11 @@ class Workspace:
         self._registry.command_limits = dict(command_limits or {})
         # What the RAM mounts store and what a command builds share the
         # workspace's max_memory; None runs uncapped.
+        self._registry.body_limit = (
+            MAX_BODY_BYTES
+            if max_body_bytes is None
+            else parse_limit(max_body_bytes, "max_body_bytes")
+        )
         self._registry.memory = (
             None
             if max_memory is None
@@ -2180,6 +2186,7 @@ class Workspace:
             args.mount_args,
             io=args.io,
             max_memory=args.max_memory,
+            max_body_bytes=args.max_body_bytes,
             network=args.network,
             system_time=args.system_time,
             mode=MountMode.READ,

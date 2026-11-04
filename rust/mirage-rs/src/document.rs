@@ -505,6 +505,7 @@ fn workspace_fields(raw: &Doc, kind: &str, at: &str) -> Answer {
                 "io",
                 "command_limits",
                 "max_memory",
+                "max_body_bytes",
                 "network",
                 "system_time",
                 "clis",

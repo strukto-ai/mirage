@@ -207,6 +207,9 @@ function validateReadBlock(prefix: string, block: Record<string, unknown>): void
 function validateConfigKeys(raw: Record<string, unknown>): void {
   validateDocument('config', raw, 'config')
   parseCommandLimits(raw.command_limits)
+  if (raw.max_body_bytes !== undefined && raw.max_body_bytes !== null) {
+    parseLimit(raw.max_body_bytes as string | number, 'max_body_bytes')
+  }
   if (raw.max_memory !== undefined && raw.max_memory !== null) {
     parseLimit(raw.max_memory as string | number, 'max_memory')
   }
@@ -610,6 +613,7 @@ export interface WorkspaceConfigRaw {
   commandLimits?: unknown
   /** What the RAM mounts store and a command builds may hold; null for no cap. */
   maxMemory?: string | number | null
+  maxBodyBytes?: string | number | null
   /** Where the workspace's connections may go; validated by networkLayer. */
   network?: NetworkSetting
   /** The workspace's time when it starts; validated by parseSystemTime. */
@@ -795,6 +799,7 @@ export async function configToWorkspaceArgs(
     options: {
       mode: wsMode,
       commandLimits: parseCommandLimits(cfg.commandLimits),
+      ...(cfg.maxBodyBytes !== undefined ? { maxBodyBytes: cfg.maxBodyBytes } : {}),
       ...(cfg.maxMemory !== undefined ? { maxMemory: cfg.maxMemory } : {}),
       ...(cfg.network !== undefined ? { network: cfg.network } : {}),
       ...(cfg.systemTime !== undefined ? { systemTime: cfg.systemTime } : {}),

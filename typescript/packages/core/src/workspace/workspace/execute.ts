@@ -1140,22 +1140,25 @@ async function runParsedLine(
           env.registry.networkOf(effectiveSession.network),
           env.registry.policies,
           () =>
-            runWithMemory(env.registry.memory, () =>
-              runWithSystemClock(env.registry.systemClock, () =>
-                runWholeLine(
-                  lineRuntime,
-                  command,
-                  stdin,
-                  effectiveSession,
-                  env.registry,
-                  killed,
-                  claimantFor(rootNode, handed),
-                  route,
-                  options.sink,
-                  deadline?.seconds ?? null,
-                  deadline?.start,
+            runWithMemory(
+              env.registry.memory,
+              () =>
+                runWithSystemClock(env.registry.systemClock, () =>
+                  runWholeLine(
+                    lineRuntime,
+                    command,
+                    stdin,
+                    effectiveSession,
+                    env.registry,
+                    killed,
+                    claimantFor(rootNode, handed),
+                    route,
+                    options.sink,
+                    deadline?.seconds ?? null,
+                    deadline?.start,
+                  ),
                 ),
-              ),
+              env.registry.bodyLimit,
             ),
           effectiveSession.sessionId,
         )
@@ -1302,20 +1305,26 @@ async function runParsedLine(
             env.registry.networkOf(context.session.network),
             env.registry.policies,
             () =>
-              runWithMemory(env.registry.memory, () =>
-                runWithSystemClock(env.registry.systemClock, async () =>
-                  runCommandTree(
-                    deadline === null ? deps : { ...deps, signal: deadline.signal },
-                    rootNode,
-                    context,
-                    stdin,
-                    false,
-                    options.callStack ?? null,
-                    (await env.registry.policies.wantsFor('postExecute', context.session.sessionId))
-                      ? env.router.context(command, context.session, await judged())
-                      : null,
+              runWithMemory(
+                env.registry.memory,
+                () =>
+                  runWithSystemClock(env.registry.systemClock, async () =>
+                    runCommandTree(
+                      deadline === null ? deps : { ...deps, signal: deadline.signal },
+                      rootNode,
+                      context,
+                      stdin,
+                      false,
+                      options.callStack ?? null,
+                      (await env.registry.policies.wantsFor(
+                        'postExecute',
+                        context.session.sessionId,
+                      ))
+                        ? env.router.context(command, context.session, await judged())
+                        : null,
+                    ),
                   ),
-                ),
+                env.registry.bodyLimit,
               ),
             context.session.sessionId,
           )

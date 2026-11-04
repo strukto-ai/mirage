@@ -31,7 +31,7 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.utils import open_regular
 from mirage.io.config import IOConfig
-from mirage.io.memory import MAX_MEMORY
+from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY
 from mirage.io.network import NetworkSetting
 from mirage.observe.log_entry import (
     EVENT_CLEAR,
@@ -431,6 +431,7 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
         StateKey.COMMAND_LIMITS: command_limits_to_json(
             ws.registry.command_limits
         ),
+        StateKey.MAX_BODY_BYTES: ws.registry.body_limit,
         StateKey.MAX_MEMORY: (
             None if ws.registry.memory is None else ws.registry.memory.limit
         ),
@@ -655,6 +656,7 @@ def build_mount_args(
         },
         profile=state.get(StateKey.PROFILE),
         max_memory=state.get(StateKey.MAX_MEMORY, MAX_MEMORY),
+        max_body_bytes=state.get(StateKey.MAX_BODY_BYTES, MAX_BODY_BYTES),
         network=state.get(StateKey.NETWORK, True),
         system_time=state.get(StateKey.SYSTEM_TIME),
     )

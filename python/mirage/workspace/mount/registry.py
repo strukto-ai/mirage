@@ -39,7 +39,7 @@ from mirage.context import (
 from mirage.errors.fs import no_mount
 from mirage.errors.types import NoMountError
 from mirage.io.config import IOConfig
-from mirage.io.memory import MemoryBudget
+from mirage.io.memory import MAX_BODY_BYTES, MemoryBudget
 from mirage.io.network import (
     NetworkRule,
     NetworkSetting,
@@ -185,6 +185,7 @@ class MountRegistry:
         # The workspace's max_memory, over the bytes its RAM mounts hold;
         # None for no cap.
         self.memory: MemoryBudget | None = None
+        self.body_limit = MAX_BODY_BYTES
         # The rule the workspace's connections are judged by; None for no
         # limit.
         self.network: NetworkRule | None = None

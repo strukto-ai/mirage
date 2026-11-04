@@ -272,3 +272,17 @@ describe('a snapshot and a RAM capacity', () => {
     await free.close()
   })
 })
+
+it('keeps max_body_bytes when copying an uncapped workspace', async () => {
+  const ws = new Workspace({ '/d': new RAMVFS() }, { maxMemory: null, maxBodyBytes: '2MB' })
+  try {
+    const copied = await ws.copy()
+    try {
+      expect(copied.registry.bodyLimit).toBe(2097152)
+    } finally {
+      await copied.close()
+    }
+  } finally {
+    await ws.close()
+  }
+})

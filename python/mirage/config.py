@@ -688,6 +688,7 @@ class WorkspaceConfig(BaseModel):
     # What the RAM mounts store and what a command builds may hold
     # together; null runs uncapped. Unset = the Workspace default.
     max_memory: str | int | None = None
+    max_body_bytes: str | int | None = None
     # Where the workspace's connections may go: true for anywhere, false
     # for nowhere, or {allow: [hosts and ranges]}.
     network: bool | dict[str, list[str] | dict[str, str]] = True
@@ -753,6 +754,11 @@ class WorkspaceConfig(BaseModel):
         if v is None:
             return v
         return coerce_write_policy(v)
+
+    @field_validator("max_body_bytes", mode="before")
+    @classmethod
+    def _v_max_body_bytes(cls, v: Any) -> int | None:
+        return v if v is None else parse_limit(v, "max_body_bytes")
 
     @field_validator("max_memory", mode="before")
     @classmethod
@@ -852,6 +858,7 @@ class WorkspaceConfig(BaseModel):
             "write": self.write,
             "session_id": self.default_session_id,
         }
+        kwargs["max_body_bytes"] = self.max_body_bytes
         if "max_memory" in self.model_fields_set:
             kwargs["max_memory"] = self.max_memory
         if "network" in self.model_fields_set:

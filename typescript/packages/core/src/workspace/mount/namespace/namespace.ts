@@ -559,6 +559,11 @@ export class Namespace {
     return this.registry.commandLimits
   }
 
+  /** The workspace's per-reply decoded body ceiling. */
+  get bodyLimit(): number {
+    return this.registry.bodyLimit
+  }
+
   /** The workspace's max_memory, null for no cap. */
   get memory(): MemoryBudget | null {
     return this.registry.memory

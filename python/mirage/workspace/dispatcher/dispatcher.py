@@ -1013,6 +1013,7 @@ class Dispatcher:
                         run_with_memory(
                             memory,
                             self._bound(name, path, caller, report, kwargs),
+                            body=self._namespace.registry.body_limit,
                         ),
                         None
                         if caller.session is None
@@ -1029,6 +1030,7 @@ class Dispatcher:
                         run_with_memory(
                             memory,
                             self._bound(name, path, held, report, kwargs),
+                            body=self._namespace.registry.body_limit,
                         ),
                         None
                         if caller.session is None

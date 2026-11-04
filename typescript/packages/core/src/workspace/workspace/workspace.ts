@@ -42,7 +42,7 @@ import { eacces, enoent } from '../../errors/fs.ts'
 import type { EventRuntime } from '../../events/base.ts'
 import { newExecutionId } from '../../execution/context.ts'
 import { IOConfig } from '../../io/config.ts'
-import { MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
+import { MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
 import { networkRule, type NetworkSetting, runWithNetwork, sameNetwork } from '../../io/network.ts'
 import { EVENT_COMMAND, EVENT_RESULT, EVENT_VFS } from '../../observe/log_entry.ts'
 import { Observer } from '../../observe/observer.ts'
@@ -555,6 +555,10 @@ export class Workspace {
     this.registry.commandLimits = { ...options.commandLimits }
     // What the RAM mounts store and what a command builds share the
     // workspace's max_memory; null runs uncapped.
+    this.registry.bodyLimit =
+      options.maxBodyBytes == null
+        ? MAX_BODY_BYTES
+        : parseLimit(options.maxBodyBytes, 'max_body_bytes')
     const maxMemory = options.maxMemory === undefined ? MAX_MEMORY : options.maxMemory
     this.registry.memory =
       maxMemory === null
@@ -2288,6 +2292,7 @@ export class Workspace {
     const mergedOptions: WorkspaceOptions = {
       io: args.io,
       maxMemory: args.maxMemory,
+      maxBodyBytes: args.maxBodyBytes,
       network: args.network,
       systemTime: args.systemTime,
       ...(args.defaultSessionId !== undefined ? { sessionId: args.defaultSessionId } : {}),
