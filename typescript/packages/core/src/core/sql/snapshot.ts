@@ -16,9 +16,9 @@ import type { SqlAccessor } from '../../accessor/sql.ts'
 import { gnuBasename, parent } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
-import { CLEAR, DIR, FILE, RENUMBERED, ROOT_INO, SQL } from './constants.ts'
+import { CLEAR, DIR, FILE, RENUMBERED, RESTORED_INO, ROOT_INO, SQL } from './constants.ts'
 import { placeBytes, readBytes } from './data.ts'
-import { byIno, inodeOf, isDir, isFile, isoOf, nowStamp, stampOf } from './inode.ts'
+import { byIno, inodeOf, isDir, isFile, isoOf, nowStamp, stampOf, type InoRef } from './inode.ts'
 
 /**
  * What a snapshot keeps of a sql mount: each file's bytes and each
@@ -54,27 +54,39 @@ export async function snapshot(accessor: SqlAccessor): Promise<SqlSnapshot> {
 /**
  * Replace everything the database holds with `state`, in one transaction:
  * the directories outermost first, then each file under its directory. A
- * path whose directory the state does not hold is dropped. Each inode is
- * given its number here, so an entry names its parent by number however
- * deep the tree.
+ * path whose directory the state does not hold is dropped. The inodes take
+ * fresh numbers counted from one the database gives first, so an entry
+ * names its parent by number however deep the tree, and an op that read an
+ * inode before the restore reaches none it made.
  */
 export async function restore(accessor: SqlAccessor, state: SqlSnapshot): Promise<void> {
-  const statements: SqlStatement[] = CLEAR.map((sql) => ({ sql }))
-  const dirs = new Map<string, number>([['/', ROOT_INO]])
   const now = nowStamp()
-  let next = ROOT_INO
+  const statements: SqlStatement[] = [
+    { sql: SQL.dropBase },
+    { sql: SQL.newInode, params: [FILE, 0, ...now] },
+    { sql: SQL.setBase },
+    ...CLEAR.map((sql) => ({ sql })),
+  ]
+  const dirs = new Map<string, InoRef>([['/', byIno(ROOT_INO)]])
+  let made = 0
   const place = async (p: string, mode: number, data: Uint8Array | null): Promise<void> => {
     const up = dirs.get(parent(p))
     if (up === undefined) return
-    const ino = ++next
+    const ref: InoRef = { sql: RESTORED_INO, params: [++made] }
     const modified = state.modified[p]
     const [seconds, nanoseconds] = modified !== undefined ? stampOf(modified) : now
     statements.push(
-      { sql: SQL.numberedInode, params: [ino, mode, data?.byteLength ?? 0, seconds, nanoseconds] },
-      { sql: SQL.newEntry, params: [gnuBasename(p), up, ino] },
+      {
+        sql: `INSERT INTO fs_inode (ino, mode, size, mtime, mtime_nsec) VALUES (${ref.sql}, ?, ?, ?, ?)`,
+        params: [...ref.params, mode, data?.byteLength ?? 0, seconds, nanoseconds],
+      },
+      {
+        sql: `INSERT INTO fs_dentry (name, parent_ino, ino) VALUES (?, ${up.sql}, ${ref.sql})`,
+        params: [gnuBasename(p), ...up.params, ...ref.params],
+      },
     )
-    if (data === null) dirs.set(p, ino)
-    else statements.push(...(await placeBytes(accessor, byIno(ino), null, 0, data)))
+    if (data === null) dirs.set(p, ref)
+    else statements.push(...(await placeBytes(accessor, ref, null, 0, data)))
   }
   const listed = state.dirs.filter((p) => p !== '/')
   listed.sort((a, b) => depth(a) - depth(b) || compareCodePoints(a, b))
@@ -82,5 +94,6 @@ export async function restore(accessor: SqlAccessor, state: SqlSnapshot): Promis
   for (const [p, data] of Object.entries(state.files)) await place(p, FILE, data)
   const renumbered = RENUMBERED[accessor.driver.dialect]
   if (renumbered !== null) statements.push({ sql: renumbered })
+  statements.push({ sql: SQL.dropBase })
   await accessor.batch(statements)
 }

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_CHUNK_SIZE, DIR, FILE } from '@struktoai/mirage-core/core/sql/constants'
@@ -176,6 +176,40 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
     racing(driver, () => ops(other).append(at('/f'), enc.encode('b')))
     await ops(vfs).append(at('/f'), enc.encode('c'))
     expect(dec.decode(await bytes(vfs, '/f'))).toBe('abc')
+  })
+
+  it('keeps a file another writer moved while an unlink of its old name ran', async () => {
+    await ops(vfs).write(at('/a'), enc.encode('kept'))
+    racing(driver, ["UPDATE fs_dentry SET name = 'b' WHERE parent_ino = 1 AND name = 'a'"])
+    await vfs.unlink(at('/a'))
+    expect(dec.decode(await bytes(vfs, '/b'))).toBe('kept')
+  })
+
+  it('retries an append on its own file, not on what now stands at its path', async () => {
+    await ops(vfs).write(at('/f'), enc.encode('a'))
+    racing(driver, [
+      "UPDATE fs_dentry SET name = 'g' WHERE parent_ino = 1 AND name = 'f'",
+      "UPDATE fs_inode SET mtime = mtime + 1 WHERE ino = (SELECT ino FROM fs_dentry WHERE parent_ino = 1 AND name = 'g')",
+      `INSERT INTO fs_inode (ino, mode, size, mtime) VALUES (1000, ${String(DIR)}, 0, 0)`,
+      "INSERT INTO fs_dentry (name, parent_ino, ino) VALUES ('f', 1, 1000)",
+    ])
+    await ops(vfs).append(at('/f'), enc.encode('c'))
+    expect(dec.decode(await bytes(vfs, '/g'))).toBe('ac')
+    expect((await ops(vfs).stat(at('/f'))).type).toBe(FileType.DIRECTORY)
+  })
+
+  it('restores into fresh inode numbers, past every one an op could hold', async () => {
+    const deep = `/${Array.from({ length: 40 }, (_, i) => `d${String(i)}`).join('/')}`
+    await vfs.mkdir(at(deep), true)
+    await ops(vfs).write(at(`${deep}/f`), enc.encode('x'))
+    const inos = async (): Promise<number[]> =>
+      (await driver.query('SELECT ino FROM fs_inode WHERE ino > 1')).map((r) => Number(r.ino))
+    const before = Math.max(...(await inos()))
+    await vfs.loadState(await vfs.getState())
+    expect(Math.min(...(await inos()))).toBeGreaterThan(before)
+    expect(dec.decode(await bytes(vfs, `${deep}/f`))).toBe('x')
+    await ops(vfs).write(at('/later'), enc.encode('y'))
+    expect(dec.decode(await bytes(vfs, '/later'))).toBe('y')
   })
 
   it('keeps no attributes, so the namespace keeps them', () => {
@@ -381,6 +415,14 @@ describe('SqlVFS', () => {
     } finally {
       await vfs.close()
     }
+  })
+
+  it('opens again after a first open failed', async () => {
+    const driver = new SqliteDriver(join(dir, 'later', 'fs.db'))
+    await expect(driver.query('SELECT 1 AS n')).rejects.toThrow()
+    mkdirSync(join(dir, 'later'))
+    expect(await driver.query('SELECT 1 AS n')).toEqual([{ n: 1 }])
+    await driver.close()
   })
 
   it('tells two in-memory databases apart, and two names of one file alike', () => {

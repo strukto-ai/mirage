@@ -23,6 +23,7 @@ from mirage.core.sql.inode import (
     Inode,
     by_entry,
     by_ino,
+    inode_at,
     make_node,
     now_stamp,
     resized,
@@ -52,21 +53,21 @@ _TRIES = 3
 
 async def _land_fresh(
     accessor: SqlAccessor,
-    path: PathSpec,
     node: Inode,
     build: Callable[[Inode], Awaitable[list[SqlStatement]]],
 ) -> Inode:
-    """Land what ``build`` makes of the file as last read, reading it
-    again and building afresh when another writer changed it since (the
-    guard in ``resized_from`` failed the batch whole); the file as the
-    batch found it."""
+    """Land what ``build`` makes of the file as last read. When another
+    writer changed it since (the guard in ``resized_from`` failed the
+    batch whole), read the same inode again, wherever it went, as an open
+    file follows its inode, and build afresh; the file as the batch found
+    it."""
     tries = 1
     while True:
         try:
             await accessor.batch(await build(node))
             return node
         except Exception:
-            fresh = target(await walk(accessor, path))
+            fresh = await inode_at(accessor, node.ino)
             same = fresh is not None and (
                 fresh.size,
                 fresh.mtime,
@@ -145,7 +146,7 @@ async def write(
             async def appended(n: Inode) -> list[SqlStatement]:
                 return await _landing(accessor, w, n, whole, True)
 
-            await _land_fresh(accessor, path, existing, appended)
+            await _land_fresh(accessor, existing, appended)
         else:
             await accessor.batch(
                 await _landing(accessor, w, existing, whole, append)
@@ -179,7 +180,7 @@ async def write(
                 resized_from(n, size, stamp),
             ]
 
-        used = await _land_fresh(accessor, path, node, placed)
+        used = await _land_fresh(accessor, node, placed)
         node = replace(used, size=size, mtime=stamp[0], mtime_nsec=stamp[1])
         offset = at + len(block)
         written += len(block)

@@ -21,11 +21,13 @@ from mirage.core.sql.constants import (
     DIR,
     FILE,
     RENUMBERED,
+    RESTORED_INO,
     ROOT_INO,
     SQL,
 )
 from mirage.core.sql.data import fill_bytes
 from mirage.core.sql.inode import (
+    InoRef,
     by_ino,
     inode_of,
     insert_rows,
@@ -88,40 +90,52 @@ def restore(
     """Replace everything the database holds with a snapshot, in one
     transaction: the directories outermost first, then each file under
     its directory. A path whose directory the snapshot does not hold is
-    dropped. Each inode is given its number here, so an entry names its
-    parent by number however deep the tree. Blocking, as ``load_state``
-    is. Mirrors TypeScript's ``restore``."""
+    dropped. The inodes take fresh numbers counted from one the database
+    gives first, so an entry names its parent by number however deep the
+    tree, and an op that read an inode before the restore reaches none it
+    made. Blocking, as ``load_state`` is. Mirrors TypeScript's
+    ``restore``."""
     cs = accessor.ready()
-    statements = [SqlStatement(sql) for sql in CLEAR]
-    made: dict[str, int] = {"/": ROOT_INO}
     now = now_stamp()
-    numbers = itertools.count(ROOT_INO + 1)
+    statements = [
+        SqlStatement(SQL["drop_base"]),
+        SqlStatement(SQL["new_inode"], (FILE, 0, *now)),
+        SqlStatement(SQL["set_base"]),
+        *(SqlStatement(sql) for sql in CLEAR),
+    ]
+    made: dict[str, InoRef] = {"/": by_ino(ROOT_INO)}
+    numbers = itertools.count(1)
 
     def place(p: str, mode: int, data: bytes | None) -> None:
         up = made.get(parent(p))
         if up is None:
             return
-        ino = next(numbers)
+        ref = InoRef(RESTORED_INO, (next(numbers),))
         seconds, nanoseconds = stamp_of(modified[p]) if p in modified else now
         size = len(data) if data is not None else 0
         statements.extend(
             [
                 SqlStatement(
-                    SQL["numbered_inode"],
-                    (ino, mode, size, seconds, nanoseconds),
+                    "INSERT INTO fs_inode (ino, mode, size, mtime,"
+                    f" mtime_nsec) VALUES ({ref.sql}, ?, ?, ?, ?)",
+                    (*ref.params, mode, size, seconds, nanoseconds),
                 ),
-                SqlStatement(SQL["new_entry"], (gnu_basename(p), up, ino)),
+                SqlStatement(
+                    "INSERT INTO fs_dentry (name, parent_ino, ino)"
+                    f" VALUES (?, {up.sql}, {ref.sql})",
+                    (gnu_basename(p), *up.params, *ref.params),
+                ),
             ]
         )
         if data is None:
-            made[p] = ino
+            made[p] = ref
             return
         statements.extend(
             insert_rows(
                 "INSERT INTO fs_data (ino, chunk_index, data)",
-                f"({by_ino(ino).sql}, ?, ?)",
+                f"({ref.sql}, ?, ?)",
                 [
-                    (i, data[at : at + cs])
+                    (*ref.params, i, data[at : at + cs])
                     for i, at in enumerate(range(0, len(data), cs))
                 ],
             )
@@ -136,4 +150,5 @@ def restore(
     renumbered = RENUMBERED[accessor.driver.dialect]
     if renumbered is not None:
         statements.append(SqlStatement(renumbered))
+    statements.append(SqlStatement(SQL["drop_base"]))
     accessor.driver.batch(statements)
