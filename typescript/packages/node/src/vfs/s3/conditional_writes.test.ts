@@ -179,7 +179,7 @@ describe('conditional writes on an S3 mount', () => {
       policy: {
         preCommand: [
           {
-            script: new ScriptSource("open('/s3/f').read()\nprint('null')\n", 'python'),
+            script: new ScriptSource("def pre_command(ctx):\n    open('/s3/f').read()\n", 'python'),
             runtime: 'monty',
           },
         ],

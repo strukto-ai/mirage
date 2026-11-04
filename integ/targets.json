@@ -3692,7 +3692,7 @@
               {
                 "script": {
                   "language": "python",
-                  "source": "def pre_command(ctx):\n    def contents(path):\n        try:\n            return open(path).read()\n        except OSError:\n            return ''\n\n    for p in ctx['paths']:\n        if 'marker' in contents(p):\n            return {'kind': 'deny', 'reason': 'marked by ' + ctx['profile']}\n"
+                  "source": "def contents(path):\n    try:\n        return open(path).read()\n    except OSError:\n        return ''\n\n\ndef pre_command(ctx):\n    for p in ctx['paths']:\n        if 'marker' in contents(p):\n            return {'kind': 'deny', 'reason': 'marked by ' + ctx['profile']}\n"
                 },
                 "runtime": "monty"
               }
