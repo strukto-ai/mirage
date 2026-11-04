@@ -71,6 +71,14 @@ export interface ServiceEnv {
 }
 
 const SERVICE_KEYS = new Set(['python', 'typescript', 'shared'])
+const SHARED_TARGETS = new Set([
+  'sharepoint',
+  'sharepoint-prefix',
+  'onedrive',
+  'box',
+  'gdrive',
+  'gdrive-folder',
+])
 
 /**
  * What runs one target. The pool takes it as an argument so a gate can pass a
@@ -309,8 +317,34 @@ export function loadCases(root: string): Case[] {
 
 /** Select an ordered backend contract suite from the shared corpus. */
 export function selectSuite(root: string, cases: Case[], name: string): Case[] {
-  if (name !== 'nextcloud') throw new Error(`unknown suite: ${name}`)
-  const selectors: unknown = JSON.parse(readFileSync(join(root, 'ci', `${name}.json`), 'utf8'))
+  if (name !== 'nextcloud' && name !== 'shared') throw new Error(`unknown suite: ${name}`)
+  const data: unknown = JSON.parse(readFileSync(join(root, 'ci', `${name}.json`), 'utf8'))
+  let selectors: unknown = data
+  let focused = new Set([name])
+  if (name === 'shared') {
+    if (
+      data === null ||
+      typeof data !== 'object' ||
+      Array.isArray(data) ||
+      Object.keys(data).length !== 2 ||
+      !('targets' in data) ||
+      !('selectors' in data)
+    ) {
+      throw new Error('suite shared: expected targets and selectors')
+    }
+    const targets: unknown = data.targets
+    if (
+      !Array.isArray(targets) ||
+      !targets.every((target: unknown): target is string => typeof target === 'string') ||
+      targets.length !== SHARED_TARGETS.size ||
+      new Set(targets).size !== SHARED_TARGETS.size ||
+      targets.some((target) => !SHARED_TARGETS.has(target))
+    ) {
+      throw new Error('suite shared: targets must name the six shared backends')
+    }
+    focused = new Set(targets)
+    selectors = data.selectors
+  }
   if (
     !Array.isArray(selectors) ||
     selectors.length === 0 ||
@@ -319,7 +353,7 @@ export function selectSuite(root: string, cases: Case[], name: string): Case[] {
   ) {
     throw new Error('suite selectors must be unique nonempty strings')
   }
-  const eligible = cases.filter((c) => c.targets.includes(name))
+  const eligible = cases.filter((c) => c.targets.some((target) => focused.has(target)))
   const selected = new Set<string>()
   for (const selector of selectors) {
     const matches = eligible.filter((c) => {
@@ -333,7 +367,29 @@ export function selectSuite(root: string, cases: Case[], name: string): Case[] {
     if (matches.length === 0) throw new Error(`suite ${name}: unused selector ${selector}`)
     for (const c of matches) selected.add(c.id)
   }
-  return eligible.filter((c) => selected.has(c.id))
+  if (name === 'nextcloud') return eligible.filter((c) => selected.has(c.id))
+  for (const c of eligible) {
+    const source = c._source?.split(sep).join('/') ?? ''
+    if (
+      !c.targets.includes('ram') ||
+      !c.targets.includes('disk') ||
+      c.clear_cache === true ||
+      'check' in c ||
+      ['vfs/', 'crossmount/', 'unix/rm/', 'unix/rmdir/'].some((prefix) => source.startsWith(prefix))
+    ) {
+      selected.add(c.id)
+    }
+  }
+  for (const target of focused) {
+    if (!eligible.some((c) => c.targets.includes(target) && selected.has(c.id))) {
+      throw new Error(`suite shared: no cases selected for ${target}`)
+    }
+  }
+  return cases.flatMap((c) => {
+    if (selected.has(c.id)) return [c]
+    const targets = c.targets.filter((target) => !focused.has(target))
+    return targets.length ? [{ ...c, targets }] : []
+  })
 }
 
 /**

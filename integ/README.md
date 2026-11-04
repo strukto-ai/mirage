@@ -294,6 +294,42 @@ manual workflow entry point, and when its workflow or service tuning changes. Lo
 target. The scheduled workflow keeps the real removal fence and existing
 30-minute job limit; it is not part of the PR gate.
 
+## Shared backend contract and full runs
+
+The regular shared Python and TypeScript shards pass `--suite shared`.
+`ci/shared.json` selects the focused corpus only for `sharepoint`,
+`sharepoint-prefix`, `onedrive`, `box`, `gdrive` and `gdrive-folder`.
+Every other target, including RAM, disk and specialized Google Drive targets,
+keeps its full eligible corpus. Prefix and folder targets retain their own
+mount configurations and eligibility; each target still executes its cases
+serially in corpus order with the original goldens.
+
+The shared contract keeps the Nextcloud selection plus each target's required
+cases: cases without both RAM and disk coverage, VFS and cross-mount behavior,
+removal, cache clears and explicit checks. It also keeps the backend I/O
+addbacks, including complete awk redirect/getline/byte, sed read/write/in-place/byte
+and compression families, plus native-search and fallback representatives. The selector gates protect target-specific coverage
+and reject invalid suites, selectors and empty selections. This moves generic
+syntax and formatting permutations to full runs; it does not establish that
+backend I/O is equivalent to RAM or disk.
+
+`Shared backends full` runs all six targets on both hosts nightly, manually,
+and on relevant pull requests. Implementation changes under `python/mirage`,
+TypeScript package `src` directories and `rust` select all six conservatively,
+as do dependency/build setup, runner, manifest, fake-service, fixture and
+workflow changes. Storage, state, mutation and retained I/O case families
+also select the full workflow; other generic syntax/formatting-only case
+changes use the regular batteries. The workflow's paths list is the exact trigger
+inventory and must be updated when moving these modules or cases.
+
+Each full target has its own 30-minute job and an isolated fake fleet from
+the existing battery setup. Both regular and full runs check strict goldens,
+retain emitted output and compare all six targets across hosts, including
+missing or extra rows. The full workflow's final gate fails if either the
+batteries or parity fail. Omit `--suite shared` to run a full target locally,
+for example `--target sharepoint --strict`. No cases are deleted from the
+corpus, and the existing regular job timeouts are unchanged.
+
 ## What a pull request runs
 
 A push to main runs every job in `.github/workflows/test_integ.yml`. A pull
@@ -313,7 +349,7 @@ Python-only battery jobs use the same install path because their fake servers
 do not import mirage packages. Jobs that build TypeScript still run prepare.
 
 The existing three shards per host still run every eligible target once with
-four processes each. `ci/shard_seconds.json` uses successful target timings
+four processes each; only the six shared-contract targets select fewer cases. `ci/shard_seconds.json` uses successful target timings
 from main runs 40976378211 and 40983556220 to rebalance them. Replaying those
 median timings through the four-worker schedule estimates the longest Python
 battery at 1,018 seconds. The scheduler compares balancing total work with
@@ -366,6 +402,7 @@ flowchart LR
     core & ts --> HOST["integ-hosting<br/>interrupts: CPU · streams · disconnect · cancellation<br/>hosting: FastAPI · Fastify · Monty<br/>RAM · S3 · Redis · Slack"]
     core & ts --> EDGE["integ-edge<br/>the corpus on workerd:<br/>every built-in CLI and its mounts"]
     NC["Nextcloud tuning and full workflow"] --> ts & data
+    SF["shared execution · backend source · storage cases<br/>runners · manifests · fakes · setup"] --> FULL["Shared backends full<br/>six targets × two hosts · goldens · parity"]
     data --> J4["integ-data · integ-events<br/>integ-tidb-filesystem"]
     database --> J5["integ-database"]
     observability --> J6["integ-observability"]

@@ -642,6 +642,230 @@ def selftest_nextcloud_suite(typescript: bool = False) -> None:
         )
 
 
+def selftest_shared_suite(typescript: bool = False) -> None:
+    """Protect backend coverage and unchanged targets in the focused suite.
+
+    Args:
+        typescript (bool): exercise the TypeScript selector when true.
+    """
+    targets = [
+        "sharepoint",
+        "sharepoint-prefix",
+        "onedrive",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+    ]
+    common = ["ram", "disk", *targets]
+    cases = [
+        {"id": "format", "targets": common, "_source": "unix/date/a.json"},
+        {"id": "read", "targets": common, "_source": "unix/cat/a.json"},
+        {"id": "unique", "targets": ["box"], "_source": "unix/date/a.json"},
+        {
+            "id": "cache",
+            "targets": common,
+            "_source": "unix/date/a.json",
+            "clear_cache": True,
+        },
+        {
+            "id": "check",
+            "targets": common,
+            "_source": "unix/date/a.json",
+            "check": "verify",
+        },
+        {"id": "remove", "targets": common, "_source": "unix/rm/a.json"},
+        {
+            "id": "untouched",
+            "targets": ["nextcloud", "gdrive-shared"],
+            "_source": "unix/date/a.json",
+        },
+    ]
+    expected = [
+        {**c, "targets": ["ram", "disk"]} if c["id"] == "format" else c
+        for c in cases
+    ]
+    config = {"targets": targets, "selectors": ["unix/cat/", "unique"]}
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        (root / "ci").mkdir()
+        for label, manifest, want in [
+            ("ordered memberships and capability gaps", config, expected),
+            ("unknown selector", {**config, "selectors": ["gone"]}, None),
+            (
+                "selector on unaffected target",
+                {**config, "selectors": ["untouched"]},
+                None,
+            ),
+            ("empty selectors", {**config, "selectors": []}, None),
+            (
+                "duplicate selector",
+                {**config, "selectors": ["read", "read"]},
+                None,
+            ),
+            ("invalid selector", {**config, "selectors": [1]}, None),
+            ("empty target list", {**config, "targets": []}, None),
+            (
+                "unknown target",
+                {**config, "targets": [*targets, "gone"]},
+                None,
+            ),
+            (
+                "duplicate target",
+                {**config, "targets": [*targets, "box"]},
+                None,
+            ),
+            ("wrong shape", ["read"], None),
+        ]:
+            (root / "ci" / "shared.json").write_text(json.dumps(manifest))
+            host = "ts" if typescript else "py"
+            name = f"shared suite ({host}): {label}"
+            if typescript:
+                proc = subprocess.run(
+                    [
+                        str(TSX),
+                        "--eval",
+                        "import('./runners/typescript/harness.ts').then(m => "
+                        "console.log(JSON.stringify(m.selectSuite("
+                        "process.env.CASE_ROOT, JSON.parse(process.env.SUITE_CASES), "
+                        "'shared'))))",
+                    ],
+                    cwd=ROOT,
+                    env={
+                        **os.environ,
+                        "CASE_ROOT": temp,
+                        "SUITE_CASES": json.dumps(cases),
+                    },
+                    capture_output=True,
+                    text=True,
+                )
+                check(
+                    name,
+                    proc.returncode != 0
+                    if want is None
+                    else proc.returncode == 0
+                    and json.loads(proc.stdout) == want,
+                    proc.stderr,
+                )
+            elif want is None:
+                try:
+                    harness.select_suite(root, cases, "shared")
+                except ValueError:
+                    check(name, True)
+                else:
+                    check(name, False, "invalid manifest accepted")
+            else:
+                before = json.dumps(cases)
+                actual = harness.select_suite(root, cases, "shared")
+                check(name, actual == want)
+                check(
+                    "shared suite: input corpus remains unchanged",
+                    json.dumps(cases) == before,
+                )
+
+    real = harness.load_cases(ROOT)
+    chosen = harness.select_suite(ROOT, real, "shared")
+    selected = {c["id"]: set(c["targets"]) for c in chosen}
+    for target in harness.load_targets(ROOT):
+        before = [c for c in real if target in c["targets"]]
+        after = [c for c in chosen if target in c["targets"]]
+        if target not in targets:
+            check(
+                f"shared suite: {target} remains full",
+                [c["id"] for c in after] == [c["id"] for c in before],
+            )
+            continue
+        check(
+            f"shared suite: {target} keeps a nonempty ordered subset",
+            0 < len(after) < len(before)
+            and [c["id"] for c in after]
+            == [
+                c["id"]
+                for c in before
+                if target in selected.get(c["id"], set())
+            ],
+        )
+        missing = [
+            c["id"]
+            for c in before
+            if target not in selected.get(c["id"], set())
+            and (
+                not {"ram", "disk"} <= set(c["targets"])
+                or c.get("clear_cache")
+                or "check" in c
+                or c["id"]
+                in {
+                    "heredoc_cleanup",
+                    "grep_m1",
+                    "sort_empty_file",
+                    "diff_shared_binary_nul",
+                    "wc_missing_operands_still_print_a_total",
+                    "cmp_l_pads_offsets_and_octal_and_names_an_empty_file",
+                }
+                or c["_source"].startswith(
+                    (
+                        "vfs/",
+                        "crossmount/",
+                        "unix/rm/",
+                        "unix/rmdir/",
+                        "unix/awk/redirect.json",
+                        "unix/awk/getline.json",
+                        "unix/awk/bytes.json",
+                        "unix/grep/basic.json",
+                        "unix/grep/binary.json",
+                        "unix/grep/s.json",
+                        "unix/grep/r.json",
+                        "unix/grep/filters.json",
+                        "unix/rg/basic.json",
+                        "unix/rg/z.json",
+                        "unix/rg/pre.json",
+                        "unix/rg/E.upper.json",
+                        "unix/rg/text.json",
+                        "unix/rg/L.upper.json",
+                        "unix/rg/files_without_match.json",
+                        "unix/rg/stats.json",
+                        "unix/rg/json.json",
+                        "unix/sed/read.json",
+                        "unix/sed/write.json",
+                        "unix/sed/inplace.json",
+                        "unix/sed/bytes.json",
+                        "unix/truncate/",
+                        "unix/gzip/",
+                        "unix/gunzip/",
+                        "unix/zcat/",
+                        "unix/zgrep/",
+                        "vfs/search/",
+                    )
+                )
+            )
+        ]
+        check(
+            f"shared suite: {target} keeps protected storage behavior",
+            not missing,
+            repr(missing),
+        )
+    if typescript:
+        proc = subprocess.run(
+            [
+                str(TSX),
+                "--eval",
+                "import('./runners/typescript/harness.ts').then(m => "
+                "console.log(JSON.stringify(m.selectSuite(m.integRoot(), "
+                "m.loadCases(m.integRoot()), 'shared').map(c => "
+                "[c.id, c.targets]))))",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        check(
+            "shared suite: both hosts select identical ordered target/case pairs",
+            proc.returncode == 0
+            and json.loads(proc.stdout)
+            == [[c["id"], c["targets"]] for c in chosen],
+            proc.stderr,
+        )
+
+
 def run_main(args: list[str], env: dict) -> int:
     return run_main_out(args, env)[0]
 
@@ -1645,6 +1869,7 @@ def selftest_typescript_gates(require: bool) -> None:
     )
     selftest_case_target_defaults(typescript=True)
     selftest_nextcloud_suite(typescript=True)
+    selftest_shared_suite(typescript=True)
     selftest_run_ids()
     selftest_plan_run()
     selftest_no_shadow_fails()
@@ -2147,6 +2372,7 @@ def main() -> None:
     selftest_delete_flag()
     selftest_case_target_defaults()
     selftest_nextcloud_suite()
+    selftest_shared_suite()
     selftest_strict_exit()
     selftest_fake_ports()
     selftest_target_pool()

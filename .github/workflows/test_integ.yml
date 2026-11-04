@@ -817,7 +817,7 @@ jobs:
           --host python --facet core --facet http
           --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant,tidb_filesystem
           --emit-dir "$GITHUB_WORKSPACE/emit/python"
-          -- ./python/.venv/bin/python integ/runners/python/main.py --strict
+          -- ./python/.venv/bin/python integ/runners/python/main.py --suite shared --strict
       # The battery cannot snapshot a workspace, so the GridFS trash under a
       # restore is probed here, where MongoDB already runs.
       - name: Probe the GridFS trash under a snapshot restore (python)
@@ -1044,7 +1044,7 @@ jobs:
           --host typescript --facet core --facet http
           --allow-skip chroma,lancedb,nextcloud,notion,postgres,qdrant,tidb_filesystem
           --emit-dir "$GITHUB_WORKSPACE/emit/typescript"
-          -- pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --strict
+          -- pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts --suite shared --strict
       - name: Probe the GridFS trash under a snapshot restore (typescript)
         if: matrix.shard == 0
         working-directory: integ
@@ -1058,11 +1058,11 @@ jobs:
           retention-days: 1
 
   # The shared battery jobs prove each language passes its own battery. This one
-  # runs both emitters and diffs them case by case, so a change that breaks
-  # the same way in both languages still fails. Shared targets only (ram,
-  # disk, redis) — the credentialed targets stay in their own jobs.
+  # diffs their emitted output case by case; each runner also checks goldens,
+  # so a change that breaks the same way in both languages still fails.
   # The battery jobs keep every target's raw outputs, so parity is a diff of
   # those files rather than both hosts running these targets a second time.
+  # The six focused backend targets keep the same selected rows on both hosts.
   # Include nested mounts and the search-only command service so native
   # delegation and dispatcher-backed composition are checked across hosts.
   integ-shared-parity:
@@ -1086,6 +1086,7 @@ jobs:
         run: >-
           python3 integ/runners/parity.py --from emit
           ram disk disk-host-links disk-capacity-permissions redis ram-history ram-nested command-service
+          sharepoint sharepoint-prefix onedrive box gdrive gdrive-folder
 
   # One job per backend family with both hosts inside it. The postgres, chroma,
   # qdrant and mongodb fleet is the expensive part and was being started twice,

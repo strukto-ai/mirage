@@ -1,0 +1,202 @@
+name: Shared backends full
+
+permissions:
+  contents: read
+
+"on":
+  pull_request:
+    paths:
+      # Implementation changes can affect backend I/O through shared execution.
+      # Keep this broad; generic case-only formatting changes stay on RAM/disk.
+      - python/mirage/**
+      - typescript/packages/*/src/**
+      - rust/**
+      - python/pyproject.toml
+      - python/uv.lock
+      - typescript/**/package.json
+      - typescript/pnpm-lock.yaml
+      - typescript/pnpm-workspace.yaml
+      - typescript/**/tsconfig*.json
+      - typescript/packages/*/scripts/**
+      - integ/runners/**
+      - integ/ci/**
+      - integ/targets.json
+      - integ/package.json
+      - integ/server/**
+      - integ/prisma/**
+      - integ/fixtures/**
+      - integ/truth/**
+      - integ/vfs/**
+      - integ/crossmount/**
+      - integ/session/**
+      - integ/lifecycle/**
+      - integ/unix/write/**
+      - integ/unix/consistency/**
+      - integ/unix/office/**
+      - integ/unix/meta_overlay/**
+      - integ/unix/truncate/**
+      - integ/unix/rm/**
+      - integ/unix/rmdir/**
+      - integ/unix/arch/**
+      - integ/unix/readfail/**
+      - integ/unix/df/**
+      - integ/unix/awk/redirect.json
+      - integ/unix/awk/getline.json
+      - integ/unix/awk/bytes.json
+      - integ/unix/sed/read.json
+      - integ/unix/sed/write.json
+      - integ/unix/sed/inplace.json
+      - integ/unix/sed/bytes.json
+      - integ/unix/grep/**
+      - integ/unix/capacity/**
+      - integ/unix/cat/**
+      - integ/unix/cmp/**
+      - integ/unix/cp/**
+      - integ/unix/diff/**
+      - integ/unix/find/**
+      - integ/unix/gunzip/**
+      - integ/unix/gzip/**
+      - integ/unix/head/**
+      - integ/unix/ln/**
+      - integ/unix/ls/**
+      - integ/unix/mkdir/**
+      - integ/unix/mv/**
+      - integ/unix/overwrite/**
+      - integ/unix/readlink/**
+      - integ/unix/realpath/**
+      - integ/unix/rg/**
+      - integ/unix/split/**
+      - integ/unix/stat/**
+      - integ/unix/tail/**
+      - integ/unix/tar/**
+      - integ/unix/tee/**
+      - integ/unix/touch/**
+      - integ/unix/unlink/**
+      - integ/unix/unzip/**
+      - integ/unix/xattr/**
+      - integ/unix/zcat/**
+      - integ/unix/zgrep/**
+      - integ/unix/zip/**
+      - integ/unix/du/**
+      - integ/unix/guard/**
+      - integ/unix/meta/**
+      - integ/unix/mtime/**
+      - integ/unix/root/**
+      - integ/unix/slash/**
+      - integ/unix/sym/**
+      - integ/unix/tree/**
+      - integ/unix/sort/basic.json
+      - integ/unix/wc/basic.json
+      - integ/bash/assign/**
+      - integ/bash/command/**
+      - integ/bash/cwd/**
+      - integ/bash/exec/**
+      - integ/bash/glob/**
+      - integ/bash/heredoc/**
+      - integ/bash/midglob/**
+      - integ/bash/pipe/**
+      - integ/bash/relative/**
+      - integ/bash/relspell/**
+      - integ/bash/relword/**
+      - integ/bash/source/**
+      - integ/bash/redirect/**
+      - .github/workflows/test_integ.yml
+      - .github/workflows/test_shared_full.yml
+      - .github/actions/integ-battery-setup/**
+      - .github/actions/setup-node-pnpm/**
+      - .github/actions/setup-uv/**
+      - .github/actions/setup-rust/**
+      - '!python/**/README.md'
+      - '!typescript/**/README.md'
+      - '!rust/**/README.md'
+      - '!integ/server/**/README.md'
+  schedule:
+    - cron: '43 19 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: shared-backends-full-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_HTTP_TIMEOUT: 120
+  MEM0_TELEMETRY: "False"
+  TSX_V8_FLAGS: --wasm-wrapper-tiering-budget=1000000000
+
+jobs:
+  shared-full:
+    name: Shared full (${{ matrix.target }}, ${{ matrix.host }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [sharepoint, sharepoint-prefix, onedrive, box, gdrive, gdrive-folder]
+        host: [python, typescript]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/integ-battery-setup
+        with:
+          build-packages: ${{ matrix.host == 'typescript' && 'true' || 'false' }}
+      - name: Create output directory
+        env:
+          HOST: ${{ matrix.host }}
+        run: mkdir -p "emit/$HOST"
+      - name: Full backend battery (python)
+        if: matrix.host == 'python'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: >-
+          ./python/.venv/bin/python integ/runners/python/main.py
+          --target "$TARGET" --strict --emit "$GITHUB_WORKSPACE/emit/python/$TARGET.json"
+      - name: Full backend battery (typescript)
+        if: matrix.host == 'typescript'
+        working-directory: integ
+        env:
+          TARGET: ${{ matrix.target }}
+        run: >-
+          pnpm exec tsx $TSX_V8_FLAGS runners/typescript/main.ts
+          --target "$TARGET" --strict --emit "$GITHUB_WORKSPACE/emit/typescript/$TARGET.json"
+      - name: Keep full battery outputs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: shared-full-${{ matrix.host }}-${{ matrix.target }}
+          path: emit/${{ matrix.host }}
+          if-no-files-found: error
+          retention-days: 1
+
+  shared-full-parity:
+    needs: shared-full
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: shared-full-python-*
+          path: emit/python
+          merge-multiple: true
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: shared-full-typescript-*
+          path: emit/typescript
+          merge-multiple: true
+      - name: Diff full backend outputs
+        run: >-
+          python3 integ/runners/parity.py --from emit
+          sharepoint sharepoint-prefix onedrive box gdrive gdrive-folder
+
+  shared-full-gate:
+    if: ${{ always() }}
+    needs: [shared-full, shared-full-parity]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require full golden and parity checks
+        env:
+          BATTERY_RESULT: ${{ needs.shared-full.result }}
+          PARITY_RESULT: ${{ needs.shared-full-parity.result }}
+        run: |
+          test "$BATTERY_RESULT" = success
+          test "$PARITY_RESULT" = success
