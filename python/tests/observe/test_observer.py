@@ -438,9 +438,15 @@ def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
         timestamp=start + 5,
         duration_ms=12,
     )
-    asyncio.run(obs.log_command("cat /d/a", "s1", line="L"))
+    asyncio.run(obs.log_command("cat /d/a", "s1", cwd="/d", line="L"))
     clock.advance(1)
-    asyncio.run(obs.log_result(IOResult(exit_code=1), [rec], "s1", line="L"))
+    io = IOResult(
+        stdout=b"x" * 20000,
+        stderr=b"cat: /d/b: No such file\n",
+        exit_code=1,
+    )
+    # The line ends in another cwd; the span keeps the one it started in.
+    asyncio.run(obs.log_result(io, [rec], "s1", cwd="/", line="L"))
     call, line = exporter.get_finished_spans()
     assert (line.name, dict(line.attributes or {})) == (
         "command",
@@ -449,6 +455,9 @@ def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
             "mirage.session.id": "s1",
             "mirage.command": "cat /d/a",
             "mirage.exit_code": 1,
+            "mirage.stdout": "x" * observer_module.TRACE_CONTENT_MAX_BYTES,
+            "mirage.stderr": "cat: /d/b: No such file\n",
+            "mirage.cwd": "/d",
         },
     )
     assert (line.start_time, line.end_time) == (
@@ -469,6 +478,70 @@ def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
         (start - 7) * 1_000_000,
         (start + 5) * 1_000_000,
     )
+    # The history keeps its own, shorter cut.
+    results = [e for e in asyncio.run(obs.events()) if e["type"] == "result"]
+    assert [len(e["stdout"]) for e in results] == [4096]
+
+
+def test_span_output_is_cut_at_the_bytes_it_is_told_to(monkeypatch):
+    monkeypatch.setenv(observer_module.TRACE_CONTENT_MAX_BYTES_ENV, "5")
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(
+        observer_module, "_tracer", lambda: provider.get_tracer("t")
+    )
+    obs = Observer(store=RAMObserverStore(), clock=ManualClock(start=NEW_YEAR))
+    asyncio.run(obs.log_command("echo", "s1", cwd="/", line="L"))
+    # Two bytes a character: five bytes end inside the third.
+    io = IOResult(stdout="ééé".encode())
+    asyncio.run(obs.log_result(io, [], "s1", cwd="/", line="L"))
+    [line] = exporter.get_finished_spans()
+    assert (line.attributes or {})["mirage.stdout"] == "éé�"
+
+
+def test_spans_leave_out_output_and_vfs_calls_when_told_to(monkeypatch):
+    monkeypatch.setenv(observer_module.TRACE_CONTENT_ENV, "false")
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    monkeypatch.setattr(
+        observer_module, "_tracer", lambda: provider.get_tracer("t")
+    )
+    obs = Observer(
+        store=RAMObserverStore(),
+        clock=ManualClock(start=NEW_YEAR),
+        workspace_id="w",
+    )
+    rec = OpRecord(
+        op="read",
+        path="/d/a",
+        source="s3",
+        bytes=6,
+        timestamp=int(NEW_YEAR * 1000),
+        duration_ms=1,
+    )
+    asyncio.run(obs.log_command("cat /d/a", "s1", cwd="/d", line="L"))
+    io = IOResult(stdout=b"secret\n")
+    asyncio.run(obs.log_result(io, [rec], "s1", cwd="/d", line="L"))
+    assert [
+        (s.name, dict(s.attributes or {}))
+        for s in exporter.get_finished_spans()
+    ] == [
+        (
+            "command",
+            {
+                "mirage.workspace.id": "w",
+                "mirage.session.id": "s1",
+                "mirage.command": "cat /d/a",
+                "mirage.exit_code": 0,
+                "mirage.cwd": "/d",
+            },
+        )
+    ]
+    # The history itself still keeps the output.
+    results = [e for e in asyncio.run(obs.events()) if e["type"] == "result"]
+    assert [e["stdout"] for e in results] == ["secret\n"]
 
 
 def test_bash_history_lists_lines_in_the_order_they_ended():

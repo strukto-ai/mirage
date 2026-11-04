@@ -15,6 +15,7 @@
 import hashlib
 import json
 import logging
+import os
 from dataclasses import replace
 from typing import Any
 from urllib.parse import quote
@@ -52,6 +53,36 @@ _NS_PER_MS = 1_000_000
 
 TRACER_NAME = "mirage.observe"
 
+# Set to ``false`` or ``0`` to keep what lines touched out of their spans:
+# no output on ``command``, no ``vfs.<call>`` spans. Named after
+# OpenTelemetry's ``OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT``.
+TRACE_CONTENT_ENV = "MIRAGE_TRACE_CAPTURE_CONTENT"
+
+# How many bytes of each of a line's stdout and stderr its ``command``
+# span keeps: ``TRACE_CONTENT_MAX_BYTES`` unless this sets a positive
+# whole number. Named after Langfuse's ``LANGFUSE_MAX_EVENT_SIZE_BYTES``.
+TRACE_CONTENT_MAX_BYTES_ENV = "MIRAGE_TRACE_CONTENT_MAX_BYTES"
+
+# 16 KiB a stream: both stay within half of the 64 KB a Cloudflare
+# Workers span holds for all its attributes, and any backend's field.
+TRACE_CONTENT_MAX_BYTES = 16 * 1024
+
+
+def _env_var(name: str) -> str:
+    return os.environ.get(name, "").strip()
+
+
+def _trace_content() -> bool:
+    """Whether spans carry content: on unless ``TRACE_CONTENT_ENV``
+    turns it off."""
+    return _env_var(TRACE_CONTENT_ENV).lower() not in ("false", "0")
+
+
+def _trace_content_max_bytes() -> int:
+    value = _env_var(TRACE_CONTENT_MAX_BYTES_ENV)
+    limit = int(value) if value.isdigit() else 0
+    return limit if limit > 0 else TRACE_CONTENT_MAX_BYTES
+
 
 def _session_file(session: str) -> str:
     """The name a session's log goes under in each day: its id
@@ -80,34 +111,52 @@ def _trace_line(
     workspace_id: str | None,
     session: str,
     command: str,
+    cwd: str | None,
     span: tuple[int, int],
     exit_code: int,
+    output: tuple[bytes, bytes],
     records: list[OpRecord],
 ) -> None:
     """Send a finished line to OpenTelemetry: a ``command`` span over its
-    run, and under it a ``vfs.<call>`` span for each call it made to a
-    mount.
+    run, with the cwd it started in and the start of its stdout and
+    stderr, and under it a ``vfs.<call>`` span for each call it made to a
+    mount. ``TRACE_CONTENT_ENV`` leaves out the output and the calls.
 
     Args:
         workspace_id (str | None): the workspace the line ran in.
         session (str): the session it ran in.
         command (str): the typed line.
+        cwd (str | None): the session cwd it started in.
         span (tuple[int, int]): its start and end, epoch milliseconds.
         exit_code (int): how it ended.
+        output (tuple[bytes, bytes]): its stdout and stderr as it wrote
+            them.
         records (list[OpRecord]): the calls it made.
     """
     tracer = _tracer()
+    content = _trace_content()
     attributes: dict[str, str | int] = {
         "mirage.session.id": session,
         "mirage.command": command,
         "mirage.exit_code": exit_code,
     }
+    if content:
+        # A cut through a character decodes as U+FFFD.
+        limit = _trace_content_max_bytes()
+        attributes["mirage.stdout"] = output[0][:limit].decode(
+            errors="replace"
+        )
+        attributes["mirage.stderr"] = output[1][:limit].decode(
+            errors="replace"
+        )
     if workspace_id is not None:
         attributes["mirage.workspace.id"] = workspace_id
+    if cwd is not None:
+        attributes["mirage.cwd"] = cwd
     line = tracer.start_span(
         "command", start_time=span[0] * _NS_PER_MS, attributes=attributes
     )
-    if line.is_recording():
+    if content and line.is_recording():
         parent = trace.set_span_in_context(line)
         for rec in records:
             call = tracer.start_span(
@@ -208,7 +257,8 @@ class Observer:
         self._clock: Clock = clock if clock is not None else SystemClock()
         self._workspace_id = workspace_id
         self._newest: dict[str, int | None] = {}
-        self._started: dict[str, tuple[int, float, str]] = {}
+        # Each open line's start (epoch ms, then monotonic), text and cwd.
+        self._started: dict[str, tuple[int, float, str, str | None]] = {}
 
     def _now_ms(self) -> int:
         """The clock's wall time in epoch milliseconds, an entry's stamp."""
@@ -291,7 +341,7 @@ class Observer:
         began = self._clock.monotonic()
         await self._log(entry)
         if line is not None:
-            self._started[line] = (entry.timestamp, began, command)
+            self._started[line] = (entry.timestamp, began, command, cwd)
 
     async def log_result(
         self,
@@ -325,6 +375,8 @@ class Observer:
             await self.log_op(rec, session, cwd, line)
         stdout = await io.materialize_stdout()
         stderr = await io.materialize_stderr()
+        out = stdout.decode(errors="replace")[:STDOUT_TRUNCATE]
+        err = stderr.decode(errors="replace")[:STDOUT_TRUNCATE]
         now = self._now_ms()
         took = (
             None
@@ -336,8 +388,10 @@ class Observer:
                 self._workspace_id,
                 session,
                 started[2],
+                started[3],
                 (started[0], started[0] + took),
                 io.exit_code,
+                (stdout, stderr),
                 op_records,
             )
         await self._log(
@@ -348,8 +402,8 @@ class Observer:
                 cwd=cwd,
                 parent=line,
                 exit_code=io.exit_code,
-                stdout=stdout.decode(errors="replace")[:STDOUT_TRUNCATE],
-                stderr=stderr.decode(errors="replace")[:STDOUT_TRUNCATE],
+                stdout=out,
+                stderr=err,
                 duration_ms=took,
             )
         )

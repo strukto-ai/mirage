@@ -23,7 +23,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../io/types.ts'
 import { ManualClock } from '../utils/clock.ts'
 import { EVENT_COMMAND, LogEntry } from './log_entry.ts'
-import { Observer, logger } from './observer.ts'
+import {
+  Observer,
+  TRACE_CONTENT_ENV,
+  TRACE_CONTENT_MAX_BYTES,
+  TRACE_CONTENT_MAX_BYTES_ENV,
+  logger,
+} from './observer.ts'
 import { OpRecord } from './record.ts'
 import { RAMObserverStore } from './store.ts'
 
@@ -348,6 +354,12 @@ describe('a clock behind stored history', () => {
 })
 
 describe('a damaged history file', () => {
+  // A tracer provider registers once until it is disabled.
+  afterEach(() => {
+    trace.disable()
+    vi.unstubAllEnvs()
+  })
+
   it('costs only the torn line and the entry appended onto it', async () => {
     const store = new RAMObserverStore()
     const o = new Observer(store, new ManualClock(NEW_YEAR))
@@ -456,9 +468,15 @@ describe('a damaged history file', () => {
       timestamp: start + 5,
       durationMs: 12,
     })
-    await o.logCommand('cat /d/a', 's1', undefined, 'L')
+    await o.logCommand('cat /d/a', 's1', '/d', 'L')
     clock.advance(1)
-    await o.logResult(new IOResult({ exitCode: 1 }), [rec], 's1', undefined, 'L')
+    const io = new IOResult({
+      stdout: new TextEncoder().encode('x'.repeat(20000)),
+      stderr: new TextEncoder().encode('cat: /d/b: No such file\n'),
+      exitCode: 1,
+    })
+    // The line ends in another cwd; the span keeps the one it started in.
+    await o.logResult(io, [rec], 's1', '/', 'L')
     const [line, call] = spans
     expect([line?.name, line?.options.attributes, line?.options.startTime, line?.end]).toEqual([
       'command',
@@ -466,7 +484,10 @@ describe('a damaged history file', () => {
         'mirage.session.id': 's1',
         'mirage.command': 'cat /d/a',
         'mirage.exit_code': 1,
+        'mirage.stdout': 'x'.repeat(TRACE_CONTENT_MAX_BYTES),
+        'mirage.stderr': 'cat: /d/b: No such file\n',
         'mirage.workspace.id': 'w',
+        'mirage.cwd': '/d',
       },
       start,
       start + 1000,
@@ -478,6 +499,66 @@ describe('a damaged history file', () => {
       start + 5,
     ])
     expect(call?.parent).toBeDefined()
+    // The history keeps its own, shorter cut.
+    const results = (await o.events()).filter((e) => e.type === 'result')
+    expect(results.map((e) => String(e.stdout).length)).toEqual([4096])
+  })
+
+  it('cuts span output at the bytes it is told to', async () => {
+    vi.stubEnv(TRACE_CONTENT_MAX_BYTES_ENV, '5')
+    const spans: SpanOptions[] = []
+    const fake = {
+      startSpan(_name: string, options: SpanOptions = {}) {
+        spans.push(options)
+        return { isRecording: () => true, end: () => undefined } as unknown as Span
+      },
+    } as unknown as Tracer
+    trace.setGlobalTracerProvider({ getTracer: () => fake })
+    const o = new Observer(new RAMObserverStore(), new ManualClock(NEW_YEAR))
+    await o.logCommand('echo', 's1', '/', 'L')
+    // Two bytes a character: five bytes end inside the third.
+    const io = new IOResult({ stdout: new TextEncoder().encode('ééé') })
+    await o.logResult(io, [], 's1', '/', 'L')
+    expect(spans[0]?.attributes?.['mirage.stdout']).toBe('éé�')
+  })
+
+  it('keeps output and vfs calls out of spans when told to', async () => {
+    vi.stubEnv(TRACE_CONTENT_ENV, 'false')
+    const spans: { name: string; options: SpanOptions }[] = []
+    const fake = {
+      startSpan(name: string, options: SpanOptions = {}) {
+        spans.push({ name, options })
+        return { isRecording: () => true, end: () => undefined } as unknown as Span
+      },
+    } as unknown as Tracer
+    trace.setGlobalTracerProvider({ getTracer: () => fake })
+    const o = new Observer(new RAMObserverStore(), new ManualClock(NEW_YEAR), 'w')
+    const rec = new OpRecord({
+      op: 'read',
+      path: '/d/a',
+      source: 's3',
+      bytes: 6,
+      timestamp: NEW_YEAR * 1000,
+      durationMs: 1,
+    })
+    await o.logCommand('cat /d/a', 's1', '/d', 'L')
+    const io = new IOResult({ stdout: new TextEncoder().encode('secret\n') })
+    await o.logResult(io, [rec], 's1', '/d', 'L')
+    expect(spans.map((s) => [s.name, s.options.attributes])).toEqual([
+      [
+        'command',
+        {
+          'mirage.session.id': 's1',
+          'mirage.command': 'cat /d/a',
+          'mirage.exit_code': 0,
+          'mirage.workspace.id': 'w',
+          'mirage.cwd': '/d',
+        },
+      ],
+    ])
+    // The history itself still keeps the output.
+    const results = (await o.events()).filter((e) => e.type === 'result')
+    expect(results.map((e) => e.stdout)).toEqual(['secret\n'])
   })
 
   it('lists lines in the order they ended, each ended once', async () => {
