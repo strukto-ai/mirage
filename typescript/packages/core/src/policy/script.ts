@@ -198,7 +198,9 @@ function stringEnd(source: string, start: number): number {
   while (end < source.length) {
     if (source.startsWith(quote, end)) return end + quote.length
     if (source[end] === '\n' && quote.length === 1) return end
-    if (source[end] === '\\') end += 2
+    // An escape takes the character after it, but not an f-string's brace,
+    // which still opens a field.
+    if (source[end] === '\\') end += fields && source[end + 1] === '{' ? 1 : 2
     else if (fields && source.startsWith('{{', end)) end += 2
     else if (fields && source[end] === '{') end = fieldEnd(source, end + 1)
     else end += 1
@@ -208,7 +210,9 @@ function stringEnd(source: string, start: number): number {
 
 /**
  * Where an f-string's replacement field whose code starts at `start` ends:
- * past the brace that closes it. Mirrors the Python `_field_end`.
+ * past the brace that closes it. Its expression is code, strings and
+ * comments skipped; a `!` conversion or `:` format spec at its top level is
+ * text (`specEnd`). Mirrors the Python `_field_end`.
  */
 function fieldEnd(source: string, start: number): number {
   let depth = 0
@@ -219,12 +223,36 @@ function fieldEnd(source: string, start: number): number {
       end = stringEnd(source, end)
       continue
     }
+    if (char === '#') {
+      end = source.indexOf('\n', end)
+      if (end === -1) return source.length
+      continue
+    }
+    if (depth === 0 && (char === ':' || (char === '!' && !source.startsWith('!=', end)))) {
+      return specEnd(source, end + 1)
+    }
     if ('([{'.includes(char)) depth += 1
     else if (')]}'.includes(char)) {
       if (depth === 0) return end + 1
       depth -= 1
     }
     end += 1
+  }
+  return source.length
+}
+
+/**
+ * Where a replacement field whose conversion or format spec starts at `start`
+ * ends: past the brace that closes it. The spec is text, so a fill such as
+ * `[` or `'` opens nothing; only a nested field's braces count. Mirrors the
+ * Python `_spec_end`.
+ */
+function specEnd(source: string, start: number): number {
+  let end = start
+  while (end < source.length) {
+    if (source[end] === '{') end = fieldEnd(source, end + 1)
+    else if (source[end] === '}') return end + 1
+    else end += 1
   }
   return source.length
 }

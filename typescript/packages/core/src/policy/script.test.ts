@@ -917,6 +917,10 @@ describe('programSource', () => {
     'RULE = f"Rules: {"""no deletes"""}"\n',
     'W = 3\nRULE = f"{1:{W}}" + f"{{literal}}"\n',
     'if"x" in "xy":\n    pass\n',
+    'RULE = f"{1:[>4}"\n',
+    'RULE = f"{1:\'>4}"\n',
+    'RULE = f"""{1 # [\n}"""\n',
+    'RULE = f"{1!r:>4}" + f"{1 != 2}" + rf"\\{1}"\n',
   ])('finds a definition after %j', (head) => {
     const source = `${head}async def pre_command(ctx):\n    return None\n`
     expect(programSource(source, 'preCommand')).toContain('await pre_command(')

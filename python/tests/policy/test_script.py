@@ -554,6 +554,10 @@ def test_a_definition_in_a_string_or_a_comment_is_not_the_programs():
         'RULE = f"Rules: {"""no deletes"""}"\n',
         'W = 3\nRULE = f"{1:{W}}" + f"{{literal}}"\n',
         'if"x" in "xy":\n    pass\n',
+        'RULE = f"{1:[>4}"\n',
+        'RULE = f"{1:\'>4}"\n',
+        'RULE = f"""{1 # [\n}"""\n',
+        'RULE = f"{1!r:>4}" + f"{1 != 2}" + rf"\\{1}"\n',
     ],
 )
 def test_a_definition_after_an_f_string_is_still_found(head):
