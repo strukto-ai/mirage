@@ -40,17 +40,13 @@ const driver = new PostgresSqlDriver('postgres://user:pass@localhost:5432/app')
 const sql = new SqlVFS({ driver })
 ```
 
-The tables hold the files alone, laid out as
+The tables are laid out as
 [AgentFS](https://github.com/tursodatabase/agentfs)'s:
 
 - `fs_inode`: one row per file and directory, with its size and mtime
 - `fs_dentry`: each entry's name under its parent directory
 - `fs_data`: a file's bytes, in rows of the database's chunk size (4 KiB unless the database says otherwise)
 - `fs_config`: the chunk size
-
-A path's mode, owner and symlinks are the workspace namespace's, as on any
-mount that keeps no attributes, so `chmod` and `ln -s` write none of these
-tables.
 
 One database holds one filesystem. The Python mount reads and writes the same
 tables, so the two runtimes on one file serve one filesystem.

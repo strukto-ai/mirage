@@ -43,9 +43,8 @@ from mirage.vfs.sql.types import SqlStatement
 
 class SqlSnapshot(TypedDict):
     """What a snapshot keeps of a sql mount: each file's bytes and each
-    directory, by mount path, with the mtime of each. A path's mode and
-    owner are the namespace's, which the workspace snapshots itself.
-    Mirrors TypeScript's ``SqlSnapshot``."""
+    directory, by mount path, with the mtime of each. Mirrors
+    TypeScript's ``SqlSnapshot``."""
 
     files: dict[str, bytes]
     dirs: list[str]

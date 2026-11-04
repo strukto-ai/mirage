@@ -53,14 +53,11 @@ from mirage.vfs.sql.types import SqlDriver
 class SqlVFS(BaseVFS):
     """A filesystem kept in SQL tables, over whatever driver it is given.
 
-    The tables hold the files alone, laid out as AgentFS's: an inode per
-    file and directory, an entry naming each under its parent, and a
-    file's bytes in rows of the database's chunk size. A path's mode,
-    owner and symlinks are the namespace's, and a session's env and cwd
-    the workspace store's, as on any mount that keeps no attributes; the
-    mount answers no ``setattr``. Each op resolves its path in one query
-    and lands its change in one transaction. One database holds one
-    filesystem. Mirrors TypeScript's ``SqlVFS``.
+    The tables are laid out as AgentFS's: an inode per file and
+    directory, an entry naming each under its parent, and a file's bytes
+    in rows of the database's chunk size. Each op resolves its path in
+    one query and lands its change in one transaction. One database holds
+    one filesystem. Mirrors TypeScript's ``SqlVFS``.
     """
 
     name: str = VFSName.SQL

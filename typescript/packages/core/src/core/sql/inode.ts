@@ -83,8 +83,7 @@ export function isoOf(seconds: number, nanoseconds: number): string {
 
 /**
  * What `stat` answers for the inode at mount path `p`: its type, size and
- * mtime. The namespace overlay adds a mode, owner or atime set on the path.
- * Mirrors Python's `inode_stat`.
+ * mtime. Mirrors Python's `inode_stat`.
  */
 export function inodeStat(p: string, node: Inode): FileStat {
   const common = { name: gnuBasename(p), modified: isoOf(node.mtime, node.mtimeNsec) }

@@ -4,11 +4,9 @@ icon: database
 description: Store workspace files in SQL tables.
 ---
 
-SQL stores workspace files in a database's tables. The files last as long as
-the database does. The tables hold the files alone, laid out as
-[AgentFS](https://github.com/tursodatabase/agentfs)'s: a path's mode, owner and
-symlinks are the [namespace](/home/infrastructure/namespace)'s, and a session's env and cwd its
-[workspace store](/home/infrastructure/sessions)'s. One database holds one filesystem.
+SQL stores workspace files in a database's tables, laid out as
+[AgentFS](https://github.com/tursodatabase/agentfs)'s. The files last as long
+as the database does. One database holds one filesystem.
 
 ## Configuration
 

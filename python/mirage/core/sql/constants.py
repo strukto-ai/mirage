@@ -24,10 +24,7 @@ ROOT_INO = 1
 # (``fs_config``), and the ops read and write rows of that size.
 DEFAULT_CHUNK_SIZE = 4096
 
-# What ``fs_inode.mode`` holds: the type bits alone. A path's
-# permissions, owner and other times are the namespace overlay's, as on
-# any mount that keeps no attributes, so the mount stores only its tree
-# and bytes.
+# What ``fs_inode.mode`` holds: the type bits alone.
 DIR = S_IFDIR
 FILE = S_IFREG
 
@@ -58,12 +55,10 @@ _SEED = (
 # The tables a database holds a filesystem in, by dialect, laid out as
 # AgentFS's: an inode is one file or directory, with its size and mtime;
 # a dentry names it under its parent; a file's bytes are its ``fs_data``
-# rows, ``chunk_size`` bytes each. The rest of what a path carries (mode,
-# owner, atime, symlinks) is Mirage's namespace, and a session's env and
-# cwd its workspace store, so neither is here. The index on
-# ``fs_dentry(ino)`` lets a removal ask whether any entry still names an
-# inode without reading others. In Postgres the root is inode 1, so the
-# generated numbers start past it.
+# rows, ``chunk_size`` bytes each. The index on ``fs_dentry(ino)`` lets a
+# removal ask whether any entry still names an inode without reading
+# others. In Postgres the root is inode 1, so the generated numbers start
+# past it.
 SCHEMA: dict[SqlDialect, tuple[str, ...]] = {
     SqlDialect.SQLITE: (
         "CREATE TABLE IF NOT EXISTS fs_config"
