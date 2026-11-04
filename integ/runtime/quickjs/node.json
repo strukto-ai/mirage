@@ -242,7 +242,7 @@
     },
     {
       "id": "stdin_arrives_as_it_is_written",
-      "note": "A data listener sees the first chunk while the producer is still writing; one that waited for the end of input would hit the line's limit. An async loop reads only as it asks, so breaking out of one over an endless pipe ends the run, and a loop begun after the end finishes. Every reader takes from one position, and base64 and UTF-8 text carry what a chunk splits. A chunk a readable listener is told of waits for read(), and input flows only once a data listener or resume() asks for it, and keeps flowing after a once('data') listener is gone, as node's does.",
+      "note": "A data listener sees the first chunk while the producer is still writing; one that waited for the end of input would hit the line's limit. An async loop reads only as it asks, so breaking out of one over an endless pipe ends the run, and a loop begun after the end finishes. Every reader takes from one position, and base64 and UTF-8 text carry what a chunk splits. A chunk a readable listener is told of waits for read(), and input flows only once a data listener or resume() asks for it, and keeps flowing after a once('data') listener is gone; when the last readable listener goes, input flows on only for a data listener still on, and otherwise waits for the next reader, as node's does.",
       "world": {
         "runtimes": [
           "quickjs",
@@ -372,6 +372,22 @@
           "expect": {
             "exit": 0,
             "stdout": "end after 1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(printf 'a\\n'; sleep 0.2; printf 'b\\n') | node -e \"process.stdin.once('data', () => {}); process.stdin.once('readable', () => { const first = String(process.stdin.read()); setTimeout(() => { let rest = ''; process.stdin.on('data', (c) => (rest += c)).on('end', () => console.log(JSON.stringify([first, rest]))) }, 400) })\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"a\\n\",\"b\\n\"]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(printf 'a\\n'; sleep 0.2; printf 'b\\n') | node -e \"let got = ''; const r = () => { let c; while ((c = process.stdin.read()) !== null) got += c }; process.stdin.on('readable', r); setTimeout(() => { process.stdin.off('readable', r); process.stdin.on('data', (c) => (got += c)).on('end', () => console.log(JSON.stringify(got))) }, 100)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"a\\nb\\n\"\n",
             "stderr": ""
           }
         }

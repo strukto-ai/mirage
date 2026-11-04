@@ -957,6 +957,7 @@
   // which then outlasts the listener, so a once('data') reader still sees
   // the end.
   let flowing = null
+  let readableListening = false
   let iterating = false
   let finished = false
   const finish = () => {
@@ -1019,6 +1020,11 @@
     input,
     () => {
       const readable = events.has('readable')
+      // As node's, once the last readable listener has gone, the stream
+      // flows on only for a data listener still on, and otherwise keeps
+      // its input for the next reader.
+      if (readableListening && !readable) flowing = events.has('data') ? true : null
+      readableListening = readable
       if (iterating || finished || (readable ? buffered !== null : flowing !== true)) {
         return false
       }
