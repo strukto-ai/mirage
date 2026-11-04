@@ -54,17 +54,43 @@ NODE_SHIM = r""";(function (argv, script) {
   // WASI's errno numbers, the ones std.open and os report, by node's
   // code and the number node reports on Linux.
   const CODES = {
+    1: ['E2BIG', 7],
     2: ['EACCES', 13],
+    6: ['EAGAIN', 11],
     8: ['EBADF', 9],
+    10: ['EBUSY', 16],
+    11: ['ECANCELED', 125],
+    19: ['EDQUOT', 122],
     20: ['EEXIST', 17],
+    21: ['EFAULT', 14],
+    22: ['EFBIG', 27],
+    27: ['EINTR', 4],
     28: ['EINVAL', 22],
     29: ['EIO', 5],
     31: ['EISDIR', 21],
+    32: ['ELOOP', 40],
+    33: ['EMFILE', 24],
+    34: ['EMLINK', 31],
+    37: ['ENAMETOOLONG', 36],
+    41: ['ENFILE', 23],
+    43: ['ENODEV', 19],
     44: ['ENOENT', 2],
+    48: ['ENOMEM', 12],
+    51: ['ENOSPC', 28],
+    52: ['ENOSYS', 38],
     54: ['ENOTDIR', 20],
     55: ['ENOTEMPTY', 39],
+    58: ['ENOTSUP', 95],
+    59: ['ENOTTY', 25],
+    60: ['ENXIO', 6],
+    61: ['EOVERFLOW', 75],
     63: ['EPERM', 1],
+    64: ['EPIPE', 32],
     69: ['EROFS', 30],
+    70: ['ESPIPE', 29],
+    73: ['ETIMEDOUT', 110],
+    74: ['ETXTBSY', 26],
+    75: ['EXDEV', 18],
   }
   function failure(errno, syscall, file) {
     const text = std.strerror(errno)
@@ -232,11 +258,16 @@ NODE_SHIM = r""";(function (argv, script) {
       }
       return new Buffer(value)
     }
-    static alloc(size, fill) {
+    static alloc(size, fill, encoding) {
       const b = new Buffer(size)
-      if (fill !== undefined) {
-        b.fill(typeof fill === 'string' ? fill.charCodeAt(0) : fill)
-      }
+      if (fill === undefined) return b
+      if (typeof fill === 'number') return b.fill(fill & 255)
+      const bytes =
+        typeof fill === 'string'
+          ? bytesOf(fill, encoding === undefined ? 'utf8' : encoding)
+          : view(fill)
+      if (bytes.length === 0) return b
+      for (let i = 0; i < size; i++) b[i] = bytes[i % bytes.length]
       return b
     }
     static isBuffer(value) {
@@ -408,7 +439,13 @@ NODE_SHIM = r""";(function (argv, script) {
           keys.push(['[' + s.toString() + ']', s])
         }
       }
-      parts = keys.map(([label, k]) => label + ': ' + at(value[k]))
+      const shown = (k) => {
+        const d = Object.getOwnPropertyDescriptor(value, k)
+        if (d === undefined || 'value' in d) return at(value[k])
+        if (d.get && d.set) return '[Getter/Setter]'
+        return d.get ? '[Getter]' : '[Setter]'
+      }
+      parts = keys.map(([label, k]) => label + ': ' + shown(k))
       if (error) start = errorText(value) + ' '
       else if (Object.getPrototypeOf(value) === null) {
         start = '[Object: null prototype] '
@@ -439,6 +476,7 @@ NODE_SHIM = r""";(function (argv, script) {
     return show(value, depth === null ? Infinity : depth, [], 0)
   }
   function format(args) {
+    if (args.length === 1 && typeof args[0] === 'string') return args[0]
     const formatted = typeof args[0] === 'string'
     let at = 0
     let head = ''
@@ -562,6 +600,7 @@ NODE_SHIM = r""";(function (argv, script) {
       return s.slice(0, i).replace(/\/+$/, '') || '/'
     },
     basename(p, ext) {
+      if (ext !== undefined && String(p) === ext) return ''
       const s = String(p).replace(/\/+$/, '')
       let b = s.slice(s.lastIndexOf('/') + 1)
       if (ext !== undefined && b !== ext && b.endsWith(ext)) {
@@ -608,13 +647,49 @@ NODE_SHIM = r""";(function (argv, script) {
 
   // fs, its synchronous calls over std and os, and the callback and
   // promise forms of each.
-  let stdinBytes = null
-  const stdin = () => {
-    if (stdinBytes === null) {
-      const bytes = new Uint8Array(std.in.readAsArrayBuffer())
-      stdinBytes = new Buffer(bytes.buffer)
+  // stdin, read as it arrives, at the one position fs.readFileSync(0),
+  // process.stdin and readline all take from.
+  let stdinEnded = false
+  function stdinChunk() {
+    if (stdinEnded) return null
+    const buffer = new ArrayBuffer(65536)
+    const n = os.read(0, buffer, 0, buffer.byteLength)
+    if (n <= 0) {
+      stdinEnded = true
+      return null
     }
-    return stdinBytes
+    return new Buffer(buffer, 0, n)
+  }
+  function stdinRest() {
+    const chunks = []
+    for (let c = stdinChunk(); c !== null; c = stdinChunk()) chunks.push(c)
+    return Buffer.concat(chunks)
+  }
+  // Text from chunks that may split a character: the bytes that end whole
+  // characters now, the rest with the next chunk, and all of it at null.
+  function textStream() {
+    let carry = new Uint8Array(0)
+    return (chunk) => {
+      let bytes = chunk === null ? carry : Buffer.concat([carry, chunk])
+      carry = new Uint8Array(0)
+      if (chunk !== null) {
+        let i = bytes.length
+        while (
+          i > 0 &&
+          bytes.length - i < 3 &&
+          (bytes[i - 1] & 0xc0) === 0x80
+        ) {
+          i--
+        }
+        const lead = i > 0 ? bytes[i - 1] : 0
+        const size = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1
+        if (i > 0 && size > bytes.length - i + 1) {
+          carry = bytes.slice(i - 1)
+          bytes = bytes.subarray(0, i - 1)
+        }
+      }
+      return utf8Text(bytes, 0, bytes.length)
+    }
   }
   const isStdin = (file) => file === 0 || file === '/dev/stdin'
   const encodingOf = (options) =>
@@ -680,7 +755,7 @@ NODE_SHIM = r""";(function (argv, script) {
     }
   }
   function readBytes(file) {
-    if (isStdin(file)) return stdin()
+    if (isStdin(file)) return stdinRest()
     if (kind(lookup(os.stat, 'open', file).mode) === os.S_IFDIR) {
       throw failure(31, 'read', file)
     }
@@ -701,15 +776,33 @@ NODE_SHIM = r""";(function (argv, script) {
       data = Buffer.from(data, encoding)
     }
     const f = open(file, flagOf(options, flag), 'open')
+    let error = null
     try {
       if (typeof data === 'string') f.puts(data)
       else if (ArrayBuffer.isView(data) || data instanceof ArrayBuffer) {
         const bytes = view(data)
         f.write(bytes.buffer, bytes.byteOffset, bytes.byteLength)
       } else f.puts(String(data))
-    } finally {
-      f.close()
+      if (f.error()) error = failure(29, 'write', file)
+    } catch (e) {
+      error = e
     }
+    const closed = f.close()
+    if (error === null && closed < 0) error = failure(-closed, 'write', file)
+    if (error !== null) throw error
+  }
+  // An entry, and what is in it first only when it is a directory with
+  // entries. remove takes a link itself, never what it points at, so the
+  // walk never leaves the tree through one, though stat follows links.
+  function removeTree(at, file) {
+    const r = os.remove(at)
+    if (r !== -55) return check(r, 'rm', file)
+    const [names, errno] = os.readdir(at)
+    if (errno !== 0) throw failure(errno, 'rm', file)
+    for (const name of names) {
+      if (name !== '.' && name !== '..') removeTree(posix.join(at, name), file)
+    }
+    check(os.remove(at), 'rm', file)
   }
   const fs = {
     readFileSync(file, options) {
@@ -738,8 +831,9 @@ NODE_SHIM = r""";(function (argv, script) {
     appendFileSync(file, data, options) {
       write(file, data, options, 'a')
     },
-    copyFileSync(from, to) {
-      write(to, readBytes(from), null, 'w')
+    copyFileSync(from, to, mode) {
+      const excl = (mode | 0) & 1
+      write(to, readBytes(from), null, excl ? 'wx' : 'w')
     },
     existsSync(file) {
       if (isStdin(file)) return true
@@ -800,33 +894,37 @@ NODE_SHIM = r""";(function (argv, script) {
       return first
     },
     rmdirSync(file) {
+      const [st, errno] = os.stat(String(file))
+      if (errno === 0 && kind(st.mode) !== os.S_IFDIR) {
+        throw failure(54, 'rmdir', file)
+      }
       check(os.remove(String(file)), 'rmdir', file)
     },
     unlinkSync(file) {
+      const [st, errno] = os.stat(String(file))
+      if (errno === 0 && kind(st.mode) === os.S_IFDIR) {
+        throw failure(31, 'unlink', file)
+      }
       check(os.remove(String(file)), 'unlink', file)
     },
     renameSync(from, to) {
       check(os.rename(String(from), String(to)), 'rename', from)
     },
     rmSync(file, options) {
-      const [st, errno] = lstat(String(file))
+      const at = String(file)
+      const [st, errno] = os.stat(at)
       if (errno !== 0) {
+        // A link to nothing stats as missing, and removes all the same.
+        if (errno === 44 && os.remove(at) === 0) return
         if (errno === 44 && options && options.force) return
         throw failure(errno, 'rm', file)
       }
-      if (kind(st.mode) === os.S_IFDIR) {
-        if (!(options && options.recursive)) {
-          const e = new Error(
-            'Path is a directory: rm returned EISDIR ' + file,
-          )
-          e.code = 'ERR_FS_EISDIR'
-          throw raise(e)
-        }
-        for (const name of fs.readdirSync(file)) {
-          fs.rmSync(posix.join(String(file), name), options)
-        }
+      if (kind(st.mode) === os.S_IFDIR && !(options && options.recursive)) {
+        const e = new Error('Path is a directory: rm returned EISDIR ' + file)
+        e.code = 'ERR_FS_EISDIR'
+        throw raise(e)
       }
-      check(os.remove(String(file)), 'rm', file)
+      removeTree(at, file)
     },
   }
   for (const name of Object.keys(fs)) fs[name] = api(fs[name])
@@ -857,6 +955,7 @@ NODE_SHIM = r""";(function (argv, script) {
     queueMicrotask(() => done(found))
   }
   fs.promises = promises
+  fs.constants = { F_OK: 0, R_OK: 4, W_OK: 2, X_OK: 1, COPYFILE_EXCL: 1 }
 
   // process, and stdin as node hands it to listeners and readline.
   function writer(file, fd) {
@@ -884,7 +983,7 @@ NODE_SHIM = r""";(function (argv, script) {
   function emitter(target, start) {
     const listeners = {}
     let started = false
-    target.on = (event, fn) => {
+    const on = (event, fn) => {
       ;(listeners[event] = listeners[event] || []).push(fn)
       if (!started) {
         started = true
@@ -892,51 +991,91 @@ NODE_SHIM = r""";(function (argv, script) {
       }
       return target
     }
-    target.once = target.on
-    target.addListener = target.on
+    const off = (event, fn) => {
+      const list = listeners[event] || []
+      const i = list.findIndex((l) => l === fn || l.listener === fn)
+      if (i >= 0) list.splice(i, 1)
+      return target
+    }
+    target.on = on
+    target.addListener = on
+    target.off = off
+    target.removeListener = off
+    target.once = (event, fn) => {
+      const once = (...args) => {
+        off(event, once)
+        fn(...args)
+      }
+      once.listener = fn
+      return on(event, once)
+    }
     return (event, ...args) => {
-      for (const fn of listeners[event] || []) fn(...args)
+      for (const fn of (listeners[event] || []).slice()) fn(...args)
     }
   }
   let encoding = null
-  let taken = false
-  const take = () => {
-    if (taken) return null
-    taken = true
-    const bytes = stdin()
-    if (bytes.length === 0) return null
-    return encoding === null ? bytes : bytes.toString(encoding)
+  let utf8 = null
+  const decode = (chunk) => {
+    if (encoding === null) return chunk
+    return utf8 !== null ? utf8(chunk) : chunk.toString(encoding)
   }
+  let pending = null
   const input = {
     fd: 0,
     isTTY: false,
     setEncoding(e) {
       encoding = e === undefined ? 'utf8' : e
+      utf8 = encodingName(encoding) === 'utf8' ? textStream() : null
       return input
     },
     resume: () => input,
     pause: () => input,
-    read: take,
+    read() {
+      const chunk = pending
+      pending = null
+      return chunk
+    },
     async *[Symbol.asyncIterator]() {
-      const chunk = take()
-      if (chunk !== null) yield chunk
+      for (let c = stdinChunk(); c !== null; c = stdinChunk()) {
+        const value = decode(c)
+        if (value.length) yield value
+      }
+      const tail = utf8 !== null ? utf8(null) : ''
+      if (tail !== '') yield tail
     },
   }
-  const emit = emitter(input, () => {
-    emit('readable')
-    const chunk = take()
-    if (chunk !== null) emit('data', chunk)
-    emit('end')
-    emit('close')
+  const emit = emitter(input, function pump() {
+    const chunk = stdinChunk()
+    if (chunk === null) {
+      const tail = utf8 !== null ? utf8(null) : ''
+      if (tail !== '') emit('data', tail)
+      emit('end')
+      emit('close')
+      return
+    }
+    const value = decode(chunk)
+    if (value.length) {
+      pending = value
+      emit('readable')
+      pending = null
+      emit('data', value)
+    }
+    os.setTimeout(pump, 0)
   })
-  const lines = () => {
-    const all = stdin().toString('utf8').split('\n')
-    if (all[all.length - 1] === '') all.pop()
-    return all.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l))
-  }
   const readline = {
     createInterface() {
       let closed = false
+      let rest = ''
+      const text = textStream()
+      // The lines the next chunk completes, and whether input has ended.
+      const pull = () => {
+        const chunk = stdinChunk()
+        const all = (rest + text(chunk)).split('\n')
+        rest = chunk === null ? '' : all.pop()
+        if (chunk === null && all[all.length - 1] === '') all.pop()
+        const lines = all.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l))
+        return [lines, chunk === null]
+      }
       const rl = {
         close() {
           if (!closed) {
@@ -945,12 +1084,25 @@ NODE_SHIM = r""";(function (argv, script) {
           }
         },
         async *[Symbol.asyncIterator]() {
-          yield* lines()
+          while (!closed) {
+            const [lines, done] = pull()
+            for (const line of lines) {
+              if (closed) return
+              yield line
+            }
+            if (done) rl.close()
+          }
         },
       }
-      const emitLine = emitter(rl, () => {
-        for (const line of lines()) emitLine('line', line)
-        rl.close()
+      const emitLine = emitter(rl, function pump() {
+        if (closed) return
+        const [lines, done] = pull()
+        for (const line of lines) {
+          if (closed) return
+          emitLine('line', line)
+        }
+        if (done) rl.close()
+        else os.setTimeout(pump, 0)
       })
       return rl
     },
@@ -998,12 +1150,12 @@ NODE_SHIM = r""";(function (argv, script) {
 
   // require: the modules above, and files by path, JavaScript run as
   // CommonJS and JSON parsed.
-  const promisify =
-    (fn) =>
-    (...args) =>
-      new Promise((resolve, reject) => {
-        fn(...args, (e, value) => (e ? reject(e) : resolve(value)))
+  const promisify = (fn) =>
+    function (...args) {
+      return new Promise((resolve, reject) => {
+        fn.call(this, ...args, (e, value) => (e ? reject(e) : resolve(value)))
       })
+    }
   const builtins = {
     buffer: { Buffer },
     fs,
@@ -1088,6 +1240,7 @@ NODE_SHIM = r""";(function (argv, script) {
     loaded: false,
     exports: {},
   }
+  if (script !== null) cache[script] = main
   define('global', g)
   define('process', process)
   define('Buffer', Buffer)
