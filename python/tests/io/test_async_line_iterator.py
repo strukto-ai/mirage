@@ -313,6 +313,7 @@ async def test_a_second_pull_waits_for_the_first(read):
         if reader._pull_lock._waiters:
             break
         await asyncio.sleep(0)
+    assert reader._pull_lock._waiters
     assert not second.done()
     gate.set()
     # One pull at a time, and the one that waited reads on from the buffer
