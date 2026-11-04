@@ -208,6 +208,63 @@ async def test_an_append_raced_by_another_lands_at_the_end_it_left(
 
 
 @pytest.mark.asyncio
+async def test_a_file_moved_while_its_old_name_is_unlinked_is_kept(
+    vfs: SqlVFS,
+):
+    await vfs.write(at("/a"), b"kept")
+    racing(
+        vfs,
+        [
+            "UPDATE fs_dentry SET name = 'b' WHERE parent_ino = 1 AND name = 'a'"
+        ],
+    )
+    await vfs.unlink(at("/a"))
+    assert await whole(vfs, "/b") == b"kept"
+
+
+@pytest.mark.asyncio
+async def test_an_append_retries_on_its_own_file_not_its_old_path(
+    vfs: SqlVFS,
+):
+    await vfs.write(at("/f"), b"a")
+    named = "(SELECT ino FROM fs_dentry WHERE parent_ino = 1 AND name = 'g')"
+    racing(
+        vfs,
+        [
+            "UPDATE fs_dentry SET name = 'g' WHERE parent_ino = 1 AND name = 'f'",
+            f"UPDATE fs_inode SET mtime = mtime + 1 WHERE ino = {named}",
+            "INSERT INTO fs_inode (ino, mode, size, mtime)"
+            f" VALUES (1000, {DIR}, 0, 0)",
+            "INSERT INTO fs_dentry (name, parent_ino, ino)"
+            " VALUES ('f', 1, 1000)",
+        ],
+    )
+    await vfs.append(at("/f"), b"c")
+    assert await whole(vfs, "/g") == b"ac"
+    assert (await vfs.stat(at("/f"))).type == FileType.DIRECTORY
+
+
+@pytest.mark.asyncio
+async def test_a_restore_takes_fresh_inode_numbers(vfs: SqlVFS):
+    deep = "/" + "/".join(f"d{i}" for i in range(40))
+    await vfs.mkdir(at(deep), parents=True)
+    await vfs.write(at(f"{deep}/f"), b"x")
+
+    async def inos() -> list[int]:
+        rows = await vfs.accessor.query(
+            "SELECT ino FROM fs_inode WHERE ino > 1"
+        )
+        return [int(r["ino"] or 0) for r in rows]
+
+    before = max(await inos())
+    vfs.load_state(vfs.get_state())
+    assert min(await inos()) > before
+    assert await whole(vfs, f"{deep}/f") == b"x"
+    await vfs.write(at("/later"), b"y")
+    assert await whole(vfs, "/later") == b"y"
+
+
+@pytest.mark.asyncio
 async def test_it_keeps_no_attributes_so_the_namespace_keeps_them(
     vfs: SqlVFS,
 ):

@@ -195,24 +195,29 @@ export function insertRows(
 }
 
 /**
- * After the entries naming `inos` were removed: the inodes, and a file's
- * bytes. A directory something was written under since keeps its inode, as
- * the guard that removed its entry kept that too.
+ * After the entries naming `inos` were removed: each inode no entry names any
+ * more, and its bytes. One an entry still names keeps everything: a directory
+ * something was written under since, whose guarded removal kept its entry, or
+ * a file another writer moved, whose entry the removal missed.
  */
 export function dropInodes(inos: readonly number[]): SqlStatement[] {
   const out: SqlStatement[] = []
+  const unnamed = (table: string): string =>
+    `NOT EXISTS (SELECT 1 FROM fs_dentry d WHERE d.ino = ${table}.ino)`
   for (let i = 0; i < inos.length; i += 500) {
     const list = inos
       .slice(i, i + 500)
       .map((ino) => byIno(ino).sql)
       .join(', ')
     out.push(
-      { sql: `DELETE FROM fs_data WHERE ino IN (${list})` },
-      {
-        sql: `DELETE FROM fs_inode WHERE ino IN (${list})
-          AND NOT EXISTS (SELECT 1 FROM fs_dentry c WHERE c.parent_ino = fs_inode.ino)`,
-      },
+      { sql: `DELETE FROM fs_data WHERE ino IN (${list}) AND ${unnamed('fs_data')}` },
+      { sql: `DELETE FROM fs_inode WHERE ino IN (${list}) AND ${unnamed('fs_inode')}` },
     )
   }
   return out
+}
+
+/** The inode numbered `ino` as it is now, wherever an entry has it, or null once it is gone. */
+export async function inodeAt(accessor: SqlAccessor, ino: number): Promise<Inode | null> {
+  return inodeOf((await accessor.query(SQL.inode, [ino]))[0])
 }

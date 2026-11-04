@@ -21,7 +21,16 @@ import { concat } from '../../utils/bytes.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
 import { FILE, FLUSH_BYTES } from './constants.ts'
 import { placeBytes } from './data.ts'
-import { byEntry, byIno, makeNode, nowStamp, resized, resizedFrom, type Inode } from './inode.ts'
+import {
+  byEntry,
+  byIno,
+  inodeAt,
+  makeNode,
+  nowStamp,
+  resized,
+  resizedFrom,
+  type Inode,
+} from './inode.ts'
 import {
   checkDestParents,
   checkWriteTarget,
@@ -36,12 +45,12 @@ import {
 // The tries a write that read a file gets when other writers keep changing it.
 const TRIES = 3
 
-// Land what `build` makes of the file as last read, reading it again and
-// building afresh when another writer changed it since (the guard in
-// `resizedFrom` failed the batch whole); the file as the batch found it.
+// Land what `build` makes of the file as last read. When another writer
+// changed it since (the guard in `resizedFrom` failed the batch whole), read
+// the same inode again, wherever it went, as an open file follows its inode,
+// and build afresh; the file as the batch found it.
 async function landFresh(
   accessor: SqlAccessor,
-  path: PathSpec,
   node: Inode,
   build: (node: Inode) => Promise<SqlStatement[]>,
 ): Promise<Inode> {
@@ -50,7 +59,7 @@ async function landFresh(
       await accessor.batch(await build(node))
       return node
     } catch (err) {
-      const fresh = target(await walk(accessor, path))
+      const fresh = await inodeAt(accessor, node.ino)
       const same =
         fresh !== null &&
         fresh.size === node.size &&
@@ -118,7 +127,7 @@ export async function write(
     const whole = await materialize(data)
     if (append && whole.byteLength === 0 && existing !== null) return
     if (append && existing !== null) {
-      await landFresh(accessor, path, existing, (n) => landing(accessor, w, n, whole, true))
+      await landFresh(accessor, existing, (n) => landing(accessor, w, n, whole, true))
     } else {
       await accessor.batch(await landing(accessor, w, existing, whole, append))
     }
@@ -141,7 +150,7 @@ export async function write(
     const stamp = nowStamp()
     let at = offset
     let size = 0
-    const used = await landFresh(accessor, path, node, async (n) => {
+    const used = await landFresh(accessor, node, async (n) => {
       at = append ? n.size : offset
       size = Math.max(n.size, at + block.byteLength)
       return [

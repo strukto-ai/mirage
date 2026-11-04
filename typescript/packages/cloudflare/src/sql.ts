@@ -41,9 +41,9 @@ export interface D1DatabaseLike {
 
 // A database's default location: one per database object, so two drivers on
 // one binding read as one database and two bindings as two.
-const labels = new WeakMap<object, string>()
+const labels = new WeakMap<D1DatabaseLike | DurableObjectStorageLike, string>()
 let labelled = 0
-function labelOf(kind: string, db: object): string {
+function labelOf(kind: string, db: D1DatabaseLike | DurableObjectStorageLike): string {
   let label = labels.get(db)
   if (label === undefined) {
     label = `${kind}#${String(++labelled)}`
