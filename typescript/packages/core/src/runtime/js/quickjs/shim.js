@@ -958,6 +958,7 @@
   // the end.
   let flowing = null
   let readableListening = false
+  let resumeScheduled = false
   let iterating = false
   let finished = false
   const finish = () => {
@@ -976,6 +977,7 @@
     },
     resume() {
       flowing = true
+      resumeScheduled = true
       events.start()
       return input
     },
@@ -1021,10 +1023,13 @@
     () => {
       const readable = events.has('readable')
       // As node's, once the last readable listener has gone, the stream
-      // flows on only for a data listener still on, and otherwise keeps
-      // its input for the next reader.
-      if (readableListening && !readable) flowing = events.has('data') ? true : null
+      // flows on only for a data listener still on or a resume() since the
+      // last step, and otherwise keeps its input for the next reader.
+      if (readableListening && !readable) {
+        flowing = resumeScheduled || events.has('data') ? true : null
+      }
       readableListening = readable
+      resumeScheduled = false
       if (iterating || finished || (readable ? buffered !== null : flowing !== true)) {
         return false
       }
