@@ -123,12 +123,14 @@ function unmountLine(prefix: string): string {
  * one of its arguments, as an sshfs serving it does, 1 once none does, and
  * 2 when it read no process at all. It reads `/proc`, never the mount, so a
  * mount whose server stalled cannot hang it, and hands awk the source in
- * its environment, never an argument, so the check never finds itself.
+ * its environment, never an argument, so the check never finds itself. A
+ * newline inside an argument becomes `\001` on both sides, apart from the
+ * NUL that ends each argument.
  */
 export function runningLine(source: string): string {
   return (
-    "cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\\0' '\\n' | " +
-    `S=${singleQuote(source)} awk ` +
+    "cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\\0\\n' '\\n\\001' | " +
+    `S=${singleQuote(source.replaceAll('\n', '\x01'))} awk ` +
     `'BEGIN { s = ENVIRON["S"] } $0 == s { f = 1 } END { exit f ? 0 : NR ? 1 : 2 }'`
   )
 }
@@ -397,6 +399,7 @@ export class SandboxMounts {
     ) {
       return null
     }
+    this.seen = null
     const present = await this.table(signal)
     const own = [...every]
       .filter(
@@ -421,10 +424,7 @@ export class SandboxMounts {
     }
     const fresh = wanted.filter((p) => !this.served.has(p))
     for (const prefix of fresh) {
-      if (await this.held(prefix, present, signal)) {
-        this.seen = null
-        return prefix
-      }
+      if (await this.held(prefix, present, signal)) return prefix
     }
     if (fresh.length > 0) {
       const make = pipeServer

@@ -147,14 +147,16 @@ def running_line(source: str) -> str:
     once none does, and 2 when it read no process at all. It reads
     ``/proc``, never the mount, so a mount whose server stalled cannot
     hang it, and hands awk the source in its environment, never an
-    argument, so the check never finds itself.
+    argument, so the check never finds itself. A newline inside an
+    argument becomes ``\\001`` on both sides, apart from the NUL that ends
+    each argument.
 
     Args:
         source (str): the mount's source.
     """
     return (
-        "cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\\0' '\\n' | "
-        f"S={single_quote(source)} awk "
+        "cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\\0\\n' '\\n\\001' | "
+        f"S={single_quote(source.replace(chr(10), chr(1)))} awk "
         '\'BEGIN { s = ENVIRON["S"] } $0 == s { f = 1 } '
         "END { exit f ? 0 : NR ? 1 : 2 }'"
     )
@@ -420,6 +422,7 @@ class SandboxMounts:
             and (self._mount_type == "ssh" or not ruled)
         ):
             return None
+        self._seen = None
         present = await self._table()
         own = tuple(
             sorted(
@@ -446,7 +449,6 @@ class SandboxMounts:
         new = [p for p in wanted if p not in self._served]
         for prefix in new:
             if await self._held(prefix, present):
-                self._seen = None
                 return prefix
         if new:
             server = pipe_server()
