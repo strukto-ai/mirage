@@ -18,7 +18,7 @@ type Reply = z.infer<typeof Reply>
  * of the requests, as a thread's do.
  */
 async function inThread(done: (reply: Reply) => void): Promise<Port> {
-  const { execute } = await import('./computations.ts')
+  const { closeAll, execute } = await import('./computations.ts')
   const made: Computations = new Map()
   let replies = Promise.resolve()
   return {
@@ -27,9 +27,11 @@ async function inThread(done: (reply: Reply) => void): Promise<Port> {
         done(await execute({ ...data, args: [...data.args] }, made))
       })
     },
-    close: () => {
-      made.clear()
-      return Promise.resolve()
+    // A thread's memory goes with it; this thread keeps the module's, so
+    // what the computations hold is released once their work settles.
+    close: async () => {
+      await replies
+      await closeAll(made)
     },
   }
 }

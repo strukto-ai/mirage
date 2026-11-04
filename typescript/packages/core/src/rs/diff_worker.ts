@@ -54,9 +54,9 @@ function refusalReply(error: unknown): DiffReply {
  * thread has a dispatcher of its own; a host without threads makes one per
  * worker, so two diffs in the same thread never share a stream.
  */
-export function diffDispatcher(): (raw: unknown) => Promise<DiffReply> {
+export function diffDispatcher(): ((raw: unknown) => Promise<DiffReply>) & { close(): void } {
   let stream: OpenStream | undefined
-  return async (raw) => {
+  const dispatch = async (raw: unknown): Promise<DiffReply> => {
     const request = DiffRequest.parse(raw)
     try {
       if (request.kind === 'close' || request.kind === 'open') {
@@ -106,4 +106,10 @@ export function diffDispatcher(): (raw: unknown) => Promise<DiffReply> {
       return refusalReply(error)
     }
   }
+  // A worker retired mid-comparison sends no `close`; its stream goes here.
+  const close = (): void => {
+    stream?.close()
+    stream = undefined
+  }
+  return Object.assign(dispatch, { close })
 }

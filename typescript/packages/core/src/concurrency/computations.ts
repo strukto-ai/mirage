@@ -1,4 +1,5 @@
-type Computation = (...args: unknown[]) => unknown
+/** A computation, and what it holds released when its worker stops. */
+type Computation = ((...args: unknown[]) => unknown) & { close?: () => void }
 
 // Each computation a worker runs, made once per worker, which keeps the
 // state it holds between one call and the next.
@@ -33,5 +34,14 @@ export async function execute(
     return { ok: true, value: await (await fn)(...request.args) }
   } catch (error) {
     return { ok: false, value: error }
+  }
+}
+
+/** Release what each of a worker's computations holds, as its worker stops. */
+export async function closeAll(made: Computations): Promise<void> {
+  const held = [...made.values()]
+  made.clear()
+  for (const fn of await Promise.allSettled(held)) {
+    if (fn.status === 'fulfilled') fn.value.close?.()
   }
 }

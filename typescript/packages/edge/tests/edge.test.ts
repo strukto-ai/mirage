@@ -80,6 +80,16 @@ describe('mirage in workerd', () => {
     expect(missing?.stderr).toBe('diff: /data/missing: No such file or directory\n')
   })
 
+  it('keeps two diffs running at once apart, each on its own stream', async () => {
+    const [both] = await run([
+      'seq 1 4000 > /data/l; seq 1 4000 | sed s/^2000$/x/ > /data/r; ' +
+        'seq 1 4000 > /data/m; seq 1 4000 | sed s/^3000$/y/ > /data/n; ' +
+        'diff /data/l /data/r > /data/one & diff /data/m /data/n > /data/two & wait; ' +
+        'cat /data/one /data/two',
+    ])
+    expect(both?.stdout).toBe('2000c2000\n< 2000\n---\n> x\n3000c3000\n< 3000\n---\n> y\n')
+  })
+
   it('runs python3 on in-process monty, reading the workspace', async () => {
     const [inline, write, script] = await run([
       "python3 -c 'print(sum(range(10)))'",
