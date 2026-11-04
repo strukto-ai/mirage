@@ -403,7 +403,8 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     name: integ-edge
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The whole battery takes about 17 minutes locally, more on a runner.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-node-pnpm
