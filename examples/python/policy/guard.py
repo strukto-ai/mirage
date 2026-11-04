@@ -12,16 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-import os
-
 # The reviewer's command program, named by workspace.yaml at
-# pre_command. It reads its context as JSON, the same fields a coded
-# policy reads, and prints its answer: nothing for no opinion, a deny to
-# refuse. It runs on the runtime the document names, and open() reads
-# through the workspace as the session.
-
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
+# pre_command. Its pre_command takes the same fields a coded policy
+# reads and returns its answer: None for no opinion, a deny to refuse.
+# It runs on the runtime the document names, and open() reads through
+# the workspace as the session.
 
 
 def contents(path):
@@ -31,6 +26,7 @@ def contents(path):
         return ""
 
 
-if any("marker" in contents(path) for path in ctx["paths"]):
-    reason = "marked files are not read by " + ctx["profile"]
-    print(json.dumps({"kind": "deny", "reason": reason}))
+def pre_command(ctx):
+    if any("marker" in contents(path) for path in ctx["paths"]):
+        reason = "marked files are not read by " + ctx["profile"]
+        return {"kind": "deny", "reason": reason}

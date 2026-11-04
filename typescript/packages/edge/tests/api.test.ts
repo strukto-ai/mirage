@@ -129,6 +129,15 @@ describe('the server API in workerd', () => {
     expect(disk.text).toContain('memory')
   })
 
+  it("names the edge's own backends when a mount names none of them", async () => {
+    const unknown = await call('POST', '/v1/workspaces', {
+      config: { mounts: { '/': { vfs: 'disk' } } },
+    })
+    expect(unknown.text).toContain('unknown VFS \\"disk\\"')
+    expect(unknown.text).toContain('slack')
+    expect(unknown.text).toContain('s3')
+  })
+
   it('serves MCP and JSON-RPC over the same workspace', async () => {
     await call('POST', '/v1/workspaces', { id: 'mcp', config: { mounts: { '/': { vfs: 'ram' } } } })
     const response = await worker.fetch('http://edge.test/v1/workspaces/mcp/mcp', {
@@ -189,10 +198,9 @@ describe('the server API in workerd', () => {
 
   it('runs a Python policy program on monty', async () => {
     const guard = [
-      'import json, os',
-      'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
-      'if ctx["command"] == "cat":',
-      '    print(json.dumps({"kind": "deny", "reason": "no cat here"}))',
+      'def pre_command(ctx):',
+      '    if ctx["command"] == "cat":',
+      '        return {"kind": "deny", "reason": "no cat here"}',
     ].join('\n')
     const created = await call('POST', '/v1/workspaces', {
       id: 'guarded',
@@ -235,10 +243,9 @@ describe('the server API in workerd', () => {
 
   it('asks a Python pre_network program before a line connects', async () => {
     const guard = [
-      'import json, os',
-      'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
-      'if ctx["host"] == "example.com":',
-      '    print(json.dumps({"kind": "deny", "reason": "not this host"}))',
+      'def pre_network(ctx):',
+      '    if ctx["host"] == "example.com":',
+      '        return {"kind": "deny", "reason": "not this host"}',
     ].join('\n')
     await call('POST', '/v1/workspaces', {
       id: 'netguard',

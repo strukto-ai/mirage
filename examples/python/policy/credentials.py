@@ -12,14 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-import os
-
 # The reviewer's variable-write program, named by workspace.yaml at
 # pre_session: a credential is the operator's to set.
 
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
 
-if ctx["key"].startswith("AWS_"):
-    reason = "credentials are set by the operator"
-    print(json.dumps({"kind": "deny", "reason": reason}))
+def pre_session(ctx):
+    if ctx["key"].startswith("AWS_"):
+        reason = "credentials are set by the operator"
+        return {"kind": "deny", "reason": reason}

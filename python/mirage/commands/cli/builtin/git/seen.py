@@ -29,6 +29,7 @@ from dulwich.repo import BaseRepo
 
 from mirage.bridge.sync import run_async_from_sync
 from mirage.commands.cli.builtin.git.constants import TREE
+from mirage.commands.cli.builtin.git.errors import EmptyTreeNameError
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.pathspec import visible_path
 from mirage.commands.cli.builtin.git.repo import Repo
@@ -220,6 +221,19 @@ def place_named(repo: BaseRepo, name: str, oid: bytes) -> str:
     return place_of(repo, oid)
 
 
+def decoded(obj: T) -> T:
+    """An object whose entries a reader is about to walk, refused as git
+    refuses a tree holding an entry with an empty name; any other object
+    comes back untouched.
+
+    Args:
+        obj (T): the object read.
+    """
+    if isinstance(obj, Tree) and b"" in obj:
+        raise EmptyTreeNameError()
+    return obj
+
+
 def shown_items(
     repo: BaseRepo, tree: Tree, base: str | None = None
 ) -> Iterator[TreeEntry]:
@@ -232,11 +246,11 @@ def shown_items(
             command found it.
     """
     if not guarded(repo):
-        yield from tree.iteritems()
+        yield from decoded(tree).iteritems()
         return
     assert isinstance(repo, Repo)
     where = place_of(repo, tree.id) if base is None else base
-    for entry in tree.iteritems():
+    for entry in decoded(tree).iteritems():
         name = entry.path.decode("utf-8", "surrogateescape")
         if visible_path(repo.location, posixpath.join(where, name)):
             yield entry
@@ -246,7 +260,8 @@ def shown_raw(repo: BaseRepo, obj: ShaFile, name: str | None = None) -> bytes:
     """An object's stored bytes as the session is shown them: a tree's
     re-encoded with only the entries it sees, so neither the bytes nor
     their count name a hidden one. Only a tree is placed, so a commit's
-    or a blob's bytes cost no lookup.
+    or a blob's bytes cost no lookup. The bytes are read whole, as git
+    reads them, so no entry name is refused here.
 
     Args:
         repo (BaseRepo): the opened repository.
@@ -261,9 +276,12 @@ def shown_raw(repo: BaseRepo, obj: ShaFile, name: str | None = None) -> bytes:
         if name is None
         else place_named(repo, name, obj.id)
     )
+    assert isinstance(repo, Repo)
     kept = Tree()
-    for entry in shown_items(repo, obj, base):
-        kept.add(entry.path, entry.mode, entry.sha)
+    for entry in obj.iteritems():
+        part = entry.path.decode("utf-8", "surrogateescape")
+        if visible_path(repo.location, posixpath.join(base, part)):
+            kept.add(entry.path, entry.mode, entry.sha)
     return kept.as_raw_string()
 
 

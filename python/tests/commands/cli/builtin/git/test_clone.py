@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from pathlib import Path
+
 import pytest
 
 from mirage.commands.cli.builtin.git import GIT
@@ -23,6 +25,7 @@ from mirage.commands.cli.builtin.git.transport import Advertisement
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
+from tests.commands.cli.builtin.git.conftest import branch_with_paths
 
 ADV = Advertisement(
     {
@@ -82,3 +85,55 @@ async def test_a_third_operand_is_too_many_arguments():
     assert result.stderr.startswith(
         b"fatal: Too many arguments.\n\nusage: git clone "
     )
+
+
+@pytest.mark.asyncio
+async def test_clone_keeps_the_repository_when_checkout_meets_an_invalid_path(
+    git_parent, repo_path: Path
+):
+    branch_with_paths(
+        repo_path,
+        "odd",
+        {
+            "../above.txt": b"above\n",
+            "a.txt": b"a\n",
+            "sub/.git/config": b"[core]\n",
+        },
+    )
+    result = await git_parent.shell("cd /w && git clone -b odd work dst")
+    assert (result.exit_code, result.stderr) == (
+        128,
+        b"Cloning into 'dst'...\n"
+        b"done.\n"
+        b"error: invalid path '../above.txt'\n"
+        b"fatal: unable to checkout working tree\n"
+        b"warning: Clone succeeded, but checkout failed.\n"
+        b"You can inspect what was checked out with 'git status'\n"
+        b"and retry with 'git restore --source=HEAD :/'\n\n",
+    )
+    dst = repo_path.parent / "dst"
+    assert not (repo_path.parent / "above.txt").exists()
+    assert sorted(p.name for p in dst.iterdir()) == [".git"]
+    log = await git_parent.shell("git -C /w/dst log --format=%s -1")
+    assert log.stdout == b"odd\n"
+
+
+@pytest.mark.asyncio
+async def test_clone_keeps_the_repository_when_checkout_meets_an_empty_name(
+    git_parent, repo_path: Path
+):
+    branch_with_paths(repo_path, "odd", {"/x.txt": b"x\n", "a.txt": b"a\n"})
+    result = await git_parent.shell("cd /w && git clone -b odd work dst")
+    assert (result.exit_code, result.stderr) == (
+        128,
+        b"Cloning into 'dst'...\n"
+        b"done.\n"
+        b"fatal: empty filename in tree entry\n"
+        b"warning: Clone succeeded, but checkout failed.\n"
+        b"You can inspect what was checked out with 'git status'\n"
+        b"and retry with 'git restore --source=HEAD :/'\n\n",
+    )
+    dst = repo_path.parent / "dst"
+    assert sorted(p.name for p in dst.iterdir()) == [".git"]
+    log = await git_parent.shell("git -C /w/dst log --format=%s -1")
+    assert log.stdout == b"odd\n"

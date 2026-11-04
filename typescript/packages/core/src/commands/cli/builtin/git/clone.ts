@@ -20,7 +20,14 @@ import { IOResult } from '../../../../io/types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { DETACHED_ADVICE, switchTo } from './checkout.ts'
-import { CloneReadOnlyError, GitError, UsageError } from './errors.ts'
+import {
+  CloneCheckoutError,
+  CloneReadOnlyError,
+  EmptyTreeNameError,
+  GitError,
+  InvalidPathError,
+  UsageError,
+} from './errors.ts'
 import { configuredHeaders, fetchObjects, ignoreFunny } from './fetch.ts'
 import { layOut } from './init.ts'
 import { readNames, removeTree, statOf, writeFile } from './io.ts'
@@ -130,13 +137,16 @@ export async function clone(
     notes += await populate(ctx, transport, target, stored, local && !quiet)
   } catch (err) {
     if (!(err instanceof GitError)) throw err
+    // A refused checkout leaves the clone behind, as git does.
     const vfs = ctx.vfs
-    if (fresh && vfs !== undefined) await removeTree(vfs, target)
-    else if (vfs !== undefined)
-      for (const entry of await readNames(vfs, target)) {
-        const child = entry.replace(/\/+$/, '').split('/').at(-1) ?? ''
-        if (child) await removeTree(vfs, target.join(child))
-      }
+    if (!(err instanceof CloneCheckoutError) && vfs !== undefined) {
+      if (fresh) await removeTree(vfs, target)
+      else
+        for (const entry of await readNames(vfs, target)) {
+          const child = entry.replace(/\/+$/, '').split('/').at(-1) ?? ''
+          if (child) await removeTree(vfs, target.join(child))
+        }
+    }
     const refusal = err.prefix === null ? err.message : `${err.prefix}: ${err.message}`
     return [
       null,
@@ -242,8 +252,15 @@ async function populate(
     notes += `Note: switching to '${commit}'.\n\n${DETACHED_ADVICE}\n`
   }
   await append(vfs, gitdir, 'logs/HEAD', line)
-  if (!fl.asBool('no_checkout'))
-    await switchTo(repo, vfs, new Map(), await commitEntries(repo, commit))
+  if (!fl.asBool('no_checkout')) {
+    try {
+      await switchTo(repo, vfs, new Map(), await commitEntries(repo, commit))
+    } catch (err) {
+      if (err instanceof InvalidPathError || err instanceof EmptyTreeNameError)
+        throw new CloneCheckoutError(notes, err)
+      throw err
+    }
+  }
   return notes
 }
 

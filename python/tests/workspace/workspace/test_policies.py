@@ -879,38 +879,23 @@ async def test_a_bare_name_under_deny_refuses_with_the_default_reason():
         await ws.close()
 
 
-# What every policy program starts with: its context, as JSON.
-CONTEXT = """\
-import json
-import os
-
-ctx = json.loads(os.environ['MIRAGE_POLICY_CTX'])
-"""
-
 # A per-command judge: deny cat under /data/sealed/ with a computed
 # reason, take shred to the approval ledger, stay silent otherwise. A
-# program prints its answer, and null is silence.
-JUDGE = (
-    CONTEXT
-    + """
-def answer():
+# program returns its answer, and None is silence.
+JUDGE = """
+def pre_command(ctx):
     for p in ctx['paths']:
         if ctx['command'] == 'cat' and p.startswith('/data/sealed/'):
             return {'kind': 'deny', 'reason': 'sealed by ' + ctx['profile']}
     if ctx['command'] == 'shred':
         return {'kind': 'ask', 'reason': 'sign-off'}
     return None
-
-print(json.dumps(answer()))
 """
-)
 
 # A judge that reads what the operand holds, not what it is called:
 # the shape a content policy takes when it is a program.
-READER = (
-    CONTEXT
-    + """
-def answer():
+READER = """
+def pre_command(ctx):
     for p in ctx['paths']:
         try:
             body = open(p).read()
@@ -919,10 +904,7 @@ def answer():
         if 'payload' in body:
             return {'kind': 'ask', 'reason': 'sign-off on payload'}
     return None
-
-print(json.dumps(answer()))
 """
-)
 
 
 def _scripted(
@@ -1174,7 +1156,11 @@ async def test_a_broken_script_fails_closed_per_command():
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles=_scripted({"pre_command": "raise ValueError('boom')"}),
+        profiles=_scripted(
+            {
+                "pre_command": "def pre_command(ctx):\n    raise ValueError('boom')"
+            }
+        ),
     )
     try:
         ws.create_session("s", profile="release")
@@ -1229,13 +1215,14 @@ def test_the_old_script_and_runtime_keys_are_told_the_new_block():
 
 
 @pytest.mark.asyncio
-async def test_a_program_printing_something_else_fails_closed():
-    # stdout is the answer: anything but one JSON answer or nothing is
-    # refused rather than guessed at.
+async def test_a_program_returning_something_else_fails_closed():
+    # Anything but an answer or None is refused rather than guessed at.
     ws = Workspace(
         {"/data/": RAMVFS()},
         mode=MountMode.WRITE,
-        profiles=_scripted({"pre_command": "print('looks fine to me')"}),
+        profiles=_scripted(
+            {"pre_command": "def pre_command(ctx):\n    return 'looks fine'"}
+        ),
     )
     try:
         ws.create_session("s", profile="release")
@@ -1243,7 +1230,7 @@ async def test_a_program_printing_something_else_fails_closed():
         assert refused.exit_code == 126
         assert refused.refusal is not None
         assert refused.refusal.reason.startswith(
-            "profile 'release' policy must print a JSON answer at pre_command"
+            "profile 'release' policy must return an answer at pre_command"
         )
     finally:
         await ws.close()
@@ -1273,21 +1260,16 @@ async def test_an_inline_document_may_not_add_a_policy():
 # Programs at the op and session views and nowhere else: writes under
 # /data/frozen are refused, so is an AWS_* variable, and a command is
 # never judged.
-FROZEN = (
-    CONTEXT
-    + """
-if ctx['write'] and ctx['path'].startswith('/data/frozen/'):
-    print(json.dumps({'kind': 'deny', 'reason': 'frozen by ' + ctx['profile']}))
+FROZEN = """
+def pre_vfs(ctx):
+    if ctx['write'] and ctx['path'].startswith('/data/frozen/'):
+        return {'kind': 'deny', 'reason': 'frozen by ' + ctx['profile']}
 """
-)
-CREDENTIALS = (
-    CONTEXT
-    + """
-if ctx['key'].startswith('AWS_'):
-    reason = 'credentials are set by the operator'
-    print(json.dumps({'kind': 'deny', 'reason': reason}))
+CREDENTIALS = """
+def pre_session(ctx):
+    if ctx['key'].startswith('AWS_'):
+        return {'kind': 'deny', 'reason': 'credentials are set by the operator'}
 """
-)
 GATES = {"pre_vfs": FROZEN, "pre_session": CREDENTIALS}
 
 
@@ -1935,17 +1917,15 @@ class SeesCaller(Policy):
 
 # A program that denies with what its caller says: the same session id
 # and working directory a coded policy reads off ``ctx.caller``.
-CALLER = (
-    CONTEXT
-    + """
-caller = ctx['caller']['session']
-if ctx['command'] == 'cat':
-    print(json.dumps({
-        'kind': 'deny',
-        'reason': caller['session_id'] + ' in ' + caller['cwd'],
-    }))
+CALLER = """
+def pre_command(ctx):
+    caller = ctx['caller']['session']
+    if ctx['command'] == 'cat':
+        return {
+            'kind': 'deny',
+            'reason': caller['session_id'] + ' in ' + caller['cwd'],
+        }
 """
-)
 
 
 @pytest.mark.asyncio
@@ -2289,10 +2269,11 @@ async def test_a_profile_program_calls_the_workspaces_policy_functions(
         return command == "rm"
 
     source = """
-import json, os
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-if await directory(ctx["command"], os.environ["TOKEN"]):
-    print(json.dumps({"kind": "deny", "reason": os.environ["WHY"]}))
+import os
+
+async def pre_command(ctx):
+    if await directory(ctx["command"], os.environ["TOKEN"]):
+        return {"kind": "deny", "reason": os.environ["WHY"]}
 """
     ws = Workspace(
         {"/data/": RAMVFS()},
@@ -2336,10 +2317,9 @@ async def _directory(command):
 @pytest.mark.asyncio
 async def test_a_copy_and_a_restore_keep_the_policy_functions(tmp_path):
     source = """
-import json, os
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-if await directory(ctx["command"]):
-    print(json.dumps({"kind": "deny", "reason": "directory says no"}))
+async def pre_command(ctx):
+    if await directory(ctx["command"]):
+        return {"kind": "deny", "reason": "directory says no"}
 """
     ws = Workspace(
         {"/data/": RAMVFS()},

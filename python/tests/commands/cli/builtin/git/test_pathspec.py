@@ -64,6 +64,33 @@ def test_a_run_directory_below_the_root_still_resolves():
     assert repo_relative(LOCATION, "/repo/docs", "notes.md") == "docs/notes.md"
 
 
+@pytest.mark.parametrize(
+    "start,operand,relative",
+    [
+        ("/repo/docs", ":/", ""),
+        ("/repo/docs", ":/a.txt", "a.txt"),
+        ("/repo/docs", ":/docs/notes.md", "docs/notes.md"),
+        ("/repo/docs", ":/:a.txt", "a.txt"),
+        ("/repo/docs", ":///a.txt", "a.txt"),
+        ("/repo/docs", ":/:", ""),
+    ],
+)
+def test_top_magic_names_a_path_from_the_root(start, operand, relative):
+    assert repo_relative(LOCATION, start, operand) == relative
+
+
+@pytest.mark.parametrize("operand", [":/:/", ":/:/a.txt", ":/:/elsewhere/a"])
+def test_a_rooted_path_after_the_top_magic_colon_is_refused(operand):
+    with pytest.raises(OutsideRepositoryError):
+        repo_relative(LOCATION, "/repo/docs", operand)
+
+
+def test_without_magic_a_colon_is_part_of_the_path():
+    assert (
+        repo_relative(LOCATION, "/repo", ":/a.txt", magic=False) == ":/a.txt"
+    )
+
+
 def test_everything_is_under_the_root():
     assert under("docs/notes.md", "")
 
@@ -113,12 +140,23 @@ def test_a_pathspec_names_a_path_a_directory_or_a_glob(
     assert pathspec_selects(path, patterns) is expected
 
 
+def test_top_magic_is_read_as_a_pattern_from_the_root():
+    operands = [":/", ":/docs/", ":/*.md"]
+    assert pathspec_patterns(LOCATION, "/repo/docs", operands) == (
+        "",
+        "docs/",
+        "*.md",
+    )
+
+
 @pytest.mark.parametrize(
     "operand,error",
     [
         ("", EmptyPathspecError),
         (":(top)a.txt", UnsupportedPathspecError),
         (":!a.txt", UnsupportedPathspecError),
+        (":/!a.txt", UnsupportedPathspecError),
+        (":/^a.txt", UnsupportedPathspecError),
         ("/elsewhere/a.txt", OutsideRepositoryError),
     ],
 )

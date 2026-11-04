@@ -388,3 +388,14 @@ async def test_cached_keeps_the_file_a_link_hides(git_rw):
         b"rm 'slot/child'\n",
         b"",
     )
+
+
+@pytest.mark.asyncio
+async def test_a_rooted_path_after_the_top_magic_colon_is_refused(
+    git_rw, repo_path: Path
+):
+    code, out, err = await run(git_rw, "rm -r -- ':/:/'")
+    assert (code, out) == (128, b"")
+    assert err.startswith(b"fatal: :/:/: ':/:/' is outside repository at ")
+    assert (repo_path / "a.txt").exists()
+    assert (await run(git_rw, "ls-files"))[1] == b"a.txt\nb.txt\n"

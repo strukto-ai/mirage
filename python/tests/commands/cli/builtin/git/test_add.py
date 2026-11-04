@@ -375,3 +375,17 @@ async def test_an_unreadable_file_is_refused_in_git_words(
         f"error: unable to index file '{name}'\n"
         f"fatal: {verb} files failed\n".encode(),
     )
+
+
+@pytest.mark.asyncio
+async def test_a_rooted_path_after_top_magic_reads_nothing_outside(
+    git_parent, repo_path: Path
+):
+    (repo_path.parent / "secret.txt").write_bytes(b"S3CR3T\n")
+    result = await git_parent.shell(
+        "cd /w/work && git add -- ':/:/w/secret.txt'"
+    )
+    assert result.exit_code == 128
+    assert b"is outside repository" in result.stderr
+    with Repo(str(repo_path)) as repo:
+        assert Blob.from_string(b"S3CR3T\n").id not in repo.object_store

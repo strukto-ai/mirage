@@ -52,7 +52,11 @@ from mirage.commands.cli.builtin.git.rows import (
     deltas,
     shown_sides,
 )
-from mirage.commands.cli.builtin.git.seen import readable, shown_entries
+from mirage.commands.cli.builtin.git.seen import (
+    decoded,
+    readable,
+    shown_entries,
+)
 from mirage.commands.cli.builtin.git.summary import (
     BINARY_SNIFF,
     FileStat,
@@ -475,7 +479,7 @@ def entries(
     else:
         obj = repo.object_store[ObjectID(tree)]
         assert isinstance(obj, Tree)
-        found = {e.path: (e.mode, e.sha) for e in obj.iteritems()}
+        found = {e.path: (e.mode, e.sha) for e in decoded(obj).iteritems()}
     # A commit's tree stands at the root; what the session cannot see
     # there is no side of any change, so no patch, count or match.
     return limited(shown_entries(repo, found), pathspecs)

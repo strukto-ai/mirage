@@ -16,10 +16,11 @@ import git from 'isomorphic-git'
 
 import { decodeText } from '../../../../shell/bytes.ts'
 import { toHex } from '../../../../utils/hex.ts'
+import { SYMLINK } from './constants.ts'
 import { GitError } from './errors.ts'
 import { resolveObject, unwrapped } from './revparse.ts'
 import { rawObject, repoArgs, type Repo } from './repo.ts'
-import { rooted } from './seen.ts'
+import { decoded, rooted } from './seen.ts'
 import type { GitObject } from './types.ts'
 
 const SPACE = 0x20
@@ -71,7 +72,7 @@ export async function treeItems(repo: Repo, treeOid: string): Promise<TreeItem[]
     })
     at = nul + 1 + OID_BYTES
   }
-  return items
+  return decoded(items)
 }
 
 /**
@@ -89,6 +90,45 @@ export async function treeEntries(
 ): Promise<Map<string, TreeEntry>> {
   const rows = await listedTree(repo, treeOid, [], true, false, false, prefix)
   return new Map(rows.map(([path, mode, oid]) => [path, { mode, oid }]))
+}
+
+const DOT_GIT = /^(?:\.git|git~1)[ .]*(?::.*)?$/is
+const GITMODULES_LINK =
+  /^(?:\.gitmodules|gitmod~[1-4]|~[1-9][0-9]{6}|g~[1-9][0-9]{5}|gi~[1-9][0-9]{4}|gi7~[1-9][0-9]{3}|gi7e~[1-9][0-9]{2}|gi7eb~[1-9][0-9]|gi7eba~[1-9])[ .]*(?::.*)?$/is
+const GITMODULES_DIR = /^\.gitmodules(?::.*)?$/is
+
+/**
+ * A path part as NTFS reads it: split at every backslash but one that starts
+ * the part, which git keeps as part of the name.
+ */
+export function ntfsPieces(part: string): string[] {
+  const [head = '', ...rest] = part.slice(1).split('\\')
+  return [part.slice(0, 1) + head, ...rest]
+}
+
+/**
+ * Whether a tree path passes git's checkout rule, pinned against git 2.47.3
+ * with its defaults (every row is in tree.test.ts).
+ *
+ * Refused: a part that is empty, `.` or `..`; a part, or an NTFS piece of one,
+ * that NTFS reads as `.git` (`.git` or its short name `git~1`, then dots or
+ * spaces, then the end or a `:` stream); and for a symlink, a last piece NTFS
+ * reads as `.gitmodules` (the name, its short names `gitmod~1`-`~4`, or the
+ * 8-character hashed short name built on `gi7eba`), or a directory part that is
+ * `.gitmodules`, with or without a `:` stream. Case is ASCII-folded, as git
+ * folds it. macOS's HFS spellings of `.git` are not covered. An empty-named
+ * tree entry never reaches here: reading the tree refuses it first.
+ */
+export function validPath(path: string, mode: string): boolean {
+  const parts = path.split('/')
+  if (parts.some((part) => part === '' || part === '.' || part === '..')) return false
+  if (parts.some((part) => ntfsPieces(part).some((piece) => DOT_GIT.test(piece)))) return false
+  // The file-type bits decide a symlink, so `0120000` and `120644` are ones.
+  if ((Number.parseInt(mode, 8) & 0o170000) !== SYMLINK) return true
+  return (
+    !GITMODULES_LINK.test(ntfsPieces(parts.at(-1) ?? '').at(-1) ?? '') &&
+    !parts.slice(0, -1).some((part) => GITMODULES_DIR.test(part))
+  )
 }
 
 /**

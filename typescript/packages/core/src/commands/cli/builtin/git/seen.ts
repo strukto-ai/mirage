@@ -18,6 +18,7 @@ import { getAdmission } from '../../../../context/session_context.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { readerOf } from '../../../../workspace/files.ts'
+import { EmptyTreeNameError } from './errors.ts'
 import { readIndex } from './index_file.ts'
 import { visiblePath } from './pathspec.ts'
 import { loadRefs } from './refs.ts'
@@ -196,6 +197,15 @@ export async function placeNamed(repo: Repo, name: string, oid: string): Promise
 }
 
 /**
+ * A tree's entries a reader is about to walk, refused as git refuses a tree
+ * holding an entry with an empty name.
+ */
+export function decoded<T extends { readonly path: string }>(items: T[]): T[] {
+  if (items.some((entry) => entry.path === '')) throw new EmptyTreeNameError()
+  return items
+}
+
+/**
  * A tree's entries the session sees, at the place it was found.
  *
  * @param repo the opened repository
@@ -207,7 +217,7 @@ export async function shownItems(
   tree: string,
   base: string | null = null,
 ): Promise<TreeObject> {
-  const items = (await git.readTree({ ...repoArgs(repo), oid: tree })).tree
+  const items = decoded((await git.readTree({ ...repoArgs(repo), oid: tree })).tree)
   if (!guarded(repo)) return items
   const where = base ?? (await placeOf(repo, tree))
   return items.filter((entry) =>

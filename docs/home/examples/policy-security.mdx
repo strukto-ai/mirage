@@ -20,15 +20,10 @@ workspace one coded policy, and walks through what the agent sees.
 
 ## The policy script
 
-The script reads the command as JSON, opens the files it names through the
-workspace, and refuses a Python script whose code deletes files:
+The script's `pre_command` takes the command, opens the files it names
+through the workspace, and refuses a Python script whose code deletes files:
 
 ```python guard.py
-import json, os
-
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-
-
 def deletes(path):
     try:
         code = open(path).read()
@@ -37,8 +32,9 @@ def deletes(path):
     return any(call in code for call in ("os.remove", "os.unlink", "shutil.rmtree"))
 
 
-if ctx["command"].startswith("python") and any(deletes(p) for p in ctx["paths"]):
-    print(json.dumps({"kind": "deny", "reason": "deleting files is disabled"}))
+def pre_command(ctx):
+    if ctx["command"].startswith("python") and any(deletes(p) for p in ctx["paths"]):
+        return {"kind": "deny", "reason": "deleting files is disabled"}
 ```
 
 The script reads the code as text, so it stops the usual calls, not every way
@@ -214,6 +210,6 @@ applies to every session of the workspace, so the host's own writes outside
 
 - [Agent profiles](/home/profiles): every profile key and how rules match.
 - [Policies](/home/policy/policies): the eight methods and their answers.
-- [Scripts](/home/policy/scripts): what a policy script reads and prints.
+- [Scripts](/home/policy/scripts): what a policy script reads and returns.
 - [Explain](/home/policy/explain): check a line against the rules before it
   runs.

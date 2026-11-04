@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { Computations } from './computations.ts'
 import { compiledModule } from '../rs/stream.ts'
 import { abortable, makeAbortError } from '../utils/abort.ts'
 
@@ -10,13 +11,40 @@ interface Port {
 const Reply = z.object({ ok: z.boolean(), value: z.unknown() })
 type Reply = z.infer<typeof Reply>
 
+/**
+ * A port that runs each computation in this thread, for a host with no
+ * threads (an edge isolate). The computation cannot be interrupted while it
+ * runs, as the isolate's own interpreter cannot; its replies keep the order
+ * of the requests, as a thread's do.
+ */
+async function inThread(done: (reply: Reply) => void): Promise<Port> {
+  const { closeAll, execute } = await import('./computations.ts')
+  const made: Computations = new Map()
+  let replies = Promise.resolve()
+  return {
+    post: (data) => {
+      replies = replies.then(async () => {
+        done(await execute({ ...data, args: [...data.args] }, made))
+      })
+    },
+    // A thread's memory goes with it; this thread keeps the module's, so
+    // what the computations hold is released once their work settles.
+    close: async () => {
+      await replies
+      await closeAll(made)
+    },
+  }
+}
+
 async function createPort(
   done: (reply: Reply) => void,
   failed: (error: Error) => void,
 ): Promise<Port> {
   const node = (globalThis as { process?: { versions?: { node?: string } } }).process?.versions
     ?.node
-  if (node !== undefined) {
+  // A host that reports a Node version without being Node (an edge
+  // runtime's compatibility layer) has no module URL to start a thread from.
+  if (node !== undefined && typeof import.meta.url === 'string') {
     const { Worker: NodeWorker } = await import('node:worker_threads')
     const url = new URL(
       import.meta.url.endsWith('.ts') ? './worker_entry.ts' : './worker_entry.js',
@@ -46,6 +74,7 @@ async function createPort(
       },
     }
   }
+  if (typeof globalThis.Worker !== 'function') return inThread(done)
   // The worker starts from the bundle core embeds, not from worker_entry.js:
   // a bundler that moves this module (Vite's dependency pre-bundling) leaves
   // no file where a relative URL would look.

@@ -28,12 +28,9 @@ function routePolicy(route: RouteRule): RoutePolicy {
 }
 
 const ROUTE_HEAVY = [
-  'import json',
-  'import os',
-  '',
-  'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
-  'if "heavy" in ctx["line"]:',
-  '    print(json.dumps({"kind": "route", "runtime": "beta"}))',
+  'def pre_execute(ctx):',
+  '    if "heavy" in ctx["line"]:',
+  '        return {"kind": "route", "runtime": "beta"}',
   '',
 ].join('\n')
 
@@ -75,8 +72,9 @@ describe('RoutePolicy', () => {
   })
 
   it.each([
-    ['1 / 0', /route_policy exited 1/],
-    ["print('beta')", /route_policy must print a JSON answer/],
+    ['x = 1', /route_policy defines no pre_execute\(ctx\)/],
+    ['def pre_execute(ctx):\n    1 / 0', /route_policy exited 1/],
+    ["def pre_execute(ctx):\n    return 'beta'", /route_policy must return an answer/],
   ])("treats a failing program as the deployment's mistake: %s", async (source, refusal) => {
     const policy = routePolicy({ script: new ScriptSource(source, 'python'), runtime: 'monty' })
     await expect(policy.preExecute(line('echo hi'))).rejects.toThrow(refusal)

@@ -403,7 +403,8 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'pull_request' || needs.changes.outputs.core == 'true' || needs.changes.outputs.ts == 'true') }}
     name: integ-edge
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The whole battery takes about 17 minutes locally, more on a runner.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup-node-pnpm
@@ -424,7 +425,7 @@ jobs:
       - name: Bundle edge's Monty runtime
         working-directory: typescript/packages/edge
         run: node scripts/bundle-monty.mjs
-      # The corpus's hf, email, slack and linear targets on an edge worker
+      # The corpus's targets for every built-in CLI on an edge worker
       # (workerd under wrangler dev), each line over the server API.
       - name: Run the corpus on the edge host
         working-directory: integ

@@ -22,7 +22,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif 'keep-out' in ctx['line']:\n    print(json.dumps({\"kind\": \"route\", \"runtime\": \"workspace\"}))\n",
+          "script": "def pre_execute(ctx):\n    if 'keep-out' in ctx['line']:\n        return {\"kind\": \"route\", \"runtime\": \"workspace\"}\n",
           "runtime": "monty"
         }
       },
@@ -306,7 +306,7 @@
           }
         },
         "route_policy": {
-          "script": "import json\nimport os\n\nctx = json.loads(os.environ[\"MIRAGE_POLICY_CTX\"])\nif 'cd ' in ctx['line']:\n    print(json.dumps({\"kind\": \"route\", \"runtime\": \"workspace\"}))\n",
+          "script": "def pre_execute(ctx):\n    if 'cd ' in ctx['line']:\n        return {\"kind\": \"route\", \"runtime\": \"workspace\"}\n",
           "runtime": "monty"
         }
       },

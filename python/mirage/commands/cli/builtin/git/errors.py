@@ -861,6 +861,84 @@ class UnmergedPathError(GitError):
         )
 
 
+class InvalidPathError(GitError):
+    """Tree paths a checkout, restore or reset meets that git refuses to
+    write, by the rule ``tree.valid_path`` holds.
+
+    One line per path and nothing written, exit 1, pinned against git
+    2.47.3. Where git goes on to refuse the line in other words (an
+    unmatched pathspec, reset's ``make_cache_entry``), those follow, and
+    the last one sets the exit code. Its text also words restore's note
+    for the paths it skips.
+
+    Args:
+        paths (list[str]): the refused paths.
+        then (tuple[GitError, ...]): the refusals git prints after them.
+    """
+
+    prefix = "error"
+    exit_code = 1
+
+    def __init__(
+        self, paths: list[str], then: tuple[GitError, ...] = ()
+    ) -> None:
+        self.paths = sorted(paths)
+        if then:
+            self.exit_code = then[-1].exit_code
+        # Later lines carry their prefix inline; the renderer writes the first.
+        super().__init__(
+            "\nerror: ".join(f"invalid path '{path}'" for path in self.paths)
+            + "".join(
+                f"\n{after}"
+                if after.prefix is None
+                else f"\n{after.prefix}: {after}"
+                for after in then
+            )
+        )
+
+
+class EmptyTreeNameError(GitError):
+    """A tree entry whose name is empty, met while reading the tree's
+    entries; reading the object whole, as ``cat-file -t`` does, is no
+    refusal. Pinned against git 2.51.2.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("empty filename in tree entry")
+
+
+class CloneCheckoutError(GitError):
+    """``clone`` whose checkout was refused: the repository stays, the
+    working tree stays empty, exit 128.
+
+    git names the first refused path only, or the empty entry name it
+    met, and says the clone itself succeeded, pinned against git 2.47.3
+    and 2.51.2.
+
+    Args:
+        notes (str): what the clone printed before the checkout.
+        cause (InvalidPathError | EmptyTreeNameError): the refusal.
+    """
+
+    prefix = None
+
+    def __init__(
+        self, notes: str, cause: InvalidPathError | EmptyTreeNameError
+    ) -> None:
+        refusal = (
+            f"error: {InvalidPathError(cause.paths[:1])}\n"
+            "fatal: unable to checkout working tree\n"
+            if isinstance(cause, InvalidPathError)
+            else f"fatal: {cause}\n"
+        )
+        super().__init__(
+            f"{notes}{refusal}"
+            "warning: Clone succeeded, but checkout failed.\n"
+            "You can inspect what was checked out with 'git status'\n"
+            "and retry with 'git restore --source=HEAD :/'\n"
+        )
+
+
 class UsageError(GitError):
     """A refusal parse-options words in full, exit 129.
 

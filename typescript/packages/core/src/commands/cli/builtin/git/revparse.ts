@@ -32,7 +32,7 @@ import type { CommitFacts } from './format.ts'
 import { MINIMUM_ABBREV } from './ref_fields.ts'
 import { loadRefs, TAG_PREFIX } from './refs.ts'
 import { commitFacts, repoArgs, type Repo } from './repo.ts'
-import { guarded, located, placeOf, placed, rooted } from './seen.ts'
+import { decoded, guarded, located, placeOf, placed, rooted } from './seen.ts'
 import type { AncestryStep, GitObject, RevOp } from './types.ts'
 
 const ANCESTOR = '~'
@@ -364,6 +364,14 @@ async function atPath(repo: Repo, rev: string, path: string, revision: string): 
   }
   let found: GitObject
   try {
+    // Every tree the path passes through has its entries read, as git reads them.
+    let through = holder.type === TREE ? holder.oid : null
+    for (const part of path.split('/').filter(Boolean)) {
+      if (through === null) break
+      const { tree } = await git.readTree({ ...repoArgs(repo), oid: through })
+      const entry = decoded(tree).find((item) => item.path === part)
+      through = entry?.type === TREE ? entry.oid : null
+    }
     // eslint-disable-next-line @typescript-eslint/no-deprecated
     const read = await git.readObject({ ...repoArgs(repo), oid: holder.oid, filepath: path })
     found = { oid: read.oid, type: read.type }

@@ -30,6 +30,7 @@ from mirage.types import MountMode, PathSpec
 from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import (
+    branch_with_paths,
     commit_gitlink,
     conflict_index,
 )
@@ -758,3 +759,98 @@ async def test_refuse_ruled_makes_no_file_call_without_a_rule():
         vfs=NoCalls(),  # type: ignore[arg-type]
     )
     await refuse_ruled(NoCalls(), location, ["a.txt", "box"], ["b.txt"])  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "line,listed",
+    [
+        ("git restore --source=odd .", b"a.txt\nb.txt\n"),
+        ("git checkout odd -- .", b"a.txt\nb.txt\nfresh\n"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_restoring_from_a_tree_skips_each_path_git_rejects(
+    git_parent, repo_path: Path, line: str, listed: bytes
+):
+    branch_with_paths(
+        repo_path,
+        "odd",
+        {
+            "../above.txt": b"above\n",
+            "a.txt": b"restored\n",
+            "fresh": b"fresh\n",
+            "sub/.git/config": b"[core]\n",
+        },
+    )
+    result = await git_parent.shell(f"cd /w/work && {line}")
+    assert (result.exit_code, result.stderr) == (
+        0,
+        b"error: invalid path '../above.txt'\n"
+        b"error: invalid path 'sub/.git/config'\n",
+    )
+    assert not (repo_path.parent / "above.txt").exists()
+    assert not (repo_path / "sub").exists()
+    assert (repo_path / "a.txt").read_text(encoding="utf-8") == "restored\n"
+    staged = await git_parent.shell("cd /w/work && git ls-files")
+    assert staged.stdout == listed
+
+
+@pytest.mark.parametrize(
+    "line,err",
+    [
+        (
+            "git restore --source=odd sub a.txt",
+            b"error: invalid path 'sub/.git/config'\n"
+            b"error: pathspec 'sub' did not match any file(s) known to git\n",
+        ),
+        (
+            "git checkout odd -- sub a.txt",
+            b"error: invalid path 'sub/.git/config'\n"
+            b"error: pathspec 'sub' did not match any file(s) known to git\n",
+        ),
+        (
+            "git restore --source=odd nosuch sub",
+            b"error: invalid path 'sub/.git/config'\n"
+            b"error: pathspec 'nosuch' did not match any file(s) known to git\n"
+            b"error: pathspec 'sub' did not match any file(s) known to git\n",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_an_operand_left_with_only_rejected_paths_matches_nothing(
+    git_parent, repo_path: Path, line: str, err: bytes
+):
+    branch_with_paths(
+        repo_path,
+        "odd",
+        {"a.txt": b"restored\n", "sub/.git/config": b"[core]\n"},
+    )
+    (repo_path / "a.txt").write_text("local\n", encoding="utf-8")
+    result = await git_parent.shell(f"cd /w/work && {line}")
+    assert (result.exit_code, result.stderr) == (1, err)
+    assert (repo_path / "a.txt").read_text(encoding="utf-8") == "local\n"
+    assert not (repo_path / "sub").exists()
+    staged = await git_parent.shell("cd /w/work && git ls-files")
+    assert staged.stdout == b"a.txt\nb.txt\n"
+
+
+@pytest.mark.asyncio
+async def test_the_retry_a_refused_clone_suggests_restores_the_rest(
+    git_parent, repo_path: Path
+):
+    branch_with_paths(
+        repo_path, "odd", {"a.txt": b"a\n", "sub/.git/config": b"[core]\n"}
+    )
+    await git_parent.shell("cd /w && git clone -b odd work dst")
+    result = await git_parent.shell(
+        "cd /w/dst && git restore --source=HEAD :/"
+    )
+    assert (result.exit_code, result.stderr) == (
+        0,
+        b"error: invalid path 'sub/.git/config'\n",
+    )
+    dst = repo_path.parent / "dst"
+    assert (dst / "a.txt").read_bytes() == b"a\n"
+    assert not (dst / "sub").exists()
+    staged = await git_parent.shell("cd /w/dst && git ls-files")
+    assert staged.stdout == b""

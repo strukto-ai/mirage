@@ -23,7 +23,7 @@ from dulwich.objects import Blob, Commit, Tree
 from dulwich.repo import Repo
 
 from mirage.commands.cli.builtin.git import GIT
-from mirage.commands.cli.builtin.git.constants import GITLINK
+from mirage.commands.cli.builtin.git.constants import GITLINK, REGULAR
 from mirage.commands.cli.builtin.git.discover import discover
 from mirage.commands.cli.builtin.git.repo import open_repo
 from mirage.commands.cli.builtin.git.types import RepoLocation
@@ -196,15 +196,83 @@ def branch_with_gitlink(repo_path: Path, branch: str, name: str) -> None:
         assert isinstance(tree, Tree)
         tree.add(name.encode(), GITLINK, head)
         repo.object_store.add_object(tree)
-        commit = Commit()
-        commit.tree = tree.id
-        commit.parents = [head]
-        commit.author = commit.committer = AUTHOR
-        commit.commit_time = commit.author_time = 0
-        commit.commit_timezone = commit.author_timezone = 0
-        commit.message = b"gitlink"
-        repo.object_store.add_object(commit)
-        repo.refs[f"refs/heads/{branch}".encode()] = commit.id
+        write_branch(repo, branch, tree.id, b"gitlink")
+
+
+TreeNode = dict[bytes, "TreeNode | tuple[int, bytes]"]
+
+
+def write_branch(repo: Repo, branch: str, tree: bytes, message: bytes) -> None:
+    """Commit a tree on top of HEAD as a branch, leaving HEAD alone.
+
+    Args:
+        repo (Repo): the open repository.
+        branch (str): the branch to write.
+        tree (bytes): the tree id to commit.
+        message (bytes): the commit message.
+    """
+    head = repo.refs[b"HEAD"]
+    commit = Commit()
+    commit.tree = tree
+    commit.parents = [head]
+    commit.author = commit.committer = AUTHOR
+    commit.commit_time = commit.author_time = 0
+    commit.commit_timezone = commit.author_timezone = 0
+    commit.message = message
+    repo.object_store.add_object(commit)
+    repo.refs[f"refs/heads/{branch}".encode()] = commit.id
+
+
+def branch_with_paths(
+    repo_path: Path,
+    branch: str,
+    paths: dict[str, bytes],
+    modes: dict[str, int] | None = None,
+) -> None:
+    """Write a branch whose tree holds exactly the given paths, recorded
+    verbatim, leaving HEAD alone.
+
+    Built object by object because porcelain refuses the names the
+    callers need: each ``/``-separated part becomes its own tree entry,
+    whatever it is called. Nothing of HEAD's tree is carried over, so
+    every file HEAD has and the branch lacks is a removal. A gitlink
+    names HEAD's commit; any other mode records the content as a blob.
+
+    Args:
+        repo_path (Path): the repository's working tree.
+        branch (str): the branch to write, its parent HEAD.
+        paths (dict[str, bytes]): repository-relative path to content.
+        modes (dict[str, int] | None): a path's entry mode, a regular
+            file where none is given.
+    """
+    modes = modes or {}
+    root: TreeNode = {}
+    for path, data in paths.items():
+        *parts, leaf = path.encode().split(b"/")
+        node = root
+        for part in parts:
+            child = node.setdefault(part, {})
+            assert isinstance(child, dict)
+            node = child
+        node[leaf] = (modes.get(path, REGULAR), data)
+    with Repo(str(repo_path)) as repo:
+        head = repo.refs[b"HEAD"]
+
+        def build(node: TreeNode) -> bytes:
+            tree = Tree()
+            for name, child in node.items():
+                if isinstance(child, dict):
+                    tree.add(name, 0o40000, build(child))
+                elif child[0] == GITLINK:
+                    tree.add(name, GITLINK, head)
+                else:
+                    blob = Blob.from_string(child[1])
+                    repo.object_store.add_object(blob)
+                    tree.add(name, child[0], blob.id)
+            repo.object_store.add_object(tree)
+            return tree.id
+
+        write_branch(repo, branch, build(root), branch.encode())
 
 
 def conflict_index(repo_path: Path, name: str) -> None:
@@ -298,6 +366,21 @@ def git_rw(repo_path: Path):
     """
     with Workspace(
         {MOUNT: DiskVFS(root=str(repo_path))}, mode=MountMode.WRITE
+    ) as ws:
+        ws.register_cli("git", GIT)
+        yield ws
+
+
+@pytest.fixture
+def git_parent(repo_path: Path):
+    """A writable workspace mounting the repository's parent at /w, so
+    the repository sits at /w/work with a directory above it.
+
+    Args:
+        repo_path (Path): the repository's working tree.
+    """
+    with Workspace(
+        {"/w/": DiskVFS(root=str(repo_path.parent))}, mode=MountMode.WRITE
     ) as ws:
         ws.register_cli("git", GIT)
         yield ws

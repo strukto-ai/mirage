@@ -17,6 +17,7 @@ import contextlib
 import dataclasses
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable, Mapping
 from enum import Enum
 from typing import Any
@@ -195,15 +196,177 @@ def script_context(
     return data
 
 
-def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:
-    """The answer a policy program printed at one method.
+# The letters a string literal's prefix may carry (r, b, u, f and t).
+_PREFIX = frozenset("rRbBuUfFtT")
 
-    Nothing (or ``null``) is no opinion. Anything else is one JSON
-    answer (``Answer``): ``{"kind": "deny", "reason": ...}``,
-    ``{"kind": "ask", "reason": ...}``, or at ``pre_execute``
+
+def _string_end(source: str, start: int) -> int:
+    """Where the string literal whose quote is at ``start`` ends: past
+    its closing quote, or at the newline that cuts a one-line string
+    short. An f- or t-string's replacement fields are skipped as code,
+    strings nested in them included (``_field_end``).
+
+    Args:
+        source (str): the program.
+        start (int): the index of the literal's opening quote.
+    """
+    head = start
+    while head > 0 and source[head - 1] in _PREFIX:
+        head -= 1
+    prefix = source[head:start].lower()
+    if head > 0 and (source[head - 1].isalnum() or source[head - 1] == "_"):
+        prefix = ""
+    fields = "f" in prefix or "t" in prefix
+    char = source[start]
+    quote = char * 3 if source.startswith(char * 3, start) else char
+    end = start + len(quote)
+    while end < len(source):
+        if source.startswith(quote, end):
+            return end + len(quote)
+        if source[end] == "\n" and len(quote) == 1:
+            return end
+        if source[end] == "\\":
+            # An escape takes the character after it, but not an
+            # f-string's brace, which still opens a field.
+            end += 1 if fields and source.startswith("{", end + 1) else 2
+        elif fields and source.startswith("{{", end):
+            end += 2
+        elif fields and source[end] == "{":
+            end = _field_end(source, end + 1)
+        else:
+            end += 1
+    return len(source)
+
+
+def _field_end(source: str, start: int) -> int:
+    """Where an f-string's replacement field whose code starts at
+    ``start`` ends: past the brace that closes it. Its expression is
+    code, strings and comments skipped; a ``!`` conversion or ``:``
+    format spec at its top level is text (``_spec_end``).
+
+    Args:
+        source (str): the program.
+        start (int): the index just past the field's opening brace.
+    """
+    depth = 0
+    end = start
+    while end < len(source):
+        char = source[end]
+        if char in "'\"":
+            end = _string_end(source, end)
+            continue
+        if char == "#":
+            end = source.find("\n", end)
+            if end == -1:
+                return len(source)
+            continue
+        if depth == 0 and (
+            char == ":" or (char == "!" and not source.startswith("!=", end))
+        ):
+            return _spec_end(source, end + 1)
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if depth == 0:
+                return end + 1
+            depth -= 1
+        end += 1
+    return len(source)
+
+
+def _spec_end(source: str, start: int) -> int:
+    """Where a replacement field whose conversion or format spec starts
+    at ``start`` ends: past the brace that closes it. The spec is text,
+    so a fill such as ``[`` or ``'`` opens nothing; only a nested
+    field's braces count.
+
+    Args:
+        source (str): the program.
+        start (int): the index just past the field's ``!`` or ``:``.
+    """
+    end = start
+    while end < len(source):
+        if source[end] == "{":
+            end = _field_end(source, end + 1)
+        elif source[end] == "}":
+            return end + 1
+        else:
+            end += 1
+    return len(source)
+
+
+def _unquoted(source: str) -> str:
+    """``source`` with every string literal and comment blanked to spaces,
+    its newlines kept, so a definition shown in a docstring is not read
+    as the program's own.
+
+    Args:
+        source (str): the program.
+    """
+    out = list(source)
+    i = 0
+    while i < len(source):
+        char = source[i]
+        if char == "#":
+            end = source.find("\n", i)
+            end = len(source) if end == -1 else end
+        elif char in "'\"":
+            end = _string_end(source, i)
+        else:
+            i += 1
+            continue
+        for k in range(i, end):
+            if out[k] != "\n":
+                out[k] = " "
+        i = end
+    return "".join(out)
+
+
+def program_source(source: str, method: str) -> str:
+    """The program a runtime runs at one method: the source as written,
+    then a call to the function it defines for the method at its top
+    level (``def pre_command(ctx)``, or ``async def``), with the
+    context, printing what it returns as the answer.
+
+    The call is appended, so the program's own lines keep their numbers
+    in a traceback. A definition inside a string or a comment is not the
+    program's (``_unquoted``).
+
+    Args:
+        source (str): the program.
+        method (str): the method it answers at.
+
+    Raises:
+        ValueError: the program defines no function for the method, as
+            a clause about "script".
+    """
+    found = re.search(
+        rf"^(async[ \t]+)?def[ \t]+{method}[ \t]*\(",
+        _unquoted(source),
+        re.MULTILINE,
+    )
+    if found is None:
+        raise ValueError(f"script defines no {method}(ctx)")
+    call = f'{method}(_mirage_json.loads(_mirage_os.environ["{CTX_ENV}"]))'
+    if found.group(1):
+        call = f"await {call}"
+    return (
+        f"{source}\n"
+        "import json as _mirage_json, os as _mirage_os\n"
+        f"print(_mirage_json.dumps({call}))\n"
+    )
+
+
+def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:
+    """The answer a policy program's function returned at one method,
+    as ``program_source`` printed it.
+
+    ``null`` (the function returned ``None``) is no opinion. Anything
+    else is one JSON answer (``Answer``): ``{"kind": "deny", "reason":
+    ...}``, ``{"kind": "ask", "reason": ...}``, or at ``pre_execute``
     ``{"kind": "route", "runtime": ..., "reason": ...}``, its reason
-    optional. A deny or an ask without a
-    reason carries the document's default one.
+    optional. A deny or an ask without a reason carries the document's
+    default one.
 
     Args:
         output (bytes): what the program wrote to stdout.
@@ -221,8 +384,8 @@ def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:
         answer = Answer.model_validate_json(text)
     except ValidationError as exc:
         raise ValueError(
-            f"script must print a JSON answer at {method}, "
-            f'{{"kind": "deny" | "ask" | "route", ...}}'
+            f"script must return an answer at {method}, "
+            f'{{"kind": "deny" | "ask" | "route", ...}}, or None'
         ) from exc
     if answer.kind not in VALIDITY[method]:
         raise ValueError(f"script cannot answer {answer.kind} at {method}")
@@ -251,19 +414,21 @@ class ScriptPolicy(Policy, SessionScopedMixin):
     ``SessionScriptsQuery`` by the session id the entry point put in the
     context.
 
-    A program runs as any program does on its runtime: never edited,
-    in the session's cwd, with the context as JSON (``script_context``)
-    in ``CTX_ENV`` and on stdin, and its answer printed on stdout
-    (``script_action``). Beside ``CTX_ENV`` it is passed only its
-    entry's own ``env``, a pointer read from the workspace's sources on
-    the entry's first run and kept: the session's variables are in the
-    context, so none the agent sets changes how the program starts, and
-    on wasi it runs with
+    A program runs as any program does on its runtime: in the session's
+    cwd, with the context as JSON (``script_context``) in ``CTX_ENV``
+    and on stdin, and the call to the function it defines for the method
+    appended (``program_source``), which prints what the function returns
+    on stdout as its answer (``script_action``).
+    Beside ``CTX_ENV`` it is passed only its entry's own ``env``, a
+    pointer read from the workspace's sources on the entry's first run
+    and kept: the session's variables are in the context, so none the
+    agent sets changes how the program starts, and on wasi it runs with
     ``-P`` (``PROGRAM_FLAGS``), so no file the agent writes stands in
     for a module it imports. Every failure fails closed: a program that
-    exits non-zero, runs past the timeout, prints something else, or
-    names a runtime that cannot be built refuses the action with a
-    reason naming the profile, and is logged. The workspace's
+    defines no function for the method, exits non-zero, runs past the
+    timeout, returns something else, or names a runtime that cannot be
+    built refuses the action with a reason naming the profile, and is
+    logged. The workspace's
     ``route_policy`` program runs here too (``run``), outside any
     profile.
 
@@ -518,6 +683,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
         Raises:
             ValueError: the program failed, as a clause about "script".
         """
+        source = program_source(entry.script.source, method)
         engine, lock = self._engine(entry)
         try:
             env = await self._env(entry)
@@ -528,7 +694,7 @@ class ScriptPolicy(Policy, SessionScopedMixin):
                         [],
                         Context(
                             flags={
-                                "c": entry.script.source,
+                                "c": source,
                                 **PROGRAM_FLAGS.get(entry.runtime, {}),
                             },
                             cwd=PathSpec.from_str_path(cwd),

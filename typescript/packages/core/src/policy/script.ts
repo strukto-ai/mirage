@@ -177,10 +177,143 @@ export function scriptContext(
   return data
 }
 
+// The letters a string literal's prefix may carry (r, b, u, f and t).
+const PREFIX = new Set('rRbBuUfFtT')
+
 /**
- * The answer a policy program printed at one method.
+ * Where the string literal whose quote is at `start` ends: past its closing
+ * quote, or at the newline that cuts a one-line string short. An f- or
+ * t-string's replacement fields are skipped as code, strings nested in them
+ * included (`fieldEnd`). Mirrors the Python `_string_end`.
+ */
+function stringEnd(source: string, start: number): number {
+  let head = start
+  while (head > 0 && PREFIX.has(source[head - 1] ?? '')) head -= 1
+  let prefix = source.slice(head, start).toLowerCase()
+  if (head > 0 && /\w/.test(source[head - 1] ?? '')) prefix = ''
+  const fields = prefix.includes('f') || prefix.includes('t')
+  const char = source[start] ?? ''
+  const quote = source.startsWith(char.repeat(3), start) ? char.repeat(3) : char
+  let end = start + quote.length
+  while (end < source.length) {
+    if (source.startsWith(quote, end)) return end + quote.length
+    if (source[end] === '\n' && quote.length === 1) return end
+    // An escape takes the character after it, but not an f-string's brace,
+    // which still opens a field.
+    if (source[end] === '\\') end += fields && source[end + 1] === '{' ? 1 : 2
+    else if (fields && source.startsWith('{{', end)) end += 2
+    else if (fields && source[end] === '{') end = fieldEnd(source, end + 1)
+    else end += 1
+  }
+  return source.length
+}
+
+/**
+ * Where an f-string's replacement field whose code starts at `start` ends:
+ * past the brace that closes it. Its expression is code, strings and
+ * comments skipped; a `!` conversion or `:` format spec at its top level is
+ * text (`specEnd`). Mirrors the Python `_field_end`.
+ */
+function fieldEnd(source: string, start: number): number {
+  let depth = 0
+  let end = start
+  while (end < source.length) {
+    const char = source[end] ?? ''
+    if (char === "'" || char === '"') {
+      end = stringEnd(source, end)
+      continue
+    }
+    if (char === '#') {
+      end = source.indexOf('\n', end)
+      if (end === -1) return source.length
+      continue
+    }
+    if (depth === 0 && (char === ':' || (char === '!' && !source.startsWith('!=', end)))) {
+      return specEnd(source, end + 1)
+    }
+    if ('([{'.includes(char)) depth += 1
+    else if (')]}'.includes(char)) {
+      if (depth === 0) return end + 1
+      depth -= 1
+    }
+    end += 1
+  }
+  return source.length
+}
+
+/**
+ * Where a replacement field whose conversion or format spec starts at `start`
+ * ends: past the brace that closes it. The spec is text, so a fill such as
+ * `[` or `'` opens nothing; only a nested field's braces count. Mirrors the
+ * Python `_spec_end`.
+ */
+function specEnd(source: string, start: number): number {
+  let end = start
+  while (end < source.length) {
+    if (source[end] === '{') end = fieldEnd(source, end + 1)
+    else if (source[end] === '}') return end + 1
+    else end += 1
+  }
+  return source.length
+}
+
+/**
+ * `source` with every string literal and comment blanked to spaces, its
+ * newlines kept, so a definition shown in a docstring is not read as the
+ * program's own. Mirrors the Python `_unquoted`.
+ */
+function unquoted(source: string): string {
+  const out = source.split('')
+  let i = 0
+  while (i < source.length) {
+    const char = source[i] ?? ''
+    let end: number
+    if (char === '#') {
+      end = source.indexOf('\n', i)
+      if (end === -1) end = source.length
+    } else if (char === "'" || char === '"') {
+      end = stringEnd(source, i)
+    } else {
+      i += 1
+      continue
+    }
+    for (let k = i; k < end; k++) if (out[k] !== '\n') out[k] = ' '
+    i = end
+  }
+  return out.join('')
+}
+
+/**
+ * The program a runtime runs at one method: the source as written, then a
+ * call to the function it defines for the method at its top level
+ * (`def pre_command(ctx)`, or `async def`), with the context, printing
+ * what it returns as the answer.
  *
- * Nothing (or `null`) is no opinion. Anything else is one JSON answer
+ * The call is appended, so the program's own lines keep their numbers in
+ * a traceback. A definition inside a string or a comment is not the
+ * program's (`unquoted`). Throws a clause about "script" when the program defines no
+ * function for the method. Mirrors the Python `program_source`.
+ */
+export function programSource(source: string, method: PolicyMethod): string {
+  const name = method.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
+  const found = new RegExp(`^(async[ \\t]+)?def[ \\t]+${name}[ \\t]*\\(`, 'm').exec(
+    unquoted(source),
+  )
+  if (found === null) throw new Error(`script defines no ${name}(ctx)`)
+  let call = `${name}(_mirage_json.loads(_mirage_os.environ["${CTX_ENV}"]))`
+  if (found[1] !== undefined) call = `await ${call}`
+  return (
+    `${source}\n` +
+    'import json as _mirage_json, os as _mirage_os\n' +
+    `print(_mirage_json.dumps(${call}))\n`
+  )
+}
+
+/**
+ * The answer a policy program's function returned at one method, as
+ * `programSource` printed it.
+ *
+ * `null` (the function returned `None`) is no opinion. Anything else is one JSON answer
  * (`Answer`): `{"kind": "deny", "reason": ...}`, `{"kind": "ask",
  * "reason": ...}`, or at `preExecute` `{"kind": "route", "runtime": ...}`.
  * A deny or an ask without a reason carries the document's default one.
@@ -201,7 +334,8 @@ export function scriptAction(output: Uint8Array, method: PolicyMethod): Deny | A
   const name = method.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
   if (!answer.success) {
     throw new Error(
-      `script must print a JSON answer at ${name}, ` + '{"kind": "deny" | "ask" | "route", ...}',
+      `script must return an answer at ${name}, ` +
+        '{"kind": "deny" | "ask" | "route", ...}, or None',
     )
   }
   const { kind, reason, runtime } = answer.data
@@ -247,17 +381,19 @@ export interface ScriptWiring {
  * session's programs through the narrow `SessionScriptsQuery` by the
  * session id the entry point put in the context.
  *
- * A program runs as any program does on its runtime: never edited, in the
- * session's cwd, with the context as JSON (`scriptContext`) in `CTX_ENV`
- * and on stdin, and its answer printed on stdout (`scriptAction`).
+ * A program runs as any program does on its runtime: in the session's cwd,
+ * with the context as JSON (`scriptContext`) in `CTX_ENV` and on stdin,
+ * and the call to the function it defines for the method appended
+ * (`programSource`), which prints what the function returns on stdout as
+ * its answer (`scriptAction`).
  * Beside `CTX_ENV` it is passed only its entry's own `env`, a pointer read
  * from the workspace's sources on the entry's first run and kept: the
  * session's variables are in the context, so none the agent sets changes
  * how the program starts,
  * and on pyodide it runs with `-P` (`PROGRAM_FLAGS`), so no file the agent
  * writes stands in for a module it imports. Every failure fails closed: a
- * program that exits non-zero, runs past the timeout, prints something
- * else, or names a runtime that cannot be built refuses the action with a
+ * program that defines no function for the method, exits non-zero, runs
+ * past the timeout, returns something else, or names a runtime that cannot be built refuses the action with a
  * reason naming the profile, and is logged. The workspace's `routePolicy`
  * program runs here too (`run`), outside any profile.
  *
@@ -472,6 +608,7 @@ export class ScriptPolicy implements Policy, SessionScopedMixin {
     payload: string,
     cwd: string,
   ): Promise<Deny | Ask | Route | null> {
+    const source = programSource(entry.script.source, method)
     let result: RunResult
     try {
       const engine = this.engine(entry)
@@ -484,7 +621,10 @@ export class ScriptPolicy implements Policy, SessionScopedMixin {
         try {
           return await runWithTimeout(
             engine.execute([], [], {
-              flags: { c: entry.script.source, ...PROGRAM_FLAGS.get(entry.runtime) },
+              flags: {
+                c: source,
+                ...PROGRAM_FLAGS.get(entry.runtime),
+              },
               cwd: PathSpec.fromStrPath(cwd),
               env: { ...env, [CTX_ENV]: payload },
               stdin: ENCODER.encode(payload),

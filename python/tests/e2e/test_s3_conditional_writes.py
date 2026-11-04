@@ -1625,7 +1625,7 @@ async def test_live_session_policy_read_does_not_advance_agent(
                 "pre_command": [
                     {
                         "script": ScriptSource(
-                            "open('/s3/f').read()\nprint('null')\n"
+                            "def pre_command(ctx):\n    open('/s3/f').read()\n"
                         ),
                         "runtime": "monty",
                     }

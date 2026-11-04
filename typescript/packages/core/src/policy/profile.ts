@@ -164,9 +164,9 @@ export interface SessionProfile {
    * The profile's policy: for each `pre` method it answers at
    * (`preExecute`, `preCommand`, `preVfs`, `preSession`; `pre_execute`,
    * ... in the document), a list of programs, each with the runtime it
-   * runs on, the shape a `clis` entry has. A program reads the method's
-   * context as JSON and prints its answer: nothing for no opinion, a
-   * deny, an ask, or at `preExecute` a route. They are asked in order and
+   * runs on, the shape a `clis` entry has. A program's function for the
+   * method takes its context and returns its answer: None for no opinion,
+   * a deny, an ask, or at `preExecute` a route. They are asked in order and
    * the first deny wins. The document is optional beside it: a profile
    * stating only a policy hides nothing, and the policy is its whole
    * admission policy.

@@ -52,16 +52,13 @@ route_policy:
 
 ## Route by a fixed script
 
-A policy script reads the line as JSON and prints where it runs. This one
-sends any line that names PyTorch or CUDA to the GPU:
+A policy script reads the line and returns where it runs. This one sends
+any line that names PyTorch or CUDA to the GPU:
 
 ```python route.py
-import json
-import os
-
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-if any(word in ctx["line"] for word in ("torch", "cuda")):
-    print(json.dumps({"kind": "route", "runtime": "daytona", "reason": "the line uses PyTorch or CUDA"}))
+def pre_execute(ctx):
+    if any(word in ctx["line"] for word in ("torch", "cuda")):
+        return {"kind": "route", "runtime": "daytona", "reason": "the line uses PyTorch or CUDA"}
 ```
 
 A line the script stays silent on runs on the first runtime that captures
@@ -78,9 +75,6 @@ network, so the LLM call is a
 the workspace hands it:
 
 ```python route.py
-import json
-import os
-
 TASK = (
     "Pick the runtime that can run the Python code in this line, monty "
     "when it can."
@@ -98,10 +92,11 @@ RUNTIMES = {
     ),
 }
 
-ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])
-if any(c["command"] == "python3" for c in ctx["commands"]):
-    choice = await parse_runtime(TASK, RUNTIMES, ctx["line"])
-    print(json.dumps({"kind": "route", **choice}))
+
+async def pre_execute(ctx):
+    if any(c["command"] == "python3" for c in ctx["commands"]):
+        choice = await parse_runtime(TASK, RUNTIMES, ctx["line"])
+        return {"kind": "route", **choice}
 ```
 
 A line with no `python3` gets no answer, and runs where its commands'

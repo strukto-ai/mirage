@@ -7,7 +7,7 @@ from dulwich.repo import BaseRepo
 
 from mirage.accessor.base import Accessor
 from mirage.commands.cli.builtin.git.constants import GITLINK
-from mirage.commands.cli.builtin.git.errors import GitError
+from mirage.commands.cli.builtin.git.errors import EmptyTreeNameError, GitError
 from mirage.commands.cli.builtin.git.index_file import read_index
 from mirage.commands.cli.builtin.git.io import (
     file_size,
@@ -18,6 +18,7 @@ from mirage.commands.cli.builtin.git.io import (
     stat_of,
 )
 from mirage.commands.cli.builtin.git.repo import open_repo
+from mirage.commands.cli.builtin.git.seen import decoded
 from mirage.commands.cli.builtin.git.session import located
 from mirage.commands.cli.builtin.git.util import fatal
 from mirage.commands.config import Context
@@ -177,12 +178,13 @@ def check(
     errors: list[str] = []
     objects: dict[bytes, ShaFile] = {}
     referenced = set(roots)
+    broken: set[bytes] = set()
     edges: dict[bytes, list[bytes]] = {}
     for oid in sorted(
         set(repo.object_store) | {ObjectID(oid) for oid in roots}
     ):
         try:
-            obj = repo.object_store[ObjectID(oid)]
+            obj = decoded(repo.object_store[ObjectID(oid)])
             obj.check()
             if obj.id != oid:
                 raise ValueError("hash mismatch")
@@ -190,8 +192,10 @@ def check(
             edges[oid] = links(obj)
             referenced.update(edges[oid])
         except Exception as exc:
+            if isinstance(exc, EmptyTreeNameError):
+                broken.add(oid)
             errors.append(f"error: object {oid.decode()}: {exc}\n")
-    for missing in sorted(referenced - objects.keys()):
+    for missing in sorted(referenced - objects.keys() - broken):
         if missing not in roots:
             errors.append(f"missing object {missing.decode()}\n")
     excluded = reachable(roots, edges) if unreachable else referenced

@@ -362,19 +362,17 @@ describe('workspaces router', () => {
     writeFileSync(
       join(dir, 'no_runtimes.py'),
       [
-        'import json, os',
-        'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
-        'if "runtimes" in ctx["config"]:',
-        '    print(json.dumps({"kind": "deny", "reason": "runtimes are the server\'s"}))',
+        'def pre_workspace(ctx):',
+        '    if "runtimes" in ctx["config"]:',
+        '        return {"kind": "deny", "reason": "runtimes are the server\'s"}',
       ].join('\n'),
     )
     writeFileSync(
       join(dir, 'no_cat.py'),
       [
-        'import json, os',
-        'ctx = json.loads(os.environ["MIRAGE_POLICY_CTX"])',
-        'if ctx["command"] == "cat":',
-        '    print(json.dumps({"kind": "deny", "reason": "no cat"}))',
+        'def pre_command(ctx):',
+        '    if ctx["command"] == "cat":',
+        '        return {"kind": "deny", "reason": "no cat"}',
       ].join('\n'),
     )
     writeFileSync(

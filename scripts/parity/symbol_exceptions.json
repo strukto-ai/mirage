@@ -134,13 +134,13 @@
   },
   "rs/diff_worker": {
    "python_only": {
-    "_STREAM": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch.",
-    "drain": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch.",
-    "drop_pair": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch.",
-    "end": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch.",
-    "feed": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch.",
-    "inspect_pair": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch.",
-    "open_pair": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatch."
+    "_STREAM": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatcher.",
+    "drain": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatcher.",
+    "drop_pair": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatcher.",
+    "end": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatcher.",
+    "feed": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatcher.",
+    "inspect_pair": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatcher.",
+    "open_pair": "Python subprocess dispatch resolves importable callables and keeps a native stream; TypeScript validates tagged structured-clone requests in diffDispatcher."
    },
    "typescript_only": {
     "Bytes": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport.",
@@ -148,9 +148,8 @@
     "DiffReply": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport.",
     "DiffRequest": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport.",
     "Options": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport.",
-    "diffDispatch": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport.",
     "refusalReply": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport.",
-    "stream": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport."
+    "diffDispatcher": "TypeScript validates tagged structured-clone request/reply bytes and metadata at the worker boundary; Python dispatches importable callables over its framed process transport; each worker makes its own dispatcher, which holds its stream."
    }
   },
   "rs/diff_pool": {
@@ -186,7 +185,8 @@
    "typescript_only": {
     "Port": "Browser and Node worker transports share this private typed interface.",
     "Reply": "Structured-clone reply shape; Python unpickles a tuple from its private pipe.",
-    "createPort": "Selects browser Worker or Node worker_threads; Python always uses an owned subprocess."
+    "createPort": "Selects browser Worker or Node worker_threads; Python always uses an owned subprocess.",
+    "inThread": "A port that runs each computation in this thread, for a host with no threads (an edge isolate); Python always starts a subprocess."
    }
   },
   "concurrency/worker_entry": {
@@ -194,10 +194,8 @@
     "main": "Python subprocess entry point reads framed requests synchronously."
    },
    "typescript_only": {
-    "computations": "Literal imports keep browser worker computations in the bundler graph; Python resolves importable functions at runtime.",
-    "Request": "Structured-clone message shape; Python uses a tuple on its private pipe.",
-    "execute": "Web Worker message callback dispatches a computation asynchronously.",
-    "node": "Selects the Node worker port or browser message handler."
+    "node": "Selects the Node worker port or browser message handler.",
+    "made": "The thread's own computations, made on first call; the table and execute live in concurrency/computations."
    }
   },
   "rs/glob": {

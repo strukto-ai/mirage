@@ -33,7 +33,10 @@ import {
 } from '@struktoai/mirage-core/workspace/record/types'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
-import type { ExecuteOptions, ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
+import type {
+  ExecuteOptions,
+  ExecuteResult,
+} from '@struktoai/mirage-core/workspace/workspace/types'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ServerHost } from '@struktoai/mirage-server/routes'
@@ -60,15 +63,15 @@ export class Workspace extends CoreWorkspace {
    * when a worker calls the workspace itself, so a socket a backend opened
    * for an earlier request is not reused.
    */
-  override shell(command: string, options: ExecuteOptions & { stream: true }): Promise<ShellExecution>
+  override shell(
+    command: string,
+    options: ExecuteOptions & { stream: true },
+  ): Promise<ShellExecution>
   override shell(
     command: string,
     options?: ExecuteOptions & { stream?: false },
   ): Promise<ExecuteResult>
-  override shell(
-    command: string,
-    options: ExecuteOptions,
-  ): Promise<ExecuteResult | ShellExecution>
+  override shell(command: string, options: ExecuteOptions): Promise<ExecuteResult | ShellExecution>
   override shell(
     command: string,
     options: ExecuteOptions = {},

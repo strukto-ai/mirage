@@ -41,6 +41,7 @@ from mirage.vfs.disk import DiskVFS
 from mirage.workspace import Workspace
 from tests.commands.cli.builtin.git.conftest import (
     REPO,
+    branch_with_paths,
     commit_file,
     repo_context,
 )
@@ -56,6 +57,7 @@ PROFILES = {
         }
     },
     "half": {"paths": {"hide": ["/repo/a/secret.txt"]}},
+    "cellared": {"paths": {"hide": ["/repo/cellar"]}},
     "fresh": {
         "commands": {"deny": [{"reason": "fresh", "paths": ["/repo/new.txt"]}]}
     },
@@ -338,6 +340,32 @@ async def test_a_tag_or_a_ref_naming_a_hidden_blob_names_nothing(
     assert out == "S3CR3T two\n"
 
 
+@pytest.mark.asyncio
+async def test_a_tag_naming_a_hidden_tree_shows_the_tag_alone(history: Path):
+    branch_with_paths(
+        history, "odd", {"cellar/inner//x.txt": b"x\n", "ok.txt": b"o\n"}
+    )
+    with Repo(str(history)) as repo:
+        root = repo[repo[repo.refs[b"refs/heads/odd"]].tree]
+        inner = repo[root[b"cellar"][1]][b"inner"][1]
+    porcelain.tag_create(
+        str(history),
+        b"ttag",
+        author=b"T <t@example.com>",
+        message=b"points at a tree",
+        annotated=True,
+        objectish=inner,
+    )
+    code, out, err = await shell(history, "git show ttag", "cellared")
+    assert (code, err) == (0, "")
+    assert out.startswith("tag ttag\n")
+    assert await shell(history, "git show ttag") == (
+        128,
+        "",
+        "fatal: empty filename in tree entry\n",
+    )
+
+
 @pytest.fixture
 def twins(tmp_path: Path) -> Path:
     """Two directories holding the same files, so one tree id stands at
@@ -377,6 +405,22 @@ async def test_staged_content_answers_to_the_rules(history: Path):
         1,
         "",
         "git diff: /repo/new.txt: Permission denied\n",
+    )
+
+
+@pytest.mark.asyncio
+async def test_raw_tree_bytes_are_read_whole_whatever_an_entry_is_named(
+    history: Path,
+):
+    branch_with_paths(history, "odd", {"/x.txt": b"x\n", "ok.txt": b"o\n"})
+    code, raw, err = await raw_shell(
+        history, "git cat-file tree odd^{tree}", "veiled"
+    )
+    assert (code, err) == (0, b"")
+    assert await shell(history, "git cat-file -s odd^{tree}", "veiled") == (
+        0,
+        f"{len(raw)}\n",
+        "",
     )
 
 
