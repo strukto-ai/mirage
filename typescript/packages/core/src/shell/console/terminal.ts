@@ -42,6 +42,9 @@ export class Terminal extends JobConsole {
   private prefixSize = 0
   private errPrefix = new Uint8Array()
   private errPrefixSize = 0
+  // What the line's record takes of each stream: its history's start,
+  // and its span's when that is longer.
+  private kept = 0
   // The chunks at the head of `chunks` the line's history entries took,
   // and the bytes of each channel they took in all.
   private taken = 0
@@ -58,14 +61,27 @@ export class Terminal extends JobConsole {
   }
 
   private remember(channel: Channel, data: Uint8Array): void {
-    if (channel === Channel.STDOUT) {
-      const part = data.subarray(0, this.prefix.byteLength - this.prefixSize)
-      this.prefix.set(part, this.prefixSize)
-      this.prefixSize += part.byteLength
+    const stdout = channel === Channel.STDOUT
+    const size = stdout ? this.prefixSize : this.errPrefixSize
+    const part = data.subarray(0, this.kept - size)
+    if (part.byteLength === 0) return
+    let prefix = stdout ? this.prefix : this.errPrefix
+    // Grown as output arrives, doubling up to `kept`, so a line that
+    // writes little reserves little.
+    if (size + part.byteLength > prefix.byteLength) {
+      const grown = new Uint8Array(
+        Math.min(this.kept, Math.max(size + part.byteLength, prefix.byteLength * 2)),
+      )
+      grown.set(prefix.subarray(0, size))
+      prefix = grown
+    }
+    prefix.set(part, size)
+    if (stdout) {
+      this.prefix = prefix
+      this.prefixSize = size + part.byteLength
     } else {
-      const part = data.subarray(0, this.errPrefix.byteLength - this.errPrefixSize)
-      this.errPrefix.set(part, this.errPrefixSize)
-      this.errPrefixSize += part.byteLength
+      this.errPrefix = prefix
+      this.errPrefixSize = size + part.byteLength
     }
   }
 
@@ -106,12 +122,10 @@ export class Terminal extends JobConsole {
    * that never attaches the reader.
    */
   async attach(reader: JobConsole | null): Promise<void> {
-    // What the line's record takes of each stream: its history's start,
-    // and its span's when that is longer.
-    const kept = reader === null ? 0 : keptOutputBytes()
-    this.prefix = new Uint8Array(kept)
+    this.kept = reader === null ? 0 : keptOutputBytes()
+    this.prefix = new Uint8Array()
     this.prefixSize = 0
-    this.errPrefix = new Uint8Array(kept)
+    this.errPrefix = new Uint8Array()
     this.errPrefixSize = 0
     this.taken = 0
     this.marked = [0, 0]
@@ -158,9 +172,10 @@ export class Terminal extends JobConsole {
     to.held += this.held
     this.chunks = []
     this.held = 0
-    this.prefix = new Uint8Array(keptOutputBytes())
+    this.kept = keptOutputBytes()
+    this.prefix = new Uint8Array()
     this.prefixSize = 0
-    this.errPrefix = new Uint8Array(keptOutputBytes())
+    this.errPrefix = new Uint8Array()
     this.errPrefixSize = 0
     this.reader = to.jobs
   }
