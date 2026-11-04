@@ -14,6 +14,7 @@
 
 import typer
 
+from mirage.cli import api as api_module
 from mirage.cli import config as config_module
 from mirage.cli import daemon as daemon_module
 from mirage.cli import login as login_module
@@ -39,6 +40,13 @@ app.add_typer(session_module.app, name="session")
 app.add_typer(shell_module.app, name="shell")
 app.add_typer(vfs_module.app, name="vfs")
 app.command("glob")(vfs_module.glob_cmd)
+app.command(
+    "api",
+    context_settings={
+        "allow_extra_args": True,
+        "ignore_unknown_options": True,
+    },
+)(api_module.api_cmd)
 app.add_typer(tools_module.app, name="tools")
 app.add_typer(daemon_module.app, name="daemon")
 app.add_typer(config_module.app, name="config")

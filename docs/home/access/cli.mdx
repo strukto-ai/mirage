@@ -297,6 +297,34 @@ mirage login
   </Accordion>
 </AccordionGroup>
 
+## Call any route
+
+`mirage api` calls a route of the server `url` points at with the CLI's login
+or token, as `gh api` does, so a script needs no token of its own:
+
+```bash
+mirage api /v1/workspaces
+mirage api /v1/workspaces/demo/shell --command 'ls /data | wc -l'
+mirage api /v1/workspaces/demo/clone --id demo-2 \
+  --override '{"mounts": {"/data": {"vfs": "ram"}}}'
+mirage api /v1/workspaces --input workspace.json
+mirage api /v1/workspaces/demo -X DELETE
+```
+
+Every option after the route is a field, except these:
+
+| Flag | Does |
+| --- | --- |
+| `--input FILE` | The body, from a YAML or JSON file; `-` reads stdin. |
+| `-X METHOD` | The method: GET, or POST once there are fields or `--input`. |
+
+A field is `--key value` or `--key=value`. A value that starts with `{` or `[`
+is JSON, `@FILE` is the file's text (`@-` reads stdin), anything else is a
+string, and a bare `--flag` is `true`. Fields make a JSON body, or the query
+string of a GET. The answer prints as JSON, a 204 prints nothing, and an error
+exits 2 with its detail. `api` takes only a route, never a URL, so the token
+goes nowhere but its own server.
+
 ## Config
 
 `mirage config set|get|unset|list` edits `~/.mirage/config.toml`. An environment variable wins over the file. Changes apply on the next start.

@@ -13,7 +13,7 @@ icon: cube
 | Way in | For | Reach it with |
 | --- | --- | --- |
 | In-app | an agent in your own process | `Workspace` and `Session`, in [Python](/python/access/in-app) or [TypeScript](/typescript/access/in-app) |
-| [HTTP](/home/access/http) | programs and services | `/v1/...` routes |
+| [HTTP](/home/access/http) | programs and services | `/v1/...` routes, or [`mirage api`](/home/access/cli#call-any-route) with the CLI's login |
 | [MCP](/home/access/mcp) | agent harnesses such as Claude Code, Cursor and Codex | `/v1/workspaces/{id}/mcp`, or `mirage mcp` on stdio |
 | [RPC](/home/access/rpc) | programs that run lines and move bytes | `/v1/workspaces/{id}/rpc`, or `mirage rpc` on stdio |
 | [CLI](/home/access/cli) | people and scripts | `mirage <verb>` |
