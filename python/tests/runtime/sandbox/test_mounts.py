@@ -340,8 +340,10 @@ async def test_a_refused_line_leaves_the_sandbox_free():
 
 
 @pytest.mark.asyncio
-async def test_both_serves_what_the_sandbox_does_not_mount_itself():
-    sandbox = FakeSandbox("both", own=["/data"])
+@pytest.mark.parametrize("source", ["tmpfs", "mirage-cache"])
+async def test_both_serves_what_the_sandbox_does_not_mount_itself(source):
+    sandbox = FakeSandbox("both")
+    sandbox.table["/data"] = (source, "tmpfs")
     ws = workspace(sandbox, hide=["/my notes/secret"])
     agent = await ws.session("agent", profile="agent")
     assert (await agent.shell("python3 job.py")).exit_code == 0

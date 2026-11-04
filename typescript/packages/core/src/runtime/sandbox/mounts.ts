@@ -407,7 +407,10 @@ export class SandboxMounts {
           this.mountType !== 'ssh' &&
           present.has(p) &&
           !this.served.has(p) &&
-          !(present.get(p)?.[0] ?? '').startsWith(SSHFS_SOURCE_PREFIX),
+          !(
+            present.get(p)?.[1] === 'fuse.sshfs' &&
+            (present.get(p)?.[0] ?? '').startsWith(SSHFS_SOURCE_PREFIX)
+          ),
       )
       .sort(compareCodePoints)
     const wanted = visible.filter((p) => !own.includes(p))

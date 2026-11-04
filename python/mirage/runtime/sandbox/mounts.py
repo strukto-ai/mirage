@@ -431,7 +431,10 @@ class SandboxMounts:
                 if self._mount_type != "ssh"
                 and p in present
                 and p not in self._served
-                and not present[p][0].startswith(SSHFS_SOURCE_PREFIX)
+                and not (
+                    present[p][1] == "fuse.sshfs"
+                    and present[p][0].startswith(SSHFS_SOURCE_PREFIX)
+                )
             )
         )
         wanted = sorted(p for p in visible if p not in own)
