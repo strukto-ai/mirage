@@ -318,6 +318,14 @@
             "stdout": "after loop\n",
             "stderr": ""
           }
+        },
+        {
+          "command": "printf 'a\\nb\\n' | node -e \"require('readline').createInterface({ input: process.stdin }).on('close', () => console.log('closed'))\" && printf 'a\\n' | node -e \"process.stdin.resume().on('end', () => console.log('ended'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "closed\nended\n",
+            "stderr": ""
+          }
         }
       ]
     },

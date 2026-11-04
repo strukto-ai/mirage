@@ -988,19 +988,26 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
       },
     }
   }
-  // Listeners on target, and the pump that feeds them. Only a listener
-  // for what the pump delivers starts it: an async iterator reads as its
-  // loop asks, so nothing reads ahead of a loop or is left reading after
-  // one ends.
-  function emitter(target, pump, feeds) {
+  // Listeners on target, and the pump that feeds them, started by the
+  // first listener or by resume() and run one step a timer until it
+  // answers false. A pump steps aside once an async loop takes the
+  // stream: the loop reads only as it asks, so nothing reads ahead of
+  // it or is left reading after it ends.
+  function emitter(target, pump) {
     const listeners = {}
-    let started = false
+    let scheduled = false
+    const start = () => {
+      if (!scheduled) {
+        scheduled = true
+        os.setTimeout(() => {
+          scheduled = false
+          if (pump()) start()
+        }, 0)
+      }
+    }
     const on = (event, fn) => {
       ;(listeners[event] = listeners[event] || []).push(fn)
-      if (!started && feeds.includes(event)) {
-        started = true
-        os.setTimeout(pump, 0)
-      }
+      start()
       return target
     }
     const off = (event, fn) => {
@@ -1021,18 +1028,21 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
       once.listener = fn
       return on(event, once)
     }
-    return (event, ...args) => {
+    const emit = (event, ...args) => {
       for (const fn of (listeners[event] || []).slice()) fn(...args)
     }
+    return { emit, start }
   }
   let decoder = null
   let pending = null
+  let paused = false
+  let iterating = false
   let finished = false
   const finish = () => {
     if (!finished) {
       finished = true
-      emit('end')
-      emit('close')
+      events.emit('end')
+      events.emit('close')
     }
   }
   const input = {
@@ -1042,14 +1052,22 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
       decoder = textStream(e === undefined ? 'utf8' : e)
       return input
     },
-    resume: () => input,
-    pause: () => input,
+    resume() {
+      paused = false
+      events.start()
+      return input
+    },
+    pause() {
+      paused = true
+      return input
+    },
     read() {
       const chunk = pending
       pending = null
       return chunk
     },
     async *[Symbol.asyncIterator]() {
+      iterating = true
       for (let c = stdinChunk(); c !== null; c = stdinChunk()) {
         const value = decoder === null ? c : decoder(c)
         if (value.length) yield value
@@ -1062,26 +1080,25 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
   const deliver = (value) => {
     if (!value.length) return
     pending = value
-    emit('readable')
+    events.emit('readable')
     pending = null
-    emit('data', value)
+    events.emit('data', value)
   }
-  const emit = emitter(
-    input,
-    function pump() {
-      const chunk = stdinChunk()
-      if (chunk === null) {
-        if (decoder !== null) deliver(decoder(null))
-        return finish()
-      }
-      deliver(decoder === null ? chunk : decoder(chunk))
-      os.setTimeout(pump, 0)
-    },
-    ['data', 'readable'],
-  )
+  const events = emitter(input, () => {
+    if (iterating || paused) return false
+    const chunk = stdinChunk()
+    if (chunk === null) {
+      if (decoder !== null) deliver(decoder(null))
+      finish()
+      return false
+    }
+    deliver(decoder === null ? chunk : decoder(chunk))
+    return true
+  })
   const readline = {
     createInterface() {
       let closed = false
+      let iterating = false
       let rest = ''
       const text = textStream('utf8')
       // The lines the next chunk completes, and whether input has ended.
@@ -1097,14 +1114,15 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
         close() {
           if (!closed) {
             closed = true
-            emitLine('close')
+            lines.emit('close')
           }
         },
         async *[Symbol.asyncIterator]() {
+          iterating = true
           try {
             while (!closed) {
-              const [lines, done] = pull()
-              for (const line of lines) {
+              const [all, done] = pull()
+              for (const line of all) {
                 if (closed) return
                 yield line
               }
@@ -1115,20 +1133,16 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
           }
         },
       }
-      const emitLine = emitter(
-        rl,
-        function pump() {
-          if (closed) return
-          const [lines, done] = pull()
-          for (const line of lines) {
-            if (closed) return
-            emitLine('line', line)
-          }
-          if (done) rl.close()
-          else os.setTimeout(pump, 0)
-        },
-        ['line'],
-      )
+      const lines = emitter(rl, () => {
+        if (closed || iterating) return false
+        const [all, done] = pull()
+        for (const line of all) {
+          if (closed) return false
+          lines.emit('line', line)
+        }
+        if (done) rl.close()
+        return !done
+      })
       return rl
     },
   }
