@@ -110,6 +110,11 @@ try {
         formats: ['es'],
         fileName: () => 'suite.js',
       },
+      // A page has no socket to reach a mail server with, and the mail
+      // libraries' ESM builds import node:stream and Buffer, which no
+      // browser shim provides; core loads them only when an email mount or
+      // himalaya runs, so the page leaves them out.
+      rollupOptions: { external: ['imapflow', 'mailparser', 'nodemailer'] },
     },
   })
   await writeFile(join(output, 'index.html'), '<!doctype html><title>Mirage shell</title>')
