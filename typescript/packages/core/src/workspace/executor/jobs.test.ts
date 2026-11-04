@@ -1106,12 +1106,12 @@ it.each([
   }
 })
 
-it('logs a never-run job whose holds on readers fail to drop', async () => {
+it('logs a never-run job whose hold fails to drop and drops the others', async () => {
   const debug = vi.fn()
   logger.debug = debug
   const unhold = vi
     .spyOn(AsyncLineIterator.prototype, 'unhold')
-    .mockRejectedValue(new Error('unhold failed'))
+    .mockRejectedValueOnce(new Error('unhold failed'))
   // eslint-disable-next-line @typescript-eslint/unbound-method
   const submit = JobTable.prototype.submit
   const submitting = vi.spyOn(JobTable.prototype, 'submit').mockImplementation(function (
@@ -1124,16 +1124,61 @@ it('logs a never-run job whose holds on readers fail to drop', async () => {
   const ws = buildWs()
   try {
     await ws.shell("printf 'x\\n' >/m/f")
-    await ws.shell('exec 3</m/f; { cat <&3; } & exec 3<&-; wait')
+    await ws.shell('exec 3</m/f 4</m/f; { cat <&3; } & exec 3<&- 4<&-; wait')
     await vi.waitFor(() => {
       expect(debug).toHaveBeenCalledWith(
         'job: dropping its holds on readers failed: Error: unhold failed',
       )
     })
+    const [failed, ...rest] = unhold.mock.contexts as { holders: number }[]
+    expect(rest.length).toBeGreaterThan(0)
+    expect([failed?.holders, ...rest.map((lines) => lines.holders)]).toEqual([
+      1,
+      ...rest.map(() => 0),
+    ])
   } finally {
     delete logger.debug
     unhold.mockRestore()
     submitting.mockRestore()
     await ws.close()
   }
+})
+
+it("releases a never-run job's readers before its mounts close", async () => {
+  const order: string[] = []
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const unhold = AsyncLineIterator.prototype.unhold
+  const slow = vi.spyOn(AsyncLineIterator.prototype, 'unhold').mockImplementation(async function (
+    this: AsyncLineIterator,
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    await unhold.call(this)
+    order.push('released')
+  })
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const submit = JobTable.prototype.submit
+  const submitting = vi.spyOn(JobTable.prototype, 'submit').mockImplementation(function (
+    this: JobTable,
+    init,
+  ) {
+    init.abort.abort()
+    return submit.call(this, init)
+  })
+  const vfs = new RAMVFS()
+  const close = vfs.close.bind(vfs)
+  vi.spyOn(vfs, 'close').mockImplementation(async () => {
+    order.push('closed')
+    await close()
+  })
+  const ws = new Workspace({ '/m': [vfs, MountMode.WRITE] }, { mode: MountMode.WRITE })
+  try {
+    await ws.shell("printf 'x\\n' >/m/f")
+    await ws.shell('exec 3</m/f; { cat <&3; } & exec 3<&-')
+  } finally {
+    await ws.close()
+    slow.mockRestore()
+    submitting.mockRestore()
+  }
+  expect(order).toContain('released')
+  expect(order.at(-1)).toBe('closed')
 })

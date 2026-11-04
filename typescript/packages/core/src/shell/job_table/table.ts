@@ -326,6 +326,8 @@ export class JobTable {
     limit?: number | null
     // The job is one simple command (`Job.simple`).
     simple?: boolean
+    // Runs as the job's process ends, whether or not its runner began.
+    ended?: () => Promise<void>
   }): Promise<Job> {
     const sessionId = init.sessionId ?? ''
     const name = crypto.randomUUID().replaceAll('-', '')
@@ -347,20 +349,24 @@ export class JobTable {
         command: init.command,
         cwd: PathSpec.fromStrPath(init.cwd),
         run: async () => {
-          if (job === null) return KILLED_EXIT_CODE
-          if (job.status !== JobStatus.RUNNING) return job.exitCode
-          const watching = new AbortController()
-          void watch(job, watching.signal).catch((err: unknown) => {
-            console.debug('job watch failed:', err)
-          })
           try {
-            return await settle(init.run, job)
+            if (job === null) return KILLED_EXIT_CODE
+            if (job.status !== JobStatus.RUNNING) return job.exitCode
+            const watching = new AbortController()
+            void watch(job, watching.signal).catch((err: unknown) => {
+              console.debug('job watch failed:', err)
+            })
+            try {
+              return await settle(init.run, job)
+            } finally {
+              watching.abort()
+              await this.recordEnding(job)
+              this.disowned = this.disowned.filter((j) => j !== job)
+              this.dropLease()
+              this.dropChecking()
+            }
           } finally {
-            watching.abort()
-            await this.recordEnding(job)
-            this.disowned = this.disowned.filter((j) => j !== job)
-            this.dropLease()
-            this.dropChecking()
+            await init.ended?.()
           }
         },
         cancel: () => {

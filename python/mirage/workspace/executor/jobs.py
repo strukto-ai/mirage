@@ -282,8 +282,16 @@ async def handle_background(
     held_inputs = hold_inputs(bg_session.open_inputs())
 
     async def drop_holds() -> None:
+        failure: Exception | None = None
         while held_inputs:
-            await held_inputs.pop().lines.unhold()
+            try:
+                await held_inputs.pop().lines.unhold()
+            except Exception as exc:
+                if failure is not None:
+                    logger.debug("job: dropping a hold failed", exc_info=True)
+                failure = failure or exc
+        if failure is not None:
+            raise failure
 
     def release_job(_: asyncio.Task[Any] | None = None) -> None:
         release_program()

@@ -248,7 +248,16 @@ export async function handleBackground(
   const bgSession = childEvaluation.session
   const heldInputs = holdInputs(bgSession.openInputs())
   const dropHolds = async (): Promise<void> => {
-    while (heldInputs.length > 0) await heldInputs.pop()?.lines.unhold()
+    let failure: { error: unknown } | undefined
+    while (heldInputs.length > 0) {
+      try {
+        await heldInputs.pop()?.lines.unhold()
+      } catch (error) {
+        if (failure !== undefined) logger.debug?.(`job: dropping a hold failed: ${String(error)}`)
+        failure ??= { error }
+      }
+    }
+    if (failure !== undefined) throw failure.error
   }
   inheritTraps(bgSession)
   const output = session.jobOutput ?? session.tty.jobs
@@ -454,6 +463,12 @@ export async function handleBackground(
       parentPid: session.processId,
       limit: session.processes.max,
       simple: oneProgram(left, session),
+      // A job whose runner never begins skips runBg's finally, so its
+      // holds on readers go as its process ends.
+      ended: () =>
+        dropHolds().catch((err: unknown) => {
+          logger.debug?.(`job: dropping its holds on readers failed: ${String(err)}`)
+        }),
     })
   } catch (err) {
     unfollow()
@@ -472,14 +487,6 @@ export async function handleBackground(
     throw err
   }
   bgSession.processId = job.process?.info.pid ?? null
-  // A job whose runner never begins skips runBg's finally, so its holds on
-  // readers go when its process ends.
-  void job.process
-    ?.join()
-    .then(dropHolds)
-    .catch((err: unknown) => {
-      logger.debug?.(`job: dropping its holds on readers failed: ${String(err)}`)
-    })
   session.lastBgJobId = job.pid
   if (session.jobWaits?.reaches(output, jobStreams(left, session)) === true)
     session.jobWaits.add(job)

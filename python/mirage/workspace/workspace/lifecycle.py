@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from types import ModuleType
 from typing import Any, cast
 
+from mirage.bridge.sync import handed
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.concurrency.limiter import run_blocking
 from mirage.io.async_line_iterator import release_inputs
@@ -227,6 +228,8 @@ async def close_workspace(deps: CloseDeps) -> list[BaseException]:
     for close in deps.closers:
         await settle(close())
     await settle(deps.processes.drain(deps.blocked_loop))
+    # What a job's end handed the loop (``soon``) lands before the mounts go.
+    await settle(handed())
     await settle(deps.job_table.close())
     await settle(
         *(

@@ -109,8 +109,13 @@ class AsyncLineIterator:
         return self._loaded
 
     async def _next_chunk(self) -> bytes:
+        """The source's next chunk, or nothing when a pull this one waited
+        for landed first, so the caller reads its buffer again."""
         self._started = True
+        seen = self._loaded
         async with self._pull_lock:
+            if self._loaded != seen:
+                return b""
             try:
                 data = await self._source.__anext__()
             finally:
@@ -235,20 +240,20 @@ class AsyncLineIterator:
         Returns:
             bytes | None: the bytes, or None at end of input.
         """
-        if self._buf:
-            data, self._buf = self._buf, b""
-            return data
-        if self._exhausted:
-            return None
         try:
-            await self._budget.run()
-            return await self._next_chunk()
+            while not self._buf:
+                if self._exhausted:
+                    return None
+                await self._budget.run()
+                self._buf += await self._next_chunk()
         except StopAsyncIteration:
             self._exhausted = True
             return None
         except BaseException as exc:
             await self._failed(exc)
             raise
+        data, self._buf = self._buf, b""
+        return data
 
     async def read1(self, size: int) -> bytes:
         """At most ``size`` bytes with at most one pull of the source, as
