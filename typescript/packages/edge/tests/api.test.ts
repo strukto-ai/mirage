@@ -129,6 +129,15 @@ describe('the server API in workerd', () => {
     expect(disk.text).toContain('memory')
   })
 
+  it("names the edge's own backends when a mount names none of them", async () => {
+    const unknown = await call('POST', '/v1/workspaces', {
+      config: { mounts: { '/': { vfs: 'disk' } } },
+    })
+    expect(unknown.text).toContain('unknown VFS \\"disk\\"')
+    expect(unknown.text).toContain('slack')
+    expect(unknown.text).toContain('s3')
+  })
+
   it('serves MCP and JSON-RPC over the same workspace', async () => {
     await call('POST', '/v1/workspaces', { id: 'mcp', config: { mounts: { '/': { vfs: 'ram' } } } })
     const response = await worker.fetch('http://edge.test/v1/workspaces/mcp/mcp', {
