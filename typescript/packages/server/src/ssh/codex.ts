@@ -23,7 +23,6 @@ import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { MountCore } from '@struktoai/mirage-core/mount/core'
 import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
 import { S_IFDIR, S_IFLNK, S_IFMT, S_IFREG } from '@struktoai/mirage-core/utils/stat_view'
-import { OWNER } from '@struktoai/mirage-node/mount/constants'
 import type { OpenMode } from '@struktoai/mirage-core/runtime/handles/index'
 import { eexist, enoent, strerrorOf } from '@struktoai/mirage-core/errors/fs'
 import type { ServerChannel } from 'ssh2'
@@ -209,6 +208,14 @@ function rpcError(err: unknown): CodexRPCError {
 
 function notAFile(path: string): CodexRPCError {
   return new CodexRPCError(RPC_INVALID_REQUEST, `path \`${path}\` is not a file`)
+}
+
+// Who owns what a row names by name: the serving user, as the Node mount's
+// OWNER has it, or 0 on a host with none. Kept here so this entry, which a
+// Worker serves too, imports nothing from `@struktoai/mirage-node`.
+const OWNER = {
+  uid: typeof process.getuid === 'function' ? process.getuid() : 0,
+  gid: typeof process.getgid === 'function' ? process.getgid() : 0,
 }
 
 const isDir = (mode: number): boolean => (mode & S_IFMT) === S_IFDIR
