@@ -988,20 +988,19 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
       },
     }
   }
-  // Listeners on target, and the pump that feeds them, started by the
-  // first listener or by iteration: one reader, however it is consumed.
-  function emitter(target, pump) {
+  // Listeners on target, and the pump that feeds them. Only a listener
+  // for what the pump delivers starts it: an async iterator reads as its
+  // loop asks, so nothing reads ahead of a loop or is left reading after
+  // one ends.
+  function emitter(target, pump, feeds) {
     const listeners = {}
     let started = false
-    const start = () => {
-      if (!started) {
+    const on = (event, fn) => {
+      ;(listeners[event] = listeners[event] || []).push(fn)
+      if (!started && feeds.includes(event)) {
         started = true
         os.setTimeout(pump, 0)
       }
-    }
-    const on = (event, fn) => {
-      ;(listeners[event] = listeners[event] || []).push(fn)
-      start()
       return target
     }
     const off = (event, fn) => {
@@ -1022,43 +1021,20 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
       once.listener = fn
       return on(event, once)
     }
-    const emit = (event, ...args) => {
+    return (event, ...args) => {
       for (const fn of (listeners[event] || []).slice()) fn(...args)
-    }
-    return { emit, start }
-  }
-  // What a pump read for an async iterator: the values not yet taken, and
-  // the iterator's wait for more until the pump says it is done.
-  function queue(start) {
-    const values = []
-    let done = false
-    let wake = null
-    const notify = () => {
-      if (wake !== null) wake()
-      wake = null
-    }
-    return {
-      push(value) {
-        values.push(value)
-        notify()
-      },
-      end() {
-        done = true
-        notify()
-      },
-      async *drain() {
-        start()
-        while (true) {
-          if (values.length) yield values.shift()
-          else if (done) return
-          else await new Promise((resolve) => (wake = resolve))
-        }
-      },
     }
   }
   let decoder = null
   let pending = null
-  let iterated = null
+  let finished = false
+  const finish = () => {
+    if (!finished) {
+      finished = true
+      emit('end')
+      emit('close')
+    }
+  }
   const input = {
     fd: 0,
     isTTY: false,
@@ -1073,69 +1049,86 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
       pending = null
       return chunk
     },
-    [Symbol.asyncIterator]() {
-      if (iterated === null) iterated = queue(stdinEvents.start)
-      return iterated.drain()
+    async *[Symbol.asyncIterator]() {
+      for (let c = stdinChunk(); c !== null; c = stdinChunk()) {
+        const value = decoder === null ? c : decoder(c)
+        if (value.length) yield value
+      }
+      const tail = decoder === null ? '' : decoder(null)
+      if (tail.length) yield tail
+      finish()
     },
   }
   const deliver = (value) => {
     if (!value.length) return
-    if (iterated !== null) iterated.push(value)
     pending = value
-    stdinEvents.emit('readable')
+    emit('readable')
     pending = null
-    stdinEvents.emit('data', value)
+    emit('data', value)
   }
-  const stdinEvents = emitter(input, function pump() {
-    const chunk = stdinChunk()
-    if (chunk === null) {
-      if (decoder !== null) deliver(decoder(null))
-      if (iterated !== null) iterated.end()
-      stdinEvents.emit('end')
-      stdinEvents.emit('close')
-      return
-    }
-    deliver(decoder === null ? chunk : decoder(chunk))
-    os.setTimeout(pump, 0)
-  })
+  const emit = emitter(
+    input,
+    function pump() {
+      const chunk = stdinChunk()
+      if (chunk === null) {
+        if (decoder !== null) deliver(decoder(null))
+        return finish()
+      }
+      deliver(decoder === null ? chunk : decoder(chunk))
+      os.setTimeout(pump, 0)
+    },
+    ['data', 'readable'],
+  )
   const readline = {
     createInterface() {
       let closed = false
       let rest = ''
-      let iterated = null
       const text = textStream('utf8')
+      // The lines the next chunk completes, and whether input has ended.
+      const pull = () => {
+        const chunk = stdinChunk()
+        const all = (rest + text(chunk)).split('\n')
+        rest = chunk === null ? '' : all.pop()
+        if (chunk === null && all[all.length - 1] === '') all.pop()
+        const lines = all.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l))
+        return [lines, chunk === null]
+      }
       const rl = {
         close() {
           if (!closed) {
             closed = true
-            if (iterated !== null) iterated.end()
-            events.emit('close')
+            emitLine('close')
           }
         },
         async *[Symbol.asyncIterator]() {
-          if (iterated === null) iterated = queue(events.start)
           try {
-            yield* iterated.drain()
+            while (!closed) {
+              const [lines, done] = pull()
+              for (const line of lines) {
+                if (closed) return
+                yield line
+              }
+              if (done) return
+            }
           } finally {
             rl.close()
           }
         },
       }
-      const events = emitter(rl, function pump() {
-        if (closed) return
-        const chunk = stdinChunk()
-        const all = (rest + text(chunk)).split('\n')
-        rest = chunk === null ? '' : all.pop()
-        if (chunk === null && all[all.length - 1] === '') all.pop()
-        for (const l of all) {
+      const emitLine = emitter(
+        rl,
+        function pump() {
           if (closed) return
-          const line = l.endsWith('\r') ? l.slice(0, -1) : l
-          if (iterated !== null) iterated.push(line)
-          events.emit('line', line)
-        }
-        if (chunk === null) rl.close()
-        else os.setTimeout(pump, 0)
-      })
+          const [lines, done] = pull()
+          for (const line of lines) {
+            if (closed) return
+            emitLine('line', line)
+          }
+          if (done) rl.close()
+          else os.setTimeout(pump, 0)
+        },
+        ['line'],
+      )
       return rl
     },
   }

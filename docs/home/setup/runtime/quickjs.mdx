@@ -313,6 +313,7 @@ loads files by path: JavaScript as CommonJS, and JSON parsed. `process`,
     | Streams, such as `fs.createReadStream()` | ✗ |
     | `process.exitCode` at the end of a run | Read by `process.exit()` only |
     | `process.nextTick()` | Runs in turn with promise jobs, not ahead of them |
+    | Waiting on stdin | Holds the engine until input arrives, so timers wait while a read does |
     | Modules an ES module imports | Run before Node's globals are set, so they reach them in functions, not at their top level |
     | Symbolic links | `lstatSync` follows them, as `statSync` does, so `unlinkSync` refuses a link to a directory; `rmSync` removes a link, never what it points at |
   </Accordion>
