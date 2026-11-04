@@ -242,7 +242,7 @@
     },
     {
       "id": "stdin_arrives_as_it_is_written",
-      "note": "A data listener sees the first chunk while the producer is still writing; one that waited for the end of input would hit the line's limit. An async loop reads only as it asks, so breaking out of one over an endless pipe ends the run, and a loop begun after the end finishes. Every reader takes from one position, and base64 and UTF-8 text carry what a chunk splits.",
+      "note": "A data listener sees the first chunk while the producer is still writing; one that waited for the end of input would hit the line's limit. An async loop reads only as it asks, so breaking out of one over an endless pipe ends the run, and a loop begun after the end finishes. Every reader takes from one position, and base64 and UTF-8 text carry what a chunk splits. A chunk a readable listener is told of waits for read(), and input flows only once a data listener or resume() asks for it, as node's does.",
       "world": {
         "runtimes": [
           "quickjs",
@@ -340,6 +340,30 @@
           "expect": {
             "exit": 0,
             "stdout": "\"x\\ny\\n\"\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'a\\nb\\n' | node -e \"let got = ''; process.stdin.on('readable', () => {}); setTimeout(() => { let c; while ((c = process.stdin.read()) !== null) got += c; process.stdin.resume() }, 30); process.stdin.on('end', () => console.log(JSON.stringify(got)))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"a\\nb\\n\"\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'x\\ny\\n' | node -e \"let d = ''; process.stdin.on('data', (c) => (d += c)); process.stdin.on('readable', () => { while (process.stdin.read() !== null); }); process.stdin.on('end', () => console.log(JSON.stringify(d)))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"x\\ny\\n\"\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'a\\n' | node -e \"process.stdin.on('end', () => console.log('ended')); setTimeout(() => console.log('no flow'), 30)\" && printf 'a\\n' | node -e \"process.stdin.pause(); process.stdin.on('data', () => console.log('data')); setTimeout(() => console.log('still paused'), 30)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "no flow\nstill paused\n",
             "stderr": ""
           }
         }
