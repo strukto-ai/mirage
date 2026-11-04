@@ -22,6 +22,7 @@ from uuid import uuid4
 
 import pytest
 
+from mirage.bridge.sync import soon
 from mirage.cache.index.config import (
     IndexConfig,
     LookupStatus,
@@ -927,6 +928,35 @@ def test_close_lands_a_stream_the_collector_closed(monkeypatch):
     loop.run_until_complete(ws.close())
     loop.close()
     assert at_close == [b"landed"]
+
+
+@pytest.mark.asyncio
+async def test_close_lands_work_handed_while_its_jobs_settle(monkeypatch):
+    vfs = RAMVFS()
+    ws = Workspace({"/data/": vfs}, mode=MountMode.WRITE)
+    landed: list[bool] = []
+    at_close: list[list[bool]] = []
+    close_vfs = vfs.close
+    kill_all = ws.job_table.kill_all
+
+    async def snapshot_close():
+        at_close.append(list(landed))
+        await close_vfs()
+
+    async def land():
+        await asyncio.sleep(0.05)
+        landed.append(True)
+
+    async def kill_and_hand():
+        await kill_all()
+        soon(asyncio.get_running_loop(), land())
+
+    monkeypatch.setattr(vfs, "close", snapshot_close)
+    monkeypatch.setattr(ws.job_table, "kill_all", kill_and_hand)
+    await ws.close()
+    # A job killed before its runner started hands its readers' release to
+    # the loop as its task ends, after the close began.
+    assert at_close == [[True]]
 
 
 def test_sync_exit_leaves_a_metadata_write_to_its_blocked_loop(monkeypatch):

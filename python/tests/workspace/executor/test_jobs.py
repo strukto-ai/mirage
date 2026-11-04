@@ -1665,3 +1665,41 @@ async def test_a_background_job_lets_go_of_its_readers_once(monkeypatch, line):
         assert discarded.count(source.lines) == 1
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_release_still_lets_go_of_the_other_readers(
+    monkeypatch,
+):
+    held: list[SharedInput] = []
+
+    def hold(inputs: list[SharedInput]) -> list[SharedInput]:
+        sources = hold_inputs(inputs)
+        held.extend(sources)
+        return sources
+
+    calls: list[AsyncLineIterator] = []
+    unhold = AsyncLineIterator.unhold
+
+    async def fail_first(self: AsyncLineIterator) -> None:
+        calls.append(self)
+        if len(calls) == 1:
+            raise ValueError("unhold failed")
+        await unhold(self)
+
+    monkeypatch.setattr(jobs_executor, "hold_inputs", hold)
+    monkeypatch.setattr(AsyncLineIterator, "unhold", fail_first)
+    ws = _workspace()
+    try:
+        await ws.shell("printf 'x\\n' >/m/f")
+        await ws.shell(
+            "exec 3</m/f 4</m/f; { cat <&3; } & kill %1; wait; exec 3<&- 4<&-"
+        )
+        await handed()
+        failed, *rest = calls
+        assert sorted(map(id, calls)) == sorted(id(s.lines) for s in held)
+        assert len(held) >= 2
+        assert [lines.holders for lines in rest] == [0] * len(rest)
+        assert failed.holders == 1
+    finally:
+        await ws.close()

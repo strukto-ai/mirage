@@ -323,6 +323,53 @@ async def test_a_second_pull_waits_for_the_first(read):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "read",
+    [AsyncLineIterator.readline, _peeked_line],
+    ids=["readline", "peek"],
+)
+async def test_a_pull_that_waited_reads_what_the_first_left(read):
+    gate, waiting, stall = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def source():
+        yield b"a\n"
+        waiting.set()
+        await gate.wait()
+        yield b"b\nc\n"
+        await stall.wait()
+        yield b"d\n"
+
+    reader = AsyncLineIterator(source())
+    assert await reader.readline() == b"a"
+    first = asyncio.create_task(read(reader))
+    await waiting.wait()
+    second = asyncio.create_task(read(reader))
+    for _ in range(100):
+        if reader._pull_lock._waiters:
+            break
+        await asyncio.sleep(0)
+    gate.set()
+    reads = await asyncio.wait_for(asyncio.gather(first, second), 1)
+    assert sorted(reads) == [b"b", b"c"]
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_read_that_waited_pulls_its_own():
+    gate, waiting = asyncio.Event(), asyncio.Event()
+    reader = AsyncLineIterator(_gated(gate, waiting, [b"b\n", b"c\n"]))
+    assert await reader.readline() == b"a"
+    first = asyncio.create_task(reader.read_chunk())
+    await waiting.wait()
+    second = asyncio.create_task(reader.read_chunk())
+    for _ in range(100):
+        if reader._pull_lock._waiters:
+            break
+        await asyncio.sleep(0)
+    gate.set()
+    assert sorted(await asyncio.gather(first, second)) == [b"b\n", b"c\n"]
+
+
+@pytest.mark.asyncio
 async def test_a_discard_during_a_pull_closes_once_the_pull_settles():
     gate, waiting, closed = asyncio.Event(), asyncio.Event(), []
     reader = AsyncLineIterator(_gated(gate, waiting, [b"b\n"], closed))
