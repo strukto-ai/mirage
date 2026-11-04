@@ -160,6 +160,15 @@ describe('mirage api', () => {
     })
   })
 
+  it("keeps a file's byte-order mark, as Python does", async () => {
+    await withServer(async (url, dir, seen) => {
+      const marked = join(dir, 'marked.txt')
+      writeFileSync(marked, Buffer.from([0xef, 0xbb, 0xbf, 0x68, 0x69]))
+      expect((await api(url, dir, '/v1/x', '--source', `@${marked}`)).code).toBe(0)
+      expect(JSON.parse(seen[0]?.body ?? '')).toEqual({ source: '\ufeffhi' })
+    })
+  })
+
   it('keeps YAML timestamps as text', async () => {
     await withServer(async (url, dir, seen) => {
       const input = join(dir, 'workspace.yaml')

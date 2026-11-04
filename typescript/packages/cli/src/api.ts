@@ -23,11 +23,11 @@ interface ApiOptions {
   input?: string
 }
 
-/** A file's text, or stdin's for `-`, refused when it isn't UTF-8. */
+/** A file's text, or stdin's for `-`, refused when it isn't UTF-8; a byte-order mark stays, as in Python. */
 async function text(path: string): Promise<string> {
   try {
     const raw = path === '-' ? await buffer(process.stdin) : readFileSync(path)
-    return new TextDecoder('utf-8', { fatal: true }).decode(raw)
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(raw)
   } catch (err) {
     fail(`cannot read ${path}: ${err instanceof Error ? err.message : String(err)}`, 2)
   }
