@@ -21,7 +21,7 @@ import { buildCli } from '../../commands/cli/mcp/build.ts'
 import { CLI } from '../../commands/cli/types.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOConfig } from '../../io/config.ts'
-import { MAX_MEMORY } from '../../io/memory.ts'
+import { MAX_BODY_BYTES, MAX_MEMORY } from '../../io/memory.ts'
 import type { NetworkSetting } from '../../io/network.ts'
 import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE, EVENT_RESULT } from '../../observe/log_entry.ts'
 import type { Observer } from '../../observe/observer.ts'
@@ -240,6 +240,7 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
     profile: ws.defaultProfileName,
     command_limits: commandLimitsToJSON(ws.registry.commandLimits),
     max_memory: ws.registry.memory?.limit ?? null,
+    max_body_bytes: ws.registry.bodyLimit,
     network: ws.network,
     system_time: ws.systemTime,
   }
@@ -533,6 +534,7 @@ export function buildMountArgs(
     ),
     profile: state.profile ?? null,
     maxMemory: state.max_memory === undefined ? MAX_MEMORY : state.max_memory,
+    maxBodyBytes: state.max_body_bytes ?? MAX_BODY_BYTES,
     network: state.network ?? true,
     systemTime: state.system_time ?? null,
   }

@@ -30,7 +30,7 @@ import {
 } from '../../context/session_context.ts'
 import { noMount } from '../../errors/fs.ts'
 import { IOConfig } from '../../io/config.ts'
-import type { MemoryBudget } from '../../io/memory.ts'
+import { MAX_BODY_BYTES, type MemoryBudget } from '../../io/memory.ts'
 import {
   narrowed,
   networkLayer,
@@ -155,6 +155,7 @@ export class MountRegistry {
   // The workspace's max_memory, over the bytes its RAM mounts hold; null
   // for no cap.
   memory: MemoryBudget | null = null
+  bodyLimit = MAX_BODY_BYTES
   // The rule the workspace's connections are judged by; null for no limit.
   network: NetworkRule | null = null
   // The workspace's system_time on its clock, which what the agent sees

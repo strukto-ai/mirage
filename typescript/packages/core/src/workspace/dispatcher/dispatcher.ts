@@ -64,6 +64,7 @@ import {
 } from '../../errors/fs.ts'
 import { type FsError } from '../../errors/types.ts'
 import { type Egress, liveEgress, runWithEgress } from '../../io/gateway.ts'
+import { ResponseTooLargeError } from '../../core/api/errors.ts'
 import { runWithMemory } from '../../io/memory.ts'
 import { closeQuietly, ensureStream } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -818,21 +819,29 @@ export class Dispatcher {
           this.namespace.network,
           this.policies,
           () =>
-            runWithMemory(this.namespace.memory, () =>
-              runWithSystemClock(this.namespace.systemClock, () =>
-                name === 'read' &&
-                kwargs?.warm !== true &&
-                kwargs?.admit_only !== true &&
-                !('retained' in (kwargs ?? {}))
-                  ? this.readRefusingDirs(path, args, kwargs, report)
-                  : this.dispatchAdmitted(name, path, args, kwargs, report),
-              ),
+            runWithMemory(
+              this.namespace.memory,
+              () =>
+                runWithSystemClock(this.namespace.systemClock, () =>
+                  name === 'read' &&
+                  kwargs?.warm !== true &&
+                  kwargs?.admit_only !== true &&
+                  !('retained' in (kwargs ?? {}))
+                    ? this.readRefusingDirs(path, args, kwargs, report)
+                    : this.dispatchAdmitted(name, path, args, kwargs, report),
+                ),
+              this.namespace.bodyLimit,
             ),
           this.access?.sessionId ?? this.caller?.session?.sessionId ?? null,
           true,
         )
       if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return await run()
       return await this.admitWrite(run)
+    } catch (error) {
+      if (error instanceof ResponseTooLargeError) {
+        Object.assign(error, { virtualPath: path.virtual })
+      }
+      throw error
     } finally {
       const data = args?.[0] ?? kwargs?.data
       if (

@@ -21,6 +21,8 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 
 from mirage.cache.index import NULL_INDEX, IndexCacheStore
 from mirage.cache.index.scope import command_scope
@@ -32,6 +34,7 @@ from mirage.context import (
     reset_current_session,
     set_current_session,
 )
+from mirage.core.api.client import api_request, status_error
 from mirage.core.time_range import followed_day
 from mirage.errors import FsCondition, posix_errno
 from mirage.errors.fs import erofs
@@ -40,6 +43,7 @@ from mirage.errors.types import (
     WalkDeclinedError,
 )
 from mirage.io import OpReport
+from mirage.io.memory import body_limit, memory_room
 from mirage.io.stream import yield_bytes
 from mirage.observe.context import RecordingScope, record, start_op
 from mirage.policy import (
@@ -4161,3 +4165,40 @@ async def test_a_policy_refusing_reads_refuses_their_shortcuts():
         assert vfs.asked == []
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_mount_api_reads_keep_two_workspace_contexts_apart():
+    seen = []
+    reply = b"xx"
+
+    async def answer(request):
+        return web.Response(body=reply)
+
+    app = web.Application()
+    app.router.add_get("/", answer)
+    async with TestServer(app) as server:
+        url = str(server.make_url("/"))
+
+        class ReplyRAM(RAMVFS):
+            async def read(self, path, offset=0, size=None):
+                await asyncio.sleep(0)
+                seen.append((body_limit(), memory_room()))
+                return await api_request(
+                    "GET", url, error_of=status_error, read="bytes"
+                )
+
+        small = Workspace(
+            {"/body": ReplyRAM()}, max_memory=1048576, max_body_bytes=2097152
+        )
+        large = Workspace(
+            {"/body": ReplyRAM()}, max_memory=4194304, max_body_bytes=8388608
+        )
+        try:
+            await asyncio.gather(
+                small.vfs.read("/body/file"), large.vfs.read("/body/file")
+            )
+            assert sorted(seen) == [(2097152, 1048576), (8388608, 4194304)]
+        finally:
+            await small.close()
+            await large.close()

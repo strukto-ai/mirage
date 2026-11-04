@@ -1902,3 +1902,19 @@ async def test_an_override_brings_its_own_capacity():
     finally:
         await over.close()
         await free.close()
+
+
+@pytest.mark.asyncio
+async def test_a_rebuilt_workspace_keeps_its_body_limit():
+    ws = Workspace({"/d": RAMVFS()}, max_memory=None, max_body_bytes="2MB")
+    try:
+        state = await to_state_dict(ws)
+        assert state[StateKey.MAX_BODY_BYTES] == 2097152
+        assert build_mount_args(state).max_body_bytes == 2097152
+        copied = await ws.copy()
+        try:
+            assert copied.registry.body_limit == 2097152
+        finally:
+            await copied.close()
+    finally:
+        await ws.close()

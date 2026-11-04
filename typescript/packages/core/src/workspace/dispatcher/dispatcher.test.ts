@@ -32,6 +32,8 @@ import type { IndexCacheStore } from '../../cache/index/store.ts'
 import { POLICY_WRITE_OPS, READ_AHEAD_BYTES } from './constants.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { apiRequest } from '../../core/api/client.ts'
+import { bodyLimit, memoryRoom } from '../../io/memory.ts'
 import { BaseVFS } from '../../vfs/base.ts'
 import type { Handed } from '../../vfs/types.ts'
 import { eacces, enoent, erofs, exdev } from '../../errors/fs.ts'
@@ -3983,3 +3985,38 @@ it.each([false, true])(
     }
   },
 )
+
+it('direct mount API reads keep two workspace contexts apart', async () => {
+  const seen: (readonly [number, number | null])[] = []
+  class ReplyRAM extends RAMVFS {
+    override async read(): Promise<Uint8Array> {
+      await Promise.resolve()
+      seen.push([bodyLimit(), memoryRoom()])
+      const data = await apiRequest('GET', 'https://body.test/reply', {
+        read: 'bytes',
+        errorOf: () => new Error('unexpected status'),
+        fetchFn: () => Promise.resolve(new Response('xx')),
+      })
+      if (!(data instanceof Uint8Array)) throw new Error('expected bytes')
+      return data
+    }
+  }
+  const small = new Workspace(
+    { '/body': new ReplyRAM() },
+    { maxMemory: 1048576, maxBodyBytes: 2097152 },
+  )
+  const large = new Workspace(
+    { '/body': new ReplyRAM() },
+    { maxMemory: 4194304, maxBodyBytes: 8388608 },
+  )
+  try {
+    await Promise.all([small.vfs.read('/body/file'), large.vfs.read('/body/file')])
+    expect(seen.sort((a, b) => a[0] - b[0])).toEqual([
+      [2097152, 1048576],
+      [8388608, 4194304],
+    ])
+  } finally {
+    await small.close()
+    await large.close()
+  }
+})

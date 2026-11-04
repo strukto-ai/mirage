@@ -35,6 +35,7 @@ export interface MountArgs {
   profile: string | null
   // The workspace's max_memory in bytes, null for no cap.
   maxMemory: number | null
+  maxBodyBytes: number
   // The workspace's network setting, as written.
   network: NetworkSetting
   // The workspace's system_time, as written; null for the host's time.

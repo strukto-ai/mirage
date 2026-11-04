@@ -14,7 +14,14 @@
 
 import { describe, expect, it } from 'vitest'
 import { MemoryExhausted } from './errors.ts'
-import { MemoryBudget, checkMemory, memoryRoom, runWithMemory } from './memory.ts'
+import {
+  MAX_BODY_BYTES,
+  MemoryBudget,
+  bodyLimit,
+  checkMemory,
+  memoryRoom,
+  runWithMemory,
+} from './memory.ts'
 
 describe('memory budget', () => {
   it('caps nothing outside a workspace', () => {
@@ -44,4 +51,25 @@ describe('memory budget', () => {
       return Promise.resolve()
     })
   })
+})
+
+it('binds a body ceiling without a memory cap and restores nested bindings', async () => {
+  expect(bodyLimit()).toBe(MAX_BODY_BYTES)
+  await runWithMemory(
+    null,
+    async () => {
+      expect(bodyLimit()).toBe(17)
+      await runWithMemory(
+        null,
+        () => {
+          expect(bodyLimit()).toBe(99)
+          return Promise.resolve()
+        },
+        99,
+      )
+      expect(bodyLimit()).toBe(17)
+    },
+    17,
+  )
+  expect(bodyLimit()).toBe(MAX_BODY_BYTES)
 })

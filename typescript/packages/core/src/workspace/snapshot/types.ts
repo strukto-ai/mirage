@@ -172,6 +172,7 @@ export interface WorkspaceStateDict {
   command_limits?: Record<string, unknown>
   /** The workspace's max_memory in bytes, null for no cap. */
   max_memory?: number | null
+  max_body_bytes?: number
   /** The workspace's network setting, as written. */
   network?: NetworkSetting
   /** The workspace's system_time, as written; null for the host's time. */

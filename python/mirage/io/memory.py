@@ -23,6 +23,7 @@ T = TypeVar("T")
 # The max_memory a workspace runs under when it names none: with the
 # 32 MB read cache, 64 MB a workspace, 32 of them on a 2 GiB machine.
 MAX_MEMORY = 32 << 20
+MAX_BODY_BYTES = 64 * 1024 * 1024
 
 
 class MemoryBudget:
@@ -54,8 +55,18 @@ _budget: ContextVar[MemoryBudget | None] = ContextVar(
 )
 
 
+_body_limit: ContextVar[int] = ContextVar(
+    "mirage_body_limit", default=MAX_BODY_BYTES
+)
+
+
+def body_limit() -> int:
+    """The workspace per-reply ceiling, or 64 MiB outside a workspace."""
+    return _body_limit.get()
+
+
 async def run_with_memory(
-    budget: MemoryBudget | None, call: Awaitable[T]
+    budget: MemoryBudget | None, call: Awaitable[T], body: int = MAX_BODY_BYTES
 ) -> T:
     """``call`` awaited under a workspace's memory budget, which what it
     stores and every object it builds are checked against. Mirrors
@@ -65,12 +76,15 @@ async def run_with_memory(
         budget (MemoryBudget | None): the workspace's budget, None for
             no cap.
         call (Awaitable[T]): the line or the op.
+        body (int): the workspace per-reply ceiling in decoded bytes.
     """
     token = _budget.set(budget)
+    body_token = _body_limit.set(body)
     try:
         return await call
     finally:
         _budget.reset(token)
+        _body_limit.reset(body_token)
 
 
 def memory_room() -> int | None:

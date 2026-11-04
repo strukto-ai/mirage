@@ -87,6 +87,7 @@ export interface WorkspaceOptions {
    * `MAX_MEMORY`.
    */
   maxMemory?: string | number | null
+  maxBodyBytes?: string | number | null
   /**
    * Where the workspace's connections may go: true for anywhere, false for
    * nowhere, or `{ allow: [...] }` hosts, `*.` suffixes, addresses and CIDR

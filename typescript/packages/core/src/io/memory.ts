@@ -22,6 +22,9 @@ import { MemoryExhausted } from './errors.ts'
  */
 export const MAX_MEMORY = 32 * 1024 * 1024
 
+/** The default decoded-byte ceiling for one buffered API reply. */
+export const MAX_BODY_BYTES = 64 * 1024 * 1024
+
 /**
  * A workspace's `max_memory` and the bytes its stores hold.
  *
@@ -43,14 +46,24 @@ export class MemoryBudget {
 }
 
 // The budget of the workspace a line or an op runs in, null for no cap.
-const budget = createAsyncContext<MemoryBudget | null>()
+const budget = createAsyncContext<{ memory: MemoryBudget | null; body: number }>()
 
 /**
  * `fn` run under a workspace's memory budget, which what it stores and every
  * object it builds are checked against. Mirrors Python's `run_with_memory`.
  */
-export function runWithMemory<T>(memory: MemoryBudget | null, fn: () => Promise<T>): Promise<T> {
-  return Promise.resolve(budget.run(memory, fn))
+export function runWithMemory<T>(
+  memory: MemoryBudget | null,
+  fn: () => Promise<T>,
+  body: number = MAX_BODY_BYTES,
+): Promise<T> {
+  return Promise.resolve(budget.run({ memory, body }, fn))
+}
+
+/** The running workspace's per-reply ceiling, or 64 MiB outside a workspace. */
+export function bodyLimit(): number {
+  const live = budget.liveStores()
+  return live.length === 0 ? MAX_BODY_BYTES : Math.min(...live.map((store) => store.body))
 }
 
 /**
@@ -61,7 +74,7 @@ export function runWithMemory<T>(memory: MemoryBudget | null, fn: () => Promise<
 export function memoryRoom(): number | null {
   let room: number | null = null
   for (const live of budget.liveStores()) {
-    if (live !== null) room = Math.min(room ?? Infinity, live.room())
+    if (live.memory !== null) room = Math.min(room ?? Infinity, live.memory.room())
   }
   return room
 }
