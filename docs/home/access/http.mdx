@@ -110,6 +110,10 @@ Create a workspace with an in-memory mount, then run a line in it:
   </Tab>
 </Tabs>
 
+[`mirage api`](/home/access/cli#call-any-route) sends the same requests with the CLI's
+login or token, so neither needs a header:
+`mirage api /v1/workspaces/demo/shell --command 'echo hello'`.
+
 The shell call returns:
 
 ```json

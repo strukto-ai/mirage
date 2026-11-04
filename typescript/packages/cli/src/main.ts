@@ -17,6 +17,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Command } from 'commander'
 import { DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
+import { registerApiCommand } from './api.ts'
 import { DaemonUnreachable } from './client.ts'
 import { LoginError } from './credentials.ts'
 import { registerConfigCommands } from './config.ts'
@@ -58,6 +59,7 @@ export function buildProgram(): Command {
   registerSessionCommands(program)
   registerShellCommand(program)
   registerVfsCommands(program)
+  registerApiCommand(program)
   registerToolCommands(program)
   registerMcpCommand(program)
   registerRpcCommand(program)
