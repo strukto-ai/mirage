@@ -245,7 +245,8 @@ class AsyncLineIterator:
                 if self._exhausted:
                     return None
                 await self._budget.run()
-                self._buf += await self._next_chunk()
+                chunk = await self._next_chunk()
+                self._buf += chunk
         except StopAsyncIteration:
             self._exhausted = True
             return None

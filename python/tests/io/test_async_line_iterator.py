@@ -370,6 +370,22 @@ async def test_a_chunk_read_that_waited_pulls_its_own():
 
 
 @pytest.mark.asyncio
+async def test_a_chunk_read_that_waited_keeps_what_a_line_read_left():
+    gate, waiting = asyncio.Event(), asyncio.Event()
+    reader = AsyncLineIterator(_gated(gate, waiting, [b"b\nc\n", b"d\n"]))
+    assert await reader.readline() == b"a"
+    first = asyncio.create_task(reader.readline())
+    await waiting.wait()
+    second = asyncio.create_task(reader.read_chunk())
+    for _ in range(100):
+        if reader._pull_lock._waiters:
+            break
+        await asyncio.sleep(0)
+    gate.set()
+    assert await asyncio.gather(first, second) == [b"b", b"c\n"]
+
+
+@pytest.mark.asyncio
 async def test_a_discard_during_a_pull_closes_once_the_pull_settles():
     gate, waiting, closed = asyncio.Event(), asyncio.Event(), []
     reader = AsyncLineIterator(_gated(gate, waiting, [b"b\n"], closed))
