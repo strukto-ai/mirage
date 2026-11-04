@@ -200,7 +200,7 @@ describe.skipIf(process.platform === 'win32')('DockerRuntime pipe', () => {
 
 // A container that answers its mount table and takes sshfs pipes.
 class MountingDockerRuntime extends FakeDockerRuntime {
-  readonly table = new Map<string, string>()
+  readonly table = new Map<string, [string, string]>()
 
   protected override async docker(
     args: string[],
@@ -210,12 +210,13 @@ class MountingDockerRuntime extends FakeDockerRuntime {
     if (args[args.length - 1] !== 'cat /proc/mounts') return super.docker(args, source, output)
     const stdin = source === null ? null : await materialize(source)
     this.calls.push([args.slice(), stdin])
-    const rows = [...this.table].map(([p, t]) => `src ${p} ${t} rw 0 0\n`).join('')
+    const rows = [...this.table].map(([p, [source, t]]) => `${source} ${p} ${t} rw 0 0\n`).join('')
     return Promise.resolve({ stdout: ENC.encode(rows), stderr: new Uint8Array(), exitCode: 0 })
   }
 
   override openPipe(command: string): Promise<SandboxPipe> {
-    this.table.set([...command.matchAll(/'([^']*)'|(\S+)/g)][6]?.[1] ?? '', 'fuse.sshfs')
+    const words = [...command.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? '')
+    this.table.set(words[6] ?? '', [words[5] ?? '', 'fuse.sshfs'])
     let end: () => void = () => undefined
     const reader = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -296,7 +297,9 @@ describe('DockerRuntime under session restrictions', () => {
         const agent = await ws.session('agent', { profile: 'agent' })
         const result = await agent.shell('tool run')
         expect(result.exitCode).toBe(0)
-        expect(Object.fromEntries(runtime.table)).toEqual({ '/data': 'fuse.sshfs' })
+        expect([...runtime.table].map(([p, [, kind]]) => [p, kind])).toEqual([
+          ['/data', 'fuse.sshfs'],
+        ])
         expect(ran(runtime, 'tool run')).toBe(true)
       } finally {
         await ws.close()

@@ -542,7 +542,7 @@ describe('E2B cancellation and validation', () => {
 // A sandbox that answers its mount table, takes sshfs pipes and records the
 // lines it runs.
 class MountingE2BRuntime extends FakedE2BRuntime {
-  readonly table = new Map<string, string>()
+  readonly table = new Map<string, [string, string]>()
   readonly lines: string[] = []
 
   protected override execArgv(argv: readonly string[]): Promise<RunResult> {
@@ -551,13 +551,14 @@ class MountingE2BRuntime extends FakedE2BRuntime {
 
   override execLine(line: string): Promise<RunResult> {
     this.lines.push(line)
-    const rows = [...this.table].map(([p, t]) => `src ${p} ${t} rw 0 0\n`).join('')
+    const rows = [...this.table].map(([p, [source, t]]) => `${source} ${p} ${t} rw 0 0\n`).join('')
     const stdout = line === 'cat /proc/mounts' ? rows : ''
     return Promise.resolve({ stdout: new TextEncoder().encode(stdout), stderr: null, exitCode: 0 })
   }
 
   override openPipe(command: string): Promise<SandboxPipe> {
-    this.table.set([...command.matchAll(/'([^']*)'|(\S+)/g)][6]?.[1] ?? '', 'fuse.sshfs')
+    const words = [...command.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? '')
+    this.table.set(words[6] ?? '', [words[5] ?? '', 'fuse.sshfs'])
     let end: () => void = () => undefined
     const reader = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -633,7 +634,9 @@ describe('E2BRuntime under session restrictions', () => {
         const agent = await ws.session('agent', { profile: 'agent' })
         const result = await agent.shell('tool run')
         expect(result.exitCode).toBe(0)
-        expect(Object.fromEntries(runtime.table)).toEqual({ '/data': 'fuse.sshfs' })
+        expect([...runtime.table].map(([p, [, kind]]) => [p, kind])).toEqual([
+          ['/data', 'fuse.sshfs'],
+        ])
         expect(runtime.lines).toContain('tool run')
       } finally {
         await ws.close()

@@ -12,6 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { spawn, spawnSync } from 'node:child_process'
+import { existsSync, mkdtempSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import {
   currentCaller,
@@ -30,7 +34,13 @@ import type { MountType, OutputFn, RunResult, SandboxPipe } from '../types.ts'
 import { RemoteSandbox } from './base.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from './mixin.ts'
 import { SSHFS_OPTIONS } from './constants.ts'
-import { mountTable, registerPipeServer, topPrefixes, type PipeServer } from './mounts.ts'
+import {
+  mountTable,
+  registerPipeServer,
+  runningLine,
+  topPrefixes,
+  type PipeServer,
+} from './mounts.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -48,12 +58,14 @@ function lineOf(argv: readonly string[]): string {
 class FakeSandbox extends RemoteSandbox implements PipeTransport {
   readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'fake'
-  readonly table = new Map<string, string>()
+  table = new Map<string, [string, string]>()
+  running = new Set<string>()
   readonly commands: string[] = []
   readonly pipes: string[] = []
   readonly ends = new Map<string, () => void>()
   readonly stopped: string[] = []
   failUnmount = false
+  failTable = false
   hang = false
 
   constructor(
@@ -63,7 +75,7 @@ class FakeSandbox extends RemoteSandbox implements PipeTransport {
     private readonly sshfsMounts = true,
   ) {
     super({ captures: ['python3'], config: { mountType } })
-    for (const prefix of own) this.table.set(prefix, 'tmpfs')
+    for (const prefix of own) this.table.set(prefix, ['tmpfs', 'tmpfs'])
   }
 
   connect(): Promise<void> {
@@ -98,11 +110,26 @@ class FakeSandbox extends RemoteSandbox implements PipeTransport {
         })
       })
     }
+    if (line === 'cat /proc/mounts' && this.failTable) {
+      return Promise.resolve({
+        stdout: new Uint8Array(),
+        stderr: ENC.encode('gone\n'),
+        exitCode: 1,
+      })
+    }
     if (line === 'cat /proc/mounts') {
       const rows = [...this.table]
-        .map(([p, kind]) => `src ${p.replaceAll(' ', '\\040')} ${kind} rw 0 0\n`)
+        .map(([p, [source, kind]]) => `${escaped(source)} ${escaped(p)} ${kind} rw 0 0\n`)
         .join('')
       return Promise.resolve({ stdout: ENC.encode(rows), stderr: null, exitCode: 0 })
+    }
+    if (line.startsWith('cat /proc/[0-9]*/cmdline')) {
+      const source = / S='([^']*)' /.exec(line)?.[1] ?? ''
+      return Promise.resolve({
+        stdout: new Uint8Array(),
+        stderr: null,
+        exitCode: this.running.has(source) ? 0 : 1,
+      })
     }
     if (line === 'command -v sshfs') {
       return Promise.resolve({
@@ -113,20 +140,29 @@ class FakeSandbox extends RemoteSandbox implements PipeTransport {
     }
     if (line.startsWith('fusermount3 -uz ')) {
       if (this.failUnmount) return Promise.reject(new Error('the sandbox went away'))
-      this.table.delete(words(line)[2] ?? '')
+      const prefix = words(line)[2] ?? ''
+      const [source] = this.table.get(prefix) ?? ['']
+      this.table.delete(prefix)
+      this.running.delete(source)
     }
     return Promise.resolve({ stdout: ENC.encode('ran\n'), stderr: null, exitCode: 0 })
   }
 
   openPipe(command: string): Promise<SandboxPipe> {
     this.pipes.push(command)
+    const source = words(command)[5] ?? ''
     const prefix = words(command)[6] ?? ''
-    if (this.sshfsMounts) this.table.set(prefix, 'fuse.sshfs')
+    if (this.sshfsMounts) {
+      this.table.set(prefix, [source, 'fuse.sshfs'])
+      this.running.add(source)
+    }
     let end: () => void = () => undefined
     const reader = new ReadableStream<Uint8Array>({
       start(controller) {
+        let open = true
         end = () => {
-          controller.close()
+          if (open) controller.close()
+          open = false
         }
       },
     })
@@ -145,6 +181,26 @@ class FakeSandbox extends RemoteSandbox implements PipeTransport {
   served(): string[] {
     return this.pipes.map((p) => words(p)[6] ?? '')
   }
+
+  /** End `prefix`'s server: its sshfs then unmounts itself. */
+  sshfsExits(prefix: string): void {
+    this.ends.get(prefix)?.()
+    const [source] = this.table.get(prefix) ?? ['']
+    this.table.delete(prefix)
+    this.running.delete(source)
+  }
+}
+
+function escaped(text: string): string {
+  return text.replaceAll(' ', '\\040')
+}
+
+// Another workspace's runtime on the same sandbox.
+function sharing(sandbox: FakeSandbox, mountType: MountType): FakeSandbox {
+  const other = new FakeSandbox(mountType)
+  other.table = sandbox.table
+  other.running = sandbox.running
+  return other
 }
 
 function workspace(
@@ -206,10 +262,54 @@ describe('mountTable', () => {
   it('unescapes paths and keeps the top entry', () => {
     const table = mountTable(
       'tmpfs /data tmpfs rw 0 0\n' +
-        'mirage:/data /data fuse.sshfs rw 0 0\n' +
-        'x /my\\040notes tmpfs rw 0 0\n',
+        'mirage-ab:/data /data fuse.sshfs rw 0 0\n' +
+        'mirage-ab:/my\\040notes /my\\040notes fuse.sshfs rw 0 0\n',
     )
-    expect(Object.fromEntries(table)).toEqual({ '/data': 'fuse.sshfs', '/my notes': 'tmpfs' })
+    expect(Object.fromEntries(table)).toEqual({
+      '/data': ['mirage-ab:/data', 'fuse.sshfs'],
+      '/my notes': ['mirage-ab:/my notes', 'fuse.sshfs'],
+    })
+  })
+})
+
+describe('runningLine', () => {
+  // A program carrying the source as an argument serves it, as sshfs does;
+  // a shorter or another source is not it.
+  it.skipIf(!existsSync('/proc/self'))('finds a program carrying the source', async () => {
+    const program = spawn('/bin/sh', [
+      '-c',
+      'echo ready; while :; do sleep 1; done',
+      'sh',
+      'mirage-x:/my notes',
+    ])
+    try {
+      await new Promise<void>((resolve) => {
+        program.stdout.once('data', () => {
+          resolve()
+        })
+      })
+      const codes = ['mirage-x:/my notes', 'mirage-x:/my', 'mirage-y:/data'].map(
+        (source) => spawnSync('/bin/sh', ['-c', runningLine(source)], { timeout: 10_000 }).status,
+      )
+      expect(codes).toEqual([0, 1, 1])
+    } finally {
+      program.kill('SIGKILL')
+    }
+  })
+
+  // With no process to read, the line cannot tell rather than answer that
+  // nothing serves the source.
+  it('cannot tell without a process list', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-running-'))
+    for (const tool of ['tr', 'awk']) {
+      const found = spawnSync('/bin/sh', ['-c', `command -v ${tool}`], { encoding: 'utf8' })
+      symlinkSync(found.stdout.trim(), join(dir, tool))
+    }
+    const done = spawnSync('/bin/sh', ['-c', runningLine('mirage-x:/data')], {
+      env: { PATH: dir },
+      timeout: 10_000,
+    })
+    expect(done.status).toBe(2)
   })
 })
 
@@ -227,9 +327,11 @@ describe('SandboxMounts', () => {
     const agent = await ws.session('agent', { profile: 'agent' })
     const result = await agent.shell('python3 job.py')
     expect([result.exitCode, DEC.decode(result.stdout)]).toEqual([0, 'ran\n'])
+    const name = (words(sandbox.pipes[0] ?? '')[5] ?? '').split(':')[0] ?? ''
+    expect(name).toMatch(/^mirage-[0-9a-f]{32}$/)
     expect(sandbox.pipes.map((p) => p.split(' 2>')[0])).toEqual([
-      `exec sshfs -f -o ${SSHFS_OPTIONS} 'mirage:/data' '/data'`,
-      `exec sshfs -f -o ${SSHFS_OPTIONS} 'mirage:/my notes' '/my notes'`,
+      `exec sshfs -f -o ${SSHFS_OPTIONS} '${name}:/data' '/data'`,
+      `exec sshfs -f -o ${SSHFS_OPTIONS} '${name}:/my notes' '/my notes'`,
     ])
     await agent.shell('python3 again.py')
     expect(sandbox.pipes).toHaveLength(2)
@@ -321,7 +423,7 @@ describe('SandboxMounts', () => {
     const ws = workspace(sandbox, ['/data/secret.csv'])
     const agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(126)
-    sandbox.table.set('/data', 'fuse')
+    sandbox.table.set('/data', ['x', 'fuse'])
     const result = await agent.shell('python3 job.py')
     expect(result.exitCode).toBe(126)
     expect(DEC.decode(result.stderr)).toBe('fake: Permission denied\n')
@@ -353,9 +455,9 @@ describe('SandboxMounts', () => {
     await ws.close()
   })
 
-  it('drops a stale sshfs mount before serving', async () => {
+  it('drops a dead sshfs mount before serving', async () => {
     const sandbox = new FakeSandbox('ssh')
-    sandbox.table.set('/data', 'fuse.sshfs')
+    sandbox.table.set('/data', ['mirage-gone:/data', 'fuse.sshfs'])
     const ws = workspace(sandbox)
     const agent = await ws.session('agent', { profile: 'agent' })
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
@@ -367,6 +469,66 @@ describe('SandboxMounts', () => {
       ),
     )
     await ws.close()
+  })
+
+  const FOREIGN =
+    'fake: another sshfs serves /data in this sandbox; give this workspace a sandbox of its own\n'
+
+  it('lets a second workspace on the sandbox unmount nothing', async () => {
+    const first = new FakeSandbox('ssh')
+    const second = sharing(first, 'ssh')
+    const [ws1, ws2] = [workspace(first), workspace(second)]
+    const one = await ws1.session('agent', { profile: 'agent' })
+    const two = await ws2.session('agent', { profile: 'agent' })
+    expect((await one.shell('python3 job.py')).exitCode).toBe(0)
+    const mounted = new Map(first.table)
+    const result = await two.shell('python3 job.py')
+    expect(result.exitCode).toBe(1)
+    expect(DEC.decode(result.stderr)).toBe(FOREIGN)
+    expect(second.pipes).toEqual([])
+    expect(first.table).toEqual(mounted)
+    expect((await one.shell('python3 job.py')).exitCode).toBe(0)
+    await ws2.close()
+    expect(first.table).toEqual(mounted)
+    await ws1.close()
+    expect(first.table.size).toBe(0)
+  })
+
+  it('leaves the mount that replaced an ended server when dropping it', async () => {
+    const first = new FakeSandbox('ssh')
+    const second = sharing(first, 'ssh')
+    const [ws1, ws2] = [workspace(first), workspace(second)]
+    const one = await ws1.session('agent', { profile: 'agent' })
+    const two = await ws2.session('agent', { profile: 'agent' })
+    expect((await one.shell('python3 job.py')).exitCode).toBe(0)
+    first.sshfsExits('/data')
+    first.sshfsExits('/my notes')
+    await until(() => true)
+    expect((await two.shell('python3 job.py')).exitCode).toBe(0)
+    const mounted = new Map(first.table)
+    for (let line = 0; line < 2; line++) {
+      const result = await one.shell('python3 job.py')
+      expect(result.exitCode).toBe(1)
+      expect(DEC.decode(result.stderr)).toBe(FOREIGN)
+    }
+    expect(first.table).toEqual(mounted)
+    await ws1.close()
+    expect(first.table).toEqual(mounted)
+    await ws2.close()
+  })
+
+  it("takes no other workspace's sshfs for its own under both", async () => {
+    const first = new FakeSandbox('ssh')
+    const second = sharing(first, 'both')
+    const [ws1, ws2] = [workspace(first), workspace(second)]
+    const one = await ws1.session('agent', { profile: 'agent' })
+    const two = await ws2.session('agent', { profile: 'agent' })
+    expect((await one.shell('python3 job.py')).exitCode).toBe(0)
+    const result = await two.shell('python3 job.py')
+    expect(result.exitCode).toBe(1)
+    expect(DEC.decode(result.stderr)).toBe(FOREIGN)
+    await ws2.close()
+    await ws1.close()
   })
 
   it.each(['both', 'fuse'] as const)(
@@ -572,6 +734,17 @@ describe('SandboxMounts', () => {
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
     sandbox.failUnmount = true
     await ws.close()
+    expect(sandbox.stopped).toEqual(['/data', '/my notes'])
+  })
+
+  it('unmounts on close when the mount table cannot be read', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    sandbox.failTable = true
+    await ws.close()
+    expect(sandbox.table.size).toBe(0)
     expect(sandbox.stopped).toEqual(['/data', '/my notes'])
   })
 
