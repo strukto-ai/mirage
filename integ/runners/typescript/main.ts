@@ -82,7 +82,9 @@ function parseArgs(): {
     else if (argv[i] === '--facet' && i + 1 < argv.length) facet = argv[++i]
     else if (argv[i] === '--suite' || argv[i]?.startsWith('--suite=')) {
       suite = argv[i] === '--suite' ? argv[++i] : argv[i]?.slice('--suite='.length)
-      if (suite !== 'nextcloud') throw new Error('--suite requires nextcloud')
+      if (suite !== 'nextcloud' && suite !== 'shared') {
+        throw new Error('--suite requires nextcloud or shared')
+      }
     } else if (argv[i] === '--emit' && i + 1 < argv.length) emit = argv[++i]
     else if (argv[i] === '--strict') strict = true
     else if (argv[i] === '--exclude-case') {
@@ -441,11 +443,16 @@ async function main(): Promise<void> {
     ids = targets.length ? targets : [...manifest.keys()]
   }
   if (suite !== undefined) {
-    if (ids.length !== 1 || ids[0] !== suite || excluded.length > 0) {
+    if (suite === 'nextcloud' && (ids.length !== 1 || ids[0] !== suite || excluded.length > 0)) {
       throw new Error('--suite requires its single --target and no --exclude-case')
     }
+    if (excluded.length > 0) throw new Error('--suite shared forbids --exclude-case')
     cases = selectSuite(root, cases, suite)
-    process.stdout.write(`suite ${suite}: ${String(cases.length)} cases\n`)
+    const count = cases.reduce(
+      (sum, c) => sum + ids.filter((id) => c.targets.includes(id)).length,
+      0,
+    )
+    process.stdout.write(`suite ${suite}: ${String(count)} target/case pairs\n`)
   }
   const report = new Report()
   const emit: EmitRow[] | null = emitPath ? [] : null

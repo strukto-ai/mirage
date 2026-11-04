@@ -47,6 +47,16 @@ CASE_DIRS = (
 # run, so two targets on it can never be in flight together. Everything else
 # mints a fresh run id per ``open_target`` and is free to overlap.
 SERVICE_KEYS = frozenset({"python", "typescript", "shared"})
+SHARED_TARGETS = frozenset(
+    {
+        "sharepoint",
+        "sharepoint-prefix",
+        "onedrive",
+        "box",
+        "gdrive",
+        "gdrive-folder",
+    }
+)
 
 # What runs one target. The pool takes it as an argument so a gate can pass
 # a recorder and watch what actually overlaps, which no end-to-end run can
@@ -233,11 +243,29 @@ def select_suite(root: Path, cases: list[dict], name: str) -> list[dict]:
     Args:
         root (Path): the integ directory.
         cases (list[dict]): loaded cases, in execution order.
-        name (str): the backend target and suite manifest name.
+        name (str): the suite manifest name.
     """
-    if name != "nextcloud":
+    if name not in {"nextcloud", "shared"}:
         raise ValueError(f"unknown suite: {name}")
-    selectors = json.loads((root / "ci" / f"{name}.json").read_text())
+    data = json.loads((root / "ci" / f"{name}.json").read_text())
+    if name == "shared":
+        if not isinstance(data, dict) or set(data) != {"targets", "selectors"}:
+            raise ValueError("suite shared: expected targets and selectors")
+        targets = data["targets"]
+        if (
+            not isinstance(targets, list)
+            or any(not isinstance(target, str) for target in targets)
+            or len(targets) != len(SHARED_TARGETS)
+            or set(targets) != SHARED_TARGETS
+        ):
+            raise ValueError(
+                "suite shared: targets must name the six shared backends"
+            )
+        focused = set(targets)
+        selectors = data["selectors"]
+    else:
+        focused = {name}
+        selectors = data
     if (
         not isinstance(selectors, list)
         or not selectors
@@ -245,7 +273,9 @@ def select_suite(root: Path, cases: list[dict], name: str) -> list[dict]:
         or len(set(selectors)) != len(selectors)
     ):
         raise ValueError("suite selectors must be unique nonempty strings")
-    eligible = [case for case in cases if name in case["targets"]]
+    eligible = [
+        case for case in cases if focused.intersection(case["targets"])
+    ]
     selected: set[str] = set()
     for selector in selectors:
         matches = [
@@ -259,7 +289,35 @@ def select_suite(root: Path, cases: list[dict], name: str) -> list[dict]:
         if not matches:
             raise ValueError(f"suite {name}: unused selector {selector}")
         selected.update(matches)
-    return [case for case in eligible if case["id"] in selected]
+    if name == "nextcloud":
+        return [case for case in eligible if case["id"] in selected]
+    selected.update(
+        case["id"]
+        for case in eligible
+        if not {"ram", "disk"} <= set(case["targets"])
+        or case.get("clear_cache")
+        or "check" in case
+        or case["_source"].startswith(
+            ("vfs/", "crossmount/", "unix/rm/", "unix/rmdir/")
+        )
+    )
+    for target in focused:
+        if not any(
+            target in case["targets"] and case["id"] in selected
+            for case in eligible
+        ):
+            raise ValueError(f"suite shared: no cases selected for {target}")
+    result: list[dict] = []
+    for case in cases:
+        if case["id"] in selected:
+            result.append(case)
+        else:
+            targets = [
+                target for target in case["targets"] if target not in focused
+            ]
+            if targets:
+                result.append({**case, "targets": targets})
+    return result
 
 
 def validate_cases(root: Path, cases: list[dict]) -> None:
