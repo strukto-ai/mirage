@@ -15,7 +15,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from mirage.types import FileStat
 
@@ -82,6 +82,17 @@ class IndexConfig(BaseModel):
 
     type: IndexType = IndexType.RAM
     ttl: float = 600
+
+    @field_validator("type")
+    @classmethod
+    def _v_type(cls, v: IndexType) -> IndexType:
+        built = cls.model_fields["type"].default
+        if v != built:
+            raise ValueError(
+                f"{cls.__name__} builds a {built.value!r} index, "
+                f"not {v.value!r}; the class picks the store"
+            )
+        return v
 
 
 class RedisIndexConfig(IndexConfig):
