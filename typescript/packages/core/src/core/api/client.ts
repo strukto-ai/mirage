@@ -549,7 +549,10 @@ export async function apiRequest(
         text = await readPrefix(response, ERROR_BODY_BYTES)
       } else if (!asBytes && !discard) text = await readText(response, maxBodyBytes)
       else if (discard) await response.body?.cancel()
-      else data = await readBytes(response, options.window, maxBodyBytes)
+      else {
+        const view = await readBytes(response, options.window, maxBodyBytes)
+        data = view.buffer.byteLength > view.length ? view.slice() : view
+      }
     } catch (err) {
       if (err instanceof ResponseTooLargeError || err instanceof MemoryExhausted) throw err
       if (signal?.aborted !== true && retry.retryTransport === true && attempt < retry.maxRetries) {

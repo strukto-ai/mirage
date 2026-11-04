@@ -16,7 +16,8 @@ import { createServer } from 'node:http'
 import { gzipSync } from 'node:zlib'
 import { MemoryBudget, runWithMemory } from '../../io/memory.ts'
 import { MemoryExhausted } from '../../io/errors.ts'
-import { describe, expect, it, vi } from 'vitest'
+import { assert, describe, expect, it, vi } from 'vitest'
+import { CHUNK_SIZE } from '../../io/cooperative.ts'
 import {
   MAX_BODY_BYTES,
   ERROR_BODY_BYTES,
@@ -688,6 +689,27 @@ function chunkedResponse(parts: readonly Uint8Array[], init?: ResponseInit) {
 
 describe('buffered binary limits', () => {
   it.each(['bytes', 'bytes_response'] as const)(
+    '%s returns an exact-length buffer after growth overshoots',
+    async (read) => {
+      const raw = new Uint8Array(CHUNK_SIZE + 1).fill(120)
+      const source = chunkedResponse([raw.subarray(0, CHUNK_SIZE), raw.subarray(CHUNK_SIZE)])
+      let result = await apiRequest('GET', TARGET, {
+        errorOf,
+        read,
+        maxBodyBytes: CHUNK_SIZE * 2,
+        fetchFn: vi.fn<typeof fetch>().mockResolvedValue(source.response),
+      })
+      if (read === 'bytes_response') {
+        assert(typeof result === 'object' && result !== null && 'data' in result)
+        result = result.data
+      }
+      assert(result instanceof Uint8Array)
+      expect(result).toEqual(raw)
+      expect(result.buffer.byteLength).toBe(result.length)
+    },
+  )
+
+  it.each(['bytes', 'bytes_response'] as const)(
     '%s refuses an oversized chunked response and never retries it',
     async (read) => {
       const source = chunkedResponse([
@@ -1106,6 +1128,29 @@ describe("the call's signal", () => {
 })
 
 describe('bounded text bodies', () => {
+  it('decodes the retained view without copying spare capacity', async () => {
+    const raw = new Uint8Array(CHUNK_SIZE + 1).fill(120)
+    const source = chunkedResponse([raw.subarray(0, CHUNK_SIZE), raw.subarray(CHUNK_SIZE)])
+    const decode = vi.spyOn(TextDecoder.prototype, 'decode')
+    try {
+      expect(
+        await apiRequest('GET', TARGET, {
+          errorOf,
+          read: 'text',
+          maxBodyBytes: CHUNK_SIZE * 2,
+          fetchFn: vi.fn<typeof fetch>().mockResolvedValue(source.response),
+        }),
+      ).toBe('x'.repeat(raw.length))
+      expect(decode).toHaveBeenCalledOnce()
+      const input = decode.mock.calls[0]?.[0]
+      assert(input instanceof Uint8Array)
+      expect(input.byteLength).toBe(raw.length)
+      expect(input.buffer.byteLength).toBe(CHUNK_SIZE * 2)
+    } finally {
+      decode.mockRestore()
+    }
+  })
+
   it.each(['json', 'text', 'response'] as const)(
     'bounds %s and preserves exact-cap values',
     async (read) => {
