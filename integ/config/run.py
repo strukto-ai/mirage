@@ -31,7 +31,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from aiohttp import web
+from aiohttp.test_utils import TestServer
+
+from mirage.config import WorkspaceConfig
+from mirage.core.api.client import api_request, status_error
+from mirage.types import PathSpec
+from mirage.vfs.ram import RAMVFS
 from mirage.vfs.registry import build_vfs
+from mirage.workspace.workspace import Workspace
 
 HOST = "python"
 SUITE = Path(__file__).parent / "cases.json"
@@ -88,7 +96,73 @@ def _problems(
     return out
 
 
+class BodyRAM(RAMVFS):
+    """A file whose body comes from the local HTTP service.
+
+    Args:
+        url (str): the fixture response URL.
+    """
+
+    def __init__(self, url: str) -> None:
+        super().__init__()
+        self.url = url
+
+    async def read(
+        self, path: PathSpec, offset: int = 0, size: int | None = None
+    ) -> bytes:
+        text = await api_request(
+            "GET", self.url, error_of=status_error, read="text"
+        )
+        return text.encode()
+
+
+async def _workspace(case: dict[str, Any]) -> list[str]:
+    try:
+        kwargs = WorkspaceConfig.model_validate(
+            case["config"]
+        ).to_workspace_kwargs()
+    except ValueError as exc:
+        return _problems(case, None, str(exc))
+    if "body_bytes" not in case:
+        ws = Workspace(**kwargs)
+        try:
+            return _problems(
+                case, {"max_body_bytes": ws.registry.body_limit}, None
+            )
+        finally:
+            await ws.close()
+
+    hits = []
+
+    async def answer(request):
+        hits.append(1)
+        return web.Response(text="x" * case["body_bytes"])
+
+    app = web.Application()
+    app.router.add_get("/", answer)
+    async with TestServer(app) as server:
+        kwargs["mounts"] = {"/body": BodyRAM(str(server.make_url("/")))}
+        ws = Workspace(**kwargs)
+        try:
+            await ws.vfs.write("/body/file", b"")
+            result = await ws.shell("cat /body/file")
+            assert hits, "the mount read never reached the service"
+            return _problems(
+                case,
+                {
+                    "stdout": (result.stdout or b"").decode(),
+                    "stderr": (result.stderr or b"").decode(),
+                    "exit_code": result.exit_code,
+                },
+                None,
+            )
+        finally:
+            await ws.close()
+
+
 async def _run(case: dict[str, Any]) -> list[str]:
+    if case["vfs"] == "workspace":
+        return await _workspace(case)
     try:
         vfs = build_vfs(case["vfs"], dict(case["config"]))
     except Exception as exc:
