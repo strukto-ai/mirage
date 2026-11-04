@@ -242,7 +242,7 @@
     },
     {
       "id": "stdin_arrives_as_it_is_written",
-      "note": "A data listener sees the first chunk while the producer is still writing; one that waited for the end of input would hit the line's limit. Every reader takes from one position and one pump, so readline's events and its async iterator see every line, and base64 and UTF-8 text carry what a chunk splits.",
+      "note": "A data listener sees the first chunk while the producer is still writing; one that waited for the end of input would hit the line's limit. An async loop reads only as it asks, so breaking out of one over an endless pipe ends the run, and a loop begun after the end finishes. Every reader takes from one position, and base64 and UTF-8 text carry what a chunk splits.",
       "world": {
         "runtimes": [
           "quickjs",
@@ -283,7 +283,7 @@
           "command": "printf 'a\\nb\\nc\\n' | node -e \"const rl = require('readline').createInterface({ input: process.stdin }); rl.on('close', () => console.log('closed')); (async () => { for await (const l of rl) { await new Promise((r) => setTimeout(r, 20)); console.log('>', l) } console.log('loop done') })()\"",
           "expect": {
             "exit": 0,
-            "stdout": "closed\n> a\n> b\n> c\nloop done\n",
+            "stdout": "> a\n> b\n> c\nclosed\nloop done\n",
             "stderr": ""
           }
         },
@@ -300,6 +300,22 @@
           "expect": {
             "exit": 0,
             "stdout": "\"ok �\"\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "seq 1 1000000000 | node -e \"(async () => { for await (const c of process.stdin) { console.log('got', c.length > 0); break } const rl = require('readline').createInterface({ input: process.stdin }); for await (const l of rl) { console.log('line', l.length > 0); break } console.log('after') })()\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "got true\nline true\nafter\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'x' | node -e \"process.stdin.on('data', () => {}); process.stdin.on('end', async () => { for await (const c of process.stdin) {} console.log('after loop') })\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "after loop\n",
             "stderr": ""
           }
         }
