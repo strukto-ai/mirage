@@ -85,6 +85,10 @@
       "types": "./dist/ssh/config.d.ts",
       "import": "./dist/ssh/config.js"
     },
+    "./ssh/codex": {
+      "types": "./dist/ssh/codex.d.ts",
+      "import": "./dist/ssh/codex.js"
+    },
     "./ssh/relay": {
       "types": "./dist/ssh/relay.d.ts",
       "import": "./dist/ssh/relay.js"

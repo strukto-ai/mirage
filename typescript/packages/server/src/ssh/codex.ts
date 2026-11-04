@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Buffer } from 'node:buffer'
-import { constants as fsConstants } from 'node:fs'
 import { posix } from 'node:path'
 import { linkView, mountView } from '@struktoai/mirage-core/commands/builtin/utils/links'
 import { WalkBudget } from '@struktoai/mirage-core/commands/builtin/utils/tree'
@@ -21,12 +20,13 @@ import { classify } from '@struktoai/mirage-core/errors/classify'
 import { JobOutput } from '@struktoai/mirage-core/shell/console/terminal'
 import { PathSpec, type JsonValue } from '@struktoai/mirage-core/types'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
-import { MountCore, type MountAttrs } from '@struktoai/mirage-node'
+import { MountCore } from '@struktoai/mirage-core/mount/core'
+import type { MountAttrs } from '@struktoai/mirage-core/mount/types'
+import { S_IFDIR, S_IFLNK, S_IFMT, S_IFREG } from '@struktoai/mirage-core/utils/stat_view'
 import { OWNER } from '@struktoai/mirage-node/mount/constants'
 import type { OpenMode } from '@struktoai/mirage-core/runtime/handles/index'
 import { eexist, enoent, strerrorOf } from '@struktoai/mirage-core/errors/fs'
 import type { ServerChannel } from 'ssh2'
-import type { WebSocket } from 'ws'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import {
   RPC_INTERNAL_ERROR,
@@ -211,9 +211,9 @@ function notAFile(path: string): CodexRPCError {
   return new CodexRPCError(RPC_INVALID_REQUEST, `path \`${path}\` is not a file`)
 }
 
-const isDir = (mode: number): boolean => (mode & fsConstants.S_IFMT) === fsConstants.S_IFDIR
-const isFile = (mode: number): boolean => (mode & fsConstants.S_IFMT) === fsConstants.S_IFREG
-const isLink = (mode: number): boolean => (mode & fsConstants.S_IFMT) === fsConstants.S_IFLNK
+const isDir = (mode: number): boolean => (mode & S_IFMT) === S_IFDIR
+const isFile = (mode: number): boolean => (mode & S_IFMT) === S_IFREG
+const isLink = (mode: number): boolean => (mode & S_IFMT) === S_IFLNK
 
 function missing(err: unknown): boolean {
   const condition = classify(err)
@@ -934,22 +934,24 @@ export async function serveCodex(
  * exec-server forward` reaches through `mirage codex-exec`, one JSON-RPC
  * message per WebSocket message either way. The connection runs in a fresh
  * session under the workspace's default profile, closed when it ends.
+ *
+ * The socket is any host's: the Node server hands its `ws` socket and a
+ * Worker its `WebSocketPair` end, each as these four calls. `onMessage`
+ * and `onClose` must take their listener before this awaits anything, so a
+ * message sent right after the upgrade is not lost.
  */
 export async function serveCodexSocket(
   registry: WorkspaceRegistry,
   entry: WorkspaceEntry,
-  socket: WebSocket,
+  socket: {
+    onMessage(listener: (text: string) => void): void
+    onClose(listener: () => void): void
+    send(text: string): Promise<void>
+    close(code: number, reason?: string): void
+  },
 ): Promise<void> {
-  // Listen before the session opens: ws hands a message to the listeners it
-  // has when the message arrives, so one sent right after the upgrade would
-  // be lost behind the await.
   const closed = new Promise<void>((resolve) => {
-    socket.once('close', () => {
-      resolve()
-    })
-  })
-  socket.on('error', (err: Error) => {
-    console.debug(`codex: socket error on ${entry.id}`, err)
+    socket.onClose(resolve)
   })
   const sessionId = newSessionId()
   let queue: Promise<CodexChannel | null> = openSession(
@@ -959,19 +961,7 @@ export async function serveCodexSocket(
     null,
     registry,
   ).then(
-    () =>
-      new CodexChannel(
-        registry,
-        entry,
-        sessionId,
-        (text) =>
-          new Promise<void>((resolve) => {
-            socket.send(text, (err) => {
-              if (err !== undefined) console.debug('codex: socket closed before a message', err)
-              resolve()
-            })
-          }),
-      ),
+    () => new CodexChannel(registry, entry, sessionId, (text) => socket.send(text)),
     (err: unknown) => {
       console.warn(`codex: cannot open a session on ${entry.id}`, err)
       const reason = err instanceof Error ? err.message : String(err)
@@ -979,11 +969,11 @@ export async function serveCodexSocket(
       return null
     },
   )
-  socket.on('message', (data: Buffer) => {
+  socket.onMessage((text) => {
     queue = queue.then(async (codex) => {
       if (codex === null) return null
       try {
-        await codex.receive(decoder.decode(data))
+        await codex.receive(text)
       } catch (err) {
         console.warn(`codex: a message failed on ${entry.id}`, err)
         socket.close(1011)

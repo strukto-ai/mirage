@@ -14,9 +14,13 @@
     "packages/browser": {
       "entry": ["scripts/*.mjs"]
     },
-    "packages/edge": {
+    "packages/cloudflare": {
       "entry": ["scripts/*.mjs"],
-      "ignoreDependencies": ["@bytecodealliance/preview2-shim", "@opentelemetry/api-logs"]
+      "ignoreDependencies": [
+        "@bytecodealliance/preview2-shim",
+        "@opentelemetry/api-logs",
+        "cloudflare"
+      ]
     }
   }
 }

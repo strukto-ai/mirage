@@ -32,7 +32,7 @@ import type {
  * The slice of an HTTP framework the routers use, so one set of routes runs
  * on every host: Fastify on Node (`app.ts` adapts it) and the web
  * `Request`/`Response` of an edge runtime with no Node
- * (`@struktoai/mirage-edge`). A router imports nothing from a host:
+ * (`@struktoai/mirage-cloudflare`). A router imports nothing from a host:
  * what a host must supply it gets through its deps.
  */
 export interface RouteShape {

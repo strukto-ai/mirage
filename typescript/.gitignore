@@ -4,5 +4,5 @@ dist/
 coverage/
 *.tsbuildinfo
 packages/core/src/generated/
-packages/edge/src/generated/
+packages/cloudflare/src/generated/
 .wrangler/

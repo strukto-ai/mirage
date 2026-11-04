@@ -26,6 +26,7 @@ __all__ = [
     "RAMWorkspaceStateStore",
     "RedisWorkspaceStateStore",
     "S3WorkspaceStateStore",
+    "SqlWorkspaceStateStore",
     "WorkspaceFields",
     "WorkspaceStateStore",
 ]
@@ -33,6 +34,7 @@ __all__ = [
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.workspace.store.redis": ("RedisWorkspaceStateStore",),
     "mirage.workspace.store.s3": ("S3WorkspaceStateStore",),
+    "mirage.workspace.store.sql": ("SqlWorkspaceStateStore",),
 }
 
 __getattr__ = lazy_exports(__name__, _EXPORTS)

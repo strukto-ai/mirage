@@ -26,6 +26,7 @@ import { parseConfigWithSchema, refuseUnknownKeys } from '@struktoai/mirage-core
 import { loadAttr } from '../utils/loader.ts'
 import type { DiskVFSOptions } from './disk/disk.ts'
 import type { RedisVFSOptions } from './redis/redis.ts'
+import type { SqlVFSOptions } from './sql/sql.ts'
 import './s3/s3.ts'
 
 // The backends that take their options without a schema, and the option
@@ -63,6 +64,11 @@ const REGISTRY: Record<string, VFSFactory> = {
     const { RedisVFS } = await import('./redis/redis.ts')
     const norm = normalizeFields(config)
     return new RedisVFS(norm)
+  },
+  sql: async (config) => {
+    refuseUnknownKeys(config, ['path', 'capacity'] satisfies (keyof SqlVFSOptions)[])
+    const { SqlVFS } = await import('./sql/sql.ts')
+    return new SqlVFS(normalizeFields(config))
   },
   gridfs: async (config) => {
     const { GridFSVFS } = await import('./gridfs/gridfs.ts')

@@ -320,11 +320,12 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
         if mt.prefix not in auto_prefixes and mt.vfs.name != "document"
     ):
         async with m.use():
-            # Disk walks the host tree and redis answers over a
-            # blocking client, so neither runs on the loop.
+            # Disk walks the host tree, redis answers over a blocking
+            # client and sql reads its database synchronously, so none
+            # runs on the loop.
             vfs_state = (
                 await run_blocking(m.vfs.get_state)
-                if m.vfs.name in (VFSName.DISK, VFSName.REDIS)
+                if m.vfs.name in (VFSName.DISK, VFSName.REDIS, VFSName.SQL)
                 else m.vfs.get_state()
             )
         row: dict[str, Any] = {
@@ -752,7 +753,7 @@ async def apply_state_dict(
             vfs_state = await run_blocking(_disk_state_as_ram, vfs_state)
         loads.append((mount, vfs_state))
     for mount, vfs_state in loads:
-        if mount.vfs.name in (VFSName.DISK, VFSName.REDIS):
+        if mount.vfs.name in (VFSName.DISK, VFSName.REDIS, VFSName.SQL):
             await run_blocking(mount.vfs.load_state, vfs_state)
         else:
             mount.vfs.load_state(vfs_state)

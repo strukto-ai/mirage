@@ -580,6 +580,46 @@ importers:
         specifier: ^0.1.0
         version: 0.1.0(patch_hash=99469ae5d18239b8df5dca4b9b2a3a292198afc2e16f229263342359c3e68ee7)
 
+  packages/cloudflare:
+    dependencies:
+      '@bytecodealliance/preview2-shim':
+        specifier: ^0.19.0
+        version: 0.19.0
+      '@opentelemetry/api':
+        specifier: ^1.10.0
+        version: 1.10.0
+      '@opentelemetry/api-logs':
+        specifier: ^0.222.0
+        version: 0.222.0
+      '@struktoai/mirage-core':
+        specifier: workspace:*
+        version: link:../core
+      '@struktoai/mirage-server':
+        specifier: workspace:*
+        version: link:../server
+      '@xmldom/xmldom':
+        specifier: ^0.9.12
+        version: 0.9.12
+    devDependencies:
+      '@pydantic/monty':
+        specifier: 1.4.0
+        version: 1.4.0
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.17
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
+      typescript:
+        specifier: ^6.0.0
+        version: 6.0.3
+      vitest:
+        specifier: ^4.1.12
+        version: 4.1.12(@opentelemetry/api@1.10.0)(@types/node@22.19.17)(vite@7.3.7(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.1))
+      wrangler:
+        specifier: 4.156.2
+        version: 4.156.2(@types/node@22.19.17)
+
   packages/core:
     dependencies:
       '@aws-sdk/client-s3':
@@ -704,46 +744,6 @@ importers:
       vitest:
         specifier: ^4.1.12
         version: 4.1.12(@opentelemetry/api@1.10.0)(@types/node@24.12.2)(vite@7.3.7(@types/node@24.12.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.1))
-
-  packages/edge:
-    dependencies:
-      '@bytecodealliance/preview2-shim':
-        specifier: ^0.19.0
-        version: 0.19.0
-      '@opentelemetry/api':
-        specifier: ^1.10.0
-        version: 1.10.0
-      '@opentelemetry/api-logs':
-        specifier: ^0.222.0
-        version: 0.222.0
-      '@struktoai/mirage-core':
-        specifier: workspace:*
-        version: link:../core
-      '@struktoai/mirage-server':
-        specifier: workspace:*
-        version: link:../server
-      '@xmldom/xmldom':
-        specifier: ^0.9.12
-        version: 0.9.12
-    devDependencies:
-      '@pydantic/monty':
-        specifier: 1.4.0
-        version: 1.4.0
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.19.17
-      esbuild:
-        specifier: ^0.28.2
-        version: 0.28.2
-      typescript:
-        specifier: ^6.0.0
-        version: 6.0.3
-      vitest:
-        specifier: ^4.1.12
-        version: 4.1.12(@opentelemetry/api@1.10.0)(@types/node@22.19.17)(vite@7.3.7(@types/node@22.19.17)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.21.0)(yaml@2.9.1))
-      wrangler:
-        specifier: 4.156.2
-        version: 4.156.2(@types/node@22.19.17)
 
   packages/langchain:
     dependencies:
@@ -10505,7 +10505,7 @@ snapshots:
       debug: 4.4.3
       minimatch: 11.0.3
       semver: 7.8.0
-      tinyglobby: 0.2.16
+      tinyglobby: 0.2.17
       ts-api-utils: 2.5.0(typescript@6.0.3)
       typescript: 6.0.3
     transitivePeerDependencies:
@@ -13906,7 +13906,7 @@ snapshots:
       lines-and-columns: 1.2.4
       mz: 2.7.0
       pirates: 4.0.7
-      tinyglobby: 0.2.16
+      tinyglobby: 0.2.17
       ts-interface-checker: 0.1.13
 
   supports-color@10.2.2: {}
@@ -13980,8 +13980,8 @@ snapshots:
 
   tinyglobby@0.2.16:
     dependencies:
-      fdir: 6.5.0(picomatch@4.0.4)
-      picomatch: 4.0.4
+      fdir: 6.5.0(picomatch@4.0.7)
+      picomatch: 4.0.7
 
   tinyglobby@0.2.17:
     dependencies:
@@ -14295,7 +14295,7 @@ snapshots:
       magic-string: 0.30.21
       obug: 2.1.4
       pathe: 2.0.3
-      picomatch: 4.0.4
+      picomatch: 4.0.7
       std-env: 4.2.0
       tinybench: 2.9.0
       tinyexec: 1.2.4
@@ -14323,7 +14323,7 @@ snapshots:
       magic-string: 0.30.21
       obug: 2.1.4
       pathe: 2.0.3
-      picomatch: 4.0.4
+      picomatch: 4.0.7
       std-env: 4.2.0
       tinybench: 2.9.0
       tinyexec: 1.2.4
@@ -14351,7 +14351,7 @@ snapshots:
       magic-string: 0.30.21
       obug: 2.1.4
       pathe: 2.0.3
-      picomatch: 4.0.4
+      picomatch: 4.0.7
       std-env: 4.2.0
       tinybench: 2.9.0
       tinyexec: 1.2.4
@@ -14379,7 +14379,7 @@ snapshots:
       magic-string: 0.30.21
       obug: 2.1.4
       pathe: 2.0.3
-      picomatch: 4.0.4
+      picomatch: 4.0.7
       std-env: 4.2.0
       tinybench: 2.9.0
       tinyexec: 1.2.4

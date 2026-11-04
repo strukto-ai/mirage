@@ -1,0 +1,35 @@
+---
+title: SQL
+icon: database
+description: Store workspace files in SQL tables.
+---
+
+SQL stores workspace files in a database's tables. The files last as long as
+the database does. The tables follow [AgentFS](https://github.com/tursodatabase/agentfs):
+a database AgentFS made mounts here, and AgentFS reads one this mount made.
+One database holds one filesystem.
+
+## Configuration
+
+For Python or Node, set `path` to the SQLite file. Leave it out to keep the
+database in memory:
+
+```yaml
+mounts:
+  /data:
+    vfs: sql
+    mode: write
+    config:
+      path: ./workspace.db
+```
+
+A Postgres server, a Durable Object's storage or a D1 database mounts from
+code, through its driver. See the SDK guides.
+
+Add `capacity: 100MB` under `config` to cap the bytes the files hold. See
+[capacity](/home/configuration#capacity).
+
+## SDK guides
+
+- [Python SQL VFS](/python/vfs/sql)
+- [TypeScript SQL setup](/typescript/setup/sql)

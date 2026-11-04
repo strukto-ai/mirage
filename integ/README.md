@@ -552,7 +552,7 @@ building TypeScript; append `python` or `typescript` to select one host.
 `integ-edge` runs the corpus's targets for every built-in CLI on the edge
 host: git on RAM, gh and github, gws and the Google mounts, hf, himalaya and
 email, slack, discord, ntn, linear, trello, airtable, mcp, and search over
-dify and mem0. `edge/run.ts` starts their fakes through the launcher (the mcp
+dify and mem0. `cloudflare/run.ts` starts their fakes through the launcher (the mcp
 fake as a process of its own), starts the edge test worker under
 `wrangler dev`, builds each target's mounts and CLIs as a config the way the
 node adapters build instances, and sends every line over the server API, checked
@@ -562,9 +562,9 @@ checks, faults, decisions, fresh reads and capacity are skipped and
 counted, and so is a target whose sessions layer inline permissions onto a
 default profile (`ram-commands`), since the API takes a session's profile by
 name. A `clear_cache` case runs warm, so the write it makes still lands; the
-few that check a size a warm cache already knows are named in `edge/run.ts`
+few that check a size a warm cache already knows are named in `cloudflare/run.ts`
 and counted apart, and any other `clear_cache` failure fails the run.
-Run it locally with `cd integ && pnpm exec tsx edge/run.ts`, optionally naming
+Run it locally with `cd integ && pnpm exec tsx cloudflare/run.ts`, optionally naming
 target ids, after building TypeScript and generating the fakes' Prisma clients.
 
 `hosting/tracking.json` also runs on both HTTP hosts, in foreground and

@@ -43,7 +43,7 @@ const TOKEN = /\{\/\* generated: ([a-z-]+) ([\w/.-]+)(?: omit=[\w,]+)? (start|en
 const CODE_SPAN = /(`+)(.+?)\1/g
 const FRONTMATTER = /^---\n[\s\S]*?\n---\n+/
 const FENCE = /^`{3,}/
-const NOT_ADAPTERS = new Set(['browser', 'cli', 'core', 'edge', 'node', 'server'])
+const NOT_ADAPTERS = new Set(['browser', 'cli', 'cloudflare', 'core', 'node', 'server'])
 // The path a docs page mounts its VFS at: a mount goes wherever its
 // workspace puts it.
 const PLACEHOLDER = '/<path>'

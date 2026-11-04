@@ -20,6 +20,9 @@ from mirage.utils.dates import iso_timestamp
 # The one spelling of "a directory looks like drwxr-xr-x and a file
 # like -rw-r--r--" for every stat translator (FUSE attrs, guest
 # st_mode); mirrors utils/stat_view.ts.
+# The type bits of a mode, as a mask: python's stat.S_IFMT is a function
+# of a mode, TypeScript's the mask itself.
+S_IFMT = 0o170000
 CHAR_MODE = S_IFCHR | 0o666
 DIR_MODE = S_IFDIR | 0o755
 FILE_MODE = S_IFREG | 0o644

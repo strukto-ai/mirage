@@ -1,0 +1,130 @@
+---
+title: SQL
+icon: database
+description: Keep a Mirage filesystem in SQL tables.
+---
+The SQL VFS keeps a filesystem in a database's tables. It supports full read
+and write operations and needs no extra for a SQLite file: it uses Python's
+own `sqlite3`.
+
+## Config
+
+```python
+from mirage import MountMode, Workspace
+from mirage.vfs.sql import SqlVFS
+
+vfs = SqlVFS("./workspace.db")
+ws = Workspace({"/sql": vfs}, mode=MountMode.WRITE)
+```
+
+| Parameter  | Required | Default   | Description                                              |
+| ---------- | -------- | --------- | -------------------------------------------------------- |
+| `path`     | no       | in memory | The SQLite file, opened and closed with the mount        |
+| `capacity` | no       | none      | The most bytes the files may hold, like `100MB`          |
+| `driver`   | no       | none      | A `SqlDriver` to borrow instead of a file; you close it |
+
+The tables are [AgentFS](https://github.com/tursodatabase/agentfs)'s, so a
+database AgentFS made mounts here and AgentFS reads one this mount made:
+
+- `fs_inode`: one row per file and directory, with its mode, owner, size and times
+- `fs_dentry`: each entry's name under its parent directory
+- `fs_data`: a file's bytes, in rows of the database's chunk size (4 KiB unless the database says otherwise)
+- `fs_symlink` and `fs_config`: link targets, and the chunk size and schema version
+
+One database holds one filesystem. The TypeScript mount reads and writes the
+same tables, so a Python and a Node process on one file serve one filesystem.
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with SQL mounted at `/<path>`.
+
+{/* generated: vfs-md sql start */}
+<Tabs>
+  <Tab title="Rendered">
+    ### Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `sql`, write |
+
+    #### Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    #### Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `sql`, write |
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
+{/* generated: vfs-md sql end */}
+
+## Cache
+
+Index TTL is `0`, so listings are read from the database every time. A
+workspace `index:` block still applies its `ttl` to this mount.
+
+## Example
+
+```python
+import asyncio
+
+from mirage import MountMode, Workspace
+from mirage.vfs.sql import SqlVFS
+
+
+async def main():
+    ws = Workspace({"/sql": SqlVFS("./workspace.db")}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("mkdir -p /sql/data/")
+        await ws.shell('echo "hello world" | tee /sql/data/hello.txt')
+        r = await ws.shell("cat /sql/data/hello.txt")
+        print(await r.stdout_str())
+    finally:
+        await ws.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```

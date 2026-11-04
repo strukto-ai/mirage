@@ -1,0 +1,71 @@
+{
+  "name": "@struktoai/mirage-cloudflare",
+  "version": "0.0.9-alpha.1",
+  "description": "Mirage on Cloudflare Workers and Durable Objects",
+  "keywords": [
+    "bash",
+    "typescript",
+    "workspace",
+    "ai-agents",
+    "agent-sandbox",
+    "virtual-filesystem",
+    "cloudflare",
+    "cloudflare-workers",
+    "durable-objects",
+    "edge",
+    "serverless"
+  ],
+  "homepage": "https://github.com/strukto-ai/mirage#readme",
+  "bugs": {
+    "url": "https://github.com/strukto-ai/mirage/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/strukto-ai/mirage.git",
+    "directory": "typescript/packages/cloudflare"
+  },
+  "license": "Apache-2.0",
+  "author": "Zecheng Zhang <zecheng@strukto.ai>",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./*": {
+      "types": "./dist/*.d.ts",
+      "import": "./dist/*.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "THIRD_PARTY_NOTICES"
+  ],
+  "scripts": {
+    "build": "node scripts/clean.mjs && node scripts/bundle-monty.mjs && tsc -p tsconfig.build.json && node scripts/copy-generated.mjs",
+    "test": "node scripts/bundle-monty.mjs && vitest run",
+    "typecheck": "node scripts/bundle-monty.mjs && tsc --noEmit"
+  },
+  "dependencies": {
+    "@bytecodealliance/preview2-shim": "^0.19.0",
+    "@opentelemetry/api": "^1.10.0",
+    "@opentelemetry/api-logs": "^0.222.0",
+    "@struktoai/mirage-core": "workspace:*",
+    "@struktoai/mirage-server": "workspace:*",
+    "@xmldom/xmldom": "^0.9.12"
+  },
+  "devDependencies": {
+    "@pydantic/monty": "1.4.0",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^6.0.0",
+    "vitest": "^4.1.12",
+    "wrangler": "4.156.2"
+  }
+}

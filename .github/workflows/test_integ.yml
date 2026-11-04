@@ -424,21 +424,21 @@ jobs:
       - name: Generate integ Prisma clients
         working-directory: integ
         run: pnpm run prisma:clients
-      # The test worker runs edge's source, whose Monty bundle is generated.
-      - name: Bundle edge's Monty runtime
-        working-directory: typescript/packages/edge
+      # The test worker runs the Cloudflare package's source, whose Monty bundle is generated.
+      - name: Bundle the Cloudflare package's Monty runtime
+        working-directory: typescript/packages/cloudflare
         run: node scripts/bundle-monty.mjs
       # The corpus's targets for every built-in CLI on an edge worker
       # (workerd under wrangler dev), each line over the server API.
       - name: Assert the edge groups preserve full coverage
         if: matrix.group == 'ram'
         working-directory: integ
-        run: pnpm exec tsx edge/run.ts --check-groups
+        run: pnpm exec tsx cloudflare/run.ts --check-groups
       - name: Run the corpus on the edge host
         working-directory: integ
         env:
           EDGE_GROUP: ${{ matrix.group }}
-        run: pnpm exec tsx edge/run.ts --group "$EDGE_GROUP"
+        run: pnpm exec tsx cloudflare/run.ts --group "$EDGE_GROUP"
 
   integ:
     needs: changes
