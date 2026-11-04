@@ -1,9 +1,3 @@
-// Node's common APIs over qjs's std and os: fs, path, process, Buffer,
-// require, the timers and node's console. The runtime evaluates this file
-// ahead of a program (node.py, node.ts), and its value, the function
-// below, takes the program's argv and script path, so a script written for
-// node finds what it reaches for first. Its twin in the other host must stay
-// byte-identical (python/tests/runtime/js/quickjs/test_node.py).
 ;(function (argv, script) {
   'use strict'
   const g = globalThis
@@ -910,11 +904,11 @@
   }
   // Listeners on target, and the pump that feeds them, started by the
   // first listener for what it delivers (an error listener reads nothing)
-  // or by resume(), and run one step a timer until it answers false. A
-  // pump steps aside once an async loop takes the stream: the loop reads
-  // only as it asks, so nothing reads ahead of it or is left reading
-  // after it ends.
-  function emitter(target, pump) {
+  // or by resume(), and run one step a timer until it answers false;
+  // added hears of each listener as it is added. A pump steps aside once
+  // an async loop takes the stream: the loop reads only as it asks, so
+  // nothing reads ahead of it or is left reading after it ends.
+  function emitter(target, pump, added) {
     const listeners = {}
     let scheduled = false
     const start = () => {
@@ -928,6 +922,7 @@
     }
     const on = (event, fn) => {
       ;(listeners[event] = listeners[event] || []).push(fn)
+      if (added !== undefined) added(event)
       if (event !== 'error') start()
       return target
     }
@@ -958,7 +953,9 @@
   let decoder = null
   let buffered = null
   let ended = false
-  // As node's: null until a data listener or resume() starts the flow.
+  // As node's: null until a data listener or resume() starts the flow,
+  // which then outlasts the listener, so a once('data') reader still sees
+  // the end.
   let flowing = null
   let iterating = false
   let finished = false
@@ -1018,24 +1015,29 @@
   // With a readable listener, as in node, a chunk waits until read()
   // takes it, nothing more is read while it waits, and data comes only
   // from read(); without one, chunks flow to data while the stream flows.
-  const events = emitter(input, () => {
-    const readable = events.has('readable')
-    const flows = flowing === true || (flowing === null && events.has('data'))
-    if (iterating || finished || (readable ? buffered !== null : !flows)) {
-      return false
-    }
-    let value = buffered
-    buffered = null
-    if (value === null && !ended) value = next()
-    if (value !== null && value.length) {
-      if (readable) {
-        buffered = value
-        events.emit('readable')
-      } else events.emit('data', value)
-    } else if (readable && ended) events.emit('readable')
-    if (ended && buffered === null) finish()
-    return !ended
-  })
+  const events = emitter(
+    input,
+    () => {
+      const readable = events.has('readable')
+      if (iterating || finished || (readable ? buffered !== null : flowing !== true)) {
+        return false
+      }
+      let value = buffered
+      buffered = null
+      if (value === null && !ended) value = next()
+      if (value !== null && value.length) {
+        if (readable) {
+          buffered = value
+          events.emit('readable')
+        } else events.emit('data', value)
+      } else if (readable && ended) events.emit('readable')
+      if (ended && buffered === null) finish()
+      return !ended
+    },
+    (event) => {
+      if (event === 'data' && flowing === null) flowing = true
+    },
+  )
   const readline = {
     createInterface() {
       let closed = false

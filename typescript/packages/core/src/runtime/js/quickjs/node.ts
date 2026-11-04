@@ -12,11 +12,12 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// Node's common APIs over qjs's std and os, as a function that takes the
-// program's argv and script path (shim.js). It is embedded at build time
-// (scripts/embed-runtime.mjs), since a page has no file to read it from.
 import shim from '../../../generated/quickjs_shim.ts'
 
+// Node's common APIs over qjs's std and os, as a function that takes the
+// program's argv and script path. shim.js is embedded at build time
+// (scripts/embed-runtime.mjs), since a page has no file to read it from;
+// its twin in the python package must stay byte-identical (test_node.py).
 export const NODE_SHIM: string = shim
 
 /**

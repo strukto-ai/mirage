@@ -242,7 +242,7 @@
     },
     {
       "id": "stdin_arrives_as_it_is_written",
-      "note": "A data listener sees the first chunk while the producer is still writing; one that waited for the end of input would hit the line's limit. An async loop reads only as it asks, so breaking out of one over an endless pipe ends the run, and a loop begun after the end finishes. Every reader takes from one position, and base64 and UTF-8 text carry what a chunk splits. A chunk a readable listener is told of waits for read(), and input flows only once a data listener or resume() asks for it, as node's does.",
+      "note": "A data listener sees the first chunk while the producer is still writing; one that waited for the end of input would hit the line's limit. An async loop reads only as it asks, so breaking out of one over an endless pipe ends the run, and a loop begun after the end finishes. Every reader takes from one position, and base64 and UTF-8 text carry what a chunk splits. A chunk a readable listener is told of waits for read(), and input flows only once a data listener or resume() asks for it, and keeps flowing after a once('data') listener is gone, as node's does.",
       "world": {
         "runtimes": [
           "quickjs",
@@ -364,6 +364,14 @@
           "expect": {
             "exit": 0,
             "stdout": "no flow\nstill paused\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(printf 'a\\n'; sleep 0.2; printf 'b\\n') | node -e \"let n = 0; process.stdin.once('data', () => n++); process.stdin.on('end', () => console.log('end after', n))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "end after 1\n",
             "stderr": ""
           }
         }
