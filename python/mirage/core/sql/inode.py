@@ -163,6 +163,27 @@ def resized(ino: InoRef, size: int, stamp: Stamp) -> SqlStatement:
     )
 
 
+def resized_from(node: Inode, size: int, stamp: Stamp) -> SqlStatement:
+    """``resized``, landing only on the inode as ``node`` read it: a size
+    or mtime another writer changed since leaves the size NULL, which its
+    column refuses, so the batch fails whole and the caller reads the file
+    again."""
+    seconds, nanoseconds = stamp
+    return SqlStatement(
+        "UPDATE fs_inode SET size = CASE WHEN size = ? AND mtime = ?"
+        " AND mtime_nsec = ? THEN CAST(? AS BIGINT) END,"
+        f" mtime = ?, mtime_nsec = ? WHERE ino = {by_ino(node.ino).sql}",
+        (
+            node.size,
+            node.mtime,
+            node.mtime_nsec,
+            size,
+            seconds,
+            nanoseconds,
+        ),
+    )
+
+
 def insert_rows(
     head: str,
     row: str,

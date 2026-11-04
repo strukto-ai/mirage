@@ -191,6 +191,23 @@ async def test_a_write_whose_directory_went_since_its_lookup_strands_nothing(
 
 
 @pytest.mark.asyncio
+async def test_an_append_raced_by_another_lands_at_the_end_it_left(
+    vfs: SqlVFS,
+):
+    await vfs.write(at("/f"), b"a")
+    named = "(SELECT ino FROM fs_dentry WHERE parent_ino = 1 AND name = 'f')"
+    racing(
+        vfs,
+        [
+            f"UPDATE fs_data SET data = X'6162' WHERE ino = {named}",
+            f"UPDATE fs_inode SET size = 2, mtime = mtime + 1 WHERE ino = {named}",
+        ],
+    )
+    await vfs.append(at("/f"), b"c")
+    assert await whole(vfs, "/f") == b"abc"
+
+
+@pytest.mark.asyncio
 async def test_it_keeps_no_attributes_so_the_namespace_keeps_them(
     vfs: SqlVFS,
 ):
