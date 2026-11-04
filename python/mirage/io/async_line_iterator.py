@@ -94,7 +94,6 @@ class AsyncLineIterator:
         self.holders = 0
         self._released = False
         self._pull_lock = asyncio.Lock()
-        self._pulling = False
         self._closing = False
 
     @property
@@ -112,11 +111,9 @@ class AsyncLineIterator:
     async def _next_chunk(self) -> bytes:
         self._started = True
         async with self._pull_lock:
-            self._pulling = True
             try:
                 data = await self._source.__anext__()
             finally:
-                self._pulling = False
                 if self._closing:
                     self._closing = False
                     await self._close_after_pull()
@@ -272,11 +269,11 @@ class AsyncLineIterator:
 
     async def discard(self) -> None:
         """Close the source and drop what it buffered, for input a failed
-        line abandoned. A pull in flight keeps the source until it settles,
-        and closes it then."""
+        line abandoned. A pull in flight, or the close it runs, keeps the
+        source until it settles, and closes it then."""
         self._buf = b""
         self._exhausted = True
-        if self._pulling:
+        if self._pull_lock.locked():
             self._closing = True
         else:
             await self._source.aclose()

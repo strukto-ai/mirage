@@ -286,10 +286,6 @@ async def _gated(
             raise ValueError("close")
 
 
-async def _line(reader: AsyncLineIterator) -> bytes | None:
-    return await reader.readline()
-
-
 async def _peeked_line(reader: AsyncLineIterator) -> bytes | None:
     await reader.peek()
     return await reader.readline()
@@ -302,7 +298,9 @@ async def _chars(reader: AsyncLineIterator) -> bytes:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "read", [_line, _peeked_line, _chars], ids=["readline", "peek", "chars"]
+    "read",
+    [AsyncLineIterator.readline, _peeked_line, _chars],
+    ids=["readline", "peek", "chars"],
 )
 async def test_a_second_pull_waits_for_the_first(read):
     gate, waiting = asyncio.Event(), asyncio.Event()
@@ -311,8 +309,11 @@ async def test_a_second_pull_waits_for_the_first(read):
     first = asyncio.create_task(read(reader))
     await waiting.wait()
     second = asyncio.create_task(read(reader))
-    for _ in range(5):
+    for _ in range(100):
+        if reader._pull_lock._waiters:
+            break
         await asyncio.sleep(0)
+    assert not second.done()
     gate.set()
     # One pull at a time, and the one that waited reads on from the buffer
     # the first left: together the reads hold b and c, however a character
@@ -350,3 +351,31 @@ async def test_a_deferred_close_that_fails_leaves_the_pull_its_chunk(caplog):
         assert await pending == b"b"
     failures = [r for r in caplog.records if r.exc_info is not None]
     assert [type(r.exc_info[1]) for r in failures] == [ValueError]
+
+
+@pytest.mark.asyncio
+async def test_a_second_discard_during_the_close_leaves_it_to_finish():
+    gate, waiting, closing, closed = (asyncio.Event() for _ in range(4))
+
+    async def source():
+        try:
+            yield b"a\n"
+            waiting.set()
+            await gate.wait()
+            yield b"b\n"
+        finally:
+            closing.set()
+            await closed.wait()
+
+    reader = AsyncLineIterator(source())
+    assert await reader.readline() == b"a"
+    pending = asyncio.create_task(reader.readline())
+    await waiting.wait()
+    await reader.discard()
+    gate.set()
+    # The deferred close is now suspended in the source's own cleanup; a
+    # second discard must leave it to finish rather than close it again.
+    await closing.wait()
+    await reader.discard()
+    closed.set()
+    assert await pending == b"b"

@@ -24,7 +24,15 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 import { ExecutionNode } from '../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { handleFg, handleJobs, handleKill, handlePs, handleWait, ownerTags } from './jobs.ts'
+import {
+  handleFg,
+  handleJobs,
+  handleKill,
+  handlePs,
+  handleWait,
+  logger,
+  ownerTags,
+} from './jobs.ts'
 
 /** A runner that finishes immediately with no output. */
 const quiet: JobRunner = () => Promise.resolve([new IOResult(), new ExecutionNode()] as JobResult)
@@ -1093,6 +1101,38 @@ it.each([
     })
   } finally {
     releasing.mockRestore()
+    submitting.mockRestore()
+    await ws.close()
+  }
+})
+
+it('logs a never-run job whose holds on readers fail to drop', async () => {
+  const debug = vi.fn()
+  logger.debug = debug
+  const unhold = vi
+    .spyOn(AsyncLineIterator.prototype, 'unhold')
+    .mockRejectedValue(new Error('unhold failed'))
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const submit = JobTable.prototype.submit
+  const submitting = vi.spyOn(JobTable.prototype, 'submit').mockImplementation(function (
+    this: JobTable,
+    init,
+  ) {
+    init.abort.abort()
+    return submit.call(this, init)
+  })
+  const ws = buildWs()
+  try {
+    await ws.shell("printf 'x\\n' >/m/f")
+    await ws.shell('exec 3</m/f; { cat <&3; } & exec 3<&-; wait')
+    await vi.waitFor(() => {
+      expect(debug).toHaveBeenCalledWith(
+        'job: dropping its holds on readers failed: Error: unhold failed',
+      )
+    })
+  } finally {
+    delete logger.debug
+    unhold.mockRestore()
     submitting.mockRestore()
     await ws.close()
   }

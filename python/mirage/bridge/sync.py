@@ -37,7 +37,7 @@ BLOCKED: WeakSet[asyncio.AbstractEventLoop] = WeakSet()
 # ``gc.callbacks`` reports at a collection's start and stop, and the work
 # its finalizers handed off, which goes to the loops as it ends.
 COLLECTING = threading.local()
-# What finalizers handed each loop (``soon``), until it ends.
+# What finalizers and callbacks handed each loop (``soon``), until it ends.
 HANDED: WeakKeyDictionary[
     asyncio.AbstractEventLoop, set[concurrent.futures.Future[None]]
 ] = WeakKeyDictionary()
@@ -120,7 +120,8 @@ def _hand_back(
 
 
 async def handed() -> None:
-    """Wait for the work finalizers handed the running loop (``soon``)."""
+    """Wait for the work finalizers and callbacks handed the running loop
+    (``soon``)."""
     pending = HANDED.get(asyncio.get_running_loop())
     if pending:
         await asyncio.gather(
