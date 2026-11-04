@@ -196,6 +196,71 @@ def script_context(
     return data
 
 
+# The letters a string literal's prefix may carry (r, b, u, f and t).
+_PREFIX = frozenset("rRbBuUfFtT")
+
+
+def _string_end(source: str, start: int) -> int:
+    """Where the string literal whose quote is at ``start`` ends: past
+    its closing quote, or at the newline that cuts a one-line string
+    short. An f- or t-string's replacement fields are skipped as code,
+    strings nested in them included (``_field_end``).
+
+    Args:
+        source (str): the program.
+        start (int): the index of the literal's opening quote.
+    """
+    head = start
+    while head > 0 and source[head - 1] in _PREFIX:
+        head -= 1
+    prefix = source[head:start].lower()
+    if head > 0 and (source[head - 1].isalnum() or source[head - 1] == "_"):
+        prefix = ""
+    fields = "f" in prefix or "t" in prefix
+    char = source[start]
+    quote = char * 3 if source.startswith(char * 3, start) else char
+    end = start + len(quote)
+    while end < len(source):
+        if source.startswith(quote, end):
+            return end + len(quote)
+        if source[end] == "\n" and len(quote) == 1:
+            return end
+        if source[end] == "\\":
+            end += 2
+        elif fields and source.startswith("{{", end):
+            end += 2
+        elif fields and source[end] == "{":
+            end = _field_end(source, end + 1)
+        else:
+            end += 1
+    return len(source)
+
+
+def _field_end(source: str, start: int) -> int:
+    """Where an f-string's replacement field whose code starts at
+    ``start`` ends: past the brace that closes it.
+
+    Args:
+        source (str): the program.
+        start (int): the index just past the field's opening brace.
+    """
+    depth = 0
+    end = start
+    while end < len(source):
+        char = source[end]
+        if char in "'\"":
+            end = _string_end(source, end)
+            continue
+        if char in "([{":
+            depth += 1
+        elif char in ")]}":
+            if depth == 0:
+                return end + 1
+            depth -= 1
+        end += 1
+    return len(source)
+
+
 def _unquoted(source: str) -> str:
     """``source`` with every string literal and comment blanked to spaces,
     its newlines kept, so a definition shown in a docstring is not read
@@ -212,18 +277,10 @@ def _unquoted(source: str) -> str:
             end = source.find("\n", i)
             end = len(source) if end == -1 else end
         elif char in "'\"":
-            quote = char * 3 if source.startswith(char * 3, i) else char
-            end = i + len(quote)
-            while end < len(source) and not source.startswith(quote, end):
-                if source[end] == "\n" and len(quote) == 1:
-                    break
-                end += 2 if source[end] == "\\" else 1
-            if source.startswith(quote, end):
-                end += len(quote)
+            end = _string_end(source, i)
         else:
             i += 1
             continue
-        end = min(end, len(source))
         for k in range(i, end):
             if out[k] != "\n":
                 out[k] = " "

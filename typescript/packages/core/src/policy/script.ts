@@ -177,6 +177,58 @@ export function scriptContext(
   return data
 }
 
+// The letters a string literal's prefix may carry (r, b, u, f and t).
+const PREFIX = new Set('rRbBuUfFtT')
+
+/**
+ * Where the string literal whose quote is at `start` ends: past its closing
+ * quote, or at the newline that cuts a one-line string short. An f- or
+ * t-string's replacement fields are skipped as code, strings nested in them
+ * included (`fieldEnd`). Mirrors the Python `_string_end`.
+ */
+function stringEnd(source: string, start: number): number {
+  let head = start
+  while (head > 0 && PREFIX.has(source[head - 1] ?? '')) head -= 1
+  let prefix = source.slice(head, start).toLowerCase()
+  if (head > 0 && /\w/.test(source[head - 1] ?? '')) prefix = ''
+  const fields = prefix.includes('f') || prefix.includes('t')
+  const char = source[start] ?? ''
+  const quote = source.startsWith(char.repeat(3), start) ? char.repeat(3) : char
+  let end = start + quote.length
+  while (end < source.length) {
+    if (source.startsWith(quote, end)) return end + quote.length
+    if (source[end] === '\n' && quote.length === 1) return end
+    if (source[end] === '\\') end += 2
+    else if (fields && source.startsWith('{{', end)) end += 2
+    else if (fields && source[end] === '{') end = fieldEnd(source, end + 1)
+    else end += 1
+  }
+  return source.length
+}
+
+/**
+ * Where an f-string's replacement field whose code starts at `start` ends:
+ * past the brace that closes it. Mirrors the Python `_field_end`.
+ */
+function fieldEnd(source: string, start: number): number {
+  let depth = 0
+  let end = start
+  while (end < source.length) {
+    const char = source[end] ?? ''
+    if (char === "'" || char === '"') {
+      end = stringEnd(source, end)
+      continue
+    }
+    if ('([{'.includes(char)) depth += 1
+    else if (')]}'.includes(char)) {
+      if (depth === 0) return end + 1
+      depth -= 1
+    }
+    end += 1
+  }
+  return source.length
+}
+
 /**
  * `source` with every string literal and comment blanked to spaces, its
  * newlines kept, so a definition shown in a docstring is not read as the
@@ -192,18 +244,11 @@ function unquoted(source: string): string {
       end = source.indexOf('\n', i)
       if (end === -1) end = source.length
     } else if (char === "'" || char === '"') {
-      const quote = source.startsWith(char.repeat(3), i) ? char.repeat(3) : char
-      end = i + quote.length
-      while (end < source.length && !source.startsWith(quote, end)) {
-        if (source[end] === '\n' && quote.length === 1) break
-        end += source[end] === '\\' ? 2 : 1
-      }
-      if (source.startsWith(quote, end)) end += quote.length
+      end = stringEnd(source, i)
     } else {
       i += 1
       continue
     }
-    end = Math.min(end, source.length)
     for (let k = i; k < end; k++) if (out[k] !== '\n') out[k] = ' '
     i = end
   }

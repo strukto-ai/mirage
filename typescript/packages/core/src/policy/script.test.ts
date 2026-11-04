@@ -913,6 +913,15 @@ describe('programSource', () => {
     ).toThrow('defines no pre_command(ctx)')
   })
 
+  it.each([
+    'RULE = f"Rules: {"""no deletes"""}"\n',
+    'W = 3\nRULE = f"{1:{W}}" + f"{{literal}}"\n',
+    'if"x" in "xy":\n    pass\n',
+  ])('finds a definition after %j', (head) => {
+    const source = `${head}async def pre_command(ctx):\n    return None\n`
+    expect(programSource(source, 'preCommand')).toContain('await pre_command(')
+  })
+
   it("calls the method's function after the program", () => {
     const source = 'def pre_command(ctx):\n    return None'
     expect(programSource(source, 'preCommand')).toBe(
