@@ -66,6 +66,7 @@ class FakeSandbox extends RemoteSandbox implements PipeTransport {
   readonly stopped: string[] = []
   failUnmount = false
   failTable = false
+  failCheck = false
   hang = false
 
   constructor(
@@ -122,6 +123,9 @@ class FakeSandbox extends RemoteSandbox implements PipeTransport {
         .map(([p, [source, kind]]) => `${escaped(source)} ${escaped(p)} ${kind} rw 0 0\n`)
         .join('')
       return Promise.resolve({ stdout: ENC.encode(rows), stderr: null, exitCode: 0 })
+    }
+    if (line.startsWith('cat /proc/[0-9]*/cmdline') && this.failCheck) {
+      return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 2 })
     }
     if (line.startsWith('cat /proc/[0-9]*/cmdline')) {
       const source = / S='([^']*)' /.exec(line)?.[1] ?? ''
@@ -281,6 +285,7 @@ describe('runningLine', () => {
       'echo ready; while :; do sleep 1; done',
       'sh',
       'mirage-x:/my notes',
+      'mirage-x:/new\nline',
     ])
     try {
       await new Promise<void>((resolve) => {
@@ -288,10 +293,16 @@ describe('runningLine', () => {
           resolve()
         })
       })
-      const codes = ['mirage-x:/my notes', 'mirage-x:/my', 'mirage-y:/data'].map(
+      const codes = [
+        'mirage-x:/my notes',
+        'mirage-x:/new\nline',
+        'mirage-x:/my',
+        'mirage-x:/new',
+        'mirage-y:/data',
+      ].map(
         (source) => spawnSync('/bin/sh', ['-c', runningLine(source)], { timeout: 10_000 }).status,
       )
-      expect(codes).toEqual([0, 1, 1])
+      expect(codes).toEqual([0, 0, 1, 1, 1])
     } finally {
       program.kill('SIGKILL')
     }
@@ -514,6 +525,28 @@ describe('SandboxMounts', () => {
     expect(first.table).toEqual(mounted)
     await ws1.close()
     expect(first.table).toEqual(mounted)
+    await ws2.close()
+  })
+
+  it('leaves the next line checking after a check that fails', async () => {
+    const first = new FakeSandbox('ssh')
+    const second = sharing(first, 'ssh')
+    const [ws1, ws2] = [workspace(first), workspace(second)]
+    const one = await ws1.session('agent', { profile: 'agent' })
+    const two = await ws2.session('agent', { profile: 'agent' })
+    expect((await one.shell('python3 job.py')).exitCode).toBe(0)
+    first.sshfsExits('/data')
+    first.sshfsExits('/my notes')
+    expect((await two.shell('python3 job.py')).exitCode).toBe(0)
+    first.failCheck = true
+    const failed = await one.shell('python3 job.py')
+    expect(failed.exitCode).toBe(1)
+    expect(DEC.decode(failed.stderr)).toContain('cannot tell whether')
+    first.failCheck = false
+    const result = await one.shell('python3 job.py')
+    expect(result.exitCode).toBe(1)
+    expect(DEC.decode(result.stderr)).toBe(FOREIGN)
+    await ws1.close()
     await ws2.close()
   })
 

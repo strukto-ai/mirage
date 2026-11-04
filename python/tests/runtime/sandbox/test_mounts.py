@@ -86,6 +86,7 @@ class FakeSandbox(RemoteSandbox, PipeTransportMixin):
         self.sshfs_mounts = sshfs_mounts
         self.fail_unmount = False
         self.fail_table = False
+        self.fail_check = False
         self.commands: list[str] = []
         self.pipes: list[str] = []
         self.requests: dict[str, asyncio.StreamReader] = {}
@@ -109,6 +110,8 @@ class FakeSandbox(RemoteSandbox, PipeTransportMixin):
                 for p, (source, kind) in self.table.items()
             )
             return RunResult(stdout=rows.encode(), stderr=None, exit_code=0)
+        if line.startswith("cat /proc/[0-9]*/cmdline") and self.fail_check:
+            return RunResult(stdout=b"", stderr=b"", exit_code=2)
         if line.startswith("cat /proc/[0-9]*/cmdline"):
             source = next(
                 w[2:] for w in shlex.split(line) if w.startswith("S=")
@@ -210,6 +213,7 @@ def test_the_running_line_finds_a_program_carrying_the_source():
             "echo ready; while :; do sleep 1; done",
             "sh",
             "mirage-x:/my notes",
+            "mirage-x:/new\nline",
         ],
         stdout=subprocess.PIPE,
     )
@@ -224,11 +228,13 @@ def test_the_running_line_finds_a_program_carrying_the_source():
             ).returncode
             for source in (
                 "mirage-x:/my notes",
+                "mirage-x:/new\nline",
                 "mirage-x:/my",
+                "mirage-x:/new",
                 "mirage-y:/data",
             )
         ]
-        assert codes == [0, 1, 1]
+        assert codes == [0, 0, 1, 1, 1]
     finally:
         program.kill()
         program.wait()
@@ -459,6 +465,29 @@ async def test_dropping_an_ended_server_leaves_the_mount_that_replaced_it():
     assert first.table == mounted
     await ws1.close()
     assert first.table == mounted
+    await ws2.close()
+
+
+@pytest.mark.asyncio
+async def test_a_check_that_fails_leaves_the_next_line_checking():
+    first = FakeSandbox("ssh")
+    second = sharing(first, "ssh")
+    ws1, ws2 = workspace(first), workspace(second)
+    one = await ws1.session("agent", profile="agent")
+    two = await ws2.session("agent", profile="agent")
+    assert (await one.shell("python3 job.py")).exit_code == 0
+    first.sshfs_exits("/data")
+    first.sshfs_exits("/my notes")
+    assert (await two.shell("python3 job.py")).exit_code == 0
+    first.fail_check = True
+    failed = await one.shell("python3 job.py")
+    assert failed.exit_code == 1
+    assert "cannot tell whether" in await failed.stderr_str()
+    first.fail_check = False
+    result = await one.shell("python3 job.py")
+    assert result.exit_code == 1
+    assert await result.stderr_str() == FOREIGN
+    await ws1.close()
     await ws2.close()
 
 
