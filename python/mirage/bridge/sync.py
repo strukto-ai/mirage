@@ -77,7 +77,8 @@ def soon(
 
     Args:
         loop (asyncio.AbstractEventLoop): the loop that runs it.
-        work (Coroutine[Any, Any, None]): what a finalizer could not do.
+        work (Coroutine[Any, Any, None]): what a finalizer or a callback
+            could not await.
     """
     done: concurrent.futures.Future[None] = concurrent.futures.Future()
     pending = HANDED.setdefault(loop, set())

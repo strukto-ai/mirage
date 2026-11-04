@@ -20,6 +20,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, tzinfo
 from typing import Any
 
+from mirage.bridge.sync import soon
 from mirage.commands.builtin.utils.identity import UNKNOWN_NAME
 from mirage.commands.builtin.utils.limit import run_with_timeout
 from mirage.commands.builtin.utils.strftime import gnu_strftime
@@ -280,8 +281,16 @@ async def handle_background(
     bg_session = child_evaluation.session
     held_inputs = hold_inputs(bg_session.open_inputs())
 
+    async def drop_holds() -> None:
+        while held_inputs:
+            await held_inputs.pop().lines.unhold()
+
     def release_job(_: asyncio.Task[Any] | None = None) -> None:
         release_program()
+
+    def drop_unrun_holds(task: asyncio.Task[Any]) -> None:
+        if held_inputs:
+            soon(task.get_loop(), drop_holds())
 
     inherit_traps(bg_session)
     output = session.job_output or session.tty.jobs
@@ -439,8 +448,7 @@ async def handle_background(
             release_job()
             reset_caller(token)
             await bg_session.close_inputs()
-            for source in held_inputs:
-                await source.lines.unhold()
+            await drop_holds()
             if job_handed is not None and decisions is not None:
                 # A job that ended held on a question leaves its grants
                 # standing for the retry, as a held line does; a killed
@@ -466,8 +474,7 @@ async def handle_background(
         )
     except BaseException as exc:
         release_job()
-        for source in held_inputs:
-            await source.lines.unhold()
+        await drop_holds()
         # A submission that fails (a console the table cannot build, a
         # session at its process cap) or is cancelled while the job store
         # answers starts no runner, so nothing would ever revoke the
@@ -479,9 +486,10 @@ async def handle_background(
             raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
         raise
     # A job killed before its runner starts never enters _run_bg, so its
-    # leases also go when its task ends.
+    # leases and its holds on readers also go when its task ends.
     if job.process is not None:
         job.process.task.add_done_callback(release_job)
+        job.process.task.add_done_callback(drop_unrun_holds)
         bg_session.process_id = job.process.info.pid
     session.last_bg_job_id = job.pid
     waits = session.job_waits
