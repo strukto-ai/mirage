@@ -129,6 +129,13 @@ def test_a_yaml_file_is_the_body_and_a_get_has_none(client, tmp_path):
     }
 
 
+def test_a_files_byte_order_mark_stays(client, tmp_path):
+    marked = tmp_path / "marked.txt"
+    marked.write_bytes(b"\xef\xbb\xbfhi")
+    assert _run("/v1/x", "--source", f"@{marked}").exit_code == 0
+    assert client.calls[0]["json"] == {"source": "\ufeffhi"}
+
+
 def test_yaml_keeps_timestamps_as_text(client, tmp_path):
     body = tmp_path / "workspace.yaml"
     body.write_text("config:\n  system_time: 2026-03-02T09:00:00Z\n")
