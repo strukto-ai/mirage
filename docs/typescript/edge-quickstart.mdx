@@ -57,8 +57,6 @@ curl -s localhost:8787 -d '{"command": "seq 1 100 | sort -rn | head -3"}'
 
 `python3` runs on Monty in the isolate's own thread, where no timer can interrupt it, so Monty's own clock stops a run: at the line's time limit, which ends the line with exit 124, or after 30 seconds with `TimeoutError` if that comes first. A loop that never ends leaves the isolate free for the next line.
 
-A Worker cannot use a socket an earlier request opened, so a workspace kept across requests opens its `postgres` and `email` connections again for each one. `ws.shell` and `ws.dispatch` each run as a request when called outside one; to share one connection across several calls in a request, or to scope other methods, wrap the request's work in `inRequest(() => ...)`, exported from `@struktoai/mirage-edge`. `createApp` already does this.
-
 For anything else from core, import its subpaths (`@struktoai/mirage-core/vfs/registry`), not its package root: the root also imports optional packages, such as Pyodide, that an edge bundle cannot resolve.
 
 ## Serve the server API
@@ -97,10 +95,23 @@ curl -s localhost:8787/v1/workspaces/demo/shell -H "Authorization: Bearer $MIRAG
 | `policies` | The server's own [policies](/home/access/http#server-policies). |
 | `snapshotStore` | An `S3Config`: the store a snapshot request may name a key in. |
 
+## Mounts and CLIs
+
+Mounts:
+
+- `ram`, `github`, `gdrive`, `gdocs`, `gsheets`, `gslides`, `gcal`, `gmail`, `onedrive`, `sharepoint`, `box`, `airtable`, `linear`, `trello`, `langfuse`, `wandb`, `mem0`, `dify`, `slack`, `discord`, `notion`, `dropbox`, `jaeger`, `databricks_volume`, `tidb_filesystem`, `hf_models`, `hf_datasets`, `hf_spaces`
+- `s3`, `r2`, `gcs`, `minio`, `ceph`, `seaweedfs`, `wasabi`, `backblaze`, `digitalocean`, `tencent`, `aliyun`, `scaleway`, `qingstor`, `oci`, `supabase`, without `proxy`
+- `qdrant`: install `@qdrant/js-client-rest`
+- `postgres`: install `pg`
+- `email`: install `imapflow`, `mailparser` and `nodemailer`
+
+`chroma` does not run on the edge.
+
+CLIs: `airtable`, `discord`, `gh`, `git`, `gws`, `hf`, `himalaya`, `linear`, `mcp`, `ntn`, `search`, `slack`, `trello`.
+
 ## Limits
 
 - An edge isolate has little memory and no disk; a Cloudflare Worker has 128 MB. Set `max_memory` on each workspace so a large write fails with `Disk quota exceeded` before the isolate runs out.
 - Workspaces live in the isolate's memory. A request routed to another isolate does not see them, and they are gone when the isolate is evicted. `store.type` must be `ram`.
-- A config's mounts come from core's VFS table: `ram`, `github`, `gdrive`, `gdocs`, `gsheets`, `gslides`, `gcal`, `gmail`, `onedrive`, `sharepoint`, `box`, `airtable`, `linear`, `trello`, `langfuse`, `wandb`, `mem0`, `qdrant` and `dify`, plus the backends that hold their own credential, configured as on Node: `slack`, `discord`, `notion`, `dropbox`, `jaeger`, `databricks_volume` and `tidb_filesystem` over `fetch`; `s3` and the S3-compatible stores (`r2`, `gcs`, `minio`, `ceph`, `seaweedfs`, `wasabi`, `backblaze`, `digitalocean`, `tencent`, `aliyun`, `scaleway`, `qingstor`, `oci`, `supabase`) through the AWS SDK, without `proxy`; `hf_models`, `hf_datasets` and `hf_spaces`; `postgres` through `pg` (install it, with `nodejs_compat`), which opens a connection per query since a Worker cannot carry a socket from one request to the next; and `email` through `imapflow` and `nodemailer`, which reconnects to IMAP once per request for the same reason. Every built-in CLI runs there too, `hf` and `himalaya` included, and `mcp` for an MCP server. `qdrant` needs `@qdrant/js-client-rest` installed; without it the bundle still builds and the mount refuses. `chroma` loads its package by a name only known at run time, which an edge runtime cannot do.
 - Network rules judge each request by host name: the isolate never sees the address a name reaches, so a `denied_domains` entry naming an address or a range is refused, and jwt mode's block on cloud metadata addresses covers only a request made to the address itself.
 - SSH, FUSE, policy and script files read by path, and runtimes or CLIs loaded by a `source:Class` reference are the Node server's alone.
