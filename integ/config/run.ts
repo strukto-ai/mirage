@@ -21,7 +21,16 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { buildVfs } from '@struktoai/mirage-node'
+import { createServer } from 'node:http'
+import {
+  buildVfs,
+  configToWorkspaceArgs,
+  loadWorkspaceConfig,
+  Workspace,
+} from '@struktoai/mirage-node'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
+import { apiRequest } from '@struktoai/mirage-core/core/api/client'
+import type { PathSpec } from '@struktoai/mirage-core/types'
 
 const HOST = 'typescript'
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -37,6 +46,7 @@ interface Case {
   id: string
   hosts?: string[]
   vfs: string
+  body_bytes?: number
   config: Record<string, unknown>
   expect: { refused?: string; state?: Record<string, unknown>; absent?: string[] }
 }
@@ -107,7 +117,73 @@ function problems(
   return out
 }
 
+class BodyRAM extends RAMVFS {
+  constructor(readonly url: string) {
+    super()
+  }
+
+  override async read(_path: PathSpec): Promise<Uint8Array> {
+    const text = await apiRequest('GET', this.url, {
+      read: 'text',
+      errorOf: (response) => new Error(String(response.status)),
+    })
+    if (typeof text !== 'string') throw new Error('expected text')
+    return new TextEncoder().encode(text)
+  }
+}
+
+async function workspace(testCase: Case): Promise<string[]> {
+  let args
+  try {
+    args = await configToWorkspaceArgs(loadWorkspaceConfig(testCase.config))
+  } catch (error) {
+    return problems(testCase, null, error instanceof Error ? error.message : String(error))
+  }
+  if (testCase.body_bytes === undefined) {
+    const ws = new Workspace(args.mounts, args.options)
+    try {
+      return problems(testCase, { max_body_bytes: ws.registry.bodyLimit }, null)
+    } finally {
+      await ws.close()
+    }
+  }
+  let hits = 0
+  const server = createServer((_request, response) => {
+    hits += 1
+    response.end('x'.repeat(testCase.body_bytes ?? 0))
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (address === null || typeof address === 'string') throw new Error('missing fixture port')
+  const ws = new Workspace(
+    { '/body': new BodyRAM(`http://127.0.0.1:${String(address.port)}`) },
+    args.options,
+  )
+  try {
+    await ws.vfs.write('/body/file', new Uint8Array())
+    const result = await ws.shell('cat /body/file')
+    if (hits === 0) throw new Error('the mount read never reached the service')
+    const decode = new TextDecoder()
+    return problems(
+      testCase,
+      {
+        stdout: decode.decode(result.stdout),
+        stderr: decode.decode(result.stderr),
+        exit_code: result.exitCode,
+      },
+      null,
+    )
+  } finally {
+    await ws.close()
+    server.closeAllConnections()
+    await new Promise<void>((resolve, reject) =>
+      server.close((err) => (err ? reject(err) : resolve())),
+    )
+  }
+}
+
 async function run(testCase: Case): Promise<string[]> {
+  if (testCase.vfs === 'workspace') return workspace(testCase)
   let vfs
   try {
     vfs = await buildVfs(testCase.vfs, { ...testCase.config })

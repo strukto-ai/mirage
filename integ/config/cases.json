@@ -485,6 +485,100 @@
       "expect": {
         "refused": "bogus"
       }
+    },
+    {
+      "id": "workspace_body_bytes_integer",
+      "vfs": "workspace",
+      "config": {
+        "mounts": {},
+        "max_body_bytes": 1024
+      },
+      "expect": {
+        "state": {
+          "max_body_bytes": 1024
+        }
+      }
+    },
+    {
+      "id": "workspace_body_bytes_size",
+      "vfs": "workspace",
+      "config": {
+        "mounts": {},
+        "max_body_bytes": "1MB"
+      },
+      "expect": {
+        "state": {
+          "max_body_bytes": 1048576
+        }
+      }
+    },
+    {
+      "id": "workspace_body_bytes_negative",
+      "vfs": "workspace",
+      "config": {
+        "mounts": {},
+        "max_body_bytes": -1
+      },
+      "expect": {
+        "refused": "max_body_bytes"
+      }
+    },
+    {
+      "id": "workspace_body_bytes_malformed",
+      "vfs": "workspace",
+      "config": {
+        "mounts": {},
+        "max_body_bytes": "lots"
+      },
+      "expect": {
+        "refused": "max_body_bytes"
+      }
+    },
+    {
+      "id": "workspace_body_bytes_unknown_sibling",
+      "vfs": "workspace",
+      "config": {
+        "mounts": {},
+        "max_body_bytes": 1024,
+        "max_body_byte": 1024
+      },
+      "expect": {
+        "refused": "max_body_byte"
+      }
+    },
+    {
+      "id": "cat_reply_over_body_limit",
+      "vfs": "workspace",
+      "config": {
+        "mounts": {},
+        "max_body_bytes": 1024,
+        "max_memory": 8192
+      },
+      "body_bytes": 2048,
+      "expect": {
+        "state": {
+          "stdout": "",
+          "stderr": "cat: /body/file: File too large\n",
+          "exit_code": 1
+        }
+      }
+    },
+    {
+      "id": "cat_reply_over_memory",
+      "vfs": "workspace",
+      "config": {
+        "mounts": {},
+        "max_body_bytes": 4096,
+        "max_memory": 1024
+      },
+      "body_bytes": 2048,
+      "expect": {
+        "state": {
+          "stdout": "",
+          "stderr": "cat: memory exhausted\n",
+          "exit_code": 1
+        }
+      }
     }
   ]
 }
