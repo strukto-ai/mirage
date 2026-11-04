@@ -120,15 +120,16 @@
           "command": "js -e \"console.log(typeof process, typeof require, typeof fetch)\"",
           "expect": {
             "exit": 0,
-            "stdout": "undefined undefined undefined\n",
+            "stdout": "object function undefined\n",
             "stderr": ""
           }
         },
         {
           "command": "js -e \"console.error('x')\"",
           "expect": {
-            "exit": 1,
-            "stderr_contains": "TypeError"
+            "exit": 0,
+            "stdout": "",
+            "stderr": "x\n"
           }
         },
         {

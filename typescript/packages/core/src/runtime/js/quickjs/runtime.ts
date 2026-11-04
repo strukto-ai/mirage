@@ -29,6 +29,7 @@ import { WasmView } from '../../wasm/view.ts'
 import { JsRuntime } from '../base.ts'
 import { QuickJsUnavailableError } from './errors.ts'
 import { cwdPreamble } from './execution.ts'
+import { nodePreamble } from './node.ts'
 
 export const QUICKJS_HOME_ENV = 'MIRAGE_QUICKJS_HOME'
 
@@ -46,10 +47,11 @@ const DEC = new TextDecoder()
 /**
  * Run JavaScript on a WASI quickjs-ng, the engine the Python host runs.
  *
- * A bare modern JS engine (ES2023 syntax, ES modules, `JSON`, regex,
- * `Promise`, top-level await) inside a wasm sandbox: no node builtins,
- * no `require`, no npm, no network. The `std`/`os` globals are exposed
- * (quickjs-ng `--std`), so scripts read stdin with
+ * A modern JS engine (ES2023 syntax, ES modules, `JSON`, regex,
+ * `Promise`, top-level await) inside a wasm sandbox, with Node's common
+ * APIs laid over its own (`node.ts`: fs, path, process, Buffer, `require`,
+ * the timers, node's console): no npm, no network. The `std`/`os` globals
+ * are exposed (quickjs-ng `--std`), so scripts read stdin with
  * `std.in.readAsString()` and reach files with `std.open`/`os.readdir`.
  * The engine's filesystem imports are intercepted, so file I/O routes
  * through the workspace dispatch, with the same cache, write modes and
@@ -140,13 +142,18 @@ export class QuickJsRuntime extends JsRuntime<WasmExecution> {
     const named = program.prog !== undefined && program.prog !== '' ? [program.prog] : []
     const cwd = ctx.cwd
     let source = program.code
-    if (cwd.virtual !== '/') {
-      // Evaluate scripts separately so their directive prologue still
-      // controls strict mode. Modules are already strict.
-      if (module && source.startsWith('#!')) source = `//${source.slice(2)}`
-      if (!module) source = `std.evalScript(${JSON.stringify(source)});`
-      source = cwdPreamble(cwd) + source
+    // Node's globals go first, so the program no longer starts the source.
+    // A script is evaluated on its own, so its directive prologue still
+    // controls strict mode and its errors name its own lines and columns;
+    // modules are already strict.
+    if (module && source.startsWith('#!')) source = `//${source.slice(2)}`
+    if (!module) {
+      source = `std.evalScript(${JSON.stringify(source)}, { backtrace_barrier: true });`
     }
+    const script = program.scriptPath?.virtual ?? null
+    source =
+      nodePreamble(['node', ...(script !== null ? [script] : []), ...program.args], script) + source
+    if (cwd.virtual !== '/') source = cwdPreamble(cwd) + source
     const argv = [
       'qjs',
       '--std',

@@ -6,8 +6,9 @@ description: Run JavaScript scripts and pipe transforms in both Mirage SDKs.
 
 QuickJS is the default runtime for `node` and `js` in both SDKs. It supports
 ES2023 for small scripts and pipe transforms, with access to workspace files
-under the same permissions as shell commands. Despite the command name,
-it does not provide Node.js APIs, npm packages or network access.
+under the same permissions as shell commands. Node.js's most used APIs are
+laid over the engine: `fs`, `path`, `process`, `Buffer`, `require`, the
+timers and Node's `console`. It has no npm packages and no network access.
 
 Both SDKs run the same engine, the WASI build of
 [quickjs-ng](https://github.com/quickjs-ng/quickjs), so a script answers
@@ -245,19 +246,73 @@ the program writes are stamped from the same clock. `performance.now()` and
 
 ### `console` and printing
 
-`console.log()` and `print()`.
+`console.log()`, `console.info()` and `console.debug()` write to stdout, and
+`console.error()` and `console.warn()` to stderr. They format values as
+Node's `util.inspect()` does and take `util.format()` placeholders such as
+`%s`, `%d` and `%j`. `print()` writes the engine's own way.
 
 <AccordionGroup>
   <Accordion title="Example: print a result" id="console-example">
     ```javascript
-    console.log("Total:", 2 + 3);
+    console.log("Total:", 2 + 3, { items: [1, 2] });
+    console.error("%d skipped", 1);
     print("done");
     ```
   </Accordion>
   <Accordion title="Limitations" id="console-limitations">
     | API or behavior | Limitation |
     | --- | --- |
-    | `console.error()` | ✗ |
+    | `console.table()`, `console.time()`, `console.count()` | ✗ |
+    | Arrays of more than six items | One line, where Node groups them in columns |
+  </Accordion>
+</AccordionGroup>
+
+### Node.js APIs
+
+`require()` returns these modules, with or without the `node:` prefix, and
+loads files by path: JavaScript as CommonJS, and JSON parsed. `process`,
+`Buffer`, `TextEncoder`, `TextDecoder`, `global`, the timers and a script's
+`__filename` and `__dirname` are globals.
+
+<AccordionGroup>
+  <Accordion title="Example: filter a JSON file" id="node-example">
+    ```javascript
+    const fs = require("fs");
+    const path = require("path");
+
+    const file = path.join("/data", "issues.json");
+    const open = JSON.parse(fs.readFileSync(file)).filter((i) => i.open);
+    fs.writeFileSync("/data/open.json", JSON.stringify(open));
+    console.log(open.length, "open");
+    ```
+  </Accordion>
+  <Accordion title="Example: read piped input by line" id="node-stdin-example">
+    ```javascript
+    const rl = require("readline").createInterface({ input: process.stdin });
+    rl.on("line", (line) => console.log(line.toUpperCase()));
+    ```
+  </Accordion>
+  <Accordion title="Support" id="node-support">
+    | Module or global | Support |
+    | --- | --- |
+    | `fs` | `readFileSync`, `writeFileSync`, `appendFileSync`, `copyFileSync`, `existsSync`, `accessSync`, `statSync`, `lstatSync`, `readdirSync` (with `withFileTypes`), `realpathSync`, `mkdirSync` (with `recursive`), `rmSync`, `rmdirSync`, `unlinkSync`, `renameSync`, each also as a callback; errors carry Node's `code`, `syscall` and `path` |
+    | `fs/promises`, `fs.promises` | The same calls, as promises |
+    | `path` | POSIX: `join`, `resolve`, `normalize`, `dirname`, `basename`, `extname`, `relative`, `isAbsolute`, `parse`, `format`, `sep`, `delimiter` |
+    | `process` | `argv`, `env`, `cwd()`, `chdir()`, `exit()`, `nextTick()`, `stdout.write()`, `stderr.write()`, and `stdin` as events (`data`, `end`, `readable`), `read()` and `for await` |
+    | `readline` | `createInterface({ input: process.stdin })`, as `line` and `close` events or `for await` |
+    | `buffer`, `Buffer` | `from`, `alloc`, `concat`, `isBuffer`, `byteLength`, `toString` in `utf8`, `base64`, `base64url`, `hex`, `latin1` and `ascii` |
+    | `util` | `format`, `inspect`, `promisify` |
+    | Timers | `setTimeout`, `setInterval`, `setImmediate` and their `clear` calls |
+  </Accordion>
+  <Accordion title="Limitations" id="node-limitations">
+    | API or behavior | Limitation |
+    | --- | --- |
+    | npm packages | ✗ |
+    | Other modules, such as `http`, `child_process` and `os` | ✗ |
+    | `import` of `node:` modules in an ES module | ✗; `require()` works in both modes |
+    | Streams, such as `fs.createReadStream()` | ✗ |
+    | `process.exitCode` at the end of a run | Read by `process.exit()` only |
+    | Symbolic links | `lstatSync` follows them, as `statSync` does |
   </Accordion>
 </AccordionGroup>
 
@@ -282,10 +337,7 @@ Unavailable in this runtime.
 <Accordion title="Limitations" id="unavailable-host-apis-limitations">
   | API or behavior | Limitation |
   | --- | --- |
-  | `setTimeout()` | ✗ |
   | `fetch()` | ✗ |
-  | `require()` | ✗ |
-  | `process` | ✗ |
 </Accordion>
 
 ## Notes

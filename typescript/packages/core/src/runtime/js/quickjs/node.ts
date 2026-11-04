@@ -1,0 +1,1117 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+/**
+ * Node's common APIs over qjs's std and os: fs, path, process, Buffer,
+ * require, the timers and node's console. A program runs after it, so a
+ * script written for node finds what it reaches for first. Its twin in
+ * node.py must stay byte-identical (python/tests/runtime/js/quickjs/test_node.py).
+ */
+export const NODE_SHIM = String.raw`;(function (argv, script) {
+  'use strict'
+  const g = globalThis
+  const define = (name, value) => {
+    if (!(name in g)) {
+      Object.defineProperty(g, name, {
+        value,
+        writable: true,
+        configurable: true,
+      })
+    }
+  }
+
+  // An error the shim raises points at its caller's line, as a builtin's
+  // does, rather than at the shim's own frames.
+  const ours = new WeakSet()
+  const raise = (e) => {
+    ours.add(e)
+    return e
+  }
+  const api = (fn) => {
+    const call = function (...args) {
+      try {
+        return fn.apply(this, args)
+      } catch (e) {
+        if (ours.has(e)) Error.captureStackTrace(e, call)
+        throw e
+      }
+    }
+    Object.defineProperty(call, 'name', { value: fn.name })
+    return call
+  }
+
+  // WASI's errno numbers, the ones std.open and os report, by node's
+  // code and the number node reports on Linux.
+  const CODES = {
+    2: ['EACCES', 13],
+    8: ['EBADF', 9],
+    20: ['EEXIST', 17],
+    28: ['EINVAL', 22],
+    29: ['EIO', 5],
+    31: ['EISDIR', 21],
+    44: ['ENOENT', 2],
+    54: ['ENOTDIR', 20],
+    55: ['ENOTEMPTY', 39],
+    63: ['EPERM', 1],
+    69: ['EROFS', 30],
+  }
+  function failure(errno, syscall, file) {
+    const text = std.strerror(errno)
+    const [code, number] = CODES[errno] || ['UNKNOWN', errno]
+    const e = new Error(
+      code +
+        ': ' +
+        text.charAt(0).toLowerCase() +
+        text.slice(1) +
+        ', ' +
+        syscall +
+        " '" +
+        file +
+        "'",
+    )
+    e.errno = -number
+    e.code = code
+    e.syscall = syscall
+    e.path = file
+    return raise(e)
+  }
+  const check = (r, syscall, file) => {
+    if (r < 0) throw failure(-r, syscall, file)
+  }
+
+  // Bytes and text. The engine has no TextDecoder, so UTF-8 goes through
+  // the URI functions, with a loose decoder for bytes they refuse.
+  function latin1(bytes, start, end) {
+    let s = ''
+    for (let i = start; i < end; i += 8192) {
+      const part = bytes.subarray(i, Math.min(end, i + 8192))
+      s += String.fromCharCode.apply(null, part)
+    }
+    return s
+  }
+  function codes(s, mask) {
+    const out = new Uint8Array(s.length)
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & mask
+    return out
+  }
+  const LONE =
+    /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g
+  function utf8Bytes(text) {
+    try {
+      return codes(unescape(encodeURIComponent(text)), 0xff)
+    } catch {
+      return codes(unescape(encodeURIComponent(text.replace(LONE, '�'))), 0xff)
+    }
+  }
+  function looseText(bytes, start, end) {
+    const units = []
+    let s = ''
+    for (let i = start; i < end;) {
+      const b = bytes[i]
+      const n =
+        b < 0x80
+          ? 0
+          : b >= 0xc2 && b <= 0xdf
+            ? 1
+            : b >= 0xe0 && b <= 0xef
+              ? 2
+              : b >= 0xf0 && b <= 0xf4
+                ? 3
+                : -1
+      let c = n <= 0 ? b : b & (0x3f >> n)
+      let j = 1
+      while (j <= n && i + j < end && (bytes[i + j] & 0xc0) === 0x80) {
+        c = (c << 6) | (bytes[i + j] & 0x3f)
+        j++
+      }
+      const bad =
+        n < 0 ||
+        j <= n ||
+        (n === 2 && c < 0x800) ||
+        (n === 3 && (c < 0x10000 || c > 0x10ffff)) ||
+        (c >= 0xd800 && c <= 0xdfff)
+      if (bad) units.push(0xfffd)
+      else if (c >= 0x10000) {
+        units.push(0xd800 + ((c - 0x10000) >> 10), 0xdc00 + (c & 0x3ff))
+      } else units.push(c)
+      i += j
+      if (units.length >= 8192) {
+        s += String.fromCharCode.apply(null, units)
+        units.length = 0
+      }
+    }
+    return s + String.fromCharCode.apply(null, units)
+  }
+  function utf8Text(bytes, start, end) {
+    try {
+      return decodeURIComponent(escape(latin1(bytes, start, end)))
+    } catch {
+      return looseText(bytes, start, end)
+    }
+  }
+  function encodingName(encoding) {
+    const e = String(encoding).toLowerCase()
+    if (e === 'utf8' || e === 'utf-8') return 'utf8'
+    if (e === 'latin1' || e === 'binary') return 'latin1'
+    if (['ascii', 'base64', 'base64url', 'hex'].includes(e)) return e
+    const err = new TypeError('Unknown encoding: ' + encoding)
+    err.code = 'ERR_UNKNOWN_ENCODING'
+    throw raise(err)
+  }
+  function bytesOf(text, encoding) {
+    const e = encodingName(encoding)
+    if (e === 'utf8') return utf8Bytes(text)
+    if (e === 'hex') {
+      const out = new Uint8Array(text.length >> 1)
+      for (let i = 0; i < out.length; i++) {
+        const v = parseInt(text.substr(i * 2, 2), 16)
+        if (Number.isNaN(v)) return out.subarray(0, i)
+        out[i] = v
+      }
+      return out
+    }
+    if (e === 'base64' || e === 'base64url') {
+      let s = text.replace(/-/g, '+').replace(/_/g, '/')
+      s = s.replace(/[^A-Za-z0-9+/]/g, '')
+      if (s.length % 4 === 1) s = s.slice(0, -1)
+      while (s.length % 4) s += '='
+      return codes(atob(s), 0xff)
+    }
+    return codes(text, 0xff)
+  }
+  const HEX = '0123456789abcdef'
+  function textOf(bytes, encoding, start, end) {
+    const e = encodingName(encoding)
+    if (e === 'utf8') return utf8Text(bytes, start, end)
+    if (e === 'latin1') return latin1(bytes, start, end)
+    if (e === 'ascii') {
+      return latin1(
+        bytes.map((b) => b & 0x7f),
+        start,
+        end,
+      )
+    }
+    if (e === 'hex') {
+      let s = ''
+      for (let i = start; i < end; i++) {
+        s += HEX[bytes[i] >> 4] + HEX[bytes[i] & 15]
+      }
+      return s
+    }
+    const b64 = btoa(latin1(bytes, start, end))
+    if (e === 'base64') return b64
+    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  }
+  const view = (data) =>
+    ArrayBuffer.isView(data)
+      ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength)
+      : new Uint8Array(data)
+
+  class Buffer extends Uint8Array {
+    static from(value, encoding, length) {
+      if (typeof value === 'string') {
+        const bytes = bytesOf(
+          value,
+          encoding === undefined ? 'utf8' : encoding,
+        )
+        return new Buffer(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+      }
+      if (value instanceof ArrayBuffer) {
+        return new Buffer(value, encoding || 0, length)
+      }
+      return new Buffer(value)
+    }
+    static alloc(size, fill) {
+      const b = new Buffer(size)
+      if (fill !== undefined) {
+        b.fill(typeof fill === 'string' ? fill.charCodeAt(0) : fill)
+      }
+      return b
+    }
+    static isBuffer(value) {
+      return value instanceof Buffer
+    }
+    static byteLength(value, encoding) {
+      if (typeof value !== 'string') return value.byteLength
+      return bytesOf(value, encoding === undefined ? 'utf8' : encoding).length
+    }
+    static concat(list, total) {
+      const size =
+        total === undefined ? list.reduce((n, b) => n + b.length, 0) : total
+      const out = new Buffer(size)
+      let at = 0
+      for (const b of list) {
+        if (at >= size) break
+        out.set(b.subarray(0, size - at), at)
+        at += Math.min(b.length, size - at)
+      }
+      return out
+    }
+    toString(encoding, start, end) {
+      const from = Math.max(0, start === undefined ? 0 : start)
+      const to = end === undefined ? this.length : Math.min(this.length, end)
+      if (from >= to) return ''
+      return textOf(this, encoding === undefined ? 'utf8' : encoding, from, to)
+    }
+    toJSON() {
+      return { type: 'Buffer', data: Array.from(this) }
+    }
+    equals(other) {
+      return (
+        this.length === other.length && this.every((b, i) => b === other[i])
+      )
+    }
+  }
+  class TextEncoder {
+    get encoding() {
+      return 'utf-8'
+    }
+    encode(text) {
+      return utf8Bytes(text === undefined ? '' : String(text))
+    }
+  }
+  class TextDecoder {
+    constructor(label) {
+      if (label !== undefined && encodingName(label) !== 'utf8') {
+        throw new RangeError('The "' + label + '" encoding is not supported')
+      }
+    }
+    get encoding() {
+      return 'utf-8'
+    }
+    decode(input) {
+      if (input === undefined) return ''
+      const bytes = view(input)
+      const s = utf8Text(bytes, 0, bytes.length)
+      return s.charCodeAt(0) === 0xfeff ? s.slice(1) : s
+    }
+  }
+
+  // Printing as node does: util.format's placeholders, and values shown
+  // the way util.inspect shows them, broken over lines past 80 columns.
+  const IDENT = /^[A-Za-z_$][\w$]*$/
+  function quote(s) {
+    const q = s.includes("'") && !s.includes('"') ? '"' : "'"
+    const body = s
+      .replace(/\\/g, '\\\\')
+      .replace(/\n/g, '\\n')
+      .replace(/\t/g, '\\t')
+      .split(q)
+      .join('\\' + q)
+    return q + body + q
+  }
+  function errorText(e) {
+    const head = String(e)
+    const stack =
+      typeof e.stack === 'string' ? e.stack.replace(/\s+$/, '') : ''
+    if (stack === '' || stack.startsWith(head)) return stack || head
+    return head + '\n' + stack
+  }
+  function nameOf(value) {
+    const proto = Object.getPrototypeOf(value)
+    const ctor = proto && proto.constructor
+    return typeof ctor === 'function' ? ctor.name : ''
+  }
+  function show(value, depth, seen, indent, refs = new Map()) {
+    switch (typeof value) {
+      case 'string':
+        return quote(value)
+      case 'number':
+        return Object.is(value, -0) ? '-0' : String(value)
+      case 'bigint':
+        return value + 'n'
+      case 'function': {
+        const name = value.name || '(anonymous)'
+        if (/^class\b/.test(Function.prototype.toString.call(value))) {
+          return '[class ' + name + ']'
+        }
+        return value.name
+          ? '[Function: ' + name + ']'
+          : '[Function ' + name + ']'
+      }
+      case 'object':
+        break
+      default:
+        return String(value)
+    }
+    if (value === null) return 'null'
+    if (seen.includes(value)) {
+      if (!refs.has(value)) refs.set(value, refs.size + 1)
+      return '[Circular *' + refs.get(value) + ']'
+    }
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime())
+        ? 'Invalid Date'
+        : value.toISOString()
+    }
+    if (value instanceof RegExp) return String(value)
+    if (value instanceof Buffer) {
+      const shown = Array.from(
+        value.subarray(0, 50),
+        (b) => HEX[b >> 4] + HEX[b & 15],
+      )
+      const more =
+        value.length > 50 ? ' ... ' + (value.length - 50) + ' more bytes' : ''
+      return (
+        '<Buffer' + (shown.length ? ' ' + shown.join(' ') : '') + more + '>'
+      )
+    }
+    if (value instanceof Promise) return 'Promise {}'
+    const error = value instanceof Error
+    if (depth < 0 && !error) {
+      return Array.isArray(value)
+        ? '[Array]'
+        : '[' + (nameOf(value) || 'Object') + ']'
+    }
+    const inner = seen.concat([value])
+    const at = (v) => show(v, depth - 1, inner, indent + 2, refs)
+    let start = ''
+    let open = '{'
+    let close = '}'
+    let parts
+    if (Array.isArray(value)) {
+      open = '['
+      close = ']'
+      parts = value.slice(0, 100).map(at)
+      if (value.length > 100) {
+        parts.push('... ' + (value.length - 100) + ' more items')
+      }
+    } else if (value instanceof Map) {
+      start = 'Map(' + value.size + ') '
+      parts = Array.from(value, ([k, v]) => at(k) + ' => ' + at(v))
+    } else if (value instanceof Set) {
+      start = 'Set(' + value.size + ') '
+      parts = Array.from(value, at)
+    } else if (ArrayBuffer.isView(value) && !(value instanceof DataView)) {
+      start = nameOf(value) + '(' + value.length + ') '
+      open = '['
+      close = ']'
+      parts = Array.from(value.subarray(0, 100), at)
+    } else {
+      const keys = Object.keys(value).map((k) => [
+        IDENT.test(k) ? k : quote(k),
+        k,
+      ])
+      for (const s of Object.getOwnPropertySymbols(value)) {
+        if (Object.prototype.propertyIsEnumerable.call(value, s)) {
+          keys.push(['[' + s.toString() + ']', s])
+        }
+      }
+      parts = keys.map(([label, k]) => label + ': ' + at(value[k]))
+      if (error) start = errorText(value) + ' '
+      else if (Object.getPrototypeOf(value) === null) {
+        start = '[Object: null prototype] '
+      } else {
+        const name = nameOf(value)
+        if (name && name !== 'Object') start = name + ' '
+      }
+    }
+    if (parts.length === 0)
+      return error ? start.slice(0, -1) : start + open + close
+    // An object a value inside it points back at is marked, as node does.
+    const ref = refs.has(value) ? '<ref *' + refs.get(value) + '> ' : ''
+    const width = parts.reduce((n, p) => n + p.length + 2, 0)
+    const fits = width + indent + start.length + open.length + 10 <= 80
+    if (
+      fits &&
+      !start.includes('\n') &&
+      !parts.some((p) => p.includes('\n'))
+    ) {
+      return ref + start + open + ' ' + parts.join(', ') + ' ' + close
+    }
+    const pad = '\n' + ' '.repeat(indent)
+    const lines = parts.join(',' + pad + '  ')
+    return ref + start + open + pad + '  ' + lines + pad + close
+  }
+  const inspect = (value, options) => {
+    const depth = options && options.depth !== undefined ? options.depth : 2
+    return show(value, depth === null ? Infinity : depth, [], 0)
+  }
+  function format(args) {
+    const formatted = typeof args[0] === 'string'
+    let at = 0
+    let head = ''
+    if (formatted) {
+      at = 1
+      head = args[0].replace(/%[sdifjoOc%]/g, (m) => {
+        if (m === '%%') return '%'
+        if (at >= args.length) return m
+        const v = args[at++]
+        switch (m[1]) {
+          case 's':
+            if (typeof v === 'string') return v
+            if (typeof v === 'bigint') return v + 'n'
+            return typeof v === 'object' && v !== null
+              ? show(v, 0, [], 0)
+              : String(v)
+          case 'd':
+          case 'i':
+          case 'f':
+            if (typeof v === 'bigint')
+              return m[1] === 'f' ? String(Number(v)) : v + 'n'
+            if (
+              typeof v === 'symbol' ||
+              (typeof v === 'object' && v !== null)
+            ) {
+              return 'NaN'
+            }
+            return String(
+              m[1] === 'i'
+                ? parseInt(v)
+                : m[1] === 'f'
+                  ? parseFloat(v)
+                  : Number(v),
+            )
+          case 'j':
+            try {
+              return JSON.stringify(v)
+            } catch {
+              return '[Circular]'
+            }
+          case 'c':
+            return ''
+          default:
+            return show(v, m[1] === 'o' ? 4 : 2, [], 0)
+        }
+      })
+    }
+    const rest = args
+      .slice(at)
+      .map((v) => (typeof v === 'string' ? v : inspect(v)))
+    return (formatted ? [head] : []).concat(rest).join(' ')
+  }
+  const printer =
+    (file) =>
+    (...args) => {
+      file.puts(format(args) + '\n')
+    }
+  console.log = printer(std.out)
+  console.info = console.log
+  console.debug = console.log
+  console.error = printer(std.err)
+  console.warn = console.error
+  console.dir = (value, options) => {
+    std.out.puts(inspect(value, options) + '\n')
+  }
+  console.assert = (ok, ...message) => {
+    if (!ok) {
+      std.err.puts(
+        'Assertion failed' +
+          (message.length ? ': ' + format(message) : '') +
+          '\n',
+      )
+    }
+  }
+
+  // path, POSIX only.
+  const posix = {
+    sep: '/',
+    delimiter: ':',
+    isAbsolute: (p) => String(p).startsWith('/'),
+    normalize(p) {
+      p = String(p)
+      if (p === '') return '.'
+      const absolute = p.startsWith('/')
+      const out = []
+      for (const part of p.split('/')) {
+        if (part === '' || part === '.') continue
+        if (part !== '..') out.push(part)
+        else if (out.length && out[out.length - 1] !== '..') out.pop()
+        else if (!absolute) out.push('..')
+      }
+      let r = out.join('/')
+      if (r === '' && !absolute) r = '.'
+      if (p.endsWith('/') && r !== '') r += '/'
+      return (absolute ? '/' : '') + r
+    },
+    join(...parts) {
+      const joined = parts
+        .map(String)
+        .filter((p) => p !== '')
+        .join('/')
+      return joined === '' ? '.' : posix.normalize(joined)
+    },
+    resolve(...parts) {
+      let r = ''
+      for (let i = parts.length - 1; i >= 0 && !r.startsWith('/'); i--) {
+        const p = String(parts[i])
+        if (p !== '') r = p + (r ? '/' + r : '')
+      }
+      if (!r.startsWith('/')) r = process.cwd() + (r ? '/' + r : '')
+      const n = posix.normalize(r)
+      return n.length > 1 && n.endsWith('/') ? n.slice(0, -1) : n
+    },
+    dirname(p) {
+      p = String(p)
+      if (p === '') return '.'
+      const s = p.replace(/\/+$/, '')
+      if (s === '') return '/'
+      const i = s.lastIndexOf('/')
+      if (i < 0) return '.'
+      return s.slice(0, i).replace(/\/+$/, '') || '/'
+    },
+    basename(p, ext) {
+      const s = String(p).replace(/\/+$/, '')
+      let b = s.slice(s.lastIndexOf('/') + 1)
+      if (ext !== undefined && b !== ext && b.endsWith(ext)) {
+        b = b.slice(0, b.length - ext.length)
+      }
+      return b
+    },
+    extname(p) {
+      const b = posix.basename(p)
+      const i = b.lastIndexOf('.')
+      return i <= 0 || b === '..' ? '' : b.slice(i)
+    },
+    relative(from, to) {
+      const a = posix.resolve(from).split('/').filter(Boolean)
+      const b = posix.resolve(to).split('/').filter(Boolean)
+      let i = 0
+      while (i < a.length && i < b.length && a[i] === b[i]) i++
+      return a
+        .slice(i)
+        .map(() => '..')
+        .concat(b.slice(i))
+        .join('/')
+    },
+    parse(p) {
+      p = String(p)
+      const base = posix.basename(p)
+      const ext = posix.extname(p)
+      const dir = p.includes('/') ? posix.dirname(p) : ''
+      return {
+        root: p.startsWith('/') ? '/' : '',
+        dir,
+        base,
+        ext,
+        name: ext ? base.slice(0, -ext.length) : base,
+      }
+    },
+    format(o) {
+      const dir = o.dir || o.root || ''
+      const base = o.base || (o.name || '') + (o.ext || '')
+      return dir === '' ? base : dir === o.root ? dir + base : dir + '/' + base
+    },
+  }
+  posix.posix = posix
+
+  // fs, its synchronous calls over std and os, and the callback and
+  // promise forms of each.
+  let stdinBytes = null
+  const stdin = () => {
+    if (stdinBytes === null) {
+      const bytes = new Uint8Array(std.in.readAsArrayBuffer())
+      stdinBytes = new Buffer(bytes.buffer)
+    }
+    return stdinBytes
+  }
+  const isStdin = (file) => file === 0 || file === '/dev/stdin'
+  const encodingOf = (options) =>
+    (typeof options === 'string' ? options : options && options.encoding) ||
+    null
+  const flagOf = (options, fallback) =>
+    (options && typeof options === 'object' && options.flag) || fallback
+  function open(file, mode, syscall) {
+    const e = {}
+    const f = std.open(String(file), mode, e)
+    if (f === null) throw failure(e.errno, syscall, file)
+    return f
+  }
+  function lookup(stat, syscall, file) {
+    const [st, errno] = stat(String(file))
+    if (errno !== 0) throw failure(errno, syscall, file)
+    return st
+  }
+  // The WASI build has no lstat or realpath: stat stands in for lstat,
+  // and a path resolves to itself once it is there.
+  const lstat = os.lstat || os.stat
+  const TYPE = Symbol('type')
+  const kind = (mode) => mode & os.S_IFMT
+  class Stats {
+    constructor(st) {
+      for (const k of ['dev', 'ino', 'mode', 'nlink', 'uid', 'gid', 'rdev']) {
+        this[k] = st[k]
+      }
+      this.size = st.size
+      this.blocks = st.blocks
+      this.atimeMs = st.atime
+      this.mtimeMs = st.mtime
+      this.ctimeMs = st.ctime
+      this.atime = new Date(st.atime)
+      this.mtime = new Date(st.mtime)
+      this.ctime = new Date(st.ctime)
+    }
+    isFile() {
+      return kind(this.mode) === os.S_IFREG
+    }
+    isDirectory() {
+      return kind(this.mode) === os.S_IFDIR
+    }
+    isSymbolicLink() {
+      return kind(this.mode) === os.S_IFLNK
+    }
+  }
+  class Dirent {
+    constructor(name, dir, mode) {
+      this.name = name
+      this.parentPath = dir
+      this.path = dir
+      Object.defineProperty(this, TYPE, { value: kind(mode) })
+    }
+    isFile() {
+      return this[TYPE] === os.S_IFREG
+    }
+    isDirectory() {
+      return this[TYPE] === os.S_IFDIR
+    }
+    isSymbolicLink() {
+      return this[TYPE] === os.S_IFLNK
+    }
+  }
+  function readBytes(file) {
+    if (isStdin(file)) return stdin()
+    if (kind(lookup(os.stat, 'open', file).mode) === os.S_IFDIR) {
+      throw failure(31, 'read', file)
+    }
+    const f = open(file, 'r', 'open')
+    try {
+      return new Buffer(f.readAsArrayBuffer())
+    } finally {
+      f.close()
+    }
+  }
+  function write(file, data, options, flag) {
+    const encoding = encodingOf(options)
+    if (
+      typeof data === 'string' &&
+      encoding &&
+      encodingName(encoding) !== 'utf8'
+    ) {
+      data = Buffer.from(data, encoding)
+    }
+    const f = open(file, flagOf(options, flag), 'open')
+    try {
+      if (typeof data === 'string') f.puts(data)
+      else if (ArrayBuffer.isView(data) || data instanceof ArrayBuffer) {
+        const bytes = view(data)
+        f.write(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+      } else f.puts(String(data))
+    } finally {
+      f.close()
+    }
+  }
+  const fs = {
+    readFileSync(file, options) {
+      const encoding = encodingOf(options)
+      if (
+        encoding !== null &&
+        encodingName(encoding) === 'utf8' &&
+        !isStdin(file)
+      ) {
+        if (kind(lookup(os.stat, 'open', file).mode) === os.S_IFDIR) {
+          throw failure(31, 'read', file)
+        }
+        const f = open(file, 'r', 'open')
+        try {
+          return f.readAsString()
+        } finally {
+          f.close()
+        }
+      }
+      const bytes = readBytes(file)
+      return encoding === null ? bytes : bytes.toString(encoding)
+    },
+    writeFileSync(file, data, options) {
+      write(file, data, options, 'w')
+    },
+    appendFileSync(file, data, options) {
+      write(file, data, options, 'a')
+    },
+    copyFileSync(from, to) {
+      write(to, readBytes(from), null, 'w')
+    },
+    existsSync(file) {
+      if (isStdin(file)) return true
+      return typeof file === 'string' && os.stat(file)[1] === 0
+    },
+    accessSync(file) {
+      lookup(os.stat, 'access', file)
+    },
+    statSync(file, options) {
+      const [st, errno] = os.stat(String(file))
+      if (errno === 0) return new Stats(st)
+      if (errno === 44 && options && options.throwIfNoEntry === false) return
+      throw failure(errno, 'stat', file)
+    },
+    lstatSync(file, options) {
+      const [st, errno] = lstat(String(file))
+      if (errno === 0) return new Stats(st)
+      if (errno === 44 && options && options.throwIfNoEntry === false) return
+      throw failure(errno, 'lstat', file)
+    },
+    readdirSync(file, options) {
+      const dir = String(file)
+      const [names, errno] = os.readdir(dir)
+      if (errno !== 0) throw failure(errno, 'scandir', file)
+      const list = names.filter((n) => n !== '.' && n !== '..').sort()
+      if (!(options && options.withFileTypes)) return list
+      return list.map((name) => {
+        const [st] = lstat(posix.join(dir, name))
+        return new Dirent(name, dir, st ? st.mode : 0)
+      })
+    },
+    realpathSync(file) {
+      if (os.realpath) return lookup(os.realpath, 'realpath', file)
+      lookup(os.stat, 'realpath', file)
+      return posix.resolve(String(file))
+    },
+    mkdirSync(file, options) {
+      const recursive =
+        options && typeof options === 'object' && options.recursive
+      const mode =
+        typeof options === 'number'
+          ? options
+          : (options && options.mode) || 0o777
+      if (!recursive) return check(os.mkdir(String(file), mode), 'mkdir', file)
+      const full = posix.resolve(String(file))
+      let first
+      let at = ''
+      for (const part of full.split('/').filter(Boolean)) {
+        at += '/' + part
+        const [st] = os.stat(at)
+        if (st === null) {
+          check(os.mkdir(at, mode), 'mkdir', file)
+          if (first === undefined) first = at
+        } else if (kind(st.mode) !== os.S_IFDIR) {
+          throw failure(at === full ? 20 : 54, 'mkdir', file)
+        }
+      }
+      return first
+    },
+    rmdirSync(file) {
+      check(os.remove(String(file)), 'rmdir', file)
+    },
+    unlinkSync(file) {
+      check(os.remove(String(file)), 'unlink', file)
+    },
+    renameSync(from, to) {
+      check(os.rename(String(from), String(to)), 'rename', from)
+    },
+    rmSync(file, options) {
+      const [st, errno] = lstat(String(file))
+      if (errno !== 0) {
+        if (errno === 44 && options && options.force) return
+        throw failure(errno, 'rm', file)
+      }
+      if (kind(st.mode) === os.S_IFDIR) {
+        if (!(options && options.recursive)) {
+          const e = new Error(
+            'Path is a directory: rm returned EISDIR ' + file,
+          )
+          e.code = 'ERR_FS_EISDIR'
+          throw raise(e)
+        }
+        for (const name of fs.readdirSync(file)) {
+          fs.rmSync(posix.join(String(file), name), options)
+        }
+      }
+      check(os.remove(String(file)), 'rm', file)
+    },
+  }
+  for (const name of Object.keys(fs)) fs[name] = api(fs[name])
+  const promises = {}
+  for (const name of Object.keys(fs)) {
+    if (name === 'existsSync') continue
+    const sync = fs[name]
+    const base = name.slice(0, -4)
+    promises[base] = (...args) =>
+      new Promise((resolve) => resolve(sync(...args)))
+    fs[base] = (...args) => {
+      const done = args.pop()
+      if (typeof done !== 'function') {
+        throw new TypeError('The "cb" argument must be of type function')
+      }
+      let result
+      let error = null
+      try {
+        result = sync(...args)
+      } catch (e) {
+        error = e
+      }
+      queueMicrotask(() => (error ? done(error) : done(null, result)))
+    }
+  }
+  fs.exists = (file, done) => {
+    const found = fs.existsSync(file)
+    queueMicrotask(() => done(found))
+  }
+  fs.promises = promises
+
+  // process, and stdin as node hands it to listeners and readline.
+  function writer(file, fd) {
+    return {
+      fd,
+      isTTY: false,
+      write(chunk, encoding, done) {
+        if (
+          typeof chunk === 'string' &&
+          (typeof encoding !== 'string' || encodingName(encoding) === 'utf8')
+        ) {
+          file.puts(chunk)
+        } else {
+          const bytes = view(
+            typeof chunk === 'string' ? Buffer.from(chunk, encoding) : chunk,
+          )
+          file.write(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+        }
+        const callback = typeof encoding === 'function' ? encoding : done
+        if (typeof callback === 'function') queueMicrotask(callback)
+        return true
+      },
+    }
+  }
+  function emitter(target, start) {
+    const listeners = {}
+    let started = false
+    target.on = (event, fn) => {
+      ;(listeners[event] = listeners[event] || []).push(fn)
+      if (!started) {
+        started = true
+        os.setTimeout(start, 0)
+      }
+      return target
+    }
+    target.once = target.on
+    target.addListener = target.on
+    return (event, ...args) => {
+      for (const fn of listeners[event] || []) fn(...args)
+    }
+  }
+  let encoding = null
+  let taken = false
+  const take = () => {
+    if (taken) return null
+    taken = true
+    const bytes = stdin()
+    if (bytes.length === 0) return null
+    return encoding === null ? bytes : bytes.toString(encoding)
+  }
+  const input = {
+    fd: 0,
+    isTTY: false,
+    setEncoding(e) {
+      encoding = e === undefined ? 'utf8' : e
+      return input
+    },
+    resume: () => input,
+    pause: () => input,
+    read: take,
+    async *[Symbol.asyncIterator]() {
+      const chunk = take()
+      if (chunk !== null) yield chunk
+    },
+  }
+  const emit = emitter(input, () => {
+    emit('readable')
+    const chunk = take()
+    if (chunk !== null) emit('data', chunk)
+    emit('end')
+    emit('close')
+  })
+  const lines = () => {
+    const all = stdin().toString('utf8').split('\n')
+    if (all[all.length - 1] === '') all.pop()
+    return all.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l))
+  }
+  const readline = {
+    createInterface() {
+      let closed = false
+      const rl = {
+        close() {
+          if (!closed) {
+            closed = true
+            emitLine('close')
+          }
+        },
+        async *[Symbol.asyncIterator]() {
+          yield* lines()
+        },
+      }
+      const emitLine = emitter(rl, () => {
+        for (const line of lines()) emitLine('line', line)
+        rl.close()
+      })
+      return rl
+    },
+  }
+  const process = {
+    argv,
+    argv0: argv[0],
+    execArgv: [],
+    env: std.getenviron(),
+    exitCode: undefined,
+    exit(code) {
+      std.exit((code === undefined ? process.exitCode : code) | 0)
+    },
+    cwd() {
+      return os.getcwd()[0]
+    },
+    chdir(dir) {
+      check(os.chdir(String(dir)), 'chdir', dir)
+    },
+    nextTick(fn, ...args) {
+      queueMicrotask(() => fn(...args))
+    },
+    stdin: input,
+    stdout: writer(std.out, 1),
+    stderr: writer(std.err, 2),
+  }
+
+  // Timers, which node keeps as globals and qjs keeps under os.
+  const later = (repeat, fn, ms, args) => {
+    if (typeof fn !== 'function') {
+      throw new TypeError('The "callback" argument must be of type function')
+    }
+    const delay = Math.max(1, Number(ms) || 0)
+    return (repeat ? os.setInterval : os.setTimeout)(() => fn(...args), delay)
+  }
+  const clear = (handle) => {
+    if (handle !== undefined && handle !== null) os.clearTimeout(handle)
+  }
+  define('setTimeout', (fn, ms, ...args) => later(false, fn, ms, args))
+  define('setInterval', (fn, ms, ...args) => later(true, fn, ms, args))
+  define('setImmediate', (fn, ...args) => later(false, fn, 0, args))
+  define('clearTimeout', clear)
+  define('clearInterval', clear)
+  define('clearImmediate', clear)
+
+  // require: the modules above, and files by path, JavaScript run as
+  // CommonJS and JSON parsed.
+  const promisify =
+    (fn) =>
+    (...args) =>
+      new Promise((resolve, reject) => {
+        fn(...args, (e, value) => (e ? reject(e) : resolve(value)))
+      })
+  const builtins = {
+    buffer: { Buffer },
+    fs,
+    'fs/promises': promises,
+    path: posix,
+    process,
+    readline,
+    util: { format: (...args) => format(args), inspect, promisify },
+  }
+  const cache = {}
+  function locate(full, id) {
+    const tries = [full, full + '.js', full + '.json', full + '/index.js']
+    for (const file of tries) {
+      const [st] = os.stat(file)
+      if (st !== null && kind(st.mode) === os.S_IFREG) return file
+    }
+    const e = new Error("Cannot find module '" + id + "'")
+    e.code = 'MODULE_NOT_FOUND'
+    throw raise(e)
+  }
+  function load(file, main) {
+    if (cache[file]) return cache[file].exports
+    const module = { id: file, filename: file, loaded: false, exports: {} }
+    cache[file] = module
+    try {
+      const source = fs.readFileSync(file, 'utf8')
+      if (file.endsWith('.json')) module.exports = JSON.parse(source)
+      else {
+        const body = source.startsWith('#!') ? '//' + source.slice(2) : source
+        const run = std.evalScript(
+          '(function (exports, require, module, __filename, __dirname) {' +
+            body +
+            '\n})',
+          { backtrace_barrier: true },
+        )
+        const dir = posix.dirname(file)
+        run.call(
+          module.exports,
+          module.exports,
+          requirer(dir, main),
+          module,
+          file,
+          dir,
+        )
+      }
+    } catch (e) {
+      delete cache[file]
+      throw e
+    }
+    module.loaded = true
+    return module.exports
+  }
+  function requirer(dir, main) {
+    const require = api(function require(id) {
+      id = String(id)
+      const name = id.startsWith('node:') ? id.slice(5) : id
+      if (Object.prototype.hasOwnProperty.call(builtins, name)) {
+        return builtins[name]
+      }
+      if (/^\.{0,2}\//.test(id)) {
+        return load(locate(posix.resolve(dir, id), id), main)
+      }
+      const e = new Error(
+        "Cannot find module '" +
+          id +
+          "': quickjs has " +
+          Object.keys(builtins).join(', ') +
+          ' and files by path, no npm',
+      )
+      e.code = 'MODULE_NOT_FOUND'
+      throw raise(e)
+    })
+    require.resolve = (id) => locate(posix.resolve(dir, String(id)), id)
+    require.cache = cache
+    require.main = main
+    return require
+  }
+
+  const main = {
+    id: '.',
+    filename: script === null ? '[eval]' : script,
+    loaded: false,
+    exports: {},
+  }
+  define('global', g)
+  define('process', process)
+  define('Buffer', Buffer)
+  define('TextEncoder', TextEncoder)
+  define('TextDecoder', TextDecoder)
+  define('module', main)
+  define('exports', main.exports)
+  define(
+    'require',
+    requirer(script === null ? process.cwd() : posix.dirname(script), main),
+  )
+  define('__filename', main.filename)
+  define('__dirname', script === null ? '.' : posix.dirname(script))
+})`
+
+/**
+ * The source that sets up Node's globals before a program runs.
+ *
+ * @param argv - what `process.argv` holds: `node`, the script when there
+ *   is one, then the program's arguments.
+ * @param script - the script's virtual path, which `__filename` and a
+ *   relative `require` start from; null for `-e` and piped programs, which
+ *   start from the working directory.
+ */
+export function nodePreamble(argv: readonly string[], script: string | null): string {
+  return `std.evalScript(${JSON.stringify(NODE_SHIM)})(${JSON.stringify(argv)}, ${JSON.stringify(script)});`
+}
