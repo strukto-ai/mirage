@@ -14,7 +14,7 @@
 
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import SQL
-from mirage.core.sql.inode import by_ino, is_dir, reap
+from mirage.core.sql.inode import by_ino, drop_inodes, is_dir
 from mirage.core.sql.path import found, leaf, parent_of, walk
 from mirage.errors.fs import ebusy, enotdir, enotempty
 from mirage.types import PathSpec
@@ -43,7 +43,7 @@ async def rmdir(accessor: SqlAccessor, path: PathSpec) -> None:
                 f" {by_ino(node.ino).sql})",
                 (parent.ino, leaf(w)),
             ),
-            *reap([node.ino]),
+            *drop_inodes([node.ino]),
         ]
     )
     if accessor.query(SQL["has_entry"], (parent.ino, leaf(w))):

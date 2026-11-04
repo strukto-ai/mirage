@@ -15,7 +15,7 @@
 import type { SqlAccessor } from '../../accessor/sql.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { FILE_MODE } from '../../utils/stat_view.ts'
+import { FILE } from './constants.ts'
 import { byIno, makeNode, nowStamp, resized } from './inode.ts'
 import { checkDestParents, checkWriteTarget, leaf, parentRef, target, walk } from './path.ts'
 
@@ -28,7 +28,7 @@ export async function create(accessor: SqlAccessor, path: PathSpec): Promise<voi
   const node = target(w)
   const now = nowStamp()
   if (node === null) {
-    await accessor.batch(makeNode(accessor, parentRef(w), leaf(w), FILE_MODE, 0, now))
+    await accessor.batch(makeNode(accessor, parentRef(w), leaf(w), FILE, 0, now))
   } else {
     const ino = byIno(node.ino)
     await accessor.batch([

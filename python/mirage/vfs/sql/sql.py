@@ -29,7 +29,6 @@ from mirage.core.sql.readdir import tree as _tree
 from mirage.core.sql.rename import rename as _rename
 from mirage.core.sql.rm import rm_r as _rm_r
 from mirage.core.sql.rmdir import rmdir as _rmdir
-from mirage.core.sql.set_attrs import set_attrs as _set_attrs
 from mirage.core.sql.snapshot import restore, snapshot
 from mirage.core.sql.stat import stat as _stat
 from mirage.core.sql.stream import read_stream as _read_stream
@@ -54,10 +53,12 @@ from mirage.vfs.sql.types import SqlDriver
 class SqlVFS(BaseVFS):
     """A filesystem kept in SQL tables, over whatever driver it is given.
 
-    The tables are AgentFS's: an inode per file and directory, an entry
-    naming each under its parent, and a file's bytes in rows of the
-    database's chunk size, so a database AgentFS made mounts here and one
-    this mount made mounts there. Each op resolves its path in one query
+    The tables hold the files alone, laid out as AgentFS's: an inode per
+    file and directory, an entry naming each under its parent, and a
+    file's bytes in rows of the database's chunk size. A path's mode,
+    owner and symlinks are the namespace's, and a session's env and cwd
+    the workspace store's, as on any mount that keeps no attributes; the
+    mount answers no ``setattr``. Each op resolves its path in one query
     and lands its change in one transaction. One database holds one
     filesystem. Mirrors TypeScript's ``SqlVFS``.
     """
@@ -195,26 +196,6 @@ class SqlVFS(BaseVFS):
                 held.grow_to(length)
             await _truncate(self.accessor, path, length, no_create)
 
-    async def setattr(
-        self,
-        path: PathSpec,
-        *,
-        mode: int | None = None,
-        uid: int | str | None = None,
-        gid: int | str | None = None,
-        atime: str | None = None,
-        mtime: str | None = None,
-    ) -> dict[str, int | str]:
-        return await _set_attrs(
-            self.accessor,
-            path,
-            mode=mode,
-            uid=uid,
-            gid=gid,
-            atime=atime,
-            mtime=mtime,
-        )
-
     async def capacity(self) -> CapacityResult:
         """The mount's own quota when capped, counted afresh so a writer
         in another process shows; else a database that grows (ELASTIC).
@@ -241,7 +222,6 @@ class SqlVFS(BaseVFS):
             self.accessor,
             files=state.get("files", {}),
             dirs=state.get("dirs", ["/"]),
-            attrs=state.get("attrs", {}),
             modified=state.get("modified", {}),
         )
         if self.usage is not None:

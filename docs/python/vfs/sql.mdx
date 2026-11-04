@@ -23,13 +23,17 @@ ws = Workspace({"/sql": vfs}, mode=MountMode.WRITE)
 | `capacity` | no       | none      | The most bytes the files may hold, like `100MB`          |
 | `driver`   | no       | none      | A `SqlDriver` to borrow instead of a file; you close it |
 
-The tables are [AgentFS](https://github.com/tursodatabase/agentfs)'s, so a
-database AgentFS made mounts here and AgentFS reads one this mount made:
+The tables hold the files alone, laid out as
+[AgentFS](https://github.com/tursodatabase/agentfs)'s:
 
-- `fs_inode`: one row per file and directory, with its mode, owner, size and times
+- `fs_inode`: one row per file and directory, with its size and mtime
 - `fs_dentry`: each entry's name under its parent directory
 - `fs_data`: a file's bytes, in rows of the database's chunk size (4 KiB unless the database says otherwise)
-- `fs_symlink` and `fs_config`: link targets, and the chunk size and schema version
+- `fs_config`: the chunk size
+
+A path's mode, owner and symlinks are the workspace namespace's, as on any
+mount that keeps no attributes, so `chmod` and `ln -s` write none of these
+tables.
 
 One database holds one filesystem. The TypeScript mount reads and writes the
 same tables, so a Python and a Node process on one file serve one filesystem.

@@ -15,8 +15,8 @@
 import type { SqlAccessor } from '../../accessor/sql.ts'
 import { eisdir } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
-import { FILE_MODE } from '../../utils/stat_view.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
+import { FILE } from './constants.ts'
 import { byEntry, byIno, isDir, makeNode, nowStamp, resized } from './inode.ts'
 import { checkDestParents, found, leaf, parentRef, target, walk } from './path.ts'
 
@@ -38,7 +38,7 @@ export async function copy(accessor: SqlAccessor, src: PathSpec, dst: PathSpec):
   const statements: SqlStatement[] =
     there !== null
       ? [{ sql: `DELETE FROM fs_data WHERE ino = ${ino.sql}` }, resized(ino, node.size, now)]
-      : makeNode(accessor, parentRef(to), leaf(to), FILE_MODE, node.size, now)
+      : makeNode(accessor, parentRef(to), leaf(to), FILE, node.size, now)
   statements.push({
     sql: `INSERT INTO fs_data (ino, chunk_index, data)
       SELECT ${ino.sql}, chunk_index, data FROM fs_data WHERE ino = ${byIno(node.ino).sql}`,

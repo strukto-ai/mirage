@@ -44,7 +44,7 @@ class SqlAccessor(Accessor):
                         SqlStatement(sql)
                         for sql in SCHEMA[self.driver.dialect]
                     ),
-                    SqlStatement(SQL["seed_root"], (now, now, now)),
+                    SqlStatement(SQL["seed_root"], (now,)),
                 ]
             )
             rows = self.driver.query(SQL["chunk_size"])

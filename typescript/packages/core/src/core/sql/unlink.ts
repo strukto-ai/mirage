@@ -16,16 +16,16 @@ import type { SqlAccessor } from '../../accessor/sql.ts'
 import { eisdir } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { SQL } from './constants.ts'
-import { isDir, reap } from './inode.ts'
+import { dropInodes, isDir } from './inode.ts'
 import { found, leaf, parentOf, walk } from './path.ts'
 
-/** Remove a file's entry, and the file with it unless another entry names it. */
+/** Remove a file, its entry and its bytes. */
 export async function unlink(accessor: SqlAccessor, path: PathSpec): Promise<void> {
   const w = await walk(accessor, path)
   const node = found(w, path)
   if (isDir(node)) throw eisdir(path)
   await accessor.batch([
     { sql: SQL.removeEntry, params: [parentOf(w)?.ino ?? null, leaf(w)] },
-    ...reap([node.ino]),
+    ...dropInodes([node.ino]),
   ])
 }

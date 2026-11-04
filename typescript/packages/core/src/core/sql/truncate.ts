@@ -15,7 +15,7 @@
 import type { SqlAccessor } from '../../accessor/sql.ts'
 import { record, startOp } from '../../observe/context.ts'
 import { VFSName, type PathSpec } from '../../types.ts'
-import { FILE_MODE } from '../../utils/stat_view.ts'
+import { FILE } from './constants.ts'
 import { cutBytes } from './data.ts'
 import { byIno, makeNode, nowStamp, resized } from './inode.ts'
 import { checkDestParents, checkWriteTarget, leaf, parentRef, target, walk } from './path.ts'
@@ -39,7 +39,7 @@ export async function truncate(
   const now = nowStamp()
   if (node === null) {
     if (noCreate) return
-    await accessor.batch(makeNode(accessor, parentRef(w), leaf(w), FILE_MODE, length, now))
+    await accessor.batch(makeNode(accessor, parentRef(w), leaf(w), FILE, length, now))
   } else {
     await accessor.batch([
       ...(await cutBytes(accessor, node, length)),

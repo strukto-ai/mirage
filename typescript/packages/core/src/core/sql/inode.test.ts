@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { SqlAccessor } from '../../accessor/sql.ts'
 import { FileType } from '../../types.ts'
 import { SqlDialect, type SqlDriver, type SqlRow } from '../../vfs/sql/types.ts'
-import { MAX_PARAMS } from './constants.ts'
+import { DIR, FILE, MAX_PARAMS } from './constants.ts'
 import { byEntry, byIno, inodeStat, insertRows, isoOf, stampOf, type Inode } from './inode.ts'
 
 // A SQLite database in this process, as the ops reach one.
@@ -41,21 +41,8 @@ function memoryDriver(): SqlDriver {
   }
 }
 
-function node(mode: number, uid = 0): Inode {
-  return {
-    ino: 2,
-    mode,
-    nlink: 1,
-    uid,
-    gid: 0,
-    size: 3,
-    atime: 0,
-    atimeNsec: 0,
-    mtime: 1_700_000_000,
-    mtimeNsec: 123_000_000,
-    ctime: 0,
-    ctimeNsec: 0,
-  }
+function node(mode: number): Inode {
+  return { ino: 2, mode, size: 3, mtime: 1_700_000_000, mtimeNsec: 123_000_000 }
 }
 
 describe('inode', () => {
@@ -65,18 +52,18 @@ describe('inode', () => {
     expect(isoOf(1_700_000_000, 0)).toBe('2023-11-14T22:13:20Z')
   })
 
-  it('stats an inode as its kind, owner 0 as none', () => {
-    const file = inodeStat('/d/a.txt', node(0o100640))
+  it('stats an inode as its kind, size and mtime, leaving mode and owner to the overlay', () => {
+    const file = inodeStat('/d/a.txt', node(FILE))
     expect([file.name, file.type, file.size, file.mode, file.uid]).toEqual([
       'a.txt',
       FileType.FILE,
       3,
-      0o640,
+      null,
       null,
     ])
     expect(file.modified).toBe('2023-11-14T22:13:20.123000Z')
-    const folder = inodeStat('/d', node(0o40755, 1000))
-    expect([folder.type, folder.size, folder.uid]).toEqual([FileType.DIRECTORY, null, 1000])
+    const folder = inodeStat('/d', node(DIR))
+    expect([folder.type, folder.size]).toEqual([FileType.DIRECTORY, null])
   })
 
   it('nests an entry ref under its parent', () => {
@@ -96,8 +83,8 @@ describe('inode', () => {
     const driver = memoryDriver()
     const accessor = new SqlAccessor(driver)
     await accessor.chunkSize()
-    expect(await accessor.query('SELECT ino, mode, nlink FROM fs_inode')).toEqual([
-      { ino: 1, mode: 0o40755, nlink: 1 },
+    expect(await accessor.query('SELECT ino, mode, size FROM fs_inode')).toEqual([
+      { ino: 1, mode: DIR, size: 0 },
     ])
     await driver.close()
   })

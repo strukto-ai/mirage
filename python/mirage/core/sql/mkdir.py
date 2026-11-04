@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sql import SqlAccessor
-from mirage.core.sql.constants import ROOT_INO
+from mirage.core.sql.constants import DIR, ROOT_INO
 from mirage.core.sql.inode import (
     by_entry,
     by_ino,
@@ -31,7 +31,6 @@ from mirage.core.sql.path import (
 from mirage.errors.fs import eexist, enotdir
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
-from mirage.utils.stat_view import DIR_MODE
 from mirage.vfs.sql.types import SqlStatement
 
 
@@ -56,7 +55,7 @@ async def mkdir(
             raise eexist(path)
         check_dest_parents(w, path)
         accessor.batch(
-            make_node(accessor, parent_ref(w), leaf(w), DIR_MODE, 0, now)
+            make_node(accessor, parent_ref(w), leaf(w), DIR, 0, now)
         )
         return
     statements: list[SqlStatement] = []
@@ -64,7 +63,7 @@ async def mkdir(
     for i, name in enumerate(w.names):
         node = w.chain[i + 1]
         if node is None:
-            statements += make_node(accessor, parent, name, DIR_MODE, 0, now)
+            statements += make_node(accessor, parent, name, DIR, 0, now)
             parent = by_entry(parent, name)
             continue
         if not is_dir(node):

@@ -16,7 +16,7 @@ import type { SqlAccessor } from '../../accessor/sql.ts'
 import { ebusy, enotdir, enotempty } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import { SQL } from './constants.ts'
-import { byIno, isDir, reap } from './inode.ts'
+import { byIno, dropInodes, isDir } from './inode.ts'
 import { found, leaf, parentOf, walk } from './path.ts'
 
 /**
@@ -38,7 +38,7 @@ export async function rmdir(accessor: SqlAccessor, path: PathSpec): Promise<void
         SELECT 1 FROM fs_dentry c WHERE c.parent_ino = ${byIno(node.ino).sql})`,
       params: [parent.ino, leaf(w)],
     },
-    ...reap([node.ino]),
+    ...dropInodes([node.ino]),
   ])
   if ((await accessor.query(SQL.hasEntry, [parent.ino, leaf(w)])).length > 0) {
     throw enotempty(path)

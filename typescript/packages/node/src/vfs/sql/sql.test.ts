@@ -15,7 +15,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DEFAULT_CHUNK_SIZE } from '@struktoai/mirage-core/core/sql/constants'
+import { DEFAULT_CHUNK_SIZE, DIR, FILE } from '@struktoai/mirage-core/core/sql/constants'
 import { materialize } from '@struktoai/mirage-core/io/types'
 import { runWithRecording } from '@struktoai/mirage-core/observe/context'
 import { ops } from '@struktoai/mirage-core/test-utils'
@@ -123,13 +123,8 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
     expect(dec.decode(await bytes(vfs, '/src'))).toBe('copied')
   })
 
-  it('stores a numeric owner and hands a name back to the overlay', async () => {
-    await ops(vfs).write(at('/o'), enc.encode('x'))
-    expect(await vfs.setattr(at('/o'), { mode: 0o600, uid: 1000, gid: 'staff' })).toEqual({
-      gid: 'staff',
-    })
-    const st = await ops(vfs).stat(at('/o'))
-    expect([st.mode, st.uid, st.gid]).toEqual([0o600, 1000, null])
+  it('keeps no attributes, so the namespace keeps them', () => {
+    expect(vfs.supports('setattr')).toBe(false)
   })
 }
 
@@ -143,7 +138,7 @@ describe('SqlVFS over SQLite', () => {
 describe.skipIf(POSTGRES_URL === undefined)('SqlVFS over Postgres', () => {
   behaves(async () => {
     const driver = new PostgresSqlDriver(POSTGRES_URL ?? '')
-    for (const table of ['fs_data', 'fs_symlink', 'fs_dentry', 'fs_inode', 'fs_config']) {
+    for (const table of ['fs_data', 'fs_dentry', 'fs_inode', 'fs_config']) {
       await driver.query(`DROP TABLE IF EXISTS ${table}`)
     }
     const vfs = new SqlVFS({ driver })
@@ -157,82 +152,45 @@ describe.skipIf(POSTGRES_URL === undefined)('SqlVFS over Postgres', () => {
   })
 })
 
-describe('SqlVFS and AgentFS', () => {
-  it('mounts a database AgentFS made, at its own chunk size', async () => {
+describe('SqlVFS tables', () => {
+  it('hold the tree and the bytes alone', async () => {
     const driver = new SqliteDriver()
-    await driver.batch([
-      { sql: 'CREATE TABLE fs_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)' },
-      { sql: "INSERT INTO fs_config VALUES ('chunk_size', '4')" },
-      {
-        sql: `CREATE TABLE fs_inode (ino INTEGER PRIMARY KEY AUTOINCREMENT, mode INTEGER NOT NULL,
-          nlink INTEGER NOT NULL DEFAULT 0, uid INTEGER NOT NULL DEFAULT 0,
-          gid INTEGER NOT NULL DEFAULT 0, size INTEGER NOT NULL DEFAULT 0,
-          atime INTEGER NOT NULL, mtime INTEGER NOT NULL, ctime INTEGER NOT NULL,
-          rdev INTEGER NOT NULL DEFAULT 0, atime_nsec INTEGER NOT NULL DEFAULT 0,
-          mtime_nsec INTEGER NOT NULL DEFAULT 0, ctime_nsec INTEGER NOT NULL DEFAULT 0)`,
-      },
-      {
-        sql: `CREATE TABLE fs_dentry (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
-          parent_ino INTEGER NOT NULL, ino INTEGER NOT NULL, UNIQUE(parent_ino, name))`,
-      },
-      {
-        sql: `CREATE TABLE fs_data (ino INTEGER NOT NULL, chunk_index INTEGER NOT NULL,
-          data BLOB NOT NULL, PRIMARY KEY (ino, chunk_index))`,
-      },
-      { sql: 'CREATE TABLE fs_symlink (ino INTEGER PRIMARY KEY, target TEXT NOT NULL)' },
-      {
-        sql: 'INSERT INTO fs_inode (ino, mode, nlink, atime, mtime, ctime) VALUES (1, 16877, 1, 0, 0, 0)',
-      },
-      {
-        sql: 'INSERT INTO fs_inode (ino, mode, nlink, size, atime, mtime, ctime) VALUES (2, 33188, 2, 10, 0, 0, 0)',
-      },
-      { sql: "INSERT INTO fs_dentry (name, parent_ino, ino) VALUES ('notes.txt', 1, 2)" },
-      { sql: "INSERT INTO fs_dentry (name, parent_ino, ino) VALUES ('link.txt', 1, 2)" },
-      {
-        sql: "INSERT INTO fs_data VALUES (2, 0, x'68656c6c'), (2, 1, x'6f20776f'), (2, 2, x'726c')",
-      },
-    ])
     const vfs = new SqlVFS({ driver })
     try {
-      expect(dec.decode(await bytes(vfs, '/notes.txt'))).toBe('hello worl')
-      await ops(vfs).append(at('/notes.txt'), enc.encode('d!'))
-      expect(dec.decode(await bytes(vfs, '/link.txt'))).toBe('hello world!')
-      const rows = await driver.query(
-        'SELECT chunk_index, length(data) AS n FROM fs_data WHERE ino = 2 ORDER BY chunk_index',
+      await ops(vfs).mkdir(at('/d'))
+      await ops(vfs).write(at('/d/f'), enc.encode('hi'))
+      const tables = await driver.query(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'fs_%' ORDER BY name",
       )
-      expect(rows.map((r) => Number(r.n))).toEqual([4, 4, 4])
-      await ops(vfs).unlink(at('/notes.txt'))
-      expect(dec.decode(await bytes(vfs, '/link.txt'))).toBe('hello world!')
-      const ino = await driver.query('SELECT nlink FROM fs_inode WHERE ino = 2')
-      expect(Number(ino[0]?.nlink)).toBe(1)
+      expect(tables.map((t) => t.name)).toEqual(['fs_config', 'fs_data', 'fs_dentry', 'fs_inode'])
+      expect(await driver.query('SELECT key, value FROM fs_config')).toEqual([
+        { key: 'chunk_size', value: String(DEFAULT_CHUNK_SIZE) },
+      ])
+      const tree = await driver.query(
+        `SELECT d.name, i.mode, i.size FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
+         ORDER BY d.name`,
+      )
+      expect(tree).toEqual([
+        { name: 'd', mode: DIR, size: 0 },
+        { name: 'f', mode: FILE, size: 2 },
+      ])
     } finally {
       await vfs.close()
       await driver.close()
     }
   })
 
-  it('writes the tables AgentFS reads', async () => {
+  it('leave chmod to the namespace, which the workspace store keeps', async () => {
     const driver = new SqliteDriver()
-    const vfs = new SqlVFS({ driver })
+    const ws = new Workspace({ '/w/': new SqlVFS({ driver }) }, { mode: MountMode.WRITE })
     try {
-      await ops(vfs).mkdir(at('/d'))
-      await ops(vfs).write(at('/d/f'), enc.encode('hi'))
-      const config = await driver.query('SELECT key, value FROM fs_config ORDER BY key')
-      expect(config).toEqual([
-        { key: 'chunk_size', value: String(DEFAULT_CHUNK_SIZE) },
-        { key: 'schema_version', value: '0.4' },
+      const r = await ws.shell('touch /w/f && chmod 600 /w/f && stat -c %a /w/f')
+      expect(r.stdoutText).toBe('600\n')
+      expect(await driver.query('SELECT mode FROM fs_inode WHERE ino > 1')).toEqual([
+        { mode: FILE },
       ])
-      const tree = await driver.query(
-        `SELECT d.name, i.mode, i.nlink, i.size FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
-         ORDER BY d.name`,
-      )
-      expect(tree).toEqual([
-        { name: 'd', mode: 0o40755, nlink: 1, size: 0 },
-        { name: 'f', mode: 0o100644, nlink: 1, size: 2 },
-      ])
-      expect((await ops(vfs).stat(at('/d/f'))).type).toBe(FileType.FILE)
     } finally {
-      await vfs.close()
+      await ws.close()
       await driver.close()
     }
   })
@@ -325,9 +283,7 @@ describe('SqlVFS', () => {
     const ws = new Workspace({ '/w/': source }, { mode: MountMode.WRITE })
     let state: Awaited<ReturnType<SqlVFS['getState']>>
     try {
-      expect(
-        (await ws.shell('mkdir -p /w/d && printf hi > /w/d/f && chmod 600 /w/d/f')).exitCode,
-      ).toBe(0)
+      expect((await ws.shell('mkdir -p /w/d && printf hi > /w/d/f')).exitCode).toBe(0)
       state = await source.getState()
     } finally {
       await ws.close()
@@ -339,7 +295,6 @@ describe('SqlVFS', () => {
     try {
       await copy.loadState(state)
       expect(dec.decode(await bytes(copy, '/d/f'))).toBe('hi')
-      expect((await ops(copy).stat(at('/d/f'))).mode).toBe(0o600)
       expect((await ops(copy).stat(at('/d'))).type).toBe(FileType.DIRECTORY)
     } finally {
       await copy.close()

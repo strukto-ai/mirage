@@ -14,7 +14,7 @@
 
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import SQL
-from mirage.core.sql.inode import by_ino, inode_of, is_dir, reap
+from mirage.core.sql.inode import by_ino, drop_inodes, inode_of, is_dir
 from mirage.core.sql.path import leaf, parent_of, target, walk
 from mirage.errors.fs import enotempty
 from mirage.types import PathSpec
@@ -75,7 +75,7 @@ async def rm_r(accessor: SqlAccessor, path: PathSpec) -> None:
             )
         )
         inos.append(node.ino)
-    accessor.batch([*statements, *reap(inos)])
+    accessor.batch([*statements, *drop_inodes(inos)])
     if parent is not None and accessor.query(
         SQL["has_entry"], (parent.ino, leaf(w))
     ):

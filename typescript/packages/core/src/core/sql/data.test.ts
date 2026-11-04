@@ -16,6 +16,7 @@ import { DatabaseSync, type SQLInputValue } from 'node:sqlite'
 import { describe, expect, it } from 'vitest'
 import { SqlAccessor } from '../../accessor/sql.ts'
 import { SqlDialect, type SqlDriver, type SqlRow } from '../../vfs/sql/types.ts'
+import { FILE } from './constants.ts'
 import { cutBytes, placeBytes, readBytes } from './data.ts'
 import { byIno, type Inode } from './inode.ts'
 
@@ -54,20 +55,7 @@ async function accessorAt(chunkSize: number): Promise<SqlAccessor> {
 }
 
 function file(size: number): Inode {
-  return {
-    ino: 7,
-    mode: 0o100644,
-    nlink: 1,
-    uid: 0,
-    gid: 0,
-    size,
-    atime: 0,
-    atimeNsec: 0,
-    mtime: 0,
-    mtimeNsec: 0,
-    ctime: 0,
-    ctimeNsec: 0,
-  }
+  return { ino: 7, mode: FILE, size, mtime: 0, mtimeNsec: 0 }
 }
 
 async function rows(accessor: SqlAccessor): Promise<string[]> {

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sql import SqlAccessor
+from mirage.core.sql.constants import FILE
 from mirage.core.sql.inode import (
     by_entry,
     by_ino,
@@ -31,7 +32,6 @@ from mirage.core.sql.path import (
 )
 from mirage.errors.fs import eisdir
 from mirage.types import PathSpec
-from mirage.utils.stat_view import FILE_MODE
 from mirage.vfs.sql.types import SqlStatement
 
 
@@ -62,7 +62,7 @@ async def copy(accessor: SqlAccessor, src: PathSpec, dst: PathSpec) -> None:
         ]
         if there is not None
         else make_node(
-            accessor, parent_ref(to), leaf(to), FILE_MODE, node.size, now
+            accessor, parent_ref(to), leaf(to), FILE, node.size, now
         )
     )
     statements.append(

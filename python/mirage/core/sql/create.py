@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.accessor.sql import SqlAccessor
+from mirage.core.sql.constants import FILE
 from mirage.core.sql.inode import by_ino, make_node, now_stamp, resized
 from mirage.core.sql.path import (
     check_dest_parents,
@@ -24,7 +25,6 @@ from mirage.core.sql.path import (
 )
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec, VFSName
-from mirage.utils.stat_view import FILE_MODE
 from mirage.vfs.sql.types import SqlStatement
 
 
@@ -39,7 +39,7 @@ async def create(accessor: SqlAccessor, path: PathSpec) -> None:
     now = now_stamp()
     if node is None:
         accessor.batch(
-            make_node(accessor, parent_ref(w), leaf(w), FILE_MODE, 0, now)
+            make_node(accessor, parent_ref(w), leaf(w), FILE, 0, now)
         )
     else:
         ino = by_ino(node.ino)

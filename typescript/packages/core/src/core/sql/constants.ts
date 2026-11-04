@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { DIR_MODE, S_IFMT, S_IFREG } from '../../utils/stat_view.ts'
+import { S_IFDIR, S_IFREG } from '../../utils/stat_view.ts'
 import { SqlDialect } from '../../vfs/sql/types.ts'
 
 /** The inode every path resolves from. */
@@ -25,8 +25,13 @@ export const ROOT_INO = 1
  */
 export const DEFAULT_CHUNK_SIZE = 4096
 
-/** The AgentFS schema the tables follow, as `fs_config` records it. */
-export const SCHEMA_VERSION = '0.4'
+/**
+ * What `fs_inode.mode` holds: the type bits alone. A path's permissions,
+ * owner and other times are the namespace overlay's, as on any mount that
+ * keeps no attributes, so the mount stores only its tree and bytes.
+ */
+export const DIR = S_IFDIR
+export const FILE = S_IFREG
 
 /** The most parameters one statement binds: D1 and Durable Objects stop at 100. */
 export const MAX_PARAMS = 100
@@ -35,86 +40,55 @@ export const MAX_PARAMS = 100
 export const FLUSH_BYTES = 1024 * 1024
 
 /** The columns of `fs_inode` the ops read. */
-export const INODE_COLUMNS = [
-  'ino',
-  'mode',
-  'nlink',
-  'uid',
-  'gid',
-  'size',
-  'atime',
-  'atime_nsec',
-  'mtime',
-  'mtime_nsec',
-  'ctime',
-  'ctime_nsec',
-] as const
+export const INODE_COLUMNS = ['ino', 'mode', 'size', 'mtime', 'mtime_nsec'] as const
 
 /** `INODE_COLUMNS` read off the table aliased `alias`. */
 export function columns(alias: string): string {
   return INODE_COLUMNS.map((c) => `${alias}.${c}`).join(', ')
 }
 
-// The rows a fresh database starts with: AgentFS's chunk size and schema
-// version, and the root directory. Each is a no-op on a database that has it,
-// so opening one another runtime made keeps what it holds.
-const SEED: readonly string[] = [
-  `INSERT INTO fs_config (key, value) SELECT 'chunk_size', '${String(DEFAULT_CHUNK_SIZE)}'
-    WHERE NOT EXISTS (SELECT 1 FROM fs_config WHERE key = 'chunk_size')`,
-  `INSERT INTO fs_config (key, value) SELECT 'schema_version', '${SCHEMA_VERSION}'
-    WHERE NOT EXISTS (SELECT 1 FROM fs_config WHERE key = 'schema_version')`,
-]
+// The chunk size a fresh database starts with; a no-op on one that has it, so
+// opening one another runtime made keeps what it holds.
+const SEED = `INSERT INTO fs_config (key, value) SELECT 'chunk_size', '${String(DEFAULT_CHUNK_SIZE)}'
+    WHERE NOT EXISTS (SELECT 1 FROM fs_config WHERE key = 'chunk_size')`
 
 /**
- * The tables a database holds a filesystem in, by dialect: AgentFS's
- * (`fs_config`, `fs_inode`, `fs_dentry`, `fs_data`, `fs_symlink`), so a
- * database either one made the other mounts. An inode is one file, directory
- * or symlink; a dentry names it under its parent; a file's bytes are its
- * `fs_data` rows, `chunk_size` bytes each. The index on `fs_dentry(ino)` is
- * the mount's own, so counting an inode's links reads no other rows.
+ * The tables a database holds a filesystem in, by dialect, laid out as
+ * AgentFS's: an inode is one file or directory, with its size and mtime; a
+ * dentry names it under its parent; a file's bytes are its `fs_data` rows,
+ * `chunk_size` bytes each. The rest of what a path carries (mode, owner,
+ * atime, symlinks) is Mirage's namespace, and a session's env and cwd its
+ * workspace store, so neither is here.
  */
 export const SCHEMA: Readonly<Record<SqlDialect, readonly string[]>> = {
   [SqlDialect.SQLITE]: [
     'CREATE TABLE IF NOT EXISTS fs_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
     `CREATE TABLE IF NOT EXISTS fs_inode (
       ino INTEGER PRIMARY KEY AUTOINCREMENT, mode INTEGER NOT NULL,
-      nlink INTEGER NOT NULL DEFAULT 0, uid INTEGER NOT NULL DEFAULT 0,
-      gid INTEGER NOT NULL DEFAULT 0, size INTEGER NOT NULL DEFAULT 0,
-      atime INTEGER NOT NULL, mtime INTEGER NOT NULL, ctime INTEGER NOT NULL,
-      rdev INTEGER NOT NULL DEFAULT 0, atime_nsec INTEGER NOT NULL DEFAULT 0,
-      mtime_nsec INTEGER NOT NULL DEFAULT 0, ctime_nsec INTEGER NOT NULL DEFAULT 0)`,
+      size INTEGER NOT NULL DEFAULT 0, mtime INTEGER NOT NULL,
+      mtime_nsec INTEGER NOT NULL DEFAULT 0)`,
     `CREATE TABLE IF NOT EXISTS fs_dentry (
       id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
       parent_ino INTEGER NOT NULL, ino INTEGER NOT NULL, UNIQUE(parent_ino, name))`,
-    'CREATE INDEX IF NOT EXISTS idx_fs_dentry_parent ON fs_dentry(parent_ino, name)',
-    'CREATE INDEX IF NOT EXISTS idx_fs_dentry_ino ON fs_dentry(ino)',
     `CREATE TABLE IF NOT EXISTS fs_data (
       ino INTEGER NOT NULL, chunk_index INTEGER NOT NULL, data BLOB NOT NULL,
       PRIMARY KEY (ino, chunk_index))`,
-    'CREATE TABLE IF NOT EXISTS fs_symlink (ino INTEGER PRIMARY KEY, target TEXT NOT NULL)',
-    ...SEED,
+    SEED,
   ],
   // The root is inode 1, so the generated numbers start past it.
   [SqlDialect.POSTGRES]: [
     'CREATE TABLE IF NOT EXISTS fs_config (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
     `CREATE TABLE IF NOT EXISTS fs_inode (
       ino BIGINT GENERATED BY DEFAULT AS IDENTITY (START WITH 2) PRIMARY KEY,
-      mode BIGINT NOT NULL, nlink BIGINT NOT NULL DEFAULT 0,
-      uid BIGINT NOT NULL DEFAULT 0, gid BIGINT NOT NULL DEFAULT 0,
-      size BIGINT NOT NULL DEFAULT 0, atime BIGINT NOT NULL, mtime BIGINT NOT NULL,
-      ctime BIGINT NOT NULL, rdev BIGINT NOT NULL DEFAULT 0,
-      atime_nsec BIGINT NOT NULL DEFAULT 0, mtime_nsec BIGINT NOT NULL DEFAULT 0,
-      ctime_nsec BIGINT NOT NULL DEFAULT 0)`,
+      mode BIGINT NOT NULL, size BIGINT NOT NULL DEFAULT 0, mtime BIGINT NOT NULL,
+      mtime_nsec BIGINT NOT NULL DEFAULT 0)`,
     `CREATE TABLE IF NOT EXISTS fs_dentry (
       id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, name TEXT NOT NULL,
       parent_ino BIGINT NOT NULL, ino BIGINT NOT NULL, UNIQUE(parent_ino, name))`,
-    'CREATE INDEX IF NOT EXISTS idx_fs_dentry_parent ON fs_dentry(parent_ino, name)',
-    'CREATE INDEX IF NOT EXISTS idx_fs_dentry_ino ON fs_dentry(ino)',
     `CREATE TABLE IF NOT EXISTS fs_data (
       ino BIGINT NOT NULL, chunk_index BIGINT NOT NULL, data BYTEA NOT NULL,
       PRIMARY KEY (ino, chunk_index))`,
-    'CREATE TABLE IF NOT EXISTS fs_symlink (ino BIGINT PRIMARY KEY, target TEXT NOT NULL)',
-    ...SEED,
+    SEED,
   ],
 }
 
@@ -131,11 +105,9 @@ export const LAST_INO: Readonly<Record<SqlDialect, string>> = {
 export const SQL = {
   chunkSize: "SELECT value FROM fs_config WHERE key = 'chunk_size'",
   // The root, made at the time `?` gives unless the database has one. The
-  // casts type the parameters, which a SELECT list leaves untyped in Postgres.
-  seedRoot: `INSERT INTO fs_inode
-    (ino, mode, nlink, uid, gid, size, atime, mtime, ctime)
-    SELECT ${String(ROOT_INO)}, ${String(DIR_MODE)}, 1, 0, 0, 0,
-      CAST(? AS BIGINT), CAST(? AS BIGINT), CAST(? AS BIGINT)
+  // cast types the parameter, which a SELECT list leaves untyped in Postgres.
+  seedRoot: `INSERT INTO fs_inode (ino, mode, size, mtime)
+    SELECT ${String(ROOT_INO)}, ${String(DIR)}, 0, CAST(? AS BIGINT)
     WHERE NOT EXISTS (SELECT 1 FROM fs_inode WHERE ino = ${String(ROOT_INO)})`,
   children: `SELECT d.name, ${columns('i')}
     FROM fs_dentry d JOIN fs_inode i ON i.ino = d.ino
@@ -153,11 +125,8 @@ export const SQL = {
     FROM tree t JOIN fs_inode i ON i.ino = t.ino`,
   chunks: `SELECT chunk_index, data FROM fs_data
     WHERE ino = ? AND chunk_index >= ? AND chunk_index <= ? ORDER BY chunk_index`,
-  usedBytes: `SELECT COALESCE(SUM(size), 0) AS n FROM fs_inode WHERE (mode & ${String(S_IFMT)}) = ${String(S_IFREG)}`,
-  newInode: `INSERT INTO fs_inode
-    (mode, nlink, uid, gid, size, atime, atime_nsec,
-    mtime, mtime_nsec, ctime, ctime_nsec)
-    VALUES (?, 1, 0, 0, ?, ?, ?, ?, ?, ?, ?)`,
+  usedBytes: `SELECT COALESCE(SUM(size), 0) AS n FROM fs_inode WHERE mode = ${String(FILE)}`,
+  newInode: 'INSERT INTO fs_inode (mode, size, mtime, mtime_nsec) VALUES (?, ?, ?, ?)',
   removeEntry: 'DELETE FROM fs_dentry WHERE parent_ino = ? AND name = ?',
   moveEntry: 'UPDATE fs_dentry SET parent_ino = ?, name = ? WHERE parent_ino = ? AND name = ?',
 } as const
@@ -165,7 +134,6 @@ export const SQL = {
 /** What `restore` empties before it writes a snapshot back. */
 export const CLEAR: readonly string[] = [
   'DELETE FROM fs_data',
-  'DELETE FROM fs_symlink',
   'DELETE FROM fs_dentry',
   `DELETE FROM fs_inode WHERE ino <> ${String(ROOT_INO)}`,
 ]
