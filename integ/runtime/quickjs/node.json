@@ -55,6 +55,22 @@
             "stdout": "[ 'b/' ]\nfalse\n",
             "stderr": ""
           }
+        },
+        {
+          "command": "node -e \"const fs = require('fs'); for (const [f, p] of [['rmdirSync', '/data/d.json'], ['unlinkSync', '/data']]) { try { fs[f](p) } catch (e) { console.log(f, e.code) } } console.log(fs.existsSync('/data/d.json'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "rmdirSync ENOTDIR\nunlinkSync EISDIR\ntrue\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"const fs = require('fs'); try { fs.copyFileSync('/data/d.json', '/data/open.txt', fs.constants.COPYFILE_EXCL) } catch (e) { console.log(e.code) } console.log(fs.readFileSync('/data/open.txt', 'utf8'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "EEXIST\n1\nend\n\n",
+            "stderr": ""
+          }
         }
       ]
     },
@@ -225,6 +241,76 @@
       ]
     },
     {
+      "id": "stdin_arrives_as_it_is_written",
+      "note": "A data listener sees the first chunk while the producer is still writing; one that waited for the end of input would hit the line's limit.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "command_limits": {
+          "@line": {
+            "timeout_seconds": 20
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "seq 1 1000000000 | node -e \"process.stdin.on('data', (c) => { console.log(c.toString().split('\\n')[0]); process.exit(0) })\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf '1\\n2\\n' | node -e \"const fs = require('fs'); console.log(JSON.stringify([fs.readFileSync(0, 'utf8'), fs.readFileSync(0, 'utf8')]))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"1\\n2\\n\",\"\"]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'one\\ntwo\\nthree\\n' | node -e \"const rl = require('readline').createInterface({ input: process.stdin }); rl.once('line', (l) => console.log('first', l)); rl.on('line', (l) => { console.log('line', l); if (l === 'two') rl.close() }); rl.on('close', () => console.log('closed'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "first one\nline one\nline two\nclosed\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "rm_stays_inside_its_tree",
+      "note": "A recursive rmSync takes a link inside the tree, not what it points at, though stat follows links on this engine.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "keep/k": "k\n",
+              "build/b": "b\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s /data/keep /data/build/link && node -e \"const fs = require('fs'); fs.rmSync('/data/build', { recursive: true }); console.log(fs.readdirSync('/data'), fs.readdirSync('/data/keep'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[ 'keep' ] [ 'k' ]\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
       "id": "console_prints_as_node_does",
       "note": "util.inspect's rendering, line breaking past 80 columns and util.format's placeholders; console.error and console.warn write to stderr.",
       "world": {
@@ -265,6 +351,14 @@
             "stdout": "Ada is 36.5 years and {\"x\":1} extra\n",
             "stderr": "warn w\n"
           }
+        },
+        {
+          "command": "node -e \"console.log({ get g() { throw new Error('boom') }, set s(v) {}, ok: 1 }); console.log('100%%')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "{ g: [Getter], s: [Setter], ok: 1 }\n100%%\n",
+            "stderr": ""
+          }
         }
       ]
     },
@@ -285,12 +379,20 @@
             "stdout": "<Buffer 68 c3 a9 6c 6c 6f> 6 aMOpbGxv 68c3a96c6c6f héllo ok\n",
             "stderr": ""
           }
+        },
+        {
+          "command": "node -e \"console.log(Buffer.alloc(5, 'ab').toString(), Buffer.alloc(3, '\\u00e9').toString('hex'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "ababa c3a9c3\n",
+            "stderr": ""
+          }
         }
       ]
     },
     {
       "id": "require_reads_files_and_names_what_it_has",
-      "note": "require loads JavaScript as CommonJS and parses JSON, by path from the requiring file; a package name it does not have fails with the modules it does.",
+      "note": "require loads JavaScript as CommonJS and parses JSON, by path from the requiring file; a package name it does not have fails with the modules it does. An entry a module requires back hands over its exports so far rather than running twice.",
       "world": {
         "runtimes": [
           "quickjs",
@@ -302,7 +404,9 @@
             "files": {
               "main.js": "const m = require('./lib/math'); const c = require('./lib/conf.json'); console.log(m.add(c.v, 4))\n",
               "lib/math.js": "module.exports = { add: (a, b) => a + b }\n",
-              "lib/conf.json": "{\"v\": 3}\n"
+              "lib/conf.json": "{\"v\": 3}\n",
+              "a.js": "const b = require('./b'); exports.name = 'a'; console.log('a ran', b.seen)\n",
+              "b.js": "exports.seen = require('./a').name === undefined ? 'partial' : 'full'\n"
             }
           }
         }
@@ -313,6 +417,14 @@
           "expect": {
             "exit": 0,
             "stdout": "7\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node /data/a.js",
+          "expect": {
+            "exit": 0,
+            "stdout": "a ran partial\n",
             "stderr": ""
           }
         },
@@ -377,6 +489,14 @@
           "expect": {
             "exit": 0,
             "stdout": "/a/c/d.txt y.tar .gz /a ../../d a/c/ false { root: '/', dir: '/h', base: 'f.txt', ext: '.txt', name: 'f' }\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"const p = require('path'); const o = { v: 7, run(cb) { cb(null, this.v) } }; o.run = require('util').promisify(o.run); o.run().then((v) => console.log(JSON.stringify([p.basename('file.txt', 'file.txt'), p.basename('/a/file.txt', 'file.txt')]), v))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"\",\"file.txt\"] 7\n",
             "stderr": ""
           }
         }

@@ -295,11 +295,11 @@ loads files by path: JavaScript as CommonJS, and JSON parsed. `process`,
   <Accordion title="Support" id="node-support">
     | Module or global | Support |
     | --- | --- |
-    | `fs` | `readFileSync`, `writeFileSync`, `appendFileSync`, `copyFileSync`, `existsSync`, `accessSync`, `statSync`, `lstatSync`, `readdirSync` (with `withFileTypes`), `realpathSync`, `mkdirSync` (with `recursive`), `rmSync`, `rmdirSync`, `unlinkSync`, `renameSync`, each also as a callback; errors carry Node's `code`, `syscall` and `path` |
+    | `fs` | `readFileSync`, `writeFileSync`, `appendFileSync`, `copyFileSync`, `existsSync`, `accessSync`, `statSync`, `lstatSync`, `readdirSync` (with `withFileTypes`), `realpathSync`, `mkdirSync` (with `recursive`), `rmSync`, `rmdirSync`, `unlinkSync`, `renameSync`, each also as a callback, and `fs.constants`; errors carry Node's `code`, `syscall`, `path` and Linux `errno` |
     | `fs/promises`, `fs.promises` | The same calls, as promises |
     | `path` | POSIX: `join`, `resolve`, `normalize`, `dirname`, `basename`, `extname`, `relative`, `isAbsolute`, `parse`, `format`, `sep`, `delimiter` |
-    | `process` | `argv`, `env`, `cwd()`, `chdir()`, `exit()`, `nextTick()`, `stdout.write()`, `stderr.write()`, and `stdin` as events (`data`, `end`, `readable`), `read()` and `for await` |
-    | `readline` | `createInterface({ input: process.stdin })`, as `line` and `close` events or `for await` |
+    | `process` | `argv`, `env`, `cwd()`, `chdir()`, `exit()`, `nextTick()`, `stdout.write()`, `stderr.write()`, and `stdin` as events (`data`, `end`, `readable`), `read()` and `for await`, each chunk as it arrives |
+    | `readline` | `createInterface({ input: process.stdin })`, as `line` and `close` events (`on`, `once`, `off`) or `for await` |
     | `buffer`, `Buffer` | `from`, `alloc`, `concat`, `isBuffer`, `byteLength`, `toString` in `utf8`, `base64`, `base64url`, `hex`, `latin1` and `ascii` |
     | `util` | `format`, `inspect`, `promisify` |
     | Timers | `setTimeout`, `setInterval`, `setImmediate` and their `clear` calls |
@@ -312,7 +312,9 @@ loads files by path: JavaScript as CommonJS, and JSON parsed. `process`,
     | `import` of `node:` modules in an ES module | ✗; `require()` works in both modes |
     | Streams, such as `fs.createReadStream()` | ✗ |
     | `process.exitCode` at the end of a run | Read by `process.exit()` only |
-    | Symbolic links | `lstatSync` follows them, as `statSync` does |
+    | `process.nextTick()` | Runs in turn with promise jobs, not ahead of them |
+    | Modules an ES module imports | Run before Node's globals are set, so they reach them in functions, not at their top level |
+    | Symbolic links | `lstatSync` follows them, as `statSync` does, so `unlinkSync` refuses a link to a directory; `rmSync` removes a link, never what it points at |
   </Accordion>
 </AccordionGroup>
 
