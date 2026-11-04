@@ -26,12 +26,12 @@ def _under(p: str) -> str:
 async def readdir(accessor: SqlAccessor, path: PathSpec) -> list[FileStat]:
     # A pattern spec addresses the directory whose entries the glob
     # filters.
-    w = walk(accessor, path.dir if path.pattern is not None else path)
+    w = await walk(accessor, path.dir if path.pattern is not None else path)
     node = target(w)
     if node is None or not is_dir(node):
         raise await not_listable(w, path)
     entries: list[tuple[str, Inode]] = []
-    for row in accessor.query(SQL["children"], (node.ino,)):
+    for row in await accessor.query(SQL["children"], (node.ino,)):
         child = inode_of(row)
         if child is not None:
             entries.append((str(row["name"]), child))
@@ -46,12 +46,12 @@ async def tree(
     """Every entry under a directory from one query, each as ``stat``
     answers it, keyed by its path below the directory; None when
     ``path`` is no directory. Mirrors TypeScript's ``tree``."""
-    w = walk(accessor, path)
+    w = await walk(accessor, path)
     node = target(w)
     if node is None or not is_dir(node):
         return None
     entries: list[tuple[str, Inode]] = []
-    for row in accessor.query(SQL["subtree"], (node.ino,)):
+    for row in await accessor.query(SQL["subtree"], (node.ino,)):
         child = inode_of(row)
         if child is not None:
             entries.append((str(row["rel"]), child))

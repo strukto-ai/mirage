@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { networkRule, runWithNetwork } from '@struktoai/mirage-core/io/network'
+import { watchNetwork } from '@struktoai/mirage-core/io/web/network'
 import { describe, expect, it } from 'vitest'
 import { encode, RespClient, RespError, type SocketLike } from './resp.ts'
 
@@ -80,6 +82,20 @@ describe('RespClient', () => {
         ]),
       ),
     )
+  })
+
+  it('asks the rule in force before each pipeline, not only the one that opened the socket', async () => {
+    watchNetwork()
+    let opened = 0
+    const client = new RespClient('redis://h.example:6379', () => {
+      opened++
+      return server('+PONG\r\n+PONG\r\n', [])
+    })
+    expect(await runWithNetwork(networkRule(true), () => client.call('PING'))).toBe('PONG')
+    await expect(runWithNetwork(networkRule(false), () => client.call('PING'))).rejects.toThrow(
+      'EACCES',
+    )
+    expect(opened).toBe(1)
   })
 
   it('fails the waiting call when the server hangs up', async () => {

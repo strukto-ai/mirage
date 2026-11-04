@@ -12,10 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Sequence
+
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import SQL
 from mirage.core.sql.inode import Inode, InoRef, by_ino, insert_rows
-from mirage.vfs.sql.types import SqlStatement, SqlValue
+from mirage.vfs.sql.types import SqlRow, SqlStatement, SqlValue
 
 
 def _bytes_of(value: SqlValue | None) -> bytes:
@@ -26,7 +28,7 @@ def _bytes_of(value: SqlValue | None) -> bytes:
     )
 
 
-def read_bytes(
+async def read_bytes(
     accessor: SqlAccessor,
     node: Inode,
     offset: int = 0,
@@ -39,11 +41,20 @@ def read_bytes(
     stop = node.size if length is None else min(offset + length, node.size)
     if stop <= offset:
         return b""
-    cs = accessor.chunk_size()
-    out = bytearray(stop - offset)
-    rows = accessor.query(
+    cs = await accessor.chunk_size()
+    rows = await accessor.query(
         SQL["chunks"], (node.ino, offset // cs, (stop - 1) // cs)
     )
+    return fill_bytes(rows, cs, offset, stop)
+
+
+def fill_bytes(
+    rows: Sequence[SqlRow], cs: int, offset: int, stop: int
+) -> bytes:
+    """The bytes ``[offset, stop)`` that ``fs_data`` rows of ``cs``
+    bytes hold, zeros where none does. Mirrors TypeScript's
+    ``fillBytes``."""
+    out = bytearray(stop - offset)
     for row in rows:
         base = int(row["chunk_index"] or 0) * cs
         data = _bytes_of(row["data"])
@@ -56,7 +67,7 @@ def read_bytes(
     return bytes(out)
 
 
-def place_bytes(
+async def place_bytes(
     accessor: SqlAccessor,
     ino: InoRef,
     node: Inode | None,
@@ -72,7 +83,7 @@ def place_bytes(
     TypeScript's ``placeBytes``."""
     if not data:
         return []
-    cs = accessor.chunk_size()
+    cs = await accessor.chunk_size()
     size = node.size if node is not None else 0
     end = offset + len(data)
     first = offset // cs
@@ -87,7 +98,7 @@ def place_bytes(
             edges = sorted(
                 {first if keep_head else last, last if keep_tail else first}
             )
-            rows = accessor.query(
+            rows = await accessor.query(
                 "SELECT chunk_index, data FROM fs_data WHERE ino = ? AND"
                 f" chunk_index IN ({', '.join('?' for _ in edges)})",
                 (node.ino, *edges),
@@ -116,7 +127,7 @@ def place_bytes(
     return out
 
 
-def cut_bytes(
+async def cut_bytes(
     accessor: SqlAccessor,
     node: Inode,
     length: int,
@@ -127,7 +138,7 @@ def cut_bytes(
     nothing; the size alone pads. Mirrors TypeScript's ``cutBytes``."""
     if length >= node.size:
         return []
-    cs = accessor.chunk_size()
+    cs = await accessor.chunk_size()
     ino = by_ino(node.ino)
     keep = -(-length // cs)
     out = [
@@ -139,7 +150,7 @@ def cut_bytes(
     tail = length % cs
     if tail == 0:
         return out
-    rows = accessor.query(SQL["chunks"], (node.ino, keep - 1, keep - 1))
+    rows = await accessor.query(SQL["chunks"], (node.ino, keep - 1, keep - 1))
     data = _bytes_of(rows[0]["data"]) if rows else b""
     if len(data) <= tail:
         return out

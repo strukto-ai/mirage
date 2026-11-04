@@ -22,13 +22,13 @@ from mirage.types import PathSpec
 async def size_of(accessor: SqlAccessor, path: PathSpec) -> int:
     """The bytes at ``path``, a directory's files included; 0 for none.
     Mirrors TypeScript's ``sizeOf``."""
-    node = target(walk(accessor, path))
+    node = target(await walk(accessor, path))
     if node is None:
         return 0
     if not is_dir(node):
         return node.size
     total = 0
-    for row in accessor.query(SQL["subtree"], (node.ino,)):
+    for row in await accessor.query(SQL["subtree"], (node.ino,)):
         child = inode_of(row)
         if child is not None and is_file(child):
             total += child.size
@@ -38,5 +38,5 @@ async def size_of(accessor: SqlAccessor, path: PathSpec) -> int:
 async def count(accessor: SqlAccessor) -> int:
     """The bytes every file of the database holds. Mirrors TypeScript's
     ``count``."""
-    rows = accessor.query(SQL["used_bytes"])
+    rows = await accessor.query(SQL["used_bytes"])
     return int(rows[0]["n"] or 0) if rows else 0

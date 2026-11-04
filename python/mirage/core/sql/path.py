@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from mirage.accessor.sql import SqlAccessor
@@ -41,13 +42,18 @@ def names_of(p: str) -> tuple[str, ...]:
     return tuple(bare.split("/")) if bare else ()
 
 
-def walk(accessor: SqlAccessor, path: PathSpec | str) -> Walk:
-    """Resolve ``path`` in one query: each level joins the entry under
-    the inode above it, so the database walks every name and answers
-    every inode on the way, and a miss stops the chain where it happens.
-    Mirrors TypeScript's ``walk``."""
-    p = norm(path if isinstance(path, str) else path.mount_path)
-    names = names_of(p)
+# SQLite joins at most 64 tables, so one query walks at most this many
+# names (two tables each, past the inode it starts from), and a deeper
+# path walks on from where the last query stopped.
+_NAMES_PER_QUERY = 31
+
+
+async def _walk_from(
+    accessor: SqlAccessor, start: int, names: Sequence[str]
+) -> list[Inode | None]:
+    """The inode ``start`` and the inode each of ``names`` reaches below
+    it in turn, None from the first miss, in one query: each level joins
+    the entry under the inode above it."""
     levels = len(names) + 1
     select: list[str] = []
     joins: list[str] = []
@@ -61,12 +67,29 @@ def walk(accessor: SqlAccessor, path: PathSpec | str) -> Walk:
             ]
     sql = (
         f"SELECT {', '.join(select)} FROM fs_inode n0 {' '.join(joins)}"
-        f"\n    WHERE n0.ino = {ROOT_INO}"
+        f"\n    WHERE n0.ino = {by_ino(start).sql}"
     )
-    rows = accessor.query(sql, names)
+    rows = await accessor.query(sql, names)
     row = rows[0] if rows else None
-    chain = tuple(inode_of(row, f"l{i}_") for i in range(levels))
-    return Walk(p, names, chain)
+    return [inode_of(row, f"l{i}_") for i in range(levels)]
+
+
+async def walk(accessor: SqlAccessor, path: PathSpec | str) -> Walk:
+    """Resolve ``path`` from the root, ``_NAMES_PER_QUERY`` names a
+    query, so the database walks every name and answers every inode on
+    the way, and a miss stops the chain where it happens. Mirrors
+    TypeScript's ``walk``."""
+    p = norm(path if isinstance(path, str) else path.mount_path)
+    names = names_of(p)
+    chain = await _walk_from(accessor, ROOT_INO, names[:_NAMES_PER_QUERY])
+    for at in range(_NAMES_PER_QUERY, len(names), _NAMES_PER_QUERY):
+        part = names[at : at + _NAMES_PER_QUERY]
+        last = chain[-1]
+        if last is None:
+            chain += [None] * len(part)
+        else:
+            chain += (await _walk_from(accessor, last.ino, part))[1:]
+    return Walk(p, names, tuple(chain))
 
 
 def target(w: Walk) -> Inode | None:

@@ -26,16 +26,16 @@ async def rmdir(accessor: SqlAccessor, path: PathSpec) -> None:
     directory holds nothing, checked in the statement that removes it,
     so a child written since the check keeps it there and the call
     answers ENOTEMPTY. Mirrors TypeScript's ``rmdir``."""
-    w = walk(accessor, path)
+    w = await walk(accessor, path)
     node = found(w, path)
     if not is_dir(node):
         raise enotdir(path)
     parent = parent_of(w)
     if parent is None:
         raise ebusy(path)
-    if accessor.query(SQL["has_child"], (node.ino,)):
+    if await accessor.query(SQL["has_child"], (node.ino,)):
         raise enotempty(path)
-    accessor.batch(
+    await accessor.batch(
         [
             SqlStatement(
                 f"{SQL['remove_entry']} AND NOT EXISTS (\n"
@@ -46,5 +46,5 @@ async def rmdir(accessor: SqlAccessor, path: PathSpec) -> None:
             *drop_inodes([node.ino]),
         ]
     )
-    if accessor.query(SQL["has_entry"], (parent.ino, leaf(w))):
+    if await accessor.query(SQL["has_entry"], (parent.ino, leaf(w))):
         raise enotempty(path)

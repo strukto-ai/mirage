@@ -19,29 +19,33 @@ import {
   type SqlStatement,
   type SqlValue,
 } from '@struktoai/mirage-core/vfs/sql/types'
+import { resolve } from 'node:path'
 import type { DatabaseSync, SQLInputValue } from 'node:sqlite'
+
+// Each `:memory:` database is its own, so each driver on one gets a location
+// of its own.
+let memories = 0
 
 /**
  * A SQLite file opened with `node:sqlite`, as the sql mount's driver.
  *
  * The file opens on the first statement, so building a mount never touches
- * the disk. `:memory:` holds the database in this process alone. Mirrors
- * Python's `SqliteDriver`.
+ * the disk; calls that arrive before it has opened share the one opening.
+ * `:memory:` holds the database in this driver alone. `location` is the
+ * file's absolute path, so two names of one file read as one database, or
+ * `:memory:#n`, one per driver. Mirrors Python's `SqliteDriver`.
  */
 export class SqliteDriver implements SqlDriver {
   readonly location: string
   readonly dialect = SqlDialect.SQLITE
-  private db: DatabaseSync | null = null
+  private db: Promise<DatabaseSync> | null = null
 
   constructor(readonly path = ':memory:') {
-    this.location = path
+    this.location = path === ':memory:' ? `:memory:#${String(++memories)}` : resolve(path)
   }
 
-  private async open(): Promise<DatabaseSync> {
-    if (this.db === null) {
-      const { DatabaseSync } = await import('node:sqlite')
-      this.db = new DatabaseSync(this.path)
-    }
+  private open(): Promise<DatabaseSync> {
+    this.db ??= import('node:sqlite').then(({ DatabaseSync }) => new DatabaseSync(this.path))
     return this.db
   }
 
@@ -62,9 +66,9 @@ export class SqliteDriver implements SqlDriver {
     }
   }
 
-  close(): Promise<void> {
-    this.db?.close()
+  async close(): Promise<void> {
+    const db = this.db
     this.db = null
-    return Promise.resolve()
+    ;(await db)?.close()
   }
 }

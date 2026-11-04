@@ -36,9 +36,9 @@ async def read(
         size (int | None): the window's length; None to the end.
     """
     timer = start_op()
-    node = found(walk(accessor, path), path)
+    node = found(await walk(accessor, path), path)
     if is_dir(node):
         raise eisdir(path)
-    data = read_bytes(accessor, node, offset, size)
+    data = await read_bytes(accessor, node, offset, size)
     record("read", path.virtual, VFSName.SQL, len(data), timer)
     return data

@@ -12,20 +12,26 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import itertools
 from typing import TypedDict
 
 from mirage.accessor.sql import SqlAccessor
-from mirage.core.sql.constants import CLEAR, DIR, FILE, ROOT_INO, SQL
-from mirage.core.sql.data import place_bytes, read_bytes
+from mirage.core.sql.constants import (
+    CLEAR,
+    DIR,
+    FILE,
+    RENUMBERED,
+    ROOT_INO,
+    SQL,
+)
+from mirage.core.sql.data import fill_bytes
 from mirage.core.sql.inode import (
-    InoRef,
-    by_entry,
     by_ino,
     inode_of,
+    insert_rows,
     is_dir,
     is_file,
     iso_of,
-    make_node,
     now_stamp,
     stamp_of,
 )
@@ -50,12 +56,13 @@ def depth(p: str) -> int:
 
 def snapshot(accessor: SqlAccessor) -> SqlSnapshot:
     """Every file and directory of the database, read in one walk of the
-    tree. Synchronous, as ``get_state`` calls it. Mirrors TypeScript's
-    ``snapshot``."""
+    tree. Blocking, as ``get_state`` is: it calls the driver itself.
+    Mirrors TypeScript's ``snapshot``."""
+    cs = accessor.ready()
     files: dict[str, bytes] = {}
     dirs = ["/"]
     modified: dict[str, str] = {}
-    for row in accessor.query(SQL["subtree"], (ROOT_INO,)):
+    for row in accessor.driver.query(SQL["subtree"], (ROOT_INO,)):
         node = inode_of(row)
         if node is None or not (is_dir(node) or is_file(node)):
             continue
@@ -63,7 +70,10 @@ def snapshot(accessor: SqlAccessor) -> SqlSnapshot:
         if is_dir(node):
             dirs.append(p)
         else:
-            files[p] = read_bytes(accessor, node)
+            rows = accessor.driver.query(
+                SQL["chunks"], (node.ino, 0, max(node.size - 1, 0) // cs)
+            )
+            files[p] = fill_bytes(rows, cs, 0, node.size)
         modified[p] = iso_of(node.mtime, node.mtime_nsec)
     return SqlSnapshot(files=files, dirs=sorted(dirs), modified=modified)
 
@@ -78,32 +88,44 @@ def restore(
     """Replace everything the database holds with a snapshot, in one
     transaction: the directories outermost first, then each file under
     its directory. A path whose directory the snapshot does not hold is
-    dropped. Mirrors TypeScript's ``restore``."""
+    dropped. Each inode is given its number here, so an entry names its
+    parent by number however deep the tree. Blocking, as ``load_state``
+    is. Mirrors TypeScript's ``restore``."""
+    cs = accessor.ready()
     statements = [SqlStatement(sql) for sql in CLEAR]
-    refs: dict[str, InoRef] = {"/": by_ino(ROOT_INO)}
+    made: dict[str, int] = {"/": ROOT_INO}
     now = now_stamp()
+    numbers = itertools.count(ROOT_INO + 1)
 
     def place(p: str, mode: int, data: bytes | None) -> None:
-        up = refs.get(parent(p))
+        up = made.get(parent(p))
         if up is None:
             return
-        name = gnu_basename(p)
-        ref = by_entry(up, name)
-        stamp = stamp_of(modified[p]) if p in modified else now
+        ino = next(numbers)
+        seconds, nanoseconds = stamp_of(modified[p]) if p in modified else now
+        size = len(data) if data is not None else 0
         statements.extend(
-            make_node(
-                accessor,
-                up,
-                name,
-                mode,
-                len(data) if data is not None else 0,
-                stamp,
+            [
+                SqlStatement(
+                    SQL["numbered_inode"],
+                    (ino, mode, size, seconds, nanoseconds),
+                ),
+                SqlStatement(SQL["new_entry"], (gnu_basename(p), up, ino)),
+            ]
+        )
+        if data is None:
+            made[p] = ino
+            return
+        statements.extend(
+            insert_rows(
+                "INSERT INTO fs_data (ino, chunk_index, data)",
+                f"({by_ino(ino).sql}, ?, ?)",
+                [
+                    (i, data[at : at + cs])
+                    for i, at in enumerate(range(0, len(data), cs))
+                ],
             )
         )
-        if data is not None:
-            statements.extend(place_bytes(accessor, ref, None, 0, data))
-        if data is None:
-            refs[p] = ref
 
     for p in sorted(
         (d for d in dirs if d != "/"), key=lambda d: (depth(d), d)
@@ -111,4 +133,7 @@ def restore(
         place(p, DIR, None)
     for p, data in files.items():
         place(p, FILE, data)
-    accessor.batch(statements)
+    renumbered = RENUMBERED[accessor.driver.dialect]
+    if renumbered is not None:
+        statements.append(SqlStatement(renumbered))
+    accessor.driver.batch(statements)

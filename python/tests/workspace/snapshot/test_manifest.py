@@ -120,3 +120,26 @@ def test_mount_vfs_state_is_rewritten_not_passed_through():
 
     files = manifest[StateKey.MOUNTS][0][MountKey.VFS_STATE]["files"]
     assert blobs[files["/a.txt"][BLOB_REF_KEY]] == b"hi"
+
+
+def test_sql_mount_bytes_round_trip_through_the_archive():
+    state = _state()
+    state[StateKey.MOUNTS] = [
+        {
+            MountKey.INDEX: 0,
+            MountKey.PREFIX: "/s",
+            MountKey.VFS_STATE: {
+                "type": "sql",
+                "files": {"/a.txt": b"sql body"},
+                "dirs": ["/"],
+            },
+        }
+    ]
+
+    manifest, blobs = split_manifest_and_blobs(state)
+    buf = io.BytesIO()
+    write_tar(buf, manifest, blobs)
+    buf.seek(0)
+
+    restored = read_tar(buf)[StateKey.MOUNTS][0][MountKey.VFS_STATE]
+    assert restored["files"] == {"/a.txt": b"sql body"}

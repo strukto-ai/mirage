@@ -225,9 +225,6 @@ export class RespClient {
 
   private async open(drop: () => void): Promise<Connection> {
     const at = target(this.url)
-    // An edge isolate opens the socket past its fetch guard, so the network
-    // rule is asked here; elsewhere this is a no-op.
-    judgeSocket(at.hostname, at.port)
     const socket = await this.connect(at.hostname, at.port, at.tls)
     const conn: Connection = {
       socket,
@@ -293,8 +290,16 @@ export class RespClient {
     return Promise.all(replies)
   }
 
-  /** Run commands as one pipeline: written together, answered in order. */
+  /**
+   * Run commands as one pipeline: written together, answered in order. An
+   * edge isolate opens the socket past its fetch guard, so the network rule
+   * in force is asked here, before every pipeline: a connection one
+   * workspace opened is not another's to use under a narrower rule.
+   * Elsewhere this is a no-op.
+   */
   async pipeline(commands: readonly (readonly RespArg[])[]): Promise<RespReply[]> {
+    const at = target(this.url)
+    judgeSocket(at.hostname, at.port)
     return this.send(await this.connection(), commands)
   }
 

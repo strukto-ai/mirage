@@ -13,9 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 
-from mirage.vfs.sql.types import SqlDriver, SqlStatement
+from mirage.concurrency.limiter import run_blocking
+from mirage.vfs.sql.types import SqlDriver, SqlRow, SqlStatement, SqlValue
 from mirage.workspace.record.types import RecordFields, generation_of
 
 _SCHEMA = (
@@ -63,20 +64,31 @@ class SqlRecordClient:
         self.scope = scope
         self._ready = False
 
-    def _db(self) -> SqlDriver:
+    # The driver blocks, so each statement runs off the loop, the table
+    # made first.
+    async def _query(
+        self, sql: str, params: Sequence[SqlValue]
+    ) -> list[SqlRow]:
+        await self._schema()
+        return await run_blocking(self._driver.query, sql, params)
+
+    async def _batch(self, statements: Sequence[SqlStatement]) -> None:
+        await self._schema()
+        await run_blocking(self._driver.batch, statements)
+
+    async def _schema(self) -> None:
         if not self._ready:
-            self._driver.batch([SqlStatement(_SCHEMA)])
+            await run_blocking(self._driver.batch, [SqlStatement(_SCHEMA)])
             self._ready = True
-        return self._driver
 
     async def get(self, name: str) -> tuple[RecordFields | None, str]:
-        rows = self._db().query(RECORD_SQL["get"], (self.scope, name))
+        rows = await self._query(RECORD_SQL["get"], (self.scope, name))
         if not rows:
             return None, ""
         return json.loads(str(rows[0]["fields"])), str(rows[0]["generation"])
 
     async def put(self, name: str, fields: RecordFields) -> None:
-        self._db().batch(
+        await self._batch(
             [
                 SqlStatement(
                     RECORD_SQL["put"],
@@ -93,31 +105,30 @@ class SqlRecordClient:
     async def cas_put(
         self, name: str, fields: RecordFields, expected_generation: int
     ) -> bool:
-        db = self._db()
         body = json.dumps(fields)
         generation = generation_of(fields)
         if expected_generation != 0:
             return bool(
-                db.query(
+                await self._query(
                     RECORD_SQL["update_at"],
                     (body, generation, self.scope, name, expected_generation),
                 )
             )
-        if db.query(
+        if await self._query(
             RECORD_SQL["insert_new"], (self.scope, name, body, generation)
         ):
             return True
         # A record written before generations has none stored, which
         # counts as 0, so it is taken over the same way a new one is.
         return bool(
-            db.query(
+            await self._query(
                 RECORD_SQL["update_at"],
                 (body, generation, self.scope, name, 0),
             )
         )
 
     async def list_names(self) -> list[str]:
-        rows = self._db().query(RECORD_SQL["list_names"], (self.scope,))
+        rows = await self._query(RECORD_SQL["list_names"], (self.scope,))
         return sorted(str(r["name"]) for r in rows)
 
     async def delete(self, names: Iterable[str]) -> None:
@@ -126,10 +137,10 @@ class SqlRecordClient:
             for name in names
         ]
         if statements:
-            self._db().batch(statements)
+            await self._batch(statements)
 
     async def clear(self) -> None:
-        self._db().batch([SqlStatement(RECORD_SQL["clear"], (self.scope,))])
+        await self._batch([SqlStatement(RECORD_SQL["clear"], (self.scope,))])
 
     async def close(self) -> None:
         pass

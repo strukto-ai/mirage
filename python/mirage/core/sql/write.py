@@ -44,7 +44,7 @@ from mirage.types import PathSpec, VFSName
 from mirage.vfs.sql.types import SqlStatement
 
 
-def _landing(
+async def _landing(
     accessor: SqlAccessor,
     w: Walk,
     node: Inode | None,
@@ -58,17 +58,17 @@ def _landing(
         ref = by_entry(parent_ref(w), leaf(w))
         return [
             *make_node(accessor, parent_ref(w), leaf(w), FILE, len(data), now),
-            *place_bytes(accessor, ref, None, 0, data),
+            *await place_bytes(accessor, ref, None, 0, data),
         ]
     ino = by_ino(node.ino)
     if append:
         return [
-            *place_bytes(accessor, ino, node, node.size, data),
+            *await place_bytes(accessor, ino, node, node.size, data),
             resized(ino, node.size + len(data), now),
         ]
     return [
         SqlStatement(f"DELETE FROM fs_data WHERE ino = {ino.sql}"),
-        *place_bytes(accessor, ino, None, 0, data),
+        *await place_bytes(accessor, ino, None, 0, data),
         resized(ino, len(data), now),
     ]
 
@@ -97,7 +97,7 @@ async def write(
         atomic (bool): stage a stream until successful EOF.
     """
     timer = start_op()
-    w = walk(accessor, path)
+    w = await walk(accessor, path)
     check_dest_parents(w, path)
     check_write_target(w, path)
     op = "append" if append else "write"
@@ -106,26 +106,28 @@ async def write(
         whole = await materialize(data)
         if append and not whole and existing is not None:
             return
-        accessor.batch(_landing(accessor, w, existing, whole, append))
+        await accessor.batch(
+            await _landing(accessor, w, existing, whole, append)
+        )
         record(op, path.virtual, VFSName.SQL, len(whole), timer)
         return
     if existing is None or not append:
-        accessor.batch(_landing(accessor, w, existing, b"", False))
-    node = found(walk(accessor, path), path)
+        await accessor.batch(await _landing(accessor, w, existing, b"", False))
+    node = found(await walk(accessor, path), path)
     offset = node.size if append else 0
     pending = bytearray()
     written = 0
 
-    def flush() -> None:
+    async def flush() -> None:
         nonlocal node, offset, written
         if not pending:
             return
         block = bytes(pending)
         ino = by_ino(node.ino)
         size = max(node.size, offset + len(block))
-        accessor.batch(
+        await accessor.batch(
             [
-                *place_bytes(accessor, ino, node, offset, block),
+                *await place_bytes(accessor, ino, node, offset, block),
                 resized(ino, size, now_stamp()),
             ]
         )
@@ -140,6 +142,6 @@ async def write(
                 continue
             pending.extend(chunk)
             if len(pending) >= FLUSH_BYTES:
-                flush()
-    flush()
+                await flush()
+    await flush()
     record(op, path.virtual, VFSName.SQL, written, timer)

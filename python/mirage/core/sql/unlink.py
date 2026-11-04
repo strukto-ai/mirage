@@ -24,12 +24,12 @@ from mirage.vfs.sql.types import SqlStatement
 async def unlink(accessor: SqlAccessor, path: PathSpec) -> None:
     """Remove a file's entry, and the file with it unless another entry
     names it."""
-    w = walk(accessor, path)
+    w = await walk(accessor, path)
     node = found(w, path)
     if is_dir(node):
         raise eisdir(path)
     parent = parent_of(w)
-    accessor.batch(
+    await accessor.batch(
         [
             SqlStatement(
                 SQL["remove_entry"],

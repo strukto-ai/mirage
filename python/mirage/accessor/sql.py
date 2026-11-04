@@ -15,6 +15,7 @@
 from collections.abc import Sequence
 
 from mirage.accessor.base import Accessor
+from mirage.concurrency.limiter import run_blocking
 from mirage.core.sql.constants import DEFAULT_CHUNK_SIZE, SCHEMA, SQL
 from mirage.utils.clock import system_date
 from mirage.vfs.sql.types import SqlDriver, SqlRow, SqlStatement, SqlValue
@@ -22,7 +23,9 @@ from mirage.vfs.sql.types import SqlDriver, SqlRow, SqlStatement, SqlValue
 
 class SqlAccessor(Accessor):
     """A sql mount's database: its driver, and the tables the ops read,
-    made on the first statement. Mirrors TypeScript's ``SqlAccessor``.
+    made on the first statement. The driver blocks, so every live call
+    runs off the loop; the snapshot, already on a worker thread, calls it
+    directly. Mirrors TypeScript's ``SqlAccessor``.
     """
 
     def __init__(self, driver: SqlDriver) -> None:
@@ -32,10 +35,10 @@ class SqlAccessor(Accessor):
         self.driver = driver
         self._chunk_size: int | None = None
 
-    def chunk_size(self) -> int:
+    def ready(self) -> int:
         """The bytes one row of a file holds, as the database records
         it; the tables and the root are made first when the database has
-        none."""
+        none. Blocks: for a caller off the loop."""
         if self._chunk_size is None:
             now = int(system_date().timestamp())
             self.driver.batch(
@@ -52,15 +55,23 @@ class SqlAccessor(Accessor):
             self._chunk_size = int(value or 0) or DEFAULT_CHUNK_SIZE
         return self._chunk_size
 
-    def query(self, sql: str, params: Sequence[SqlValue] = ()) -> list[SqlRow]:
-        """The rows one statement answers, once the tables are there."""
-        self.chunk_size()
-        return self.driver.query(sql, params)
+    async def chunk_size(self) -> int:
+        """``ready``, off the loop the first time."""
+        if self._chunk_size is not None:
+            return self._chunk_size
+        return await run_blocking(self.ready)
 
-    def batch(self, statements: Sequence[SqlStatement]) -> None:
+    async def query(
+        self, sql: str, params: Sequence[SqlValue] = ()
+    ) -> list[SqlRow]:
+        """The rows one statement answers, once the tables are there."""
+        await self.chunk_size()
+        return await run_blocking(self.driver.query, sql, params)
+
+    async def batch(self, statements: Sequence[SqlStatement]) -> None:
         """Run ``statements`` in one transaction, once the tables are
         there."""
         if not statements:
             return
-        self.chunk_size()
-        self.driver.batch(statements)
+        await self.chunk_size()
+        await run_blocking(self.driver.batch, statements)

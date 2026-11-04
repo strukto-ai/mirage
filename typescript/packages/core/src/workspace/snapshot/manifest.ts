@@ -119,6 +119,13 @@ function mountToManifest(mount: JsonObject, a: BlobAllocator): JsonObject {
       `_redis${String(idx)}`,
       `mounts/${String(idx)}/data`,
     )
+  } else if (ptype === VFSName.SQL) {
+    ps[VFSStateKey.FILES] = stashBlobs(
+      files,
+      a,
+      `_sql${String(idx)}`,
+      `mounts/${String(idx)}/files`,
+    )
   }
   const out: JsonObject = {}
   for (const [k, v] of Object.entries(mount)) {

@@ -122,7 +122,9 @@ export function byEntry(parent: InoRef, name: string): InoRef {
 /**
  * A new inode of `mode` and `size` bytes, and the entry that names it `name`
  * under `parent`, as two statements of one batch: the entry takes the number
- * the inode was just given.
+ * the inode was just given. The parent is named through its inode, so a
+ * parent another writer removed since the lookup leaves the entry no parent,
+ * which its column refuses, and the batch fails whole rather than strand it.
  */
 export function makeNode(
   accessor: SqlAccessor,
@@ -139,7 +141,8 @@ export function makeNode(
     },
     {
       sql: `INSERT INTO fs_dentry (name, parent_ino, ino)
-        VALUES (?, ${parent.sql}, ${LAST_INO[accessor.driver.dialect]})`,
+        VALUES (?, (SELECT ino FROM fs_inode WHERE ino = ${parent.sql}),
+          ${LAST_INO[accessor.driver.dialect]})`,
       params: [name, ...parent.params],
     },
   ]

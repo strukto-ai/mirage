@@ -147,6 +147,10 @@ def _mount_to_manifest(
         ps[VFSStateKey.FILES] = _stash_blobs(
             files, a, f"_redis{idx}", tar_dir=f"mounts/{idx}/data"
         )
+    elif ptype == VFSName.SQL:
+        ps[VFSStateKey.FILES] = _stash_blobs(
+            files, a, f"_sql{idx}", tar_dir=f"mounts/{idx}/files"
+        )
     return {
         **{k: v for k, v in mount.items() if k != MountKey.VFS_STATE},
         MountKey.VFS_STATE: ps,

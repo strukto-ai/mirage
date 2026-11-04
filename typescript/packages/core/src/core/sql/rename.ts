@@ -17,7 +17,7 @@ import { ebusy, einval, eisdir, enotdir, enotempty } from '../../errors/fs.ts'
 import type { PathSpec } from '../../types.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
 import { SQL } from './constants.ts'
-import { dropInodes, isDir } from './inode.ts'
+import { byIno, dropInodes, isDir } from './inode.ts'
 import { checkDestParents, found, leaf, parentOf, target, walk } from './path.ts'
 
 /**
@@ -26,7 +26,9 @@ import { checkDestParents, found, leaf, parentOf, target, walk } from './path.ts
  * transaction. A file onto a directory is EISDIR, a directory onto a file
  * ENOTDIR, onto a directory that holds entries ENOTEMPTY, and into its own
  * subtree EINVAL; a file or empty directory at the destination is replaced.
- * Mirrors Python's `rename`.
+ * A directory there goes only while it is still empty: one another writer
+ * wrote into since the check keeps its entry, the move meets that name and
+ * fails whole, and the call answers ENOTEMPTY. Mirrors Python's `rename`.
  */
 export async function rename(accessor: SqlAccessor, src: PathSpec, dst: PathSpec): Promise<void> {
   const from = await walk(accessor, src)
@@ -49,11 +51,23 @@ export async function rename(accessor: SqlAccessor, src: PathSpec, dst: PathSpec
     throw eisdir(dst)
   }
   const statements: SqlStatement[] = []
-  if (there !== null) statements.push({ sql: SQL.removeEntry, params: [toParent.ino, leaf(to)] })
+  if (there !== null) {
+    const empty = isDir(there)
+      ? ` AND NOT EXISTS (SELECT 1 FROM fs_dentry c WHERE c.parent_ino = ${byIno(there.ino).sql})`
+      : ''
+    statements.push({ sql: SQL.removeEntry + empty, params: [toParent.ino, leaf(to)] })
+  }
   statements.push({
     sql: SQL.moveEntry,
     params: [toParent.ino, leaf(to), fromParent.ino, leaf(from)],
   })
   if (there !== null) statements.push(...dropInodes([there.ino]))
-  await accessor.batch(statements)
+  try {
+    await accessor.batch(statements)
+  } catch (err) {
+    if (there !== null && isDir(there)) {
+      if ((await accessor.query(SQL.hasChild, [there.ino])).length > 0) throw enotempty(dst)
+    }
+    throw err
+  }
 }

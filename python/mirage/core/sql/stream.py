@@ -30,12 +30,12 @@ async def read_stream(
 ) -> AsyncIterator[bytes]:
     """A file's bytes, ``FLUSH_BYTES`` at a time, so a large one never
     sits whole in memory."""
-    node = found(walk(accessor, path), path)
+    node = found(await walk(accessor, path), path)
     if is_dir(node):
         raise eisdir(path)
     rec = record_stream("read", path.virtual, VFSName.SQL)
     for offset in range(0, node.size, FLUSH_BYTES):
-        data = read_bytes(accessor, node, offset, FLUSH_BYTES)
+        data = await read_bytes(accessor, node, offset, FLUSH_BYTES)
         if rec is not None:
             rec.bytes += len(data)
         yield data

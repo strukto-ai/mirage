@@ -32,18 +32,18 @@ async def create(accessor: SqlAccessor, path: PathSpec) -> None:
     """Make an empty file, or empty the one there. Mirrors TypeScript's
     ``create``."""
     timer = start_op()
-    w = walk(accessor, path)
+    w = await walk(accessor, path)
     check_dest_parents(w, path)
     check_write_target(w, path)
     node = target(w)
     now = now_stamp()
     if node is None:
-        accessor.batch(
+        await accessor.batch(
             make_node(accessor, parent_ref(w), leaf(w), FILE, 0, now)
         )
     else:
         ino = by_ino(node.ino)
-        accessor.batch(
+        await accessor.batch(
             [
                 SqlStatement(f"DELETE FROM fs_data WHERE ino = {ino.sql}"),
                 resized(ino, 0, now),

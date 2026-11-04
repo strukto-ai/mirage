@@ -30,7 +30,7 @@ interface PgPoolLike {
   query(sql: string, params?: readonly unknown[]): Promise<{ rows: Record<string, unknown>[] }>
   connect(): Promise<PgClientLike>
   end(): Promise<void>
-  on(event: 'error', listener: () => void): void
+  on(event: 'error', listener: (err: unknown) => void): void
 }
 
 interface PgModule {
@@ -78,7 +78,9 @@ export class PostgresSqlDriver implements SqlDriver {
       const pool = new Pool({ connectionString: this.dsn })
       // An idle connection the server dropped is already discarded; the
       // listener keeps Node from ending the process over it.
-      pool.on('error', () => undefined)
+      pool.on('error', (err: unknown) => {
+        console.debug(`postgres: idle connection to ${this.location} dropped`, err)
+      })
       return pool
     })()
     return this.pool

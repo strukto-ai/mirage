@@ -49,8 +49,12 @@ export class SqlRecordClient implements RecordClient {
     readonly scope: string,
   ) {}
 
+  // A failed first statement is tried again on the next call, not kept.
   private async db(): Promise<SqlDriver> {
-    this.ready ??= this.driver.batch([{ sql: SCHEMA }])
+    this.ready ??= this.driver.batch([{ sql: SCHEMA }]).catch((err: unknown) => {
+      this.ready = null
+      throw err
+    })
     await this.ready
     return this.driver
   }

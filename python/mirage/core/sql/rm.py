@@ -30,7 +30,7 @@ async def rm_r(accessor: SqlAccessor, path: PathSpec) -> None:
     directories above it, and the call answers ENOTEMPTY. Mirrors
     TypeScript's ``rmR``.
     """
-    w = walk(accessor, path)
+    w = await walk(accessor, path)
     node = target(w)
     if node is None:
         return
@@ -40,7 +40,7 @@ async def rm_r(accessor: SqlAccessor, path: PathSpec) -> None:
     if is_dir(node):
         files: list[int] = []
         dirs: dict[int, list[int]] = {}
-        for row in accessor.query(SQL["subtree"], (node.ino,)):
+        for row in await accessor.query(SQL["subtree"], (node.ino,)):
             child = inode_of(row)
             if child is None:
                 continue
@@ -75,8 +75,8 @@ async def rm_r(accessor: SqlAccessor, path: PathSpec) -> None:
             )
         )
         inos.append(node.ino)
-    accessor.batch([*statements, *drop_inodes(inos)])
-    if parent is not None and accessor.query(
+    await accessor.batch([*statements, *drop_inodes(inos)])
+    if parent is not None and await accessor.query(
         SQL["has_entry"], (parent.ino, leaf(w))
     ):
         raise enotempty(path)
