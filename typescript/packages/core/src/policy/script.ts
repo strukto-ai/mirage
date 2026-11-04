@@ -178,18 +178,54 @@ export function scriptContext(
 }
 
 /**
+ * `source` with every string literal and comment blanked to spaces, its
+ * newlines kept, so a definition shown in a docstring is not read as the
+ * program's own. Mirrors the Python `_unquoted`.
+ */
+function unquoted(source: string): string {
+  const out = source.split('')
+  let i = 0
+  while (i < source.length) {
+    const char = source[i] ?? ''
+    let end: number
+    if (char === '#') {
+      end = source.indexOf('\n', i)
+      if (end === -1) end = source.length
+    } else if (char === "'" || char === '"') {
+      const quote = source.startsWith(char.repeat(3), i) ? char.repeat(3) : char
+      end = i + quote.length
+      while (end < source.length && !source.startsWith(quote, end)) {
+        if (source[end] === '\n' && quote.length === 1) break
+        end += source[end] === '\\' ? 2 : 1
+      }
+      if (source.startsWith(quote, end)) end += quote.length
+    } else {
+      i += 1
+      continue
+    }
+    end = Math.min(end, source.length)
+    for (let k = i; k < end; k++) if (out[k] !== '\n') out[k] = ' '
+    i = end
+  }
+  return out.join('')
+}
+
+/**
  * The program a runtime runs at one method: the source as written, then a
  * call to the function it defines for the method at its top level
  * (`def pre_command(ctx)`, or `async def`), with the context, printing
  * what it returns as the answer.
  *
  * The call is appended, so the program's own lines keep their numbers in
- * a traceback. Throws a clause about "script" when the program defines no
+ * a traceback. A definition inside a string or a comment is not the
+ * program's (`unquoted`). Throws a clause about "script" when the program defines no
  * function for the method. Mirrors the Python `program_source`.
  */
 export function programSource(source: string, method: PolicyMethod): string {
   const name = method.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
-  const found = new RegExp(`^(async[ \\t]+)?def[ \\t]+${name}[ \\t]*\\(`, 'm').exec(source)
+  const found = new RegExp(`^(async[ \\t]+)?def[ \\t]+${name}[ \\t]*\\(`, 'm').exec(
+    unquoted(source),
+  )
   if (found === null) throw new Error(`script defines no ${name}(ctx)`)
   let call = `${name}(_mirage_json.loads(_mirage_os.environ["${CTX_ENV}"]))`
   if (found[1] !== undefined) call = `await ${call}`

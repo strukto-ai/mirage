@@ -902,6 +902,17 @@ describe('programSource', () => {
     }
   })
 
+  it('reads no definition from a string or a comment', () => {
+    const shown =
+      '"""How to write one:\n\nasync def pre_command(ctx):\n    ...\n"""\n' +
+      '# def pre_command(ctx) in a comment\n' +
+      'def pre_command(ctx):\n    return None\n'
+    expect(programSource(shown, 'preCommand')).not.toContain('await pre_command(')
+    expect(() =>
+      programSource("'''\ndef pre_command(ctx):\n'''\n# def pre_command(ctx):\n", 'preCommand'),
+    ).toThrow('defines no pre_command(ctx)')
+  })
+
   it("calls the method's function after the program", () => {
     const source = 'def pre_command(ctx):\n    return None'
     expect(programSource(source, 'preCommand')).toBe(

@@ -196,6 +196,41 @@ def script_context(
     return data
 
 
+def _unquoted(source: str) -> str:
+    """``source`` with every string literal and comment blanked to spaces,
+    its newlines kept, so a definition shown in a docstring is not read
+    as the program's own.
+
+    Args:
+        source (str): the program.
+    """
+    out = list(source)
+    i = 0
+    while i < len(source):
+        char = source[i]
+        if char == "#":
+            end = source.find("\n", i)
+            end = len(source) if end == -1 else end
+        elif char in "'\"":
+            quote = char * 3 if source.startswith(char * 3, i) else char
+            end = i + len(quote)
+            while end < len(source) and not source.startswith(quote, end):
+                if source[end] == "\n" and len(quote) == 1:
+                    break
+                end += 2 if source[end] == "\\" else 1
+            if source.startswith(quote, end):
+                end += len(quote)
+        else:
+            i += 1
+            continue
+        end = min(end, len(source))
+        for k in range(i, end):
+            if out[k] != "\n":
+                out[k] = " "
+        i = end
+    return "".join(out)
+
+
 def program_source(source: str, method: str) -> str:
     """The program a runtime runs at one method: the source as written,
     then a call to the function it defines for the method at its top
@@ -203,7 +238,8 @@ def program_source(source: str, method: str) -> str:
     context, printing what it returns as the answer.
 
     The call is appended, so the program's own lines keep their numbers
-    in a traceback.
+    in a traceback. A definition inside a string or a comment is not the
+    program's (``_unquoted``).
 
     Args:
         source (str): the program.
@@ -214,7 +250,9 @@ def program_source(source: str, method: str) -> str:
             a clause about "script".
     """
     found = re.search(
-        rf"^(async[ \t]+)?def[ \t]+{method}[ \t]*\(", source, re.MULTILINE
+        rf"^(async[ \t]+)?def[ \t]+{method}[ \t]*\(",
+        _unquoted(source),
+        re.MULTILINE,
     )
     if found is None:
         raise ValueError(f"script defines no {method}(ctx)")

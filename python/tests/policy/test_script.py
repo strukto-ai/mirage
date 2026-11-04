@@ -534,6 +534,20 @@ def test_a_program_must_define_the_methods_function():
             program_source(source, "pre_command")
 
 
+def test_a_definition_in_a_string_or_a_comment_is_not_the_programs():
+    shown = (
+        '"""How to write one:\n\nasync def pre_command(ctx):\n    ...\n"""\n'
+        "# def pre_command(ctx) in a comment\n"
+        "def pre_command(ctx):\n    return None\n"
+    )
+    assert "await pre_command(" not in program_source(shown, "pre_command")
+    with pytest.raises(ValueError, match=r"defines no pre_command\(ctx\)"):
+        program_source(
+            "'''\ndef pre_command(ctx):\n'''\n# def pre_command(ctx):\n",
+            "pre_command",
+        )
+
+
 def test_a_program_defining_the_methods_function_is_called_after():
     source = "def pre_command(ctx):\n    return None"
     assert program_source(source, "pre_command") == (
