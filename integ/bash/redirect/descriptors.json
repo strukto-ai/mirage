@@ -1441,7 +1441,27 @@
       "targets": [
         "ram",
         "disk",
-        "redis"
+        "redis",
+        "opfs",
+        "s3",
+        "databricks",
+        "gridfs",
+        "s3-prefix",
+        "databricks-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "sharepoint-prefix",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
       ],
       "command": "( seq 1 8000 >/data/f; exec 3</data/f; { cat <&3 >/dev/null; } & while read -u 3 l; do :; done; wait; echo status=$? )",
       "expect": {

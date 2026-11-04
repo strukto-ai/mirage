@@ -70,6 +70,8 @@ import type { ExecuteNodeFn, ExecuteNodeOpts } from './command/types.ts'
 import { answerClosed, failedRead, statementStdin } from './statement.ts'
 import { inheritTraps } from './traps.ts'
 
+export const logger: { debug?: (message: string) => void } = {}
+
 /**
  * Send a command's output to a console as chunks arrive.
  *
@@ -243,6 +245,9 @@ export async function handleBackground(
   const childEvaluation = childContext(context)
   const bgSession = childEvaluation.session
   const heldInputs = holdInputs(bgSession.openInputs())
+  const dropHolds = async (): Promise<void> => {
+    while (heldInputs.length > 0) await heldInputs.pop()?.lines.unhold()
+  }
   inheritTraps(bgSession)
   const output = session.jobOutput ?? session.tty.jobs
   // A job is a shell of its own: what jobs it starts write into the
@@ -421,7 +426,7 @@ export async function handleBackground(
       unfollow()
       releaseProgram()
       await bgSession.closeInputs()
-      for (const source of heldInputs) await source.lines.unhold()
+      await dropHolds()
 
       if (jobHanded !== null && decisions !== null) {
         // A job that ended held on a question leaves its grants standing
@@ -451,7 +456,7 @@ export async function handleBackground(
   } catch (err) {
     unfollow()
     releaseProgram()
-    for (const source of heldInputs) await source.lines.unhold()
+    await dropHolds()
 
     // A submission that fails (a console the table cannot build, a
     // session at its process cap) starts no runner, so nothing would ever
@@ -465,6 +470,14 @@ export async function handleBackground(
     throw err
   }
   bgSession.processId = job.process?.info.pid ?? null
+  // A job whose runner never begins skips runBg's finally, so its holds on
+  // readers go when its process ends.
+  void job.process
+    ?.join()
+    .then(dropHolds)
+    .catch((err: unknown) => {
+      logger.debug?.(`job: dropping its holds on readers failed: ${String(err)}`)
+    })
   session.lastBgJobId = job.pid
   if (session.jobWaits?.reaches(output, jobStreams(left, session)) === true)
     session.jobWaits.add(job)

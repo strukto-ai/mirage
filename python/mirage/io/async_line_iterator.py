@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 from collections.abc import AsyncGenerator
 
 from mirage.io.cooperative import chunks
@@ -21,6 +22,8 @@ from mirage.io.memory import check_memory, memory_room
 from mirage.io.types import ByteSource, DeviceInput, PipeEnd, PipeStream
 from mirage.io.yield_budget import YieldBudget
 from mirage.types import PathSpec
+
+logger = logging.getLogger(__name__)
 
 
 def char_width(data: bytes) -> int:
@@ -90,6 +93,9 @@ class AsyncLineIterator:
         self._exhausted = False
         self.holders = 0
         self._released = False
+        self._pull_lock = asyncio.Lock()
+        self._pulling = False
+        self._closing = False
 
     @property
     def position(self) -> int:
@@ -105,9 +111,24 @@ class AsyncLineIterator:
 
     async def _next_chunk(self) -> bytes:
         self._started = True
-        data = await self._source.__anext__()
+        async with self._pull_lock:
+            self._pulling = True
+            try:
+                data = await self._source.__anext__()
+            finally:
+                self._pulling = False
+                if self._closing:
+                    self._closing = False
+                    await self._close_after_pull()
         self._loaded += len(data)
         return data
+
+    async def _close_after_pull(self) -> None:
+        """Close the source a discard left to the pull in flight."""
+        try:
+            await self._source.aclose()
+        except Exception:
+            logger.debug("reader close after its pull failed", exc_info=True)
 
     def __aiter__(self) -> "AsyncLineIterator":
         return self
@@ -164,7 +185,8 @@ class AsyncLineIterator:
                 check_memory(held)
                 self._buf = self._buf[split:]
                 try:
-                    self._buf += await self._next_chunk()
+                    chunk = await self._next_chunk()
+                    self._buf += chunk
                 except StopAsyncIteration:
                     self._exhausted = True
         except BaseException as exc:
@@ -201,7 +223,8 @@ class AsyncLineIterator:
                 return False
             try:
                 await self._budget.run()
-                self._buf = await self._next_chunk()
+                chunk = await self._next_chunk()
+                self._buf += chunk
             except StopAsyncIteration:
                 self._exhausted = True
             except BaseException as exc:
@@ -249,10 +272,14 @@ class AsyncLineIterator:
 
     async def discard(self) -> None:
         """Close the source and drop what it buffered, for input a failed
-        line abandoned."""
+        line abandoned. A pull in flight keeps the source until it settles,
+        and closes it then."""
         self._buf = b""
         self._exhausted = True
-        await self._source.aclose()
+        if self._pulling:
+            self._closing = True
+        else:
+            await self._source.aclose()
         close = getattr(self._input, "aclose", None)
         if not self._started and close is not None:
             await close()
@@ -338,7 +365,8 @@ class AsyncLineIterator:
                 # could be before reading its first byte as a whole one.
                 if len(self._buf) < need and not self._exhausted:
                     try:
-                        self._buf += await self._next_chunk()
+                        chunk = await self._next_chunk()
+                        self._buf += chunk
                     except StopAsyncIteration:
                         self._exhausted = True
                     continue

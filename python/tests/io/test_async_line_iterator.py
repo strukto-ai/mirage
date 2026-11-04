@@ -315,8 +315,9 @@ async def test_a_second_pull_waits_for_the_first(read):
         await asyncio.sleep(0)
     gate.set()
     # One pull at a time, and the one that waited reads on from the buffer
-    # the first left: a stale buffer would give d in place of c.
-    assert set(await asyncio.gather(first, second)) == {b"b", b"c"}
+    # the first left: together the reads hold b and c, however a character
+    # read splits them, where a stale buffer would give d in place of c.
+    assert b"".join(sorted(await asyncio.gather(first, second))) == b"bc"
 
 
 @pytest.mark.asyncio
