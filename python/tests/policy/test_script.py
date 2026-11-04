@@ -548,6 +548,20 @@ def test_a_definition_in_a_string_or_a_comment_is_not_the_programs():
         )
 
 
+@pytest.mark.parametrize(
+    "head",
+    [
+        'RULE = f"Rules: {"""no deletes"""}"\n',
+        'W = 3\nRULE = f"{1:{W}}" + f"{{literal}}"\n',
+        'if"x" in "xy":\n    pass\n',
+    ],
+)
+def test_a_definition_after_an_f_string_is_still_found(head):
+    source = head + "async def pre_command(ctx):\n    return None\n"
+    compile(source, "guard.py", "exec")
+    assert "await pre_command(" in program_source(source, "pre_command")
+
+
 def test_a_program_defining_the_methods_function_is_called_after():
     source = "def pre_command(ctx):\n    return None"
     assert program_source(source, "pre_command") == (
