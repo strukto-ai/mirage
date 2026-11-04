@@ -269,8 +269,9 @@ class AsyncLineIterator:
 
     async def discard(self) -> None:
         """Close the source and drop what it buffered, for input a failed
-        line abandoned. A pull in flight, or the close it runs, keeps the
-        source until it settles, and closes it then."""
+        line abandoned. A pull in flight keeps the source until it
+        settles and closes it then; a close already running is left to
+        finish."""
         self._buf = b""
         self._exhausted = True
         if self._pull_lock.locked():
