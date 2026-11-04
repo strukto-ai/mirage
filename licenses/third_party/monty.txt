@@ -1,7 +1,7 @@
-typescript/packages/edge/scripts/bundle-monty.mjs bundles the in-process
+typescript/packages/cloudflare/scripts/bundle-monty.mjs bundles the in-process
 worker pieces of @pydantic/monty 1.4.0 (https://github.com/pydantic/monty):
 dist/worker/serve.js, channel.js, poolOptions.js and the modules they import,
-with dist/shared.js. @struktoai/mirage-edge ships them as
+with dist/shared.js. @struktoai/mirage-cloudflare ships them as
 dist/generated/monty.js, together with monty's unmodified WebAssembly
 modules, dist/generated/monty.component.core*.wasm. monty carries this
 notice:

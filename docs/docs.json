@@ -125,6 +125,7 @@
                   "home/setup/disk",
                   "home/setup/opfs",
                   "home/setup/redis",
+                  "home/setup/sql",
                   "home/setup/ssh"
                 ]
               },
@@ -397,6 +398,7 @@
                   "python/vfs/disk",
                   "python/vfs/ram",
                   "python/vfs/redis",
+                  "python/vfs/sql",
                   "python/vfs/ssh"
                 ]
               },
@@ -527,7 +529,7 @@
               "typescript/install",
               "typescript/quickstart",
               "typescript/browser-quickstart",
-              "typescript/edge-quickstart",
+              "typescript/cloudflare-quickstart",
               "typescript/setup/fuse",
               "typescript/limitations"
             ]
@@ -586,6 +588,7 @@
                   "typescript/setup/ram",
                   "typescript/setup/opfs",
                   "typescript/setup/redis",
+                  "typescript/setup/sql",
                   "typescript/setup/upstash",
                   "typescript/setup/ssh"
                 ]

@@ -18,6 +18,8 @@ import type { WorkspaceRegistry } from '../registry.ts'
 import { serveCodexSocket } from '../ssh/codex.ts'
 import type { SSHEndpoint } from '../ssh/types.ts'
 
+const decoder = new TextDecoder()
+
 interface SshParams {
   id: string
 }
@@ -102,7 +104,26 @@ export function registerSshRoutes(
         socket.close(1011, 'workspace not found')
         return
       }
-      void serveCodexSocket(deps.registry, entry, socket).catch((error: unknown) => {
+      socket.on('error', (err: Error) => {
+        console.debug(`codex: socket error on ${entry.id}`, err)
+      })
+      void serveCodexSocket(deps.registry, entry, {
+        onMessage: (listener) =>
+          socket.on('message', (data: Buffer) => {
+            listener(decoder.decode(data))
+          }),
+        onClose: (listener) => socket.once('close', listener),
+        send: (text) =>
+          new Promise<void>((resolve) => {
+            socket.send(text, (err) => {
+              if (err !== undefined) console.debug('codex: socket closed before a message', err)
+              resolve()
+            })
+          }),
+        close: (code, reason) => {
+          socket.close(code, reason)
+        },
+      }).catch((error: unknown) => {
         console.warn('codex: connection failed', error)
         socket.terminate()
       })

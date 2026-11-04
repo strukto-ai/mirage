@@ -151,6 +151,7 @@ describe('VFSName', () => {
       'seaweedfs',
       'sharepoint',
       'slack',
+      'sql',
       'ssh',
       'supabase',
       'tencent',

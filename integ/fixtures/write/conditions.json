@@ -125,6 +125,7 @@
     ],
     "sharepoint": [],
     "slack": [],
+    "sql": [],
     "ssh": [],
     "supabase": [
       "put",
@@ -360,6 +361,7 @@
       },
       "sharepoint": {},
       "slack": {},
+      "sql": {},
       "ssh": {},
       "supabase": {
         "put": [

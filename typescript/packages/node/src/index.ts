@@ -47,6 +47,9 @@ export { normalizeGridFSConfig, type GridFSConfig } from './vfs/gridfs/config.ts
 export { GridFSVFS } from './vfs/gridfs/gridfs.ts'
 export { RedisVFS, type RedisVFSOptions, type RedisVFSState } from './vfs/redis/redis.ts'
 export { RedisStore, type RedisStoreOptions } from './vfs/redis/store.ts'
+export { SqliteDriver } from './vfs/sql/driver.ts'
+export { PostgresSqlDriver } from './vfs/sql/postgres.ts'
+export { SqlVFS, type SqlVFSOptions } from './vfs/sql/sql.ts'
 export { S3VFS } from './vfs/s3/s3.ts'
 export { TiDBFilesystemVFS } from '@struktoai/mirage-core/vfs/direct/tidb_filesystem'
 export { Workspace, type NodeWorkspaceOptions } from './workspace.ts'
@@ -67,6 +70,11 @@ export {
   RedisWorkspaceStateStore,
   type RedisWorkspaceStateStoreOptions,
 } from './workspace/store/redis.ts'
+export { SqlRecordClient } from '@struktoai/mirage-core/workspace/record/sql'
+export {
+  SqlWorkspaceStateStore,
+  type SqlWorkspaceStateStoreOptions,
+} from '@struktoai/mirage-core/workspace/store/sql'
 
 export type { LinearConfig } from '@struktoai/mirage-core/core/linear/config'
 export type { NotionConfig } from '@struktoai/mirage-core/core/notion/config'

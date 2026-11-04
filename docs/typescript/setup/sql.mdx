@@ -1,0 +1,118 @@
+---
+title: SQL
+icon: database
+description: Keep a Mirage filesystem in SQL tables.
+---
+
+`SqlVFS` keeps a filesystem in a database's tables: a SQLite file, a Postgres
+server, a Durable Object's storage or a D1 database.
+
+## Install
+
+```bash
+pnpm add @struktoai/mirage-node
+```
+
+## Config
+
+```ts
+import { MountMode, SqlVFS, Workspace } from '@struktoai/mirage-node'
+
+const sql = new SqlVFS({ path: './workspace.db' })
+
+const ws = new Workspace({ '/sql': sql }, { mode: MountMode.WRITE })
+await ws.shell('echo "hello" | tee /sql/greet')
+await ws.shell('cat /sql/greet')
+```
+
+| Field | Default | Notes |
+| --- | --- | --- |
+| `path` | `:memory:` | The SQLite file, opened and closed with the mount. |
+| `driver` | none | A database to borrow instead of a file; you close it. |
+| `capacity` | none | The most bytes the files may hold, like `100MB`. |
+
+To mount Postgres, install `pg` and pass its driver:
+
+```ts
+import { PostgresSqlDriver, SqlVFS } from '@struktoai/mirage-node'
+
+const driver = new PostgresSqlDriver('postgres://user:pass@localhost:5432/app')
+const sql = new SqlVFS({ driver })
+```
+
+The tables are [AgentFS](https://github.com/tursodatabase/agentfs)'s, so a
+database AgentFS made mounts here and AgentFS reads one this mount made:
+
+- `fs_inode`: one row per file and directory, with its mode, owner, size and times
+- `fs_dentry`: each entry's name under its parent directory
+- `fs_data`: a file's bytes, in rows of the database's chunk size (4 KiB unless the database says otherwise)
+- `fs_symlink` and `fs_config`: link targets, and the chunk size and schema version
+
+One database holds one filesystem. The Python mount reads and writes the same
+tables, so the two runtimes on one file serve one filesystem.
+
+## VFS.md
+
+The [VFS.md](/home/setup/vfs-md) an agent reads with SQL mounted at `/<path>`.
+
+{/* generated: vfs-md sql start */}
+<Tabs>
+  <Tab title="Rendered">
+    ### Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `sql`, write |
+
+    #### Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    #### Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+  </Tab>
+  <Tab title="Raw">
+    ```markdown
+    ---
+    name: workspace-filesystem
+    description: The virtual filesystem layout of this workspace.
+    ---
+
+    # Virtual Filesystem
+
+    | Path | Description |
+    | --- | --- |
+    | `/<path>` | `sql`, write |
+
+    ## Supported Unix Commands for VFS
+
+    Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+    | Path | Supported |
+    | --- | --- |
+    | `/<path>` | Almost all Unix commands. |
+
+    ## Limitations of Unix Commands for VFS
+
+    Where a path differs from a local filesystem:
+
+    | Path | Limitations |
+    | --- | --- |
+    | `/<path>` | `grep -r`, `find` and `du` stop after 1000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+    Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    ```
+  </Tab>
+</Tabs>
+{/* generated: vfs-md sql end */}

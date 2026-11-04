@@ -4,12 +4,13 @@ icon: /images/redis-logo.svg
 description: Store workspace files in Redis.
 ---
 
-Redis stores workspace files in a Redis database. Available in Python, Node
-and browsers. File persistence depends on the database's configuration.
+Redis stores workspace files in a Redis database. Available in Python, Node,
+Cloudflare Workers and browsers. File persistence depends on the database's
+configuration.
 
 ## Configuration
 
-For Python or Node, set `url` to your Redis connection URL. Use `key_prefix`
+For Python, Node or Cloudflare Workers, set `url` to your Redis connection URL. Use `key_prefix`
 to keep this workspace's files separate from other data:
 
 ```yaml

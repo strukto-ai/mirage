@@ -55,7 +55,7 @@ PY_HEAVY = (
 # `.` is the barrel and is *meant* to be heavy; `./bin/daemon` is a program,
 # not a module anyone imports for a symbol. `./api`, `./routes`, `./registry`
 # and `./auth/middleware` are what a host serving the API builds it from
-# (@struktoai/mirage-edge); no CLI imports them.
+# (@struktoai/mirage-cloudflare); no CLI imports them.
 UNGATED_SUBPATHS = (
     ".",
     "./package.json",

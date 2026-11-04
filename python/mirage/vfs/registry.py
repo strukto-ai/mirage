@@ -49,6 +49,7 @@ REGISTRY: dict[str, VFSEntry] = {
     "ram": VFSEntry("mirage.vfs.ram:RAMVFS", None),
     "disk": VFSEntry("mirage.vfs.disk:DiskVFS", None),
     "redis": VFSEntry("mirage.vfs.redis:RedisVFS", None),
+    "sql": VFSEntry("mirage.vfs.sql:SqlVFS", None),
     "s3": VFSEntry("mirage.vfs.s3:S3VFS", "mirage.vfs.s3:S3Config"),
     "gridfs": VFSEntry(
         "mirage.vfs.gridfs:GridFSVFS", "mirage.vfs.gridfs:GridFSConfig"

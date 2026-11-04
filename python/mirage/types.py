@@ -957,6 +957,7 @@ class VFSName(StrEnum):
     JAEGER = "jaeger"
     SSH = "ssh"
     REDIS = "redis"
+    SQL = "sql"
     GCS = "gcs"
     OCI = "oci"
     R2 = "r2"

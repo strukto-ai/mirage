@@ -21,12 +21,14 @@ if TYPE_CHECKING:
     from mirage.vfs.disk import DiskVFS
     from mirage.vfs.ram import RAMVFS
     from mirage.vfs.redis import RedisVFS
+    from mirage.vfs.sql import SqlVFS
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.vfs.base": ("BaseVFS",),
     "mirage.vfs.disk": ("DiskVFS",),
     "mirage.vfs.ram": ("RAMVFS",),
     "mirage.vfs.redis": ("RedisVFS",),
+    "mirage.vfs.sql": ("SqlVFS",),
 }
 
 __all__ = [
@@ -34,6 +36,7 @@ __all__ = [
     "DiskVFS",
     "RAMVFS",
     "RedisVFS",
+    "SqlVFS",
 ]
 
 __getattr__ = lazy_exports(__name__, _EXPORTS)

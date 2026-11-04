@@ -153,7 +153,7 @@
    },
    "typescript_only": {
     "routes": "The route contract (RouteApp, RouteRequest, RouteReply) the routers register on, so one set of routes runs on Fastify under Node and on the web Request/Response of an edge runtime. Python's routers register on FastAPI alone and have no second host to share them with.",
-    "api": "Registers every HTTP route once (registerApi) for the Fastify daemon and the web Request/Response host of @struktoai/mirage-edge alike. Python's app.py includes its routers on its one FastAPI app."
+    "api": "Registers every HTTP route once (registerApi) for the Fastify daemon and the web Request/Response host of @struktoai/mirage-cloudflare alike. Python's app.py includes its routers on its one FastAPI app."
    }
   },
   "vfs/lancedb": {
@@ -199,6 +199,11 @@
   "concurrency": {
    "typescript_only": {
     "computations": "The computation table a worker runs and its execute, made once per worker, shared by worker_entry (a thread) and worker's in-thread port (a host with no threads, an edge isolate). Python always starts a subprocess, which resolves importable functions itself."
+   }
+  },
+  "vfs/sql": {
+   "typescript_only": {
+    "postgres": "Node's PostgresSqlDriver over npm pg (already node's optional peer). Python's SqlDriver is synchronous, because get_state reads the database from a worker thread, and python's postgres peer asyncpg is async-only, so a python Postgres driver waits on a synchronous client."
    }
   }
  }

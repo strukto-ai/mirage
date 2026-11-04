@@ -50,6 +50,7 @@ NATIVE_RANGE = {
     "s3",
     "sharepoint",
     "slack",
+    "sql",
     "ssh",
     "tidb_filesystem",
 }
