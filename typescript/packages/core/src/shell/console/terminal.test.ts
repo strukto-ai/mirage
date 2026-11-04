@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CHUNK_SIZE } from '../../io/cooperative.ts'
 import { MemoryExhausted } from '../../io/errors.ts'
 import { MemoryBudget, runWithMemory } from '../../io/memory.ts'
+import { TRACE_CONTENT_MAX_BYTES_ENV } from '../../observe/observer.ts'
 import { concat } from '../../utils/bytes.ts'
 import { Recorder } from '../descriptors.ts'
 import { Channel, JobConsole, Tee, Terminal } from './index.ts'
@@ -153,6 +154,25 @@ describe('Terminal', () => {
     expect(tty.stdoutPrefix).toEqual(enc('next'))
     tty.dropLine()
     expect(tty.stdoutPrefix.byteLength).toBe(0)
+  })
+
+  it('reserves its prefix as output arrives, not up front', async () => {
+    vi.stubEnv(TRACE_CONTENT_MAX_BYTES_ENV, String(1024 * 1024))
+    try {
+      const tty = new Terminal()
+      const reserved = () => (tty as unknown as { prefix: Uint8Array }).prefix.byteLength
+      await tty.attach(new JobConsole())
+      expect(reserved()).toBe(0)
+      await tty.emit(Channel.STDOUT, enc('hello'))
+      expect(tty.stdoutPrefix).toEqual(enc('hello'))
+      expect(reserved()).toBe(5)
+      const more = new Uint8Array(CHUNK_SIZE * 2).fill(1)
+      await tty.emit(Channel.STDOUT, more)
+      expect(tty.stdoutPrefix).toEqual(concat([enc('hello'), more]))
+      expect(reserved()).toBe(5 + more.byteLength)
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it('a noisy job does not hold a reader from attaching', async () => {
