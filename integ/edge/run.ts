@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import assert from 'node:assert/strict'
 import { type ChildProcess, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -625,6 +626,113 @@ function runsHere(t: Target): boolean {
   )
 }
 
+type Group = 'ram' | 'gdrive' | 'gdrive-folder' | 'rest'
+
+const GROUPS: Group[] = ['ram', 'gdrive', 'gdrive-folder', 'rest']
+
+function groupOf(target: Target): Group {
+  switch (target.id) {
+    case 'ram':
+    case 'gdrive':
+    case 'gdrive-folder':
+      return target.id
+    default:
+      return 'rest'
+  }
+}
+
+function selectTargets(runnable: Target[], args: string[]): Target[] {
+  let targets: Target[]
+  if (args[0] === '--group') {
+    const group = args[1]
+    if (args.length !== 2) throw new Error('--group needs exactly one group name')
+    switch (group) {
+      case 'ram':
+      case 'gdrive':
+      case 'gdrive-folder':
+      case 'rest':
+        targets = runnable.filter((target) => groupOf(target) === group)
+        break
+      default:
+        throw new Error(`unknown edge group: ${String(group)}`)
+    }
+  } else {
+    const unknown = args.filter((id) => !runnable.some((target) => target.id === id))
+    if (unknown.length > 0) throw new Error(`the edge host runs no target ${unknown.join(', ')}`)
+    targets = runnable.filter((target) => args.length === 0 || args.includes(target.id))
+  }
+  if (targets.length === 0) throw new Error('the edge selection contains no targets')
+  return targets
+}
+
+function plan(
+  runnable: Target[],
+  cases: Case[],
+  args: string[],
+): { target: Target; cases: Case[] }[] {
+  return selectTargets(runnable, args).map((target) => ({
+    target,
+    cases: cases.filter((c) => c.targets.includes(target.id)),
+  }))
+}
+
+function checkGroups(runnable: Target[], cases: Case[]): void {
+  assert.deepEqual(selectTargets(runnable, []), runnable)
+  assert.deepEqual(
+    selectTargets(runnable, ['gdrive-folder', 'ram']),
+    runnable.filter((target) => target.id === 'ram' || target.id === 'gdrive-folder'),
+  )
+  for (const args of [
+    ['--group'],
+    ['--group', ''],
+    ['--group', 'unknown'],
+    ['--group', 'ram', 'gdrive'],
+    ['--group', 'ram', '--group', 'rest'],
+    ['unknown'],
+  ]) {
+    assert.throws(() => selectTargets(runnable, args))
+  }
+  assert.throws(() =>
+    selectTargets(
+      runnable.filter((target) => target.id !== 'ram'),
+      ['--group', 'ram'],
+    ),
+  )
+  assert.throws(() => selectTargets([], []))
+  const targetIds = new Set<string>()
+  const inventory = new Map<string, string[]>()
+  for (const group of GROUPS) {
+    const selected = plan(runnable, cases, ['--group', group])
+    let executable = 0
+    let skipped = 0
+    for (const { target, cases: targetCases } of selected) {
+      assert(!targetIds.has(target.id), `target occurs in multiple groups: ${target.id}`)
+      targetIds.add(target.id)
+      inventory.set(
+        target.id,
+        targetCases.map((c) => c.id),
+      )
+      executable += targetCases.filter((c) => !needsMore(c)).length
+      skipped += targetCases.filter(needsMore).length
+    }
+    assert(executable > 0, `edge group ${group} has no executable cases`)
+    console.log(
+      `${group}: ${String(selected.length)} targets, ${String(executable)} executable, ${String(skipped)} skipped`,
+    )
+  }
+  assert.deepEqual(targetIds, new Set(runnable.map((target) => target.id)))
+  for (const target of runnable) {
+    assert.deepEqual(
+      inventory.get(target.id),
+      cases.filter((c) => c.targets.includes(target.id)).map((c) => c.id),
+      `edge group changes the ordered case inventory for ${target.id}`,
+    )
+  }
+  console.log(
+    'edge groups: disjoint and exhaustive targets and ordered cases; default selection unchanged',
+  )
+}
+
 /** The edge test worker under `wrangler dev`, answering on `port`. */
 async function startEdge(port: number): Promise<ChildProcess> {
   const child = spawn(
@@ -661,13 +769,14 @@ async function startEdge(port: number): Promise<ChildProcess> {
 }
 
 async function main(): Promise<void> {
-  const only = process.argv.slice(2)
+  const args = process.argv.slice(2)
   const runnable = [...loadTargets(root).values()].filter(runsHere)
-  // A name this host doesn't run is refused, so a typo can't pass as a run
-  // of no cases.
-  const unknown = only.filter((id) => !runnable.some((t) => t.id === id))
-  if (unknown.length > 0) throw new Error(`the edge host runs no target ${unknown.join(', ')}`)
-  const targets = runnable.filter((t) => only.length === 0 || only.includes(t.id))
+  if (args[0] === '--check-groups') {
+    if (args.length !== 1) throw new Error('--check-groups takes no other arguments')
+    checkGroups(runnable, loadCases(root))
+    return
+  }
+  const selected = plan(runnable, loadCases(root), args)
   const dir = mkdtempSync(join(tmpdir(), 'mirage-integ-edge-'))
   const port = await freePort()
   const base = `http://127.0.0.1:${String(port)}`
@@ -684,8 +793,7 @@ async function main(): Promise<void> {
     fakes = await startFakes(dir)
     mcp = await startMcp()
     worker = await startEdge(port)
-    const cases = loadCases(root)
-    for (const target of targets) {
+    for (const { target, cases } of selected) {
       const config = await OPENERS[target.service ?? '']!(target)
       // A session's inline permissions document rides in as a profile of its
       // own, the one way the API names what a session runs under.
@@ -742,7 +850,6 @@ async function main(): Promise<void> {
       }
       try {
         for (const c of cases) {
-          if (!c.targets.includes(target.id)) continue
           if (needsMore(c)) {
             skipped++
             continue

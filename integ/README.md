@@ -348,16 +348,21 @@ native build or compiles it when missing.
 Python-only battery jobs use the same install path because their fake servers
 do not import mirage packages. Jobs that build TypeScript still run prepare.
 
-The existing three shards per host still run every eligible target once with
-four processes each; only the six shared-contract targets select fewer cases. `ci/shard_seconds.json` uses successful target timings
-from main runs 40976378211 and 40983556220 to rebalance them. Replaying those
-median timings through the four-worker schedule estimates the longest Python
-battery at 1,018 seconds. The scheduler compares balancing total work with
-balancing the worker pool's finish time, keeping the faster predicted split;
-both spread the shared fake launcher's load first. Replaying the observed
-target durations from run 40993380901 gives 1,227 → 1,000 seconds for Python
-and retains the TypeScript split. These are scheduling estimates, not measured
-end-to-end CI savings.
+The three shared shards per host still run every eligible target once with
+four processes each; only the six shared-contract targets select fewer cases.
+`ci/shard_seconds.json` uses successful target timings from run 41797128971:
+focused coverage for those six backends, full coverage for every other target.
+The scheduler balances the shared fake launcher's load and the worker pool's
+predicted finish time. Targets keep their complete ordered case sequence;
+only their shard placement and launch order change. Timing replay is a
+scheduling estimate, not a measured end-to-end improvement.
+
+The edge corpus runs in four isolated jobs: RAM, Google Drive, Google Drive
+folder, and every other supported target. Each job owns its worker and fake
+services, so targets keep their serial fixture lifecycle. The partition gate
+checks that the groups are disjoint and cover the original target/case
+inventory. These jobs keep the full edge corpus; the local default still
+runs every supported target.
 
 `runtime/parallel.sh` overlaps the Python and TypeScript JSON drivers inside
 each existing runtime job. It waits for both even after a failure, then runs
@@ -366,10 +371,12 @@ and `sandbox/mounts`, which mounts fixed paths in their shared Docker container.
 The `integ/runtime/**` filter covers the driver; the gate selftest checks its
 overlap, exact suite coverage, database and mount serialization, duplicate
 launch detection and failure propagation.
-The eight runtime legs move `dir/readdir` from D to C and `write/write` from F
-to G to shorten the two longest JSON batteries; their CLI and in-process
-coverage moves together, and service requirements follow the suite list.
-Job matrices, timeout limits, strict checks and coverage floors are unchanged.
+Runtime C, G and H are split into smaller jobs at whole-suite boundaries.
+Both SDK hosts and both CLI daemons keep every existing runtime/backend
+combination, including fresh-interpreter cases and the oldest supported
+Pyodide check. The suite partition gate rejects missing, duplicate and unknown
+assignments. The existing timeout limits, strict checks and coverage floors
+stay unchanged.
 
 The Nextcloud CI container also lowers its Argon2id memory cost from 8 MiB to
 256 KiB for its public fixture credentials. A local before/after run of the
@@ -400,7 +407,7 @@ flowchart LR
     ts --> J2["integ-ts"]
     core & ts --> J3["integ-shared-py · integ-shared-ts<br/>integ-shared-parity · integ-selftests<br/>integ-facets · integ-wandb"]
     core & ts --> HOST["integ-hosting<br/>interrupts: CPU · streams · disconnect · cancellation<br/>hosting: FastAPI · Fastify · Monty<br/>RAM · S3 · Redis · Slack"]
-    core & ts --> EDGE["integ-edge<br/>the corpus on workerd:<br/>every built-in CLI and its mounts"]
+    core & ts --> EDGE["integ-edge<br/>four isolated workerd jobs:<br/>RAM · Drive · Drive folder · other targets"]
     NC["Nextcloud tuning and full workflow"] --> ts & data
     SF["shared execution · backend source · storage cases<br/>runners · manifests · fakes · setup"] --> FULL["Shared backends full<br/>six targets × two hosts · goldens · parity"]
     data --> J4["integ-data · integ-events<br/>integ-tidb-filesystem"]
