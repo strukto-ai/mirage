@@ -19,8 +19,8 @@ from itertools import islice
 from typing import Any
 
 from mirage.concurrency.limiter import owned_task
-from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.memory import check_memory
+from mirage.observe.observer import kept_output_bytes
 from mirage.shell.console.job_console import JobConsole
 from mirage.shell.console.types import Channel, OwnedStream
 
@@ -48,6 +48,9 @@ class Terminal(JobConsole):
         self.attaching: asyncio.Event | None = None
         self._prefix = bytearray()
         self._err_prefix = bytearray()
+        # What the line's record takes of each stream: its history's
+        # start, and its span's when that is longer.
+        self._kept = kept_output_bytes()
         # The chunks at the head of ``chunks`` the line's history entries
         # took, and the bytes of each channel they took in all.
         self._taken = 0
@@ -66,7 +69,7 @@ class Terminal(JobConsole):
 
     def _remember(self, channel: Channel, data: bytes) -> None:
         kept = self._prefix if channel == Channel.STDOUT else self._err_prefix
-        kept.extend(data[: max(0, CHUNK_SIZE - len(kept))])
+        kept.extend(data[: max(0, self._kept - len(kept))])
 
     async def emit(self, channel: Channel, data: bytes) -> None:
         """Take what the line wrote.
@@ -121,6 +124,7 @@ class Terminal(JobConsole):
         """
         self._prefix.clear()
         self._err_prefix.clear()
+        self._kept = kept_output_bytes()
         self._taken = 0
         self._marked = (0, 0)
         if reader is None:
@@ -165,6 +169,7 @@ class Terminal(JobConsole):
         to.held += self.held
         self.chunks = deque()
         self.held = 0
+        self._kept = kept_output_bytes()
         self.reader = to.jobs
 
     def drain(self) -> tuple[bytes, bytes]:

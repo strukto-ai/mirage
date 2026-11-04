@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { context, trace, type Attributes, type Tracer } from '@opentelemetry/api'
+import { CHUNK_SIZE } from '../io/cooperative.ts'
 import type { IOResult } from '../io/types.ts'
 import { YieldBudget } from '../io/yield_budget.ts'
 import type { JsonObject } from '../types.ts'
@@ -90,6 +91,32 @@ function traceContentMaxBytes(): number {
 }
 
 /**
+ * The bytes of each stream a line's terminal keeps for its record while a
+ * reader takes the line: CHUNK_SIZE, or the span's cap when content is
+ * traced and the cap is larger. Mirrors Python's `kept_output_bytes`.
+ */
+export function keptOutputBytes(): number {
+  return traceContent() ? Math.max(CHUNK_SIZE, traceContentMaxBytes()) : CHUNK_SIZE
+}
+
+/**
+ * The start of `raw` as text of at most `limit` bytes in UTF-8. A byte
+ * that isn't UTF-8 reads as U+FFFD, three bytes, so the text is cut
+ * again after decoding, before the character that would cross `limit`.
+ * Mirrors Python's `_traced_output`.
+ */
+function tracedOutput(raw: Uint8Array, limit: number): string {
+  const decoder = new TextDecoder('utf-8', { fatal: false })
+  const text = decoder.decode(raw.subarray(0, limit))
+  const encoded = new TextEncoder().encode(text)
+  if (encoded.byteLength <= limit) return text
+  let end = limit
+  // Back to the first byte of the character `limit` falls inside.
+  while (end > 0 && ((encoded[end] ?? 0) & 0xc0) === 0x80) end--
+  return decoder.decode(encoded.subarray(0, end))
+}
+
+/**
  * The tracer a finished line goes to: a no-op until the process sets up
  * an OpenTelemetry SDK, whose exporter picks the backend.
  */
@@ -102,8 +129,10 @@ function tracer(): Tracer {
  * (`span`, its start and end in epoch milliseconds), with the cwd it
  * started in and the start of its stdout and stderr (`output`, as it wrote
  * them), and under it a `vfs.<call>` span for each call it made to a
- * mount. TRACE_CONTENT_ENV leaves out the output and the calls. Mirrors
- * Python's `_trace_line`.
+ * mount. Each span also carries its start or end and its length in
+ * milliseconds, as the history's entries have them, for a tracer that
+ * can't be given a span's times. TRACE_CONTENT_ENV leaves out the output
+ * and the calls. Mirrors Python's `_trace_line`.
  */
 function traceLine(
   workspaceId: string | undefined,
@@ -120,13 +149,13 @@ function traceLine(
     'mirage.session.id': session,
     'mirage.command': command,
     'mirage.exit_code': exitCode,
+    'mirage.timestamp': span[0],
+    'mirage.duration_ms': span[1] - span[0],
   }
   if (content) {
-    // A cut through a character decodes as U+FFFD.
     const limit = traceContentMaxBytes()
-    const decoder = new TextDecoder('utf-8', { fatal: false })
-    attributes['mirage.stdout'] = decoder.decode(output[0].subarray(0, limit))
-    attributes['mirage.stderr'] = decoder.decode(output[1].subarray(0, limit))
+    attributes['mirage.stdout'] = tracedOutput(output[0], limit)
+    attributes['mirage.stderr'] = tracedOutput(output[1], limit)
   }
   if (workspaceId !== undefined) attributes['mirage.workspace.id'] = workspaceId
   if (cwd !== undefined) attributes['mirage.cwd'] = cwd
@@ -142,6 +171,8 @@ function traceLine(
             'mirage.vfs.path': rec.path,
             'mirage.vfs.source': rec.source,
             'mirage.vfs.bytes': rec.bytes,
+            'mirage.vfs.timestamp': rec.timestamp,
+            'mirage.vfs.duration_ms': rec.durationMs,
           },
         },
         parent,

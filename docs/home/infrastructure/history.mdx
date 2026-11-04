@@ -91,14 +91,22 @@ the backend: OTLP to Datadog, Honeycomb, Grafana, Langfuse and others.
 
 | Span | Attributes |
 | --- | --- |
-| `command` | `mirage.workspace.id`, `mirage.session.id`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.stdout`, `mirage.stderr` |
-| `vfs.<call>` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes` |
+| `command` | `mirage.workspace.id`, `mirage.session.id`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr` |
+| `vfs.<call>` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes`, `mirage.vfs.timestamp`, `mirage.vfs.duration_ms` |
 
 `mirage.cwd` is where the line started. `mirage.stdout` and `mirage.stderr`
-are the start of its output: 16 KiB of each by default, or as many bytes as
-`MIRAGE_TRACE_CONTENT_MAX_BYTES` says. At that size both fit the 64 KB a
-Cloudflare Workers span holds for all its attributes, and any backend's
-field. To keep what lines touch out of the traces, set
+are the start of its output, as UTF-8 text of at most 16 KiB each by
+default, or as many bytes as `MIRAGE_TRACE_CONTENT_MAX_BYTES` says. At that
+size both fit the 64 KB a Cloudflare Workers span holds for all its
+attributes, and any backend's field.
+
+`mirage.timestamp` and `mirage.duration_ms` repeat the span's own start and
+length in milliseconds, as the history's `command` and `result` entries have
+them; on a `vfs.<call>` span, `mirage.vfs.timestamp` is when the call ended,
+as its `vfs` entry has it. They are for a tracer that can't be given a
+span's times, such as a Cloudflare Workers custom span.
+
+To keep what lines touch out of the traces, set
 `MIRAGE_TRACE_CAPTURE_CONTENT=false`: `command` spans then carry no output and
 no `vfs.<call>` spans are sent. The history keeps the first 4096 characters of
 each output either way.

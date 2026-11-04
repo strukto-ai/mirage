@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { concat } from '../../utils/bytes.ts'
-import { CHUNK_SIZE } from '../../io/cooperative.ts'
+import { keptOutputBytes } from '../../observe/observer.ts'
 import { checkMemory } from '../../io/memory.ts'
 import { JobConsole } from './job_console.ts'
 import { Channel, type OwnedStream } from './types.ts'
@@ -59,11 +59,11 @@ export class Terminal extends JobConsole {
 
   private remember(channel: Channel, data: Uint8Array): void {
     if (channel === Channel.STDOUT) {
-      const part = data.subarray(0, CHUNK_SIZE - this.prefixSize)
+      const part = data.subarray(0, this.prefix.byteLength - this.prefixSize)
       this.prefix.set(part, this.prefixSize)
       this.prefixSize += part.byteLength
     } else {
-      const part = data.subarray(0, CHUNK_SIZE - this.errPrefixSize)
+      const part = data.subarray(0, this.errPrefix.byteLength - this.errPrefixSize)
       this.errPrefix.set(part, this.errPrefixSize)
       this.errPrefixSize += part.byteLength
     }
@@ -106,9 +106,12 @@ export class Terminal extends JobConsole {
    * that never attaches the reader.
    */
   async attach(reader: JobConsole | null): Promise<void> {
-    this.prefix = reader === null ? new Uint8Array() : new Uint8Array(CHUNK_SIZE)
+    // What the line's record takes of each stream: its history's start,
+    // and its span's when that is longer.
+    const kept = reader === null ? 0 : keptOutputBytes()
+    this.prefix = new Uint8Array(kept)
     this.prefixSize = 0
-    this.errPrefix = reader === null ? new Uint8Array() : new Uint8Array(CHUNK_SIZE)
+    this.errPrefix = new Uint8Array(kept)
     this.errPrefixSize = 0
     this.taken = 0
     this.marked = [0, 0]
@@ -155,9 +158,9 @@ export class Terminal extends JobConsole {
     to.held += this.held
     this.chunks = []
     this.held = 0
-    this.prefix = new Uint8Array(CHUNK_SIZE)
+    this.prefix = new Uint8Array(keptOutputBytes())
     this.prefixSize = 0
-    this.errPrefix = new Uint8Array(CHUNK_SIZE)
+    this.errPrefix = new Uint8Array(keptOutputBytes())
     this.errPrefixSize = 0
     this.reader = to.jobs
   }

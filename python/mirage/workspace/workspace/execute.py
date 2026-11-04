@@ -408,22 +408,6 @@ async def recurse(
     return io
 
 
-def session_cwd(
-    sessions: SessionManager,
-    session_id: str,
-) -> str | None:
-    """The session's cwd for history, None once the session is gone.
-
-    Args:
-        sessions (SessionManager): the workspace's sessions.
-        session_id (str): session whose cwd the history entry records.
-    """
-    try:
-        return sessions.get(session_id).cwd
-    except KeyError:
-        return None
-
-
 @dataclass(slots=True)
 class LineFrame:
     """What ``Workspace.shell`` needs from the line to answer an abort:
@@ -799,7 +783,7 @@ async def run_prepared_line(
             await ws.observer.log_command(
                 command,
                 session_id,
-                session_cwd(ws.sessions, session_id),
+                effective_session.cwd,
                 execution_scope.id,
             )
         # Syntax gates before policy, mirroring the TS order and
@@ -1274,6 +1258,6 @@ async def run_prepared_line(
                 await _shown(io, sink),
                 scope.records,
                 session_id,
-                session_cwd(ws.sessions, session_id),
+                effective_session.cwd,
                 execution_scope.id,
             )
