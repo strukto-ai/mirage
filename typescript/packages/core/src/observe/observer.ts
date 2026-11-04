@@ -53,6 +53,43 @@ const NAME_LIMIT = 200
 const TRACER_NAME = 'mirage.observe'
 
 /**
+ * Set to `false` or `0` to keep what lines touched out of their spans:
+ * no output on `command`, no `vfs.<call>` spans. Named after
+ * OpenTelemetry's `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`.
+ */
+export const TRACE_CONTENT_ENV = 'MIRAGE_TRACE_CAPTURE_CONTENT'
+
+/**
+ * How many bytes of each of a line's stdout and stderr its `command` span
+ * keeps: TRACE_CONTENT_MAX_BYTES unless this sets a positive whole number.
+ * Named after Langfuse's `LANGFUSE_MAX_EVENT_SIZE_BYTES`.
+ */
+export const TRACE_CONTENT_MAX_BYTES_ENV = 'MIRAGE_TRACE_CONTENT_MAX_BYTES'
+
+/**
+ * 16 KiB a stream: both stay within half of the 64 KB a Cloudflare
+ * Workers span holds for all its attributes, and any backend's field.
+ */
+export const TRACE_CONTENT_MAX_BYTES = 16 * 1024
+
+function envVar(name: string): string | undefined {
+  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
+  return proc?.env?.[name]?.trim()
+}
+
+/** Whether spans carry content: on unless TRACE_CONTENT_ENV turns it off. */
+function traceContent(): boolean {
+  const value = envVar(TRACE_CONTENT_ENV)?.toLowerCase()
+  return value !== 'false' && value !== '0'
+}
+
+function traceContentMaxBytes(): number {
+  const value = envVar(TRACE_CONTENT_MAX_BYTES_ENV) ?? ''
+  const limit = /^\d+$/.test(value) ? Number(value) : 0
+  return limit > 0 ? limit : TRACE_CONTENT_MAX_BYTES
+}
+
+/**
  * The tracer a finished line goes to: a no-op until the process sets up
  * an OpenTelemetry SDK, whose exporter picks the backend.
  */
@@ -62,26 +99,39 @@ function tracer(): Tracer {
 
 /**
  * Send a finished line to OpenTelemetry: a `command` span over its run
- * (`span`, its start and end in epoch milliseconds), and under it a
- * `vfs.<call>` span for each call it made to a mount. Mirrors Python's
- * `_trace_line`.
+ * (`span`, its start and end in epoch milliseconds), with the cwd it
+ * started in and the start of its stdout and stderr (`output`, as it wrote
+ * them), and under it a `vfs.<call>` span for each call it made to a
+ * mount. TRACE_CONTENT_ENV leaves out the output and the calls. Mirrors
+ * Python's `_trace_line`.
  */
 function traceLine(
   workspaceId: string | undefined,
   session: string,
   command: string,
+  cwd: string | undefined,
   span: [number, number],
   exitCode: number,
+  output: [Uint8Array, Uint8Array],
   records: readonly OpRecord[],
 ): void {
+  const content = traceContent()
   const attributes: Attributes = {
     'mirage.session.id': session,
     'mirage.command': command,
     'mirage.exit_code': exitCode,
   }
+  if (content) {
+    // A cut through a character decodes as U+FFFD.
+    const limit = traceContentMaxBytes()
+    const decoder = new TextDecoder('utf-8', { fatal: false })
+    attributes['mirage.stdout'] = decoder.decode(output[0].subarray(0, limit))
+    attributes['mirage.stderr'] = decoder.decode(output[1].subarray(0, limit))
+  }
   if (workspaceId !== undefined) attributes['mirage.workspace.id'] = workspaceId
+  if (cwd !== undefined) attributes['mirage.cwd'] = cwd
   const line = tracer().startSpan('command', { startTime: span[0], attributes })
-  if (line.isRecording()) {
+  if (content && line.isRecording()) {
     const parent = trace.setSpan(context.active(), line)
     for (const rec of records) {
       const call = tracer().startSpan(
@@ -184,7 +234,8 @@ export class Observer {
   private readonly _store: ObserverStore
   private readonly clock: Clock
   private readonly newest = new Map<string, number | null>()
-  private readonly started = new Map<string, [number, number, string]>()
+  // Each open line's start (epoch ms, then monotonic), text and cwd.
+  private readonly started = new Map<string, [number, number, string, string | undefined]>()
 
   constructor(
     store?: ObserverStore,
@@ -248,7 +299,7 @@ export class Observer {
     if (line !== undefined) init.id = line
     const began = this.clock.monotonic()
     await this.log(new LogEntry(init))
-    if (line !== undefined) this.started.set(line, [init.timestamp, began, command])
+    if (line !== undefined) this.started.set(line, [init.timestamp, began, command, cwd])
   }
 
   /**
@@ -278,9 +329,11 @@ export class Observer {
       if (pending !== undefined) await pending
       await this.logOp(rec, session, cwd, line)
     }
+    const out = await io.materializeStdout()
+    const err = await io.materializeStderr()
     const decoder = new TextDecoder('utf-8', { fatal: false })
-    const stdout = decoder.decode(await io.materializeStdout()).slice(0, STDOUT_TRUNCATE)
-    const stderr = decoder.decode(await io.materializeStderr()).slice(0, STDOUT_TRUNCATE)
+    const stdout = decoder.decode(out).slice(0, STDOUT_TRUNCATE)
+    const stderr = decoder.decode(err).slice(0, STDOUT_TRUNCATE)
     const now = this.nowMs()
     const took =
       started === undefined ? undefined : Math.round((this.clock.monotonic() - started[1]) * 1000)
@@ -289,8 +342,10 @@ export class Observer {
         this.workspaceId,
         session,
         started[2],
+        started[3],
         [started[0], started[0] + took],
         io.exitCode,
+        [out, err],
         opRecords,
       )
     }
