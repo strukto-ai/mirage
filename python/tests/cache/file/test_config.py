@@ -15,7 +15,7 @@
 import pytest
 from pydantic import ValidationError
 
-from mirage.cache.file.config import CacheConfig, RedisCacheConfig
+from mirage.cache.file.config import CacheConfig, CacheType, RedisCacheConfig
 
 
 @pytest.mark.parametrize(
@@ -47,3 +47,12 @@ def test_cache_config_refuses_a_field_it_does_not_take(model, fields, named):
 @pytest.mark.parametrize(("limit", "kept"), [(1e6, 1000000), ("1MB", "1MB")])
 def test_cache_config_takes_a_whole_number_float_or_a_size(model, limit, kept):
     assert model(limit=limit).limit == kept
+
+
+@pytest.mark.parametrize(
+    ("model", "kind"),
+    [(CacheConfig, CacheType.REDIS), (RedisCacheConfig, CacheType.RAM)],
+)
+def test_cache_config_refuses_a_type_its_class_does_not_build(model, kind):
+    with pytest.raises(ValidationError, match=model.__name__):
+        model(type=kind)

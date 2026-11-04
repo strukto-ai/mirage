@@ -32,6 +32,17 @@ class CacheConfig(BaseModel):
     limit: str | int = "32MB"
     max_drain_bytes: int | None = None
 
+    @field_validator("type")
+    @classmethod
+    def _v_type(cls, v: CacheType) -> CacheType:
+        built = cls.model_fields["type"].default
+        if v != built:
+            raise ValueError(
+                f"{cls.__name__} builds a {built.value!r} cache, "
+                f"not {v.value!r}; the class picks the store"
+            )
+        return v
+
     @field_validator("limit", mode="before")
     @classmethod
     def _v_limit(cls, v: Any) -> Any:

@@ -109,3 +109,12 @@ def test_redis_index_config_is_index_config():
 def test_index_config_refuses_a_field_it_does_not_take(model, fields, named):
     with pytest.raises(ValidationError, match=named):
         model(**fields)
+
+
+@pytest.mark.parametrize(
+    ("model", "kind"),
+    [(IndexConfig, IndexType.REDIS), (RedisIndexConfig, IndexType.RAM)],
+)
+def test_index_config_refuses_a_type_its_class_does_not_build(model, kind):
+    with pytest.raises(ValidationError, match=model.__name__):
+        model(type=kind)
