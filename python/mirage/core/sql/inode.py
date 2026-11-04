@@ -206,29 +206,28 @@ def insert_rows(
     return out
 
 
+def _unnamed(table: str) -> str:
+    # The row's inode is one no entry names.
+    return f"NOT EXISTS (SELECT 1 FROM fs_dentry d WHERE d.ino = {table}.ino)"
+
+
 def drop_inodes(inos: Sequence[int]) -> list[SqlStatement]:
     """After the entries naming ``inos`` were removed: each inode no
     entry names any more, and its bytes. One an entry still names keeps
     everything: a directory something was written under since, whose
     guarded removal kept its entry, or a file another writer moved, whose
     entry the removal missed."""
-
-    def unnamed(table: str) -> str:
-        return (
-            f"NOT EXISTS (SELECT 1 FROM fs_dentry d WHERE d.ino = {table}.ino)"
-        )
-
     out: list[SqlStatement] = []
     for i in range(0, len(inos), 500):
         listed = ", ".join(by_ino(ino).sql for ino in inos[i : i + 500])
         out += [
             SqlStatement(
                 f"DELETE FROM fs_data WHERE ino IN ({listed})"
-                f" AND {unnamed('fs_data')}"
+                f" AND {_unnamed('fs_data')}"
             ),
             SqlStatement(
                 f"DELETE FROM fs_inode WHERE ino IN ({listed})"
-                f" AND {unnamed('fs_inode')}"
+                f" AND {_unnamed('fs_inode')}"
             ),
         ]
     return out

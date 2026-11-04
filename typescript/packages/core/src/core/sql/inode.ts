@@ -194,6 +194,11 @@ export function insertRows(
   return out
 }
 
+// The row's inode is one no entry names.
+function unnamed(table: string): string {
+  return `NOT EXISTS (SELECT 1 FROM fs_dentry d WHERE d.ino = ${table}.ino)`
+}
+
 /**
  * After the entries naming `inos` were removed: each inode no entry names any
  * more, and its bytes. One an entry still names keeps everything: a directory
@@ -202,8 +207,6 @@ export function insertRows(
  */
 export function dropInodes(inos: readonly number[]): SqlStatement[] {
   const out: SqlStatement[] = []
-  const unnamed = (table: string): string =>
-    `NOT EXISTS (SELECT 1 FROM fs_dentry d WHERE d.ino = ${table}.ino)`
   for (let i = 0; i < inos.length; i += 500) {
     const list = inos
       .slice(i, i + 500)
