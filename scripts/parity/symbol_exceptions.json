@@ -332,6 +332,15 @@
     "refuseWrite": "Without async task isolation (the browser fallback) a hook cannot run as a policy deciding, so its session view refuses writes by hand; Python's contextvars always isolate tasks."
    }
   },
+  "cli/api": {
+   "python_only": {
+    "api_cmd": "Typer commands are module functions; commander registers the same command inline in registerApiCommand."
+   },
+   "typescript_only": {
+    "registerApiCommand": "commander registers a command through a function; Typer's is the module function api_cmd.",
+    "ApiOptions": "TypeScript declares the options commander parses as an interface; Typer passes the same options to api_cmd as parameters."
+   }
+  },
   "cli/stream": {
    "python_only": {
     "_ready": "Python waits for native file-descriptor readiness to stream stdin and stdout without blocking its event loop; Node's stdio streams provide readiness and backpressure directly.",

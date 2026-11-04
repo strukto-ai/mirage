@@ -16,25 +16,27 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import typer
 import yaml
 
 from mirage.cli.client import make_client
 from mirage.cli.output import emit, fail, handle_response
+from mirage.utils.yaml import parse_yaml
 
 
 def _text(path: str) -> str:
-    """A file's text, or stdin's for ``-``.
+    """A file's text, or stdin's for ``-``, refused when it isn't UTF-8.
 
     Args:
         path (str): the file, or ``-``.
     """
-    if path == "-":
-        return sys.stdin.read()
     try:
+        if path == "-":
+            return sys.stdin.buffer.read().decode("utf-8")
         return Path(path).read_text(encoding="utf-8")
-    except OSError as err:
+    except (OSError, UnicodeDecodeError) as err:
         fail(f"cannot read {path}: {err}", exit_code=2)
 
 
@@ -105,7 +107,8 @@ def api_cmd(
     Every other option is a field: --key value or --key=value. A value
     starting with { or [ is JSON, @file reads the file (@- stdin), and a
     bare --flag is true. Fields make a JSON body, or the query string of
-    a GET; --input sends a YAML or JSON file as the body instead.
+    a GET; --input sends a YAML or JSON file as the body instead. A JSON
+    answer prints as JSON; any other, a stream or a tar, byte for byte.
     """
     if "://" in route or route.startswith("-"):
         fail(
@@ -122,31 +125,33 @@ def api_cmd(
     body: Any = None
     if input_file is not None:
         try:
-            body = yaml.safe_load(_text(input_file))
+            body = parse_yaml(_text(input_file))
         except yaml.YAMLError as err:
             fail(f"invalid YAML/JSON in {input_file}: {err}", exit_code=2)
     elif fields:
         body = dict(fields)
     path = route if route.startswith("/") else f"/{route}"
-    params: list[tuple[str, str]] = []
     if verb in ("GET", "HEAD"):
-        # As gh does: a GET's fields are its query string.
-        params = [(key, _query_text(value)) for key, value in fields]
-        has_body = False
+        # As gh does: a GET's fields are its query string, after the
+        # route's own.
+        if fields:
+            query = urlencode([(k, _query_text(v)) for k, v in fields])
+            path += f"{'&' if '?' in path else '?'}{query}"
+        body = None
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        if has_body:
-            r = client.request(verb, path, json=body)
-        else:
-            r = client.request(verb, path, params=params)
-    if r.status_code >= 400:
-        handle_response(r)
-    if not r.content:
-        return
-    if "json" in r.headers.get("content-type", ""):
-        emit(r.json())
-    else:
-        typer.echo(r.text, nl=False)
+        with client.stream(verb, path, json=body, timeout=None) as r:
+            if r.status_code >= 400:
+                r.read()
+                handle_response(r)
+            if _is_json(r.headers.get("content-type", "")):
+                if r.read():
+                    emit(r.json())
+                return
+            out = sys.stdout.buffer
+            for chunk in r.iter_bytes():
+                out.write(chunk)
+                out.flush()
 
 
 def _query_text(value: Any) -> str:
@@ -159,3 +164,15 @@ def _query_text(value: Any) -> str:
     if isinstance(value, str):
         return value
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+
+
+def _is_json(content_type: str) -> bool:
+    """Whether a reply is one JSON document: ``application/json`` or a
+    ``+json`` type, not a stream of records such as NDJSON. Mirrors
+    TypeScript's ``isJson``.
+
+    Args:
+        content_type (str): the reply's content type.
+    """
+    kind = content_type.split(";")[0].strip().lower()
+    return kind == "application/json" or kind.endswith("+json")

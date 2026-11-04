@@ -1046,6 +1046,14 @@ async def lifecycle(
     tty_code, _, _ = await cli("shell", "-w", "i", "-c", "exit 3", tty=True)
     piped_code, _, _ = await cli("shell", "-w", "i", "-c", "exit 3")
     got["shell_exit_status"] = f"{tty_code} {piped_code}"
+    _, out, _ = await cli(
+        "api", "/v1/workspaces/i/shell", "--command", "echo api"
+    )
+    got["api_sends_fields"] = json.loads(out)["stdout"]
+    _, out, _ = await cli("api", "/v1/workspaces/i/history?last=1")
+    got["api_keeps_the_route_query"] = str(len(json.loads(out)))
+    code, _, _ = await cli("api", "https://mirage.invalid/v1/workspaces")
+    got["api_takes_only_a_route"] = str(code)
     code, _, _ = await cli("workspace", "get", "nope")
     got["unknown_workspace"] = str(code)
     code, _, _ = await cli("workspace", "load", "--key", "ghost.tar")

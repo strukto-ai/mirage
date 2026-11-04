@@ -23,11 +23,11 @@ interface ApiOptions {
   input?: string
 }
 
-/** A file's text, or stdin's for `-`. */
+/** A file's text, or stdin's for `-`, refused when it isn't UTF-8. */
 async function text(path: string): Promise<string> {
-  if (path === '-') return (await buffer(process.stdin)).toString('utf-8')
   try {
-    return readFileSync(path, 'utf-8')
+    const raw = path === '-' ? await buffer(process.stdin) : readFileSync(path)
+    return new TextDecoder('utf-8', { fatal: true }).decode(raw)
   } catch (err) {
     fail(`cannot read ${path}: ${err instanceof Error ? err.message : String(err)}`, 2)
   }
@@ -78,12 +78,31 @@ async function parseFields(words: string[]): Promise<[string, unknown][]> {
 }
 
 /**
+ * A field's value as a query string spells it: a string as itself, else
+ * its JSON. Mirrors Python's `_query_text`.
+ */
+function queryText(value: unknown): string {
+  return typeof value === 'string' ? value : JSON.stringify(value)
+}
+
+/**
+ * Whether a reply is one JSON document: `application/json` or a `+json`
+ * type, not a stream of records such as NDJSON. Mirrors Python's
+ * `_is_json`.
+ */
+function isJson(contentType: string | null): boolean {
+  const type = (contentType ?? '').split(';')[0]?.trim().toLowerCase() ?? ''
+  return type === 'application/json' || type.endsWith('+json')
+}
+
+/**
  * Call any route of the server the CLI points at, as `gh api` does:
  * with the CLI's own login or token, so nothing else needs one. Every
  * other `--key value` is a field: fields make a JSON body, or the query
- * string of a GET; `--input` sends a YAML or JSON file as the body.
- * Prints the answer: JSON as JSON, nothing for a 204. Mirrors Python's
- * `api_cmd`.
+ * string of a GET, after any query the route has; `--input` sends a
+ * YAML or JSON file as the body. Prints a JSON answer as JSON, and any
+ * other answer, a stream or a tar, byte for byte as it arrives.
+ * Mirrors Python's `api_cmd`.
  */
 export function registerApiCommand(program: Command): void {
   program
@@ -133,10 +152,7 @@ export function registerApiCommand(program: Command): void {
         // As gh does: a GET's fields are its query string.
         if (fields.length > 0) {
           const query = new URLSearchParams(
-            fields.map(([key, value]): [string, string] => [
-              key,
-              typeof value === 'string' ? value : JSON.stringify(value),
-            ]),
+            fields.map(([key, value]): [string, string] => [key, queryText(value)]),
           )
           path += `${path.includes('?') ? '&' : '?'}${query.toString()}`
         }
@@ -144,15 +160,25 @@ export function registerApiCommand(program: Command): void {
       }
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
-      const r = await c.request(
-        method,
-        path,
-        body === undefined ? {} : { body: JSON.stringify(body) },
-      )
+      const r = await c.request(method, path, {
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        timeoutMs: null,
+      })
       if (r.status >= 400) await handleResponse(r)
-      const answer = await r.text()
-      if (answer === '') return
-      if (r.headers.get('content-type')?.includes('json') === true) emit(JSON.parse(answer))
-      else process.stdout.write(answer)
+      if (isJson(r.headers.get('content-type'))) {
+        const answer = await r.text()
+        if (answer !== '') emit(JSON.parse(answer))
+        return
+      }
+      if (r.body === null) return
+      const chunks: AsyncIterable<Uint8Array> = r.body
+      for await (const chunk of chunks) {
+        await new Promise<void>((resolve, reject) => {
+          process.stdout.write(chunk, (err) => {
+            if (err === null || err === undefined) resolve()
+            else reject(err)
+          })
+        })
+      }
     })
 }
