@@ -406,14 +406,18 @@ describe('SandboxMounts', () => {
     await ws.close()
   })
 
-  it('serves over both what the sandbox does not mount itself', async () => {
-    const sandbox = new FakeSandbox('both', ['/data'])
-    const ws = workspace(sandbox, ['/my notes/secret'])
-    const agent = await ws.session('agent', { profile: 'agent' })
-    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
-    expect(sandbox.served()).toEqual(['/my notes'])
-    await ws.close()
-  })
+  it.each(['tmpfs', 'mirage-cache'])(
+    'serves over both what the sandbox does not mount itself (%s)',
+    async (source) => {
+      const sandbox = new FakeSandbox('both')
+      sandbox.table.set('/data', [source, 'tmpfs'])
+      const ws = workspace(sandbox, ['/my notes/secret'])
+      const agent = await ws.session('agent', { profile: 'agent' })
+      expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+      expect(sandbox.served()).toEqual(['/my notes'])
+      await ws.close()
+    },
+  )
 
   it.each(['both', 'fuse'] as const)(
     'refuses a line under %s while a rule covers a prefix the sandbox serves',
