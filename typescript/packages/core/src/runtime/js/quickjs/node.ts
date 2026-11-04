@@ -665,14 +665,16 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
     for (let c = stdinChunk(); c !== null; c = stdinChunk()) chunks.push(c)
     return Buffer.concat(chunks)
   }
-  // Text from chunks that may split a character: the bytes that end whole
-  // characters now, the rest with the next chunk, and all of it at null.
-  function textStream() {
+  // Text from chunks, in an encoding: what ends whole now and the rest with
+  // the next chunk (a character UTF-8 splits, a group of fewer than three
+  // bytes base64 would pad), and all of it at null.
+  function textStream(encoding) {
+    const e = encodingName(encoding)
     let carry = new Uint8Array(0)
     return (chunk) => {
       let bytes = chunk === null ? carry : Buffer.concat([carry, chunk])
-      carry = new Uint8Array(0)
-      if (chunk !== null) {
+      let cut = bytes.length
+      if (chunk !== null && e === 'utf8') {
         let i = bytes.length
         while (
           i > 0 &&
@@ -683,12 +685,13 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
         }
         const lead = i > 0 ? bytes[i - 1] : 0
         const size = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : lead >= 0xc0 ? 2 : 1
-        if (i > 0 && size > bytes.length - i + 1) {
-          carry = bytes.slice(i - 1)
-          bytes = bytes.subarray(0, i - 1)
-        }
+        if (i > 0 && size > bytes.length - i + 1) cut = i - 1
+      } else if (chunk !== null && e.startsWith('base64')) {
+        cut -= bytes.length % 3
       }
-      return utf8Text(bytes, 0, bytes.length)
+      carry = bytes.slice(cut)
+      bytes = bytes.subarray(0, cut)
+      return textOf(bytes, e, 0, bytes.length)
     }
   }
   const isStdin = (file) => file === 0 || file === '/dev/stdin'
@@ -794,15 +797,20 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
   // An entry, and what is in it first only when it is a directory with
   // entries. remove takes a link itself, never what it points at, so the
   // walk never leaves the tree through one, though stat follows links.
-  function removeTree(at, file) {
+  function removeTree(at, file, force) {
     const r = os.remove(at)
+    if (r === -44 && force) return
     if (r !== -55) return check(r, 'rm', file)
     const [names, errno] = os.readdir(at)
+    if (errno === 44 && force) return
     if (errno !== 0) throw failure(errno, 'rm', file)
     for (const name of names) {
-      if (name !== '.' && name !== '..') removeTree(posix.join(at, name), file)
+      if (name !== '.' && name !== '..') {
+        removeTree(posix.join(at, name), file, force)
+      }
     }
-    check(os.remove(at), 'rm', file)
+    const last = os.remove(at)
+    if (!(last === -44 && force)) check(last, 'rm', file)
   }
   const fs = {
     readFileSync(file, options) {
@@ -924,7 +932,7 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
         e.code = 'ERR_FS_EISDIR'
         throw raise(e)
       }
-      removeTree(at, file)
+      removeTree(at, file, Boolean(options && options.force))
     },
   }
   for (const name of Object.keys(fs)) fs[name] = api(fs[name])
@@ -980,15 +988,20 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
       },
     }
   }
-  function emitter(target, start) {
+  // Listeners on target, and the pump that feeds them, started by the
+  // first listener or by iteration: one reader, however it is consumed.
+  function emitter(target, pump) {
     const listeners = {}
     let started = false
-    const on = (event, fn) => {
-      ;(listeners[event] = listeners[event] || []).push(fn)
+    const start = () => {
       if (!started) {
         started = true
-        os.setTimeout(start, 0)
+        os.setTimeout(pump, 0)
       }
+    }
+    const on = (event, fn) => {
+      ;(listeners[event] = listeners[event] || []).push(fn)
+      start()
       return target
     }
     const off = (event, fn) => {
@@ -1009,23 +1022,48 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
       once.listener = fn
       return on(event, once)
     }
-    return (event, ...args) => {
+    const emit = (event, ...args) => {
       for (const fn of (listeners[event] || []).slice()) fn(...args)
     }
+    return { emit, start }
   }
-  let encoding = null
-  let utf8 = null
-  const decode = (chunk) => {
-    if (encoding === null) return chunk
-    return utf8 !== null ? utf8(chunk) : chunk.toString(encoding)
+  // What a pump read for an async iterator: the values not yet taken, and
+  // the iterator's wait for more until the pump says it is done.
+  function queue(start) {
+    const values = []
+    let done = false
+    let wake = null
+    const notify = () => {
+      if (wake !== null) wake()
+      wake = null
+    }
+    return {
+      push(value) {
+        values.push(value)
+        notify()
+      },
+      end() {
+        done = true
+        notify()
+      },
+      async *drain() {
+        start()
+        while (true) {
+          if (values.length) yield values.shift()
+          else if (done) return
+          else await new Promise((resolve) => (wake = resolve))
+        }
+      },
+    }
   }
+  let decoder = null
   let pending = null
+  let iterated = null
   const input = {
     fd: 0,
     isTTY: false,
     setEncoding(e) {
-      encoding = e === undefined ? 'utf8' : e
-      utf8 = encodingName(encoding) === 'utf8' ? textStream() : null
+      decoder = textStream(e === undefined ? 'utf8' : e)
       return input
     },
     resume: () => input,
@@ -1035,73 +1073,67 @@ export const NODE_SHIM = String.raw`;(function (argv, script) {
       pending = null
       return chunk
     },
-    async *[Symbol.asyncIterator]() {
-      for (let c = stdinChunk(); c !== null; c = stdinChunk()) {
-        const value = decode(c)
-        if (value.length) yield value
-      }
-      const tail = utf8 !== null ? utf8(null) : ''
-      if (tail !== '') yield tail
+    [Symbol.asyncIterator]() {
+      if (iterated === null) iterated = queue(stdinEvents.start)
+      return iterated.drain()
     },
   }
-  const emit = emitter(input, function pump() {
+  const deliver = (value) => {
+    if (!value.length) return
+    if (iterated !== null) iterated.push(value)
+    pending = value
+    stdinEvents.emit('readable')
+    pending = null
+    stdinEvents.emit('data', value)
+  }
+  const stdinEvents = emitter(input, function pump() {
     const chunk = stdinChunk()
     if (chunk === null) {
-      const tail = utf8 !== null ? utf8(null) : ''
-      if (tail !== '') emit('data', tail)
-      emit('end')
-      emit('close')
+      if (decoder !== null) deliver(decoder(null))
+      if (iterated !== null) iterated.end()
+      stdinEvents.emit('end')
+      stdinEvents.emit('close')
       return
     }
-    const value = decode(chunk)
-    if (value.length) {
-      pending = value
-      emit('readable')
-      pending = null
-      emit('data', value)
-    }
+    deliver(decoder === null ? chunk : decoder(chunk))
     os.setTimeout(pump, 0)
   })
   const readline = {
     createInterface() {
       let closed = false
       let rest = ''
-      const text = textStream()
-      // The lines the next chunk completes, and whether input has ended.
-      const pull = () => {
-        const chunk = stdinChunk()
-        const all = (rest + text(chunk)).split('\n')
-        rest = chunk === null ? '' : all.pop()
-        if (chunk === null && all[all.length - 1] === '') all.pop()
-        const lines = all.map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l))
-        return [lines, chunk === null]
-      }
+      let iterated = null
+      const text = textStream('utf8')
       const rl = {
         close() {
           if (!closed) {
             closed = true
-            emitLine('close')
+            if (iterated !== null) iterated.end()
+            events.emit('close')
           }
         },
         async *[Symbol.asyncIterator]() {
-          while (!closed) {
-            const [lines, done] = pull()
-            for (const line of lines) {
-              if (closed) return
-              yield line
-            }
-            if (done) rl.close()
+          if (iterated === null) iterated = queue(events.start)
+          try {
+            yield* iterated.drain()
+          } finally {
+            rl.close()
           }
         },
       }
-      const emitLine = emitter(rl, function pump() {
+      const events = emitter(rl, function pump() {
         if (closed) return
-        const [lines, done] = pull()
-        for (const line of lines) {
+        const chunk = stdinChunk()
+        const all = (rest + text(chunk)).split('\n')
+        rest = chunk === null ? '' : all.pop()
+        if (chunk === null && all[all.length - 1] === '') all.pop()
+        for (const l of all) {
           if (closed) return
-          emitLine('line', line)
+          const line = l.endsWith('\r') ? l.slice(0, -1) : l
+          if (iterated !== null) iterated.push(line)
+          events.emit('line', line)
         }
-        if (done) rl.close()
+        if (chunk === null) rl.close()
         else os.setTimeout(pump, 0)
       })
       return rl

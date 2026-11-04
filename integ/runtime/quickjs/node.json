@@ -242,7 +242,7 @@
     },
     {
       "id": "stdin_arrives_as_it_is_written",
-      "note": "A data listener sees the first chunk while the producer is still writing; one that waited for the end of input would hit the line's limit.",
+      "note": "A data listener sees the first chunk while the producer is still writing; one that waited for the end of input would hit the line's limit. Every reader takes from one position and one pump, so readline's events and its async iterator see every line, and base64 and UTF-8 text carry what a chunk splits.",
       "world": {
         "runtimes": [
           "quickjs",
@@ -278,6 +278,30 @@
             "stdout": "first one\nline one\nline two\nclosed\n",
             "stderr": ""
           }
+        },
+        {
+          "command": "printf 'a\\nb\\nc\\n' | node -e \"const rl = require('readline').createInterface({ input: process.stdin }); rl.on('close', () => console.log('closed')); (async () => { for await (const l of rl) { await new Promise((r) => setTimeout(r, 20)); console.log('>', l) } console.log('loop done') })()\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "closed\n> a\n> b\n> c\nloop done\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "seq 1 30000 | node -e \"let s = ''; process.stdin.setEncoding('base64'); process.stdin.on('data', (c) => (s += c)); process.stdin.on('end', () => console.log(Buffer.from(s, 'base64').toString().split('\\n').length - 1, /=./.test(s)))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "30000 false\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'ok \\xc3' | node -e \"let got = ''; process.stdin.setEncoding('utf8'); process.stdin.on('readable', () => { let c; while ((c = process.stdin.read()) !== null) got += c }); process.stdin.on('end', () => console.log(JSON.stringify(got)))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"ok �\"\n",
+            "stderr": ""
+          }
         }
       ]
     },
@@ -305,6 +329,14 @@
           "expect": {
             "exit": 0,
             "stdout": "[ 'keep' ] [ 'k' ]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mkdir -p /data/t/a/b && echo 1 > /data/t/a/b/f && node -e \"const fs = require('fs'); fs.rmSync('/data/t', { recursive: true, force: true }); fs.rmSync('/data/none', { recursive: true, force: true }); console.log(fs.existsSync('/data/t'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "false\n",
             "stderr": ""
           }
         }
