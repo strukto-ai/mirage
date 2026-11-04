@@ -38,8 +38,8 @@ from mirage.vfs.sql.types import SqlStatement
 async def copy(accessor: SqlAccessor, src: PathSpec, dst: PathSpec) -> None:
     """Copy a file's bytes to ``dst`` inside the database, row for row:
     nothing passes through the mount. Mirrors TypeScript's ``copy``."""
-    frm = walk(accessor, src)
-    to = walk(accessor, dst)
+    frm = await walk(accessor, src)
+    to = await walk(accessor, dst)
     check_dest_parents(to, dst)
     node = found(frm, src)
     if is_dir(node):
@@ -73,4 +73,4 @@ async def copy(accessor: SqlAccessor, src: PathSpec, dst: PathSpec) -> None:
             ino.params,
         )
     )
-    accessor.batch(statements)
+    await accessor.batch(statements)

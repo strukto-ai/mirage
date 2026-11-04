@@ -40,14 +40,19 @@ export function namesOf(p: string): string[] {
   return bare === '' ? [] : bare.split('/')
 }
 
-/**
- * Resolve `path` in one query: each level joins the entry under the inode
- * above it, so the database walks every name and answers every inode on the
- * way, and a miss stops the chain where it happens. Mirrors Python's `walk`.
- */
-export async function walk(accessor: SqlAccessor, path: PathSpec | string): Promise<Walk> {
-  const p = norm(typeof path === 'string' ? path : path.mountPath)
-  const names = namesOf(p)
+// SQLite joins at most 64 tables, so one query walks at most this many names
+// (two tables each, past the inode it starts from), and a deeper path walks
+// on from where the last query stopped.
+const NAMES_PER_QUERY = 31
+
+// The inode `from` and the inode each of `names` reaches below it in turn,
+// null from the first miss, in one query: each level joins the entry under
+// the inode above it.
+async function walkFrom(
+  accessor: SqlAccessor,
+  from: number,
+  names: readonly string[],
+): Promise<(Inode | null)[]> {
   const levels = names.length + 1
   const select: string[] = []
   const joins: string[] = []
@@ -63,9 +68,26 @@ export async function walk(accessor: SqlAccessor, path: PathSpec | string): Prom
     }
   }
   const sql = `SELECT ${select.join(', ')} FROM fs_inode n0 ${joins.join(' ')}
-    WHERE n0.ino = ${String(ROOT_INO)}`
+    WHERE n0.ino = ${byIno(from).sql}`
   const row = (await accessor.query(sql, names))[0]
-  const chain = Array.from({ length: levels }, (_, i) => inodeOf(row, `l${String(i)}_`))
+  return Array.from({ length: levels }, (_, i) => inodeOf(row, `l${String(i)}_`))
+}
+
+/**
+ * Resolve `path` from the root, `NAMES_PER_QUERY` names a query, so the
+ * database walks every name and answers every inode on the way, and a miss
+ * stops the chain where it happens. Mirrors Python's `walk`.
+ */
+export async function walk(accessor: SqlAccessor, path: PathSpec | string): Promise<Walk> {
+  const p = norm(typeof path === 'string' ? path : path.mountPath)
+  const names = namesOf(p)
+  const chain = await walkFrom(accessor, ROOT_INO, names.slice(0, NAMES_PER_QUERY))
+  for (let at = NAMES_PER_QUERY; at < names.length; at += NAMES_PER_QUERY) {
+    const part = names.slice(at, at + NAMES_PER_QUERY)
+    const last = chain[chain.length - 1] ?? null
+    if (last === null) chain.push(...part.map(() => null))
+    else chain.push(...(await walkFrom(accessor, last.ino, part)).slice(1))
+  }
   return { p, names, chain }
 }
 

@@ -19,5 +19,5 @@ from mirage.types import FileStat, PathSpec
 
 
 async def stat(accessor: SqlAccessor, path: PathSpec) -> FileStat:
-    w = walk(accessor, path)
+    w = await walk(accessor, path)
     return inode_stat(w.p, found(w, path))

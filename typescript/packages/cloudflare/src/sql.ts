@@ -39,6 +39,19 @@ export interface D1DatabaseLike {
   batch(statements: D1StatementLike[]): Promise<unknown[]>
 }
 
+// A database's default location: one per database object, so two drivers on
+// one binding read as one database and two bindings as two.
+const labels = new WeakMap<object, string>()
+let labelled = 0
+function labelOf(kind: string, db: object): string {
+  let label = labels.get(db)
+  if (label === undefined) {
+    label = `${kind}#${String(++labelled)}`
+    labels.set(db, label)
+  }
+  return label
+}
+
 // A BLOB binds as its own ArrayBuffer: both hosts take one, neither a view.
 function bind(value: SqlValue): unknown {
   if (!(value instanceof Uint8Array)) return value
@@ -71,7 +84,7 @@ export class DurableObjectSqlDriver implements SqlDriver {
 
   constructor(
     private readonly storage: DurableObjectStorageLike,
-    readonly location = 'durable-object',
+    readonly location = labelOf('durable-object', storage),
   ) {}
 
   query(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow[]> {
@@ -101,7 +114,7 @@ export class D1SqlDriver implements SqlDriver {
 
   constructor(
     private readonly db: D1DatabaseLike,
-    readonly location = 'd1',
+    readonly location = labelOf('d1', db),
   ) {}
 
   async query(sql: string, params: readonly SqlValue[] = []): Promise<SqlRow[]> {

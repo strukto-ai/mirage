@@ -18,4 +18,4 @@ from mirage.types import PathSpec
 
 
 async def exists(accessor: SqlAccessor, path: PathSpec) -> bool:
-    return target(walk(accessor, path)) is not None
+    return target(await walk(accessor, path)) is not None

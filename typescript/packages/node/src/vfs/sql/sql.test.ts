@@ -45,6 +45,20 @@ async function bytes(
   return materialize(await vfs.read(at(p), undefined, offset, size))
 }
 
+// A writer racing the next op: `sql` lands just before the op's own batch,
+// after its lookups.
+function racing(driver: SqlDriver, sql: readonly string[]): void {
+  const batch = driver.batch.bind(driver)
+  let pending = true
+  driver.batch = async (statements) => {
+    if (pending) {
+      pending = false
+      await batch(sql.map((s) => ({ sql: s })))
+    }
+    await batch(statements)
+  }
+}
+
 // The filesystem behaviour every driver owes, run once per database.
 function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void {
   let vfs: SqlVFS
@@ -121,6 +135,38 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
     await vfs.copy(at('/src'), at('/dst'))
     expect(dec.decode(await bytes(vfs, '/dst'))).toBe('copied')
     expect(dec.decode(await bytes(vfs, '/src'))).toBe('copied')
+  })
+
+  it('walks a path deeper than one query joins', async () => {
+    const deep = `/${Array.from({ length: 40 }, (_, i) => `d${String(i)}`).join('/')}`
+    await vfs.mkdir(at(deep), true)
+    await ops(vfs).write(at(`${deep}/f`), enc.encode('deep'))
+    expect(dec.decode(await bytes(vfs, `${deep}/f`))).toBe('deep')
+    expect((await ops(vfs).stat(at(deep))).type).toBe(FileType.DIRECTORY)
+    expect(await vfs.exists(at(`${deep}/nope/f`))).toBe(false)
+  })
+
+  it('refuses a move onto a directory written into since its check, stranding nothing', async () => {
+    await vfs.mkdir(at('/src'))
+    await vfs.mkdir(at('/dst'))
+    racing(driver, [
+      `INSERT INTO fs_inode (ino, mode, size, mtime) VALUES (1000, ${String(FILE)}, 0, 0)`,
+      "INSERT INTO fs_dentry (name, parent_ino, ino) SELECT 'new', ino, 1000 FROM fs_dentry WHERE parent_ino = 1 AND name = 'dst'",
+    ])
+    await expect(vfs.rename(at('/src'), at('/dst'))).rejects.toMatchObject({ code: 'ENOTEMPTY' })
+    expect(await vfs.exists(at('/dst/new'))).toBe(true)
+    expect(await vfs.exists(at('/src'))).toBe(true)
+  })
+
+  it('fails a write whose directory went since its lookup, stranding nothing', async () => {
+    await vfs.mkdir(at('/d'))
+    racing(driver, [
+      "DELETE FROM fs_inode WHERE ino IN (SELECT ino FROM fs_dentry WHERE parent_ino = 1 AND name = 'd')",
+      "DELETE FROM fs_dentry WHERE parent_ino = 1 AND name = 'd'",
+    ])
+    await expect(ops(vfs).write(at('/d/f'), enc.encode('x'))).rejects.toThrow()
+    const inodes = await driver.query('SELECT ino FROM fs_inode')
+    expect(inodes.map((r) => Number(r.ino))).toEqual([1])
   })
 
   it('keeps no attributes, so the namespace keeps them', () => {
@@ -322,10 +368,18 @@ describe('SqlVFS', () => {
     const vfs = new SqlVFS()
     try {
       expect((await vfs.capacity()).state).toBe(CapacityState.ELASTIC)
-      expect(vfs.storageLocation()).toBe('sql::memory:')
+      expect(vfs.storageLocation()).toMatch(/^sql::memory:#\d+$/)
     } finally {
       await vfs.close()
     }
+  })
+
+  it('tells two in-memory databases apart, and two names of one file alike', () => {
+    expect(new SqlVFS().storageLocation()).not.toBe(new SqlVFS().storageLocation())
+    const path = join(dir, 'fs.db')
+    expect(new SqlVFS({ path }).storageLocation()).toBe(
+      new SqlVFS({ path: join(dir, '.', 'fs.db') }).storageLocation(),
+    )
   })
 
   it('takes a path or a driver, not both', () => {

@@ -12,19 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import itertools
+import os
 import sqlite3
 import threading
 from collections.abc import Sequence
 
 from mirage.vfs.sql.types import SqlDialect, SqlRow, SqlStatement, SqlValue
 
+# Each ``:memory:`` database is its own, so each driver on one gets a
+# location of its own.
+_memories = itertools.count(1)
+
 
 class SqliteDriver:
     """A SQLite file opened with ``sqlite3``, as the sql mount's driver.
 
     The file opens on the first statement, so building a mount never
-    touches the disk. ``:memory:`` holds the database in this process
-    alone. One connection serves every caller, serialized by a lock,
+    touches the disk. ``:memory:`` holds the database in this driver
+    alone. ``location`` is the file's absolute path, so two names of one
+    file read as one database, or ``:memory:#n``, one per driver. One
+    connection serves every caller, serialized by a lock,
     because a snapshot reads it from a worker thread while the loop may
     still write. Mirrors TypeScript's ``SqliteDriver``.
     """
@@ -34,12 +42,17 @@ class SqliteDriver:
         path (str): the database file, or ``:memory:``.
         """
         self.path = path
+        self._location = (
+            f":memory:#{next(_memories)}"
+            if path == ":memory:"
+            else os.path.abspath(path)
+        )
         self._db: sqlite3.Connection | None = None
         self._lock = threading.Lock()
 
     @property
     def location(self) -> str:
-        return self.path
+        return self._location
 
     @property
     def dialect(self) -> SqlDialect:

@@ -16,20 +16,9 @@ import type { SqlAccessor } from '../../accessor/sql.ts'
 import { gnuBasename, parent } from '../../utils/path.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { SqlStatement } from '../../vfs/sql/types.ts'
-import { CLEAR, DIR, FILE, ROOT_INO, SQL } from './constants.ts'
+import { CLEAR, DIR, FILE, RENUMBERED, ROOT_INO, SQL } from './constants.ts'
 import { placeBytes, readBytes } from './data.ts'
-import {
-  byEntry,
-  byIno,
-  inodeOf,
-  isDir,
-  isFile,
-  isoOf,
-  makeNode,
-  nowStamp,
-  stampOf,
-  type InoRef,
-} from './inode.ts'
+import { byIno, inodeOf, isDir, isFile, isoOf, nowStamp, stampOf } from './inode.ts'
 
 /**
  * What a snapshot keeps of a sql mount: each file's bytes and each
@@ -65,34 +54,33 @@ export async function snapshot(accessor: SqlAccessor): Promise<SqlSnapshot> {
 /**
  * Replace everything the database holds with `state`, in one transaction:
  * the directories outermost first, then each file under its directory. A
- * path whose directory the state does not hold is dropped.
+ * path whose directory the state does not hold is dropped. Each inode is
+ * given its number here, so an entry names its parent by number however
+ * deep the tree.
  */
 export async function restore(accessor: SqlAccessor, state: SqlSnapshot): Promise<void> {
   const statements: SqlStatement[] = CLEAR.map((sql) => ({ sql }))
-  const refs = new Map<string, InoRef>([['/', byIno(ROOT_INO)]])
+  const dirs = new Map<string, number>([['/', ROOT_INO]])
   const now = nowStamp()
+  let next = ROOT_INO
   const place = async (p: string, mode: number, data: Uint8Array | null): Promise<void> => {
-    const up = refs.get(parent(p))
+    const up = dirs.get(parent(p))
     if (up === undefined) return
-    const name = gnuBasename(p)
+    const ino = ++next
     const modified = state.modified[p]
-    const ref = byEntry(up, name)
+    const [seconds, nanoseconds] = modified !== undefined ? stampOf(modified) : now
     statements.push(
-      ...makeNode(
-        accessor,
-        up,
-        name,
-        mode,
-        data?.byteLength ?? 0,
-        modified !== undefined ? stampOf(modified) : now,
-      ),
+      { sql: SQL.numberedInode, params: [ino, mode, data?.byteLength ?? 0, seconds, nanoseconds] },
+      { sql: SQL.newEntry, params: [gnuBasename(p), up, ino] },
     )
-    if (data !== null) statements.push(...(await placeBytes(accessor, ref, null, 0, data)))
-    if (data === null) refs.set(p, ref)
+    if (data === null) dirs.set(p, ino)
+    else statements.push(...(await placeBytes(accessor, byIno(ino), null, 0, data)))
   }
-  const dirs = state.dirs.filter((p) => p !== '/')
-  dirs.sort((a, b) => depth(a) - depth(b) || compareCodePoints(a, b))
-  for (const p of dirs) await place(p, DIR, null)
+  const listed = state.dirs.filter((p) => p !== '/')
+  listed.sort((a, b) => depth(a) - depth(b) || compareCodePoints(a, b))
+  for (const p of listed) await place(p, DIR, null)
   for (const [p, data] of Object.entries(state.files)) await place(p, FILE, data)
+  const renumbered = RENUMBERED[accessor.driver.dialect]
+  if (renumbered !== null) statements.push({ sql: renumbered })
   await accessor.batch(statements)
 }

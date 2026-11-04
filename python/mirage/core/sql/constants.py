@@ -102,6 +102,14 @@ LAST_INO: dict[SqlDialect, str] = {
     SqlDialect.POSTGRES: "currval(pg_get_serial_sequence('fs_inode', 'ino'))",
 }
 
+# What runs after inodes were given their numbers (a restore), by
+# dialect: Postgres's sequence moves past them; SQLite's follows its rows.
+RENUMBERED: dict[SqlDialect, str | None] = {
+    SqlDialect.SQLITE: None,
+    SqlDialect.POSTGRES: "SELECT setval(pg_get_serial_sequence('fs_inode',"
+    " 'ino'), (SELECT MAX(ino) FROM fs_inode))",
+}
+
 # Every fixed statement the sql ops run, by name. TypeScript's ``SQL``
 # holds the same text, so the two runtimes read and write one database
 # alike. ``seed_root`` makes the root at the time ``?`` gives unless the
@@ -131,9 +139,14 @@ SQL: dict[str, str] = {
     f" WHERE mode = {FILE}",
     "new_inode": "INSERT INTO fs_inode (mode, size, mtime, mtime_nsec)"
     " VALUES (?, ?, ?, ?)",
+    "numbered_inode": "INSERT INTO fs_inode"
+    " (ino, mode, size, mtime, mtime_nsec) VALUES (?, ?, ?, ?, ?)",
+    "new_entry": "INSERT INTO fs_dentry (name, parent_ino, ino)"
+    " VALUES (?, ?, ?)",
     "remove_entry": "DELETE FROM fs_dentry WHERE parent_ino = ? AND name = ?",
-    "move_entry": "UPDATE fs_dentry SET parent_ino = ?, name = ?"
-    " WHERE parent_ino = ? AND name = ?",
+    "move_entry": "UPDATE fs_dentry SET parent_ino ="
+    " (SELECT ino FROM fs_inode WHERE ino = ?), name = ?"
+    "\n    WHERE parent_ino = ? AND name = ?",
 }
 
 # What ``restore`` empties before it writes a snapshot back.

@@ -99,6 +99,16 @@ export const LAST_INO: Readonly<Record<SqlDialect, string>> = {
 }
 
 /**
+ * What runs after inodes were given their numbers (a restore), by dialect:
+ * Postgres's sequence moves past them; SQLite's follows its rows.
+ */
+export const RENUMBERED: Readonly<Record<SqlDialect, string | null>> = {
+  [SqlDialect.SQLITE]: null,
+  [SqlDialect.POSTGRES]:
+    "SELECT setval(pg_get_serial_sequence('fs_inode', 'ino'), (SELECT MAX(ino) FROM fs_inode))",
+}
+
+/**
  * Every fixed statement the sql ops run, by name. Python's `SQL` holds the
  * same text, so the two runtimes read and write one database alike.
  */
@@ -127,8 +137,13 @@ export const SQL = {
     WHERE ino = ? AND chunk_index >= ? AND chunk_index <= ? ORDER BY chunk_index`,
   usedBytes: `SELECT COALESCE(SUM(size), 0) AS n FROM fs_inode WHERE mode = ${String(FILE)}`,
   newInode: 'INSERT INTO fs_inode (mode, size, mtime, mtime_nsec) VALUES (?, ?, ?, ?)',
+  numberedInode: 'INSERT INTO fs_inode (ino, mode, size, mtime, mtime_nsec) VALUES (?, ?, ?, ?, ?)',
+  newEntry: 'INSERT INTO fs_dentry (name, parent_ino, ino) VALUES (?, ?, ?)',
   removeEntry: 'DELETE FROM fs_dentry WHERE parent_ino = ? AND name = ?',
-  moveEntry: 'UPDATE fs_dentry SET parent_ino = ?, name = ? WHERE parent_ino = ? AND name = ?',
+  // The new parent through its inode, so one removed since the lookup
+  // fails the move rather than strand the entry.
+  moveEntry: `UPDATE fs_dentry SET parent_ino = (SELECT ino FROM fs_inode WHERE ino = ?), name = ?
+    WHERE parent_ino = ? AND name = ?`,
 } as const
 
 /** What `restore` empties before it writes a snapshot back. */

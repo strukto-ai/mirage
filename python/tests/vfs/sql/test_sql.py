@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import AsyncIterator
+import errno
+from collections.abc import AsyncIterator, Sequence
 
 import pytest
 import pytest_asyncio
@@ -23,6 +24,7 @@ from mirage.observe.context import RecordingScope
 from mirage.types import CapacityState, FileType, MountMode, PathSpec
 from mirage.vfs.sql.driver import SqliteDriver
 from mirage.vfs.sql.sql import SqlVFS
+from mirage.vfs.sql.types import SqlStatement
 from mirage.vfs.testing import MutationFixture, check_mutation_contract
 from mirage.workspace import Workspace
 from mirage.workspace.record.sql import SqlRecordClient
@@ -40,6 +42,22 @@ def at(p: str) -> PathSpec:
 
 async def whole(vfs: SqlVFS, p: str) -> bytes:
     return await materialize(await vfs.read(at(p)))
+
+
+def racing(vfs: SqlVFS, sql: list[str]) -> None:
+    """A writer racing the next op: ``sql`` lands just before the op's
+    own batch, after its lookups."""
+    driver = vfs.accessor.driver
+    batch = driver.batch
+    pending = [True]
+
+    def landing(statements: Sequence[SqlStatement]) -> None:
+        if pending:
+            pending.clear()
+            batch([SqlStatement(s) for s in sql])
+        batch(statements)
+
+    driver.batch = landing  # type: ignore[method-assign]
 
 
 @pytest_asyncio.fixture
@@ -65,7 +83,7 @@ async def test_a_file_across_chunk_boundaries_reads_whole_and_in_windows(
     assert await whole(vfs, "/big") == data
     assert await vfs.read(at("/big"), CS - 2, 6) == data[CS - 2 : CS + 4]
     assert await vfs.read(at("/big"), CS * 2, None) == data[CS * 2 :]
-    rows = vfs.accessor.query("SELECT COUNT(*) AS n FROM fs_data")
+    rows = await vfs.accessor.query("SELECT COUNT(*) AS n FROM fs_data")
     assert rows[0]["n"] == 3
 
 
@@ -109,7 +127,7 @@ async def test_a_tree_moves_with_one_entry_and_goes_whole(vfs: SqlVFS):
         await vfs.rename(at("/z"), at("/z/b/in"))
     await vfs.rm_r(at("/z"))
     assert await vfs.readdir(at("/")) == []
-    rows = vfs.accessor.query("SELECT COUNT(*) AS n FROM fs_inode")
+    rows = await vfs.accessor.query("SELECT COUNT(*) AS n FROM fs_inode")
     assert rows[0]["n"] == 1
 
 
@@ -119,6 +137,57 @@ async def test_copy_stays_inside_the_database(vfs: SqlVFS):
     await vfs.copy(at("/src"), at("/dst"))
     assert await whole(vfs, "/dst") == b"copied"
     assert await whole(vfs, "/src") == b"copied"
+
+
+@pytest.mark.asyncio
+async def test_a_path_deeper_than_one_query_joins_still_walks(vfs: SqlVFS):
+    deep = "/" + "/".join(f"d{i}" for i in range(40))
+    await vfs.mkdir(at(deep), parents=True)
+    await vfs.write(at(f"{deep}/f"), b"deep")
+    assert await whole(vfs, f"{deep}/f") == b"deep"
+    assert (await vfs.stat(at(deep))).type == FileType.DIRECTORY
+    assert not await vfs.exists(at(f"{deep}/nope/f"))
+
+
+@pytest.mark.asyncio
+async def test_a_move_onto_a_directory_written_into_since_its_check_fails(
+    vfs: SqlVFS,
+):
+    await vfs.mkdir(at("/src"))
+    await vfs.mkdir(at("/dst"))
+    racing(
+        vfs,
+        [
+            "INSERT INTO fs_inode (ino, mode, size, mtime)"
+            f" VALUES (1000, {FILE}, 0, 0)",
+            "INSERT INTO fs_dentry (name, parent_ino, ino) SELECT 'new',"
+            " ino, 1000 FROM fs_dentry WHERE parent_ino = 1 AND name = 'dst'",
+        ],
+    )
+    with pytest.raises(OSError) as raised:
+        await vfs.rename(at("/src"), at("/dst"))
+    assert raised.value.errno == errno.ENOTEMPTY
+    assert await vfs.exists(at("/dst/new"))
+    assert await vfs.exists(at("/src"))
+
+
+@pytest.mark.asyncio
+async def test_a_write_whose_directory_went_since_its_lookup_strands_nothing(
+    vfs: SqlVFS,
+):
+    await vfs.mkdir(at("/d"))
+    racing(
+        vfs,
+        [
+            "DELETE FROM fs_inode WHERE ino IN (SELECT ino FROM fs_dentry"
+            " WHERE parent_ino = 1 AND name = 'd')",
+            "DELETE FROM fs_dentry WHERE parent_ino = 1 AND name = 'd'",
+        ],
+    )
+    with pytest.raises(Exception):
+        await vfs.write(at("/d/f"), b"x")
+    rows = await vfs.accessor.query("SELECT ino FROM fs_inode")
+    assert [r["ino"] for r in rows] == [1]
 
 
 @pytest.mark.asyncio
@@ -268,7 +337,18 @@ async def test_a_snapshot_carries_the_files_into_a_fresh_mount():
 @pytest.mark.asyncio
 async def test_an_uncapped_database_grows(vfs: SqlVFS):
     assert (await vfs.capacity()).state == CapacityState.ELASTIC
-    assert vfs.storage_location() == "sql::memory:"
+    assert vfs.storage_location().startswith("sql::memory:#")
+
+
+def test_two_memory_databases_differ_and_two_names_of_one_file_agree(
+    tmp_path,
+):
+    assert SqlVFS().storage_location() != SqlVFS().storage_location()
+    path = tmp_path / "fs.db"
+    assert (
+        SqlVFS(str(path)).storage_location()
+        == SqlVFS(f"{tmp_path}/./fs.db").storage_location()
+    )
 
 
 @pytest.mark.asyncio

@@ -28,10 +28,15 @@ from mirage.core.sql.path import (
     target,
     walk,
 )
-from mirage.errors.fs import eexist, enotdir
+from mirage.errors.fs import eexist, enoent, enotdir
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mounted_path
 from mirage.vfs.sql.types import SqlStatement
+
+# A new directory's entry names its parent by the entry above it, a
+# subquery a level, which SQLite bounds; ``mkdir -p`` lands this many
+# levels a batch.
+_LEVELS_PER_BATCH = 16
 
 
 async def mkdir(
@@ -45,29 +50,44 @@ async def mkdir(
     is EEXIST whichever kind it is. ``mkdir -p`` walks the chain itself,
     so it reports the component it trips on (``mkdir -p a.txt/sub`` is
     ENOTDIR on ``a.txt``), reaching the target as a plain file is EEXIST,
-    and an existing directory anywhere is success. Every directory it
-    makes lands in one transaction. Mirrors TypeScript's ``mkdir``.
+    and an existing directory anywhere is success. The directories it
+    makes land ``_LEVELS_PER_BATCH`` levels a transaction. Mirrors
+    TypeScript's ``mkdir``.
     """
-    w = walk(accessor, path)
+    w = await walk(accessor, path)
     now = now_stamp()
     if not parents:
         if target(w) is not None:
             raise eexist(path)
         check_dest_parents(w, path)
-        accessor.batch(
+        await accessor.batch(
             make_node(accessor, parent_ref(w), leaf(w), DIR, 0, now)
         )
         return
     statements: list[SqlStatement] = []
     parent = by_ino(ROOT_INO)
+    levels = 0
     for i, name in enumerate(w.names):
         node = w.chain[i + 1]
-        if node is None:
-            statements += make_node(accessor, parent, name, DIR, 0, now)
-            parent = by_entry(parent, name)
+        if node is not None:
+            if not is_dir(node):
+                named = mounted_path(path, "/" + "/".join(w.names[: i + 1]))
+                raise (
+                    eexist(named) if i == len(w.names) - 1 else enotdir(named)
+                )
+            parent = by_ino(node.ino)
+            levels = 0
             continue
-        if not is_dir(node):
-            named = mounted_path(path, "/" + "/".join(w.names[: i + 1]))
-            raise eexist(named) if i == len(w.names) - 1 else enotdir(named)
-        parent = by_ino(node.ino)
-    accessor.batch(statements)
+        if levels == _LEVELS_PER_BATCH:
+            await accessor.batch(statements)
+            statements = []
+            above = "/" + "/".join(w.names[:i])
+            made = target(await walk(accessor, above))
+            if made is None:
+                raise enoent(mounted_path(path, above))
+            parent = by_ino(made.ino)
+            levels = 0
+        statements += make_node(accessor, parent, name, DIR, 0, now)
+        parent = by_entry(parent, name)
+        levels += 1
+    await accessor.batch(statements)

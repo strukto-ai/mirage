@@ -38,7 +38,7 @@ async def truncate(
     size alone, which reads as zeros. A missing file is made at that
     size unless ``no_create``. Mirrors TypeScript's ``truncate``."""
     timer = start_op()
-    w = walk(accessor, path)
+    w = await walk(accessor, path)
     check_dest_parents(w, path)
     check_write_target(w, path)
     node = target(w)
@@ -46,13 +46,13 @@ async def truncate(
     if node is None:
         if no_create:
             return
-        accessor.batch(
+        await accessor.batch(
             make_node(accessor, parent_ref(w), leaf(w), FILE, length, now)
         )
     else:
-        accessor.batch(
+        await accessor.batch(
             [
-                *cut_bytes(accessor, node, length),
+                *await cut_bytes(accessor, node, length),
                 resized(by_ino(node.ino), length, now),
             ]
         )

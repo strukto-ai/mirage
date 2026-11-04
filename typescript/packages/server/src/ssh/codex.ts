@@ -210,14 +210,6 @@ function notAFile(path: string): CodexRPCError {
   return new CodexRPCError(RPC_INVALID_REQUEST, `path \`${path}\` is not a file`)
 }
 
-// Who owns what a row names by name: the serving user, as the Node mount's
-// OWNER has it, or 0 on a host with none. Kept here so this entry, which a
-// Worker serves too, imports nothing from `@struktoai/mirage-node`.
-const OWNER = {
-  uid: typeof process.getuid === 'function' ? process.getuid() : 0,
-  gid: typeof process.getgid === 'function' ? process.getgid() : 0,
-}
-
 const isDir = (mode: number): boolean => (mode & S_IFMT) === S_IFDIR
 const isFile = (mode: number): boolean => (mode & S_IFMT) === S_IFREG
 const isLink = (mode: number): boolean => (mode & S_IFMT) === S_IFLNK
@@ -506,7 +498,15 @@ class CodexChannel {
     private readonly write: (text: string) => Promise<void>,
   ) {
     const ws = entry.runner.ws
-    this.core = new MountCore(ws.vfs, { session: ws.getSession(sessionId), owner: OWNER })
+    // Who owns what a row names by name: the serving user, as the Node
+    // mount's OWNER has it, or 0 on a host with none. Written here so this
+    // entry, which a Worker serves too, imports nothing from
+    // `@struktoai/mirage-node`.
+    const owner = {
+      uid: typeof process.getuid === 'function' ? process.getuid() : 0,
+      gid: typeof process.getgid === 'function' ? process.getgid() : 0,
+    }
+    this.core = new MountCore(ws.vfs, { session: ws.getSession(sessionId), owner })
     this.methods = {
       initialize: () => this.initialize(),
       'environment/info': () => this.environmentInfo(),

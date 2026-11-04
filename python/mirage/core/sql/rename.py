@@ -14,7 +14,7 @@
 
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import SQL
-from mirage.core.sql.inode import drop_inodes, is_dir
+from mirage.core.sql.inode import by_ino, drop_inodes, is_dir
 from mirage.core.sql.path import (
     check_dest_parents,
     found,
@@ -34,9 +34,12 @@ async def rename(accessor: SqlAccessor, src: PathSpec, dst: PathSpec) -> None:
     in one transaction. A file onto a directory is EISDIR, a directory
     onto a file ENOTDIR, onto a directory that holds entries ENOTEMPTY,
     and into its own subtree EINVAL; a file or empty directory at the
-    destination is replaced. Mirrors TypeScript's ``rename``."""
-    frm = walk(accessor, src)
-    to = walk(accessor, dst)
+    destination is replaced. A directory there goes only while it is
+    still empty: one another writer wrote into since the check keeps its
+    entry, the move meets that name and fails whole, and the call answers
+    ENOTEMPTY. Mirrors TypeScript's ``rename``."""
+    frm = await walk(accessor, src)
+    to = await walk(accessor, dst)
     check_dest_parents(to, dst)
     node = found(frm, src)
     if frm.p == to.p:
@@ -53,7 +56,7 @@ async def rename(accessor: SqlAccessor, src: PathSpec, dst: PathSpec) -> None:
             raise einval(src)
         if there is not None and not is_dir(there):
             raise enotdir(dst)
-        if there is not None and accessor.query(
+        if there is not None and await accessor.query(
             SQL["has_child"], (there.ino,)
         ):
             raise enotempty(dst)
@@ -61,8 +64,16 @@ async def rename(accessor: SqlAccessor, src: PathSpec, dst: PathSpec) -> None:
         raise eisdir(dst)
     statements: list[SqlStatement] = []
     if there is not None:
+        empty = (
+            " AND NOT EXISTS (SELECT 1 FROM fs_dentry c"
+            f" WHERE c.parent_ino = {by_ino(there.ino).sql})"
+            if is_dir(there)
+            else ""
+        )
         statements.append(
-            SqlStatement(SQL["remove_entry"], (to_parent.ino, leaf(to)))
+            SqlStatement(
+                SQL["remove_entry"] + empty, (to_parent.ino, leaf(to))
+            )
         )
     statements.append(
         SqlStatement(
@@ -72,4 +83,13 @@ async def rename(accessor: SqlAccessor, src: PathSpec, dst: PathSpec) -> None:
     )
     if there is not None:
         statements += drop_inodes([there.ino])
-    accessor.batch(statements)
+    try:
+        await accessor.batch(statements)
+    except Exception:
+        if (
+            there is not None
+            and is_dir(there)
+            and await accessor.query(SQL["has_child"], (there.ino,))
+        ):
+            raise enotempty(dst) from None
+        raise

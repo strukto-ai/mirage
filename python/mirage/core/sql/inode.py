@@ -137,13 +137,17 @@ def make_node(
 ) -> list[SqlStatement]:
     """A new inode of ``mode`` and ``size`` bytes, and the entry that
     names it ``name`` under ``parent``, as two statements of one batch:
-    the entry takes the number the inode was just given."""
+    the entry takes the number the inode was just given. The parent is
+    named through its inode, so a parent another writer removed since the
+    lookup leaves the entry no parent, which its column refuses, and the
+    batch fails whole rather than strand it."""
     seconds, nanoseconds = stamp
     return [
         SqlStatement(SQL["new_inode"], (mode, size, seconds, nanoseconds)),
         SqlStatement(
             "INSERT INTO fs_dentry (name, parent_ino, ino) VALUES"
-            f" (?, {parent.sql}, {LAST_INO[accessor.driver.dialect]})",
+            f" (?, (SELECT ino FROM fs_inode WHERE ino = {parent.sql}),"
+            f" {LAST_INO[accessor.driver.dialect]})",
             (name, *parent.params),
         ),
     ]

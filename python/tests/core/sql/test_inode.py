@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import pytest
+
 from mirage.accessor.sql import SqlAccessor
 from mirage.core.sql.constants import DIR, FILE, MAX_PARAMS
 from mirage.core.sql.inode import (
@@ -69,10 +71,11 @@ def test_rows_split_where_a_statement_would_bind_too_many():
     assert sum(len(s.params) for s in statements) == 2 * MAX_PARAMS
 
 
-def test_a_fresh_database_holds_the_root_alone():
+@pytest.mark.asyncio
+async def test_a_fresh_database_holds_the_root_alone():
     driver = SqliteDriver()
     accessor = SqlAccessor(driver)
-    accessor.chunk_size()
-    rows = accessor.query("SELECT ino, mode, size FROM fs_inode")
+    await accessor.chunk_size()
+    rows = await accessor.query("SELECT ino, mode, size FROM fs_inode")
     assert rows == [{"ino": 1, "mode": DIR, "size": 0}]
     driver.close()

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { SqlAccessor } from '../../accessor/sql.ts'
-import type { SqlStatement, SqlValue } from '../../vfs/sql/types.ts'
+import type { SqlRow, SqlStatement, SqlValue } from '../../vfs/sql/types.ts'
 import { SQL } from './constants.ts'
 import { byIno, insertRows, type Inode, type InoRef } from './inode.ts'
 
@@ -35,12 +35,25 @@ export async function readBytes(
   const stop = length === null ? node.size : Math.min(offset + length, node.size)
   if (stop <= offset) return new Uint8Array(0)
   const cs = await accessor.chunkSize()
-  const out = new Uint8Array(stop - offset)
   const rows = await accessor.query(SQL.chunks, [
     node.ino,
     Math.floor(offset / cs),
     Math.floor((stop - 1) / cs),
   ])
+  return fillBytes(rows, cs, offset, stop)
+}
+
+/**
+ * The bytes `[offset, stop)` that `fs_data` rows of `cs` bytes hold, zeros
+ * where none does. Mirrors Python's `fill_bytes`.
+ */
+export function fillBytes(
+  rows: readonly SqlRow[],
+  cs: number,
+  offset: number,
+  stop: number,
+): Uint8Array {
+  const out = new Uint8Array(stop - offset)
   for (const row of rows) {
     const base = Number(row.chunk_index) * cs
     const data = bytesOf(row.data)
