@@ -286,3 +286,17 @@ it('keeps max_body_bytes when copying an uncapped workspace', async () => {
     await ws.close()
   }
 })
+
+it.each([1024, null])('copies with the requested body ceiling %s', async (maxBodyBytes) => {
+  const ws = new Workspace({ '/d': new RAMVFS() }, { maxBodyBytes: '2MB' })
+  try {
+    const copied = await ws.copy({ maxBodyBytes })
+    try {
+      expect(copied.registry.bodyLimit).toBe(maxBodyBytes ?? 64 * 1024 * 1024)
+    } finally {
+      await copied.close()
+    }
+  } finally {
+    await ws.close()
+  }
+})

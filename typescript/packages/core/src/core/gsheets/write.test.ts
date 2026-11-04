@@ -31,14 +31,9 @@ function manager(): TokenManager {
 }
 
 function respond(status: number, body: string): typeof globalThis.fetch {
-  return vi.fn(() =>
-    Promise.resolve({
-      ok: status < 400,
-      status,
-      statusText: String(status),
-      text: () => Promise.resolve(body),
-    }),
-  ) as unknown as typeof globalThis.fetch
+  return vi.fn<typeof globalThis.fetch>(() =>
+    Promise.resolve(new Response(body, { status, statusText: String(status) })),
+  )
 }
 
 function sentInit(fetch: typeof globalThis.fetch): RequestInit | undefined {

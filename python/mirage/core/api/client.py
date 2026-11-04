@@ -463,7 +463,7 @@ def _merged_headers(
     return {**(headers or {}), "Range": header}
 
 
-async def _read_bytes(
+async def _read_buffer(
     resp: aiohttp.ClientResponse,
     window: ByteWindow | None,
     max_body_bytes: int,
@@ -511,6 +511,21 @@ async def _read_bytes(
     return data
 
 
+async def _read_bytes(
+    resp: aiohttp.ClientResponse,
+    window: ByteWindow | None,
+    max_body_bytes: int,
+) -> bytes:
+    """Return exact-sized binary bytes.
+
+    Args:
+        resp (aiohttp.ClientResponse): the response to read.
+        window (ByteWindow | None): requested byte range.
+        max_body_bytes (int): maximum retained bytes.
+    """
+    return bytes(await _read_buffer(resp, window, max_body_bytes))
+
+
 async def _read_prefix(resp: aiohttp.ClientResponse, limit: int) -> str:
     """Keep a lossy UTF-8 prefix and close the unread error body.
 
@@ -529,24 +544,28 @@ async def _read_prefix(resp: aiohttp.ClientResponse, limit: int) -> str:
     return data.decode("utf-8-sig", errors="replace")
 
 
-async def _read_text(resp: aiohttp.ClientResponse, max_body_bytes: int) -> str:
+async def _read_text(
+    resp: aiohttp.ClientResponse, max_body_bytes: int, method: str
+) -> str:
     """Decode a bounded success body without copying its retained bytes.
 
     Args:
         resp (aiohttp.ClientResponse): the successful response.
         max_body_bytes (int): per-call ceiling, bounded by the workspace's
             max_body_bytes and memory budget.
+        method (str): request method; HEAD lengths describe metadata.
     """
     limit = min(max_body_bytes, body_limit())
     length = resp.headers.get("Content-Length")
     if (
-        "Content-Encoding" not in resp.headers
+        method.upper() != "HEAD"
+        and "Content-Encoding" not in resp.headers
         and length is not None
         and int(length) > limit
     ):
         resp.close()
         raise ResponseTooLargeError(limit)
-    data = await _read_bytes(resp, None, limit)
+    data = await _read_buffer(resp, None, limit)
     return data.decode("utf-8-sig", errors="replace")
 
 
@@ -601,18 +620,18 @@ async def _attempt(
         if read == "none":
             return None
         if read == "bytes":
-            return bytes(await _read_bytes(resp, window, max_body_bytes))
+            return await _read_bytes(resp, window, max_body_bytes)
         if read == "bytes_response":
             return ApiResponse(
-                bytes(await _read_bytes(resp, window, max_body_bytes)),
+                await _read_bytes(resp, window, max_body_bytes),
                 resp.status,
                 lowered_headers(resp.headers),
             )
         if read == "text":
-            return await _read_text(resp, max_body_bytes)
+            return await _read_text(resp, max_body_bytes, method)
         if read == "location":
             return resp.headers.get("Location")
-        text = await _read_text(resp, max_body_bytes)
+        text = await _read_text(resp, max_body_bytes, method)
         if not text:
             # 204 and an empty 2xx have nothing to decode; the caller gets
             # None rather than a parse error on a call that worked

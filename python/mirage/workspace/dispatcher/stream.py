@@ -18,7 +18,8 @@ from typing import Any
 
 from mirage.cache.lock import KeyHold
 from mirage.io import OpReport
-from mirage.io.stream import close_quietly, ensure_stream
+from mirage.io.memory import MemoryBudget, run_with_memory
+from mirage.io.stream import OutputStream, close_quietly, ensure_stream
 from mirage.io.types import ByteSource
 from mirage.types import VFSName
 
@@ -174,3 +175,30 @@ class _LentPayload:
                 yield chunk
         finally:
             await close_quietly(self.source)
+
+
+def _with_memory(
+    source: AsyncIterator[bytes], memory: MemoryBudget | None, body: int
+) -> AsyncIterator[bytes]:
+    """Keep the workspace limits around deferred pulls and cleanup.
+
+    Args:
+        source (AsyncIterator[bytes]): the returned stream.
+        memory (MemoryBudget | None): its workspace budget.
+        body (int): its workspace reply ceiling.
+    """
+
+    async def pulled() -> AsyncIterator[bytes]:
+        while True:
+            try:
+                step = await run_with_memory(memory, anext(source), body)
+            except StopAsyncIteration:
+                return
+            yield step
+
+    async def close() -> None:
+        aclose = getattr(source, "aclose", None)
+        if aclose is not None:
+            await run_with_memory(memory, aclose(), body)
+
+    return OutputStream(pulled(), close)

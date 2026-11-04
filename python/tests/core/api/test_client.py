@@ -1428,3 +1428,20 @@ async def test_gzip_text_ignores_compressed_length_over_decoded_cap():
             == "ok"
         )
     assert len(compressed) > 4
+
+
+@pytest.mark.asyncio
+async def test_head_keeps_metadata_when_represented_body_exceeds_cap():
+    session, response, _ = _binary_session([])
+    response.headers = CIMultiDictProxy(CIMultiDict({"Content-Length": "999"}))
+    result = await api_request(
+        "HEAD",
+        TARGET,
+        error_of=_error_of,
+        session=session,
+        read="response",
+        max_body_bytes=4,
+    )
+    assert result.data is None
+    assert result.status == 200
+    assert result.headers["content-length"] == "999"

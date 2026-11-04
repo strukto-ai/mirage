@@ -13,7 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { KeyHold } from '../../cache/lock.ts'
-import { ensureStream } from '../../io/stream.ts'
+import { ensureStream, OutputStream } from '../../io/stream.ts'
+import { type MemoryBudget, runWithMemory } from '../../io/memory.ts'
 import type { ByteSource, OpReport } from '../../io/types.ts'
 import { VFSName } from '../../types.ts'
 import { concat } from '../../utils/bytes.ts'
@@ -147,4 +148,29 @@ export class LentPayload {
       await iterator.return?.()
     }
   }
+}
+
+/** Keep the workspace limits around deferred pulls and cleanup. */
+export function withMemory(
+  source: AsyncIterable<Uint8Array>,
+  memory: MemoryBudget | null,
+  body: number,
+): AsyncIterable<Uint8Array> {
+  const iterator = source[Symbol.asyncIterator]()
+  async function* pulled(): AsyncGenerator<Uint8Array> {
+    for (;;) {
+      const step = await runWithMemory(memory, () => iterator.next(), body)
+      if (step.done === true) return
+      yield step.value
+    }
+  }
+  return new OutputStream(pulled(), async () => {
+    await runWithMemory(
+      memory,
+      async () => {
+        await iterator.return?.()
+      },
+      body,
+    )
+  })
 }

@@ -171,6 +171,7 @@ from mirage.workspace.dispatcher.stream import (
     _memory_answered,
     _primed,
     _served,
+    _with_memory,
 )
 from mirage.workspace.mount import MountEntry
 from mirage.workspace.mount.namespace import Namespace
@@ -1069,12 +1070,20 @@ class Dispatcher:
                 and not kwargs.get("warm")
                 and "retained" not in kwargs
             ):
-                return await self._read_refusing_dirs(
+                result, io = await self._read_refusing_dirs(
                     path, caller, report, kwargs
                 )
-            return await self._dispatch(
-                name, path, caller, report=report, **kwargs
-            )
+            else:
+                result, io = await self._dispatch(
+                    name, path, caller, report=report, **kwargs
+                )
+            if hasattr(result, "__aiter__"):
+                result = _with_memory(
+                    result,
+                    self._namespace.registry.memory,
+                    self._namespace.registry.body_limit,
+                )
+            return result, io
         finally:
             reset_caller(token)
 

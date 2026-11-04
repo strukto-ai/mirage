@@ -2360,6 +2360,7 @@ export class Workspace {
       policyFunctions: options.policyFunctions ?? this.policyFunctions,
       clock: options.clock ?? this.clock,
       ids: options.ids ?? this.ids,
+      ...(options.maxBodyBytes !== undefined ? { maxBodyBytes: options.maxBodyBytes } : {}),
       ...(options.commandLimits !== undefined ? { commandLimits: options.commandLimits } : {}),
       ...(options.network !== undefined ? { network: options.network } : {}),
       ...(options.systemTime !== undefined ? { systemTime: options.systemTime } : {}),
