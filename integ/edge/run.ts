@@ -15,6 +15,7 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { type AddressInfo, createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -283,6 +284,15 @@ async function startFakes(dir: string): Promise<ChildProcess> {
   throw new Error('the fakes exited before announcing their URLs')
 }
 
+/** A port no process on this host holds, so no other worker answers for this run's. */
+async function freePort(): Promise<number> {
+  const server = createServer()
+  await new Promise<void>((done) => server.listen(0, '127.0.0.1', done))
+  const { port } = server.address() as AddressInfo
+  await new Promise<void>((done) => server.close(() => done()))
+  return port
+}
+
 /** The edge test worker under `wrangler dev`, answering on `port`. */
 async function startEdge(port: number): Promise<ChildProcess> {
   const child = spawn(
@@ -304,11 +314,15 @@ async function startEdge(port: number): Promise<ChildProcess> {
     },
   )
   for (let i = 0; i < 240; i++) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error('the edge worker exited before it answered')
+    }
     try {
       if ((await fetch(`http://127.0.0.1:${String(port)}/v1/health`)).ok) return child
     } catch {
-      await delay(500)
+      // Not listening yet.
     }
+    await delay(500)
   }
   child.kill()
   throw new Error('the edge worker did not start')
@@ -316,8 +330,16 @@ async function startEdge(port: number): Promise<ChildProcess> {
 
 async function main(): Promise<void> {
   const only = process.argv.slice(2)
+  const runnable = [...loadTargets(root).values()].filter(
+    (t) => OPENERS[t.service ?? ''] !== undefined && t.env === undefined,
+  )
+  // A name this host doesn't run is refused, so a typo can't pass as a run
+  // of no cases.
+  const unknown = only.filter((id) => !runnable.some((t) => t.id === id))
+  if (unknown.length > 0) throw new Error(`the edge host runs no target ${unknown.join(', ')}`)
+  const targets = runnable.filter((t) => only.length === 0 || only.includes(t.id))
   const dir = mkdtempSync(join(tmpdir(), 'mirage-integ-edge-'))
-  const port = 8799
+  const port = await freePort()
   const base = `http://127.0.0.1:${String(port)}`
   let fakes: ChildProcess | null = null
   let worker: ChildProcess | null = null
@@ -328,12 +350,6 @@ async function main(): Promise<void> {
     fakes = await startFakes(dir)
     worker = await startEdge(port)
     const cases = loadCases(root)
-    const targets = [...loadTargets(root).values()].filter(
-      (t) =>
-        OPENERS[t.service ?? ''] !== undefined &&
-        t.env === undefined &&
-        (only.length === 0 || only.includes(t.id)),
-    )
     for (const target of targets) {
       const config = await OPENERS[target.service ?? '']!(target)
       // A session's inline permissions document rides in as a profile of its
@@ -403,7 +419,8 @@ async function main(): Promise<void> {
   console.log(
     `\nedge: ${String(passed)} passed, ${String(failed)} failed, ${String(skipped)} skipped`,
   )
-  if (failed > 0) process.exitCode = 1
+  // A run that passed nothing proved nothing.
+  if (failed > 0 || passed === 0) process.exitCode = 1
 }
 
 await main()
