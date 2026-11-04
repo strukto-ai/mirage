@@ -18,7 +18,13 @@ from typing import Any
 
 import pytest
 
+from mirage.bridge.sync import handed
 from mirage.io import IOResult
+from mirage.io.async_line_iterator import (
+    AsyncLineIterator,
+    SharedInput,
+    hold_inputs,
+)
 from mirage.policy.profile import SessionProfile
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.job_table import Job, JobStatus, JobTable
@@ -1618,3 +1624,44 @@ async def test_kill_reaches_a_grandchild_past_the_job_between_them():
         while ws.processes.live():
             await asyncio.sleep(0.02)
     await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "exec 3</m/f; { cat <&3; } & kill %1; wait; exec 3<&-",
+        "exec 3</m/f; { cat <&3; } & exec 3<&-; kill %1; wait",
+        "exec 3</m/f; { cat <&3 >/dev/null; } & wait; exec 3<&-",
+    ],
+    ids=["closed-after", "closed-before", "ran"],
+)
+async def test_a_job_that_never_runs_lets_go_of_its_readers(monkeypatch, line):
+    held: list[SharedInput] = []
+
+    def hold(inputs: list[SharedInput]) -> list[SharedInput]:
+        sources = hold_inputs(inputs)
+        held.extend(sources)
+        return sources
+
+    discarded: list[AsyncLineIterator] = []
+    discard = AsyncLineIterator.discard
+
+    async def record(self: AsyncLineIterator) -> None:
+        discarded.append(self)
+        await discard(self)
+
+    monkeypatch.setattr(jobs_executor, "hold_inputs", hold)
+    monkeypatch.setattr(AsyncLineIterator, "discard", record)
+    ws = _workspace()
+    try:
+        await ws.shell("printf 'x\\n' >/m/f")
+        await ws.shell(line)
+        await handed()
+        [source] = held
+        # A job killed before its runner started still lets the reader go,
+        # whoever closes last; one that ran lets it go once.
+        assert source.lines.holders == 0
+        assert discarded.count(source.lines) == 1
+    finally:
+        await ws.close()

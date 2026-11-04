@@ -12,6 +12,9 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import logging
+
 import pytest
 
 from mirage.io.async_line_iterator import (
@@ -261,3 +264,88 @@ async def test_what_a_reader_loads_must_fit_in_the_memory_budget():
         await run_with_memory(
             MemoryBudget(8, lambda: 0), load([b"abcd", b"efgh", b"i"])
         )
+
+
+async def _gated(
+    gate: asyncio.Event,
+    waiting: asyncio.Event,
+    after: list[bytes],
+    closed: list[bool] | None = None,
+    fails: bool = False,
+):
+    try:
+        yield b"a\n"
+        waiting.set()
+        await gate.wait()
+        for part in after:
+            yield part
+    finally:
+        if closed is not None:
+            closed.append(True)
+        if fails:
+            raise ValueError("close")
+
+
+async def _line(reader: AsyncLineIterator) -> bytes | None:
+    return await reader.readline()
+
+
+async def _peeked_line(reader: AsyncLineIterator) -> bytes | None:
+    await reader.peek()
+    return await reader.readline()
+
+
+async def _chars(reader: AsyncLineIterator) -> bytes:
+    text, _ = await reader.read_chars(8, b"\n")
+    return text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "read", [_line, _peeked_line, _chars], ids=["readline", "peek", "chars"]
+)
+async def test_a_second_pull_waits_for_the_first(read):
+    gate, waiting = asyncio.Event(), asyncio.Event()
+    reader = AsyncLineIterator(_gated(gate, waiting, [b"b\nc\n", b"d\n"]))
+    assert await reader.readline() == b"a"
+    first = asyncio.create_task(read(reader))
+    await waiting.wait()
+    second = asyncio.create_task(read(reader))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    gate.set()
+    # One pull at a time, and the one that waited reads on from the buffer
+    # the first left: a stale buffer would give d in place of c.
+    assert set(await asyncio.gather(first, second)) == {b"b", b"c"}
+
+
+@pytest.mark.asyncio
+async def test_a_discard_during_a_pull_closes_once_the_pull_settles():
+    gate, waiting, closed = asyncio.Event(), asyncio.Event(), []
+    reader = AsyncLineIterator(_gated(gate, waiting, [b"b\n"], closed))
+    assert await reader.readline() == b"a"
+    pending = asyncio.create_task(reader.readline())
+    await waiting.wait()
+    await reader.discard()
+    assert closed == []
+    gate.set()
+    assert await pending == b"b"
+    assert closed == [True]
+    assert await reader.readline() is None
+
+
+@pytest.mark.asyncio
+async def test_a_deferred_close_that_fails_leaves_the_pull_its_chunk(caplog):
+    gate, waiting = asyncio.Event(), asyncio.Event()
+    reader = AsyncLineIterator(_gated(gate, waiting, [b"b\n"], fails=True))
+    assert await reader.readline() == b"a"
+    pending = asyncio.create_task(reader.readline())
+    await waiting.wait()
+    with caplog.at_level(
+        logging.DEBUG, logger="mirage.io.async_line_iterator"
+    ):
+        await reader.discard()
+        gate.set()
+        assert await pending == b"b"
+    failures = [r for r in caplog.records if r.exc_info is not None]
+    assert [type(r.exc_info[1]) for r in failures] == [ValueError]

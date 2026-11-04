@@ -14,6 +14,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { stderrStr, stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { IOResult } from '../../io/types.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
@@ -1060,5 +1061,39 @@ it("child shells reach another's processes", async () => {
   } finally {
     await a.close()
     await b.close()
+  }
+})
+
+it.each([
+  ['never runs', 'exec 3</m/f; { cat <&3; } & exec 3<&-; wait', true],
+  ['ran', 'exec 3</m/f; { cat <&3 >/dev/null; } & wait; exec 3<&-', false],
+])('a job whose runner %s lets go of its readers', async (_, line, skip) => {
+  const releasing = vi.spyOn(AsyncLineIterator.prototype, 'release')
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const submit = JobTable.prototype.submit
+  // An abort before the runner begins is the state a kill from a
+  // concurrent line reaches: settle skips runBg.
+  const submitting = vi.spyOn(JobTable.prototype, 'submit').mockImplementation(function (
+    this: JobTable,
+    init,
+  ) {
+    if (skip) init.abort.abort()
+    return submit.call(this, init)
+  })
+  const ws = buildWs()
+  try {
+    await ws.shell("printf 'x\\n' >/m/f")
+    await ws.shell(line)
+    await vi.waitFor(() => {
+      const state = [...new Set(releasing.mock.contexts)].map((r) => {
+        const held = r as { holders: number; exhausted: boolean }
+        return [held.holders, held.exhausted]
+      })
+      expect(state).toEqual([[0, true]])
+    })
+  } finally {
+    releasing.mockRestore()
+    submitting.mockRestore()
+    await ws.close()
   }
 })

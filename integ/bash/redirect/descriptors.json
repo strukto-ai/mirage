@@ -1436,6 +1436,22 @@
       "note": "Pinned against GNU Bash 5.2.37 in debian:stable-slim; aliases and the enclosing stdout share emission order."
     },
     {
+      "id": "background_and_foreground_readers_share_a_descriptor",
+      "seq": 982524,
+      "targets": [
+        "ram",
+        "disk",
+        "redis"
+      ],
+      "command": "( seq 1 8000 >/data/f; exec 3</data/f; { cat <&3 >/dev/null; } & while read -u 3 l; do :; done; wait; echo status=$? )",
+      "expect": {
+        "exit": 0,
+        "stdout": "status=0\n",
+        "stderr": ""
+      },
+      "note": "Pinned on Debian 13.6 (debian:stable-slim): Bash 5.2.37. 8000 lines span more than two 16 KiB chunks (below one the line passes either way) and stay under the 10000-iteration loop cap."
+    },
+    {
       "id": "shared_fd_readwrite_creates_refuses_unprotected_creation",
       "seq": 982600,
       "targets": [
