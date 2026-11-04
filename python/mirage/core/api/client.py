@@ -547,7 +547,7 @@ async def _read_text(resp: aiohttp.ClientResponse, max_body_bytes: int) -> str:
         resp.close()
         raise ResponseTooLargeError(limit)
     data = await _read_bytes(resp, None, limit)
-    return data.decode("utf-8-sig")
+    return data.decode("utf-8-sig", errors="replace")
 
 
 async def _attempt(

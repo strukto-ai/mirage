@@ -1200,6 +1200,49 @@ describe('bounded text bodies', () => {
     },
   )
 
+  it.each(['json', 'text', 'response'] as const)(
+    'replaces invalid UTF-8 and strips BOM for %s',
+    async (read) => {
+      const raw = new Uint8Array([0xef, 0xbb, 0xbf, 0x22, 0xff, 0x22])
+      const source = chunkedResponse([raw.subarray(0, 4), raw.subarray(4)])
+      const result = await apiRequest('GET', TARGET, {
+        errorOf,
+        read,
+        maxBodyBytes: raw.length,
+        fetchFn: vi.fn<typeof fetch>().mockResolvedValue(source.response),
+      })
+      if (read === 'response') {
+        assert(typeof result === 'object' && result !== null && 'data' in result)
+        expect(result.data).toBe('\ufffd')
+      } else expect(result).toBe(read === 'text' ? '"\ufffd"' : '\ufffd')
+    },
+  )
+
+  it('fails invalid UTF-8 JSON like the replaced text', async () => {
+    const replaced = '{"value":\ufffd}'
+    const source = chunkedResponse([
+      new TextEncoder().encode('\ufeff{"value":'),
+      new Uint8Array([0xff, 0x7d]),
+    ])
+    const fetchFn = vi.fn<typeof fetch>().mockResolvedValue(source.response)
+    let expected: unknown
+    try {
+      JSON.parse(replaced)
+    } catch (error) {
+      expected = error
+    }
+    assert(expected instanceof SyntaxError)
+    await expect(
+      apiRequest('GET', TARGET, {
+        errorOf,
+        fetchFn,
+        retry: { ...NO_RETRY, maxRetries: 2, retryTransport: true },
+        sleep: noWait,
+      }),
+    ).rejects.toThrow(expected)
+    expect(fetchFn).toHaveBeenCalledOnce()
+  })
+
   it.each([false, true])(
     'checks Content-Length before pulling unless encoded: %s',
     async (encoded) => {

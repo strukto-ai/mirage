@@ -14,6 +14,7 @@
 
 import asyncio
 import gzip
+import json
 from collections.abc import AsyncGenerator, Iterable
 from unittest.mock import AsyncMock, MagicMock
 
@@ -1202,6 +1203,45 @@ async def test_text_modes_strip_bom_and_decode_split_utf8(mode):
     assert (result.data if mode == "response" else result) == (
         '"€"' if mode == "text" else "€"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["json", "text", "response"])
+async def test_text_modes_replace_invalid_utf8_and_strip_bom(mode):
+    raw = b'\xef\xbb\xbf"\xff"'
+    session, _, _ = _binary_session([raw[:4], raw[4:]])
+    result = await api_request(
+        "GET",
+        TARGET,
+        error_of=_error_of,
+        read=mode,
+        max_body_bytes=len(raw),
+        session=session,
+    )
+    assert (result.data if mode == "response" else result) == (
+        '"\ufffd"' if mode == "text" else "\ufffd"
+    )
+
+
+@pytest.mark.asyncio
+async def test_invalid_utf8_json_fails_like_replaced_text():
+    replaced = '{"value":\ufffd}'
+    with pytest.raises(json.JSONDecodeError) as expected:
+        json.loads(replaced)
+    raw = b'\xef\xbb\xbf{"value":\xff}'
+    session, _, _ = _binary_session([raw])
+    with pytest.raises(json.JSONDecodeError) as exc:
+        await api_request(
+            "GET",
+            TARGET,
+            error_of=_error_of,
+            session=session,
+            retry=RetryPolicy(max_retries=2, retry_transport=True),
+        )
+    assert exc.value.doc == replaced
+    assert exc.value.pos == expected.value.pos
+    assert str(exc.value) == str(expected.value)
+    session.request.assert_called_once()
 
 
 @pytest.mark.asyncio
