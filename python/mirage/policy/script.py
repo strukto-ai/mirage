@@ -226,7 +226,9 @@ def _string_end(source: str, start: int) -> int:
         if source[end] == "\n" and len(quote) == 1:
             return end
         if source[end] == "\\":
-            end += 2
+            # An escape takes the character after it, but not an
+            # f-string's brace, which still opens a field.
+            end += 1 if fields and source.startswith("{", end + 1) else 2
         elif fields and source.startswith("{{", end):
             end += 2
         elif fields and source[end] == "{":
@@ -238,7 +240,9 @@ def _string_end(source: str, start: int) -> int:
 
 def _field_end(source: str, start: int) -> int:
     """Where an f-string's replacement field whose code starts at
-    ``start`` ends: past the brace that closes it.
+    ``start`` ends: past the brace that closes it. Its expression is
+    code, strings and comments skipped; a ``!`` conversion or ``:``
+    format spec at its top level is text (``_spec_end``).
 
     Args:
         source (str): the program.
@@ -251,6 +255,15 @@ def _field_end(source: str, start: int) -> int:
         if char in "'\"":
             end = _string_end(source, end)
             continue
+        if char == "#":
+            end = source.find("\n", end)
+            if end == -1:
+                return len(source)
+            continue
+        if depth == 0 and (
+            char == ":" or (char == "!" and not source.startswith("!=", end))
+        ):
+            return _spec_end(source, end + 1)
         if char in "([{":
             depth += 1
         elif char in ")]}":
@@ -258,6 +271,27 @@ def _field_end(source: str, start: int) -> int:
                 return end + 1
             depth -= 1
         end += 1
+    return len(source)
+
+
+def _spec_end(source: str, start: int) -> int:
+    """Where a replacement field whose conversion or format spec starts
+    at ``start`` ends: past the brace that closes it. The spec is text,
+    so a fill such as ``[`` or ``'`` opens nothing; only a nested
+    field's braces count.
+
+    Args:
+        source (str): the program.
+        start (int): the index just past the field's ``!`` or ``:``.
+    """
+    end = start
+    while end < len(source):
+        if source[end] == "{":
+            end = _field_end(source, end + 1)
+        elif source[end] == "}":
+            return end + 1
+        else:
+            end += 1
     return len(source)
 
 
