@@ -69,7 +69,8 @@ Mirage refuses a whole line, and says why, when it would mean something
 else in the sandbox: it runs a command only Mirage has (an installed CLI,
 a shell function, `ln`, a job such as `kill %1`), a file Mirage wrote
 outside the mounts, an alias, `&`, a variable set without `export` that the
-line reads before assigning it at its top level, `$1` and the other special
+line reads before assigning it at its top level, an assignment to a
+`readonly` variable, `$1` and the other special
 parameters, `$?` or `PIPESTATUS` in its first pipeline (before the first
 `;`, `&&` or `||`), or a script or inline code whose run the mounts' `exec`
 rule refuses, whichever runtime the interpreter is bound to. Run it as two
