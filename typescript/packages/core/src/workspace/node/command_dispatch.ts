@@ -1005,7 +1005,16 @@ async function routeArgv(
   const consumer = lookup(name, session, registry, routing)
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
-    return runExternal(argv, stdin, session, registry, routing, signal, sink)
+    return runExternal(
+      argv,
+      stdin,
+      session,
+      registry,
+      routing,
+      namespace.sessionLinks(session),
+      signal,
+      sink,
+    )
   }
 
   // `--help` as a builtin's first word: bash answers it with the builtin's

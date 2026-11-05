@@ -179,7 +179,7 @@ async def handle_exec_path(
             and registry.exec_allowed_at(target)
         ):
             return await run_external(
-                argv, stdin, session, registry, routing, sink
+                argv, stdin, session, registry, routing, namespace, sink
             )
         return script_error(
             path,

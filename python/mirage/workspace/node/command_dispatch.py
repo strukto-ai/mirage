@@ -1094,7 +1094,7 @@ async def _route_argv(
     if consumer is Consumer.EXTERNAL:
         assert routing is not None
         return await run_external(
-            argv, stdin, session, registry, routing, sink
+            argv, stdin, session, registry, routing, namespace, sink
         )
 
     # ── `--help` as a builtin's first word ─────

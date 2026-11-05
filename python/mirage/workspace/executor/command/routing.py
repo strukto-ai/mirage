@@ -612,7 +612,7 @@ def invocation_routing(
     if script is not None:
         spots += [
             script.virtual,
-            _followed(script.virtual, namespace, session),
+            followed(script.virtual, namespace, session),
         ]
     if not any(registry.unserved(spot) for spot in spots):
         return routing
@@ -622,7 +622,7 @@ def invocation_routing(
     )
 
 
-def _followed(
+def followed(
     path: str, namespace: Namespace | None, session: SessionState | None
 ) -> str:
     """``path`` with the session's links followed; as named without a

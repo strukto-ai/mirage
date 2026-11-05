@@ -41,13 +41,13 @@ import { parameterReads } from '../../shell/parse/env.ts'
 import { commandWords, inheritedReads } from '../../shell/parse/names.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { VarAttr } from '../../shell/variable.ts'
-import { CycleError, resolvePath } from '../../utils/path.ts'
+import { resolvePath } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { expandingAliases } from '../executor/builtins/alias/alias.ts'
 import { FRESH_SHELL_NAMES, INTERPRETER_NAMES, WORKSPACE_JOB_WORDS } from '../lookup/constants.ts'
 import { Consumer } from '../lookup/types.ts'
-import { interpreterScript, invocationRouting } from '../executor/command/routing.ts'
+import { followed, interpreterScript, invocationRouting } from '../executor/command/routing.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Judged, Walked } from '../node/explain.ts'
@@ -94,9 +94,6 @@ declare module '../frame.ts' {
     routing?: RouteDecision<Runtime>
   }
 }
-
-// Where the router's debug lines go: unset by default, so it logs nothing.
-export const logger: { debug?: (message: string) => void } = {}
 
 export class Router {
   private readonly registry: MountRegistry
@@ -267,7 +264,7 @@ export class Router {
         const name = ctx.command
         consumer = lookup(name, stand, this.registry)
         if (INTERPRETER_NAMES.has(name) && !WORKSPACE_ONLY.has(consumer)) {
-          const refused = this.execRefused(ctx)
+          const refused = this.execRefused(ctx, stand)
           if (refused !== null) unexecutable.push(refused)
         }
         if (consumer === Consumer.EXTERNAL) {
@@ -300,7 +297,7 @@ export class Router {
     const outside: string[] = []
     const held: string[] = []
     for (const [path, stand] of paths) {
-      const place = await this.place(this.followed(path, stand))
+      const place = await this.place(followed(path, this.namespace.sessionLinks(stand)))
       if (place === 'sandbox') outside.push(path)
       else if (place === 'held') held.push(path)
     }
@@ -314,23 +311,6 @@ export class Router {
         [WHOLE_LINE]: box,
       }),
       fallback: catchAll(this.runtimes.entries),
-    }
-  }
-
-  /**
-   * `path` with the links Mirage holds followed, as the session sees them;
-   * as named when they loop. Mirrors Python's `Router._followed`.
-   *
-   * @param path an absolute virtual path.
-   * @param session the session the path is named in.
-   */
-  private followed(path: string, session: SessionState): string {
-    try {
-      return this.namespace.sessionLinks(session).follow(path)
-    } catch (caught) {
-      if (!(caught instanceof CycleError)) throw caught
-      logger.debug?.(`${path}: links loop; judged as named: ${String(caught)}`)
-      return path
     }
   }
 
@@ -361,12 +341,14 @@ export class Router {
    * judges it on Monty. Mirrors Python's `Router._exec_refused`.
    *
    * @param ctx the interpreter command.
+   * @param session the session whose links its script follows, as Monty follows them.
    */
-  private execRefused(ctx: CommandContext): string | null {
+  private execRefused(ctx: CommandContext, session: SessionState): string | null {
     const script = interpreterScript(ctx.command, ctx.argv, ctx.cwd)
     if (script !== null) {
-      if (this.registry.execAllowedAt(script.virtual)) return null
-      return `${script.virtual} is not in EXEC mode`
+      const path = followed(script.virtual, this.namespace.sessionLinks(session))
+      if (this.registry.execAllowedAt(path)) return null
+      return `${path} is not in EXEC mode`
     }
     if (this.registry.isExecAllowed()) return null
     return 'no mount is in EXEC mode'

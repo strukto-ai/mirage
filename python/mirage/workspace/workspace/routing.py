@@ -15,7 +15,6 @@
 import asyncio
 import dataclasses
 import errno
-import logging
 import posixpath
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Literal
@@ -52,10 +51,10 @@ from mirage.shell.types import TSNodeLike
 from mirage.shell.variable import VarAttr
 from mirage.types import PathSpec
 from mirage.utils.abort import MirageAbortError
-from mirage.utils.path import CycleError
 from mirage.view.types import FileView, SessionView
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.command.routing import (
+    followed,
     interpreter_script,
     invocation_routing,
 )
@@ -71,8 +70,6 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.explain import Judged, Walked
 from mirage.workspace.session import SessionState
 from mirage.workspace.workspace.runtimes import Runtimes
-
-logger = logging.getLogger(__name__)
 
 
 class Router:
@@ -351,7 +348,7 @@ class Router:
                     name in INTERPRETER_NAMES
                     and consumer not in _WORKSPACE_ONLY
                 ):
-                    refused = self._exec_refused(ctx)
+                    refused = self._exec_refused(ctx, stand)
                     if refused is not None:
                         unexecutable.append(refused)
                 if consumer is Consumer.EXTERNAL:
@@ -391,7 +388,7 @@ class Router:
         outside: list[str] = []
         held: list[str] = []
         for path, stand in paths:
-            place = await self._place(self._followed(path, stand))
+            place = await self._place(followed(path, self._namespace, stand))
             if place == "sandbox":
                 outside.append(path)
             elif place == "held":
@@ -411,22 +408,6 @@ class Router:
             bindings={**bindings, WHOLE_LINE: box},
             fallback=catch_all(entries),
         )
-
-    def _followed(self, path: str, session: SessionState) -> str:
-        """``path`` with the links Mirage holds followed, as the session
-        sees them; as named when they loop.
-
-        Args:
-            path (str): an absolute virtual path.
-            session (SessionState): the session the path is named in.
-        """
-        try:
-            return self._namespace.session_links(session).follow(path)
-        except CycleError:
-            logger.debug(
-                "%s: links loop; judged as named", path, exc_info=True
-            )
-            return path
 
     async def _place(
         self, path: str
@@ -455,7 +436,9 @@ class Router:
             return "held"
         return "sandbox"
 
-    def _exec_refused(self, ctx: CommandContext) -> str | None:
+    def _exec_refused(
+        self, ctx: CommandContext, session: SessionState
+    ) -> str | None:
         """Why the mounts' exec rule refuses the program an interpreter
         command runs, None when it may run: its script's mount is not in
         EXEC mode, or for inline code (``-c``, ``-m``, ``-e``, stdin) no
@@ -463,10 +446,12 @@ class Router:
 
         Args:
             ctx (CommandContext): the interpreter command.
+            session (SessionState): the session whose links its script
+                follows, as Monty follows them.
         """
         script = interpreter_script(ctx.command, ctx.argv, ctx.cwd)
         if script is not None:
-            path = script.virtual
+            path = followed(script.virtual, self._namespace, session)
             if self._registry.exec_allowed_at(path):
                 return None
             return f"{path} is not in EXEC mode"

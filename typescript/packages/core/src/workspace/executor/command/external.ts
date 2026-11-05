@@ -30,7 +30,8 @@ import type { MountRegistry } from '../../mount/registry.ts'
 import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
-import { interpreterScript } from './routing.ts'
+import { followed, interpreterScript } from './routing.ts'
+import type { NamespaceLinks } from '../../../view/types.ts'
 import { admissionDenial } from './run.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { concat } from '../../../utils/bytes.ts'
@@ -53,6 +54,7 @@ export async function runExternal(
   session: SessionState,
   registry: MountRegistry,
   routing: RouteDecision<Runtime>,
+  links: NamespaceLinks | null,
   signal?: AbortSignal,
   sink?: JobConsole,
 ): Promise<[ByteSource | null, IOResult, ExecutionNode]> {
@@ -60,7 +62,7 @@ export async function runExternal(
   const key = Object.hasOwn(bindings, argv.name) ? argv.name : EXTERNAL_COMMANDS
   const runtime = bindings[key]
   const command = shellJoin(argv.tokens)
-  const refused = learnedExecRefusal(argv, runtime, session, registry)
+  const refused = learnedExecRefusal(argv, runtime, session, registry, links)
   if (refused !== null) {
     const stderr = await refused.materializeStderr()
     return [null, refused, new ExecutionNode({ command, exitCode: refused.exitCode, stderr })]
@@ -170,15 +172,22 @@ async function executeProgram(
  * @param entry the runtime it is bound to.
  * @param session the session it runs in.
  * @param registry the mounts and their modes.
+ * @param links the links the script follows, as Monty follows them before it
+ *   judges the script; null for none.
  */
 function learnedExecRefusal(
   argv: Argv,
   entry: Runtime | null | undefined,
   session: SessionState,
   registry: MountRegistry,
+  links: NamespaceLinks | null,
 ): IOResult | null {
   if (!INTERPRETER_NAMES.has(argv.name) || entry?.learned(argv.name) !== true) return null
-  const script = interpreterScript(argv.name, argv.args, session.cwd)
+  let script = interpreterScript(argv.name, argv.args, session.cwd)
+  if (script !== null) {
+    const target = followed(script.virtual, links)
+    if (target !== script.virtual) script = PathSpec.fromStrPath(target)
+  }
   const refused = execRefusal(argv.name, script, {
     execAllowed: registry.isExecAllowed(),
     execPathAllowed: registry.execAllowedAt,

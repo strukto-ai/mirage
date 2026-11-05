@@ -849,3 +849,30 @@ describe('Router whole-line exec rule', () => {
     }
   })
 })
+
+describe('Router linked script exec rule', () => {
+  it.each<[string, number]>([
+    ['python3 /x/link.py', 126],
+    ['python3 /x/link.py > /tmp/o; make', 1],
+  ])("judges the script's link target: %s", async (line, code) => {
+    const box = new Box()
+    const ws = new Workspace(
+      {
+        '/x': new Mount(new RAMVFS(), { mode: MountMode.EXEC }),
+        '/w': new Mount(new RAMVFS(), { mode: MountMode.WRITE }),
+      },
+      { runtimes: [box, new Monty(), 'workspace'] },
+    )
+    try {
+      await ws.vfs.write('/w/app.py', ENC.encode('print(1)'))
+      await ws.shell('cd /x && python3 -c 1')
+      await ws.shell('ln -s /w/app.py /x/link.py')
+      box.lines.length = 0
+      const [got, , err] = await run(ws, line)
+      expect([got, err.includes('/w/app.py')]).toEqual([code, true])
+      expect([box.lines, box.whole]).toEqual([[], []])
+    } finally {
+      await ws.close()
+    }
+  })
+})

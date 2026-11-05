@@ -143,7 +143,16 @@ export async function handleExecPath(
       !registry.unserved(target) &&
       registry.execAllowedAt(target)
     )
-      return runExternal(argv, stdin, session, registry, routing, signal, sink)
+      return runExternal(
+        argv,
+        stdin,
+        session,
+        registry,
+        routing,
+        namespace.sessionLinks(session),
+        signal,
+        sink,
+      )
     return scriptError(path, 'cannot execute binary file: Exec format error', CANNOT_EXECUTE_STATUS)
   }
   const script = decodeText(data)

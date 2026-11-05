@@ -907,3 +907,28 @@ async def test_a_whole_line_judges_the_interpreters_script_not_a_redirect():
         assert box.whole == [line]
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, code",
+    [("python3 /x/link.py", 126), ("python3 /x/link.py > /tmp/o; make", 1)],
+)
+async def test_an_interpreter_the_box_took_judges_the_scripts_link_target(
+    line, code
+):
+    box = Box()
+    ws = Workspace(
+        {"/x": (RAMVFS(), MountMode.EXEC), "/w": (RAMVFS(), MountMode.WRITE)},
+        runtimes=[box, Monty(), "workspace"],
+    )
+    try:
+        await ws.vfs.write("/w/app.py", b"print(1)")
+        await ws.shell("cd /x && python3 -c 1")
+        await ws.shell("ln -s /w/app.py /x/link.py")
+        box.lines.clear()
+        got, _, err = await run(ws, line)
+        assert (got, b"/w/app.py" in err) == (code, True)
+        assert box.lines == [] and box.whole == []
+    finally:
+        await ws.close()

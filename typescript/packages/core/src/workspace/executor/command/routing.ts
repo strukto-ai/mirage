@@ -505,7 +505,7 @@ export const logger: { debug?: (message: string) => void } = {}
  * @param path an absolute virtual path.
  * @param links the session's links; null for none.
  */
-function followed(path: string, links: NamespaceLinks | null): string {
+export function followed(path: string, links: NamespaceLinks | null): string {
   if (links === null) return path
   try {
     return links.follow(path)

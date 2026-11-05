@@ -40,11 +40,15 @@ from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.types import PathSpec, Producer
 from mirage.utils.abort import MirageAbortError
-from mirage.workspace.executor.command.routing import interpreter_script
+from mirage.workspace.executor.command.routing import (
+    followed,
+    interpreter_script,
+)
 from mirage.workspace.executor.command.run import admission_denial
 from mirage.workspace.expand.argv import Argv
 from mirage.workspace.lookup.constants import INTERPRETER_NAMES
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
 
@@ -57,6 +61,7 @@ async def run_external(
     session: SessionState,
     registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity],
+    namespace: Namespace | None,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Execute one admitted program; its surrounding shell stays in Mirage.
@@ -71,7 +76,7 @@ async def run_external(
     bindings = routing.bindings
     entry = bindings.get(argv.name, bindings.get(EXTERNAL_COMMANDS))
     command = shlex.join(argv.tokens)
-    refused = _learned_exec_refusal(argv, entry, session, registry)
+    refused = _learned_exec_refusal(argv, entry, session, registry, namespace)
     if refused is not None:
         return (
             None,
@@ -190,6 +195,7 @@ def _learned_exec_refusal(
     entry: RuntimeIdentity | None,
     session: SessionState,
     registry: MountRegistry,
+    namespace: Namespace | None,
 ) -> IOResult | None:
     """The mounts' exec rule for an interpreter a sandbox took
     (``Runtime.learned``), as Monty applies it (``exec_refusal``), so a
@@ -202,6 +208,8 @@ def _learned_exec_refusal(
         entry (RuntimeIdentity | None): the runtime it is bound to.
         session (SessionState): the session it runs in.
         registry (MountRegistry): the mounts and their modes.
+        namespace (Namespace | None): the links the script follows, as
+            Monty follows them before it judges the script; None for none.
     """
     if not (
         argv.name in INTERPRETER_NAMES
@@ -210,6 +218,10 @@ def _learned_exec_refusal(
     ):
         return None
     script = interpreter_script(argv.name, argv.args, session.cwd)
+    if script is not None:
+        target = followed(script.virtual, namespace, session)
+        if target != script.virtual:
+            script = PathSpec.from_str_path(target)
     refused = exec_refusal(
         argv.name,
         script,
