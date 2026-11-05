@@ -10,7 +10,8 @@ use regex_automata::util::look::LookMatcher;
 use regex_automata::{Anchored, Input, MatchKind, hybrid, meta};
 use regex_syntax::hir::Hir;
 
-use self::backtrack::{Program, Scratch, Shape, unit_at};
+pub(crate) use self::backtrack::unit_at;
+use self::backtrack::{Program, Scratch, Shape};
 use self::hir::Lower;
 use self::parse::{Ast, Dialect, TOO_BIG, Unit};
 use crate::pcre::{self, Pcre};

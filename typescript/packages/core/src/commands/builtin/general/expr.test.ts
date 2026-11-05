@@ -18,7 +18,7 @@ import { materialize } from '../../../io/types.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../types.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
-import { GENERAL_EXPR, isNull } from './expr.ts'
+import { GENERAL_EXPR, exprEval } from './expr.ts'
 
 const DEC = new TextDecoder()
 
@@ -266,20 +266,17 @@ describe('expr | and &', () => {
     await expectValue(['0', '&', '1', '/', '0'], '0', 1)
   })
 
-  it('counts any run of zeros as false, not just the character zero', () => {
-    expect([isNull(''), isNull('0'), isNull('00'), isNull('-0'), isNull('-000')]).toEqual([
-      true,
-      true,
-      true,
-      true,
-      true,
-    ])
-    expect([isNull('-'), isNull('1'), isNull('0a'), isNull('00 ')]).toEqual([
-      false,
-      false,
-      false,
-      false,
-    ])
+  it('counts any run of zeros as false, not just the character zero', async () => {
+    expect(
+      await Promise.all(
+        ['', '0', '00', '-0', '-000'].map(async (value) => (await exprEval(['+', value]))[1] === 1),
+      ),
+    ).toEqual([true, true, true, true, true])
+    expect(
+      await Promise.all(
+        ['-', '1', '0a', '00 '].map(async (value) => (await exprEval(['+', value]))[1] === 1),
+      ),
+    ).toEqual([false, false, false, false])
   })
 })
 
