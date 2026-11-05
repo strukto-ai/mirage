@@ -22,6 +22,9 @@ import { record, startOp } from '../observe/context.ts'
 import { norm } from '../utils/path.ts'
 import { type FileStat, Limit, MountMode, OnExceed, PathSpec } from '../types.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
+import { EvaluationContext } from '../workspace/evaluation.ts'
+import { SessionState } from '../workspace/session/session.ts'
+import { runWithEvaluation } from '../context/session_context.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import type { Policy } from './base.ts'
 import { ebusy } from '../errors/fs.ts'
@@ -2144,4 +2147,206 @@ it('composition merges many asks without recounting prior rules', async () => {
   const policies = new Policies([{ preCommand: () => questions }])
   const ctx: CommandContext = { command: 'true', argv: [], cwd: '/', paths: [] }
   expect(await policies.preCommand(ctx)).toMatchObject({ rules })
+})
+
+class RouteOnPython implements Policy {
+  preExecute(ctx: RouteContext): Action | null {
+    return ctx.line.startsWith('python3') ? { kind: 'route', runtime: 'beta' } : null
+  }
+}
+
+class CapOnSeq implements Policy {
+  postExecute(ctx: ExecuteResultContext): Action | null {
+    return ctx.line.startsWith('seq') ? new Limit({ maxLines: 2 }) : null
+  }
+}
+
+class SyncDeny implements Policy {
+  preCommand(ctx: CommandContext): Action | null {
+    if (ctx.command === 'rm') return { kind: 'deny', reason: 'sync no' }
+    return null
+  }
+}
+
+function routed(line: string): RouteContext {
+  return { line, commands: [], sessionId: '' }
+}
+
+function ran(line: string): ExecuteResultContext {
+  return {
+    line,
+    commands: [],
+    sessionId: '',
+    producer: { command: line, prefixes: [], declared: null },
+    exitCode: 0,
+    output: new Uint8Array(),
+    results: {},
+  }
+}
+
+// A check that follows a quiet one asks the policies in the order mirage-rs
+// left and replays their answers to it, so it settles as a chain that never
+// saw the quiet check.
+describe('a check after a quiet one', () => {
+  const cases: [
+    string,
+    () => Policy[],
+    (policies: Policies) => Promise<unknown>,
+    (policies: Policies) => Promise<unknown>,
+  ][] = [
+    [
+      'asks merge',
+      () => [new AskRm(), new AskRm()],
+      (p) => p.preCommand(ctx('ls')),
+      (p) => p.preCommand(ctx('rm')),
+    ],
+    [
+      'a deny outranks an ask',
+      () => [new AskRm(), new DenyRm()],
+      (p) => p.preCommand(ctx('ls')),
+      (p) => p.preCommand(ctx('rm')),
+    ],
+    [
+      'a silent policy is passed over',
+      () => [silent, new SyncDeny(), new AskRm()],
+      (p) => p.preCommand(ctx('ls')),
+      (p) => p.preCommand(ctx('rm')),
+    ],
+    [
+      'routes agree',
+      () => [new RouteOnPython(), new RouteOnPython()],
+      (p) => p.preExecute(routed('ls')),
+      (p) => p.preExecute(routed('python3 x')),
+    ],
+    [
+      'limits merge',
+      () => [new CapOnSeq(), new CapOnSeq()],
+      (p) => p.postExecute(ran('ls')),
+      (p) => p.postExecute(ran('seq 9')),
+    ],
+  ]
+  it.each(cases)('settles like a fresh chain: %s', async (_name, chain, quiet, loud) => {
+    const warmed = new Policies(chain())
+    await quiet(warmed)
+    expect(await loud(warmed)).toEqual(await loud(new Policies(chain())))
+  })
+})
+
+it('a repeated quiet check opens no composition', async () => {
+  const close = vi.spyOn(Composition.prototype, 'close')
+  try {
+    const policies = new Policies([new DenyRm(), new AskRm()])
+    for (let i = 0; i < 3; i++) expect(await policies.preCommand(ctx('ls'))).toBeNull()
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(await policies.preCommand(ctx('rm'))).toMatchObject({ kind: 'deny' })
+    expect(close).toHaveBeenCalledTimes(2)
+  } finally {
+    close.mockRestore()
+  }
+})
+
+it('a replayed check runs each policy once', async () => {
+  const calls: string[] = []
+  const note: Policy = {
+    preCommand: (seen: CommandContext) => {
+      calls.push(seen.command)
+      return null
+    },
+  }
+  const policies = new Policies([note, new DenyRm(), note])
+  expect(await policies.preCommand(ctx('ls'))).toBeNull()
+  expect(await policies.preCommand(ctx('rm'))).toMatchObject({ kind: 'deny' })
+  expect(calls).toEqual(['ls', 'ls', 'rm'])
+})
+
+it('a policy added after a quiet check is asked', async () => {
+  const policies = new Policies([silent, new AskRm()])
+  expect(await policies.preCommand(ctx('weird'))).toBeNull()
+  policies.add(new DenyWeird())
+  expect(await policies.preCommand(ctx('weird'))).toMatchObject({ kind: 'deny', reason: 'nope' })
+})
+
+it('a quiet preNetwork passes the same policies again', async () => {
+  class Open implements Policy {
+    preNetwork(): Action | null {
+      return null
+    }
+  }
+  const policies = new Policies([new Open(), silent, new Open()])
+  const seen = { host: 'example.com', address: '192.0.2.1', port: 443 }
+  const first: Policy[] = []
+  const second: Policy[] = []
+  expect(await policies.preNetwork(seen, first)).toEqual([null, null])
+  expect(await policies.preNetwork(seen, second)).toEqual([null, null])
+  expect(first.map((policy) => policy.constructor.name)).toEqual([
+    'Object',
+    'MountModePolicy',
+    'Open',
+    'Open',
+  ])
+  expect(second).toEqual(first)
+})
+
+it('a cancelled check after a quiet one keeps who passed', async () => {
+  let hold = false
+  let entered = (): void => undefined
+  const reached = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  class Open implements Policy {
+    preNetwork(): Action | null {
+      return null
+    }
+  }
+  class Wait implements Policy {
+    async preNetwork(): Promise<Action | null> {
+      if (hold) {
+        entered()
+        await new Promise(() => undefined)
+      }
+      return null
+    }
+  }
+  const policies = new Policies([new Open(), new Wait()])
+  const seen = { host: 'example.com', address: '192.0.2.1', port: 443 }
+  expect(await policies.preNetwork(seen, [])).toEqual([null, null])
+  hold = true
+  const passed: Policy[] = []
+  const controller = new AbortController()
+  const evaluation = new EvaluationContext(new SessionState({ sessionId: 's' }))
+  evaluation.frame.abortSignal = controller.signal
+  const running = runWithEvaluation(evaluation, () => policies.preNetwork(seen, passed))
+  void running.catch(() => undefined)
+  await reached
+  controller.abort()
+  await expect(running).rejects.toMatchObject({ name: 'AbortError' })
+  expect(passed.map((policy) => policy.constructor.name)).toEqual(['MountModePolicy', 'Open'])
+})
+
+it('a check among some policies leaves no order', async () => {
+  class Closing implements Policy {
+    postNetwork(): null {
+      return null
+    }
+  }
+  const first = new Closing()
+  const second = new Closing()
+  const policies = new Policies([first, second])
+  const seen = {
+    host: 'example.com',
+    address: '192.0.2.1',
+    port: 443,
+    bytesSent: 0,
+    bytesReceived: 0,
+    seconds: 0,
+    ended: 'closed' as const,
+  }
+  const close = vi.spyOn(Composition.prototype, 'close')
+  try {
+    for (const among of [[first], [second], [first], [first, second]])
+      await policies.postNetwork(seen, among)
+    expect(close).toHaveBeenCalledTimes(4)
+  } finally {
+    close.mockRestore()
+  }
 })
