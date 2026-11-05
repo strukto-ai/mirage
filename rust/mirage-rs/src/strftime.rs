@@ -44,46 +44,98 @@ struct Config {
 
 pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     let config: Config = parse_config(config)?;
-    let leap = leap(config.year);
-    let days = match config.month {
-        2 => 28 + i64::from(leap),
-        4 | 6 | 9 | 11 => 30,
-        _ => 31,
-    };
-    if !(1..=12).contains(&config.month)
-        || !(1..=days).contains(&config.day)
-        || !(0..=23).contains(&config.hour)
-        || !(0..=59).contains(&config.minute)
-        || !(0..=60).contains(&config.second)
-        || config.nanosecond >= 1_000_000_000
-        || config.year.unsigned_abs() > i32::MAX as u64 + 1900
-        || config.offset.unsigned_abs() >= 86400
-    {
-        return Err(StreamError::new("strftime: invalid time fields"));
+    Ok(Box::new(Strftime::new(config)?))
+}
+
+impl Strftime {
+    fn new(config: Config) -> Result<Self, StreamError> {
+        let leap = leap(config.year);
+        let days = match config.month {
+            2 => 28 + i64::from(leap),
+            4 | 6 | 9 | 11 => 30,
+            _ => 31,
+        };
+        if !(1..=12).contains(&config.month)
+            || !(1..=days).contains(&config.day)
+            || !(0..=23).contains(&config.hour)
+            || !(0..=59).contains(&config.minute)
+            || !(0..=60).contains(&config.second)
+            || config.nanosecond >= 1_000_000_000
+            || config.year.unsigned_abs() > i32::MAX as u64 + 1900
+            || config.offset.unsigned_abs() >= 86400
+        {
+            return Err(StreamError::new("strftime: invalid time fields"));
+        }
+        let ordinal =
+            MONTH_STARTS[config.month - 1] + config.day + i64::from(leap && config.month > 2);
+        let before = config.year - 1;
+        let first =
+            (before + before.div_euclid(4) - before.div_euclid(100) + before.div_euclid(400) + 1)
+                .rem_euclid(7);
+        let weekday = (first + ordinal - 1) % 7;
+        let week = (ordinal + 9 - (weekday + 6) % 7) / 7;
+        let (iso_year, iso_week) = if week == 0 {
+            (config.year - 1, weeks(config.year - 1))
+        } else if week > weeks(config.year) {
+            (config.year + 1, 1)
+        } else {
+            (config.year, week)
+        };
+        Ok(Strftime {
+            config,
+            ordinal,
+            weekday,
+            iso_year,
+            iso_week,
+            format: Vec::new(),
+            finished: false,
+        })
     }
-    let ordinal = MONTH_STARTS[config.month - 1] + config.day + i64::from(leap && config.month > 2);
-    let before = config.year - 1;
-    let first =
-        (before + before.div_euclid(4) - before.div_euclid(100) + before.div_euclid(400) + 1)
-            .rem_euclid(7);
-    let weekday = (first + ordinal - 1) % 7;
-    let week = (ordinal + 9 - (weekday + 6) % 7) / 7;
-    let (iso_year, iso_week) = if week == 0 {
-        (config.year - 1, weeks(config.year - 1))
-    } else if week > weeks(config.year) {
-        (config.year + 1, 1)
-    } else {
-        (config.year, week)
-    };
-    Ok(Box::new(Strftime {
-        config,
-        ordinal,
-        weekday,
-        iso_year,
-        iso_week,
-        format: Vec::new(),
-        finished: false,
-    }))
+
+    pub(crate) fn utc(epoch: i64, nanosecond: u32) -> Result<Self, StreamError> {
+        let days = epoch.div_euclid(86400);
+        let cycle = days.div_euclid(146097);
+        let mut year = 1970 + cycle * 400;
+        let mut day = days.rem_euclid(146097);
+        while day >= 365 + i64::from(leap(year)) {
+            day -= 365 + i64::from(leap(year));
+            year += 1;
+        }
+        let mut month = 1;
+        for length in [
+            31,
+            28 + i64::from(leap(year)),
+            31,
+            30,
+            31,
+            30,
+            31,
+            31,
+            30,
+            31,
+            30,
+            31,
+        ] {
+            if day < length {
+                break;
+            }
+            day -= length;
+            month += 1;
+        }
+        let seconds = epoch.rem_euclid(86400);
+        Self::new(Config {
+            year,
+            month,
+            day: day + 1,
+            hour: seconds / 3600,
+            minute: seconds / 60 % 60,
+            second: seconds % 60,
+            nanosecond,
+            epoch,
+            offset: 0,
+            zone: "UTC".into(),
+        })
+    }
 }
 
 fn leap(year: i64) -> bool {
@@ -102,7 +154,7 @@ fn weeks(year: i64) -> i64 {
     }
 }
 
-struct Strftime {
+pub(crate) struct Strftime {
     config: Config,
     ordinal: i64,
     weekday: i64,
@@ -213,7 +265,7 @@ fn reserve(out: &mut Vec<u8>, additional: usize) -> Result<(), StreamError> {
 impl Strftime {
     // date's formatter differs from libc's (used by jq): widths replace
     // numeric defaults, '-' suppresses text padding, and '+' signs years.
-    fn render(&self, format: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
+    pub(crate) fn render(&self, format: &[u8], out: &mut Vec<u8>) -> Result<(), StreamError> {
         let mut at = 0;
         while at < format.len() {
             let start = at;

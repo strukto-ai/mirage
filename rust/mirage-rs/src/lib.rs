@@ -15,6 +15,7 @@ mod du;
 mod expand;
 mod file;
 mod find;
+mod find_printf;
 mod fold;
 mod generated;
 mod glob;
@@ -424,6 +425,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "scan" => scan::open(config),
         "quote" => quote::open(config),
         "width" => width::open(config),
+        "find_printf" => find_printf::open(config),
         "strftime" => strftime::open(config),
         "json_validate" => json_validate::open(config),
         "lance_query" => lance_query::open(config),

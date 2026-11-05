@@ -1,5 +1,5 @@
 {
- "baseline": 1680,
+ "baseline": 1676,
  "modules": {
   "server/app": {
    "python_only": {
