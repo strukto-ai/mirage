@@ -1,7 +1,8 @@
 typescript/packages/cloudflare/scripts/bundle-quickjs.mjs fetches the WASI
 build of quickjs-ng 0.16.2 (https://github.com/quickjs-ng/quickjs), the
-release's qjs-wasi.wasm, unmodified. @struktoai/mirage-cloudflare ships it as
-dist/generated/qjs-wasi.wasm. quickjs-ng carries this notice:
+release's qjs-wasi.wasm, and sets a maximum on its memory, changing nothing
+else. @struktoai/mirage-cloudflare ships it as dist/generated/qjs-wasi.wasm.
+quickjs-ng carries this notice:
 
 The MIT License (MIT)
 
