@@ -56,9 +56,29 @@ describe('DaemonClient spawn config validation', () => {
       authToken: '',
       idleGraceSeconds: 30,
     })
+    vi.spyOn(client, 'isReachable').mockResolvedValue(false)
     await expect(client.ensureRunning({ timeoutMs: 500 })).rejects.toThrow(DaemonUnreachable)
     expect(existsSync(join(home, 'auth_token'))).toBe(false)
     expect(existsSync(join(home, 'daemon.log'))).toBe(false)
+  })
+
+  it('gives a remote server 10 s to answer, and a local daemon half a second', async () => {
+    const remote = new DaemonClient({
+      url: 'https://mirage.invalid',
+      authToken: '',
+      idleGraceSeconds: 30,
+    })
+    const remoteProbe = vi.spyOn(remote, 'isReachable').mockResolvedValue(true)
+    await remote.ensureRunning({ allowSpawn: false })
+    expect(remoteProbe).toHaveBeenCalledWith(10_000)
+    const local = new DaemonClient({
+      url: 'http://127.0.0.1:1',
+      authToken: 't',
+      idleGraceSeconds: 30,
+    })
+    const localProbe = vi.spyOn(local, 'isReachable').mockResolvedValue(true)
+    await local.ensureRunning({ allowSpawn: false })
+    expect(localProbe).toHaveBeenCalledWith()
   })
 })
 

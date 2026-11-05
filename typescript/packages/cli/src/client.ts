@@ -30,6 +30,7 @@ import { isLocalUrl, loadDaemonSettings, type DaemonSettings } from './settings.
 const requireFromHere = createRequire(import.meta.url)
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
+const REMOTE_PROBE_TIMEOUT_SECONDS = 10
 
 /** The daemon is down and may not be spawned, or a spawned one never answered. */
 export class DaemonUnreachable extends Error {
@@ -175,16 +176,20 @@ export class DaemonClient {
    * Ensure the daemon is reachable, optionally spawning it. `timeoutMs` is
    * how long a spawned daemon has to answer `/v1/health`: a first start
    * loads the whole server. A daemon that exits first ends the wait, unless
-   * another daemon already holds the port. Mirrors Python's
+   * another daemon already holds the port. A remote server has
+   * `REMOTE_PROBE_TIMEOUT_SECONDS` to answer `/v1/health`: a new connection
+   * over the internet, or a server woken from idle, can take seconds, where a
+   * local daemon answers at once or is not up. Mirrors Python's
    * `ensure_running`.
    */
   async ensureRunning(opts: { allowSpawn?: boolean; timeoutMs?: number } = {}): Promise<void> {
     const allowSpawn = opts.allowSpawn ?? true
     const timeoutMs = opts.timeoutMs ?? 30_000
-    if (await this.isReachable()) return
     if (!isLocalUrl(this.settings.url)) {
+      if (await this.isReachable(REMOTE_PROBE_TIMEOUT_SECONDS * 1000)) return
       throw new DaemonUnreachable(`daemon not reachable at ${this.settings.url}`)
     }
+    if (await this.isReachable()) return
     if (!allowSpawn) {
       throw new DaemonUnreachable(
         `daemon not reachable at ${this.settings.url}; run \`mirage workspace create CONFIG.yaml\` to spawn one`,
