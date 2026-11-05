@@ -233,6 +233,11 @@ SANDBOX_OPT = "but the line runs in the sandbox for /opt"
             f"cd: D is not exported, {SANDBOX_OPT}",
         ),
         (
+            "readonly X=old",
+            "X=new; cd /opt && make",
+            f"X=new;: X is readonly in Mirage, {SANDBOX_OPT}",
+        ),
+        (
             "D=old",
             'D=$D; cd /opt && echo "$D"; make',
             f"D=$D;: D is not exported, {SANDBOX_OPT}",

@@ -236,6 +236,11 @@ describe('Router whole lines', () => {
       'cd: D is not exported, but the line runs in the sandbox for /opt\n',
     ],
     [
+      'readonly X=old',
+      'X=new; cd /opt && make',
+      'X=new;: X is readonly in Mirage, but the line runs in the sandbox for /opt\n',
+    ],
+    [
       'D=old',
       'D=$D; cd /opt && echo "$D"; make',
       'D=$D;: D is not exported, but the line runs in the sandbox for /opt\n',

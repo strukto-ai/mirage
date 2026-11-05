@@ -46,7 +46,11 @@ from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.helpers import starts_a_job
 from mirage.shell.parse.env import parameter_reads
-from mirage.shell.parse.names import command_words, inherited_reads
+from mirage.shell.parse.names import (
+    assignment_values,
+    command_words,
+    inherited_reads,
+)
 from mirage.shell.types import TSNodeLike
 from mirage.shell.variable import VarAttr
 from mirage.types import PathSpec
@@ -657,8 +661,8 @@ def _whole_refusal(
 ) -> str | None:
     """Why a line that needs the sandbox's own files may not run there
     whole, None when it may: it runs something only Mirage has, names a
-    file only Mirage holds, uses an alias, starts a job, or reads a
-    value only Mirage holds.
+    file only Mirage holds, uses an alias, starts a job, reads a value
+    only Mirage holds, or assigns a variable Mirage keeps readonly.
 
     Args:
         session (SessionState): the effective session.
@@ -712,6 +716,17 @@ def _whole_refusal(
     if unexported:
         return (
             f"{unexported[0]} is not exported, but the line runs in the "
+            f"sandbox for {path}"
+        )
+    readonly = sorted(
+        name
+        for name, _, _ in assignment_values(ast)
+        if name in session.vars
+        and VarAttr.READONLY in session.vars[name].attrs
+    )
+    if readonly:
+        return (
+            f"{readonly[0]} is readonly in Mirage, but the line runs in the "
             f"sandbox for {path}"
         )
     return None

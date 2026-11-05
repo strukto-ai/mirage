@@ -38,7 +38,7 @@ import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import { fsError } from '../../errors/fs.ts'
 import { startsAJob } from '../../shell/helpers.ts'
 import { parameterReads } from '../../shell/parse/env.ts'
-import { commandWords, inheritedReads } from '../../shell/parse/names.ts'
+import { assignmentValues, commandWords, inheritedReads } from '../../shell/parse/names.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { VarAttr } from '../../shell/variable.ts'
 import { resolvePath } from '../../utils/path.ts'
@@ -523,8 +523,9 @@ function learned(runtime: Runtime | null | undefined, name: string): boolean {
 /**
  * Why a line that needs the sandbox's own files may not run there whole,
  * null when it may: it runs something only Mirage has, names a file only
- * Mirage holds, uses an alias, starts a job, or reads a value only Mirage
- * holds. Mirrors Python's `_whole_refusal`.
+ * Mirage holds, uses an alias, starts a job, reads a value only Mirage holds,
+ * or assigns a variable Mirage keeps readonly. Mirrors Python's
+ * `_whole_refusal`.
  *
  * @param session the effective session.
  * @param ast the parsed line.
@@ -573,5 +574,15 @@ function wholeRefusal(
     .sort(compareCodePoints)
   if (unexported.length > 0)
     return `${unexported[0] ?? ''} is not exported, but the line runs in the sandbox for ${path}`
+  const readonly = assignmentValues(ast)
+    .map(([name]) => name)
+    .filter(
+      (name) =>
+        Object.hasOwn(session.vars, name) &&
+        session.vars[name]?.attrs.has(VarAttr.Readonly) === true,
+    )
+    .sort(compareCodePoints)
+  if (readonly.length > 0)
+    return `${readonly[0] ?? ''} is readonly in Mirage, but the line runs in the sandbox for ${path}`
   return null
 }
