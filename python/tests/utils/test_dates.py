@@ -749,16 +749,14 @@ def test_ns_to_iso_rounds_as_node_stat_dates(ns, want):
     assert ns_to_iso(ns) == want
 
 
-def test_async_date_parser_can_cancel_a_long_expression():
-    async def run():
-        task = asyncio.create_task(
-            parse_date_expr_async("1 day " * 100000, tz=timezone.utc, now=NOW)
-        )
-        asyncio.get_running_loop().call_later(0.001, task.cancel)
-        with pytest.raises(asyncio.CancelledError):
-            await task
-
-    asyncio.run(run())
+@pytest.mark.asyncio
+async def test_async_date_parser_can_cancel_a_long_expression():
+    task = asyncio.create_task(
+        parse_date_expr_async("1 day " * 100000, tz=timezone.utc, now=NOW)
+    )
+    asyncio.get_running_loop().call_later(0.001, task.cancel)
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 def test_date_parser_refuses_invalid_raw_utf8_as_a_date():
