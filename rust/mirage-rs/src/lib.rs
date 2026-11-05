@@ -56,6 +56,7 @@ mod rg_options;
 mod sanitize;
 mod scan;
 mod sed;
+mod select;
 mod seq;
 pub mod shell;
 mod shuf;
@@ -428,6 +429,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "lance_query" => lance_query::open(config),
         "sanitize" => sanitize::open(config),
         "sed" => sed::open(config),
+        "select" => select::open(config),
         "seq" => seq::open(config),
         "shuf" => shuf::open(config),
         "sort" => sort::open(config),

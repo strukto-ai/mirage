@@ -74,6 +74,19 @@ def main() -> None:
             run("file", {}, b"%P", b"DF-1.4"),
             b"application/pdf",
         ),
+        "record selection": (
+            run(
+                "select",
+                {
+                    "mode": "last",
+                    "unit": "records",
+                    "count": "2",
+                    "terminator": 10,
+                },
+                b"a\nb\nc",
+            ),
+            b"b\nc",
+        ),
         "base64 encode": (
             run("base64", {"mode": "encode", "wrap": 76}, b"hel", b"lo"),
             b"aGVsbG8=\n",
