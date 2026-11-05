@@ -85,7 +85,7 @@ export async function elementIsSet(
   else if (scalar !== null) held = makeArray([scalar])
   else return false
   let idx = await subscriptIndex(session, sub, view)
-  if (idx < 0) idx += arrayExtent(held)
+  if (idx < 0n) idx += arrayExtent(held)
   return arrayHas(held, idx)
 }
 
@@ -122,7 +122,7 @@ export async function assignElement(
   if (session.readonlyVars.has(name)) return 'readonly'
   const amap = session.assocs[name]
   let stored: ShellValue
-  let assigned: ReadonlySet<number | string> | null = null
+  let assigned: ReadonlySet<bigint | string> | null = null
   if (amap !== undefined) {
     const key = subscript ?? '0'
     if (key === '') return 'subscript'
@@ -141,9 +141,9 @@ export async function assignElement(
         // resolves `x[-1]` against the length-1 array that produces.
         arr = makeArray(scalar === undefined ? [] : [scalar])
       }
-      let idx = subscript === null ? 0 : await subscriptIndex(session, subscript, view)
-      if (idx < 0) idx += arrayExtent(arr)
-      if (idx < 0) return 'subscript'
+      let idx = subscript === null ? 0n : await subscriptIndex(session, subscript, view)
+      if (idx < 0n) idx += arrayExtent(arr)
+      if (idx < 0n) return 'subscript'
       const base = append ? arrayGet(arr, idx) : ''
       stored = arrayWith(arr, idx, base + value)
       assigned = new Set([idx])

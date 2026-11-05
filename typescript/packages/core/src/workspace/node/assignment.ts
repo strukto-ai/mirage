@@ -51,7 +51,7 @@ async function fatalIndex(
   context: EvaluationContext,
   subscript: string,
   view: SessionView,
-): Promise<number> {
+): Promise<bigint> {
   const session = context.session
   try {
     return await subscriptIndex(session, subscript, view)
@@ -66,7 +66,7 @@ async function fatalIndexLiteral(
   held: ShellArray | null,
   items: readonly string[],
   append: boolean,
-  indexOf: (subscript: string) => Promise<number>,
+  indexOf: (subscript: string) => Promise<bigint>,
 ): Promise<ShellArray> {
   try {
     return await buildIndexedLiteral(held, items, append, indexOf)
@@ -103,7 +103,7 @@ async function assignVar(
   view: SessionView,
   key: string,
   value: ShellValue,
-  assigned: ReadonlySet<number | string> | null = null,
+  assigned: ReadonlySet<bigint | string> | null = null,
   added: string | null = null,
 ): Promise<void> {
   try {
@@ -320,8 +320,8 @@ export async function executeAssignment(
       arr = makeArray(scalar === undefined ? [] : [scalar])
     }
     let idx = await fatalIndex(context, subText, view)
-    if (idx < 0) idx += arrayExtent(arr)
-    if (idx < 0) {
+    if (idx < 0n) idx += arrayExtent(arr)
+    if (idx < 0n) {
       // Same fatal shape as the empty subscript above.
       const nameText = text.slice(0, eq).replace(/\+$/, '')
       throw new DiscardSignal(encodeText(`bash: ${nameText}: bad array subscript\n`))
@@ -349,7 +349,7 @@ export async function executeAssignment(
     // `a=x` writes element 0 and keeps the rest.
     const newArr = heldArr.copy()
     arraySet(newArr, 0, stored)
-    await assignVar(view, key, newArr, new Set([0]), added)
+    await assignVar(view, key, newArr, new Set([0n]), added)
   } else {
     await assignVar(view, key, stored, null, added)
   }

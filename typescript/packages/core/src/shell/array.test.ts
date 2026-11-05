@@ -34,21 +34,21 @@ describe('shell array', () => {
   it('makeArray is dense from zero', () => {
     const arr = makeArray(['a', 'b'])
     expect([...arr.elements]).toEqual([
-      [0, 'a'],
-      [1, 'b'],
+      [0n, 'a'],
+      [1n, 'b'],
     ])
-    expect(arrayIndices(arr)).toEqual([0, 1])
+    expect(arrayIndices(arr)).toEqual([0n, 1n])
   })
 
   it('arraySet holds only the element it assigns', () => {
     const arr = new ShellArray()
     arraySet(arr, 3, 'v')
-    expect([...arr.elements]).toEqual([[3, 'v']])
+    expect([...arr.elements]).toEqual([[3n, 'v']])
     // An index no write reached is no element.
     expect(arrayCount(arr)).toBe(1)
     expect(arrayValues(arr)).toEqual(['v'])
-    expect(arrayIndices(arr)).toEqual([3])
-    expect(arrayExtent(arr)).toBe(4)
+    expect(arrayIndices(arr)).toEqual([3n])
+    expect(arrayExtent(arr)).toBe(4n)
     expect(arrayGet(arr, 0)).toBe('')
     expect(arrayHas(arr, 0)).toBe(false)
     expect(arrayHas(arr, 3)).toBe(true)
@@ -58,34 +58,34 @@ describe('shell array', () => {
     const arr = makeArray(['zero', 'one', 'two'])
     arrayUnset(arr, 1)
     expect([...arr.elements]).toEqual([
-      [0, 'zero'],
-      [2, 'two'],
+      [0n, 'zero'],
+      [2n, 'two'],
     ])
     expect(arrayGet(arr, 2)).toBe('two')
     expect(arrayCount(arr)).toBe(2)
-    expect(arrayIndices(arr)).toEqual([0, 2])
+    expect(arrayIndices(arr)).toEqual([0n, 2n])
   })
 
   it('unsetting a trailing element shrinks the extent', () => {
     const arr = makeArray(['x', 'y', 'z'])
     arrayUnset(arr, 2)
     expect(arrayValues(arr)).toEqual(['x', 'y'])
-    expect(arrayExtent(arr)).toBe(2)
+    expect(arrayExtent(arr)).toBe(2n)
   })
 
   it('unsetting a trailing element drops earlier holes too', () => {
     const arr = makeArray(['x', 'y', 'z'])
     arrayUnset(arr, 1)
     arrayUnset(arr, 2)
-    expect([...arr.elements]).toEqual([[0, 'x']])
-    expect(arrayExtent(arr)).toBe(1)
+    expect([...arr.elements]).toEqual([[0n, 'x']])
+    expect(arrayExtent(arr)).toBe(1n)
   })
 
   it('unsetting an out-of-range index is a no-op', () => {
     const arr = makeArray(['x'])
     arrayUnset(arr, 5)
     arrayUnset(arr, -1)
-    expect([...arr.elements]).toEqual([[0, 'x']])
+    expect([...arr.elements]).toEqual([[0n, 'x']])
   })
 
   it('a hole can be reassigned', () => {
@@ -93,7 +93,7 @@ describe('shell array', () => {
     arrayUnset(arr, 1)
     arraySet(arr, 1, 'new')
     expect(arrayValues(arr)).toEqual(['x', 'new', 'z'])
-    expect(arrayIndices(arr)).toEqual([0, 1, 2])
+    expect(arrayIndices(arr)).toEqual([0n, 1n, 2n])
     expect(arrayCount(arr)).toBe(3)
   })
 
@@ -133,7 +133,7 @@ describe('shell array', () => {
   it('an empty string is an element, not a hole', () => {
     const arr = makeArray(['', 'y'])
     expect(arrayCount(arr)).toBe(2)
-    expect(arrayIndices(arr)).toEqual([0, 1])
+    expect(arrayIndices(arr)).toEqual([0n, 1n])
     expect(arrayValues(arr)).toEqual(['', 'y'])
   })
 
@@ -141,11 +141,11 @@ describe('shell array', () => {
     const arr = makeArray(['a'])
     arraySet(arr, 1_000_000_000, 'far')
     expect(arrayCount(arr)).toBe(2)
-    expect(arrayExtent(arr)).toBe(1_000_000_001)
-    expect(arrayIndices(arr)).toEqual([0, 1_000_000_000])
+    expect(arrayExtent(arr)).toBe(1_000_000_001n)
+    expect(arrayIndices(arr)).toEqual([0n, 1_000_000_000n])
     expect(arraySlice(arr, 1, null)).toEqual(['far'])
     arrayUnset(arr, 1_000_000_000)
-    expect(arrayExtent(arr)).toBe(1)
+    expect(arrayExtent(arr)).toBe(1n)
   })
 })
 
@@ -166,9 +166,9 @@ describe('buildIndexedLiteral', () => {
     const intOf = (t: string) => Promise.resolve(Number(t))
     const built = await buildIndexedLiteral(null, ['[3]=x', 'y', '[1]=z'], false, intOf)
     expect([...built.elements]).toEqual([
-      [1, 'z'],
-      [3, 'x'],
-      [4, 'y'],
+      [1n, 'z'],
+      [3n, 'x'],
+      [4n, 'y'],
     ])
     // `+=` starts the cursor at the extent; last index wins.
     const appended = await buildIndexedLiteral(makeArray(['a']), ['b', '[0]=A'], true, intOf)

@@ -236,7 +236,7 @@ export function coerceValue(
   value: ShellValue,
   attrs: ReadonlySet<VarAttr>,
   integer: Coercer | null,
-  assigned: ReadonlySet<number | string> | null = null,
+  assigned: ReadonlySet<bigint | string> | null = null,
 ): ShellValue {
   if (!attrs.has(VarAttr.Integer) && !attrs.has(VarAttr.Lower) && !attrs.has(VarAttr.Upper)) {
     return value

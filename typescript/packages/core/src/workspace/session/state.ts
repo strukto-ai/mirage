@@ -304,12 +304,12 @@ class SessionElements implements ElementOps {
     if (visibleAssocs(this.session)[name] !== undefined) {
       return stripKeyQuotes(subscript)
     }
-    let idx = Number(subscript)
-    if (idx < 0) {
+    let idx = BigInt(subscript)
+    if (idx < 0n) {
       const arr = visibleArrays(this.session)[name]
       if (arr !== undefined) idx += arrayExtent(arr)
-      else if (envGet(this.session, name) !== null) idx += 1
-      if (idx < 0) throw new ArithError('bad array subscript', `${name}[${subscript}]`)
+      else if (envGet(this.session, name) !== null) idx += 1n
+      if (idx < 0n) throw new ArithError('bad array subscript', `${name}[${subscript}]`)
     }
     return String(idx)
   }
@@ -318,11 +318,11 @@ class SessionElements implements ElementOps {
     const amap = visibleAssocs(this.session)[name]
     if (amap !== undefined) return amap[key] ?? null
     const arr = visibleArrays(this.session)[name]
-    const idx = Number(key)
+    const idx = BigInt(key)
     if (arr === undefined) {
       const scalar = envGet(this.session, name)
       if (scalar === null) return null
-      return idx === 0 ? scalar : null
+      return idx === 0n ? scalar : null
     }
     return arrayHas(arr, idx) ? arrayGet(arr, idx) : null
   }
@@ -354,13 +354,13 @@ async function landWrites(
     const assoc = visibleAssocs(session)[name]
     const arr = visibleArrays(session)[name]
     let value: ShellValue = write.value
-    let assigned: ReadonlySet<number | string> | null = null
+    let assigned: ReadonlySet<bigint | string> | null = null
     if (assoc !== undefined) {
       const key = write.key ?? '0'
       value = { ...assoc, [key]: write.value }
       assigned = new Set([key])
     } else if (write.key !== null || arr !== undefined) {
-      const index = write.key === null ? 0 : Number(write.key)
+      const index = write.key === null ? 0n : BigInt(write.key)
       // A scalar becomes element 0, as `assignElement` turns it
       // (`x=7; n='x[1]=5'` keeps the 7).
       const scalar = arr === undefined ? conversionScalar(session, name) : undefined
@@ -396,16 +396,16 @@ export async function subscriptIndex(
   session: SessionState,
   subscript: string,
   view: SessionView | null = null,
-): Promise<number> {
+): Promise<bigint> {
   const plain = plainDecimal(subscript)
-  if (plain !== null) return Number(plain)
+  if (plain !== null) return plain
   const reader = randomReader(session)
-  let idx = 0
+  let idx = 0n
   let writes: readonly ArithWrite[]
   let error: ArithError | ReadonlyVariableError | null = null
   try {
     const result = sessionArith(session, subscript, reader, session.shellOptions.nounset === true)
-    idx = Number(result.value)
+    idx = result.value
     writes = result.writes
   } catch (err) {
     if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err
@@ -776,7 +776,7 @@ async function setVar(
   value: ShellValue,
   followRef = true,
   diagnostics?: (string | Uint8Array)[],
-  assigned: ReadonlySet<number | string> | null = null,
+  assigned: ReadonlySet<bigint | string> | null = null,
   added: string | null = null,
 ): Promise<void> {
   if (followRef) name = deref(session, name) || name

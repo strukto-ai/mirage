@@ -314,10 +314,10 @@ describe('subscriptIndex', () => {
     const s = new SessionState({ sessionId: 's' })
     seedVar(s, 'i', '1')
     s.vars[RANDOM] = makeVar('1')
-    expect(await subscriptIndex(s, '3')).toBe(3)
-    expect(await subscriptIndex(s, 'i+1')).toBe(2)
+    expect(await subscriptIndex(s, '3')).toBe(3n)
+    expect(await subscriptIndex(s, 'i+1')).toBe(2n)
     // The subscript's assignment lands, bash's `a[x=3]`.
-    expect(await subscriptIndex(s, 'x=3')).toBe(3)
+    expect(await subscriptIndex(s, 'x=3')).toBe(3n)
     expect(s.vars.x?.value).toBe('3')
     // One that fails lands what it assigned before failing, then throws
     // in bash's words rather than reading element 0.
@@ -325,7 +325,7 @@ describe('subscriptIndex', () => {
     expect(s.vars.y?.value).toBe('4')
     // A seed reaches the generator, and the draw after it advances the
     // session past it.
-    expect(await subscriptIndex(s, 'RANDOM=42, RANDOM')).toBe(17772)
+    expect(await subscriptIndex(s, 'RANDOM=42, RANDOM')).toBe(17772n)
     const drawn = s.vars[RANDOM].value
     expect(nextRandom(s, typeof drawn === 'string' ? drawn : undefined)).toBe(26794)
     // Through the session view, a refusal is the gate's.

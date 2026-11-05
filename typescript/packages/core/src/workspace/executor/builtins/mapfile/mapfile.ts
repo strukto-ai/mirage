@@ -116,7 +116,7 @@ export async function handleMapfile(
     seen++
     if (seen <= skip) continue
     const record = found && !strip ? concat([data, Uint8Array.of(delim)]) : data
-    const replaced = arr.elements.get(index)
+    const replaced = arr.elements.get(BigInt(index))
     held += record.byteLength + (replaced === undefined ? SLOT : -encodeText(replaced).byteLength)
     checkMemory(held)
     const text = decodeText(record)

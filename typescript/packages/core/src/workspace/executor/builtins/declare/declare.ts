@@ -167,7 +167,7 @@ export function scalarValue(
   held: ShellValue | null,
   value: string,
   kind: VarKind | null,
-): [ShellValue, ReadonlySet<number | string> | null] {
+): [ShellValue, ReadonlySet<bigint | string> | null] {
   const scalar = typeof held === 'string' ? held : null
   const map =
     held !== null && typeof held === 'object' && !(held instanceof ShellArray) ? held : null
@@ -178,7 +178,7 @@ export function scalarValue(
     const arr =
       held instanceof ShellArray ? held.copy() : makeArray(scalar === null ? [] : [scalar])
     arraySet(arr, 0, value)
-    return [arr, new Set([0])]
+    return [arr, new Set([0n])]
   }
   return [value, null]
 }

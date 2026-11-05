@@ -791,7 +791,7 @@ async function sliceArray(
   expandChild: ExpandChild,
   operand: ArithOperand,
 ): Promise<string[]> {
-  const bounds = await sliceBounds(node, expandChild, operand, arrayExtent(arr))
+  const bounds = await sliceBounds(node, expandChild, operand, Number(arrayExtent(arr)))
   return bounds === null ? [] : arraySlice(arr, ...bounds)
 }
 
@@ -948,7 +948,7 @@ async function expansionIndex(
   session: SessionState,
   view: SessionView | undefined,
   subscript: string,
-): Promise<number> {
+): Promise<bigint> {
   try {
     return await subscriptIndex(session, subscript, view ?? null)
   } catch (err) {
@@ -1150,10 +1150,10 @@ async function expandBracesIn(
     }
     const subText = await named(p.subscript, expandSubscriptKey(p, expandChild))
     let idx = await expansionIndex(session, view, subText)
-    if (idx < 0) idx += arrayExtent(arr)
+    if (idx < 0n) idx += arrayExtent(arr)
     val = arrayGet(arr, idx)
     varInEnv = arrayHas(arr, idx)
-    if (idx >= 0) writeKey = String(idx)
+    if (idx >= 0n) writeKey = String(idx)
   } else if (p.varName !== null) {
     if (callStack) {
       const localVal = callStack.getLocal(p.varName)

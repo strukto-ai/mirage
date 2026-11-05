@@ -158,6 +158,10 @@ CASES = [
     ('a=(1 2 3); declare -a a; echo "[${a[@]}]"', "[1 2 3]\n"),
     ('a=(x); declare -a a+=(y); echo "[${a[@]}]"', "[x y]\n"),
     ('b=(p); declare b+=(q); echo "[${b[@]}]"', "[p q]\n"),
+    (
+        "a[9007199254740992]=left; a+=(right); echo ${!a[@]} ${a[@]} ${a[-1]}",
+        "9007199254740992 9007199254740993 left right right\n",
+    ),
 ]
 
 
