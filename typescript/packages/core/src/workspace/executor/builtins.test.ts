@@ -57,7 +57,10 @@ import {
   handleWhoami,
   handleXargs as streamXargs,
 } from './builtins/index.ts'
+import { FORK_FAILED } from './builtins/timeout/constants.ts'
 import { durationSeconds, parseSignal, signalName } from './builtins/timeout/timeout.ts'
+import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { Workspace } from '../workspace/workspace.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel } from '../../shell/console/index.ts'
@@ -2651,7 +2654,7 @@ describe('handleXargs', () => {
 })
 
 describe('handleTimeout', () => {
-  const session = new SessionState({ sessionId: 'test' })
+  const context = new EvaluationContext(new SessionState({ sessionId: 'test' }))
   // timeout streams its command's stdout, and its status settles once that
   // stream is drained, as the shell's barriers drain it.
   const timed = async (
@@ -2782,7 +2785,7 @@ describe('handleTimeout', () => {
 
   it('passes through when the command finishes in time', async () => {
     const shell = fakeShell([3])
-    const [stdout, io] = await timed(shell.fn, ['5', 'wc', '-l'], session)
+    const [stdout, io] = await timed(shell.fn, ['5', 'wc', '-l'], context)
     expect(shell.lines).toEqual(['wc -l'])
     expect(io.exitCode).toBe(3)
     expect(decode(stdout)).toBe('ran:wc -l\n')
@@ -2795,7 +2798,7 @@ describe('handleTimeout', () => {
           resolve(new IOResult())
         }, 1000),
       )
-    const [, io] = await timed(slow, ['0.05', 'sleep', '1'], session)
+    const [, io] = await timed(slow, ['0.05', 'sleep', '1'], context)
     expect(io.exitCode).toBe(124)
   })
 
@@ -2810,7 +2813,7 @@ describe('handleTimeout', () => {
       await new Promise((resolve) => setTimeout(resolve, 1000))
       return new IOResult()
     }
-    const [stdout, io] = await timed(early, ['0.05', 'sleep', '1'], session)
+    const [stdout, io] = await timed(early, ['0.05', 'sleep', '1'], context)
     expect([decode(await materialize(stdout)), io.exitCode]).toEqual(['early\n', 124])
   })
 
@@ -2838,7 +2841,7 @@ describe('handleTimeout', () => {
       })
       return new IOResult()
     }
-    const [stdout] = await handleTimeout(forever, ['5', 'tail', '-f'], session)
+    const [stdout] = await handleTimeout(forever, ['5', 'tail', '-f'], context)
     if (stdout === null || stdout instanceof Uint8Array)
       throw new Error('timeout returned no stream')
     const chunks = stdout[Symbol.asyncIterator]()
@@ -2851,7 +2854,7 @@ describe('handleTimeout', () => {
   // What the line prints as it winds down past its stop is lost, as a
   // signalled process prints nothing more; what it lands is still joined.
   it('drops what the line prints after its stop', async () => {
-    const [stdout, io] = await timed(goesOn, ['0.05', 'rev', 'a', 'b'], session)
+    const [stdout, io] = await timed(goesOn, ['0.05', 'rev', 'a', 'b'], context)
     expect([decode(await materialize(stdout)), io.exitCode]).toEqual(['early\n', 124])
   })
 
@@ -2866,7 +2869,7 @@ describe('handleTimeout', () => {
       await new Promise((resolve) => setTimeout(resolve, 200))
       return new IOResult()
     }
-    const [, io] = await timed(late, ['-s', 'CONT', '0.05', 'sleep', '1'], session)
+    const [, io] = await timed(late, ['-s', 'CONT', '0.05', 'sleep', '1'], context)
     expect([io.exitCode, decode(await materialize(io.stderr))]).toEqual([124, 'warn\n'])
   })
 
@@ -2894,7 +2897,7 @@ describe('handleTimeout', () => {
           stderr: new TextEncoder().encode('tail: nope: No such file or directory\n'),
         }),
       )
-    const [stdout, io] = await timed(complaining, ['0.05', 'tail', '-F', 'nope'], session)
+    const [stdout, io] = await timed(complaining, ['0.05', 'tail', '-F', 'nope'], context)
     expect(io.exitCode).toBe(124)
     expect(stdout.byteLength).toBe(0)
     expect(decode(await materialize(io.stderr))).toBe('tail: nope: No such file or directory\n')
@@ -2918,14 +2921,14 @@ describe('handleTimeout', () => {
           { once: true },
         )
       })
-    const [, io] = await timed(follow, ['0.05', 'tail', '-f', 'x'], session)
+    const [, io] = await timed(follow, ['0.05', 'tail', '-f', 'x'], context)
     expect(io.exitCode).toBe(124)
     expect(seen?.aborted).toBe(true)
   })
 
   it('invalid duration exits 125', async () => {
     const shell = fakeShell()
-    const [, io] = await timed(shell.fn, ['xx', 'sleep', '1'], session)
+    const [, io] = await timed(shell.fn, ['xx', 'sleep', '1'], context)
     expect(io.exitCode).toBe(125)
     expect(decode(await materialize(io.stderr))).toBe(
       `timeout: invalid time interval 'xx'\n${TIMEOUT_TRY}`,
@@ -2935,7 +2938,7 @@ describe('handleTimeout', () => {
 
   it('missing operand exits 125', async () => {
     const shell = fakeShell()
-    const [, io] = await timed(shell.fn, ['5'], session)
+    const [, io] = await timed(shell.fn, ['5'], context)
     expect(io.exitCode).toBe(125)
     expect(decode(await materialize(io.stderr))).toBe(TIMEOUT_TRY)
   })
@@ -2961,7 +2964,7 @@ describe('handleTimeout', () => {
     [['-k', 'x', '1', 'true'], "timeout: invalid time interval 'x'\n"],
   ])('option refusals exit 125 (%j)', async (args, message) => {
     const shell = fakeShell()
-    const [, io] = await timed(shell.fn, args, session)
+    const [, io] = await timed(shell.fn, args, context)
     expect(io.exitCode).toBe(125)
     expect(decode(await materialize(io.stderr))).toBe(message + TIMEOUT_TRY)
     expect(shell.lines).toEqual([])
@@ -2994,7 +2997,7 @@ describe('handleTimeout', () => {
     ],
   ])('signal outcome (%j)', async (args, code, said) => {
     const shell = slowShell({ 'sleep 1': 1000 })
-    const [, io, node] = await timed(shell.fn, [...args, 'sleep', '1'], session)
+    const [, io, node] = await timed(shell.fn, [...args, 'sleep', '1'], context)
     expect(io.exitCode).toBe(code)
     expect(node.exitCode).toBe(code)
     expect(decode(await materialize(io.stderr))).toBe(said)
@@ -3008,14 +3011,14 @@ describe('handleTimeout', () => {
     [['-p', '-s', 'CONT'], 3],
   ])('ignored signals let the command finish (%j)', async (args, code) => {
     const shell = slowShell({ sh: 200 }, { sh: 3 })
-    const [stdout, io] = await timed(shell.fn, [...args, '0.05', 'sh'], session)
+    const [stdout, io] = await timed(shell.fn, [...args, '0.05', 'sh'], context)
     expect(io.exitCode).toBe(code)
     expect(decode(stdout)).toBe('ran:sh\n')
   })
 
   it('a stopped timeout never returns', async () => {
     const shell = slowShell({ sh: 50 })
-    const run = timed(shell.fn, ['-s', 'STOP', '0.01', 'sh'], session)
+    const run = timed(shell.fn, ['-s', 'STOP', '0.01', 'sh'], context)
     const late = new Promise((resolve) =>
       setTimeout(() => {
         resolve('late')
@@ -3031,8 +3034,38 @@ describe('handleTimeout', () => {
       return Promise.resolve(new IOResult())
     }
     const input = new TextEncoder().encode('hi\n')
-    await timed(execute, ['1', 'cat'], session, input)
+    await timed(execute, ['1', 'cat'], context, input)
     expect(seen).toEqual([input])
+  })
+
+  // timeout signals its command's whole process group, so the jobs the
+  // command started end at the deadline too; --foreground signals the
+  // command alone.
+  it('stops the jobs its command started at the deadline', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const io = await ws.shell(
+        "timeout 0.05 sh -c 'sleep 30 & sleep 30'; echo $?; " +
+          "timeout --foreground 0.05 sh -c 'sleep 31 & sleep 30'; echo $?; ps -o args",
+      )
+      const out = decode(io.stdout).split('\n')
+      expect(out.slice(0, 2)).toEqual(['124', '124'])
+      expect(out).not.toContain('sleep 30')
+      expect(out).toContain('sleep 31')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('cannot start the command once its session holds processes.max', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { processes: { max: 1 } })
+    try {
+      const io = await ws.shell('timeout 1 true')
+      expect(io.exitCode).toBe(125)
+      expect(decode(await materialize(io.stderr))).toBe(FORK_FAILED)
+    } finally {
+      await ws.close()
+    }
   })
 })
 

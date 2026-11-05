@@ -115,17 +115,12 @@ describe('SessionProfile', () => {
     )
   })
 
-  it('processes takes a scope or its fields', () => {
+  it('processes takes a scope or its fields, and keeps only what it states', () => {
     expect(SessionProfile({ processes: 'workspace' }).processes).toEqual({
       list: 'workspace',
       kill: 'workspace',
-      max: null,
     })
-    expect(SessionProfile({ processes: { max: 4 } }).processes).toEqual({
-      list: 'session',
-      kill: 'session',
-      max: 4,
-    })
+    expect(SessionProfile({ processes: { max: 4 } }).processes).toEqual({ max: 4 })
     for (const bad of [
       'none',
       { list: 'session', kill: 'workspace' },

@@ -31,6 +31,7 @@ from mirage.workspace.executor.builtins.shared import (
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.budget import check_env, entry_bytes
 
 
 async def handle_alias(
@@ -79,6 +80,12 @@ async def handle_alias(
                 else:
                     errors.append(f"bash: alias: `{name}': invalid alias name")
                 continue
+            held = session.aliases.get(name)
+            check_env(
+                session,
+                0 if held is None else entry_bytes(name, held),
+                entry_bytes(name, value),
+            )
             _changing(session, name, mark)
             session.aliases[name] = value
             continue

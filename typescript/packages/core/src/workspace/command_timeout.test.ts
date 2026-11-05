@@ -171,6 +171,7 @@ describe('the line deadline inside a long expansion', () => {
         mode: MountMode.WRITE,
         commandLimits: { '@line': new Limit({ timeoutSeconds: 0.3 }) },
         env: { x },
+        maxEnv: null,
       },
     )
     try {
@@ -209,7 +210,11 @@ describe('background job at the line limit', () => {
   function jobWs(seconds: number): Workspace {
     return new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, commandLimits: { '@line': new Limit({ timeoutSeconds: seconds }) } },
+      {
+        mode: MountMode.WRITE,
+        commandLimits: { '@line': new Limit({ timeoutSeconds: seconds }) },
+        maxMemory: null,
+      },
     )
   }
 

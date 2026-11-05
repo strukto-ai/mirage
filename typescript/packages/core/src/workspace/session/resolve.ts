@@ -28,11 +28,7 @@ import type {
   ProfileScripts,
   ScriptMethod,
 } from '../../policy/types.ts'
-import {
-  DEFAULT_PROCESS_PERMISSIONS,
-  parseProcessPermissions,
-  restrictProcesses,
-} from '../../process/config.ts'
+import { layerProcesses, restrictProcesses, type ProcessesBlock } from '../../process/config.ts'
 import { fromUnits, units } from '../../rs/document.ts'
 import { StreamRefusal } from '../../rs/errors.ts'
 import { admissionMatcher, rulesWire, visibilityFrom, type Wire } from '../../rs/policy.ts'
@@ -222,11 +218,13 @@ function compilePlan(profile: SessionProfile): PlanReply {
  * when it states them (they are session presets, not permissions).
  * Either side null returns the other unchanged; the profile's policy
  * survives the merge, since the inline document can only add rules
- * beside it.
+ * beside it. An inline `processes` narrows the profile's over the
+ * workspace's (`workspaceProcesses`).
  */
 export function withInline(
   base: SessionProfile | null,
   inline: SessionProfile | null,
+  workspaceProcesses: ProcessesBlock | null = null,
 ): SessionProfile | null {
   if (inline === null) return base
   const restriction = restrictMatching(base, inline)
@@ -239,12 +237,10 @@ export function withInline(
       'inline permissions may add ask and deny rules, not a policy; state one on the profile',
     )
   }
-  const own =
-    base?.processes == null ? DEFAULT_PROCESS_PERMISSIONS : parseProcessPermissions(base.processes)
   const processes =
     inline.processes == null
-      ? own
-      : restrictProcesses(own, parseProcessPermissions(inline.processes))
+      ? (base?.processes ?? null)
+      : restrictProcesses(layerProcesses([base?.processes, workspaceProcesses]), inline.processes)
   if (base === null) return inline.processes == null ? inline : { ...inline, processes }
   return {
     ...restriction,
@@ -282,9 +278,17 @@ export function compileScripts(effective: SessionProfile, name: string): Profile
   return compiled
 }
 
-/** The session fields a profile compiles to. */
-export function compileProfile(effective: SessionProfile | null, name = ''): CompiledProfile {
+/**
+ * The session fields a profile compiles to; its `processes` over the
+ * workspace's (`workspaceProcesses`), field by field.
+ */
+export function compileProfile(
+  effective: SessionProfile | null,
+  name = '',
+  workspaceProcesses: ProcessesBlock | null = null,
+): CompiledProfile {
   const profile = name === '' ? null : name
+  const processes = Object.freeze(layerProcesses([effective?.processes, workspaceProcesses]))
   if (effective === null) {
     return {
       setup: { env: null, cwd: null },
@@ -294,7 +298,7 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
         commands: null,
         scripts: {},
         commandLimits: null,
-        processes: DEFAULT_PROCESS_PERMISSIONS,
+        processes,
         network: null,
       },
       hideReasons: [],
@@ -304,10 +308,6 @@ export function compileProfile(effective: SessionProfile | null, name = ''): Com
   const plan = compilePlan(effective)
   const commands = rulesFrom(plan.commands)
   checkRules(commands)
-  const processes =
-    effective.processes == null
-      ? DEFAULT_PROCESS_PERMISSIONS
-      : parseProcessPermissions(effective.processes)
   return {
     setup: { env: effective.env ?? null, cwd: effective.cwd ?? null },
     visibility: visibilityFrom(plan.visibility, processes.list),

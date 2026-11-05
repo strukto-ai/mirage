@@ -28,6 +28,8 @@ from mirage.policy import (
     Deny,
     ExecuteResultContext,
     MountRootPolicy,
+    NetworkContext,
+    NetworkResultContext,
     Pending,
     Policies,
     Policy,
@@ -43,6 +45,7 @@ from mirage.policy import (
     refusal_of,
     render_deny,
 )
+from mirage.policy.composition import Composition
 from mirage.policy.mixin import SessionScopedMixin
 from mirage.policy.policies import agreed, settled
 from mirage.policy.types import RouteContext, SessionContext
@@ -946,3 +949,168 @@ async def test_composition_merges_many_asks_without_recounting_prior_rules():
     result = await Policies([Questions()]).pre_command(_ctx("true", []))
     assert isinstance(result, Ask)
     assert result.rules == rules
+
+
+class RouteOnPython(Policy):
+    async def pre_execute(self, ctx: RouteContext) -> Action | None:
+        return Route("beta") if ctx.line.startswith("python3") else None
+
+
+class CapOnSeq(Policy):
+    async def post_execute(self, ctx: ExecuteResultContext) -> Action | None:
+        return Limit(max_lines=2) if ctx.line.startswith("seq") else None
+
+
+class Open(Policy):
+    async def pre_network(self, ctx: NetworkContext) -> Action | None:
+        return None
+
+
+def _line(line: str) -> RouteContext:
+    return RouteContext(line=line, commands=(), session_id="")
+
+
+def _ran(line: str) -> ExecuteResultContext:
+    return ExecuteResultContext(line=line, commands=(), session_id="")
+
+
+# A check that follows a quiet one asks the policies in the order mirage-rs
+# left and replays their answers to it, so it settles as a chain that never
+# saw the quiet check.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "chain", "quiet", "loud"),
+    [
+        ("pre_command", (AskRm, AskRm), _ctx("ls"), _ctx("rm")),
+        ("pre_command", (AskRm, DenyRm), _ctx("ls"), _ctx("rm")),
+        ("pre_command", (Silent, SyncDeny, AskRm), _ctx("ls"), _ctx("rm")),
+        (
+            "pre_execute",
+            (RouteOnPython, RouteOnPython),
+            _line("ls"),
+            _line("python3 x"),
+        ),
+        ("post_execute", (CapOnSeq, CapOnSeq), _ran("ls"), _ran("seq 9")),
+    ],
+)
+async def test_a_check_after_a_quiet_one_settles_like_a_fresh_chain(
+    method, chain, quiet, loud
+):
+    warmed = Policies([kind() for kind in chain])
+    fresh = Policies([kind() for kind in chain])
+    await getattr(warmed, method)(quiet)
+    assert await getattr(warmed, method)(loud) == await getattr(fresh, method)(
+        loud
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_repeated_quiet_check_opens_no_composition(monkeypatch):
+    opened = []
+
+    class Counting(Composition):
+        def __init__(self) -> None:
+            super().__init__()
+            opened.append(self)
+
+    monkeypatch.setattr("mirage.policy.policies.Composition", Counting)
+    policies = Policies([DenyRm(), AskRm()])
+    for _ in range(3):
+        assert await policies.pre_command(_ctx("ls")) is None
+    assert len(opened) == 1
+    assert isinstance(await policies.pre_command(_ctx("rm")), Deny)
+    assert len(opened) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_replayed_check_runs_each_policy_once():
+    calls = []
+
+    class Note(Policy):
+        async def pre_command(self, ctx: CommandContext) -> Action | None:
+            calls.append(ctx.command)
+            return None
+
+    policies = Policies([Note(), DenyRm(), Note()])
+    assert await policies.pre_command(_ctx("ls")) is None
+    assert isinstance(await policies.pre_command(_ctx("rm")), Deny)
+    assert calls == ["ls", "ls", "rm"]
+
+
+@pytest.mark.asyncio
+async def test_a_policy_added_after_a_quiet_check_is_asked():
+    policies = Policies([Silent(), AskRm()])
+    assert await policies.pre_command(_ctx("weird")) is None
+    policies.add(DenyWeird())
+    refused = await policies.pre_command(_ctx("weird"))
+    assert isinstance(refused, Deny)
+    assert refused.reason == "nope"
+
+
+@pytest.mark.asyncio
+async def test_a_quiet_pre_network_passes_the_same_policies_again():
+    policies = Policies([Open(), Silent(), Open()])
+    ctx = NetworkContext(host="example.com", address="192.0.2.1", port=443)
+    first: list[Policy] = []
+    second: list[Policy] = []
+    assert await policies.pre_network(ctx, first) == (None, None)
+    assert await policies.pre_network(ctx, second) == (None, None)
+    assert [type(policy).__name__ for policy in first] == [
+        "Silent",
+        "MountModePolicy",
+        "Open",
+        "Open",
+    ]
+    assert second == first
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_check_after_a_quiet_one_keeps_who_passed():
+    entered = asyncio.Event()
+    hold: list[bool] = []
+
+    class Wait(Policy):
+        async def pre_network(self, ctx: NetworkContext) -> Action | None:
+            if hold:
+                entered.set()
+                await asyncio.Event().wait()
+            return None
+
+    policies = Policies([Open(), Wait()])
+    ctx = NetworkContext(host="example.com", address="192.0.2.1", port=443)
+    assert await policies.pre_network(ctx, []) == (None, None)
+    hold.append(True)
+    passed: list[Policy] = []
+    running = asyncio.create_task(policies.pre_network(ctx, passed))
+    await entered.wait()
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    assert [type(policy).__name__ for policy in passed] == [
+        "MountModePolicy",
+        "Open",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_check_among_some_policies_leaves_no_order(monkeypatch):
+    opened = []
+
+    class Counting(Composition):
+        def __init__(self) -> None:
+            super().__init__()
+            opened.append(self)
+
+    class Closing(Policy):
+        async def post_network(self, ctx: NetworkResultContext) -> None:
+            return None
+
+    monkeypatch.setattr("mirage.policy.policies.Composition", Counting)
+    first, second = Closing(), Closing()
+    policies = Policies([first, second])
+    ctx = NetworkResultContext(
+        host="example.com", address="192.0.2.1", port=443
+    )
+    for among in [(first,), (second,), (first,), (first, second)]:
+        await policies.post_network(ctx, among)
+    assert len(opened) == 4

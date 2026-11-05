@@ -50,6 +50,7 @@ from mirage.policy.profile import (
     compile_program,
 )
 from mirage.policy.types import ProfileScript, ProfileScripts
+from mirage.process.config import ProcessPermissions
 from mirage.rs.document import validate_document
 from mirage.runtime.base import Runtime
 from mirage.runtime.table import build_runtime
@@ -689,6 +690,9 @@ class WorkspaceConfig(BaseModel):
     # together; null runs uncapped. Unset = the Workspace default.
     max_memory: str | int | None = None
     max_body_bytes: str | int | None = None
+    # The bytes each session's variables, functions and aliases may hold:
+    # a size, 2MB by default, null for no cap.
+    max_env: str | int | None = None
     # Where the workspace's connections may go: true for anywhere, false
     # for nowhere, or {allow: [hosts and ranges]}.
     network: bool | dict[str, list[str] | dict[str, str]] = True
@@ -714,6 +718,9 @@ class WorkspaceConfig(BaseModel):
     # The profile a session gets when it names none; `default` when unset
     # and a profile of that name exists.
     profile: str | None = None
+    # The one workspace-wide block a profile overrides, field by field:
+    # whose processes a session sees and stops, and how many it holds.
+    processes: ProcessPermissions | None = None
     mode: MountMode = MountMode.WRITE
     # The read policy a mount inherits when it declares none. There is
     # deliberately no workspace-level bound: `ttl:` exists only inside a
@@ -764,6 +771,11 @@ class WorkspaceConfig(BaseModel):
     @classmethod
     def _v_max_memory(cls, v: Any) -> int | None:
         return v if v is None else parse_limit(v, "max_memory")
+
+    @field_validator("max_env", mode="before")
+    @classmethod
+    def _v_max_env(cls, v: Any) -> int | None:
+        return v if v is None else parse_limit(v, "max_env")
 
     @field_validator("network", mode="before")
     @classmethod
@@ -861,6 +873,8 @@ class WorkspaceConfig(BaseModel):
         kwargs["max_body_bytes"] = self.max_body_bytes
         if "max_memory" in self.model_fields_set:
             kwargs["max_memory"] = self.max_memory
+        if "max_env" in self.model_fields_set:
+            kwargs["max_env"] = self.max_env
         if "network" in self.model_fields_set:
             kwargs["network"] = self.network
         if self.system_time is not None:
@@ -885,6 +899,8 @@ class WorkspaceConfig(BaseModel):
             }
         if self.profile is not None:
             kwargs["profile"] = self.profile
+        if self.processes is not None:
+            kwargs["processes"] = self.processes
         # Passed through as-is: this method is sync, and env-plane
         # resolution is async at command time, so no fetching here.
         if self.env is not None:

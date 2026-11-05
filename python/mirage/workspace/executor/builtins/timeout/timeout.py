@@ -34,7 +34,12 @@ from mirage.commands.spec.usage import (
     unknown_option_error,
     usage_hint,
 )
-from mirage.context import reset_program_invocation, set_program_invocation
+from mirage.context import (
+    reset_current_session,
+    reset_program_invocation,
+    set_current_evaluation,
+    set_program_invocation,
+)
 from mirage.io import IOResult
 from mirage.io.stream import (
     OutputStream,
@@ -43,13 +48,19 @@ from mirage.io.stream import (
     yield_bytes,
 )
 from mirage.io.types import ByteSource, OutputState
+from mirage.process.handle import ProcessHandle
+from mirage.process.table import ProcessTable
+from mirage.process.types import ProcessInfo
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.constants import NOT_FOUND_STATUS, TIMEOUT_STATUS
 from mirage.shell.join import shell_join
+from mirage.types import PathSpec
+from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.timeout.constants import (
     CONTINUE_SIGNALS,
+    FORK_FAILED,
     SELF_KILLING_SIGNALS,
     SIGCHLD,
     SIGKILL,
@@ -64,14 +75,11 @@ from mirage.workspace.executor.builtins.timeout.constants import (
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.lookup.lookup import execs
 from mirage.workspace.mount.registry import MountRegistry
-from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
 
 _UNIT_SECONDS = {"": 1.0, "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0}
-
-_Run = asyncio.Future[tuple[bytes | None, IOResult]]
 
 
 def _usage_error(message: str) -> tuple[None, IOResult, ExecutionNode]:
@@ -229,33 +237,41 @@ def signal_name(number: int) -> str:
 async def handle_timeout(
     execute_fn: Callable[..., Any],
     args: list[str],
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None = None,
     registry: MountRegistry | None = None,
+    processes: ProcessTable | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Run `timeout [OPTION] DURATION COMMAND [ARG...]` (GNU timeout).
 
     The inner line is built with shell_join so already-expanded words
     survive re-parsing as one token each (GNU timeout execs the command
-    without a shell). The command reads timeout's stdin. At the deadline
-    the command gets -s's signal (TERM by default), and a command here
-    is a task, not a process, so the signal's default action decides:
-    one that terminates ends the run, and 124 reports it, or the status
-    a shell would show with --preserve-status; one that is ignored (0,
-    CHLD, CONT, URG, WINCH) lets the run carry on, and -k's KILL ends it
-    later with 137; a stop halts it until that KILL. timeout signals its
-    own process group unless --foreground, so it dies of what it cannot
-    ignore (KILL, 32, 33), stops itself on STOP, and never wakes after
-    CHLD; each ends as GNU's does. -v says each signal on stderr.
+    without a shell). The command reads timeout's stdin and runs as a
+    process of its own, a child of the caller's, so the jobs it starts
+    are its children. At the deadline the command gets -s's signal (TERM
+    by default), and a process here is a task, so the signal's default
+    action decides: one that terminates ends the run, and 124 reports
+    it, or the status a shell would show with --preserve-status; one
+    that is ignored (0, CHLD, CONT, URG, WINCH) lets the run carry on,
+    and -k's KILL ends it later with 137; a stop halts it until that
+    KILL. timeout signals its own process group unless --foreground, so
+    the jobs the command started get the signal too, and it dies of what
+    it cannot ignore (KILL, 32, 33), stops itself on STOP, and never
+    wakes after CHLD; each ends as GNU's does. -v says each signal on
+    stderr.
 
     Args:
         execute_fn (Callable): shell evaluator for the inner line.
         args (list[str]): options, duration operand, then the command.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the caller's evaluation, which the
+            command's process forks.
         stdin (ByteSource | None): what the command reads.
         registry (MountRegistry | None): where the command name is
             looked up; None runs every name.
+        processes (ProcessTable | None): the workspace's processes, which
+            the command joins; None starts a table of its own.
     """
+    session = context.session
     parse = parse_shell_options(SHELL_SPECS["timeout"], args or [])
     signal = 15
     kill_after = 0.0
@@ -319,26 +335,28 @@ async def handle_timeout(
     return await _supervise(
         execute_fn,
         shell_join(command),
-        session,
+        context,
         stdin,
         seconds,
         signal,
         kill_after,
         parse.flags,
         command[0],
+        processes if processes is not None else ProcessTable(),
     )
 
 
 async def _supervise(
     execute_fn: Callable[..., Any],
     inner: str,
-    session: SessionState,
+    context: EvaluationContext,
     stdin: ByteSource | None,
     seconds: float,
     signal: int,
     kill_after: float,
     flags: dict[str, str | bool],
     name: str,
+    processes: ProcessTable,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Start the inner line under the deadline and hand back its stdout
     as it writes it, as GNU's command writes to timeout's own stdout; the
@@ -348,37 +366,64 @@ async def _supervise(
     Args:
         execute_fn (Callable): shell evaluator for the inner line.
         inner (str): the joined command line.
-        session (SessionState): shell session state.
+        context (EvaluationContext): the caller's evaluation.
         stdin (ByteSource | None): what the command reads.
         seconds (float): the deadline; 0 (or inf) is none.
         signal (int): the signal sent at the deadline.
         kill_after (float): -k, how long until KILL follows; 0 is never.
         flags (dict[str, str | bool]): the parsed options.
         name (str): the command word, which -v names.
+        processes (ProcessTable): where the command's process starts.
     """
     foreground = flags.get("f") is True
     preserve = flags.get("p") is True
     verbose = flags.get("v") is True
+    session = context.session
     console = PipeConsole()
     held: list[IOResult] = []
-    # timeout execs its command, so a builtin that is also a program
-    # answers as the program. The task copies the context it starts in.
-    token = set_program_invocation(session)
-    try:
-        task = asyncio.ensure_future(
-            _execute_drained(
-                execute_fn, inner, session.session_id, stdin, console, held
+    ran: list[tuple[bytes | None, IOResult]] = []
+    child = child_context(context)
+
+    async def run() -> int:
+        token = set_current_evaluation(child)
+        # timeout execs its command, so a builtin that is also a program
+        # answers as the program.
+        program = set_program_invocation(child.session)
+        try:
+            ran.append(
+                await _execute_drained(
+                    execute_fn, inner, session.session_id, stdin, console, held
+                )
             )
+        finally:
+            reset_program_invocation(program)
+            reset_current_session(token)
+            await child.session.close_inputs()
+        return ran[0][1].exit_code
+
+    def forked(info: ProcessInfo) -> None:
+        child.session.process_id = info.pid
+
+    try:
+        process = processes.start(
+            session_id=session.session_id,
+            command=inner,
+            cwd=PathSpec.from_str_path(session.cwd),
+            parent_pid=session.process_id,
+            run=run,
+            limit=session.processes.max,
+            started=forked,
         )
-    finally:
-        reset_program_invocation(token)
+    except BlockingIOError:
+        return _refuse(FORK_FAILED)
 
     async def watch() -> Result:
         # The deadline's answer, then the run's stdout ends, whatever the
         # deadline answered.
         try:
             return await _deadline(
-                task,
+                process,
+                ran,
                 console,
                 held,
                 seconds,
@@ -390,8 +435,8 @@ async def _supervise(
                 name,
             )
         finally:
-            if not task.done():
-                await _cancel(task)
+            if not process.task.done():
+                await _cancel(process.task)
             console.end()
 
     watching = asyncio.ensure_future(watch())
@@ -442,7 +487,8 @@ async def _streamed(
 
 
 async def _deadline(
-    task: _Run,
+    process: ProcessHandle,
+    ran: list[tuple[bytes | None, IOResult]],
     console: JobConsole,
     held: list[IOResult],
     seconds: float,
@@ -456,7 +502,9 @@ async def _deadline(
     """Wait for the run, and at the deadline do what the signal does.
 
     Args:
-        task (_Run): the running inner line.
+        process (ProcessHandle): the command's process.
+        ran (list[tuple[bytes | None, IOResult]]): its drained output
+            and result, once it ended on its own.
         console (JobConsole): what it printed so far.
         held (list[IOResult]): its result, once it existed.
         seconds (float): the deadline; 0 (or inf) is none.
@@ -467,10 +515,12 @@ async def _deadline(
         verbose (bool): -v, which says each signal sent.
         name (str): the command word, which -v names.
     """
+    task = process.task
     deadline = seconds if 0 < seconds < math.inf else None
     done, _ = await asyncio.wait({task}, timeout=deadline)
     if task in done:
-        stdout, io = task.result()
+        task.result()
+        stdout, io = ran[0]
         return (
             stdout,
             io,
@@ -492,12 +542,12 @@ async def _deadline(
         # The command stops, or timeout never wakes: only -k's KILL
         # ends the wait, and not even that once timeout stopped itself.
         if stops:
-            await _cancel(task)
+            await _stop(process, signal, foreground)
         if kill_after == 0 or (signal == SIGSTOP and not foreground):
             await asyncio.get_running_loop().create_future()
         await asyncio.sleep(kill_after)
         if not task.done():
-            await _cancel(task)
+            await _stop(process, SIGKILL, foreground)
         say(SIGKILL)
         return await _ended(console, held, said, 137)
     if signal in CONTINUE_SIGNALS or signal in STOP_SIGNALS:
@@ -505,12 +555,12 @@ async def _deadline(
             {task}, timeout=kill_after if kill_after else None
         )
         if task not in done:
-            await _cancel(task)
+            await _stop(process, SIGKILL, foreground)
             say(SIGKILL)
             return await _ended(console, held, said, 137)
-        code = task.result()[1].exit_code if preserve else TIMEOUT_STATUS
+        code = task.result() if preserve else TIMEOUT_STATUS
         return await _ended(console, held, said, code, finished=True)
-    await _cancel(task)
+    await _stop(process, signal, foreground)
     if signal in SELF_KILLING_SIGNALS and (
         not foreground or signal == SIGKILL
     ):
@@ -520,7 +570,15 @@ async def _deadline(
     )
 
 
-async def _cancel(task: _Run | asyncio.Future[Result]) -> None:
+async def _stop(process: ProcessHandle, signal: int, foreground: bool) -> None:
+    # timeout signals its own process group unless --foreground, so the
+    # jobs the command started end with it.
+    if not foreground:
+        process.terminate(signal)
+    await _cancel(process.task)
+
+
+async def _cancel(task: asyncio.Future[Any]) -> None:
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task
@@ -613,7 +671,8 @@ async def timeout_builtin(call: BuiltinCall) -> Result:
     return await handle_timeout(
         call.execute_fn,
         list(call.argv.args),
-        call.context.session,
+        call.context,
         call.stdin,
         call.registry,
+        call.job_table.processes if call.job_table is not None else None,
     )

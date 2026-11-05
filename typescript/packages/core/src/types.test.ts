@@ -23,6 +23,7 @@ import {
   PathSpec,
   ReadPolicy,
   VFSName,
+  underCeiling,
   wordText,
 } from './types.ts'
 
@@ -493,4 +494,14 @@ it.each([
 it('keeps spelled ancestors in a parent path', () => {
   const child = PathSpec.fromStrPath('/hidden/../repo', undefined, '/').join('.git', 'HEAD')
   expect(child.parent.dotted).toBe('/hidden/../repo/.git')
+})
+
+describe('underCeiling', () => {
+  it('holds a bound and a lifted one to the ceiling', () => {
+    expect(underCeiling(64, 32)).toBe(32)
+    expect(underCeiling(16, 32)).toBe(16)
+    expect(underCeiling(null, 32)).toBe(32)
+    expect(underCeiling(null, null)).toBeNull()
+    expect(underCeiling(600, undefined)).toBe(600)
+  })
 })

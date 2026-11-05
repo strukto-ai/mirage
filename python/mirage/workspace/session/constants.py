@@ -98,3 +98,11 @@ STARTUP_VALUES: dict[str, ShellVar] = {
     "OPTIND": ShellVar("1", frozenset({VarAttr.INTEGER})),
     "OPTERR": ShellVar("1"),
 }
+
+# The max_env a workspace runs under when it names none: the 2 MiB Linux
+# gives env and argv at exec, so a doubling `x=$x$x` stops in some 21
+# steps.
+MAX_ENV = 1 << 21
+
+# Bash's own exit when it cannot allocate, a fatal error.
+ENV_EXHAUSTED_STATUS = 2

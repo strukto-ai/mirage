@@ -66,6 +66,8 @@ describe('line deadline', () => {
         yield await Promise.resolve(chunk)
       }
     }
+    // Lifted: shuf holds its input, and an always-ready source can fill
+    // max_memory before the deadline on a fast host.
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       {
@@ -73,6 +75,7 @@ describe('line deadline', () => {
           '@line': new Limit({ timeoutSeconds: 0.1 }),
           '@all': new Limit({ maxLines: null, maxBytes: null }),
         },
+        maxMemory: null,
       },
     )
     const start = performance.now()

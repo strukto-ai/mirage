@@ -32,6 +32,7 @@ import { registerMetrics } from './metrics.ts'
 import { type RateLimit, registerRateLimits, resolveRateLimits } from './rate_limit.ts'
 import {
   OWNERS_PREFIX,
+  resolveCeilings,
   resolveGracefulTimeout,
   resolveMaxSessions,
   resolveMaxWorkspaces,
@@ -111,7 +112,7 @@ export interface BuildAppOptions {
   /**
    * The most sessions each workspace holds; past it a new session answers
    * 429. Undefined reads `$MIRAGE_MAX_SESSIONS` or the `max_sessions`
-   * config key, else sets no cap.
+   * config key, else 16.
    */
   maxSessions?: number
   /**
@@ -120,6 +121,30 @@ export interface BuildAppOptions {
    * reads `$MIRAGE_GRACEFUL_TIMEOUT` or the `graceful_timeout` config key, else 0.
    */
   gracefulTimeout?: number
+  /**
+   * The most a workspace's `max_memory` reaches, a lifted one included, as
+   * a size. Undefined reads `$MIRAGE_MAX_MEMORY` or the `max_memory` config
+   * key, else sets no ceiling.
+   */
+  maxMemory?: string | number
+  /**
+   * The most a session's `processes.max` reaches, a lifted one included.
+   * Undefined reads `$MIRAGE_MAX_PROCESSES` or the `max_processes` config
+   * key, else sets no ceiling.
+   */
+  maxProcesses?: number
+  /**
+   * The most seconds a line runs, whatever `@line` a config or profile
+   * sets. Undefined reads `$MIRAGE_MAX_LINE_SECONDS` or the
+   * `max_line_seconds` config key, else sets no ceiling.
+   */
+  maxLineSeconds?: number
+  /**
+   * The most a workspace's `max_env` reaches, a lifted one included, as a
+   * size. Undefined reads `$MIRAGE_MAX_ENV` or the `max_env` config key,
+   * else sets no ceiling.
+   */
+  maxEnv?: string | number
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -175,6 +200,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     policies: options.policies ?? [],
     programs: resolvePolicyFile(loadPolicyFile, options.policyFile),
     maxSessions: resolveMaxSessions(options.maxSessions),
+    ceilings: resolveCeilings(options),
   })
   const gracefulTimeout = resolveGracefulTimeout(options.gracefulTimeout)
   const rateLimits = resolveRateLimits(options.rateLimits)

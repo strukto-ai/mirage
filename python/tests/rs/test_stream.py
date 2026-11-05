@@ -104,7 +104,7 @@ async def test_glob_replacement_cancellation_prevents_later_output(
 async def test_foreground_parameter_cancellation_closes_matcher_before_returning(
     monkeypatch,
 ):
-    ws = Workspace({})
+    ws = Workspace({}, max_env=None)
     active = set()
     entered = []
     closed = set()

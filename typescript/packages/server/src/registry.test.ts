@@ -21,10 +21,21 @@ import { MountMode } from '@struktoai/mirage-core/types'
 import { DiskRecordClient, loadPolicyFile, Workspace } from '@struktoai/mirage-node'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { DaemonConfigError } from './daemon_config.ts'
-import { ENV_GRACEFUL_TIMEOUT, ENV_HOME, ENV_MAX_SESSIONS, ENV_MAX_WORKSPACES } from './env.ts'
+import { MAX_SESSIONS } from './constants.ts'
+import {
+  ENV_GRACEFUL_TIMEOUT,
+  ENV_HOME,
+  ENV_MAX_LINE_SECONDS,
+  ENV_MAX_ENV,
+  ENV_MAX_MEMORY,
+  ENV_MAX_PROCESSES,
+  ENV_MAX_SESSIONS,
+  ENV_MAX_WORKSPACES,
+} from './env.ts'
 import {
   Claim,
   resolveGracefulTimeout,
+  resolveCeilings,
   resolveMaxSessions,
   resolveMaxWorkspaces,
   resolvePolicyFile,
@@ -303,12 +314,52 @@ describe('resolveMaxSessions', () => {
   it('reads the env then config', async () => {
     const home = await mkdtemp(join(tmpdir(), 'mir-sessions-'))
     try {
-      expect(resolveMaxSessions(undefined, { [ENV_HOME]: home })).toBeNull()
+      expect(resolveMaxSessions(undefined, { [ENV_HOME]: home })).toBe(MAX_SESSIONS)
+      expect(resolveMaxSessions(undefined, { [ENV_HOME]: home }, 4)).toBe(4)
       await writeFile(join(home, 'config.toml'), '[daemon]\nmax_sessions = 8\n')
       expect(resolveMaxSessions(undefined, { [ENV_HOME]: home })).toBe(8)
       expect(() => resolveMaxSessions(undefined, { [ENV_MAX_SESSIONS]: '0' })).toThrow(
         /max_sessions/,
       )
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('resolveCeilings', () => {
+  it('reads each setting from the env then config', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'mir-ceilings-'))
+    try {
+      expect(resolveCeilings({}, { [ENV_HOME]: home })).toEqual({
+        maxMemory: null,
+        maxProcesses: null,
+        maxLineSeconds: null,
+        maxEnv: null,
+      })
+      await writeFile(
+        join(home, 'config.toml'),
+        '[daemon]\nmax_memory = "16MB"\nmax_processes = 32\nmax_env = "64KB"\n',
+      )
+      expect(resolveCeilings({}, { [ENV_HOME]: home })).toEqual({
+        maxMemory: 16 << 20,
+        maxProcesses: 32,
+        maxLineSeconds: null,
+        maxEnv: 64 << 10,
+      })
+      expect(
+        resolveCeilings({ maxProcesses: 4 }, { [ENV_HOME]: home, [ENV_MAX_LINE_SECONDS]: '90' }),
+      ).toEqual({ maxMemory: 16 << 20, maxProcesses: 4, maxLineSeconds: 90, maxEnv: 64 << 10 })
+      for (const [env, bad, key] of [
+        [ENV_MAX_MEMORY, 'lots', 'max_memory'],
+        [ENV_MAX_MEMORY, '0', 'max_memory'],
+        [ENV_MAX_ENV, 'lots', 'max_env'],
+        [ENV_MAX_PROCESSES, '0', 'max_processes'],
+        [ENV_MAX_LINE_SECONDS, '-1', 'max_line_seconds'],
+        [ENV_MAX_LINE_SECONDS, 'Infinity', 'max_line_seconds'],
+      ] as const) {
+        expect(() => resolveCeilings({}, { [ENV_HOME]: home, [env]: bad })).toThrow(key)
+      }
     } finally {
       await rm(home, { recursive: true, force: true })
     }

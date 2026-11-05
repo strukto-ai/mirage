@@ -58,6 +58,7 @@ import {
   withValue,
 } from '../../shell/variable.ts'
 import type { SessionState } from './session.ts'
+import { argsBytes, checkEnv, entryBytes } from './budget.ts'
 
 /**
  * The one copy-out of a session's environment.
@@ -867,6 +868,11 @@ async function setVar(
   if (session.shellOptions.allexport === true) {
     stored = withAttr(stored, VarAttr.Export)
   }
+  checkEnv(
+    session,
+    existing === undefined ? 0 : entryBytes(name, existing.value),
+    entryBytes(name, stored.value),
+  )
   setSessionEntry(session.vars, name, stored)
   try {
     await postSessionGate(
@@ -1066,8 +1072,14 @@ export function setPositionalParams(
   callStack: CallStack | null,
   values: string[],
 ): void {
-  if (callStack !== null && callStack.depth > 1) callStack.setPositional(values)
-  else session.positionalArgs = values
+  if (callStack !== null && callStack.depth > 1) {
+    const held = argsBytes(callStack.getAllPositional())
+    checkEnv(session, held, argsBytes(values), held)
+    callStack.setPositional(values)
+  } else {
+    checkEnv(session, argsBytes(session.positionalArgs), argsBytes(values))
+    session.positionalArgs = values
+  }
 }
 
 /**
@@ -1158,7 +1170,11 @@ export function setAttr(
   attr: VarAttr | null,
   on = true,
 ): void {
-  const existing = sessionEntry(session.vars, name) ?? makeVar()
+  let existing = sessionEntry(session.vars, name)
+  if (existing === undefined) {
+    checkEnv(session, 0, entryBytes(name, undefined))
+    existing = makeVar()
+  }
   setSessionEntry(session.vars, name, attr === null ? existing : withAttr(existing, attr, on))
 }
 

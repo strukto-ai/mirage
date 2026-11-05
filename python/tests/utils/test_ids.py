@@ -26,10 +26,12 @@ import pytest
 import mirage
 from mirage.utils.clock import ManualClock, SystemClock
 from mirage.utils.ids import (
+    MAX_NAME_LENGTH,
     IdSource,
     SeededIdSource,
     SystemIdSource,
     _splitmix64,
+    check_name,
     new_session_id,
     new_workspace_id,
     random_below,
@@ -517,3 +519,16 @@ def test_no_seamed_module_draws_past_the_id_source():
 
 def test_every_kept_process_draw_is_still_made():
     assert set(KEPT_ON_PROCESS_RANDOMNESS) - _seamed_draws() == set()
+
+
+def test_check_name_takes_every_id_mirage_and_adapters_mint():
+    for name in ("default", f"sess_{'a' * 12}", uuid7(), "user:42", "a" * 128):
+        check_name("session id", name)
+
+
+@pytest.mark.parametrize(
+    "name", ["", "a" * (MAX_NAME_LENGTH + 1), "a\nb", "tab\there", "x\x7f"]
+)
+def test_check_name_refuses_empty_long_or_control_names(name):
+    with pytest.raises(ValueError, match="^invalid profile name: must be 1"):
+        check_name("profile name", name)

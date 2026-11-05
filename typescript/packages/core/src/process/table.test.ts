@@ -309,6 +309,30 @@ it('start refuses a session at its limit', async () => {
   await start('a').join()
 })
 
+it('the ceiling holds a lifted or larger limit', async () => {
+  const processes = new ProcessTable(),
+    release = gate()
+  processes.ceiling = 1
+  const start = (limit: number | null) =>
+    processes.start({
+      sessionId: 'a',
+      command: 'work',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => undefined,
+      limit,
+      run: async () => {
+        await release.promise
+        return 0
+      },
+    })
+  const held = start(null)
+  for (const limit of [null, 128]) {
+    expect(() => start(limit)).toThrow(expect.objectContaining({ code: 'EAGAIN' }))
+  }
+  release.release()
+  await held.join()
+})
+
 it('group cancellation reaches grandchildren after an intermediate exits', async () => {
   const processes = new ProcessTable(),
     release = gate()

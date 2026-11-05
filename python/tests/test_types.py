@@ -15,11 +15,13 @@
 from dataclasses import FrozenInstanceError
 
 import pytest
+from pydantic import ValidationError
 
 from mirage.types import (
     DEFAULT_READ_TTL,
     Aggr,
     CacheFacts,
+    Ceilings,
     FileStat,
     FileType,
     Limit,
@@ -29,6 +31,7 @@ from mirage.types import (
     ReadPolicy,
     ReadSpec,
     parse_mount_mode,
+    under_ceiling,
     word_text,
 )
 
@@ -314,3 +317,18 @@ def test_parent_retains_spelled_ancestors():
         ".git", "HEAD"
     )
     assert child.parent.dotted == "/hidden/../repo/.git"
+
+
+def test_under_ceiling_holds_a_bound_and_a_lifted_one_to_the_ceiling():
+    assert under_ceiling(64, 32) == 32
+    assert under_ceiling(16, 32) == 16
+    assert under_ceiling(None, 32) == 32
+    assert under_ceiling(None, None) is None
+    assert under_ceiling(600.0, None) == 600.0
+
+
+def test_ceilings_refuse_a_bound_that_is_not_above_zero():
+    with pytest.raises(ValidationError):
+        Ceilings(max_processes=0)
+    with pytest.raises(ValidationError):
+        Ceilings(max_line_seconds=float("inf"))

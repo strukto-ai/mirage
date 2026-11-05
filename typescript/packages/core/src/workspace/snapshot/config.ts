@@ -17,6 +17,7 @@ import type { CLI } from '../../commands/cli/types.ts'
 import type { IOConfig } from '../../io/config.ts'
 import type { NetworkSetting } from '../../io/network.ts'
 import type { SessionProfile } from '../../policy/profile.ts'
+import type { ProcessPermissions } from '../../process/config.ts'
 import type { Limit, WritePolicy } from '../../types.ts'
 import { hasRedactedSecret, REDACTED_SECRET } from '../../vfs/secrets.ts'
 import type { Mount } from '../mount/spec.ts'
@@ -33,9 +34,13 @@ export interface MountArgs {
   // The profile table every session ran under, and its default.
   profiles: Record<string, SessionProfile>
   profile: string | null
+  // The workspace's processes block, as stated; null when it states none.
+  processes: Partial<ProcessPermissions> | null
   // The workspace's max_memory in bytes, null for no cap.
   maxMemory: number | null
   maxBodyBytes: number
+  // The workspace's max_env in bytes, null for no cap.
+  maxEnv: number | null
   // The workspace's network setting, as written.
   network: NetworkSetting
   // The workspace's system_time, as written; null for the host's time.

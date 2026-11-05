@@ -323,7 +323,8 @@
             "group": "Configuration",
             "pages": [
               "home/configuration",
-              "home/authentication"
+              "home/authentication",
+              "home/security"
             ]
           },
           {

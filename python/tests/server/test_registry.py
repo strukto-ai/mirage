@@ -20,10 +20,15 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.policy.base import Policy
 from mirage.policy.types import Action, CommandContext, VfsContext
+from mirage.server.constants import MAX_SESSIONS
 from mirage.server.daemon_config import DaemonConfigError
 from mirage.server.env import (
     ENV_GRACEFUL_TIMEOUT,
     ENV_HOME,
+    ENV_MAX_ENV,
+    ENV_MAX_LINE_SECONDS,
+    ENV_MAX_MEMORY,
+    ENV_MAX_PROCESSES,
     ENV_MAX_SESSIONS,
     ENV_MAX_WORKSPACES,
     ENV_POLICY_FILE,
@@ -31,11 +36,13 @@ from mirage.server.env import (
 from mirage.server.registry import (
     Claim,
     WorkspaceRegistry,
+    resolve_ceilings,
     resolve_graceful_timeout,
     resolve_max_sessions,
     resolve_max_workspaces,
     resolve_policy_file,
 )
+from mirage.types import Ceilings
 from mirage.utils.abort import MirageAbortError
 from mirage.workspace.record.disk import DiskRecordClient
 
@@ -263,12 +270,51 @@ def test_max_workspaces_must_be_a_positive_whole_number(monkeypatch, value):
 def test_max_sessions_reads_the_env_then_config(monkeypatch, tmp_path):
     monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
     monkeypatch.delenv(ENV_MAX_SESSIONS, raising=False)
-    assert resolve_max_sessions() is None
+    assert resolve_max_sessions() == MAX_SESSIONS
     (tmp_path / "config.toml").write_text("[daemon]\nmax_sessions = 8\n")
     assert resolve_max_sessions() == 8
     monkeypatch.setenv(ENV_MAX_SESSIONS, "0")
     with pytest.raises(DaemonConfigError, match="max_sessions"):
         resolve_max_sessions()
+
+
+def test_ceilings_read_each_setting_from_the_env_then_config(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    for name in (
+        ENV_MAX_MEMORY,
+        ENV_MAX_PROCESSES,
+        ENV_MAX_LINE_SECONDS,
+        ENV_MAX_ENV,
+    ):
+        monkeypatch.delenv(name, raising=False)
+    assert resolve_ceilings() == Ceilings()
+    (tmp_path / "config.toml").write_text(
+        '[daemon]\nmax_memory = "16MB"\nmax_processes = 32\nmax_env = "64KB"\n'
+    )
+    assert resolve_ceilings() == Ceilings(
+        max_memory=16 << 20, max_processes=32, max_env=64 << 10
+    )
+    monkeypatch.setenv(ENV_MAX_LINE_SECONDS, "90")
+    assert resolve_ceilings(max_processes=4) == Ceilings(
+        max_memory=16 << 20,
+        max_processes=4,
+        max_line_seconds=90.0,
+        max_env=64 << 10,
+    )
+    for env, bad, key in (
+        (ENV_MAX_MEMORY, "lots", "max_memory"),
+        (ENV_MAX_MEMORY, "0", "max_memory"),
+        (ENV_MAX_ENV, "lots", "max_env"),
+        (ENV_MAX_PROCESSES, "0", "max_processes"),
+        (ENV_MAX_LINE_SECONDS, "-1", "max_line_seconds"),
+        (ENV_MAX_LINE_SECONDS, "inf", "max_line_seconds"),
+    ):
+        monkeypatch.setenv(env, bad)
+        with pytest.raises(DaemonConfigError, match=key):
+            resolve_ceilings()
+        monkeypatch.delenv(env)
 
 
 def test_graceful_timeout_reads_the_env_then_config(monkeypatch, tmp_path):

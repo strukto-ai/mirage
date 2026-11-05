@@ -1,5 +1,5 @@
 import { DEFAULT_PROCESS_PERMISSIONS, type ProcessPermissions } from './config.ts'
-import type { PathSpec, ProcessScope } from '../types.ts'
+import { underCeiling, type PathSpec, type ProcessScope } from '../types.ts'
 import { ProcessHandle, type ExecutionBind } from './handle.ts'
 import type { ProcessInfo, ProcessRunner } from './types.ts'
 import type { ProcessView } from './view.ts'
@@ -14,6 +14,11 @@ export class ProcessTable {
   private readonly ancestors = new Map<number, readonly number[]>()
   private readonly generations = new Map<string, number>()
   private stopped = false
+  /**
+   * The host's ceiling on any session's limit, a lifted one included,
+   * whatever profile, snapshot or store set it. Mirrors Python's `ceiling`.
+   */
+  ceiling: number | null = null
 
   /**
    * @param bind runs each runner as part of its execution, so what it
@@ -44,7 +49,8 @@ export class ProcessTable {
 
   /**
    * Host-only: the supplied runner must admit commands before effects.
-   * `limit` is the most runners the session may hold, this one included;
+   * `limit` is the most runners the session may hold, this one included,
+   * held under `ceiling`;
    * stopping runners count until they finish cleanup and leave the live registry.
    * Past it this throws EAGAIN, what fork(2) answers at `ulimit -u`.
    * `started` is what the caller sets up from the process's identity before
@@ -66,10 +72,11 @@ export class ProcessTable {
     started?: (info: ProcessInfo) => void
   }): ProcessHandle {
     if (this.stopped) throw new Error('process table is stopped')
+    const limit = underCeiling(init.limit ?? null, this.ceiling)
     if (
-      init.limit != null &&
+      limit !== null &&
       [...this.runners.values()].filter(({ handle }) => handle.info.sessionId === init.sessionId)
-        .length >= init.limit
+        .length >= limit
     )
       throw Object.assign(new Error('Resource temporarily unavailable'), { code: 'EAGAIN' })
     const parent = init.parentPid == null ? undefined : this.runners.get(init.parentPid)

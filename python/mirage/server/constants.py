@@ -13,6 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 MAX_FINISHED_JOBS = 1024
+# The sessions each workspace holds when the host names no cap: with
+# each session's 128 processes, what a shared host can carry per
+# workspace.
+MAX_SESSIONS = 16
 FINISHED_JOB_RETENTION_SECONDS = 3600.0
 
 MAX_STDIN_BYTES = 64 * 1024 * 1024

@@ -1244,6 +1244,24 @@
    "python_only": {
     "PUBLISH_BYTES": "A Python RAM file is immutable bytes, so each landing of a streamed write copies the whole file, and past this size the wait grows with it; TypeScript grows one buffer and lands only the new bytes, so its wait stays STREAM_PUBLISH_SECONDS."
    }
+  },
+  "process/config": {
+   "typescript_only": {
+    "ProcessesBlock": "A block as written, a bare scope or the fields it states; Python's ProcessPermissions keeps both shapes in one pydantic model, its model_fields_set recording what was stated.",
+    "layerProcesses": "Python's ProcessPermissions.layered, a classmethod on the model; TypeScript's ProcessPermissions is a plain interface with no methods.",
+    "statedProcesses": "The fields a block states, which Python reads off model_fields_set; a TypeScript object keeps only the keys it was given, so parsing one is its own function."
+   }
+  },
+  "server/daemon_config": {
+   "python_only": {
+    "SIZE_KEYS": "Python's tomllib hands each [daemon] value back typed, so a size key takes an int or a string; TypeScript's reader returns every value as text and checks only the numeric keys."
+   }
+  },
+  "workspace/session/budget": {
+   "typescript_only": {
+    "recordBytes": "TypeScript caches each variable record's bytes in a WeakMap keyed by the record; Python's records are slotted and may hold a list, so they cannot be weak keys, and Python measures a record as it sums.",
+    "varBytes": "The WeakMap behind recordBytes; see there."
+   }
   }
  }
 }
