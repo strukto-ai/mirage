@@ -19,6 +19,7 @@ from mirage.io.async_line_iterator import AsyncLineIterator, line_buffer
 from mirage.io.memory import check_memory
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
+from mirage.shell.array import make_array
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.escapes import ends_escaped
 from mirage.view.types import SessionView
@@ -393,7 +394,7 @@ async def handle_read(
         if view.is_readonly(array_name):
             return readonly_refusal("read", array_name)
         try:
-            await view.set(array_name, list(parts))
+            await view.set(array_name, make_array(list(parts)))
         except PolicyDenied as exc:
             return refusal("read", exc)
         code = 0 if complete else 1

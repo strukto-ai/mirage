@@ -20,6 +20,7 @@ import {
   arrayGet,
   arrayHas,
   arrayWith,
+  makeArray,
   type ShellArray,
 } from '../../shell/array.ts'
 import { ArithError, ReadonlyVariableError } from '../../shell/errors.ts'
@@ -81,7 +82,7 @@ export async function elementIsSet(
   const scalar = envGet(session, name)
   let held: ShellArray
   if (arr !== undefined) held = arr
-  else if (scalar !== null) held = [scalar]
+  else if (scalar !== null) held = makeArray([scalar])
   else return false
   let idx = await subscriptIndex(session, sub, view)
   if (idx < 0) idx += arrayExtent(held)
@@ -138,7 +139,7 @@ export async function assignElement(
         const scalar = conversionScalar(session, name)
         // An existing scalar becomes element 0, even when empty: bash
         // resolves `x[-1]` against the length-1 array that produces.
-        arr = scalar === undefined ? [] : [scalar]
+        arr = makeArray(scalar === undefined ? [] : [scalar])
       }
       let idx = subscript === null ? 0 : await subscriptIndex(session, subscript, view)
       if (idx < 0) idx += arrayExtent(arr)

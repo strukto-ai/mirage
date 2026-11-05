@@ -19,7 +19,7 @@ import { checkMemory } from '../../../../io/memory.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
-import { arraySet, type ShellArray } from '../../../../shell/array.ts'
+import { arraySet, ShellArray } from '../../../../shell/array.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
@@ -99,17 +99,15 @@ export async function handleMapfile(
 
   const buffer = stdin !== null ? lineBuffer(stdin) : null
   const existing = visibleArrays(session)[name]
-  const arr: ShellArray = existing !== undefined && 'O' in flags ? [...existing] : []
+  const arr = existing !== undefined && 'O' in flags ? existing.copy() : new ShellArray()
   let index = origin
   let stored = 0
   let seen = 0
-  // The array's bytes, its slots and what it keeps in them, so neither -O
-  // appends nor empty records grow it past the workspace's max_memory a few
-  // lines at a time.
-  let held = arr.reduce(
-    (sum, v) => sum + (v === null ? 0 : encodeText(v).byteLength),
-    SLOT * arr.length,
-  )
+  // The array's bytes, a slot for each element and what it keeps in it, so
+  // neither -O appends nor empty records grow it past the workspace's
+  // max_memory a few lines at a time.
+  let held = 0
+  for (const v of arr.elements.values()) held += SLOT + encodeText(v).byteLength
   const outputs: Uint8Array[] = []
   const errs: Uint8Array[] = []
   while (buffer !== null && (limit === 0 || stored < limit)) {
@@ -118,11 +116,8 @@ export async function handleMapfile(
     seen++
     if (seen <= skip) continue
     const record = found && !strip ? concat([data, Uint8Array.of(delim)]) : data
-    const replaced = arr[index] ?? null
-    held +=
-      SLOT * Math.max(index + 1 - arr.length, 0) +
-      record.byteLength -
-      (replaced === null ? 0 : encodeText(replaced).byteLength)
+    const replaced = arr.elements.get(index)
+    held += record.byteLength + (replaced === undefined ? SLOT : -encodeText(replaced).byteLength)
     checkMemory(held)
     const text = decodeText(record)
     arraySet(arr, index, text)

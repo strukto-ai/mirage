@@ -18,7 +18,8 @@ import {
   arraySet,
   buildAssocLiteral,
   buildIndexedLiteral,
-  type ShellArray,
+  makeArray,
+  ShellArray,
 } from '../../../../shell/array.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { ArithError, DiscardSignal } from '../../../../shell/errors.ts'
@@ -141,9 +142,14 @@ export function startLocal(session: SessionState, name: string, inherit: boolean
  * kind, or null when they agree.
  */
 export function kindConflict(held: ShellValue | null, kind: VarKind | null): string | null {
-  if (kind === VarKind.Assoc && Array.isArray(held))
+  if (kind === VarKind.Assoc && held instanceof ShellArray)
     return 'cannot convert indexed to associative array'
-  if (kind === VarKind.Indexed && held !== null && typeof held === 'object' && !Array.isArray(held))
+  if (
+    kind === VarKind.Indexed &&
+    held !== null &&
+    typeof held === 'object' &&
+    !(held instanceof ShellArray)
+  )
     return 'cannot convert associative to indexed array'
   return null
 }
@@ -163,13 +169,14 @@ export function scalarValue(
   kind: VarKind | null,
 ): [ShellValue, ReadonlySet<number | string> | null] {
   const scalar = typeof held === 'string' ? held : null
-  const map = held !== null && typeof held === 'object' && !Array.isArray(held) ? held : null
+  const map =
+    held !== null && typeof held === 'object' && !(held instanceof ShellArray) ? held : null
   if (map !== null || kind === VarKind.Assoc) {
     return [{ ...map, '0': value }, new Set(['0'])]
   }
-  if (Array.isArray(held) || kind === VarKind.Indexed) {
-    const arr: ShellArray = Array.isArray(held) ? [...held] : []
-    if (scalar !== null) arr.push(scalar)
+  if (held instanceof ShellArray || kind === VarKind.Indexed) {
+    const arr =
+      held instanceof ShellArray ? held.copy() : makeArray(scalar === null ? [] : [scalar])
     arraySet(arr, 0, value)
     return [arr, new Set([0])]
   }
@@ -283,8 +290,8 @@ export function plusRefusal(
   ) {
     return readonlyLine(cmd, name)
   }
-  const isMap = value !== null && typeof value === 'object' && !Array.isArray(value)
-  if ((plus.includes('a') && Array.isArray(value)) || (plus.includes('A') && isMap)) {
+  const isMap = value !== null && typeof value === 'object' && !(value instanceof ShellArray)
+  if ((plus.includes('a') && value instanceof ShellArray) || (plus.includes('A') && isMap)) {
     return `bash: ${cmd}: ${name}: cannot destroy array variables in this way`
   }
   return null
@@ -387,7 +394,7 @@ export async function storeStagedArrays(
         let indexed: ShellArray | null = session.arrays[name] ?? null
         if (append && indexed === null) {
           const scalar = conversionScalar(session, name)
-          indexed = scalar === undefined ? null : [scalar]
+          indexed = scalar === undefined ? null : makeArray([scalar])
         }
         base = await buildIndexedLiteral(indexed, items, append, (sub) =>
           subscriptIndex(session, sub, view),
@@ -568,14 +575,9 @@ export function declareLine(session: SessionState, name: string): string | null 
   const letters = attrLetters(v)
   const head = letters ? `declare -${letters}` : 'declare --'
   if (v.value === null) return `${head} ${name}`
-  if (Array.isArray(v.value)) {
+  if (v.value instanceof ShellArray) {
     const parts: string[] = []
-    for (let i = 0; i < v.value.length; i++) {
-      const el = v.value[i]
-      if (el !== null && el !== undefined) {
-        parts.push(`[${String(i)}]=${bashDeclareQuote(el)}`)
-      }
-    }
+    for (const [i, el] of v.value.elements) parts.push(`[${String(i)}]=${bashDeclareQuote(el)}`)
     return `${head} ${name}=(${parts.join(' ')})`
   }
   if (typeof v.value !== 'string') return `${head} ${name}${assocBody(v.value)}`

@@ -15,6 +15,7 @@
 import type { RedirectResult } from '../../context/session_context.ts'
 import { IOResult } from '../../io/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
+import { makeArray, ShellArray } from '../../shell/array.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { DiscardSignal } from '../../shell/errors.ts'
@@ -343,14 +344,14 @@ export async function executeDeclaration(
         conversionErrors.push(`bash: ${cmdWord}: ${bare}: ${conflict}`)
         continue
       }
-      const isMap = held !== null && typeof held === 'object' && !Array.isArray(held)
-      if (wantAssoc ? isMap : Array.isArray(held)) continue
+      const isMap = held !== null && typeof held === 'object' && !(held instanceof ShellArray)
+      if (wantAssoc ? isMap : held instanceof ShellArray) continue
       // A local of another kind starts empty; at top level an existing
       // scalar becomes element 0, or the value at the literal key "0" (GNU
       // allows scalar-to-associative conversion, unlike indexed).
       const scalar = local ? undefined : conversionScalar(session, bare)
       if (wantAssoc) seedVar(session, bare, scalar === undefined ? {} : { '0': scalar })
-      else seedVar(session, bare, scalar === undefined ? [] : [scalar])
+      else seedVar(session, bare, makeArray(scalar === undefined ? [] : [scalar]))
     }
   }
   // declare/typeset scope like `local` inside a function (bash

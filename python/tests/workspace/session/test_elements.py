@@ -14,6 +14,7 @@
 
 import asyncio
 
+from mirage.shell.array import make_array
 from mirage.shell.variable import VarAttr, with_attr
 from mirage.types import HiddenVars, Visibility
 from mirage.workspace.session import SessionState
@@ -24,7 +25,7 @@ from mirage.workspace.session.state import seed_var
 def _session() -> SessionState:
     session = SessionState(session_id="s", cwd="/")
     seed_var(session, "m", {"a": "1", "k5": "9", "0": "z"})
-    seed_var(session, "arr", ["10", "20", "30"])
+    seed_var(session, "arr", make_array(["10", "20", "30"]))
     seed_var(session, "s5", "5")
     seed_var(session, "i", "1")
     return session
@@ -95,5 +96,5 @@ def test_assign_element_indexed_scalar_and_statuses():
         assert await assign_element(session, None, "h", "0", "x") == "denied"
 
     asyncio.run(run())
-    assert session.arrays["arr"] == ["10", "X", "Y"]
-    assert session.arrays["sc"] == ["base", "one"]
+    assert session.arrays["arr"] == make_array(["10", "X", "Y"])
+    assert session.arrays["sc"] == make_array(["base", "one"])

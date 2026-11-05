@@ -64,6 +64,7 @@ import { Workspace } from '../workspace/workspace.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import { Channel } from '../../shell/console/index.ts'
+import { makeArray, ShellArray } from '../../shell/array.ts'
 
 async function readBody(out: ByteSource | null): Promise<string> {
   if (out === null) return ''
@@ -140,7 +141,7 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ VAL: 'x' }) })
     setAttr(s, 'VAL', VarAttr.Readonly)
     setAttr(s, 'ONLY', VarAttr.Readonly)
-    seedVar(s, 'AR', ['a', 'b c'])
+    seedVar(s, 'AR', makeArray(['a', 'b c']))
     setAttr(s, 'AR', VarAttr.Readonly)
     const [out, io] = await markNames(['-p'], s, null, VarAttr.Readonly)
     expect(io.exitCode).toBe(0)
@@ -235,27 +236,32 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
 
   it('unset removes a whole array and a single element', async () => {
     const s = new SessionState({ sessionId: 'test' })
-    seedVar(s, 'arr', ['x', 'y', 'z'])
+    seedVar(s, 'arr', makeArray(['x', 'y', 'z']))
     // An interior element leaves a hole so later indices keep their
     // positions; a trailing one drops off, as bash does.
     await handleUnset(['arr[1]'], s, sessionView(s))
-    expect(s.arrays.arr).toEqual(['x', null, 'z'])
+    expect(s.arrays.arr).toEqual(
+      new ShellArray([
+        [0, 'x'],
+        [2, 'z'],
+      ]),
+    )
     await handleUnset(['arr[2]'], s, sessionView(s))
-    expect(s.arrays.arr).toEqual(['x'])
+    expect(s.arrays.arr).toEqual(makeArray(['x']))
     await handleUnset(['arr'], s, sessionView(s))
     expect('arr' in s.arrays).toBe(false)
   })
 
   it('unset rejects an element of a readonly array', async () => {
     const s = new SessionState({ sessionId: 'test' })
-    seedVar(s, 'arr', ['x', 'y'])
+    seedVar(s, 'arr', makeArray(['x', 'y']))
     setAttr(s, 'arr', VarAttr.Readonly)
     const [, io] = await handleUnset(['arr[1]'], s, sessionView(s))
     expect(io.exitCode).toBe(1)
     expect(decode(io.stderr as Uint8Array)).toBe(
       'bash: unset: arr: cannot unset: readonly variable\n',
     )
-    expect(s.arrays.arr).toEqual(['x', 'y'])
+    expect(s.arrays.arr).toEqual(makeArray(['x', 'y']))
   })
 
   it('unset NAME[0] removes a scalar, a non-zero subscript errors', async () => {
@@ -271,16 +277,16 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
 
   it('unset of a negative element outside the extent errors', async () => {
     const s = new SessionState({ sessionId: 'test' })
-    seedVar(s, 'arr', ['x'])
+    seedVar(s, 'arr', makeArray(['x']))
     const [, io] = await handleUnset(['arr[-2]'], s, sessionView(s))
     expect(io.exitCode).toBe(1)
     // bash prints only the bracketed part here, not the base name.
     expect(decode(io.stderr as Uint8Array)).toBe('bash: unset: [-2]: bad array subscript\n')
-    expect(s.arrays.arr).toEqual(['x'])
-    seedVar(s, 'two', ['x', 'y'])
+    expect(s.arrays.arr).toEqual(makeArray(['x']))
+    seedVar(s, 'two', makeArray(['x', 'y']))
     const [, io2] = await handleUnset(['two[-2]'], s, sessionView(s))
     expect(io2.exitCode).toBe(0)
-    expect(s.arrays.two).toEqual([null, 'y'])
+    expect(s.arrays.two).toEqual(new ShellArray([[1, 'y']]))
   })
 
   it('unset of an element of an unset name is a no-op', async () => {
@@ -584,7 +590,7 @@ describe('handlePrintf', () => {
     const [, io] = await printed(['-v', 'arr[2]', 'hi'], s)
     expect(io.exitCode).toBe(0)
     // Indices 0 and 1 are holes, not empty elements.
-    expect(s.arrays.arr).toEqual([null, null, 'hi'])
+    expect(s.arrays.arr).toEqual(new ShellArray([[2, 'hi']]))
   })
 
   it('-v with an invalid name errors before the format runs', async () => {
@@ -606,7 +612,7 @@ describe('handlePrintf', () => {
     // `a[ ]` is a valid arithmetic 0, not an empty subscript.
     const [, io2] = await printed(['-v', 'a[ ]', 'x'], s)
     expect(io2.exitCode).toBe(0)
-    expect(s.arrays.a).toEqual(['x'])
+    expect(s.arrays.a).toEqual(makeArray(['x']))
   })
 
   it('-v refuses a readonly scalar and a readonly array element', async () => {
@@ -616,22 +622,22 @@ describe('handlePrintf', () => {
     expect(io.exitCode).toBe(1)
     expect(decode(io.stderr as Uint8Array)).toBe('bash: R: readonly variable\n')
     expect(s.env.R).toBe('orig')
-    seedVar(s, 'A', ['x', 'y'])
+    seedVar(s, 'A', makeArray(['x', 'y']))
     setAttr(s, 'A', VarAttr.Readonly)
     const [, io2] = await printed(['-v', 'A[0]', '%d', 'nope'], s)
     expect(io2.exitCode).toBe(1)
     expect(decode(io2.stderr as Uint8Array)).toBe(
       'bash: printf: nope: invalid number\nbash: A: readonly variable\n',
     )
-    expect(s.arrays.A).toEqual(['x', 'y'])
+    expect(s.arrays.A).toEqual(makeArray(['x', 'y']))
   })
 
   it('-v on a bare name keeps the other elements of an existing array', async () => {
     const s = new SessionState({ sessionId: 'test' })
-    seedVar(s, 'B', ['p', 'q', 'r'])
+    seedVar(s, 'B', makeArray(['p', 'q', 'r']))
     const [, io] = await printed(['-v', 'B', 'Q'], s)
     expect(io.exitCode).toBe(0)
-    expect(s.arrays.B).toEqual(['Q', 'q', 'r'])
+    expect(s.arrays.B).toEqual(makeArray(['Q', 'q', 'r']))
     expect('B' in s.env).toBe(false)
   })
 
@@ -648,7 +654,7 @@ describe('handlePrintf', () => {
     const s = new SessionState({ sessionId: 'test', vars: varsFromEnv({ W: 'orig' }) })
     const [, io] = await printed(['-v', 'W[-1]', 'hi'], s)
     expect(io.exitCode).toBe(0)
-    expect(s.arrays.W).toEqual(['hi'])
+    expect(s.arrays.W).toEqual(makeArray(['hi']))
     expect('W' in s.env).toBe(false)
   })
 
@@ -1621,7 +1627,7 @@ describe('handleRead', () => {
 
   it('a scalar read replaces an array of the same name', async () => {
     const s = new SessionState({ sessionId: 'test' })
-    seedVar(s, 'A', ['x', 'y'])
+    seedVar(s, 'A', makeArray(['x', 'y']))
     const stdin = new TextEncoder().encode('one\n')
     await handleRead(['A'], s, stdin, sessionView(s))
     expect(s.env.A).toBe('one')

@@ -26,6 +26,7 @@ from mirage.shell.array import (
     array_with,
     build_assoc_literal,
     build_indexed_literal,
+    make_array,
 )
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -332,7 +333,7 @@ async def execute_assignment(
         held = session.arrays.get(key)
         if append and held is None:
             scalar = conversion_scalar(session, key)
-            held = None if scalar is None else [scalar]
+            held = None if scalar is None else make_array([scalar])
         # `arr+=(...)` starts at the extent, so it fills the hole a
         # trailing `unset arr[last]` left but skips interior ones;
         # a `[i]=v` element places at i and the next plain word
@@ -393,7 +394,7 @@ async def execute_assignment(
         arr = session.arrays.get(key)
         if arr is None:
             scalar = conversion_scalar(session, key)
-            arr = [] if scalar is None else [scalar]
+            arr = make_array([] if scalar is None else [scalar])
         idx = await _fatal_index(context, sub_text, view)
         if idx < 0:
             idx += array_extent(arr)
@@ -432,7 +433,7 @@ async def execute_assignment(
         await _assign_var(view, key, new_map, frozenset({"0"}), added)
     elif held_arr is not None:
         # `a=x` writes element 0 and keeps the rest.
-        new_arr = list(held_arr)
+        new_arr = held_arr.copy()
         array_set(new_arr, 0, stored)
         await _assign_var(view, key, new_arr, frozenset({0}), added)
     else:

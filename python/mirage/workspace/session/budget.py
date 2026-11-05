@@ -70,7 +70,7 @@ def entry_bytes(name: str, value: ShellValue | None) -> int:
             byte_length(k) + byte_length(v) + 1 for k, v in value.items()
         )
     else:
-        held = sum(byte_length(v) + 1 for v in value if v is not None)
+        held = sum(byte_length(v) + 1 for v in value.elements.values())
     return byte_length(name) + held
 
 

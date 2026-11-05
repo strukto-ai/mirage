@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
-  type ShellArray,
+  ShellArray,
   arrayCount,
   arrayExtent,
   arrayGet,
@@ -33,15 +33,18 @@ import {
 describe('shell array', () => {
   it('makeArray is dense from zero', () => {
     const arr = makeArray(['a', 'b'])
-    expect(arr).toEqual(['a', 'b'])
+    expect([...arr.elements]).toEqual([
+      [0, 'a'],
+      [1, 'b'],
+    ])
     expect(arrayIndices(arr)).toEqual([0, 1])
   })
 
-  it('arraySet pads with holes, not empty strings', () => {
-    const arr: ShellArray = []
+  it('arraySet holds only the element it assigns', () => {
+    const arr = new ShellArray()
     arraySet(arr, 3, 'v')
-    expect(arr).toEqual([null, null, null, 'v'])
-    // The hole is addressable but is not an element.
+    expect([...arr.elements]).toEqual([[3, 'v']])
+    // An index no write reached is no element.
     expect(arrayCount(arr)).toBe(1)
     expect(arrayValues(arr)).toEqual(['v'])
     expect(arrayIndices(arr)).toEqual([3])
@@ -54,7 +57,10 @@ describe('shell array', () => {
   it('unsetting an interior element keeps the later indices', () => {
     const arr = makeArray(['zero', 'one', 'two'])
     arrayUnset(arr, 1)
-    expect(arr).toEqual(['zero', null, 'two'])
+    expect([...arr.elements]).toEqual([
+      [0, 'zero'],
+      [2, 'two'],
+    ])
     expect(arrayGet(arr, 2)).toBe('two')
     expect(arrayCount(arr)).toBe(2)
     expect(arrayIndices(arr)).toEqual([0, 2])
@@ -63,7 +69,7 @@ describe('shell array', () => {
   it('unsetting a trailing element shrinks the extent', () => {
     const arr = makeArray(['x', 'y', 'z'])
     arrayUnset(arr, 2)
-    expect(arr).toEqual(['x', 'y'])
+    expect(arrayValues(arr)).toEqual(['x', 'y'])
     expect(arrayExtent(arr)).toBe(2)
   })
 
@@ -71,26 +77,28 @@ describe('shell array', () => {
     const arr = makeArray(['x', 'y', 'z'])
     arrayUnset(arr, 1)
     arrayUnset(arr, 2)
-    expect(arr).toEqual(['x'])
+    expect([...arr.elements]).toEqual([[0, 'x']])
+    expect(arrayExtent(arr)).toBe(1)
   })
 
   it('unsetting an out-of-range index is a no-op', () => {
     const arr = makeArray(['x'])
     arrayUnset(arr, 5)
     arrayUnset(arr, -1)
-    expect(arr).toEqual(['x'])
+    expect([...arr.elements]).toEqual([[0, 'x']])
   })
 
   it('a hole can be reassigned', () => {
     const arr = makeArray(['x', 'y', 'z'])
     arrayUnset(arr, 1)
     arraySet(arr, 1, 'new')
-    expect(arr).toEqual(['x', 'new', 'z'])
+    expect(arrayValues(arr)).toEqual(['x', 'new', 'z'])
+    expect(arrayIndices(arr)).toEqual([0, 1, 2])
     expect(arrayCount(arr)).toBe(3)
   })
 
   it('slicing keeps subscripts, not ordinals', () => {
-    const arr: ShellArray = []
+    const arr = new ShellArray()
     arraySet(arr, 1, 'b')
     arraySet(arr, 3, 'd')
     arraySet(arr, 9, 'j')
@@ -102,7 +110,7 @@ describe('shell array', () => {
   })
 
   it('slice length counts elements taken', () => {
-    const arr: ShellArray = []
+    const arr = new ShellArray()
     arraySet(arr, 1, 'b')
     arraySet(arr, 3, 'd')
     arraySet(arr, 9, 'j')
@@ -112,7 +120,7 @@ describe('shell array', () => {
   })
 
   it('a negative slice offset counts from the extent', () => {
-    const arr: ShellArray = []
+    const arr = new ShellArray()
     arraySet(arr, 1, 'b')
     arraySet(arr, 9, 'j')
     expect(arraySlice(arr, -1, null)).toEqual(['j'])
@@ -127,6 +135,17 @@ describe('shell array', () => {
     expect(arrayCount(arr)).toBe(2)
     expect(arrayIndices(arr)).toEqual([0, 1])
     expect(arrayValues(arr)).toEqual(['', 'y'])
+  })
+
+  it('a far index holds one element', () => {
+    const arr = makeArray(['a'])
+    arraySet(arr, 1_000_000_000, 'far')
+    expect(arrayCount(arr)).toBe(2)
+    expect(arrayExtent(arr)).toBe(1_000_000_001)
+    expect(arrayIndices(arr)).toEqual([0, 1_000_000_000])
+    expect(arraySlice(arr, 1, null)).toEqual(['far'])
+    arrayUnset(arr, 1_000_000_000)
+    expect(arrayExtent(arr)).toBe(1)
   })
 })
 
@@ -146,10 +165,14 @@ describe('buildIndexedLiteral', () => {
   it('places subscripted elements and continues from them', async () => {
     const intOf = (t: string) => Promise.resolve(Number(t))
     const built = await buildIndexedLiteral(null, ['[3]=x', 'y', '[1]=z'], false, intOf)
-    expect(built).toEqual([null, 'z', null, 'x', 'y'])
+    expect([...built.elements]).toEqual([
+      [1, 'z'],
+      [3, 'x'],
+      [4, 'y'],
+    ])
     // `+=` starts the cursor at the extent; last index wins.
-    const appended = await buildIndexedLiteral(['a'], ['b', '[0]=A'], true, intOf)
-    expect(appended).toEqual(['A', 'b'])
+    const appended = await buildIndexedLiteral(makeArray(['a']), ['b', '[0]=A'], true, intOf)
+    expect(arrayValues(appended)).toEqual(['A', 'b'])
   })
 })
 

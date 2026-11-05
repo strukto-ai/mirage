@@ -5,6 +5,7 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { argsBytes, entryBytes } from './budget.ts'
 import { MAX_ENV } from './constants.ts'
+import { ShellArray } from '../../shell/array.ts'
 
 const DEC = new TextDecoder()
 
@@ -26,7 +27,15 @@ describe('max_env', () => {
     expect(entryBytes('a', 'é')).toBe(3)
     expect(argsBytes(['ab', 'c'])).toBe(5)
     expect(argsBytes([''])).toBe(1)
-    expect(entryBytes('a', ['xy', null, 'z'])).toBe(6)
+    expect(
+      entryBytes(
+        'a',
+        new ShellArray([
+          [0, 'xy'],
+          [2, 'z'],
+        ]),
+      ),
+    ).toBe(6)
     expect(entryBytes('m', { k: 'vv' })).toBe(5)
   })
 

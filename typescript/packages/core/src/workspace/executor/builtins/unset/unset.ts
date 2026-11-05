@@ -113,7 +113,7 @@ async function unsetElement(
     idx += arrayExtent(arr)
     if (idx < 0) return 'subscript'
   }
-  const next = [...arr]
+  const next = arr.copy()
   arrayUnset(next, idx)
   await view.set(base, next)
   return 'ok'

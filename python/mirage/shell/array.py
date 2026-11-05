@@ -14,7 +14,39 @@
 
 from collections.abc import Awaitable, Callable
 
-ShellArray = list[str | None]
+
+class ShellArray:
+    """An indexed array, as bash keeps one: only its assigned elements,
+    by index, in index order. ``a[1000000000]=x`` holds one element, and
+    an index no write reached, or ``unset`` cleared, is no element at
+    all: it does not count toward ``${#a[@]}`` or expand in ``${a[@]}``.
+    Mirrors TypeScript's ``ShellArray``.
+
+    Args:
+        elements (dict[int, str] | None): index to value, in index order.
+    """
+
+    __slots__ = ("elements",)
+
+    def __init__(self, elements: dict[int, str] | None = None) -> None:
+        self.elements: dict[int, str] = {} if elements is None else elements
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, ShellArray) and self.elements == other.elements
+        )
+
+    __hash__ = None  # type: ignore[assignment]
+
+    def __bool__(self) -> bool:
+        return bool(self.elements)
+
+    def __repr__(self) -> str:
+        return f"ShellArray({self.elements!r})"
+
+    def copy(self) -> "ShellArray":
+        """A copy a write to which leaves this one as it is."""
+        return ShellArray(dict(self.elements))
 
 
 def keyed_word(word: str) -> tuple[str, str] | None:
@@ -57,7 +89,7 @@ async def build_indexed_literal(
             resolver; async because a subscript may assign, and the
             assignment lands through the session view.
     """
-    arr: ShellArray = list(base) if append and base is not None else []
+    arr = base.copy() if append and base is not None else ShellArray()
     cursor = array_extent(arr) if append else 0
     for word in words:
         keyed = keyed_word(word)
@@ -120,7 +152,7 @@ def make_array(values: list[str]) -> ShellArray:
     Args:
         values (list[str]): the element values, starting at index 0.
     """
-    return list(values)
+    return ShellArray(dict(enumerate(values)))
 
 
 def array_extent(arr: ShellArray) -> int:
@@ -130,25 +162,25 @@ def array_extent(arr: ShellArray) -> int:
     Args:
         arr (ShellArray): the array.
     """
-    return len(arr)
+    return next(reversed(arr.elements)) + 1 if arr.elements else 0
 
 
 def array_values(arr: ShellArray) -> list[str]:
-    """Return the assigned values in index order, skipping holes.
+    """Return the assigned values in index order.
 
     Args:
         arr (ShellArray): the array.
     """
-    return [v for v in arr if v is not None]
+    return list(arr.elements.values())
 
 
 def array_indices(arr: ShellArray) -> list[int]:
-    """Return the assigned indices in order, skipping holes.
+    """Return the assigned indices in order.
 
     Args:
         arr (ShellArray): the array.
     """
-    return [i for i, v in enumerate(arr) if v is not None]
+    return list(arr.elements)
 
 
 def array_count(arr: ShellArray) -> int:
@@ -157,7 +189,7 @@ def array_count(arr: ShellArray) -> int:
     Args:
         arr (ShellArray): the array.
     """
-    return sum(1 for v in arr if v is not None)
+    return len(arr.elements)
 
 
 def array_has(arr: ShellArray, idx: int) -> bool:
@@ -167,33 +199,33 @@ def array_has(arr: ShellArray, idx: int) -> bool:
         arr (ShellArray): the array.
         idx (int): a non-negative index.
     """
-    return 0 <= idx < len(arr) and arr[idx] is not None
+    return idx in arr.elements
 
 
 def array_get(arr: ShellArray, idx: int) -> str:
-    """Return the element at ``idx``, or the empty string for a hole or
-    an out-of-range index.
+    """Return the element at ``idx``, or the empty string for an index
+    that holds none.
 
     Args:
         arr (ShellArray): the array.
         idx (int): a non-negative index.
     """
-    if not 0 <= idx < len(arr):
-        return ""
-    return arr[idx] or ""
+    return arr.elements.get(idx, "")
 
 
 def array_set(arr: ShellArray, idx: int, value: str) -> None:
-    """Assign ``value`` at ``idx``, extending with holes as needed.
+    """Assign ``value`` at ``idx``, keeping the elements in index order.
 
     Args:
         arr (ShellArray): the array, mutated in place.
         idx (int): a non-negative index.
         value (str): the element value.
     """
-    while len(arr) <= idx:
-        arr.append(None)
-    arr[idx] = value
+    elements = arr.elements
+    ordered = idx in elements or not elements or idx > next(reversed(elements))
+    elements[idx] = value
+    if not ordered:
+        arr.elements = dict(sorted(elements.items()))
 
 
 def array_with(arr: ShellArray, idx: int, value: str) -> ShellArray:
@@ -209,7 +241,7 @@ def array_with(arr: ShellArray, idx: int, value: str) -> ShellArray:
         idx (int): a non-negative index.
         value (str): the element value.
     """
-    updated = list(arr)
+    updated = arr.copy()
     array_set(updated, idx, value)
     return updated
 
@@ -234,7 +266,7 @@ def array_slice(arr: ShellArray, offset: int, length: int | None) -> list[str]:
         offset += array_extent(arr)
         if offset < 0:
             return []
-    picked = [v for i, v in enumerate(arr) if v is not None and i >= offset]
+    picked = [v for i, v in arr.elements.items() if i >= offset]
     if length is None:
         return picked
     if length < 0:
@@ -245,15 +277,11 @@ def array_slice(arr: ShellArray, offset: int, length: int | None) -> list[str]:
 def array_unset(arr: ShellArray, idx: int) -> None:
     """Clear one element, keeping the indices of the elements after it.
 
-    Trailing holes are dropped so the extent stays at one past the
-    highest assigned index, matching how bash resolves ``arr[-1]``.
+    The extent stays at one past the highest assigned index, matching
+    how bash resolves ``arr[-1]``.
 
     Args:
         arr (ShellArray): the array, mutated in place.
         idx (int): a non-negative index.
     """
-    if not 0 <= idx < len(arr):
-        return
-    arr[idx] = None
-    while arr and arr[-1] is None:
-        arr.pop()
+    arr.elements.pop(idx, None)

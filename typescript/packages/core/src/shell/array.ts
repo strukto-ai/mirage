@@ -13,15 +13,56 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 /**
- * A shell array: assigned values by index, with `null` for a hole left by
- * `unset arr[i]` or skipped by `arr[9]=v`. Holes are addressable but do
- * not count toward `${#arr[@]}` and do not expand in `${arr[@]}`.
+ * An indexed array, as bash keeps one: only its assigned elements, by
+ * index, in index order. `a[1000000000]=x` holds one element, and an index
+ * no write reached, or `unset` cleared, is no element at all: it does not
+ * count toward `${#a[@]}` or expand in `${a[@]}`. Mirrors Python's
+ * `ShellArray`.
  */
-export type ShellArray = (string | null)[]
+export class ShellArray {
+  /** Index to value, in index order. */
+  readonly elements: Map<number, string>
+  private top = -1
+
+  constructor(elements: Iterable<readonly [number, string]> = []) {
+    this.elements = new Map([...elements].sort(([a], [b]) => a - b))
+    for (const index of this.elements.keys()) this.top = index
+  }
+
+  /** One past the highest index assigned. */
+  get extent(): number {
+    return this.top + 1
+  }
+
+  /** Assign `value` at `idx`, keeping the elements in index order. */
+  set(idx: number, value: string): void {
+    const ordered = this.elements.has(idx) || idx > this.top
+    this.elements.set(idx, value)
+    if (ordered) {
+      this.top = Math.max(this.top, idx)
+      return
+    }
+    const sorted = [...this.elements].sort(([a], [b]) => a - b)
+    this.elements.clear()
+    for (const [index, item] of sorted) this.elements.set(index, item)
+  }
+
+  /** Clear the element at `idx`, if it holds one. */
+  unset(idx: number): void {
+    if (!this.elements.delete(idx) || idx !== this.top) return
+    this.top = -1
+    for (const index of this.elements.keys()) this.top = index
+  }
+
+  /** A copy a write to which leaves this one as it is. */
+  copy(): ShellArray {
+    return new ShellArray(this.elements)
+  }
+}
 
 /** Build a dense array from consecutive values, starting at index 0. */
-export function makeArray(values: string[]): ShellArray {
-  return [...values]
+export function makeArray(values: readonly string[]): ShellArray {
+  return new ShellArray(values.map((value, index) => [index, value] as const))
 }
 
 /**
@@ -29,53 +70,37 @@ export function makeArray(values: string[]): ShellArray {
  * negative subscript against.
  */
 export function arrayExtent(arr: ShellArray): number {
-  return arr.length
+  return arr.extent
 }
 
-/** The assigned values in index order, skipping holes. */
+/** The assigned values in index order. */
 export function arrayValues(arr: ShellArray): string[] {
-  return arr.filter((v): v is string => v !== null)
+  return [...arr.elements.values()]
 }
 
-/** The assigned indices in order, skipping holes. */
+/** The assigned indices in order. */
 export function arrayIndices(arr: ShellArray): number[] {
-  const out: number[] = []
-  arr.forEach((v, i) => {
-    if (v !== null) out.push(i)
-  })
-  return out
+  return [...arr.elements.keys()]
 }
 
 /** The number of assigned elements, which is `${#arr[@]}`. */
 export function arrayCount(arr: ShellArray): number {
-  return arrayValues(arr).length
+  return arr.elements.size
 }
 
 /** Whether `idx` holds an assigned element. */
 export function arrayHas(arr: ShellArray, idx: number): boolean {
-  return idx >= 0 && idx < arr.length && arr[idx] !== null && arr[idx] !== undefined
+  return arr.elements.has(idx)
 }
 
-/**
- * The element at `idx`, or the empty string for a hole or an
- * out-of-range index.
- */
+/** The element at `idx`, or the empty string for an index that holds none. */
 export function arrayGet(arr: ShellArray, idx: number): string {
-  if (idx < 0 || idx >= arr.length) return ''
-  return arr[idx] ?? ''
+  return arr.elements.get(idx) ?? ''
 }
 
-/**
- * Assign `value` at `idx`, extending with holes as needed.
- *
- * The subscript comes from script text, so the write goes through
- * `splice` rather than `arr[idx] = value`: an element assignment on a
- * caller-supplied key is a prototype-pollution shape, and `splice`
- * cannot name a property at all.
- */
+/** Assign `value` at `idx`, keeping the elements in index order. */
 export function arraySet(arr: ShellArray, idx: number, value: string): void {
-  while (arr.length <= idx) arr.push(null)
-  arr.splice(idx, 1, value)
+  arr.set(idx, value)
 }
 
 /**
@@ -87,8 +112,8 @@ export function arraySet(arr: ShellArray, idx: number, value: string): void {
  * the element applied.
  */
 export function arrayWith(arr: ShellArray, idx: number, value: string): ShellArray {
-  const updated = [...arr]
-  arraySet(updated, idx, value)
+  const updated = arr.copy()
+  updated.set(idx, value)
   return updated
 }
 
@@ -108,24 +133,19 @@ export function arraySlice(arr: ShellArray, offset: number, length: number | nul
     if (start < 0) return []
   }
   const picked: string[] = []
-  arr.forEach((v, i) => {
-    if (v !== null && i >= start) picked.push(v)
-  })
+  for (const [i, v] of arr.elements) if (i >= start) picked.push(v)
   if (length === null) return picked
   if (length < 0) return picked.slice(0, Math.max(0, picked.length + length))
   return picked.slice(0, length)
 }
 
 /**
- * Clear one element, keeping the indices of the elements after it.
- *
- * Trailing holes are dropped so the extent stays at one past the highest
- * assigned index, matching how bash resolves `arr[-1]`.
+ * Clear one element, keeping the indices of the elements after it. The
+ * extent stays at one past the highest assigned index, matching how bash
+ * resolves `arr[-1]`.
  */
 export function arrayUnset(arr: ShellArray, idx: number): void {
-  if (idx < 0 || idx >= arr.length) return
-  arr.splice(idx, 1, null)
-  while (arr.length > 0 && arr[arr.length - 1] === null) arr.pop()
+  arr.unset(idx)
 }
 
 /**
@@ -158,7 +178,7 @@ export async function buildIndexedLiteral(
   append: boolean,
   indexOf: (subscript: string) => Promise<number>,
 ): Promise<ShellArray> {
-  const arr: ShellArray = append && base !== null ? [...base] : []
+  const arr = append && base !== null ? base.copy() : new ShellArray()
   let cursor = append ? arrayExtent(arr) : 0
   for (const word of words) {
     const keyed = keyedWord(word)

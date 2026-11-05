@@ -1,6 +1,7 @@
 import pytest
 
 from mirage.io.stream import materialize
+from mirage.shell.array import make_array
 from mirage.shell.variable import VarAttr
 from mirage.workspace.executor.builtins.declare.declare import mark_names
 from mirage.workspace.session.session import SessionState
@@ -17,7 +18,7 @@ async def test_readonly_p_prints_scalars_and_arrays():
     seed_var(session, "VAL", "x")
     set_attr(session, "VAL", VarAttr.READONLY)
     set_attr(session, "ONLY", VarAttr.READONLY)
-    seed_var(session, "AR", ["a", "b c"])
+    seed_var(session, "AR", make_array(["a", "b c"]))
     set_attr(session, "AR", VarAttr.READONLY)
     out, io, _ = await mark_names(["-p"], session, None, VarAttr.READONLY)
     assert io.exit_code == 0

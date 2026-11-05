@@ -588,10 +588,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "ar17=(x y z); echo ${!ar17[@]}",
+      "command": "ar17=(x y z); echo ${!ar17[@]}; ar17[1000000000]=far; ar17[5]=mid; echo ${#ar17[@]} ${!ar17[@]} ${ar17[-1]}; unset 'ar17[-1]'; echo ${!ar17[@]} ${ar17[-1]}",
       "expect": {
         "exit": 0,
-        "stdout": "0 1 2\n",
+        "stdout": "0 1 2\n5 0 1 2 5 1000000000 far\n0 1 2 5 mid\n",
         "stderr": ""
       }
     },

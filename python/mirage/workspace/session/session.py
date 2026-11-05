@@ -841,7 +841,7 @@ class SessionState:
             {
                 name: var.value
                 for name, var in self.vars.items()
-                if isinstance(var.value, list)
+                if isinstance(var.value, ShellArray)
             }
         )
 

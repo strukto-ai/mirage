@@ -562,9 +562,8 @@ def _arith_targets(
             for item in value.values():
                 frontier.extend(identifier_names(item))
         elif value is not None:
-            for element in value:
-                if element is not None:
-                    frontier.extend(identifier_names(element))
+            for element in value.elements.values():
+                frontier.extend(identifier_names(element))
         values, reads = assigned.get(name, (set(), set()))
         for literal in values:
             frontier.extend(identifier_names(literal))

@@ -23,7 +23,7 @@ import {
   type ProcessPermissions,
 } from '../../process/config.ts'
 import { EnvVar, type EnvEntries } from '../../secrets/config.ts'
-import type { ShellArray } from '../../shell/array.ts'
+import { ShellArray } from '../../shell/array.ts'
 import { Terminal, type JobOutput } from '../../shell/console/index.ts'
 import {
   BIN_PREFIX,
@@ -831,7 +831,7 @@ export class SessionState {
   get arrays(): Readonly<Record<string, ShellArray>> {
     const out = ownRecord<ShellArray>()
     for (const [name, v] of Object.entries(this.vars)) {
-      if (Array.isArray(v.value)) out[name] = v.value
+      if (v.value instanceof ShellArray) out[name] = v.value
     }
     return Object.freeze(out)
   }
@@ -840,7 +840,7 @@ export class SessionState {
   get assocs(): Readonly<Record<string, Record<string, string>>> {
     const out = ownRecord<Record<string, string>>()
     for (const [name, v] of Object.entries(this.vars)) {
-      if (v.value !== null && typeof v.value === 'object' && !Array.isArray(v.value)) {
+      if (v.value !== null && typeof v.value === 'object' && !(v.value instanceof ShellArray)) {
         out[name] = v.value
       }
     }

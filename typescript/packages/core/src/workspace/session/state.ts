@@ -30,7 +30,7 @@ import {
   arrayValues,
   arrayWith,
   makeArray,
-  type ShellArray,
+  ShellArray,
 } from '../../shell/array.ts'
 import {
   FUNCNAME,
@@ -194,7 +194,7 @@ export function visibleEnv(session: SessionState): Record<string, string> {
 export function visibleArrays(session: SessionState): Record<string, ShellArray> {
   const out = ownRecord<ShellArray>()
   for (const [name, v] of Object.entries(session.vars)) {
-    if (Array.isArray(v.value) && !varHidden(session.visibility, name)) {
+    if (v.value instanceof ShellArray && !varHidden(session.visibility, name)) {
       out[name] = v.value
     }
   }
@@ -202,10 +202,10 @@ export function visibleArrays(session: SessionState): Record<string, ShellArray>
   // an assignment to either is ignored, as bash ignores one, because the
   // record answers before the store.
   if (!varHidden(session.visibility, PIPESTATUS)) {
-    out[PIPESTATUS] = session.pipeStatus.map((code) => String(code))
+    out[PIPESTATUS] = makeArray(session.pipeStatus.map((code) => String(code)))
   }
   if (session.functionNames !== null && !varHidden(session.visibility, FUNCNAME)) {
-    out[FUNCNAME] = [...session.functionNames]
+    out[FUNCNAME] = makeArray([...session.functionNames])
   }
   return out
 }
@@ -223,7 +223,7 @@ export function visibleAssocs(session: SessionState): Record<string, Record<stri
     if (
       v.value !== null &&
       typeof v.value === 'object' &&
-      !Array.isArray(v.value) &&
+      !(v.value instanceof ShellArray) &&
       !varHidden(session.visibility, name)
     ) {
       out[name] = v.value
@@ -755,7 +755,11 @@ export function appended(
   integer: boolean,
 ): [string, string | null] {
   const text =
-    typeof held === 'string' ? held : Array.isArray(held) ? arrayGet(held, 0) : (held?.['0'] ?? '')
+    typeof held === 'string'
+      ? held
+      : held instanceof ShellArray
+        ? arrayGet(held, 0)
+        : (held?.['0'] ?? '')
   return integer ? [text, added] : [joinBytes(text + added), null]
 }
 
@@ -1288,7 +1292,7 @@ export const SHELL_BOOKKEEPING: ReadonlySet<string> = new Set(['PWD', 'OLDPWD', 
 export function gateRendering(value: ShellValue | null): string | null {
   if (value === null) return null
   if (typeof value === 'string') return value
-  if (Array.isArray(value)) return arrayValues(value).join(' ')
+  if (value instanceof ShellArray) return arrayValues(value).join(' ')
   return Object.keys(value)
     .sort(compareCodePoints)
     .map((k) => value[k])

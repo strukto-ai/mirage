@@ -20,6 +20,7 @@ import { checkMemory } from '../../../../io/memory.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
+import { makeArray } from '../../../../shell/array.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { endsEscaped } from '../../../../shell/escapes.ts'
 import type { SessionView } from '../../../../view/types.ts'
@@ -286,7 +287,7 @@ export async function handleRead(
     const parts = exact !== null ? (line !== '' ? [line] : []) : splitReadLine(line, ifs, 0)
     if (view.isReadonly(arrayName)) return readonlyRefusal('read', arrayName)
     try {
-      await view.set(arrayName, [...parts])
+      await view.set(arrayName, makeArray(parts))
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal('read', err)
       throw err

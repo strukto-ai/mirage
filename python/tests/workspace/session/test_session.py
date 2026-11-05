@@ -18,6 +18,7 @@ import json
 from mirage.policy.match import Outcome
 from mirage.policy.types import AdmissionRules, CommandRule, Decision, Scope
 from mirage.secrets.config import EnvVar
+from mirage.shell.array import array_set, make_array
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import MountMode
 from mirage.workspace.session import SessionState
@@ -175,7 +176,7 @@ def test_fork_copies_every_field_including_mount_modes():
         vars={
             "FOO": ShellVar("bar"),
             "HOME": ShellVar(None, frozenset({VarAttr.READONLY})),
-            "ARGV": ShellVar(["a", "b"]),
+            "ARGV": ShellVar(make_array(["a", "b"])),
         },
         mount_modes={
             "/s3": MountMode.READ,
@@ -202,7 +203,7 @@ def test_fork_copies_every_field_including_mount_modes():
     assert forked.mount_modes is not original.mount_modes
     assert forked.shell_options == {"errexit": True}
     assert "HOME" in forked.readonly_vars
-    assert forked.arrays == {"ARGV": ["a", "b"]}
+    assert forked.arrays == {"ARGV": make_array(["a", "b"])}
     assert forked.last_exit_code == 7
 
 
@@ -279,14 +280,14 @@ def test_fork_deep_copies_mutable_containers():
         session_id="orig",
         vars={
             "FOO": ShellVar("bar"),
-            "A": ShellVar(["1"]),
+            "A": ShellVar(make_array(["1"])),
         },
     )
     forked = original.fork()
     seed_var(forked, "NEW", "leaked?")
-    forked.arrays["A"].append("2")
+    array_set(forked.arrays["A"], 1, "2")
     assert "NEW" not in original.env
-    assert original.arrays["A"] == ["1"]
+    assert original.arrays["A"] == make_array(["1"])
 
 
 def test_every_field_is_classified_as_inherited_or_transient():
@@ -667,7 +668,7 @@ def test_new_shell_starts_from_the_environment():
         vars={
             "PLAIN": ShellVar("p"),
             "OUT": ShellVar("o", exported | {VarAttr.READONLY}),
-            "ARR": ShellVar(["a"], exported),
+            "ARR": ShellVar(make_array(["a"]), exported),
             "UNSET": ShellVar(None, exported),
             "IFS": ShellVar(",", exported),
             "TOKEN": ShellVar(None, exported, token),

@@ -42,6 +42,7 @@ import { BaseVFS } from '../vfs/base.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { seedVar, setAttr } from '../workspace/session/state.ts'
 import { Workspace } from './workspace/workspace.ts'
+import { makeArray } from '../shell/array.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -489,10 +490,10 @@ describe('the remaining session writers clear the same gate', () => {
     // write.
     const ws = makeWs([new DenySecretEnv()])
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
-    seedVar(sess, 'SECRET_E', ['a'])
+    seedVar(sess, 'SECRET_E', makeArray(['a']))
     const io = await ws.shell('SECRET_E+=x')
     expect(io.exitCode).not.toBe(0)
-    expect(sess.arrays.SECRET_E).toEqual(['a'])
+    expect(sess.arrays.SECRET_E).toEqual(makeArray(['a']))
   })
 
   it('a declaration array assignment fires the gate', async () => {
@@ -569,7 +570,7 @@ describe('the remaining session writers clear the same gate', () => {
     expect(io.exitCode).toBe(0)
     expect(stdoutStr(io)).toBe('')
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
-    expect(sess.arrays.ARR).toEqual(['x', 'y'])
+    expect(sess.arrays.ARR).toEqual(makeArray(['x', 'y']))
   })
 
   it('a readonly loop variable refuses before the body', async () => {
@@ -596,10 +597,10 @@ describe('the remaining session writers clear the same gate', () => {
   it('a subscripted unset of an array element fires the gate', async () => {
     const ws = makeWs([new DenySecretEnv()])
     const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
-    seedVar(sess, 'SECRET_W', ['a', 'b'])
+    seedVar(sess, 'SECRET_W', makeArray(['a', 'b']))
     const io = await ws.shell("unset 'SECRET_W[1]'")
     expect(io.exitCode).not.toBe(0)
-    expect(sess.arrays.SECRET_W).toEqual(['a', 'b'])
+    expect(sess.arrays.SECRET_W).toEqual(makeArray(['a', 'b']))
   })
 
   it('the for-loop variable fires the gate', async () => {
@@ -982,7 +983,7 @@ describe('hidden vars across the shell tier', () => {
     expect(element.exitCode).toBe(0)
     const whole = await ws.shell('unset SLACK_TOKEN', { sessionId: 'agent' })
     expect(whole.exitCode).toBe(0)
-    expect(ws.getSession('agent').arrays.SLACK_TOKEN).toEqual(['xoxb-real', 'xoxb-two'])
+    expect(ws.getSession('agent').arrays.SLACK_TOKEN).toEqual(makeArray(['xoxb-real', 'xoxb-two']))
   })
 
   it('bare export of a hidden var is refused', async () => {
@@ -1007,14 +1008,14 @@ describe('hidden vars across the shell tier', () => {
     await ws.shell('b=(x y)', { sessionId: 'agent' })
     const io = await ws.shell('b[SECRET_IDX]=z', { sessionId: 'agent' })
     expect(io.exitCode).toBe(0)
-    expect(ws.getSession('agent').arrays.b).toEqual(['z', 'y'])
+    expect(ws.getSession('agent').arrays.b).toEqual(makeArray(['z', 'y']))
   })
 })
 
 function makeHiddenArrayWs(): Workspace {
   const ws = makeWs()
   const sess = ws.createSession('agent', { mounts: { '/a': MountMode.WRITE } })
-  seedVar(sess, 'SLACK_TOKEN', ['xoxb-real', 'xoxb-two'])
+  seedVar(sess, 'SLACK_TOKEN', makeArray(['xoxb-real', 'xoxb-two']))
   seedVar(sess, 'PUBLIC', 'ok')
   sess.visibility = { ...sess.visibility, vars: { names: ['SLACK_TOKEN'] } }
   return ws

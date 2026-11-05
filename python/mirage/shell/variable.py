@@ -143,7 +143,7 @@ def var_kind(var: ShellVar) -> VarKind:
     """
     if isinstance(var.value, dict):
         return VarKind.ASSOC
-    if isinstance(var.value, list):
+    if isinstance(var.value, ShellArray):
         return VarKind.INDEXED
     return VarKind.SCALAR
 
@@ -155,7 +155,7 @@ def copy_var(var: ShellVar) -> ShellVar:
         var (ShellVar): the variable to copy.
     """
     value = var.value
-    if isinstance(value, (list, dict)):
+    if isinstance(value, (ShellArray, dict)):
         return with_value(var, value.copy())
     return var
 
@@ -169,7 +169,7 @@ def with_value(var: ShellVar, value: ShellValue | None) -> ShellVar:
         var (ShellVar): the variable to copy.
         value (ShellValue | None): the value to store.
     """
-    if isinstance(value, (list, dict)) and VarAttr.NAMEREF in var.attrs:
+    if isinstance(value, (ShellArray, dict)) and VarAttr.NAMEREF in var.attrs:
         return replace(var, value=value, attrs=var.attrs - {VarAttr.NAMEREF})
     return replace(var, value=value)
 
@@ -267,14 +267,16 @@ def coerce_value(
             )
             for k, v in value.items()
         }
-    return [
-        (
-            v
-            if v is None or (assigned is not None and i not in assigned)
-            else coerce_scalar(v, attrs, integer)
-        )
-        for i, v in enumerate(value)
-    ]
+    return ShellArray(
+        {
+            i: (
+                v
+                if assigned is not None and i not in assigned
+                else coerce_scalar(v, attrs, integer)
+            )
+            for i, v in value.elements.items()
+        }
+    )
 
 
 def stored_attrs(var: ShellVar) -> str:

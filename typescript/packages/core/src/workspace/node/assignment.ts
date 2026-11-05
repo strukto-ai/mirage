@@ -22,6 +22,7 @@ import {
   arrayWith,
   buildAssocLiteral,
   buildIndexedLiteral,
+  makeArray,
   type ShellArray,
 } from '../../shell/array.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -264,7 +265,7 @@ export async function executeAssignment(
     let held: ShellArray | null = session.arrays[key] ?? null
     if (append && held === null) {
       const scalar = conversionScalar(session, key)
-      held = scalar === undefined ? null : [scalar]
+      held = scalar === undefined ? null : makeArray([scalar])
     }
     // `arr+=(...)` starts at the extent, so it fills the hole a
     // trailing `unset arr[last]` left but skips interior ones; a
@@ -316,7 +317,7 @@ export async function executeAssignment(
     let arr: ShellArray | undefined = session.arrays[key]
     if (arr === undefined) {
       const scalar = conversionScalar(session, key)
-      arr = scalar === undefined ? [] : [scalar]
+      arr = makeArray(scalar === undefined ? [] : [scalar])
     }
     let idx = await fatalIndex(context, subText, view)
     if (idx < 0) idx += arrayExtent(arr)
@@ -346,7 +347,7 @@ export async function executeAssignment(
     await assignVar(view, key, newMap, new Set(['0']), added)
   } else if (heldArr !== undefined) {
     // `a=x` writes element 0 and keeps the rest.
-    const newArr = [...heldArr]
+    const newArr = heldArr.copy()
     arraySet(newArr, 0, stored)
     await assignVar(view, key, newArr, new Set([0]), added)
   } else {

@@ -134,7 +134,7 @@ async def _unset_element(
         idx += array_extent(arr)
         if idx < 0:
             return "subscript"
-    new_arr = list(arr)
+    new_arr = arr.copy()
     array_unset(new_arr, idx)
     await view.set(base, new_arr)
     return "ok"

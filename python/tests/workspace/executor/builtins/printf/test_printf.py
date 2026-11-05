@@ -3,6 +3,7 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.io.stream import materialize
+from mirage.shell.array import ShellArray, make_array
 from mirage.shell.variable import VarAttr
 from mirage.types import Limit
 from mirage.workspace.executor.builtins.printf import handle_printf
@@ -156,7 +157,7 @@ async def test_printf_v_targets_array_element():
     assert out is None
     assert node.exit_code == 0
     # Indices 0 and 1 are holes, not empty elements.
-    assert session.arrays["arr"] == [None, None, "hi"]
+    assert session.arrays["arr"] == ShellArray({2: "hi"})
 
 
 @pytest.mark.asyncio
@@ -189,7 +190,7 @@ async def test_printf_v_blank_subscript_is_arithmetic_zero():
     session = SessionState(session_id="s1")
     out, io, node = await printed(["-v", "a[ ]", "x"], session)
     assert node.exit_code == 0
-    assert session.arrays["a"] == ["x"]
+    assert session.arrays["a"] == make_array(["x"])
 
 
 @pytest.mark.asyncio
@@ -206,23 +207,23 @@ async def test_printf_v_readonly_scalar_is_rejected():
 @pytest.mark.asyncio
 async def test_printf_v_readonly_array_element_is_rejected():
     session = SessionState(session_id="s1")
-    seed_var(session, "A", ["x", "y"])
+    seed_var(session, "A", make_array(["x", "y"]))
     set_attr(session, "A", VarAttr.READONLY)
     out, io, node = await printed(["-v", "A[0]", "%d", "nope"], session)
     assert node.exit_code == 1
     assert io.stderr == (
         b"bash: printf: nope: invalid number\nbash: A: readonly variable\n"
     )
-    assert session.arrays["A"] == ["x", "y"]
+    assert session.arrays["A"] == make_array(["x", "y"])
 
 
 @pytest.mark.asyncio
 async def test_printf_v_scalar_target_keeps_other_array_elements():
     session = SessionState(session_id="s1")
-    seed_var(session, "B", ["p", "q", "r"])
+    seed_var(session, "B", make_array(["p", "q", "r"]))
     out, io, node = await printed(["-v", "B", "Q"], session)
     assert node.exit_code == 0
-    assert session.arrays["B"] == ["Q", "q", "r"]
+    assert session.arrays["B"] == make_array(["Q", "q", "r"])
     assert "B" not in session.env
 
 
@@ -243,7 +244,7 @@ async def test_printf_v_negative_subscript_wraps_over_the_scalar():
     seed_var(session, "W", "orig")
     out, io, node = await printed(["-v", "W[-1]", "hi"], session)
     assert node.exit_code == 0
-    assert session.arrays["W"] == ["hi"]
+    assert session.arrays["W"] == make_array(["hi"])
     assert "W" not in session.env
 
 
