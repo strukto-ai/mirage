@@ -14,30 +14,22 @@
 
 import type { FileStat } from '../../types.ts'
 import { ContentType } from '../../types.ts'
-import { FILE_MIME_MAP, MAGIC_SIGNATURES } from './constants.ts'
+import { openStreamSync } from '../../rs/stream.ts'
+import { z } from 'zod'
+import { byteView, decodeText } from '../../shell/bytes.ts'
+
+const TYPE = z.enum(ContentType)
+const DEC = new TextDecoder()
 
 export function detectFileType(header: Uint8Array, stat: FileStat): ContentType {
   if (stat.content !== null && stat.content !== ContentType.BINARY) return stat.content
-  for (const [sig, ftype] of MAGIC_SIGNATURES) {
-    if (startsWith(header, sig)) return ftype
+  const stream = openStreamSync('file', {})
+  try {
+    stream.feed(header)
+    return TYPE.parse(DEC.decode(stream.finish()))
+  } finally {
+    stream.close()
   }
-  const sample = header.subarray(0, 256)
-  let printable = true
-  for (const b of sample) {
-    if (b !== 0 && b >= 128) {
-      printable = false
-      break
-    }
-  }
-  return printable ? ContentType.TEXT : ContentType.BINARY
-}
-
-function startsWith(data: Uint8Array, sig: readonly number[]): boolean {
-  if (data.byteLength < sig.length) return false
-  for (let i = 0; i < sig.length; i++) {
-    if (data[i] !== sig[i]) return false
-  }
-  return true
 }
 
 export function formatFileResult(
@@ -50,6 +42,14 @@ export function formatFileResult(
   mime: boolean,
 ): string {
   const key = result
-  const desc = mime ? (FILE_MIME_MAP[key] ?? key) : key
+  let desc = key
+  if (mime) {
+    const stream = openStreamSync('file', { kind: byteView(key), mime: true })
+    try {
+      desc = decodeText(stream.finish())
+    } finally {
+      stream.close()
+    }
+  }
   return brief ? desc : `${pathOriginal}: ${desc}`
 }

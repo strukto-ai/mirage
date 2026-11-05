@@ -13,6 +13,7 @@ mod digest;
 mod document;
 mod du;
 mod expand;
+mod file;
 mod find;
 mod fold;
 mod generated;
@@ -392,6 +393,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "cut" => cut::open(config),
         "digest" => digest::open(config),
         "expand" => expand::open_expand(config),
+        "file" => file::open(config),
         "fmt" => reflow::open(config),
         "fold" => fold::open(config),
         "diff" => diff::open(config),

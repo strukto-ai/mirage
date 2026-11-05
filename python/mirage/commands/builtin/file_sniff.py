@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.commands.builtin.constants import FILE_MIME_MAP, MAGIC_SIGNATURES
+from mirage.rs.stream import open_stream
+from mirage.shell.bytes import byte_view, decode_text
 from mirage.types import ContentType, FileStat, FileType
 
 
@@ -36,7 +37,15 @@ def format_file_result(
         if isinstance(result, (ContentType, FileType))
         else str(result)
     )
-    desc = FILE_MIME_MAP.get(key, key) if mime else key
+    desc = (
+        decode_text(
+            open_stream(
+                "file", {"kind": byte_view(key), "mime": True}
+            ).finish()
+        )
+        if mime
+        else key
+    )
     if brief:
         return desc
     return f"{path}: {desc}"
@@ -45,9 +54,6 @@ def format_file_result(
 def detect_file_type(header: bytes, s: FileStat) -> ContentType | str:
     if s.content is not None and s.content != ContentType.BINARY:
         return s.content
-    for sig, ftype in MAGIC_SIGNATURES:
-        if header.startswith(sig):
-            return ftype
-    if all(b < 128 for b in header[:256] if b != 0):
-        return ContentType.TEXT
-    return ContentType.BINARY
+    stream = open_stream("file", {})
+    stream.feed(header)
+    return ContentType(stream.finish().decode())

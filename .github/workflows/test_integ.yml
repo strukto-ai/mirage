@@ -83,6 +83,7 @@ jobs:
             # filters, so their disk/RAM CLI corpus runs with either twin.
             # Rust quote, width, strftime, JSON validation and Lance SQL, and
             # their host adapters, use these whole-host filters too.
+            # Rust file detection and MIME formatting use these filters too.
             # LanceDB's shared core/lancedb/types modules select the embedded
             # LanceDB corpus through these same whole-host filters.
             # The io/writer, spool, archive/codec and streamed upload modules
