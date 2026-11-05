@@ -146,6 +146,32 @@ def test_a_remote_url_is_never_spawned(tmp_path, monkeypatch):
     assert not (tmp_path / "auth_token").exists()
 
 
+def test_a_remote_server_slow_to_answer_is_waited_for(tmp_path, monkeypatch):
+    # A server woken from idle answers after a second, past a local probe's
+    # half second.
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    monkeypatch.setattr("mirage.cli.client.is_local_url", lambda url: False)
+
+    class Waking(BaseHTTPRequestHandler):
+        def do_GET(self):
+            time.sleep(1)
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), Waking)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        with DaemonClient(DaemonSettings(url=url)) as client:
+            client.ensure_running(allow_spawn=False)
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 class _GonePopen:
     """A spawned daemon that has already exited, as a crash leaves it."""
 
