@@ -18,7 +18,8 @@ import errno
 import logging
 import secrets
 import shlex
-from collections.abc import Mapping
+from collections.abc import Callable, Coroutine, Mapping
+from typing import Any
 
 import asyncssh
 from asyncssh.connection import SSHConnection
@@ -334,6 +335,7 @@ class ShellChannel:
         self._input = ChannelInput(process)
         self._output = ChannelOutput(process, self._tty)
         self._running: concurrent.futures.Future[int] | None = None
+        self._line: asyncio.Task[int] | None = None
         self._lost = False
 
     def _live(self) -> bool:
@@ -341,8 +343,27 @@ class ShellChannel:
         return wid in self._registry and self._registry.get(wid) is self._entry
 
     def _interrupt(self) -> None:
-        if self._running is not None:
+        line = self._line
+        if line is not None:
+            line.get_loop().call_soon_threadsafe(line.cancel)
+        elif self._running is not None:
             self._running.cancel()
+
+    async def _held(self, line: Callable[[], Coroutine[Any, Any, int]]) -> int:
+        """Run a line as the task Ctrl-C cancels on the workspace loop.
+
+        Cancelling that task, not the future the channel waits on, keeps
+        the channel waiting until the line has ended: what the line
+        leaves in ``$?`` as it unwinds lands before the interrupt's 130.
+
+        Args:
+            line (Callable[[], Coroutine[Any, Any, int]]): starts the line.
+        """
+        self._line = asyncio.current_task()
+        try:
+            return await line()
+        finally:
+            self._line = None
 
     async def _watch_close(self) -> None:
         await self._process.wait_closed()
@@ -394,12 +415,14 @@ class ShellChannel:
         runner = self._entry.runner
         loop = asyncio.get_running_loop()
         self._running = asyncio.run_coroutine_threadsafe(
-            run_line(
-                runner.ws,
-                self._session_id,
-                line,
-                LoopStdin(self._input, loop),
-                loop_sender(self._output, loop),
+            self._held(
+                lambda: run_line(
+                    runner.ws,
+                    self._session_id,
+                    line,
+                    LoopStdin(self._input, loop),
+                    loop_sender(self._output, loop),
+                )
             ),
             runner.loop,
         )

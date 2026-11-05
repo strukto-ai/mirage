@@ -576,10 +576,9 @@ class Observer:
             elif kind == EVENT_CLEAR:
                 visible = []
             elif kind == EVENT_DELETE:
+                named = (e.get("target"), e.get("command"))
                 for idx, entry in enumerate(visible):
-                    if entry.get("timestamp") == e.get(
-                        "target"
-                    ) and entry.get("command") == e.get("command"):
+                    if (entry.get("timestamp"), entry.get("command")) == named:
                         del visible[idx]
                         break
         return visible
