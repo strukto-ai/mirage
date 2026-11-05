@@ -157,10 +157,15 @@ describe('mirage in workerd', () => {
     expect(after?.stdout).toBe('ok\n')
   })
 
-  it('stops output held for its redirect at max_memory', async () => {
-    const [fill, after] = await run(['seq 1 10000000 > /tmp/big', 'echo ok'], '8MB')
-    expect(fill?.exit).toBe(1)
-    expect(fill?.stderr).toBe('line: memory exhausted\n')
+  it('streams a redirect into its file, and stops output held for one at max_memory', async () => {
+    const [streamed, held, after] = await run(
+      ['seq 1 10000000 > /tmp/big', 'seq 1 10000000 | sed s/1/x/ > /tmp/big', 'echo ok'],
+      '8MB',
+    )
+    expect(streamed?.exit).toBe(1)
+    expect(streamed?.stderr).toBe('/tmp/big: Disk quota exceeded\n')
+    expect(held?.exit).toBe(1)
+    expect(held?.stderr).toBe('line: memory exhausted\n')
     expect(after?.stdout).toBe('ok\n')
   })
 

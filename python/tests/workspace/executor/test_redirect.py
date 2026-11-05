@@ -1220,7 +1220,7 @@ async def test_a_redirect_takes_the_windows_while_its_store_streams_elsewhere():
 
     class Held(RAMVFS):
         async def write(self, path, data, *, atomic=False):
-            if data != b"":
+            if data != b"" and not entered.is_set():
                 entered.set()
                 await release.wait()
             await super().write(path, data, atomic=atomic)

@@ -1419,6 +1419,7 @@ describe('a first write across workspaces', () => {
     const started = new Promise<void>((resolve) => (entered = resolve))
     let release = (): void => undefined
     const released = new Promise<void>((resolve) => (release = resolve))
+    let holding = false
     class Held extends RAMVFS {
       override async write(
         path: PathSpec,
@@ -1427,7 +1428,8 @@ describe('a first write across workspaces', () => {
         handed?: Handed,
         atomic = false,
       ): Promise<void> {
-        if (!(data instanceof Uint8Array && data.byteLength === 0)) {
+        if (!holding && !(data instanceof Uint8Array && data.byteLength === 0)) {
+          holding = true
           entered()
           await released
         }
