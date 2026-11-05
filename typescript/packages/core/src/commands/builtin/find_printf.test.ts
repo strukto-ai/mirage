@@ -200,7 +200,9 @@ it('honors an abort while formatting a final row', async () => {
   const abort = new AbortController()
   let now = 0
   const clock = vi.spyOn(performance, 'now').mockImplementation(() => (now += 20))
-  const timer = setImmediate(() => abort.abort())
+  const timer = setImmediate(() => {
+    abort.abort()
+  })
   try {
     await expect(
       renderPrintf(engine, '/data/a', '/data', null, null, abort.signal),
