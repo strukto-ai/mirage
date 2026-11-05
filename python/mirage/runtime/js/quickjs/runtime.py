@@ -23,6 +23,7 @@ from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.files import RuntimeFiles
 from mirage.runtime.js.base import JsRuntime
 from mirage.runtime.js.quickjs.execution import cwd_preamble
+from mirage.runtime.js.quickjs.node import node_preamble
 from mirage.runtime.types import (
     FilesystemOperation,
     OutputFn,
@@ -50,11 +51,13 @@ _BUILD_HINT = (
 class QuickJsRuntime(JsRuntime[WasmExecution]):
     """Run JavaScript on a WASI quickjs-ng under wasmtime, in-process.
 
-    A bare modern JS engine (ES2023 syntax, ES modules, `JSON`, regex,
-    `Promise`, top-level await) inside a wasm sandbox: no node builtins,
-    no `require`, no npm, no network. The `std`/`os` globals are exposed
-    (quickjs-ng `--std`), so scripts read stdin with
-    `std.in.readAsString()` and reach files with `std.open`/`os.readdir`.
+    A modern JS engine (ES2023 syntax, ES modules, `JSON`, regex,
+    `Promise`, top-level await) inside a wasm sandbox, with Node's common
+    APIs laid over its own (``shim.js``: fs, path, process, Buffer,
+    ``require``, the timers, node's console): no npm, no network. The
+    `std`/`os` globals are exposed (quickjs-ng `--std`), so scripts read
+    stdin with `std.in.readAsString()` and reach files with
+    `std.open`/`os.readdir`.
     The engine's filesystem imports are intercepted, so that file I/O
     routes through the workspace dispatch — the same cache, write modes,
     and session narrowing as shell commands — with no FUSE mount and no
@@ -154,13 +157,26 @@ class QuickJsRuntime(JsRuntime[WasmExecution]):
         named = [program.prog] if program.prog else []
         cwd = ctx.cwd
         source = program.code
+        # Node's globals go first, so the program no longer starts the
+        # source. A script is evaluated on its own, so its directive
+        # prologue still controls strict mode and its errors name its own
+        # lines and columns; modules are already strict.
+        if ctx.flags.get("module") and source.startswith("#!"):
+            source = "//" + source[2:]
+        if not ctx.flags.get("module"):
+            source = (
+                f"std.evalScript({json.dumps(source)}, "
+                "{ backtrace_barrier: true });"
+            )
+        script = program.script_path.virtual if program.script_path else None
+        source = (
+            node_preamble(
+                ["node", *([script] if script else []), *program.args],
+                script,
+            )
+            + source
+        )
         if cwd.virtual != "/":
-            # Evaluate scripts separately so their directive prologue still
-            # controls strict mode. Modules are already strict.
-            if ctx.flags.get("module") and source.startswith("#!"):
-                source = "//" + source[2:]
-            if not ctx.flags.get("module"):
-                source = f"std.evalScript({json.dumps(source)});"
             source = cwd_preamble(cwd) + source
         argv += ["-e", source, "--", *named, *program.args]
         fs = WasmView(files=RuntimeFiles.of(ctx, self._binding))

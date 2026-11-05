@@ -34,15 +34,19 @@ from mirage.runtime.binding import (
     restricted_mounts_for,
 )
 from mirage.runtime.sandbox.constants import (
+    MOUNT_GUARD,
     MOUNT_POLL_SECONDS,
     MOUNT_WAIT_SECONDS,
     PIPE_SERVER_HINT,
     SSHFS_HINT,
     SSHFS_LOG_PREFIX,
     SSHFS_OPTIONS,
+    SSHFS_SOURCE_PREFIX,
     UNMOUNT_WAIT_SECONDS,
+    mount_field,
 )
 from mirage.runtime.types import MountType, RunResult, SandboxPipe
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.utils.quote import single_quote
 from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
@@ -75,20 +79,23 @@ def octal_char(match: re.Match[str]) -> str:
     return chr(int(match.group(1), 8))
 
 
-def mount_table(text: str) -> dict[str, str]:
-    """Each mountpoint a ``/proc/mounts`` lists, with its type.
+def mount_table(text: str) -> dict[str, tuple[str, str]]:
+    """Each mountpoint a ``/proc/mounts`` lists, with its source and type.
 
-    The kernel escapes a space in a path as ``\\040``; that is undone. A
-    point mounted twice keeps the later (top) entry's type.
+    The kernel escapes a space in a source or path as ``\\040``; that is
+    undone. A point mounted twice keeps the later (top) entry.
 
     Args:
         text (str): the file's contents.
     """
-    table: dict[str, str] = {}
+    table: dict[str, tuple[str, str]] = {}
     for line in text.splitlines():
         fields = line.split()
         if len(fields) >= 3:
-            table[OCTAL_ESCAPE.sub(octal_char, fields[1])] = fields[2]
+            table[OCTAL_ESCAPE.sub(octal_char, fields[1])] = (
+                OCTAL_ESCAPE.sub(octal_char, fields[0]),
+                fields[2],
+            )
     return table
 
 
@@ -137,6 +144,40 @@ def unmount_line(prefix: str) -> str:
     return f"fusermount3 -uz {path} || fusermount -uz {path}"
 
 
+def unmounted(runtime: str, prefix: str) -> str:
+    """Why a line did not run: the sandbox no longer holds ``prefix``.
+
+    Args:
+        runtime (str): the runtime's name.
+        prefix (str): the mountpoint.
+    """
+    return (
+        f"{runtime}: {prefix} is no longer mounted in the sandbox (did it "
+        "restart?); the line did not run"
+    )
+
+
+def running_line(source: str) -> str:
+    """The sandbox command that exits 0 while a program runs with
+    ``source`` as one of its arguments, as an sshfs serving it does, 1
+    once none does, and 2 when it read no process at all. It reads
+    ``/proc``, never the mount, so a mount whose server stalled cannot
+    hang it, and hands awk the source in its environment, never an
+    argument, so the check never finds itself. A newline inside an
+    argument becomes ``\\001`` on both sides, apart from the NUL that ends
+    each argument.
+
+    Args:
+        source (str): the mount's source.
+    """
+    return (
+        "cat /proc/[0-9]*/cmdline 2>/dev/null | tr '\\0\\n' '\\n\\001' | "
+        f"S={single_quote(source.replace(chr(10), chr(1)))} awk "
+        '\'BEGIN { s = ENVIRON["S"] } $0 == s { f = 1 } '
+        "END { exit f ? 0 : NR ? 1 : 2 }'"
+    )
+
+
 class SandboxMounts:
     """The workspace prefixes one sandbox sees, by its ``mount_type``.
 
@@ -164,6 +205,22 @@ class SandboxMounts:
     session made again under the same id, which a program the first one
     started could otherwise read through. Under ``fuse`` the host serves
     nothing, and any session may run.
+
+    Each sshfs source names the instance serving it
+    (``mirage-<id>:<prefix>``), so an instance unmounts only its own: a
+    prefix another sshfs still serves, as another workspace's runtime on
+    the same sandbox does, refuses the line (1) rather than being taken,
+    and one whose sshfs has gone is unmounted and served.
+
+    A sandbox may restart between a line's admit and its exec and come
+    back without its mounts, so each line runs under ``MOUNT_GUARD``,
+    which checks every mount it holds in the boot the program runs in
+    and exits 126 with nothing run when one is gone. The next line reads
+    the mounts again: what the host served is served again, and while a
+    mount of the sandbox's own is gone lines are refused (126) until the
+    sandbox mounts it again, rather than served over by the host. Under
+    ``fuse`` the mounts are read on every line until the sandbox holds
+    every prefix, so one it mounts late is guarded too.
 
     Args:
         runtime (str): the runtime's name, for messages.
@@ -193,7 +250,13 @@ class SandboxMounts:
             str, tuple[SandboxPipe, asyncio.Task[None], Any]
         ] = {}
         self._seen: tuple[frozenset[str], frozenset[str]] | None = None
+        # The sandbox's own mounts as last read, and each prefix held since.
+        self._own: dict[str, tuple[str, str]] = {}
+        self._owned: set[str] = set()
+        # What each served prefix was laid over, shown again once its server ends.
+        self._under: dict[str, tuple[str, str] | None] = {}
         self._lock = asyncio.Lock()
+        self._name = f"{SSHFS_SOURCE_PREFIX}{uuid.uuid4().hex}"
 
     @property
     def file_effects_dispatched(self) -> bool:
@@ -206,7 +269,9 @@ class SandboxMounts:
         """Bring the mounts in step, then refuse a line that may not run:
         one the session's restrictions reach past the dispatcher is
         refused as a policy refuses it (126), one the sandbox cannot
-        serve because another session holds it fails (1).
+        serve because another session or another sshfs holds it, or
+        another mount covers it, fails (1), and one over a mount of the
+        sandbox's own that is gone is refused (126).
 
         Args:
             binding (WorkspaceBinding | None): the runtime's workspace.
@@ -268,9 +333,22 @@ class SandboxMounts:
                     current, binding.mount_prefixes()
                 )
             )
-            await self._reconcile(
+            refused = await self._reconcile(
                 binding, binding.files, session, every, ruled
             )
+            if refused is not None:
+                return RunResult(
+                    stdout=b"",
+                    stderr=f"{self._runtime}: {refused}\n".encode(),
+                    exit_code=1,
+                )
+            lost = self._lost()
+            if lost is not None:
+                return RunResult(
+                    stdout=b"",
+                    stderr=f"{unmounted(self._runtime, lost)}\n".encode(),
+                    exit_code=CANNOT_EXECUTE_STATUS,
+                )
             unserved = self._unserved(ruled)
             if self._mount_type != "fuse" and (not unserved or self._served):
                 self._session = session
@@ -281,6 +359,42 @@ class SandboxMounts:
                 "dispatcher",
             )
         return None
+
+    def guarded(self, argv: tuple[str, ...]) -> tuple[str, ...]:
+        """``argv`` under ``MOUNT_GUARD``, holding every mount the sandbox
+        had at the line's admit; unchanged when it had none.
+
+        Args:
+            argv (tuple[str, ...]): the program and its arguments.
+        """
+        held = {
+            p: (self._source(p), "fuse.sshfs") for p in self._served
+        } | self._own
+        if not held:
+            return argv
+        words: list[str] = []
+        for prefix, (source, kind) in sorted(held.items()):
+            words += [
+                mount_field(prefix),
+                mount_field(source, source=True),
+                kind,
+                unmounted(self._runtime, prefix),
+            ]
+        return (
+            "/bin/sh",
+            "-c",
+            MOUNT_GUARD,
+            "sh",
+            "/proc/mounts",
+            *words,
+            "--",
+            *argv,
+        )
+
+    def forget(self) -> None:
+        """Read the mounts again on the next line: a guarded line found
+        one gone, or its program exited as the guard does."""
+        self._seen = None
 
     async def close(self) -> None:
         """Unmount every served prefix and end its SFTP server."""
@@ -361,7 +475,15 @@ class SandboxMounts:
         session: SessionState,
         every: set[str],
         ruled: frozenset[str],
-    ) -> None:
+    ) -> str | None:
+        """Serve what the session sees and drop what it no longer does.
+
+        Returns:
+            str | None: why the line may not run, a prefix another sshfs
+            still serves or another mount covers, which is left alone and
+            nothing new served; None once in step, or with a mount of the
+            sandbox's own gone, which ``admit`` refuses.
+        """
         visible = frozenset(
             top_prefixes(binding.resolver.prefixes())
             if self._mount_type != "fuse"
@@ -373,8 +495,12 @@ class SandboxMounts:
             and not ended
             and (self._mount_type == "ssh" or not ruled)
         ):
-            return
+            return None
+        self._seen = None
         present = await self._table()
+        ended += [
+            p for p in self._served if p not in ended and p not in present
+        ]
         own = tuple(
             sorted(
                 p
@@ -382,9 +508,34 @@ class SandboxMounts:
                 if self._mount_type != "ssh"
                 and p in present
                 and p not in self._served
+                and not (
+                    present[p][1] == "fuse.sshfs"
+                    and present[p][0].startswith(SSHFS_SOURCE_PREFIX)
+                )
             )
         )
+        self._own = {p: present[p] for p in own}
+        self._owned = (self._owned & every) | set(own)
+        if self._lost() is not None:
+            return None
         wanted = sorted(p for p in visible if p not in own)
+        covered = next(
+            (
+                p
+                for p in sorted(self._served)
+                if p in wanted
+                and p in present
+                and present[p] != (self._source(p), "fuse.sshfs")
+                and (p not in ended or present[p][1] != "fuse.sshfs")
+                and not (p in ended and present[p] == self._under.get(p))
+            ),
+            None,
+        )
+        if covered is not None:
+            return (
+                f"another mount covers {covered} in this sandbox; the line "
+                "did not run"
+            )
         for prefix in wanted:
             under = [o for o in own if o.startswith(prefix + "/")]
             if under:
@@ -395,8 +546,14 @@ class SandboxMounts:
         for prefix in [
             p for p in self._served if p not in wanted or p in ended
         ]:
-            await self._drop(prefix)
+            await self._drop(prefix, present)
         new = [p for p in wanted if p not in self._served]
+        for prefix in new:
+            if await self._held(prefix, present):
+                return (
+                    f"another sshfs serves {prefix} in this sandbox; give "
+                    "this workspace a sandbox of its own"
+                )
         if new:
             server = pipe_server()
             if (await self._run("command -v sshfs")).exit_code != 0:
@@ -411,12 +568,46 @@ class SandboxMounts:
             except BaseException:
                 await self._unmount()
                 raise
-        self._seen = (frozenset(every), visible)
+        if self._mount_type != "fuse" or set(top_prefixes(every)) <= set(own):
+            self._seen = (frozenset(every), visible)
+        return None
+
+    def _source(self, prefix: str) -> str:
+        return f"{self._name}:{prefix}"
+
+    def _lost(self) -> str | None:
+        """A mount of the sandbox's own it held and no longer does; the
+        prefixes held are kept only while the workspace mounts them."""
+        return min(self._owned - self._own.keys(), default=None)
+
+    async def _held(
+        self, prefix: str, present: dict[str, tuple[str, str]]
+    ) -> bool:
+        """Whether another sshfs still serves ``prefix``.
+
+        Args:
+            prefix (str): the mountpoint.
+            present (dict[str, tuple[str, str]]): the sandbox's mount table.
+        """
+        source, kind = present.get(prefix, ("", ""))
+        if kind != "fuse.sshfs" or source == self._source(prefix):
+            return False
+        found = await self._run(running_line(source))
+        if found.exit_code not in (0, 1):
+            raise RuntimeError(
+                f"{self._runtime}: cannot tell whether {source} is served: "
+                f"{said(found.stderr)}"
+            )
+        return found.exit_code == 0
 
     async def _serve(
-        self, server: Any, prefix: str, present: dict[str, str]
+        self,
+        server: Any,
+        prefix: str,
+        present: dict[str, tuple[str, str]],
     ) -> None:
-        if present.get(prefix) == "fuse.sshfs":
+        self._under[prefix] = present.get(prefix)
+        if present.get(prefix, ("", ""))[1] == "fuse.sshfs":
             await self._run(unmount_line(prefix))
         path = single_quote(prefix)
         made = await self._run(
@@ -429,7 +620,7 @@ class SandboxMounts:
                 f"{said(made.stderr)}"
             )
         log = single_quote(f"{SSHFS_LOG_PREFIX}_{uuid.uuid4().hex}.log")
-        source = single_quote(f"mirage:{prefix}")
+        source = single_quote(self._source(prefix))
         pipe = await self._open_pipe(
             f"exec sshfs -f -o {SSHFS_OPTIONS} {source} {path} 2>{log}"
         )
@@ -441,7 +632,10 @@ class SandboxMounts:
             deadline = asyncio.get_running_loop().time() + MOUNT_WAIT_SECONDS
             while True:
                 try:
-                    if (await self._table()).get(prefix) == "fuse.sshfs":
+                    if (await self._table()).get(prefix) == (
+                        self._source(prefix),
+                        "fuse.sshfs",
+                    ):
                         return
                 except Exception as error:
                     diagnostic = (
@@ -511,7 +705,7 @@ class SandboxMounts:
                 "could not remove sshfs log: %s", said(removed.stderr)
             )
 
-    async def _table(self) -> dict[str, str]:
+    async def _table(self) -> dict[str, tuple[str, str]]:
         listed = await self._run("cat /proc/mounts")
         if listed.exit_code != 0:
             raise RuntimeError(
@@ -520,24 +714,35 @@ class SandboxMounts:
             )
         return mount_table(listed.stdout.decode(errors="replace"))
 
-    async def _drop(self, prefix: str) -> None:
+    async def _drop(
+        self, prefix: str, present: dict[str, tuple[str, str]]
+    ) -> None:
+        """Unmount ``prefix`` if the mount on top is still this instance's,
+        then end its SFTP server.
+
+        Args:
+            prefix (str): the served mountpoint.
+            present (dict[str, tuple[str, str]]): the sandbox's mount table.
+        """
         pipe, task, _ = self._served.pop(prefix)
-        try:
-            done = await self._run(unmount_line(prefix))
-            if done.exit_code != 0:
+        self._under.pop(prefix, None)
+        if present.get(prefix, ("", ""))[0] == self._source(prefix):
+            try:
+                done = await self._run(unmount_line(prefix))
+                if done.exit_code != 0:
+                    logger.warning(
+                        "%s: unmounting %s in the sandbox failed: %s",
+                        self._runtime,
+                        prefix,
+                        said(done.stderr),
+                    )
+            except Exception:
                 logger.warning(
-                    "%s: unmounting %s in the sandbox failed: %s",
+                    "%s: unmounting %s in the sandbox failed",
                     self._runtime,
                     prefix,
-                    said(done.stderr),
+                    exc_info=True,
                 )
-        except Exception:
-            logger.warning(
-                "%s: unmounting %s in the sandbox failed",
-                self._runtime,
-                prefix,
-                exc_info=True,
-            )
         try:
             await pipe.stop()
             await asyncio.wait_for(task, UNMOUNT_WAIT_SECONDS)
@@ -551,6 +756,20 @@ class SandboxMounts:
             task.cancel()
 
     async def _unmount(self) -> None:
+        present: dict[str, tuple[str, str]] = {}
+        if self._served:
+            try:
+                present = await self._table()
+            except Exception:
+                logger.warning(
+                    "%s: reading the mount table to unmount failed; "
+                    "unmounting every served prefix",
+                    self._runtime,
+                    exc_info=True,
+                )
+                present = {
+                    p: (self._source(p), "fuse.sshfs") for p in self._served
+                }
         for prefix in list(self._served):
-            await self._drop(prefix)
+            await self._drop(prefix, present)
         self._seen = None

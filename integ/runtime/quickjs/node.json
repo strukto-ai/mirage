@@ -1,0 +1,650 @@
+{
+  "requires": {
+    "python": [
+      "env:MIRAGE_QUICKJS_HOME"
+    ],
+    "typescript": []
+  },
+  "cases": [
+    {
+      "id": "fs_reads_and_writes_files",
+      "note": "readFileSync without an encoding hands back a Buffer that JSON.parse reads as text, as node's does; the writes land in the mount.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "d.json": "{\"items\":[{\"n\":1,\"open\":true},{\"n\":2,\"open\":false}]}"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e \"const fs = require('fs'); const d = JSON.parse(fs.readFileSync('/data/d.json')); fs.writeFileSync('/data/open.txt', d.items.filter((i) => i.open).map((i) => i.n).join('\\n') + '\\n'); fs.appendFileSync('/data/open.txt', 'end\\n')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cat /data/open.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\nend\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"const fs = require('node:fs'); console.log(fs.existsSync('/data/d.json'), fs.existsSync('/data/none'), fs.statSync('/data/open.txt').size, fs.statSync('/data').isDirectory(), fs.readdirSync('/data'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "true false 6 true [ 'd.json', 'open.txt' ]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"const fs = require('fs'); fs.mkdirSync('/data/a/b', { recursive: true }); fs.writeFileSync('/data/a/b/c.txt', 'x'); console.log(fs.readdirSync('/data/a', { withFileTypes: true }).map((e) => e.name + (e.isDirectory() ? '/' : ''))); fs.rmSync('/data/a', { recursive: true }); console.log(fs.existsSync('/data/a'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[ 'b/' ]\nfalse\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"const fs = require('fs'); for (const [f, p] of [['rmdirSync', '/data/d.json'], ['unlinkSync', '/data']]) { try { fs[f](p) } catch (e) { console.log(f, e.code) } } console.log(fs.existsSync('/data/d.json'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "rmdirSync ENOTDIR\nunlinkSync EISDIR\ntrue\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"const fs = require('fs'); try { fs.copyFileSync('/data/d.json', '/data/open.txt', fs.constants.COPYFILE_EXCL) } catch (e) { console.log(e.code) } console.log(fs.readFileSync('/data/open.txt', 'utf8'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "EEXIST\n1\nend\n\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "fs_errors_carry_node_codes",
+      "note": "An error fs raises has node's code, syscall, path and Linux errno, and an uncaught one points at the caller's line and column rather than the shim's frames.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {}
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e \"try { require('fs').readFileSync('/data/none') } catch (e) { console.log(e.code, e.errno, e.syscall, e.message) }\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "ENOENT -2 open ENOENT: no such file or directory, open '/data/none'\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"require('fs').readFileSync('/data/none')\"",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "Error: ENOENT: no such file or directory, open '/data/none'\n    at <eval> (<evalScript>:1:14)\n\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "fs_callbacks_and_promises",
+      "note": "Each sync call also has its callback form, answered on a later job, and its fs/promises form.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "d.json": "{\"items\":[{\"n\":1,\"open\":true},{\"n\":2,\"open\":false}]}"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e \"const fs = require('fs'); fs.readFile('/data/d.json', 'utf8', (err, s) => console.log('cb', err, s.length)); require('fs/promises').readFile('/data/none').catch((e) => console.log('promise', e.code)); console.log('first')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "first\ncb null 52\npromise ENOENT\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "process_and_module_globals",
+      "note": "process.argv as node lays it out, the environment, the working directory, raw writes and exit codes; a script's __filename, __dirname and require.main.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "tool.js": "console.log(__filename, __dirname, process.argv.slice(1), require.main === module)\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log(process.argv, process.argv0)\" a b",
+          "expect": {
+            "exit": 0,
+            "stdout": "[ 'node', 'a', 'b' ] node\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "export GREETING=hi; node -e \"console.log(process.env.GREETING)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "hi\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd /data && node -e \"console.log(process.cwd(), require('path').resolve('x.txt'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "/data /data/x.txt\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"process.stdout.write('no newline'); process.stderr.write('err\\n'); process.exit(3)\"; echo \" status=$?\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "no newline status=3\n",
+            "stderr": "err\n"
+          }
+        },
+        {
+          "command": "node /data/tool.js one two",
+          "expect": {
+            "exit": 0,
+            "stdout": "/data/tool.js /data [ '/data/tool.js', 'one', 'two' ] true\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "stdin_as_node_reads_it",
+      "note": "Piped input through stream listeners, readline, readFileSync(0) and async iteration.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "printf 'b\\na\\n' | node -e \"let s = ''; process.stdin.setEncoding('utf8'); process.stdin.on('data', (c) => (s += c)); process.stdin.on('end', () => console.log(s.split('\\n').filter(Boolean).sort()))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[ 'a', 'b' ]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'x\\r\\ny\\n' | node -e \"const rl = require('readline').createInterface({ input: process.stdin }); rl.on('line', (l) => console.log(JSON.stringify(l))); rl.on('close', () => console.log('closed'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"x\"\n\"y\"\nclosed\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'q' | node -e \"console.log(require('fs').readFileSync(0, 'utf8') + '!')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "q!\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'z' | node -e \"(async () => { for await (const c of process.stdin) console.log(String(c)) })()\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "z\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "stdin_arrives_as_it_is_written",
+      "note": "A data listener sees the first chunk while the producer is still writing; one that waited for the end of input would hit the line's limit. An async loop reads only as it asks, so breaking out of one over an endless pipe ends the run, and a loop begun after the end finishes. Every reader takes from one position, and base64 and UTF-8 text carry what a chunk splits. A chunk a readable listener is told of waits for read(), and input flows only once a data listener or resume() asks for it, and keeps flowing after a once('data') listener is gone; when the last readable listener goes, input flows on only for a data listener still on or a resume() just made that no pause() has undone, and otherwise waits for the next reader, as node's does.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "command_limits": {
+          "@line": {
+            "timeout_seconds": 20
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "seq 1 1000000000 | node -e \"process.stdin.on('data', (c) => { console.log(c.toString().split('\\n')[0]); process.exit(0) })\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf '1\\n2\\n' | node -e \"const fs = require('fs'); console.log(JSON.stringify([fs.readFileSync(0, 'utf8'), fs.readFileSync(0, 'utf8')]))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"1\\n2\\n\",\"\"]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'one\\ntwo\\nthree\\n' | node -e \"const rl = require('readline').createInterface({ input: process.stdin }); rl.once('line', (l) => console.log('first', l)); rl.on('line', (l) => { console.log('line', l); if (l === 'two') rl.close() }); rl.on('close', () => console.log('closed'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "first one\nline one\nline two\nclosed\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'a\\nb\\nc\\n' | node -e \"const rl = require('readline').createInterface({ input: process.stdin }); rl.on('close', () => console.log('closed')); (async () => { for await (const l of rl) { await new Promise((r) => setTimeout(r, 20)); console.log('>', l) } console.log('loop done') })()\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "> a\n> b\n> c\nclosed\nloop done\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "seq 1 30000 | node -e \"let s = ''; process.stdin.setEncoding('base64'); process.stdin.on('data', (c) => (s += c)); process.stdin.on('end', () => console.log(Buffer.from(s, 'base64').toString().split('\\n').length - 1, /=./.test(s)))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "30000 false\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'ok \\xc3' | node -e \"let got = ''; process.stdin.setEncoding('utf8'); process.stdin.on('readable', () => { let c; while ((c = process.stdin.read()) !== null) got += c }); process.stdin.on('end', () => console.log(JSON.stringify(got)))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"ok �\"\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "seq 1 1000000000 | node -e \"(async () => { for await (const c of process.stdin) { console.log('got', c.length > 0); break } const rl = require('readline').createInterface({ input: process.stdin }); for await (const l of rl) { console.log('line', l.length > 0); break } console.log('after') })()\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "got true\nline true\nafter\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'x' | node -e \"process.stdin.on('data', () => {}); process.stdin.on('end', async () => { for await (const c of process.stdin) {} console.log('after loop') })\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "after loop\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'a\\nb\\n' | node -e \"require('readline').createInterface({ input: process.stdin }).on('close', () => console.log('closed'))\" && printf 'a\\n' | node -e \"process.stdin.resume().on('end', () => console.log('ended'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "closed\nended\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'a\\nb\\n' | node -e \"process.stdin.on('error', () => {}); setTimeout(() => { require('readline').createInterface({ input: process.stdin }).on('line', (l) => console.log('line', l)) }, 30)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "line a\nline b\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'x\\ny\\n' | node -e \"process.stdin.pause(); let got = ''; process.stdin.on('readable', () => { let c; while ((c = process.stdin.read()) !== null) got += c }); process.stdin.on('end', () => console.log(JSON.stringify(got)))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"x\\ny\\n\"\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'a\\nb\\n' | node -e \"let got = ''; process.stdin.on('readable', () => {}); setTimeout(() => { let c; while ((c = process.stdin.read()) !== null) got += c; process.stdin.resume() }, 30); process.stdin.on('end', () => console.log(JSON.stringify(got)))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"a\\nb\\n\"\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'x\\ny\\n' | node -e \"let d = ''; process.stdin.on('data', (c) => (d += c)); process.stdin.on('readable', () => { while (process.stdin.read() !== null); }); process.stdin.on('end', () => console.log(JSON.stringify(d)))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"x\\ny\\n\"\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "printf 'a\\n' | node -e \"process.stdin.on('end', () => console.log('ended')); setTimeout(() => console.log('no flow'), 30)\" && printf 'a\\n' | node -e \"process.stdin.pause(); process.stdin.on('data', () => console.log('data')); setTimeout(() => console.log('still paused'), 30)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "no flow\nstill paused\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(printf 'a\\n'; sleep 0.2; printf 'b\\n') | node -e \"let n = 0; process.stdin.once('data', () => n++); process.stdin.on('end', () => console.log('end after', n))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "end after 1\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(printf 'a\\n'; sleep 0.2; printf 'b\\n') | node -e \"process.stdin.once('data', () => {}); process.stdin.once('readable', () => { const first = String(process.stdin.read()); setTimeout(() => { let rest = ''; process.stdin.on('data', (c) => (rest += c)).on('end', () => console.log(JSON.stringify([first, rest]))) }, 400) })\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"a\\n\",\"b\\n\"]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(printf 'a\\n'; sleep 0.2; printf 'b\\n') | node -e \"let got = ''; const r = () => { let c; while ((c = process.stdin.read()) !== null) got += c }; process.stdin.on('readable', r); setTimeout(() => { process.stdin.off('readable', r); process.stdin.on('data', (c) => (got += c)).on('end', () => console.log(JSON.stringify(got))) }, 100)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"a\\nb\\n\"\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(printf 'a\\n'; sleep 0.2; printf 'b\\n') | node -e \"let first; process.stdin.once('readable', () => { first = String(process.stdin.read()); process.stdin.resume() }); process.stdin.on('end', () => console.log('ended', JSON.stringify(first)))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "ended \"a\\n\"\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(printf 'a\\n'; sleep 0.2; printf 'b\\n') | node -e \"let got = ''; process.stdin.once('readable', () => { got += process.stdin.read(); setTimeout(() => process.stdin.resume().on('data', (c) => (got += c)), 50) }); process.stdin.on('end', () => console.log(JSON.stringify(got)))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"a\\nb\\n\"\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "(printf 'a\\n'; sleep 0.2; printf 'b\\n') | node -e \"let got = ''; process.stdin.once('readable', () => { got += process.stdin.read(); process.stdin.resume(); process.stdin.pause(); setTimeout(() => process.stdin.on('data', (c) => (got += c)).resume(), 400) }); process.stdin.on('end', () => console.log(JSON.stringify(got)))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "\"a\\nb\\n\"\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "rm_stays_inside_its_tree",
+      "note": "A recursive rmSync takes a link inside the tree, not what it points at, though stat follows links on this engine.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "keep/k": "k\n",
+              "build/b": "b\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "ln -s /data/keep /data/build/link && node -e \"const fs = require('fs'); fs.rmSync('/data/build', { recursive: true }); console.log(fs.readdirSync('/data'), fs.readdirSync('/data/keep'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[ 'keep' ] [ 'k' ]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "mkdir -p /data/t/a/b && echo 1 > /data/t/a/b/f && node -e \"const fs = require('fs'); fs.rmSync('/data/t', { recursive: true, force: true }); fs.rmSync('/data/none', { recursive: true, force: true }); console.log(fs.existsSync('/data/t'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "false\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "console_prints_as_node_does",
+      "note": "util.inspect's rendering, line breaking past 80 columns and util.format's placeholders; console.error and console.warn write to stderr.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e \"console.log({ a: 1, b: 'two', c: [1, { d: null }], e: undefined }, [], {}, 'top', 5n, new Map([['k', [1]]]), new Set(['s']))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "{ a: 1, b: 'two', c: [ 1, { d: null } ], e: undefined } [] {} top 5n Map(1) { 'k' => [ 1 ] } Set(1) { 's' }\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"const o = { a: { b: { c: { d: 1 } } } }; o.self = o; console.log(o)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "<ref *1> { a: { b: { c: [Object] } }, self: [Circular *1] }\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"console.log({ alpha: 'aaaaaaaaaaaaaaaa', beta: 'bbbbbbbbbbbbbbbb', gamma: 'cccccccccccccccc', delta: 1 })\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "{\n  alpha: 'aaaaaaaaaaaaaaaa',\n  beta: 'bbbbbbbbbbbbbbbb',\n  gamma: 'cccccccccccccccc',\n  delta: 1\n}\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"console.log('%s is %d years and %j', 'Ada', 36.5, { x: 1 }, 'extra'); console.error('warn %s', 'w')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "Ada is 36.5 years and {\"x\":1} extra\n",
+            "stderr": "warn w\n"
+          }
+        },
+        {
+          "command": "node -e \"console.log({ get g() { throw new Error('boom') }, set s(v) {}, ok: 1 }); console.log('100%%')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "{ g: [Getter], s: [Setter], ok: 1 }\n100%%\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "buffer_and_text",
+      "note": "Buffer's encodings and TextEncoder and TextDecoder, which the engine lacks.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e \"const b = Buffer.from('h\\u00e9llo'); console.log(b, b.length, b.toString('base64'), b.toString('hex'), Buffer.from('aMOpbGxv', 'base64').toString(), new TextDecoder().decode(new TextEncoder().encode('ok')))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "<Buffer 68 c3 a9 6c 6c 6f> 6 aMOpbGxv 68c3a96c6c6f héllo ok\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"console.log(Buffer.alloc(5, 'ab').toString(), Buffer.alloc(3, '\\u00e9').toString('hex'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "ababa c3a9c3\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "require_reads_files_and_names_what_it_has",
+      "note": "require loads JavaScript as CommonJS and parses JSON, by path from the requiring file; a package name it does not have fails with the modules it does. An entry a module requires back hands over its exports so far rather than running twice.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ],
+        "mounts": {
+          "/data": {
+            "vfs": "ram",
+            "files": {
+              "main.js": "const m = require('./lib/math'); const c = require('./lib/conf.json'); console.log(m.add(c.v, 4))\n",
+              "lib/math.js": "module.exports = { add: (a, b) => a + b }\n",
+              "lib/conf.json": "{\"v\": 3}\n",
+              "a.js": "const b = require('./b'); exports.name = 'a'; console.log('a ran', b.seen)\n",
+              "b.js": "exports.seen = require('./a').name === undefined ? 'partial' : 'full'\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "node /data/main.js",
+          "expect": {
+            "exit": 0,
+            "stdout": "7\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node /data/a.js",
+          "expect": {
+            "exit": 0,
+            "stdout": "a ran partial\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "cd /data && node -e \"console.log(require('./lib/conf').v)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "3\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"require('axios')\"",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr_contains": "Cannot find module 'axios': quickjs has buffer, fs, fs/promises, path, process, readline, util and files by path, no npm"
+          }
+        },
+        {
+          "command": "node -e \"console.log(typeof fetch, typeof require('util').inspect)\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "undefined function\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "timers_are_globals",
+      "note": "setTimeout with arguments, clearTimeout, setInterval and setImmediate, over the engine's os timers.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e \"const t = setTimeout(() => console.log('never'), 10); clearTimeout(t); setTimeout((a, b) => console.log('late', a + b), 150, 1, 2); let n = 0; const i = setInterval(() => { if (++n === 3) { clearInterval(i); console.log('ticks', n) } }, 5); setImmediate(() => console.log('soon')); console.log('now')\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "now\nsoon\nticks 3\nlate 3\n",
+            "stderr": ""
+          }
+        }
+      ]
+    },
+    {
+      "id": "path_is_posix",
+      "note": "path's POSIX functions, as node's path.posix answers them.",
+      "world": {
+        "runtimes": [
+          "quickjs",
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "node -e \"const p = require('path'); console.log(p.join('/a/b', '../c', './d.txt'), p.basename('/x/y.tar.gz', '.gz'), p.extname('y.tar.gz'), p.dirname('/a/b/'), p.relative('/a/b/c', '/a/d'), p.normalize('a//b/../c/'), p.isAbsolute('a'), p.parse('/h/f.txt'))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "/a/c/d.txt y.tar .gz /a ../../d a/c/ false { root: '/', dir: '/h', base: 'f.txt', ext: '.txt', name: 'f' }\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "node -e \"const p = require('path'); const o = { v: 7, run(cb) { cb(null, this.v) } }; o.run = require('util').promisify(o.run); o.run().then((v) => console.log(JSON.stringify([p.basename('file.txt', 'file.txt'), p.basename('/a/file.txt', 'file.txt')]), v))\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"\",\"file.txt\"] 7\n",
+            "stderr": ""
+          }
+        }
+      ]
+    }
+  ]
+}

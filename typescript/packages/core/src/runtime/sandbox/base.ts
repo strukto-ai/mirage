@@ -15,6 +15,7 @@
 import type { Context } from '../../commands/config.ts'
 import { currentCaller } from '../../context/session_context.ts'
 import type { ByteSource } from '../../io/types.ts'
+import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
 import { shellJoin } from '../../shell/join.ts'
 import type { PathSpec } from '../../types.ts'
 import { abortable } from '../../utils/abort.ts'
@@ -202,6 +203,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     await this.ensureConnected(ctx.signal)
     const refusal = (await this.mounts?.admit(this.binding, ctx.signal)) ?? null
     if (refusal !== null) return refusal
+    const run = this.mounts?.guarded(argv) ?? argv
     const given = { ...this.config.env, ...ctx.env }
     const clock = await this.systemTimeEnv(given, ctx.signal)
     // A deadline that passed during the probe starts nothing.
@@ -214,8 +216,8 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
       command: shown ?? shellJoin(argv),
     })
     try {
-      return await this.execArgv(
-        argv,
+      const done = await this.execArgv(
+        run,
         ctx.stdin,
         { ...given, ...clock, [EXEC_ID]: execId },
         ctx.cwd.virtual,
@@ -223,6 +225,8 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
         errors,
         ctx.signal,
       )
+      if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forget()
+      return done
     } catch (error) {
       if (ctx.signal?.aborted === true) await this.reapRun(execId, runner?.signal ?? 15)
       throw error

@@ -20,8 +20,10 @@ import pytest
 
 from mirage.runtime.sandbox.constants import (
     EXEC_ID,
+    MOUNT_GUARD,
     REAP_ABSENT,
     bash_line_argv,
+    mount_field,
     programs_probe,
     reap_line,
     wrap_line,
@@ -157,4 +159,140 @@ def test_bash_line_argv_passes_the_line_and_the_name_as_positional_words():
         "sh",
         "x",
         "box",
+    )
+
+
+def guarded(table, *entries):
+    return subprocess.run(
+        ["/bin/sh", "-c", MOUNT_GUARD, "sh", str(table), *entries]
+        + ["--", "/bin/echo", "ran"],
+        capture_output=True,
+        env={"PATH": "/nowhere"},
+        check=False,
+        timeout=10,
+    )
+
+
+def expected(prefix, source, kind):
+    return (
+        mount_field(prefix),
+        mount_field(source, source=True),
+        kind,
+        f"lost {prefix}",
+    )
+
+
+def test_mount_field_escapes_what_the_kernel_escapes():
+    assert mount_field("/a b\tc\nd\\e#") == "/a\\040b\\011c\\012d\\134e#"
+    assert mount_field("m:/a b#", source=True) == "m:/a\\040b\\043"
+
+
+# The guard runs the program once every mount it expects is on top, read
+# through the kernel's escapes, with only sh's builtins on the PATH.
+def test_the_mount_guard_runs_the_program_over_its_mounts(tmp_path):
+    table = tmp_path / "mounts"
+    table.write_text(
+        "mirage-x:/my\\040notes /my\\040notes fuse.sshfs rw 0 0\n"
+        "tmpfs /a\\134b tmpfs rw 0 0\n"
+    )
+    done = guarded(
+        table,
+        *expected("/my notes", "mirage-x:/my notes", "fuse.sshfs"),
+        *expected("/a\\b", "tmpfs", "tmpfs"),
+    )
+    assert (done.returncode, done.stdout, done.stderr) == (0, b"ran\n", b"")
+
+
+# The kernel escapes a # in a source, never in a mountpoint; an older mount
+# under ours is no matter.
+@pytest.mark.parametrize(
+    ("rows", "prefix", "source"),
+    [
+        (
+            "mirage-x:/a\\043b /a#b fuse.sshfs rw 0 0\n",
+            "/a#b",
+            "mirage-x:/a#b",
+        ),
+        (
+            "tmpfs /data tmpfs rw 0 0\nmirage-x:/data /data fuse.sshfs rw 0 0\n",
+            "/data",
+            "mirage-x:/data",
+        ),
+    ],
+    ids=["hash", "over-an-older-mount"],
+)
+def test_the_mount_guard_runs_over_the_top_mount(
+    tmp_path, rows, prefix, source
+):
+    table = tmp_path / "mounts"
+    table.write_text(rows)
+    done = guarded(table, *expected(prefix, source, "fuse.sshfs"))
+    assert (done.returncode, done.stdout, done.stderr) == (0, b"ran\n", b"")
+
+
+# The guard's own names never reach the program's environment.
+def test_the_mount_guard_hands_the_program_its_environment(tmp_path):
+    table = tmp_path / "mounts"
+    table.write_text("mirage-x:/data /data fuse.sshfs rw 0 0\n")
+    words = ("t", "f", "s", "m", "k", "o")
+    done = subprocess.run(
+        ["/bin/sh", "-c", MOUNT_GUARD, "sh", str(table)]
+        + list(expected("/data", "mirage-x:/data", "fuse.sshfs"))
+        + ["--", "/usr/bin/env"],
+        capture_output=True,
+        env={"PATH": "/nowhere", **{w: f"keep-{w}" for w in words}},
+        check=False,
+        timeout=10,
+    )
+    assert done.returncode == 0
+    assert {f"{w}=keep-{w}" for w in words} <= set(
+        done.stdout.decode().splitlines()
+    )
+
+
+def test_the_mount_guard_checks_every_mount(tmp_path):
+    table = tmp_path / "mounts"
+    table.write_text("mirage-x:/data /data fuse.sshfs rw 0 0\n")
+    done = guarded(
+        table,
+        *expected("/data", "mirage-x:/data", "fuse.sshfs"),
+        *expected("/a\\b", "tmpfs", "tmpfs"),
+    )
+    assert (done.returncode, done.stdout, done.stderr) == (
+        126,
+        b"",
+        b"lost /a\\b\n",
+    )
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        "",
+        "mirage-y:/data /data fuse.sshfs rw 0 0\n",
+        "mirage-x:/data /data tmpfs rw 0 0\n",
+        "mirage-x:/data /data fuse.sshfs rw 0 0\ntmpfs /data tmpfs rw 0 0\n",
+    ],
+    ids=["gone", "another-source", "another-type", "covered"],
+)
+def test_the_mount_guard_refuses_a_mount_not_on_top(tmp_path, rows):
+    table = tmp_path / "mounts"
+    table.write_text(rows)
+    done = guarded(table, *expected("/data", "mirage-x:/data", "fuse.sshfs"))
+    assert (done.returncode, done.stdout, done.stderr) == (
+        126,
+        b"",
+        b"lost /data\n",
+    )
+
+
+def test_the_mount_guard_refuses_without_a_mount_table(tmp_path):
+    done = guarded(
+        tmp_path / "missing",
+        *expected("/data", "mirage-x:/data", "fuse.sshfs"),
+    )
+    assert (done.returncode, done.stdout, done.stderr) == (
+        126,
+        b"",
+        b"lost /data\n",
     )

@@ -19,7 +19,7 @@
           "command": "node -e \"std.out.puts('a'); std.out.puts('b'); print('c'); console.log({k: 1}, [1, 2])\"",
           "expect": {
             "exit": 0,
-            "stdout": "abc\n[object Object] 1,2\n",
+            "stdout": "abc\n{ k: 1 } [ 1, 2 ]\n",
             "stderr": ""
           }
         }

@@ -23,6 +23,7 @@ from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.runtime.js import QuickJsRuntime
 from mirage.runtime.js.quickjs import QUICKJS_HOME_ENV
+from mirage.runtime.js.quickjs.node import node_preamble
 from mirage.runtime.types import Program, RunResult
 from mirage.runtime.wasm import WasmView
 from mirage.types import PathSpec
@@ -77,6 +78,15 @@ class _ArgvSpy:
         return b"", b"", 0
 
 
+def _script(code: str, argv: list[str]) -> str:
+    # What -e carries for a classic script: Node's globals, then the
+    # script evaluated on its own.
+    return (
+        node_preamble(argv, None)
+        + f'std.evalScript("{code}", {{ backtrace_barrier: true }});'
+    )
+
+
 async def _spied_argv(program: Program, **fields) -> list[str]:
     # __init__ demands a real qjs-wasi.wasm on disk and argv assembly is
     # the only thing under test, so the engine is stubbed out. These run
@@ -101,7 +111,7 @@ async def test_program_args_ride_behind_the_end_of_options_marker():
         "--std",
         "--script",
         "-e",
-        "CODE",
+        _script("CODE", ["node", "-e", "PROG", "-m"]),
         "--",
         "-e",
         "PROG",
@@ -117,7 +127,7 @@ async def test_named_program_still_takes_the_first_arg_slot():
         "--std",
         "--script",
         "-e",
-        "CODE",
+        _script("CODE", ["node", "-m"]),
         "--",
         "tool",
         "-m",
@@ -127,7 +137,14 @@ async def test_named_program_still_takes_the_first_arg_slot():
 @pytest.mark.asyncio
 async def test_module_mode_is_still_the_interpreters_own_switch():
     argv = await _spied_argv(Program(code="CODE"), flags={"module": True})
-    assert argv == ["qjs", "--std", "-m", "-e", "CODE", "--"]
+    assert argv == [
+        "qjs",
+        "--std",
+        "-m",
+        "-e",
+        node_preamble(["node"], None) + "CODE",
+        "--",
+    ]
 
 
 @live
@@ -388,8 +405,10 @@ async def test_descriptor_and_byte_calls_answer_as_the_shim_mirrors():
     try:
         await ws.shell("cat > /data/p.js", stdin=program.encode())
         io = await ws.shell("node /data/p.js")
+        # A bigint offset seeks to a bigint, which console.log shows as
+        # node does.
         assert await io.stdout_str() == (
-            "4 2 0 -28\n2 104,105 0 -8 false\n104 65 3\nhiA\n"
+            "4 2 0n -28\n2 104,105 0 -8 false\n104 65 3\nhiA\n"
         )
     finally:
         await ws.close()

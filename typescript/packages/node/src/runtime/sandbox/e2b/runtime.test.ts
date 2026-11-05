@@ -25,7 +25,7 @@ import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/runtime/sandbox/e2b/co
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
-import { EXEC_ID, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { EXEC_ID, MOUNT_GUARD, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 
 const DEC = new TextDecoder()
 
@@ -542,22 +542,24 @@ describe('E2B cancellation and validation', () => {
 // A sandbox that answers its mount table, takes sshfs pipes and records the
 // lines it runs.
 class MountingE2BRuntime extends FakedE2BRuntime {
-  readonly table = new Map<string, string>()
+  readonly table = new Map<string, [string, string]>()
   readonly lines: string[] = []
 
   protected override execArgv(argv: readonly string[]): Promise<RunResult> {
-    return this.execLine(argv[0] === '/bin/sh' ? (argv[2] ?? '') : argv.join(' '))
+    const run = argv[2] === MOUNT_GUARD ? argv.slice(argv.indexOf('--', 5) + 1) : argv
+    return this.execLine(run[0] === '/bin/sh' ? (run[2] ?? '') : run.join(' '))
   }
 
   override execLine(line: string): Promise<RunResult> {
     this.lines.push(line)
-    const rows = [...this.table].map(([p, t]) => `src ${p} ${t} rw 0 0\n`).join('')
+    const rows = [...this.table].map(([p, [source, t]]) => `${source} ${p} ${t} rw 0 0\n`).join('')
     const stdout = line === 'cat /proc/mounts' ? rows : ''
     return Promise.resolve({ stdout: new TextEncoder().encode(stdout), stderr: null, exitCode: 0 })
   }
 
   override openPipe(command: string): Promise<SandboxPipe> {
-    this.table.set([...command.matchAll(/'([^']*)'|(\S+)/g)][6]?.[1] ?? '', 'fuse.sshfs')
+    const words = [...command.matchAll(/'([^']*)'|(\S+)/g)].map((m) => m[1] ?? m[2] ?? '')
+    this.table.set(words[6] ?? '', [words[5] ?? '', 'fuse.sshfs'])
     let end: () => void = () => undefined
     const reader = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -633,7 +635,9 @@ describe('E2BRuntime under session restrictions', () => {
         const agent = await ws.session('agent', { profile: 'agent' })
         const result = await agent.shell('tool run')
         expect(result.exitCode).toBe(0)
-        expect(Object.fromEntries(runtime.table)).toEqual({ '/data': 'fuse.sshfs' })
+        expect([...runtime.table].map(([p, [, kind]]) => [p, kind])).toEqual([
+          ['/data', 'fuse.sshfs'],
+        ])
         expect(runtime.lines).toContain('tool run')
       } finally {
         await ws.close()

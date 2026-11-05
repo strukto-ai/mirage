@@ -112,19 +112,20 @@ describe('node/js: quickjs runtime', () => {
     await ws.close()
   }, 60_000)
 
-  it('sandboxed: no node builtins', async () => {
+  it("sandboxed: node's globals, but no network", async () => {
     const { ws } = makeWorkspace()
     const io = await ws.shell('js -e "console.log(typeof process, typeof require, typeof fetch)"')
     expect(io.exitCode).toBe(0)
-    expect(stdoutStr(io)).toBe('undefined undefined undefined\n')
+    expect(stdoutStr(io)).toBe('object function undefined\n')
     await ws.close()
   }, 60_000)
 
-  it('console.error does not exist, matching quickjs-ng --std', async () => {
+  it('console.error writes to stderr, as node does', async () => {
     const { ws } = makeWorkspace()
     const io = await ws.shell('js -e "console.error(\'x\')"')
-    expect(io.exitCode).toBe(1)
-    expect(stderrStr(io)).toContain('TypeError')
+    expect(io.exitCode).toBe(0)
+    expect(stdoutStr(io)).toBe('')
+    expect(stderrStr(io)).toBe('x\n')
     await ws.close()
   }, 60_000)
 

@@ -102,6 +102,11 @@ Mirage, so the container must see the mounts there. `mount_type` picks how:
   data on the container's own mounts.
 - The container shows one session's view, the first that runs a line there.
   Give each agent its own container.
+- An sshfs still serving a path Mirage serves, another workspace's or one
+  of your own, is left alone and the line exits 1. Give each workspace its
+  own container.
+- If the container restarts, Mirage mounts the paths again. A line caught
+  mid-restart exits 126 without running.
 - The root mount and `/dev` are not served.
 
 ### fuse
@@ -127,6 +132,9 @@ docker exec my-sandbox mirage workspace create /tmp/sandbox.yaml
 
 - This workspace's rules do not reach those files, so a line is refused
   while the session's permissions hide or narrow anything under them.
+- If a path the container mounted goes away, as on a restart, lines exit
+  126 until it is mounted again. Start Mirage from the image's entrypoint
+  so a restart mounts it again.
 - Keep the container's paths in step with the host's mounts yourself.
   `sandbox.yaml` can differ where it should, such as an endpoint
   (`host.docker.internal`) or narrower credentials.

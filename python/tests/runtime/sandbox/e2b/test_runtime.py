@@ -26,7 +26,7 @@ from mirage.commands.config import Context
 from mirage.context.session_context import run_with_execution
 from mirage.io.types import materialize
 from mirage.process.table import ProcessTable
-from mirage.runtime.sandbox.constants import EXEC_ID, wrap_line
+from mirage.runtime.sandbox.constants import EXEC_ID, MOUNT_GUARD, wrap_line
 from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
 from mirage.runtime.sandbox.e2b.constants import PTY_MARK, PTY_RAW
 from mirage.runtime.types import RunResult, SandboxPipe
@@ -441,22 +441,28 @@ class MountingE2BRuntime(E2BRuntime):
 
     def __init__(self, **options):
         super().__init__(**options)
-        self.table: dict[str, str] = {}
+        self.table: dict[str, tuple[str, str]] = {}
         self.lines: list[str] = []
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if argv[2:3] == (MOUNT_GUARD,):
+            argv = argv[argv.index("--", 5) + 1 :]
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
         data = await materialize(stdin) if stdin is not None else None
         return await self.exec_line(line, data, env, cwd)
 
     async def exec_line(self, line, stdin, env, cwd):
         self.lines.append(line)
-        rows = "".join(f"src {p} {t} rw 0 0\n" for p, t in self.table.items())
+        rows = "".join(
+            f"{source} {p} {t} rw 0 0\n"
+            for p, (source, t) in self.table.items()
+        )
         stdout = rows if line == "cat /proc/mounts" else ""
         return RunResult(stdout=stdout.encode(), stderr=None, exit_code=0)
 
     async def open_pipe(self, command):
-        self.table[shlex.split(command)[6]] = "fuse.sshfs"
+        source, prefix = shlex.split(command)[5:7]
+        self.table[prefix] = (source, "fuse.sshfs")
         requests = asyncio.StreamReader()
 
         async def stop() -> None:
@@ -526,6 +532,7 @@ async def test_ssh_mounts_serve_a_restricted_session_its_files(profile):
     agent = await ws.session("agent", profile="agent")
     result = await agent.shell("tool run")
     assert result.exit_code == 0
-    assert runtime.table == {"/data": "fuse.sshfs"}
+    assert [kind for _, kind in runtime.table.values()] == ["fuse.sshfs"]
+    assert list(runtime.table) == ["/data"]
     assert "tool run" in runtime.lines
     await ws.close()
