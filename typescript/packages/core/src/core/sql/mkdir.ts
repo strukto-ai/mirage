@@ -22,8 +22,11 @@ import { byEntry, byIno, isDir, makeNode, nowStamp } from './inode.ts'
 import { checkDestParents, leaf, parentRef, target, walk } from './path.ts'
 
 // A new directory's entry names its parent by the entry above it, a subquery
-// a level, which SQLite bounds; `mkdir -p` lands this many levels a batch.
-const LEVELS_PER_BATCH = 16
+// a level, so the deepest statement grows faster than one level a level:
+// SQLite counts a batch's deepest entry, and the lookup of the last directory
+// it made, at most 83 deep for six levels and past 100 for seven, where D1
+// and Durable Objects stop. `mkdir -p` lands this many levels a batch.
+const LEVELS_PER_BATCH = 6
 
 /**
  * Make a directory. Plain mkdir is one mkdir(2) on the whole path, so an
@@ -58,10 +61,15 @@ export async function mkdir(accessor: SqlAccessor, path: PathSpec, parents = fal
     }
     if (levels === LEVELS_PER_BATCH) {
       await accessor.batch(statements.splice(0))
-      const above = `/${w.names.slice(0, i).join('/')}`
-      const made = target(await walk(accessor, above))
-      if (made === null) throw enoent(mountedPath(path, above))
-      parent = byIno(made.ino)
+      const made = await accessor.query(
+        `SELECT ino FROM fs_inode WHERE ino = ${parent.sql}`,
+        parent.params,
+      )
+      const ino = made[0]?.ino
+      if (ino === null || ino === undefined) {
+        throw enoent(mountedPath(path, `/${w.names.slice(0, i).join('/')}`))
+      }
+      parent = byIno(Number(ino))
       levels = 0
     }
     statements.push(...makeNode(accessor, parent, name, DIR, 0, now))

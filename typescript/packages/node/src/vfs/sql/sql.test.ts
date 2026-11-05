@@ -147,6 +147,26 @@ function behaves(open: () => Promise<{ vfs: SqlVFS; driver: SqlDriver }>): void 
     expect(await vfs.exists(at(`${deep}/nope/f`))).toBe(false)
   })
 
+  it.each([19, 20, 31, 32, 96])(
+    'makes, writes, reads, moves, copies and removes %i names deep',
+    async (depth) => {
+      const dir = `/${Array.from({ length: depth - 1 }, (_, i) => `d${String(i)}`).join('/')}`
+      await vfs.mkdir(at(`${dir}/g`), true)
+      await ops(vfs).write(at(`${dir}/f`), enc.encode('deep'))
+      expect(dec.decode(await bytes(vfs, `${dir}/f`))).toBe('deep')
+      expect((await ops(vfs).stat(at(`${dir}/g`))).type).toBe(FileType.DIRECTORY)
+      await ops(vfs).rename(at(`${dir}/f`), at(`${dir}/h`))
+      expect(dec.decode(await bytes(vfs, `${dir}/h`))).toBe('deep')
+      await vfs.copy(at(`${dir}/h`), at(`${dir}/c`))
+      expect(dec.decode(await bytes(vfs, `${dir}/c`))).toBe('deep')
+      await vfs.unlink(at(`${dir}/h`))
+      expect(await vfs.exists(at(`${dir}/h`))).toBe(false)
+      expect(await ops(vfs).readdir(at(dir))).toEqual([`${dir}/c`, `${dir}/g`])
+      await vfs.rmR(at('/d0'))
+      expect(await ops(vfs).readdir(at('/'))).toEqual([])
+    },
+  )
+
   it('refuses a move onto a directory written into since its check, stranding nothing', async () => {
     await vfs.mkdir(at('/src'))
     await vfs.mkdir(at('/dst'))
@@ -221,6 +241,21 @@ describe('SqlVFS over SQLite', () => {
   behaves(() => {
     const driver = new SqliteDriver()
     return Promise.resolve({ vfs: new SqlVFS({ driver }), driver })
+  })
+})
+
+// A node:sqlite connection, whose limits a caller may lower.
+interface Limited {
+  readonly limits: Record<string, number>
+}
+
+// D1 and Durable Objects run SQLite with these limits lowered to 100.
+describe("SqlVFS over SQLite at workerd's limits", () => {
+  behaves(async () => {
+    const driver = new SqliteDriver()
+    const db = await (driver as unknown as { open(): Promise<Limited> }).open()
+    for (const limit of ['column', 'exprDepth', 'variableNumber']) db.limits[limit] = 100
+    return { vfs: new SqlVFS({ driver }), driver }
   })
 })
 

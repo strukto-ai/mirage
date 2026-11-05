@@ -93,7 +93,11 @@ async function sqlLines(driver: SqlDriver, run: SqlRun): Promise<Response> {
     const results = []
     for (const line of run.lines) {
       const result = await ws.shell(line)
-      results.push({ exit: result.exitCode, stdout: decoder.decode(result.stdout) })
+      results.push({
+        exit: result.exitCode,
+        stdout: decoder.decode(result.stdout),
+        stderr: decoder.decode(result.stderr),
+      })
     }
     return Response.json(results)
   } finally {
