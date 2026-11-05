@@ -241,3 +241,33 @@ async def test_awk_rs_paragraph_separator_is_the_whole_newline_run():
         stdin=_chunked((b"a\n\n", b"\nb\n")),
     )
     assert (await _drain(output)).decode() == "a|b|"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fmt", ["%s", "%s" + "x" * 131074], ids=["short", "long"]
+)
+async def test_awk_keeps_detected_errors_when_stdout_closes_early(fmt):
+    output, io = await awk_generic(
+        [],
+        ('BEGIN { print "before"; printf fmt; print "after" }',),
+        {"v": [f"fmt={fmt}"]},
+        stream=_make_backend({}),
+    )
+    iterator = aiter(output)
+    assert await anext(iterator) == b"before\n"
+    await iterator.aclose()
+    assert (
+        await _drain(io.stderr)
+        == (
+            f"awk: not enough arguments to satisfy format string '{fmt}'\n"
+        ).encode()
+    )
+
+
+@pytest.mark.asyncio
+async def test_awk_increments_a_missing_field():
+    assert (
+        await _run_stdin("BEGIN { print $1++; print NF,$1 }", b"")
+        == "0\n1 1\n"
+    )

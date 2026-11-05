@@ -21,7 +21,7 @@ import type { PathSpec, ReadStreamFn } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
 import { AWK_USAGE } from '../constants.ts'
 import { type AwkFlags } from './awk_types.ts'
-import { openStream, serveRequests, type OpenStream } from '../../../rs/stream.ts'
+import { closeStream, openStream, serveRequests, type OpenStream } from '../../../rs/stream.ts'
 import { StreamHost } from '../utils/stream_host.ts'
 
 import { fsStrerror, isEnotdir, isMissingPath } from '../../../errors/fs.ts'
@@ -84,9 +84,15 @@ async function* awkStream(
     yield* serveRequests(stream, host, signal)
     io.exitCode = stream.status()
   } finally {
-    io.stderr = await host.errors.output()
-    await host.close()
-    stream.close()
+    try {
+      io.stderr = await host.errors.output()
+    } finally {
+      try {
+        await host.close()
+      } finally {
+        await closeStream(stream)
+      }
+    }
   }
 }
 

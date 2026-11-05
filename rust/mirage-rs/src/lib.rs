@@ -2,18 +2,23 @@ mod awk;
 mod base64;
 mod bc;
 mod block_size;
+mod calendar;
 mod cat;
 mod cmp;
 mod column;
 mod comm;
 mod compress;
 mod cut;
+mod date;
 mod diff;
 mod digest;
 mod document;
 mod du;
 mod expand;
+mod expr;
+mod file;
 mod find;
+mod find_printf;
 mod fold;
 mod generated;
 mod glob;
@@ -55,6 +60,7 @@ mod rg_options;
 mod sanitize;
 mod scan;
 mod sed;
+mod select;
 mod seq;
 pub mod shell;
 mod shuf;
@@ -392,6 +398,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "cut" => cut::open(config),
         "digest" => digest::open(config),
         "expand" => expand::open_expand(config),
+        "file" => file::open(config),
         "fmt" => reflow::open(config),
         "fold" => fold::open(config),
         "diff" => diff::open(config),
@@ -421,11 +428,15 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "scan" => scan::open(config),
         "quote" => quote::open(config),
         "width" => width::open(config),
+        "date" => date::open(config),
+        "expr" => expr::open(config),
+        "find_printf" => find_printf::open(config),
         "strftime" => strftime::open(config),
         "json_validate" => json_validate::open(config),
         "lance_query" => lance_query::open(config),
         "sanitize" => sanitize::open(config),
         "sed" => sed::open(config),
+        "select" => select::open(config),
         "seq" => seq::open(config),
         "shuf" => shuf::open(config),
         "sort" => sort::open(config),

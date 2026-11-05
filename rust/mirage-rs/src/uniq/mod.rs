@@ -1,5 +1,7 @@
 mod options;
 
+use std::collections::VecDeque;
+
 use serde::Deserialize;
 
 use crate::records::{Records, Take};
@@ -44,6 +46,11 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         count: 0,
         groups: 0,
         repeated_groups: 0,
+        phase: Phase::Read,
+        current_key: (0, 0),
+        first_key: (0, 0),
+        output: VecDeque::new(),
+        busy: false,
     }))
 }
 
@@ -58,112 +65,299 @@ struct Uniq {
     count: u64,
     groups: u64,
     repeated_groups: u64,
+    phase: Phase,
+    current_key: (usize, usize),
+    first_key: (usize, usize),
+    output: VecDeque<Output>,
+    busy: bool,
+}
+
+const WORK: usize = 16384;
+
+#[derive(Clone, Copy)]
+enum Phase {
+    Read,
+    Key {
+        at: usize,
+        field: usize,
+        blanks: bool,
+    },
+    Compare(usize),
+    Close,
+    Prepare,
+    Copy(usize),
+    Plan,
+    Advance,
+    Done,
+}
+
+#[derive(Clone, Copy)]
+enum Source {
+    First,
+    Current,
+}
+
+enum Output {
+    Bytes(Vec<u8>, usize),
+    Record(Source, usize),
+}
+
+fn equal_key(left: &[u8], right: &[u8], ignore_case: bool) -> bool {
+    if ignore_case {
+        left.eq_ignore_ascii_case(right)
+    } else {
+        left == right
+    }
 }
 
 impl Uniq {
-    fn key<'a>(&self, line: &'a [u8]) -> &'a [u8] {
-        let blank = |byte: &u8| *byte == b' ' || *byte == b'\t';
-        let mut at = 0;
-        for _ in 0..self.keys.skip_fields {
-            if at >= line.len() {
-                break;
-            }
-            at += line[at..].iter().take_while(|b| blank(b)).count();
-            at += line[at..].iter().take_while(|b| !blank(b)).count();
-        }
-        let rest = &line[at.saturating_add(self.keys.skip_chars).min(line.len())..];
-        &rest[..self.keys.check_chars.unwrap_or(usize::MAX).min(rest.len())]
-    }
-
-    fn record(&self, line: &[u8], count: u64, out: &mut Vec<u8>) {
+    fn record(&mut self, source: Source, count: u64) {
         if self.config.count {
-            out.extend_from_slice(format!("{count:>7} ").as_bytes());
+            self.output
+                .push_back(Output::Bytes(format!("{count:>7} ").into_bytes(), 0));
         }
-        out.extend_from_slice(line);
-        out.push(self.terminator);
+        self.output.push_back(Output::Record(source, 0));
+        self.blank();
     }
 
-    fn close_group(&self, out: &mut Vec<u8>) {
-        let config = &self.config;
-        let Some(first) = &self.first else { return };
-        if config.all_repeated.is_none()
-            && (config.count || config.unique)
-            && !(config.repeated && self.count == 1)
-            && !(config.unique && self.count > 1)
+    fn blank(&mut self) {
+        self.output
+            .push_back(Output::Bytes(vec![self.terminator], 0));
+    }
+
+    fn close_group(&mut self) {
+        if self.first.is_some()
+            && self.config.all_repeated.is_none()
+            && (self.config.count || self.config.unique)
+            && !(self.config.repeated && self.count == 1)
+            && !(self.config.unique && self.count > 1)
         {
-            self.record(first, self.count, out);
+            self.record(Source::First, self.count);
         }
     }
 
-    fn line(&mut self, line: &[u8], out: &mut Vec<u8>) {
-        let key = self.key(line);
-        let same = self.first.as_ref().is_some_and(|first| {
-            let before = self.key(first);
-            if self.config.ignore_case {
-                key.eq_ignore_ascii_case(before)
-            } else {
-                key == before
-            }
-        });
-        if !same {
-            self.close_group(out);
-            let first = self.first.get_or_insert_with(Vec::new);
-            first.clear();
-            first.extend_from_slice(line);
-            crate::release_capacity(first);
-            self.count = 0;
-            self.groups += 1;
-        }
+    fn plan(&mut self) {
         self.count += 1;
-        let config = &self.config;
-        let first = self.first.as_deref().unwrap_or_default();
-        let repeated_groups = self.repeated_groups;
-        if let Some(group) = config.group {
-            let before = matches!(group, Method::Prepend | Method::Both) || self.groups > 1;
-            if self.count == 1 && before {
-                out.push(self.terminator);
+        if let Some(group) = self.config.group {
+            if self.count == 1
+                && (matches!(group, Method::Prepend | Method::Both) || self.groups > 1)
+            {
+                self.blank();
             }
-            self.record(line, 1, out);
-        } else if let Some(method) = config.all_repeated {
+            self.record(Source::Current, 1);
+        } else if let Some(method) = self.config.all_repeated {
             if self.count == 2 {
-                if method == Method::Prepend || (method == Method::Separate && repeated_groups > 0)
+                if method == Method::Prepend
+                    || (method == Method::Separate && self.repeated_groups > 0)
                 {
-                    out.push(self.terminator);
+                    self.blank();
                 }
-                self.record(first, 1, out);
+                self.record(Source::First, 1);
             }
             if self.count >= 2 {
-                self.record(line, 1, out);
+                self.record(Source::Current, 1);
             }
             if self.count == 2 {
                 self.repeated_groups += 1;
             }
-        } else if !(config.count || config.unique)
-            && self.count == if config.repeated { 2 } else { 1 }
+        } else if !(self.config.count || self.config.unique)
+            && self.count == if self.config.repeated { 2 } else { 1 }
         {
-            self.record(first, 1, out);
+            self.record(Source::First, 1);
+        }
+        self.phase = Phase::Advance;
+    }
+
+    fn emit(&mut self, out: &mut Vec<u8>, available: usize) {
+        let item = self.output.pop_front().unwrap();
+        let (data, at) = match &item {
+            Output::Bytes(data, at) => (data.as_slice(), *at),
+            Output::Record(Source::First, at) => (self.first.as_deref().unwrap(), *at),
+            Output::Record(Source::Current, at) => {
+                let Take::Record((data, _)) = self.records.peek_span(self.terminator) else {
+                    unreachable!()
+                };
+                (data, *at)
+            }
+        };
+        let end = data.len().min(at.saturating_add(available));
+        out.extend_from_slice(&data[at..end]);
+        if end < data.len() {
+            self.output.push_front(match item {
+                Output::Bytes(data, _) => Output::Bytes(data, end),
+                Output::Record(source, _) => Output::Record(source, end),
+            });
         }
     }
 
     fn pump(&mut self, out: &mut Vec<u8>) {
-        let mut records = std::mem::take(&mut self.records);
-        loop {
-            match records.next_span(self.terminator) {
-                Take::Record(line) => self.line(line, out),
-                Take::Wait => break,
-                Take::End => {
-                    self.close_group(out);
-                    if self.first.is_some()
-                        && matches!(self.config.group, Some(Method::Append | Method::Both))
-                    {
-                        out.push(self.terminator);
+        let limit = out.len().saturating_add(WORK);
+        let mut work = WORK;
+        while work > 0 && out.len() < limit {
+            work -= 1;
+            if !self.output.is_empty() {
+                self.emit(out, limit - out.len());
+                continue;
+            }
+            match self.phase {
+                Phase::Read => match self.records.peek_span(self.terminator) {
+                    Take::Wait => {
+                        self.busy = false;
+                        return;
                     }
+                    Take::End => {
+                        self.close_group();
+                        if self.first.is_some()
+                            && matches!(self.config.group, Some(Method::Append | Method::Both))
+                        {
+                            self.blank();
+                        }
+                        self.phase = Phase::Done;
+                    }
+                    Take::Record((line, _)) if self.keys.skip_fields == 0 => {
+                        let start = self.keys.skip_chars.min(line.len());
+                        let end = start
+                            .saturating_add(self.keys.check_chars.unwrap_or(usize::MAX))
+                            .min(line.len());
+                        self.current_key = (start, end);
+                        let key = &line[start..end];
+                        let before = self
+                            .first
+                            .as_deref()
+                            .map(|first| &first[self.first_key.0..self.first_key.1]);
+                        if let Some(before) = before.filter(|before| before.len() == key.len()) {
+                            if key.len() > work {
+                                self.phase = Phase::Compare(0);
+                            } else {
+                                work -= key.len();
+                                if equal_key(key, before, self.config.ignore_case) {
+                                    self.plan();
+                                    if self.output.is_empty() {
+                                        self.records.advance();
+                                        self.phase = Phase::Read;
+                                    }
+                                } else {
+                                    self.phase = Phase::Close;
+                                }
+                            }
+                        } else {
+                            self.phase = Phase::Close;
+                        }
+                    }
+                    Take::Record(_) => {
+                        self.phase = Phase::Key {
+                            at: 0,
+                            field: 0,
+                            blanks: true,
+                        };
+                    }
+                },
+                Phase::Key {
+                    mut at,
+                    mut field,
+                    mut blanks,
+                } => {
+                    let Take::Record((line, _)) = self.records.peek_span(self.terminator) else {
+                        unreachable!()
+                    };
+                    while at < line.len() && field < self.keys.skip_fields && work > 0 {
+                        let blank = matches!(line[at], b' ' | b'\t');
+                        if !blanks && blank {
+                            field += 1;
+                            blanks = true;
+                            continue;
+                        }
+                        if !blank {
+                            blanks = false;
+                        }
+                        at += 1;
+                        work -= 1;
+                    }
+                    if at == line.len() || field == self.keys.skip_fields {
+                        let start = at.saturating_add(self.keys.skip_chars).min(line.len());
+                        let end = start
+                            .saturating_add(self.keys.check_chars.unwrap_or(usize::MAX))
+                            .min(line.len());
+                        self.current_key = (start, end);
+                        self.phase = if self.first.is_some()
+                            && end - start == self.first_key.1 - self.first_key.0
+                        {
+                            Phase::Compare(0)
+                        } else {
+                            Phase::Close
+                        };
+                    } else {
+                        self.phase = Phase::Key { at, field, blanks };
+                    }
+                }
+                Phase::Compare(at) => {
+                    let Take::Record((line, _)) = self.records.peek_span(self.terminator) else {
+                        unreachable!()
+                    };
+                    let key = &line[self.current_key.0..self.current_key.1];
+                    let before =
+                        &self.first.as_deref().unwrap()[self.first_key.0..self.first_key.1];
+                    let end = key.len().min(at.saturating_add(work));
+                    let same = equal_key(&key[at..end], &before[at..end], self.config.ignore_case);
+                    work -= end - at;
+                    self.phase = if !same {
+                        Phase::Close
+                    } else if end == key.len() {
+                        Phase::Plan
+                    } else {
+                        Phase::Compare(end)
+                    };
+                }
+                Phase::Close => {
+                    self.close_group();
+                    self.phase = Phase::Prepare;
+                }
+                Phase::Prepare => {
+                    let Take::Record((line, _)) = self.records.peek_span(self.terminator) else {
+                        unreachable!()
+                    };
+                    let first = self.first.get_or_insert_with(Vec::new);
+                    if first.capacity() < line.len()
+                        || first.capacity() > line.len().max(WORK).saturating_mul(2)
+                    {
+                        *first = Vec::with_capacity(line.len());
+                    } else {
+                        first.clear();
+                    }
+                    self.first_key = self.current_key;
+                    self.count = 0;
+                    self.groups += 1;
+                    self.phase = Phase::Copy(0);
+                }
+                Phase::Copy(at) => {
+                    let Take::Record((line, _)) = self.records.peek_span(self.terminator) else {
+                        unreachable!()
+                    };
+                    let end = line.len().min(at.saturating_add(work));
+                    self.first
+                        .as_mut()
+                        .unwrap()
+                        .extend_from_slice(&line[at..end]);
+                    work -= end - at;
+                    self.phase = if end == line.len() {
+                        Phase::Plan
+                    } else {
+                        Phase::Copy(end)
+                    };
+                }
+                Phase::Plan => self.plan(),
+                Phase::Advance => {
+                    self.records.advance();
+                    self.phase = Phase::Read;
+                }
+                Phase::Done => {
                     self.first = None;
-                    break;
+                    self.busy = false;
+                    return;
                 }
             }
         }
-        self.records = records;
+        self.busy = true;
     }
 }
 
@@ -173,19 +367,88 @@ impl Stream for Uniq {
         self.pump(out);
         Ok(())
     }
-
     fn finish(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        if !self.records.ended() {
-            self.records.end();
-            self.pump(out);
-        }
+        self.records.end();
+        self.pump(out);
+        Ok(())
+    }
+    fn busy(&self) -> bool {
+        self.busy
+    }
+    fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
+        self.pump(out);
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use crate::{config, run};
+
+    #[test]
+    fn giant_keys_copies_and_group_output_resume_in_bounded_steps() {
+        let cases = [
+            (
+                r#"{"count":true,"typed":[["skip_fields","1"]]}"#,
+                [
+                    vec![b' '; WORK * 4],
+                    b"x KEY\n".to_vec(),
+                    vec![b' '; WORK * 4],
+                    b"y KEY\n".to_vec(),
+                ]
+                .concat(),
+                [
+                    b"      2 ".to_vec(),
+                    vec![b' '; WORK * 4],
+                    b"x KEY\n".to_vec(),
+                ]
+                .concat(),
+            ),
+            (
+                r#"{"ignore_case":true}"#,
+                [
+                    vec![b'a'; WORK * 8],
+                    b"\n".to_vec(),
+                    vec![b'A'; WORK * 8],
+                    b"\n".to_vec(),
+                ]
+                .concat(),
+                [vec![b'a'; WORK * 8], b"\n".to_vec()].concat(),
+            ),
+            (
+                r#"{"count":true}"#,
+                b"a\nb\n".repeat(WORK),
+                b"      1 a\n      1 b\n".repeat(WORK),
+            ),
+        ];
+        for (options, input, expected) in cases {
+            let config = config(
+                r#"{"count":false,"repeated":false,"unique":false,"typed":[],"ignore_case":false,"all_repeated":null,"group":null,"zero_terminated":false}"#,
+                options,
+            );
+            let mut stream = open(config.as_bytes()).unwrap();
+            let mut piece = Vec::new();
+            stream.feed(&input, &mut piece).unwrap();
+            assert!(piece.len() <= WORK);
+            let mut out = piece.clone();
+            piece.clear();
+            stream.finish(&mut piece).unwrap();
+            assert!(piece.len() <= WORK);
+            out.extend_from_slice(&piece);
+            let mut turns = 0;
+            while stream.busy() {
+                piece.clear();
+                stream.drain(&mut piece).unwrap();
+                assert!(piece.len() <= WORK);
+                out.extend_from_slice(&piece);
+                turns += 1;
+                assert!(turns < 1000);
+            }
+            assert!(turns > 1);
+            assert_eq!(out, expected);
+        }
+    }
 
     fn uniq(options: &str, input: &[u8]) -> Vec<u8> {
         let config = config(

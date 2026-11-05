@@ -36,7 +36,7 @@ from mirage.errors.fs import enoent
 from mirage.errors.types import OperationNotSupportedError
 from mirage.io.cooperative import chunks
 from mirage.observe.context import RecordingScope
-from mirage.types import FileStat, FileType
+from mirage.types import ContentType, FileStat, FileType
 from tests.core.object_store.conftest import (
     FakeStore,
     make_driver,
@@ -146,7 +146,7 @@ def test_mutation_returns_confirmed_metadata_without_a_lookup(
         name="result.txt",
         size=7,
         type=FileType.FILE,
-        content="text",
+        content=ContentType.TEXT,
         fingerprint="confirmed-token",
         revision="confirmed-revision",
         extra={"etag": "confirmed-token"},

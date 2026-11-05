@@ -237,4 +237,46 @@ describe('max sessions', () => {
     expect((await create('b')).statusCode).toBe(201)
     await app.close()
   })
+
+  it("holds a tenant's lifted limits to the host's ceilings", async () => {
+    const app = buildApp({ maxMemory: '1MB', maxProcesses: 8, maxLineSeconds: 1.5 })
+    try {
+      const created = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces',
+        payload: {
+          id: 'lifted',
+          config: {
+            mounts: { '/': { vfs: 'ram', mode: 'write' } },
+            max_memory: null,
+            processes: { max: null },
+            command_limits: { '@line': { timeout_seconds: 0 } },
+          },
+        },
+      })
+      expect(created.statusCode).toBe(201)
+      await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/lifted/sessions',
+        payload: { session_id: 'agent' },
+      })
+      const patched = await app.inject({
+        method: 'PATCH',
+        url: '/v1/workspaces/lifted/sessions/agent',
+        payload: { profile: { processes: { max: 1000 } } },
+      })
+      expect(patched.statusCode).toBe(200)
+      const ws = app.registry.get('lifted').runner.ws
+      expect(ws.registry.memory?.limit).toBe(1 << 20)
+      expect(ws.processes.ceiling).toBe(8)
+      const ran = await app.inject({
+        method: 'POST',
+        url: '/v1/workspaces/lifted/shell?session_id=agent',
+        payload: { command: 'sleep 5; echo no' },
+      })
+      expect(ran.json<{ exit_code: number }>().exit_code).toBe(124)
+    } finally {
+      await app.close()
+    }
+  }, 30000)
 })

@@ -201,3 +201,31 @@ describe('awk RS', () => {
     expect(out).toBe('a|b|')
   })
 })
+
+it.each([0, 131074])(
+  'keeps detected errors when stdout closes early with %i trailing bytes',
+  async (length) => {
+    const fmt = '%s' + 'x'.repeat(length)
+    const result = await awkGeneric(
+      [],
+      ['BEGIN { print "before"; printf fmt; print "after" }'],
+      ctx({ v: [`fmt=${fmt}`] }),
+      makeStream({}),
+    )
+    const [stdout, io] = result ?? [null, new IOResult()]
+    if (stdout === null || stdout instanceof Uint8Array) throw new Error('expected streamed output')
+    const iterator = stdout[Symbol.asyncIterator]()
+    const first = await iterator.next()
+    if (first.done) throw new Error('expected output before the diagnostic')
+    expect(DEC.decode(first.value)).toBe('before\n')
+    await iterator.return?.()
+    expect(DEC.decode(await materialize(io.stderr))).toBe(
+      `awk: not enough arguments to satisfy format string '${fmt}'\n`,
+    )
+  },
+)
+
+it('increments a missing field', async () => {
+  const [out] = await run([], ['BEGIN { print $1++; print NF,$1 }'], ctx())
+  expect(out).toBe('0\n1 1\n')
+})

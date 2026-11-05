@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from dataclasses import replace
 
 import pytest
 
@@ -104,7 +105,7 @@ def test_dot_prefixed_names_are_dropped_from_listings(accessor):
     # ".foo"; every other op would report it absent).
     async def hidden_rooms(a, match):
         rooms = await list_rooms(a, match)
-        return [rooms[0].model_copy(update={"name": ".secret"}), *rooms]
+        return [replace(rooms[0], name=".secret"), *rooms]
 
     readdir = make_readdir(
         detect_scope, listers={"rooms": hidden_rooms}, static_root=("rooms",)

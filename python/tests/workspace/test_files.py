@@ -320,7 +320,7 @@ class TestFreshStat:
             listed = await ws.vfs.stat("/data/f.txt")
             await ws.mount("/data").index.set_dir(
                 "/data",
-                [("f.txt", listed.model_copy(update={"mode": 0o600}))],
+                [("f.txt", replace(listed, mode=0o600))],
                 datetime.now(timezone.utc) + timedelta(hours=1),
             )
             assert (await ws.vfs.stat("/data/f.txt")).mode == 0o600

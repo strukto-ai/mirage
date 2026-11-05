@@ -83,6 +83,11 @@ jobs:
             # filters, so their disk/RAM CLI corpus runs with either twin.
             # Rust quote, width, strftime, JSON validation and Lance SQL, and
             # their host adapters, use these whole-host filters too.
+            # Rust file detection and MIME formatting use these filters too.
+            # Rust select and rs/select cover head/tail boundaries and windows.
+            # Rust find_printf and builtin/executor adapters cover find formatting.
+            # Rust expr and general/expr adapters cover expression evaluation.
+            # Rust date/calendar, utils/dates and general/date cover date parsing.
             # LanceDB's shared core/lancedb/types modules select the embedded
             # LanceDB corpus through these same whole-host filters.
             # The io/writer, spool, archive/codec and streamed upload modules
@@ -424,7 +429,8 @@ jobs:
       - name: Generate integ Prisma clients
         working-directory: integ
         run: pnpm run prisma:clients
-      # The test worker runs the Cloudflare package's source, whose Monty bundle is generated.
+      # The test worker runs the Cloudflare package's source, whose Monty
+      # bundle is generated.
       - name: Bundle the Cloudflare package's Monty runtime
         working-directory: typescript/packages/cloudflare
         run: node scripts/bundle-monty.mjs

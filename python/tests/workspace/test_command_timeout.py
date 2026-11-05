@@ -97,6 +97,7 @@ async def test_the_line_deadline_lands_inside_a_long_expansion(line):
         mode=MountMode.WRITE,
         command_limits=_line(0.3),
         env={"x": "\n".join(str(i) for i in range(1, 2000001))},
+        max_env=None,
     )
     started = time.monotonic()
     r = await ws.shell(line)
@@ -477,14 +478,14 @@ async def test_large_ram_command_honors_caller_cancel(command, monkeypatch):
         cancel.set()
 
     class ScannedBytes(bytes):
-        def count(self, sub, start=0, end=None):
+        def __getitem__(self, key):
             nonlocal timer, consumed
-            result = super().count(sub, start, end)
-            end_at = len(self) if end is None else min(len(self), end)
-            consumed += end_at - start
-            if timer is None:
-                timer = loop.call_soon(stop)
-            return result
+            value = super().__getitem__(key)
+            if isinstance(key, slice):
+                consumed += len(value)
+                if timer is None:
+                    timer = loop.call_soon(stop)
+            return value
 
     async def read(path, offset=0, size=None):
         nonlocal timer, consumed, available
@@ -492,8 +493,7 @@ async def test_large_ram_command_honors_caller_cancel(command, monkeypatch):
         assert isinstance(source, bytes)
         available += len(source)
         if command.startswith("head "):
-            # One whole blob: only the inner line scan can yield the
-            # abort after it finishes counting its first bounded slice.
+            # One producer blob; track the slices passed to the selector.
             yield ScannedBytes(source)
             return
         yield source[:CHUNK_SIZE]

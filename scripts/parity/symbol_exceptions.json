@@ -1,5 +1,5 @@
 {
- "baseline": 1680,
+ "baseline": 1672,
  "modules": {
   "server/app": {
    "python_only": {
@@ -251,7 +251,8 @@
     "openStreamSync": "Synchronous pure utilities lazily initialize embedded Wasm; Python native streams open synchronously.",
     "synchronous": "Shares the current embedded Wasm instance between synchronous utilities and asynchronous command streams.",
     "movables": "The matcher streams each instance holds, which close with it when it retires; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
-    "retire": "Drops a grown or trapped instance and closes the matcher streams still on it; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle."
+    "retire": "Drops a grown or trapped instance and closes the matcher streams still on it; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
+    "moduleSource": "TypeScript accepts a lazy Node Wasm loader alongside bundled bytes or a precompiled module; Python loads its native extension."
    }
   },
   "fuse/constants": {
@@ -661,8 +662,9 @@
   },
   "utils/dates": {
    "typescript_only": {
-    "mod7": "JavaScript's % keeps the dividend's sign, so the weekday arithmetic needs a helper for a remainder from 0 to 6; Python's % already gives one.",
-    "EXACT": "Python's integers are exact at any size; TypeScript sums relative counts as BigInt and needs the bound past which a total no longer converts to a double exactly."
+    "WALL": "Zod validates the six calendar fields returned by the clock bridge; Python checks and projects the native JSON fields directly.",
+    "REQUEST": "Zod validates the shared core's time-zone lookup request before passing it to the TypeScript zone provider.",
+    "PLACEMENT": "Zod validates the shared core's parsed instant and optional local wall fields before constructing a TypeScript Date."
    }
   },
   "config": {
@@ -1107,7 +1109,9 @@
     "crossing": "A stat row as it crosses to the worker, without its backend row, which structured clone cannot carry; Python's guest reads the row in-process.",
     "portOf": "Builds a Port over node's or a page's worker.",
     "startWorker": "Starts the worker a guest runs on, from its file in Node and its embedded bundle on a page; Python starts a thread (asyncio.to_thread).",
-    "workerUnavailable": "Lets the runtime answer 127 before a run where no worker can start; Python always has threads."
+    "workerUnavailable": "Lets the runtime answer 127 before a run where no worker can start; Python always has threads.",
+    "GuestEnd": "How a worker or JSPI guest ended, which GuestHost turns into the run's result; Python's thread returns its exit code and lost files directly.",
+    "GuestHost": "The host's side of one run, shared by the worker engine and the JSPI one (an edge isolate's); Python has one engine, whose WasmExecution answers its thread's calls itself."
    }
   },
   "runtime/wasm/fs": {
@@ -1125,7 +1129,14 @@
     "GuestFile": "An open file of the host's, answered across the bridge; Python's WasiFs holds the Descriptor itself.",
     "GuestView": "The run's WasmView, answered across the bridge; Python's WasiFs holds the view itself.",
     "clockNs": "Reads the clocks preview1 asks for in nanoseconds; Python's time module answers in them (time.time_ns, monotonic_ns).",
-    "wasiImports": "The import table for WebAssembly.instantiate, the twin of install_wasi_fs."
+    "wasiImports": "The import table for WebAssembly.instantiate, the twin of install_wasi_fs.",
+    "Calls": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly.",
+    "answer": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly.",
+    "drive": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly. drive runs the steps, at once or awaiting each answer.",
+    "resume": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly. resume is drive from its first promise on.",
+    "settle": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly. settle runs them where every answer is at hand, as a worker's are.",
+    "thenable": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly. thenable tells a promise answer from one at hand.",
+    "failed": "Maps a failed import to its errno, passing GuestExit through, which _call_guarded does in Python."
    }
   },
   "runtime/wasm/loader": {
@@ -1222,6 +1233,34 @@
   "runtime/python/monty/constants": {
    "typescript_only": {
     "SHARED_THREAD_SECONDS": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit."
+   }
+  },
+  "runtime/js/quickjs/runtime": {
+   "typescript_only": {
+    "QuickJsEngine": "A worker per run, or JSPI in the host's own isolate where no worker can start (an edge runtime); Python always runs qjs on a thread under wasmtime."
+   }
+  },
+  "core/ram/constants": {
+   "python_only": {
+    "PUBLISH_BYTES": "A Python RAM file is immutable bytes, so each landing of a streamed write copies the whole file, and past this size the wait grows with it; TypeScript grows one buffer and lands only the new bytes, so its wait stays STREAM_PUBLISH_SECONDS."
+   }
+  },
+  "process/config": {
+   "typescript_only": {
+    "ProcessesBlock": "A block as written, a bare scope or the fields it states; Python's ProcessPermissions keeps both shapes in one pydantic model, its model_fields_set recording what was stated.",
+    "layerProcesses": "Python's ProcessPermissions.layered, a classmethod on the model; TypeScript's ProcessPermissions is a plain interface with no methods.",
+    "statedProcesses": "The fields a block states, which Python reads off model_fields_set; a TypeScript object keeps only the keys it was given, so parsing one is its own function."
+   }
+  },
+  "server/daemon_config": {
+   "python_only": {
+    "SIZE_KEYS": "Python's tomllib hands each [daemon] value back typed, so a size key takes an int or a string; TypeScript's reader returns every value as text and checks only the numeric keys."
+   }
+  },
+  "workspace/session/budget": {
+   "typescript_only": {
+    "recordBytes": "TypeScript caches each variable record's bytes in a WeakMap keyed by the record; Python's records are slotted and may hold a list, so they cannot be weak keys, and Python measures a record as it sums.",
+    "varBytes": "The WeakMap behind recordBytes; see there."
    }
   }
  }

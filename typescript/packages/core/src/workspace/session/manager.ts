@@ -20,6 +20,7 @@ import type { CompiledProfile } from '../../policy/profile.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
 import { applyProfile, narrow } from './resolve.ts'
+import { checkEnvFits, entryBytes } from './budget.ts'
 import { CAS_MAX_RETRIES, generationOf, type RecordFields } from '../record/types.ts'
 import type { AdmissionRules, Decision, ProfileScripts } from '../../policy/types.ts'
 import type { EnvEntries } from '../../secrets/config.ts'
@@ -27,7 +28,7 @@ import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { SystemClock, type Clock } from '../../utils/clock.ts'
-import { SystemIdSource, type IdSource } from '../../utils/ids.ts'
+import { checkName, SystemIdSource, type IdSource } from '../../utils/ids.ts'
 
 type StoredSession = Parameters<typeof SessionState.fromDict>[0]
 
@@ -51,6 +52,15 @@ function mergeSeedVars(session: SessionState, seedVars: Record<string, ShellVar>
   for (const [name, seeded] of Object.entries(seedVars)) {
     if (!(name in session.vars)) session.vars[name] = seeded
   }
+}
+
+/** The bytes `mergeSeedVars` adds to a stored record. Mirrors Python's `_seed_bytes`. */
+function seedBytes(session: SessionState, seedVars: Record<string, ShellVar>): number {
+  let held = 0
+  for (const [name, seeded] of Object.entries(seedVars)) {
+    if (!(name in session.vars)) held += entryBytes(name, seeded.value)
+  }
+  return held
 }
 
 /**
@@ -78,6 +88,12 @@ export class SessionManager extends SessionOwner {
   private readonly persisted = new Map<string, string>()
 
   private defaultProfileInternal: CompiledProfile | null = null
+
+  /**
+   * The workspace's max_env, which a created session must start within;
+   * null for no cap. Mirrors Python's `max_env`.
+   */
+  maxEnv: number | null = null
 
   // The workspace's env block, translated: seeded onto the default
   // session now and copied into every created session as its template.
@@ -298,9 +314,16 @@ export class SessionManager extends SessionOwner {
   }
 
   private async hydrate(): Promise<void> {
-    const entries = await this.sessionStore.load()
-    for (const [sid, fields] of entries) {
-      const stored = SessionState.fromDict(fields as StoredSession)
+    // A record past max_env, with the env entries the merge adds, refuses the
+    // load before any session changes, as a snapshot past it does. A record a
+    // local session replaced is skipped.
+    const records = [...(await this.sessionStore.load())]
+      .filter(([sid]) => sid === this.defaultId || !this.sessions.has(sid))
+      .map(([sid, fields]) => [sid, SessionState.fromDict(fields as StoredSession)] as const)
+    for (const [, record] of records) {
+      checkEnvFits(record, this.maxEnv, seedBytes(record, this.seedVarsInternal))
+    }
+    for (const [sid, stored] of records) {
       if (sid === this.defaultId) {
         const dflt = this.defaultSession()
         setCwd(dflt, stored.cwd)
@@ -338,7 +361,6 @@ export class SessionManager extends SessionOwner {
         this.hasManaged = this.hasManaged || holdsManaged(dflt)
         continue
       }
-      if (this.sessions.has(sid)) continue
       stored.ids = this.ids
       this.sessions.set(sid, stored)
       this.persisted.set(sid, JSON.stringify(stored.toDict()))
@@ -425,6 +447,7 @@ export class SessionManager extends SessionOwner {
       profile?: CompiledProfile
     } = {},
   ): SessionState {
+    checkName('session id', sessionId)
     if (this.sessions.has(sessionId)) {
       throw new Error(`Session ${sessionId} already exists`)
     }
@@ -438,6 +461,7 @@ export class SessionManager extends SessionOwner {
     })
     session.ids = this.ids
     if (options.profile !== undefined) applyProfile(session, options.profile)
+    checkEnvFits(session, this.maxEnv)
     this.hasManaged = this.hasManaged || holdsManaged(session)
     this.sessions.set(sessionId, session)
     return session

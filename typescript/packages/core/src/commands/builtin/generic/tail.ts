@@ -1,4 +1,3 @@
-import { YieldBudget } from '../../../io/yield_budget.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,6 +43,9 @@ import { revisionFor } from '../../../observe/context.ts'
 import { dispatchOf } from '../utils/links.ts'
 import { StreamRefusal } from '../../../rs/errors.ts'
 import { refused, scan } from '../../../rs/scan.ts'
+import { openStream, closeStream } from '../../../rs/stream.ts'
+import { YieldBudget } from '../../../io/yield_budget.ts'
+import { progress } from '../../../rs/select.ts'
 
 /**
  * `-n`/`-c` split by the end they count from. A leading `+` counts forward
@@ -251,38 +253,49 @@ async function* tailFile(
           yield* tailRange(readRange, path, offset, size)
           return
         }
+        if (n === 0) return
         let end = size
-        let wanted = Math.abs(n)
         let window = CHUNK_SIZE
         const budget = new YieldBudget()
-        while (end > 0) {
-          await budget.run()
-          const start = Math.max(0, end - window)
-          const data = await materialize(readRange(path, start, end - start))
-          if (data.byteLength !== end - start) break
-          if (end === size && data.at(-1) === 10) wanted++
-          let found = 0
-          for (let at = data.indexOf(10); at >= 0; at = data.indexOf(10, at + 1)) found++
-          if (found < wanted && start > 0) {
-            wanted -= found
+        const selector = await openStream('select', {
+          mode: 'reverse',
+          unit: 'records',
+          count: String(Math.abs(n)),
+          terminator: 10,
+        })
+        try {
+          while (end > 0) {
+            await budget.run()
+            const start = Math.max(0, end - window)
+            const data = await materialize(readRange(path, start, end - start))
+            if (data.byteLength !== end - start) break
+            let selected: number | null = null
+            for (let stop = data.byteLength; stop > 0; stop -= CHUNK_SIZE) {
+              const offset = Math.max(0, stop - CHUNK_SIZE)
+              selector.feed(data.subarray(offset, stop))
+              while (selector.busy()) {
+                const paused = budget.run()
+                if (paused !== undefined) await paused
+                selector.drain()
+              }
+              if (selector.done()) {
+                selected = offset + progress(selector).consumed
+                break
+              }
+              const paused = budget.run()
+              if (paused !== undefined) await paused
+            }
+            if (selected !== null || start === 0) {
+              const offset = selected ?? 0
+              yield* chunks(data.subarray(offset))
+              yield* tailRange(readRange, path, end, size)
+              return
+            }
             end = start
             window = Math.min(window * 2, 1 << 20)
-            continue
           }
-          let at = data.length
-          while (wanted > 0) {
-            at = at === 0 ? -1 : data.lastIndexOf(10, at - 1)
-            if (at < 0) break
-            wanted--
-          }
-          if (wanted === 0 || start === 0) {
-            const piece = wanted === 0 ? data.subarray(at + 1) : data
-            yield* chunks(piece)
-            yield* tailRange(readRange, path, end, size)
-            return
-          }
-          end = start
-          window = Math.min(window * 2, 1 << 20)
+        } finally {
+          await closeStream(selector)
         }
       }
     }
@@ -290,91 +303,50 @@ async function* tailFile(
   yield* tail(read(path), counts)
 }
 
-// The tail of one source, read as it streams. Mirrors Python's `tail`.
 async function* tail(source: ByteSource, rawCounts: TailCounts): AsyncIterable<Uint8Array> {
   const counts = normalizeCounts(rawCounts)
-  if (counts.fromByte !== null || counts.fromLine !== null) {
-    let skipBytes = counts.fromByte === null ? 0 : Math.max(0, counts.fromByte - 1)
-    let skipLines = counts.fromLine === null ? 0 : Math.max(0, counts.fromLine - 1)
-    for await (const part of chunks(source)) {
-      let start = Math.min(skipBytes, part.length)
-      skipBytes -= start
-      while (skipLines > 0 && start < part.length) {
-        const next = part.indexOf(10, start)
-        if (next === -1) {
-          start = part.length
-          break
-        }
-        start = next + 1
-        skipLines--
+  const forward = counts.fromByte !== null || counts.fromLine !== null
+  const byteMode =
+    counts.fromByte !== null || (counts.fromLine === null && counts.byteCount !== null)
+  const count =
+    counts.fromByte !== null
+      ? Math.max(0, counts.fromByte - 1)
+      : counts.fromLine !== null
+        ? Math.max(0, counts.fromLine - 1)
+        : Math.abs(counts.byteCount ?? counts.lines ?? 10)
+  const engine = await openStream('select', {
+    mode: forward ? 'skip' : 'last',
+    unit: byteMode ? 'bytes' : 'records',
+    count: String(count),
+    terminator: 10,
+  })
+  const budget = new YieldBudget()
+  const input = chunks(source)
+  try {
+    if (engine.done()) return
+    for await (const part of input) {
+      const output = engine.feed(part)
+      if (output.byteLength > 0) yield output
+      while (engine.busy()) {
+        const paused = budget.run()
+        if (paused !== undefined) await paused
+        const output = engine.drain()
+        if (output.byteLength > 0) yield output
       }
-      if (start < part.length && skipLines === 0) yield part.subarray(start)
+      if (!forward && !byteMode) checkMemory(progress(engine).retained)
     }
-    return
+    const output = engine.finish()
+    if (output.byteLength > 0) yield output
+    while (engine.busy()) {
+      const paused = budget.run()
+      if (paused !== undefined) await paused
+      const output = engine.drain()
+      if (output.byteLength > 0) yield output
+    }
+  } finally {
+    await closeStream(engine)
+    await input.return?.(undefined)
   }
-  if (counts.byteCount !== null) {
-    const count = Math.abs(counts.byteCount)
-    if (count === 0) return
-    const kept: Uint8Array[] = []
-    let held = 0
-    for await (const part of chunks(source)) {
-      kept.push(part.slice(-count))
-      held += Math.min(part.length, count)
-      while (kept[0] !== undefined && held - kept[0].length >= count) {
-        held -= kept[0].length
-        kept.shift()
-      }
-    }
-    if (held > 0) yield concat(kept).slice(-count)
-    return
-  }
-  const count = Math.abs(counts.lines ?? 10)
-  if (count === 0) return
-  // The bounded chunks that may hold the last lines, each with its
-  // newlines: the first goes once the others hold a newline more than the
-  // count, which covers a last line that lacks its own.
-  const ends: [Uint8Array, number][] = []
-  let next = 0
-  let held = 0
-  let size = 0
-  for await (const part of chunks(source)) {
-    if (part.length === 0) continue
-    let newlines = 0
-    for (let at = part.indexOf(10); at >= 0; at = part.indexOf(10, at + 1)) newlines++
-    ends.push([part, newlines])
-    held += newlines
-    size += part.length
-    for (
-      let first = ends[next];
-      first !== undefined && held - first[1] > count;
-      first = ends[next]
-    ) {
-      held -= first[1]
-      size -= first[0].length
-      next++
-    }
-    checkMemory(size)
-    if (next * 2 > ends.length) {
-      ends.splice(0, next)
-      next = 0
-    }
-  }
-  const last = ends.at(-1)
-  if (last === undefined || next >= ends.length) return
-  let wanted = count + (last[0].at(-1) === 10 ? 1 : 0)
-  const pieces: Uint8Array[] = []
-  for (const [part, newlines] of ends.slice(next).reverse()) {
-    if (newlines < wanted) {
-      wanted -= newlines
-      pieces.push(part)
-      continue
-    }
-    let at = part.length
-    for (; wanted > 0; wanted--) at = part.lastIndexOf(10, at - 1)
-    pieces.push(part.subarray(at + 1))
-    break
-  }
-  yield concat(pieces.reverse())
 }
 
 // Each opened operand's tail under its header. An unread operand (a

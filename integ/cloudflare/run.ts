@@ -72,6 +72,38 @@ const MCP_PORT = 5110
 
 type Config = Record<string, unknown>
 
+// How long the edge worker may take over one request: past the corpus's
+// slowest line, a 300,000-pass shell loop that takes over two minutes on a
+// CI runner, and short of the five minutes Node's fetch waits for headers,
+// as the shell route answers once its line ends. A line that hangs the
+// worker, or a worker that never built (wrangler dev holds a request until
+// one does), then fails the run rather than holding it to the job's limit.
+const ANSWER_MS = 280_000
+
+/** The edge worker left a request unanswered past its limit. */
+class NoAnswer extends Error {}
+
+/** A fetch our limit ended, or Node's own wait for headers or a body. */
+function timedOut(e: unknown): boolean {
+  if (e instanceof DOMException && e.name === 'TimeoutError') return true
+  const code = (e as { cause?: { code?: unknown } } | null)?.cause?.code
+  return code === 'UND_ERR_HEADERS_TIMEOUT' || code === 'UND_ERR_BODY_TIMEOUT'
+}
+
+/** A request of the edge worker's, failing once it has not answered in `ms`. */
+async function edgeFetch(url: string, init: RequestInit = {}, ms = ANSWER_MS): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) })
+  } catch (e) {
+    if (timedOut(e)) {
+      throw new NoAnswer(`${url}: the edge worker did not answer in ${String(ms / 1000)} s`, {
+        cause: e,
+      })
+    }
+    throw e
+  }
+}
+
 /** A fresh id per open, the shape the adapters' `runId` has. */
 function runId(): string {
   return randomUUID().replace(/-/g, '').slice(0, 8)
@@ -421,18 +453,18 @@ async function applyProfiles(
   const auth = { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` }
   const sessions = `${base}/v1/workspaces/${id}/sessions`
   for (const [sid, profile] of Object.entries(profiles)) {
-    const listed = (await (await fetch(sessions, { headers: auth })).json()) as {
+    const listed = (await (await edgeFetch(sessions, { headers: auth })).json()) as {
       session_id: string
     }[]
     if (!listed.some((s) => s.session_id === sid)) {
-      const created = await fetch(sessions, {
+      const created = await edgeFetch(sessions, {
         method: 'POST',
         headers: auth,
         body: JSON.stringify({ session_id: sid }),
       })
       if (created.status !== 201) throw new Error(`session ${sid}: ${await created.text()}`)
     }
-    const set = await fetch(`${sessions}/${encodeURIComponent(sid)}`, {
+    const set = await edgeFetch(`${sessions}/${encodeURIComponent(sid)}`, {
       method: 'PATCH',
       headers: auth,
       body: JSON.stringify({ profile }),
@@ -461,7 +493,7 @@ function edgeWorkspace(base: string, id: string): ExecWorkspace {
           })()
     const query =
       opts?.sessionId === undefined ? '' : `?session_id=${encodeURIComponent(opts.sessionId)}`
-    const response = await fetch(`${base}/v1/workspaces/${id}/shell${query}`, {
+    const response = await edgeFetch(`${base}/v1/workspaces/${id}/shell${query}`, {
       ...init,
       method: 'POST',
       headers: {
@@ -492,7 +524,7 @@ function edgeWorkspace(base: string, id: string): ExecWorkspace {
     sessionId: string | undefined,
   ): Promise<string> => {
     const scope = sessionId === undefined ? '' : `/sessions/${encodeURIComponent(sessionId)}`
-    const response = await fetch(`${base}/v1/workspaces/${id}${scope}/${kind}-md`, {
+    const response = await edgeFetch(`${base}/v1/workspaces/${id}${scope}/${kind}-md`, {
       method: path === undefined ? 'GET' : 'PUT',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${TOKEN}` },
       ...(path === undefined ? {} : { body: JSON.stringify({ path }) }),
@@ -519,7 +551,7 @@ function edgeWorkspace(base: string, id: string): ExecWorkspace {
     decisions: { pending: () => [], answer: () => unsupported('decisions') },
     explain: () => unsupported('explain'),
     close: async () => {
-      await fetch(`${base}/v1/workspaces/${id}`, {
+      await edgeFetch(`${base}/v1/workspaces/${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${TOKEN}` },
       })
@@ -753,19 +785,24 @@ async function startEdge(port: number): Promise<ChildProcess> {
       env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
     },
   )
-  for (let i = 0; i < 240; i++) {
+  // Two minutes in all, each probe five seconds of it: a worker that fails
+  // to build leaves wrangler dev holding the probe.
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline) {
     if (child.exitCode !== null || child.signalCode !== null) {
       throw new Error('the edge worker exited before it answered')
     }
     try {
-      if ((await fetch(`http://127.0.0.1:${String(port)}/v1/health`)).ok) return child
+      if ((await edgeFetch(`http://127.0.0.1:${String(port)}/v1/health`, {}, 5_000)).ok) {
+        return child
+      }
     } catch {
-      // Not listening yet.
+      // Not listening yet, or not built.
     }
     await delay(500)
   }
   child.kill()
-  throw new Error('the edge worker did not start')
+  throw new Error('the edge worker did not start in two minutes; its build is in the log above')
 }
 
 async function main(): Promise<void> {
@@ -813,7 +850,7 @@ async function main(): Promise<void> {
       // The workspace, its sessions and its seeds; again after workerd ends
       // an isolate, which takes every workspace it held with it.
       const open = async (): Promise<void> => {
-        const created = await fetch(`${base}/v1/workspaces`, {
+        const created = await edgeFetch(`${base}/v1/workspaces`, {
           method: 'POST',
           headers: auth,
           body: JSON.stringify({ id, config }),
@@ -822,7 +859,7 @@ async function main(): Promise<void> {
           throw new Error(`create answered ${String(created.status)} ${await created.text()}`)
         }
         for (const [sid, profile] of sessions) {
-          const opened = await fetch(`${base}/v1/workspaces/${id}/sessions`, {
+          const opened = await edgeFetch(`${base}/v1/workspaces/${id}/sessions`, {
             method: 'POST',
             headers: auth,
             body: JSON.stringify({ session_id: sid, ...(profile !== null ? { profile } : {}) }),
@@ -840,10 +877,11 @@ async function main(): Promise<void> {
         }
       }
       const alive = async (): Promise<boolean> =>
-        (await fetch(`${base}/v1/workspaces/${id}`, { headers: auth })).status !== 404
+        (await edgeFetch(`${base}/v1/workspaces/${id}`, { headers: auth })).status !== 404
       try {
         await open()
       } catch (e) {
+        if (e instanceof NoAnswer) throw e
         failed++
         console.log(`FAIL ${target.id}: ${String(e)}`)
         continue
@@ -866,6 +904,11 @@ async function main(): Promise<void> {
             ran = true
             diffs = compare(bound, exitCode, out, err, elapsed, null, notes)
           } catch (e) {
+            // A line the worker never answered leaves it wedged, failing
+            // every line after it, so the run ends at that one.
+            if (e instanceof NoAnswer) {
+              throw new Error(`${target.id}/${bound.id}: ${bound.command}`, { cause: e })
+            }
             diffs = [String(e)]
             if (!(await alive())) {
               lost++

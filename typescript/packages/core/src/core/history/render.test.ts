@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import type { JsonObject } from '../../types.ts'
+import { HISTFILESIZE } from './constants.ts'
 import { renderBashHistory, renderHistoryListing } from './render.ts'
 
 function command(cmd: string, timestamp = 0): JsonObject {
@@ -35,6 +36,13 @@ describe('renderBashHistory', () => {
       { type: 'vfs', session: 's1', timestamp: 2000, vfs: 'read' },
     ]
     expect(renderBashHistory(events)).toBe('')
+  })
+
+  it('keeps the newest HISTFILESIZE commands', () => {
+    const events = Array.from({ length: HISTFILESIZE + 2 }, (_, i) => command(`echo ${String(i)}`))
+    const lines = renderBashHistory(events).trimEnd().split('\n')
+    expect(lines).toHaveLength(2 * HISTFILESIZE)
+    expect([lines[1], lines.at(-1)]).toEqual(['echo 2', `echo ${String(HISTFILESIZE + 1)}`])
   })
 })
 

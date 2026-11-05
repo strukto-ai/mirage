@@ -38,7 +38,11 @@ await app.listen({ host: '127.0.0.1', port: 8765 })
 | `maxWorkspaces` | `MIRAGE_MAX_WORKSPACES`, else the `max_workspaces` key, else no cap | The most workspaces the app holds at once. A create, clone or load past it answers 503, and the ones it holds keep running. |
 | `policies` | none | The server's own [policies](/home/access/http#server-policies): each answers `preWorkspace` before a workspace is built, and is registered on every workspace the app builds. |
 | `policyFile` | `MIRAGE_POLICY_FILE`, else the `policy_file` key, else none | A file of policy programs that answer the same way. |
-| `maxSessions` | `MIRAGE_MAX_SESSIONS`, else the `max_sessions` key, else no cap | The most sessions each workspace holds, its default session among them. A new session past it, over HTTP or SSH, answers 429. |
+| `maxSessions` | `MIRAGE_MAX_SESSIONS`, else the `max_sessions` key, else `16` | The most sessions each workspace holds, its default session among them. A new session past it, over HTTP or SSH, answers 429. |
+| `maxMemory` | `MIRAGE_MAX_MEMORY`, else the `max_memory` key, else none | The most any workspace's `max_memory` reaches, as a [size](/home/configuration#sizes). A workspace that sets more, or lifts its cap, gets this. |
+| `maxProcesses` | `MIRAGE_MAX_PROCESSES`, else the `max_processes` key, else none | The most any session's `processes.max` reaches, whatever a config or profile sets. |
+| `maxLineSeconds` | `MIRAGE_MAX_LINE_SECONDS`, else the `max_line_seconds` key, else none | The most seconds any line runs, whatever `@line` a config or profile sets. A line past it exits 124. |
+| `maxEnv` | `MIRAGE_MAX_ENV`, else the `max_env` key, else none | The most any workspace's `max_env` reaches, as a [size](/home/configuration#sizes). |
 | `rateLimits` | `MIRAGE_RATE_LIMITS`, else the `rate_limits` key, else `ip=1000/minute` | A list of `{ key, rate }`; an empty list disables limits. See [Rate limits](/home/access/http#rate-limits). |
 | `forwardedAllowIps` | `MIRAGE_FORWARDED_ALLOW_IPS`, else the `forwarded_allow_ips` key, else none | The proxies, addresses or networks, whose `X-Forwarded-For` names the client. `['*']` believes any. |
 | `gracefulTimeout` | `MIRAGE_GRACEFUL_TIMEOUT`, else the `graceful_timeout` key, else `0` | Seconds running lines get to finish on `app.close()` before they are cancelled. New work is refused meanwhile. |

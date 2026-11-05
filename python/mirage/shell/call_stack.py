@@ -190,6 +190,10 @@ class CallStack:
     def set_positional(self, values: list[str]) -> None:
         self.current.positional = values
 
+    def positionals(self) -> list[list[str]]:
+        """Every frame's positional parameters, outermost first."""
+        return [frame.positional for frame in self._frames]
+
     def set_local(self, name: str, value: str) -> None:
         self.current.locals[name] = value
 

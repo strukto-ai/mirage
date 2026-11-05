@@ -11,7 +11,9 @@ From outside, `ws.history()`, [`GET /v1/workspaces/{id}/history`](/home/access/h
 and `mirage workspace history` read every session's record: each command as a
 `command` entry when it starts and a `result` entry (exit code, stdout,
 stderr) when it ends, and with `vfs`, each call it made to a mount between
-them.
+them. A read returns the newest 10,000 entries at most, and `/.bash_history`
+the newest 10,000 commands, as bash's `HISTFILESIZE` bounds its history file;
+`history` lists the newest 500, as `HISTSIZE` does.
 
 A line of several commands is recorded as bash's history adds it when it
 reads the line interactively: one entry per command read, with what that
@@ -91,7 +93,7 @@ the backend: OTLP to Datadog, Honeycomb, Grafana, Langfuse and others.
 
 | Span | Attributes |
 | --- | --- |
-| `command` | `mirage.workspace.id`, `mirage.session.id`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr` |
+| `command` | `mirage.workspace.id`, `mirage.session.id`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr`, `mirage.vfs.dropped` |
 | `vfs.<call>` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes`, `mirage.vfs.timestamp`, `mirage.vfs.duration_ms` |
 
 `mirage.cwd` is where the line started. `mirage.stdout` and `mirage.stderr`
@@ -99,6 +101,11 @@ are the start of its output, as UTF-8 text of at most 16 KiB each by
 default, or as many bytes as `MIRAGE_TRACE_CONTENT_MAX_BYTES` says. At that
 size both fit the 64 KB a Cloudflare Workers span holds for all its
 attributes, and any backend's field.
+
+A line sends at most 1000 `vfs.<call>` spans, or as many as
+`MIRAGE_TRACE_MAX_SPANS` says, so a walk over a large tree cannot flood the
+exporter. `mirage.vfs.dropped` on its `command` span counts the calls past
+that; the history still records every call.
 
 `mirage.timestamp` and `mirage.duration_ms` repeat the span's own start and
 length in milliseconds, as the history's `command` and `result` entries have

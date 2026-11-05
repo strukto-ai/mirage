@@ -122,5 +122,9 @@ async function clone(
   const merged = { ...existing, ...overrideMounts }
   // The clone shares the source's remote mounts, whose clients run on the
   // source's clock, so it runs on that clock too.
-  return host.Workspace.fromState(state, { secrets, clock: src.clock }, merged)
+  return host.Workspace.fromState(
+    state,
+    { secrets, clock: src.clock, ceilings: src.registry.ceilings },
+    merged,
+  )
 }

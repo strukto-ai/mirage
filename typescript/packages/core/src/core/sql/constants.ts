@@ -32,6 +32,9 @@ export const FILE = S_IFREG
 /** The most parameters one statement binds: D1 and Durable Objects stop at 100. */
 export const MAX_PARAMS = 100
 
+/** The most columns one query answers: D1 and Durable Objects stop at 100. */
+export const MAX_COLUMNS = 100
+
 /** The bytes a streamed write gathers before it lands them. */
 export const FLUSH_BYTES = 1024 * 1024
 

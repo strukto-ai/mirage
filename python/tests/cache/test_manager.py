@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -23,7 +24,7 @@ from mirage.cache.context import publish_read
 from mirage.cache.file.io import mutation_lock
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import NULL_INDEX
-from mirage.cache.index.config import LookupStatus
+from mirage.cache.index.config import LookupStatus, row_json
 from mirage.cache.index.constants import LISTING_TRUST_WINDOW
 from mirage.cache.index.ram import RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
@@ -914,7 +915,7 @@ async def test_retained_fallback_row_is_fenced(interference):
         cache, index, "/data/", True, owns_path=lambda _: owns[0]
     )
     old = FileStat(name="a", type=FileType.FILE, fingerprint="old")
-    new = old.model_copy(update={"fingerprint": "confirmed"})
+    new = replace(old, fingerprint="confirmed")
     await index.set_dir("/data", [("a", old)])
     listing = await index.list_dir("/data")
     old = (await index.get("/data/a")).entry
@@ -924,7 +925,7 @@ async def test_retained_fallback_row_is_fenced(interference):
             manager.retain_resolved_entry(
                 PathSpec.from_str_path("/data/a"),
                 generation,
-                old.model_dump_json(),
+                row_json(old),
                 new,
             )
         )
@@ -935,9 +936,7 @@ async def test_retained_fallback_row_is_fenced(interference):
                 PathSpec.from_str_path("/data/a"), FileChangeKind.UPDATE
             )
         elif interference == "replace":
-            await index.put(
-                "/data/a", old.model_copy(update={"fingerprint": "newer"})
-            )
+            await index.put("/data/a", replace(old, fingerprint="newer"))
         elif interference == "unmount":
             owns[0] = False
     await pending
@@ -961,7 +960,7 @@ async def test_retention_cannot_overwrite_a_peer_workspace(
     peer = CacheManager(RAMFileCacheStore(), index, "/data/", True)
     path = PathSpec.from_str_path("/data/a")
     old = FileStat(name="a", type=FileType.FILE, fingerprint="old")
-    latest = old.model_copy(update={"size": 9})
+    latest = replace(old, size=9)
     await index.put(path.virtual, old)
     original_get = index.get
     original_replace = index.replace_if_unchanged
@@ -991,8 +990,8 @@ async def test_retention_cannot_overwrite_a_peer_workspace(
     await manager.retain_resolved_entry(
         path,
         manager.generation,
-        old.model_dump_json(),
-        old.model_copy(update={"fingerprint": "confirmed"}),
+        row_json(old),
+        replace(old, fingerprint="confirmed"),
     )
     assert interferences == 1
     result = (await original_get(path.virtual)).entry

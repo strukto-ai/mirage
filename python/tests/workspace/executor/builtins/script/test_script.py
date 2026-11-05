@@ -20,7 +20,7 @@ async def test_read_script_text_reports_a_missing_file():
 @pytest.mark.asyncio
 async def test_read_script_text_calls_a_directory_a_directory():
     session = SessionState(session_id="s", cwd="/")
-    stat = FileStat(name="sub", path="/sub", type=FileType.DIRECTORY, size=0)
+    stat = FileStat(name="sub", type=FileType.DIRECTORY, size=0)
 
     async def dispatch(op, path, **kwargs):
         if op == "stat":

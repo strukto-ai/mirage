@@ -167,6 +167,199 @@ function crossing(row: VFSStat | null): VFSStat | null {
   return Object.fromEntries(Object.entries(row).filter(([key]) => key !== 'source')) as VFSStat
 }
 
+/** How a run ended, as its guest reports it. */
+export interface GuestEnd {
+  exitCode: number
+  /** The trap that ended it, or null when it exited. */
+  trap: string | null
+  /** One line per file whose writes could not land. */
+  lost: string[]
+}
+
+/**
+ * The host's side of one run, wherever its guest runs: it answers each
+ * call the guest makes over the run's view, input and output, keeps what
+ * the guest writes to a stream no sink takes, and lands the files the
+ * guest left open.
+ *
+ * @param view - the files the guest sees.
+ * @param stdin - the run's input, which the guest takes as it reads it.
+ * @param output - receives stdout as the guest writes it; absent keeps it.
+ * @param errors - the same for stderr.
+ * @param halt - ends the calls still waiting: the run's stop, or its end.
+ * @param trapPrefix - the command name a failure's stderr line starts with.
+ */
+export class GuestHost {
+  private readonly open = new Map<number, Descriptor>()
+  private readonly kept: [Uint8Array[], Uint8Array[]] = [[], []]
+  private readonly reader: AsyncLineIterator | null
+
+  constructor(
+    private readonly view: WasmView,
+    stdin: ByteSource | null,
+    private readonly output: OutputFn | undefined,
+    private readonly errors: OutputFn | undefined,
+    private readonly halt: AbortSignal,
+    private readonly trapPrefix: string,
+  ) {
+    this.reader = stdin === null ? null : new AsyncLineIterator(stdin)
+  }
+
+  /**
+   * Answer one call the guest makes.
+   *
+   * @param call - the call.
+   */
+  async answer(call: GuestCall): Promise<unknown> {
+    const args = call.args ?? []
+    switch (call.op) {
+      // The view's files stop with the run, and the run's end waits for
+      // a call under way, as Python's abort joins it, so a file it
+      // opens is among those the end lands.
+      case 'view':
+        return this.viewCall(call.method ?? '', args)
+      case 'file':
+        return this.fileCall(call.file ?? -1, call.method ?? '', args)
+      case 'stdin':
+        return this.reader === null
+          ? new Uint8Array()
+          : abortable(this.reader.read1(args[0] as number), this.halt)
+      case 'output': {
+        const fd = args[0] === 2 ? 2 : 1
+        const bytes = args[1] as Uint8Array
+        const sink = fd === 1 ? this.output : this.errors
+        if (sink === undefined) {
+          ;(fd === 1 ? this.kept[0] : this.kept[1]).push(bytes)
+          return true
+        }
+        try {
+          await abortable(sink(bytes), this.halt)
+          return true
+        } catch (error) {
+          if (this.halt.aborted) throw error
+          // A reader that went away fails the guest's write with EPIPE.
+          console.debug(`${this.trapPrefix}: the reader went away: ${String(error)}`)
+          return false
+        }
+      }
+      case 'sleep':
+        return sleep(args[0] as number, this.halt).then(
+          () => false,
+          () => true,
+        )
+    }
+  }
+
+  /**
+   * The run's `[stdout, stderr, exitCode]`: what no sink took, and a line
+   * for the trap and each file whose writes were lost.
+   *
+   * @param end - how the guest ended.
+   */
+  result(end: GuestEnd): [Uint8Array, Uint8Array | null, number] {
+    let stderr = concat(this.kept[1])
+    const lines = [...(end.trap === null ? [] : [end.trap]), ...end.lost]
+    if (lines.length > 0)
+      stderr = concat([
+        stderr,
+        new TextEncoder().encode(lines.map((line) => `${this.trapPrefix}: ${line}\n`).join('')),
+      ])
+    const exitCode = end.lost.length > 0 && end.exitCode === 0 ? 1 : end.exitCode
+    return [concat(this.kept[0]), stderr.byteLength > 0 ? stderr : null, exitCode]
+  }
+
+  /** Land the files the guest left open: what they wrote still lands, as a
+   * killed process's writes are in its files. A landing that fails has no
+   * one left to tell. */
+  async land(): Promise<void> {
+    for (const file of this.open.values()) {
+      try {
+        await file.close()
+      } catch (error) {
+        console.debug(`${this.trapPrefix}: landing an open file failed: ${String(error)}`)
+      }
+    }
+    this.open.clear()
+  }
+
+  private async viewCall(method: string, args: unknown[]): Promise<unknown> {
+    const view = this.view
+    const path = args[0] as string
+    switch (method) {
+      case 'stat':
+        return crossing(await view.stat(path))
+      case 'lstat':
+        return crossing(await view.lstat(path))
+      case 'statOrNull':
+        return crossing(await view.statOrNull(path, args[1] === true))
+      case 'open': {
+        const file = await view.open(path, args[1] as OpenMode)
+        this.open.set(file.fd, file)
+        return { id: file.fd, opened: file.opened, inode: file.inode }
+      }
+      case 'unlink':
+        return view.unlink(path)
+      case 'mkdir':
+        return view.mkdir(path)
+      case 'rmdir':
+        return view.rmdir(path)
+      case 'rename':
+        return view.rename(path, args[1] as string)
+      case 'symlink':
+        return view.symlink(path, args[1] as string)
+      case 'walked':
+        return view.walked(path, args[1] !== false)
+      case 'readlink':
+        return view.readlink(path)
+      case 'setattr':
+        return view.setattr(
+          path,
+          args[1] as string | null,
+          args[2] as string | null,
+          args[3] === true,
+        )
+      case 'readdir':
+        return view.readdir(path)
+    }
+    throw new Error(`unknown view call: ${method}`)
+  }
+
+  private async fileCall(id: number, method: string, args: unknown[]): Promise<unknown> {
+    const file = this.open.get(id)
+    if (file === undefined) throw new Error(`no open file ${String(id)}`)
+    switch (method) {
+      case 'path':
+        return file.path
+      case 'position':
+        return file.pos
+      case 'size':
+        return file.size()
+      case 'read':
+        return file.read(args[0] as number)
+      case 'pread':
+        return file.pread(args[0] as number, args[1] as number)
+      case 'write':
+        return file.write(args[0] as Uint8Array)
+      case 'pwrite':
+        return file.pwrite(args[0] as number, args[1] as Uint8Array)
+      case 'seek':
+        return file.seek(args[0] as number, args[1] as number)
+      case 'truncate':
+        return file.truncate(args[0] as number)
+      case 'land':
+        return file.land()
+      case 'close':
+        this.open.delete(id)
+        return file.close()
+      case 'fstat':
+        return crossing(await file.files.fstat(file.fd))
+      case 'unlinked':
+        return file.files.unlinked(file.fd)
+    }
+    throw new Error(`unknown file call: ${method}`)
+  }
+}
+
 /**
  * Compile-once, run-many WASI module, each run on a worker. Mirrors
  * Python's `WasmExecution`: the module compiles once, each request runs
@@ -229,61 +422,20 @@ export class WasmExecution {
     this.checkOpen()
     const module = await abortable(this.module(), stop)
     const port = this.idle.pop() ?? (await this.started(stop))
-    const reader = stdin === null ? null : new AsyncLineIterator(stdin)
-    const kept: [Uint8Array[], Uint8Array[]] = [[], []]
-    const open = new Map<number, Descriptor>()
     const buffers = new Set<SharedArrayBuffer>()
     const answers = new Set<Promise<void>>()
     // A call still waiting when the run ends (input that has not come)
     // ends with it.
     const ended = new AbortController()
     const halt = stop === undefined ? ended.signal : AbortSignal.any([stop, ended.signal])
+    const host = new GuestHost(view, stdin, output, errors, halt, this.trapPrefix)
     const state = { stopped: false }
-    const operation = async (call: GuestCall): Promise<unknown> => {
-      const args = call.args ?? []
-      switch (call.op) {
-        // The view's files stop with the run, and the run's end waits for
-        // a call under way, as Python's abort joins it, so a file it
-        // opens is among those the end lands.
-        case 'view':
-          return this.viewCall(view, open, call.method ?? '', args)
-        case 'file':
-          return this.fileCall(open, call.file ?? -1, call.method ?? '', args)
-        case 'stdin':
-          return reader === null
-            ? new Uint8Array()
-            : abortable(reader.read1(args[0] as number), halt)
-        case 'output': {
-          const fd = args[0] === 2 ? 2 : 1
-          const bytes = args[1] as Uint8Array
-          const sink = fd === 1 ? output : errors
-          if (sink === undefined) {
-            ;(fd === 1 ? kept[0] : kept[1]).push(bytes)
-            return true
-          }
-          try {
-            await abortable(sink(bytes), halt)
-            return true
-          } catch (error) {
-            if (halt.aborted) throw error
-            // A reader that went away fails the guest's write with EPIPE.
-            console.debug(`${this.trapPrefix}: the reader went away: ${String(error)}`)
-            return false
-          }
-        }
-        case 'sleep':
-          return sleep(args[0] as number, halt).then(
-            () => false,
-            () => true,
-          )
-      }
-    }
     let fail = (error: Error): void => {
       throw error
     }
     const answer = (message: GuestCall & BridgeCall): void => {
       if (message.buffer !== undefined) buffers.add(message.buffer)
-      const work = (): Promise<unknown> => operation(message)
+      const work = (): Promise<unknown> => host.answer(message)
       const done =
         message.buffer !== undefined
           ? respond(message.buffer, work)
@@ -335,16 +487,7 @@ export class WasmExecution {
         offset: boundSystemClock() === null ? 0 : systemNow() - Date.now() / 1000,
         ...(port.bridge !== undefined ? { bridge: port.bridge } : {}),
       } satisfies GuestRun)
-      const done = await result
-      let stderr = concat(kept[1])
-      const lines = [...(done.trap === null ? [] : [done.trap]), ...done.lost]
-      if (lines.length > 0)
-        stderr = concat([
-          stderr,
-          new TextEncoder().encode(lines.map((line) => `${this.trapPrefix}: ${line}\n`).join('')),
-        ])
-      const exitCode = done.lost.length > 0 && done.exitCode === 0 ? 1 : done.exitCode
-      return [concat(kept[0]), stderr.byteLength > 0 ? stderr : null, exitCode]
+      return host.result(await result)
     } catch (error) {
       // A worker that failed is not reused.
       state.stopped = true
@@ -353,16 +496,8 @@ export class WasmExecution {
       stop?.removeEventListener('abort', end)
       ended.abort()
       await Promise.all(answers)
-      // A stopped guest left its files open; what they wrote still lands,
-      // as a killed process's writes are in its files. A landing that fails
-      // has no one left to tell.
-      for (const file of open.values()) {
-        try {
-          await file.close()
-        } catch (error) {
-          console.debug(`${this.trapPrefix}: landing an open file failed: ${String(error)}`)
-        }
-      }
+      // A stopped guest left its files open; what they wrote still lands.
+      await host.land()
       if (state.stopped || this.closed) port.terminate()
       else this.idle.push(port)
     }
@@ -408,92 +543,6 @@ export class WasmExecution {
       throw error
     }
     return port
-  }
-
-  private async viewCall(
-    view: WasmView,
-    open: Map<number, Descriptor>,
-    method: string,
-    args: unknown[],
-  ): Promise<unknown> {
-    const path = args[0] as string
-    switch (method) {
-      case 'stat':
-        return crossing(await view.stat(path))
-      case 'lstat':
-        return crossing(await view.lstat(path))
-      case 'statOrNull':
-        return crossing(await view.statOrNull(path, args[1] === true))
-      case 'open': {
-        const file = await view.open(path, args[1] as OpenMode)
-        open.set(file.fd, file)
-        return { id: file.fd, opened: file.opened, inode: file.inode }
-      }
-      case 'unlink':
-        return view.unlink(path)
-      case 'mkdir':
-        return view.mkdir(path)
-      case 'rmdir':
-        return view.rmdir(path)
-      case 'rename':
-        return view.rename(path, args[1] as string)
-      case 'symlink':
-        return view.symlink(path, args[1] as string)
-      case 'walked':
-        return view.walked(path, args[1] !== false)
-      case 'readlink':
-        return view.readlink(path)
-      case 'setattr':
-        return view.setattr(
-          path,
-          args[1] as string | null,
-          args[2] as string | null,
-          args[3] === true,
-        )
-      case 'readdir':
-        return view.readdir(path)
-    }
-    throw new Error(`unknown view call: ${method}`)
-  }
-
-  private async fileCall(
-    open: Map<number, Descriptor>,
-    id: number,
-    method: string,
-    args: unknown[],
-  ): Promise<unknown> {
-    const file = open.get(id)
-    if (file === undefined) throw new Error(`no open file ${String(id)}`)
-    switch (method) {
-      case 'path':
-        return file.path
-      case 'position':
-        return file.pos
-      case 'size':
-        return file.size()
-      case 'read':
-        return file.read(args[0] as number)
-      case 'pread':
-        return file.pread(args[0] as number, args[1] as number)
-      case 'write':
-        return file.write(args[0] as Uint8Array)
-      case 'pwrite':
-        return file.pwrite(args[0] as number, args[1] as Uint8Array)
-      case 'seek':
-        return file.seek(args[0] as number, args[1] as number)
-      case 'truncate':
-        return file.truncate(args[0] as number)
-      case 'land':
-        return file.land()
-      case 'close':
-        open.delete(id)
-        return file.close()
-      case 'fstat':
-        return crossing(await file.files.fstat(file.fd))
-      case 'unlinked':
-        return file.files.unlinked(file.fd)
-    }
-    throw new Error(`unknown file call: ${method}`)
   }
 
   /** Let the idle workers go. */

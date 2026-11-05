@@ -1,9 +1,11 @@
 import asyncio
 import json
 import sys
+from datetime import datetime, timezone
 
 from mirage import MountMode, Workspace, _rs
 from mirage.types import JsonValue
+from mirage.utils.dates import parse_date_expr
 from mirage.vfs.ram import RAMVFS
 
 # Each stream runs once through the native module of an installed mirage-ai
@@ -70,6 +72,35 @@ async def pipeline() -> tuple[int, bytes]:
 
 def main() -> None:
     checks = {
+        "file signature": (
+            run("file", {}, b"%P", b"DF-1.4"),
+            b"application/pdf",
+        ),
+        "date parser": (
+            str(
+                parse_date_expr("2026-01-15 12:30:45 UTC", tz=timezone.utc)
+            ).encode(),
+            str(
+                datetime(2026, 1, 15, 12, 30, 45, tzinfo=timezone.utc)
+            ).encode(),
+        ),
+        "expression evaluator": (
+            run("expr", {"words": ["2", "+", "3", "*", "4"], "utf8": False}),
+            b"14",
+        ),
+        "record selection": (
+            run(
+                "select",
+                {
+                    "mode": "last",
+                    "unit": "records",
+                    "count": "2",
+                    "terminator": 10,
+                },
+                b"a\nb\nc",
+            ),
+            b"b\nc",
+        ),
         "base64 encode": (
             run("base64", {"mode": "encode", "wrap": 76}, b"hel", b"lo"),
             b"aGVsbG8=\n",

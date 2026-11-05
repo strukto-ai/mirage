@@ -1,10 +1,9 @@
 import git from 'isomorphic-git'
-import Hash from 'sha.js'
 import type { NOOPAccessor } from '../../../../accessor/base.ts'
 import { type PathSpec, FileType } from '../../../../types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { sha1Hex } from '../../../../utils/hash.ts'
+import { Digest, sha1Hex } from '../../../../utils/hash.ts'
 import { isWalkError, fsStrerror } from '../../../../errors/fs.ts'
 import { toHex } from '../../../../utils/hex.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
@@ -25,38 +24,42 @@ const PACK_BLOCK = 1 << 18
 
 /** Hash bounded ranges, retaining only the trailing SHA-1 between reads. */
 export async function checkPack(vfs: Files, path: PathSpec, expected: Uint8Array): Promise<void> {
-  const digest = new Hash.sha1()
-  let tail = new Uint8Array()
-  let offset = 0
+  const digest = new Digest('sha1')
   try {
-    const size = (await vfs.stat(path)).size
-    while (size === null || offset < size) {
-      const count = size === null ? PACK_BLOCK : Math.min(PACK_BLOCK, size - offset)
-      const chunk = await readRange(vfs, path, offset, count)
-      if (chunk.length === 0) {
-        if (size !== null && offset < size) throw new GitError(`truncated pack: ${path.virtual}`)
-        break
+    let tail = new Uint8Array()
+    let offset = 0
+    try {
+      const size = (await vfs.stat(path)).size
+      while (size === null || offset < size) {
+        const count = size === null ? PACK_BLOCK : Math.min(PACK_BLOCK, size - offset)
+        const chunk = await readRange(vfs, path, offset, count)
+        if (chunk.length === 0) {
+          if (size !== null && offset < size) throw new GitError(`truncated pack: ${path.virtual}`)
+          break
+        }
+        offset += chunk.length
+        const buffered = new Uint8Array(tail.length + chunk.length)
+        buffered.set(tail)
+        buffered.set(chunk, tail.length)
+        if (buffered.length > 20) digest.update(buffered.subarray(0, -20))
+        tail = buffered.slice(-20)
+        if (offset % (4 * PACK_BLOCK) === 0)
+          await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        if (size === null && chunk.length < count) break
       }
-      offset += chunk.length
-      const buffered = new Uint8Array(tail.length + chunk.length)
-      buffered.set(tail)
-      buffered.set(chunk, tail.length)
-      if (buffered.length > 20) digest.update(buffered.subarray(0, -20))
-      tail = buffered.slice(-20)
-      if (offset % (4 * PACK_BLOCK) === 0)
-        await new Promise<void>((resolve) => setTimeout(resolve, 0))
-      if (size === null && chunk.length < count) break
+    } catch (err) {
+      if (!isWalkError(err)) throw err
+      const detail = fsStrerror(err) ?? (err instanceof Error ? err.message : String(err))
+      const failure = new GitError(`cannot read pack ${path.virtual}: ${detail}`)
+      failure.cause = err
+      throw failure
     }
-  } catch (err) {
-    if (!isWalkError(err)) throw err
-    const detail = fsStrerror(err) ?? (err instanceof Error ? err.message : String(err))
-    const failure = new GitError(`cannot read pack ${path.virtual}: ${detail}`)
-    failure.cause = err
-    throw failure
+    if (offset < 32) throw new GitError(`truncated pack: ${path.virtual}`)
+    if (digest.digest() !== toHex(tail) || toHex(tail) !== toHex(expected))
+      throw new GitError(`pack checksum mismatch: ${path.virtual}`)
+  } finally {
+    digest.close()
   }
-  if (offset < 32) throw new GitError(`truncated pack: ${path.virtual}`)
-  if (digest.digest('hex') !== toHex(tail) || toHex(tail) !== toHex(expected))
-    throw new GitError(`pack checksum mismatch: ${path.virtual}`)
 }
 
 async function objectIds(repo: Repo): Promise<Set<string>> {

@@ -14,7 +14,7 @@
 
 import { encodeBase64 } from '../../utils/base64.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
-import Hash from 'sha.js'
+import { Digest } from '../../utils/hash.ts'
 import type { HfHubAccessor } from '../../accessor/hf_hub.ts'
 import { apiUrl, hubPost, hubPostNdjson, revSegment } from './client.ts'
 import { COMMIT_CHUNK, DEFAULT_COMMIT_MESSAGE, PREUPLOAD_SAMPLE_BYTES } from './constants.ts'
@@ -38,9 +38,14 @@ interface UploadInfo {
 
 /** Hash bytes the way the preupload endpoint identifies their content. */
 export function contentOid(data: Uint8Array, mode: string): string {
-  const hash = mode === REGULAR ? new Hash.sha1() : new Hash.sha256()
-  if (mode === REGULAR) hash.update(`blob ${String(data.byteLength)}\0`)
-  return hash.update(data).digest('hex')
+  const hash = new Digest(mode === REGULAR ? 'sha1' : 'sha256')
+  try {
+    if (mode === REGULAR) hash.update(new TextEncoder().encode(`blob ${String(data.byteLength)}\0`))
+    hash.update(data)
+    return hash.digest()
+  } finally {
+    hash.close()
+  }
 }
 
 /**

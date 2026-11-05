@@ -337,6 +337,33 @@ async def test_start_refuses_a_session_at_its_limit():
 
 
 @pytest.mark.asyncio
+async def test_the_ceiling_holds_a_lifted_or_larger_limit():
+    processes = ProcessTable()
+    processes.ceiling = 1
+    release = asyncio.Event()
+
+    async def run():
+        await release.wait()
+        return 0
+
+    def start(limit: int | None) -> ProcessHandle:
+        return processes.start(
+            session_id="a",
+            command="work",
+            cwd=PathSpec.from_str_path("/"),
+            run=run,
+            limit=limit,
+        )
+
+    held = start(None)
+    for limit in (None, 128):
+        with pytest.raises(BlockingIOError):
+            start(limit)
+    release.set()
+    await held.join()
+
+
+@pytest.mark.asyncio
 async def test_cancel_group_reaches_grandchild_after_intermediate_exit():
     processes = ProcessTable()
     release = asyncio.Event()

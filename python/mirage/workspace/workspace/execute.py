@@ -62,7 +62,7 @@ from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
-from mirage.types import PathSpec, Refusal
+from mirage.types import PathSpec, Refusal, under_ceiling
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.clock import run_with_system_clock
 from mirage.workspace.abort import line_status_writer, set_line_writer
@@ -101,6 +101,7 @@ from mirage.workspace.session import (
     reset_current_session,
     set_current_session,
 )
+from mirage.workspace.session.budget import run_with_env_limit
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.snapshot import ContentDriftError
 from mirage.workspace.snapshot.drift import DriftQueue
@@ -728,8 +729,11 @@ async def run_prepared_line(
     # The `@line` limit the frame carries to the outermost line's deadline
     # and to every job the line starts, each from its own start.
     outer_timeout = context.frame.line_timeout
-    context.frame.line_timeout = line_timeout(
-        ws.registry.command_limits, effective_session.command_limits
+    context.frame.line_timeout = under_ceiling(
+        line_timeout(
+            ws.registry.command_limits, effective_session.command_limits
+        ),
+        ws.registry.ceilings.max_line_seconds,
     )
     # Taken before any statement stamps, so a cancelled line can put
     # `$?` back to what it found. Restored at the seam in
@@ -1125,28 +1129,33 @@ async def run_prepared_line(
                     run_with_memory(
                         ws.registry.memory,
                         run_with_timeout(
-                            run_command_tree(
-                                ws.dispatch,
-                                ws.registry,
-                                ws.namespace,
-                                job_table or ws.job_table,
-                                exec_recursion,
-                                ast,
-                                context,
-                                stdin,
-                                cancel,
-                                handed=handed,
-                                sink=sink,
-                                call_stack=call_stack,
-                                execution_scope=execution_scope,
-                                route=ws.router.context(
-                                    command, effective_session, await judged()
-                                )
-                                if await ws.registry.policies.wants_for(
-                                    "post_execute",
-                                    effective_session.session_id,
-                                )
-                                else None,
+                            run_with_env_limit(
+                                ws.registry.max_env,
+                                run_command_tree(
+                                    ws.dispatch,
+                                    ws.registry,
+                                    ws.namespace,
+                                    job_table or ws.job_table,
+                                    exec_recursion,
+                                    ast,
+                                    context,
+                                    stdin,
+                                    cancel,
+                                    handed=handed,
+                                    sink=sink,
+                                    call_stack=call_stack,
+                                    execution_scope=execution_scope,
+                                    route=ws.router.context(
+                                        command,
+                                        effective_session,
+                                        await judged(),
+                                    )
+                                    if await ws.registry.policies.wants_for(
+                                        "post_execute",
+                                        effective_session.session_id,
+                                    )
+                                    else None,
+                                ),
                             ),
                             context.frame.line_timeout if top_level else None,
                             LINE_NAME,

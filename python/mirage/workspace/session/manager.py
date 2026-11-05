@@ -24,7 +24,7 @@ from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
 from mirage.utils.clock import Clock, SystemClock
-from mirage.utils.ids import IdSource, SystemIdSource
+from mirage.utils.ids import IdSource, SystemIdSource, check_name
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.record.types import (
@@ -32,6 +32,7 @@ from mirage.workspace.record.types import (
     RecordFields,
     generation_of,
 )
+from mirage.workspace.session.budget import check_env_fits, entry_bytes
 from mirage.workspace.session.resolve import apply_profile, narrow
 from mirage.workspace.session.session import (
     SessionState,
@@ -70,6 +71,22 @@ def _merge_seed_vars(
     for name, var in seed_vars.items():
         if name not in session.vars:
             session.vars[name] = var
+
+
+def _seed_bytes(
+    session: SessionState, seed_vars: Mapping[str, ShellVar]
+) -> int:
+    """The bytes :func:`_merge_seed_vars` adds to a stored record.
+
+    Args:
+        session (SessionState): a session hydrated from the store.
+        seed_vars (Mapping[str, ShellVar]): the workspace's template.
+    """
+    return sum(
+        entry_bytes(name, var.value)
+        for name, var in seed_vars.items()
+        if name not in session.vars
+    )
 
 
 class SessionManager(SessionOwner):
@@ -133,6 +150,9 @@ class SessionManager(SessionOwner):
         self._loaded = False
         self._load_lock = asyncio.Lock()
         self._default_profile: CompiledProfile | None = None
+        # The workspace's max_env, which a created session must start
+        # within; None for no cap.
+        self.max_env: int | None = None
 
     @property
     def loaded(self) -> bool:
@@ -339,10 +359,22 @@ class SessionManager(SessionOwner):
         async with self._load_lock:
             if self._loaded:
                 return
-            entries = await self._store.load()
-            for sid, fields in entries.items():
+            # A record past max_env, with the env entries the merge adds,
+            # refuses the load before any session changes, as a snapshot
+            # past it does. A record a local session replaced is skipped.
+            records = {
+                sid: SessionState.from_dict(fields)
+                for sid, fields in (await self._store.load()).items()
+                if sid == self._default_id or sid not in self._sessions
+            }
+            for record in records.values():
+                check_env_fits(
+                    record,
+                    self.max_env,
+                    _seed_bytes(record, self._seed_vars),
+                )
+            for sid, stored in records.items():
                 if sid == self._default_id:
-                    stored = SessionState.from_dict(fields)
                     default = self._sessions[self._default_id]
                     set_cwd(default, stored.cwd)
                     default.vars = stored.vars
@@ -381,17 +413,12 @@ class SessionManager(SessionOwner):
                         default
                     )
                     continue
-                if sid in self._sessions:
-                    continue
-                session = SessionState.from_dict(fields)
-                session.ids = self._ids
-                self._sessions[sid] = session
+                stored.ids = self._ids
+                self._sessions[sid] = stored
                 self._locks[sid] = asyncio.Lock()
-                self._persisted[sid] = copy.deepcopy(session.to_dict())
-                _merge_seed_vars(session, self._seed_vars)
-                self._has_managed = self._has_managed or _holds_managed(
-                    session
-                )
+                self._persisted[sid] = copy.deepcopy(stored.to_dict())
+                _merge_seed_vars(stored, self._seed_vars)
+                self._has_managed = self._has_managed or _holds_managed(stored)
             self._loaded = True
 
     async def flush(self, session_id: str | None = None) -> None:
@@ -500,6 +527,7 @@ class SessionManager(SessionOwner):
                 under, applied here so a pointer its env names counts
                 toward ``has_managed_env``.
         """
+        check_name("session id", session_id)
         if session_id in self._sessions:
             raise ValueError(f"Session {session_id!r} already exists")
         seeded = dict(self._seed_vars)
@@ -514,6 +542,7 @@ class SessionManager(SessionOwner):
         )
         if profile is not None:
             apply_profile(session, profile)
+        check_env_fits(session, self.max_env)
         self._has_managed = self._has_managed or _holds_managed(session)
         self._sessions[session_id] = session
         self._locks[session_id] = asyncio.Lock()

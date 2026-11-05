@@ -1348,6 +1348,7 @@
     {
       "id": "redirected_background_output_keeps_the_job_deadline",
       "world": {
+        "max_memory": null,
         "mounts": {
           "/ram": {
             "vfs": "ram",

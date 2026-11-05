@@ -26,6 +26,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
     readdir: vi.fn(actual.readdir),
     realpath: vi.fn(actual.realpath),
     opendir: vi.fn(actual.opendir),
+    open: vi.fn(actual.open),
     lstat: vi.fn(actual.lstat),
   }
 })
@@ -245,7 +246,7 @@ it.each(['preserved', 'unsupported'])(
 it('checks parent listing permission even when a native spelling proof succeeds', async () => {
   const { root, cleanup } = tmpRoot('mirage-disk-parent-permission-')
   const actual = await vi.importActual<typeof fs>('node:fs/promises')
-  const openDir = vi.mocked(fs.opendir)
+  const openDir = vi.mocked(fs.open)
   const listDir = vi.mocked(fs.readdir)
   const native = vi.mocked(fs.realpath)
   const lookup = vi.mocked(fs.lstat)
@@ -271,7 +272,7 @@ it('checks parent listing permission even when a native spelling proof succeeds'
     expect(openDir).toHaveBeenCalledOnce()
   } finally {
     vi.unstubAllGlobals()
-    openDir.mockReset().mockImplementation(actual.opendir)
+    openDir.mockReset().mockImplementation(actual.open)
     listDir.mockReset().mockImplementation(actual.readdir)
     native.mockReset().mockImplementation(actual.realpath)
     lookup.mockReset().mockImplementation(actual.lstat)
@@ -397,14 +398,28 @@ it('lists the parent of a name past ASCII', async () => {
 it('still opens the parent of a name a probe proves', async () => {
   const { root, cleanup } = tmpRoot('mirage-disk-probe-permission-')
   const actual = await vi.importActual<typeof fs>('node:fs/promises')
-  const openDir = vi.mocked(fs.opendir)
+  const openDir = vi.mocked(fs.open)
   try {
     await writeFile(join(root, '7'), 'x')
     openDir.mockClear().mockRejectedValue(Object.assign(new Error('denied'), { code: 'EACCES' }))
     await expect(resolveInside(root, spec('/7'))).rejects.toMatchObject({ code: 'EACCES' })
     expect(openDir).toHaveBeenCalledOnce()
   } finally {
-    openDir.mockReset().mockImplementation(actual.opendir)
+    openDir.mockReset().mockImplementation(actual.open)
+    cleanup()
+  }
+})
+
+it('opens a proven parent instead of listing it', async () => {
+  const { root, cleanup } = tmpRoot('mirage-disk-parent-open-')
+  const openDir = vi.mocked(fs.opendir)
+  try {
+    await mkdir(join(root, 'lib'))
+    for (let i = 0; i < 30; i++) await writeFile(join(root, 'lib', String(i)), 'x')
+    openDir.mockClear()
+    expect(await resolveInside(root, spec('/lib/7'))).toBe(join(root, 'lib', '7'))
+    expect(openDir).not.toHaveBeenCalled()
+  } finally {
     cleanup()
   }
 })

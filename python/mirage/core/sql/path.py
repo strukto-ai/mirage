@@ -16,7 +16,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from mirage.accessor.sql import SqlAccessor
-from mirage.core.sql.constants import INODE_COLUMNS, ROOT_INO
+from mirage.core.sql.constants import (
+    INODE_COLUMNS,
+    MAX_COLUMNS,
+    MAX_PARAMS,
+    ROOT_INO,
+)
 from mirage.core.sql.inode import Inode, InoRef, by_ino, inode_of, is_dir
 from mirage.errors.fs import eisdir, enoent, enotdir, listing_error
 from mirage.types import PathSpec
@@ -42,10 +47,19 @@ def names_of(p: str) -> tuple[str, ...]:
     return tuple(bare.split("/")) if bare else ()
 
 
-# SQLite joins at most 64 tables, so one query walks at most this many
-# names (two tables each, past the inode it starts from), and a deeper
+# SQLite joins at most this many tables in one query.
+_MAX_JOIN_TABLES = 64
+
+# One query walks as many names as its limits allow: every inode column
+# for the start and each name within ``MAX_COLUMNS``, two tables a name
+# past the start within ``_MAX_JOIN_TABLES``, one parameter a name
+# within ``MAX_PARAMS``. The columns bind first, at 19 names. A deeper
 # path walks on from where the last query stopped.
-_NAMES_PER_QUERY = 31
+_NAMES_PER_QUERY = min(
+    MAX_COLUMNS // len(INODE_COLUMNS) - 1,
+    (_MAX_JOIN_TABLES - 1) // 2,
+    MAX_PARAMS,
+)
 
 
 async def _walk_from(

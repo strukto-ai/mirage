@@ -31,6 +31,7 @@ import type { ShellVar } from '../../../shell/variable.ts'
 import type { PathSpec } from '../../../types.ts'
 import { wordText } from '../../../types.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
+import { argsBytes, checkEnv, framesBytes } from '../../session/budget.ts'
 import type { SessionState } from '../../session/session.ts'
 import { restoreLocals } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
@@ -82,6 +83,10 @@ export async function runShellFunction(
     )
   }
   cs.admit(cmdName)
+  // Positional args carry the word as typed ($1 stays sub/a.txt), a copy for
+  // the call's own frame, as bash's.
+  const textArgs = restParts.map(wordText)
+  checkEnv(session, 0, argsBytes(textArgs), framesBytes(cs))
   // The body's statements read the caller's stdin in turn.
   const scope = parser.fork()
   let body
@@ -93,8 +98,6 @@ export async function runShellFunction(
     throw error
   }
   const bodyStdin = share(stdin)
-  // Positional args carry the word as typed ($1 stays sub/a.txt).
-  const textArgs = restParts.map(wordText)
   cs.push(textArgs, cmdName)
   let lifted = liftFunctionTraps(session)
   const outerNames = session.functionNames

@@ -55,6 +55,7 @@ from mirage.rs.diff_types import DiffComputer
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn
 from mirage.types import (
+    Ceilings,
     Limit,
     MountMode,
     PathSpec,
@@ -186,6 +187,11 @@ class MountRegistry:
         # None for no cap.
         self.memory: MemoryBudget | None = None
         self.body_limit = MAX_BODY_BYTES
+        # The workspace's max_env, the bytes each session's shell state
+        # may hold; None for no cap.
+        self.max_env: int | None = None
+        # The host's ceilings, which hold what the workspace sets.
+        self.ceilings = Ceilings()
         # The rule the workspace's connections are judged by; None for no
         # limit.
         self.network: NetworkRule | None = None

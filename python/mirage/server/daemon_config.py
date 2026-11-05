@@ -36,6 +36,10 @@ ALLOWED_KEYS = frozenset(
         "graceful_timeout",
         "max_workspaces",
         "max_sessions",
+        "max_memory",
+        "max_env",
+        "max_processes",
+        "max_line_seconds",
         "rate_limits",
         "policy_file",
         "port",
@@ -54,11 +58,16 @@ NUMERIC_KEYS = frozenset(
         "jwt_clock_skew",
         "max_workspaces",
         "max_sessions",
+        "max_processes",
+        "max_line_seconds",
         "port",
         "ssh_port",
         "workers",
     }
 )
+# Keys that take a size: a whole number of bytes, or a string such as
+# "256MB".
+SIZE_KEYS = frozenset({"max_memory", "max_env"})
 DEFAULT_RATE_LIMITS = "ip=1000/minute"
 
 
@@ -85,7 +94,8 @@ def validate_daemon_table(table: dict[str, Any]) -> None:
         k
         for k, v in table.items()
         if (k in NUMERIC_KEYS and not isinstance(v, (int, float)))
-        or (k not in NUMERIC_KEYS and not isinstance(v, str))
+        or (k in SIZE_KEYS and not isinstance(v, (int, str)))
+        or (k not in NUMERIC_KEYS | SIZE_KEYS and not isinstance(v, str))
     )
     if bad_types:
         raise DaemonConfigError(

@@ -509,7 +509,7 @@ class MountCore:
             stored = content_size(s) if size is None else size
             size = max(stored, *(o + len(d) for o, d in writes))
         if size is not None and size != s.size:
-            s = s.model_copy(update={"size": size})
+            s = replace(s, size=size)
         # A row the stat above fetched was judged there; a held one is
         # judged here, with the size the handle answers.
         if retained:
@@ -1439,7 +1439,7 @@ class MountCore:
                 w for w in ctx.write_buf if w[1] is not marker or marker
             ]
         await self._free_spool(ctx)
-        landed = row.model_copy(update={"size": len(data)})
+        landed = replace(row, size=len(data))
         for other in self._open_on(ctx.key):
             if other is ctx or other.data is held:
                 other.data = data
@@ -2081,7 +2081,7 @@ class MountCore:
                 await self._land_held(ctx, ctx.detached or row)
             held = ctx.data or b""
             data = held[:length] + bytes(max(0, length - len(held)))
-            landed = (ctx.detached or row).model_copy(update={"size": length})
+            landed = replace(ctx.detached or row, size=length)
             for other in self._open_on(ctx.key):
                 if other is ctx or other.data is held:
                     other.data = data

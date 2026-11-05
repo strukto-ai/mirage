@@ -13,8 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { EXEC_PLACEHOLDER } from '../../commands/builtin/constants.ts'
-import { expandPrintf, type PrintfStatFacts } from '../../commands/builtin/find_printf.ts'
-import type { ExecAction, FindAction, PrintfAction } from '../../commands/builtin/types.ts'
+import {
+  compilePrintf,
+  renderPrintf,
+  type PrintfStatFacts,
+} from '../../commands/builtin/find_printf.ts'
+import type { ExecAction, FindAction } from '../../commands/builtin/types.ts'
 import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
 import type { Identity } from '../../commands/builtin/utils/identity.ts'
 import { linkView } from '../../commands/builtin/utils/links.ts'
@@ -27,6 +31,7 @@ import { SharedStdin } from '../../io/stream.ts'
 import { type ByteSource, materialize, type PathRecord } from '../../io/types.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
 import type { FindExpr } from '../../rs/find.ts'
+import type { OpenStream } from '../../rs/stream.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { shellJoin } from '../../shell/join.ts'
@@ -257,18 +262,6 @@ async function printfFacts(
   }
 }
 
-/** Render one row through a `-printf` format; `st` is null when the
- * format names no stat directive. */
-function printfRow(
-  action: PrintfAction,
-  path: string,
-  base: string,
-  st: PrintfStatFacts | null,
-  identity: Identity | null,
-): Uint8Array {
-  return encodeText(expandPrintf(action.parts, path, base, st, identity))
-}
-
 /** Whether an action reads the row's stat: `-ls`, and a `-printf` whose
  * format names a stat directive (%s %y %m %T ...). */
 function readsStat(action: FindAction): boolean {
@@ -448,89 +441,105 @@ export async function applyFindActions(
   const stats = actions.some(readsStat)
   const statted = testsStat(expr)
   const startVirtuals = new Set(starts.length > 0 ? starts.map((s) => s.virtual) : [cwd])
-  for (const [match, base] of matches) {
-    signal?.throwIfAborted()
-    const path = match.rawPath || match.virtual
-    // The stat -ls and -printf render is the one find already holds,
-    // taken before any action of the chain can remove the row; a row it
-    // never statted is looked up by the first action that reads it, and
-    // held from there, as GNU stats a row once.
-    let held =
-      stats && (statted || startVirtuals.has(match.virtual))
-        ? await rowStat(match, vfs, statPath, [])
-        : null
+  const formatters = new Map<number, OpenStream>()
+  try {
     for (const [position, action] of actions.entries()) {
-      if (action.kind === 'exec') {
-        if (action.batch) {
-          const bucket = batches.get(position) ?? []
-          bucket.push(path)
-          batches.set(position, bucket)
-          continue
+      if (action.kind === 'printf') formatters.set(position, compilePrintf(action.parts))
+    }
+    for (const [match, base] of matches) {
+      signal?.throwIfAborted()
+      const path = match.rawPath || match.virtual
+      // The stat -ls and -printf render is the one find already holds,
+      // taken before any action of the chain can remove the row; a row it
+      // never statted is looked up by the first action that reads it, and
+      // held from there, as GNU stats a row once.
+      let held =
+        stats && (statted || startVirtuals.has(match.virtual))
+          ? await rowStat(match, vfs, statPath, [])
+          : null
+      for (const [position, action] of actions.entries()) {
+        const formatter = formatters.get(position)
+        if (action.kind === 'exec') {
+          if (action.batch) {
+            const bucket = batches.get(position) ?? []
+            bucket.push(path)
+            batches.set(position, bucket)
+            continue
+          }
+          if (executeFn === undefined) break
+          if (
+            !(await runExec(
+              executeFn,
+              session,
+              registry,
+              cwd,
+              statPath,
+              action,
+              [path],
+              out,
+              errors,
+              once,
+            ))
+          )
+            break
+        } else if (readsStat(action)) {
+          held = held ?? (await rowStat(match, vfs, statPath, errors))
+          if (held === null) {
+            // A row -ls or -printf cannot stat is false, so the chain ends
+            // for it, as GNU's does.
+            exitCode = 1
+            break
+          }
+          out.push(
+            formatter !== undefined
+              ? await renderPrintf(
+                  formatter,
+                  path,
+                  base,
+                  await printfFacts(match, held, vfs),
+                  identity,
+                  signal,
+                )
+              : lsRow(match, held, identity),
+          )
+        } else if (formatter !== undefined) {
+          out.push(await renderPrintf(formatter, path, base, null, identity, signal))
+        } else if (action.kind === 'delete') {
+          // A structural row is skipped, not refused, the way Unix leaves
+          // a mount point in place.
+          if (structural(match, registry)) continue
+          if (!(await deleteRow(match, vfs, dispatch, errors, statPath))) {
+            exitCode = 1
+            break
+          }
+        } else {
+          out.push(encodeText(path + (action.kind === 'print0' ? '\0' : '\n')))
         }
-        if (executeFn === undefined) break
-        if (
-          !(await runExec(
-            executeFn,
-            session,
-            registry,
-            cwd,
-            statPath,
-            action,
-            [path],
-            out,
-            errors,
-            once,
-          ))
-        )
-          break
-      } else if (readsStat(action)) {
-        held = held ?? (await rowStat(match, vfs, statPath, errors))
-        if (held === null) {
-          // A row -ls or -printf cannot stat is false, so the chain ends
-          // for it, as GNU's does.
-          exitCode = 1
-          break
-        }
-        out.push(
-          action.kind === 'printf'
-            ? printfRow(action, path, base, await printfFacts(match, held, vfs), identity)
-            : lsRow(match, held, identity),
-        )
-      } else if (action.kind === 'printf') {
-        out.push(printfRow(action, path, base, null, identity))
-      } else if (action.kind === 'delete') {
-        // A structural row is skipped, not refused, the way Unix leaves
-        // a mount point in place.
-        if (structural(match, registry)) continue
-        if (!(await deleteRow(match, vfs, dispatch, errors, statPath))) {
-          exitCode = 1
-          break
-        }
-      } else {
-        out.push(encodeText(path + (action.kind === 'print0' ? '\0' : '\n')))
       }
     }
+    for (const [position, action] of actions.entries()) {
+      const paths = batches.get(position)
+      if (action.kind !== 'exec' || paths === undefined || executeFn === undefined) continue
+      signal?.throwIfAborted()
+      if (
+        !(await runExec(
+          executeFn,
+          session,
+          registry,
+          cwd,
+          statPath,
+          action,
+          paths,
+          out,
+          errors,
+          once,
+        ))
+      )
+        exitCode = 1
+    }
+    const body = concat(out)
+    return [body.byteLength > 0 ? body : null, concat(errors), exitCode]
+  } finally {
+    for (const engine of formatters.values()) engine.close()
   }
-  for (const [position, action] of actions.entries()) {
-    const paths = batches.get(position)
-    if (action.kind !== 'exec' || paths === undefined || executeFn === undefined) continue
-    signal?.throwIfAborted()
-    if (
-      !(await runExec(
-        executeFn,
-        session,
-        registry,
-        cwd,
-        statPath,
-        action,
-        paths,
-        out,
-        errors,
-        once,
-      ))
-    )
-      exitCode = 1
-  }
-  const body = concat(out)
-  return [body.byteLength > 0 ? body : null, concat(errors), exitCode]
 }

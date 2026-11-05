@@ -2,7 +2,6 @@ import asyncio
 import functools
 import inspect
 import math
-from collections import deque
 from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Mapping
 from contextlib import aclosing
 from dataclasses import dataclass
@@ -36,6 +35,8 @@ from mirage.io.yield_budget import YieldBudget
 from mirage.observe.context import revision_for
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused, scan
+from mirage.rs.select import progress
+from mirage.rs.stream import close_stream, open_stream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.types import (
@@ -202,104 +203,48 @@ async def tail(
     from_line: int | None = None,
     from_byte: int | None = None,
 ) -> AsyncGenerator[bytes, None]:
-    async with aclosing(chunks(src)) as source:
-        if from_byte is not None:
-            # GNU counts `-c +N` from byte N, 1-indexed, so +0 and +1 both mean
-            # the whole file.
-            skip = max(0, from_byte - 1)
-            skipped = 0
-            async for chunk in source:
-                if skipped >= skip:
-                    yield chunk
-                    continue
-                remaining = skip - skipped
-                if len(chunk) <= remaining:
-                    skipped += len(chunk)
-                    continue
-                yield chunk[remaining:]
-                skipped = skip
-            return
-
-        if from_line is not None:
-            start = max(1, from_line)
-            skip = start - 1
-            if skip == 0:
-                async for chunk in source:
-                    yield chunk
+    forward = from_byte is not None or from_line is not None
+    byte_mode = from_byte is not None or (from_line is None and c is not None)
+    count = (
+        max(0, from_byte - 1)
+        if from_byte is not None
+        else max(0, from_line - 1)
+        if from_line is not None
+        else abs(c)
+        if c is not None
+        else abs(n if n is not None else 10)
+    )
+    engine = open_stream(
+        "select",
+        {
+            "mode": "skip" if forward else "last",
+            "unit": "bytes" if byte_mode else "records",
+            "count": str(count),
+            "terminator": 10,
+        },
+    )
+    budget = YieldBudget()
+    try:
+        async with aclosing(chunks(src)) as source:
+            if engine.done():
                 return
-            skipped = 0
-            emitting = False
             async for chunk in source:
-                if emitting:
-                    yield chunk
-                    continue
-                count = chunk.count(b"\n")
-                if skipped + count < skip:
-                    skipped += count
-                    continue
-                i = 0
-                for _ in range(skip - skipped):
-                    j = chunk.find(b"\n", i)
-                    i = j + 1
-                skipped = skip
-                emitting = True
-                if i < len(chunk):
-                    yield chunk[i:]
-            return
-
-        if c is not None:
-            target_c = abs(c)
-            if target_c == 0:
-                return
-            kept: deque[bytes] = deque()
-            held = 0
-            async for chunk in source:
-                kept.append(chunk)
-                held += len(chunk)
-                while held - len(kept[0]) >= target_c:
-                    held -= len(kept.popleft())
-            if held:
-                yield b"".join(kept)[-target_c:]
-            return
-
-        target = abs(n) if n is not None else 10
-        if target == 0:
-            return
-
-        # The bounded chunks that may hold the last lines, each with its
-        # newlines: the first goes once the others hold a newline more
-        # than the target, which covers a last line that lacks its own.
-        ends: deque[tuple[bytes, int]] = deque()
-        held = 0
-        size = 0
-        async for chunk in source:
-            if not chunk:
-                continue
-            count = chunk.count(b"\n")
-            ends.append((chunk, count))
-            held += count
-            size += len(chunk)
-            while held - ends[0][1] > target:
-                first, first_count = ends.popleft()
-                held -= first_count
-                size -= len(first)
-            check_memory(size)
-        if not ends:
-            return
-        wanted = target + ends[-1][0].endswith(b"\n")
-        pieces: list[bytes] = []
-        while ends:
-            chunk, count = ends.pop()
-            if count < wanted:
-                wanted -= count
-                pieces.append(chunk)
-                continue
-            at = len(chunk)
-            for _ in range(wanted):
-                at = chunk.rfind(b"\n", 0, at)
-            pieces.append(chunk[at + 1 :])
-            break
-        yield b"".join(reversed(pieces))
+                if output := engine.feed(chunk):
+                    yield output
+                while engine.busy():
+                    await budget.run()
+                    if output := engine.drain():
+                        yield output
+                if not forward and not byte_mode:
+                    check_memory(progress(engine).retained)
+        if output := engine.finish():
+            yield output
+        while engine.busy():
+            await budget.run()
+            if output := engine.drain():
+                yield output
+    finally:
+        await close_stream(engine)
 
 
 async def tail_multi(
@@ -495,45 +440,55 @@ async def _tail_file(
                         async for part in source:
                             yield part
                     return
+                if n == 0:
+                    return
                 end = size
-                wanted = abs(n)
                 window = CHUNK_SIZE
                 budget = YieldBudget()
-                while end > 0:
-                    await budget.run()
-                    start = max(0, end - window)
-                    data = await materialize(
-                        read_range(path, offset=start, size=end - start)
-                    )
-                    if len(data) != end - start:
-                        break
-                    if end == size and data.endswith(b"\n"):
-                        wanted += 1
-                    found = data.count(b"\n")
-                    if found < wanted and start > 0:
-                        wanted -= found
+                selector = open_stream(
+                    "select",
+                    {
+                        "mode": "reverse",
+                        "unit": "records",
+                        "count": str(abs(n)),
+                        "terminator": 10,
+                    },
+                )
+                try:
+                    while end > 0:
+                        await budget.run()
+                        start = max(0, end - window)
+                        data = await materialize(
+                            read_range(path, offset=start, size=end - start)
+                        )
+                        if len(data) != end - start:
+                            break
+                        selected: int | None = None
+                        for stop in range(len(data), 0, -CHUNK_SIZE):
+                            offset = max(0, stop - CHUNK_SIZE)
+                            selector.feed(data[offset:stop])
+                            while selector.busy():
+                                await budget.run()
+                                selector.drain()
+                            if selector.done():
+                                selected = offset + progress(selector).consumed
+                                break
+                            await budget.run()
+                        if selected is not None or start == 0:
+                            offset = selected if selected is not None else 0
+                            async for part in chunks(data[offset:]):
+                                yield part
+                            if end < size:
+                                async with aclosing(
+                                    _tail_range(read_range, path, end, size)
+                                ) as source:
+                                    async for part in source:
+                                        yield part
+                            return
                         end = start
                         window = min(window * 2, 1 << 20)
-                        continue
-                    at = len(data)
-                    while wanted:
-                        at = data.rfind(b"\n", 0, at)
-                        if at < 0:
-                            break
-                        wanted -= 1
-                    if not wanted or start == 0:
-                        if piece := data[at + 1 :] if not wanted else data:
-                            async for part in chunks(piece):
-                                yield part
-                        if end < size:
-                            async with aclosing(
-                                _tail_range(read_range, path, end, size)
-                            ) as source:
-                                async for part in source:
-                                    yield part
-                        return
-                    end = start
-                    window = min(window * 2, 1 << 20)
+                finally:
+                    await close_stream(selector)
     raw = read(path)
     if inspect.isawaitable(raw):
         raw = await raw
@@ -545,8 +500,8 @@ async def _tail_file(
             from_line=counts.from_line,
             from_byte=counts.from_byte,
         )
-    ) as selected:
-        async for part in selected:
+    ) as output:
+        async for part in output:
             yield part
 
 

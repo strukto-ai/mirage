@@ -171,6 +171,7 @@ describe('the line deadline inside a long expansion', () => {
         mode: MountMode.WRITE,
         commandLimits: { '@line': new Limit({ timeoutSeconds: 0.3 }) },
         env: { x },
+        maxEnv: null,
       },
     )
     try {
@@ -209,7 +210,11 @@ describe('background job at the line limit', () => {
   function jobWs(seconds: number): Workspace {
     return new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, commandLimits: { '@line': new Limit({ timeoutSeconds: seconds }) } },
+      {
+        mode: MountMode.WRITE,
+        commandLimits: { '@line': new Limit({ timeoutSeconds: seconds }) },
+        maxMemory: null,
+      },
     )
   }
 
@@ -410,10 +415,10 @@ describe('large in-memory commands', () => {
       abort.abort()
     }
     class ScannedBytes extends Uint8Array {
-      override indexOf(searchElement: number, fromIndex = 0): number {
-        const result = super.indexOf(searchElement, fromIndex)
-        if (result === -1) {
-          consumed += this.byteLength
+      override subarray(begin = 0, end?: number) {
+        const result = super.subarray(begin, end)
+        if (this.byteLength === available && result.byteLength < available) {
+          consumed += result.byteLength
           timer ??= setImmediate(stop)
         }
         return result
@@ -424,8 +429,7 @@ describe('large in-memory commands', () => {
       if (!(source instanceof Uint8Array)) throw new Error('RAM input must be bytes')
       available += source.byteLength
       if (command.startsWith('head ')) {
-        // Keep one whole blob so the inner line scan must yield the abort
-        // after it finishes counting its first bounded slice.
+        // One producer blob; track the slices passed to the selector.
         yield new ScannedBytes(source)
         return
       }

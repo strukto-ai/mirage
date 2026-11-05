@@ -222,7 +222,11 @@ def _to_json(value: Any) -> JsonValue:
     if isinstance(value, bytes):
         return base64.b64encode(value).decode()
     if isinstance(value, FileStat):
-        return value.model_dump(mode="json", exclude={"extra"})
+        return {
+            name: getattr(value, name)
+            for name in FileStat.__dataclass_fields__
+            if name != "extra"
+        }
     if isinstance(value, PathSpec):
         return value.virtual
     if isinstance(value, Mapping):

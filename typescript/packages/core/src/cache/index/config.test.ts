@@ -17,15 +17,16 @@ import { ZodError } from 'zod'
 import { errorSummary } from '../../secrets/summary.ts'
 import { ContentType, FileStat, FileType } from '../../types.ts'
 import {
-  FileStatWireSchema,
   type IndexConfig,
   IndexDirectory,
   IndexType,
   normalizeIndexConfig,
+  parseRow,
+  rowJson,
 } from './config.ts'
 
-// The one wire format a row is stored in: what pydantic writes for a
-// FileStat, snake_case and every field. `test_config.py` pins the same literal.
+// The one wire format a row is stored in: what Python's `row_json` writes
+// for a FileStat, snake_case and every field. `test_config.py` pins the same literal.
 const WIRE =
   '{"name":"a.txt","size":6,"modified":"2026-01-01T00:00:00Z","fingerprint":"v1","revision":null,"type":"file","content":"text","mode":null,"uid":null,"gid":null,"atime":null,"ctime":null,"birthtime":null,"dev":null,"extra":{}}'
 
@@ -39,14 +40,26 @@ describe('row JSON', () => {
       type: FileType.FILE,
       content: ContentType.TEXT,
     })
-    expect(JSON.stringify(row)).toBe(WIRE)
-    expect(new FileStat(FileStatWireSchema.parse(JSON.parse(WIRE)))).toEqual(row)
+    expect(rowJson(row)).toBe(WIRE)
+    expect(parseRow(WIRE)).toEqual(row)
   })
 
-  // A row the schema refuses is an error, as `model_validate_json` raises,
+  // A row the schema refuses is an error, as Python's `parse_row` raises,
   // never a hit with the field empty.
   it('refuses a row missing its type', () => {
-    expect(() => FileStatWireSchema.parse(JSON.parse('{"name":"c"}'))).toThrow()
+    expect(() => parseRow('{"name":"c"}')).toThrow()
+  })
+
+  it.each([
+    '{"name":null,"type":"file"}',
+    '{"name":"a","type":"file","size":[]}',
+    '{"name":"a","type":"file","size":true}',
+    '{"name":"a","type":"file","modified":5}',
+    '{"name":"a","type":"file","extra":null}',
+    '{"name":"a","type":"file","uid":[]}',
+    '{"name":"a","type":"bogus"}',
+  ])('refuses a row with a field of the wrong type: %s', (raw) => {
+    expect(() => parseRow(raw)).toThrow()
   })
 })
 

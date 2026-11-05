@@ -128,7 +128,7 @@ pub(super) struct Function {
 
 pub(super) struct Code {
     pub(super) ops: Vec<Op>,
-    pub(super) strings: Vec<Vec<u8>>,
+    pub(super) strings: Vec<super::value::Text>,
     pub(super) functions: Vec<Function>,
     pub(super) globals: HashMap<Vec<u8>, u32>,
     pub(super) global_count: usize,
@@ -833,7 +833,7 @@ pub(super) fn compile(program: &Program) -> Code {
     }
     Code {
         ops: compiler.ops,
-        strings: compiler.strings,
+        strings: compiler.strings.into_iter().map(Into::into).collect(),
         functions,
         global_count: compiler.globals.len(),
         globals: compiler.globals,

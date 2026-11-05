@@ -23,7 +23,7 @@ import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import { resolveSourcesFor } from '@struktoai/mirage-core/secrets/sources'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { isPlainObject } from '@struktoai/mirage-core/utils/records'
-import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
+import { checkName, newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
@@ -279,9 +279,17 @@ function pastSessionCap(ws: Workspace, cap: number | null, holder: string): stri
   return `${holder} holds ${String(held)} sessions, past max_sessions (${String(cap)})`
 }
 
-/** Refuse an id that would name the state root, not a workspace. */
-function refuseDotId(reply: RouteReply, id: string): RouteReply {
-  return reply.status(400).send({ detail: `invalid workspace id: ${id}` })
+/**
+ * Refuse an id that would name the state root, not a workspace, or that
+ * breaks the rule every name a caller gives keeps; null lets it through.
+ */
+function refuseId(reply: RouteReply, id: string, reserved: ReadonlySet<string>): RouteReply | null {
+  try {
+    checkName('workspace id', id)
+  } catch (err) {
+    return reply.status(400).send({ detail: err instanceof Error ? err.message : String(err) })
+  }
+  return reserved.has(id) ? reply.status(400).send({ detail: `invalid workspace id: ${id}` }) : null
 }
 
 /**
@@ -354,7 +362,8 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       // id run one at a time, so a second of the same config answers what
       // the first built, and one of another config is refused at once.
       const wid = body.id ?? cfg.workspaceId ?? newWorkspaceId()
-      if (deps.host.reservedIds.has(wid)) return refuseDotId(reply, wid)
+      const bad = refuseId(reply, wid, deps.host.reservedIds)
+      if (bad !== null) return bad
       const digest = configDigest(config)
       return deps.registry.creating(wid, digest, async (admitted) => {
         if (!admitted) {
@@ -409,6 +418,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
               // with zero infrastructure, like git init); the library default
               // stays ram. An explicit store always wins.
               store: args.options.store ?? deps.host.stateStore(),
+              ceilings: deps.registry.ceilings,
               // Whichever of the two built it, no sibling workspace shares
               // it, so this workspace is the one that closes it.
               ownsStore: true,
@@ -479,8 +489,9 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       return reply.status(e.statusCode).send({ detail: e.message })
     }
     const { key, id: workspaceId, override } = body
-    if (workspaceId !== undefined && deps.host.reservedIds.has(workspaceId))
-      return refuseDotId(reply, workspaceId)
+    const bad =
+      workspaceId === undefined ? null : refuseId(reply, workspaceId, deps.host.reservedIds)
+    if (bad !== null) return bad
     if (
       workspaceId !== undefined &&
       (deps.registry.has(workspaceId) || deps.registry.removing(workspaceId))
@@ -525,6 +536,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
                 ...(override?.secrets !== undefined ? { secrets: override.secrets } : {}),
                 ...(store !== undefined ? { s3: store } : {}),
                 policies,
+                ceilings: deps.registry.ceilings,
               },
               overrides,
             ),
@@ -731,8 +743,8 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       const source = deps.registry.visible(req.params.id, req.account)
       if (source === null) return reply.status(404).send({ detail: 'workspace not found' })
       const body = req.body
-      if (body.id !== undefined && deps.host.reservedIds.has(body.id))
-        return refuseDotId(reply, body.id)
+      const bad = body.id === undefined ? null : refuseId(reply, body.id, deps.host.reservedIds)
+      if (bad !== null) return bad
       if (
         body.id !== undefined &&
         (deps.registry.has(body.id) || deps.registry.removing(body.id))

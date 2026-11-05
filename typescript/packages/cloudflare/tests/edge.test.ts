@@ -148,9 +148,19 @@ describe('mirage in workerd', () => {
   })
 
   it('refuses a write past max_memory', async () => {
+    const [, copy, after] = await run(
+      ['seq 1 700000 > /tmp/a', 'cp /tmp/a /tmp/b', 'echo ok'],
+      '8MB',
+    )
+    expect(copy?.exit).toBe(1)
+    expect(copy?.stderr).toContain('Disk quota exceeded')
+    expect(after?.stdout).toBe('ok\n')
+  })
+
+  it('stops output held for its redirect at max_memory', async () => {
     const [fill, after] = await run(['seq 1 10000000 > /tmp/big', 'echo ok'], '8MB')
     expect(fill?.exit).toBe(1)
-    expect(fill?.stderr).toContain('Disk quota exceeded')
+    expect(fill?.stderr).toBe('line: memory exhausted\n')
     expect(after?.stdout).toBe('ok\n')
   })
 
@@ -179,16 +189,18 @@ describe('mirage in workerd', () => {
     },
   )
   for (const on of ['d1', 'object'] as const) {
+    const sql = async (id: string, lines: readonly string[]): Promise<Result[]> => {
+      const response = await worker.fetch('http://edge.test/sql', {
+        method: 'POST',
+        body: JSON.stringify({ lines, on, id }),
+      })
+      expect(response.status).toBe(200)
+      return (await response.json()) as Result[]
+    }
+
     it(`keeps files and the session's cwd in SQL on ${on}, across requests`, async () => {
       const id = `t-${on}-${crypto.randomUUID()}`
-      const at = async (lines: readonly string[]): Promise<Result[]> => {
-        const response = await worker.fetch('http://edge.test/sql', {
-          method: 'POST',
-          body: JSON.stringify({ lines, on, id }),
-        })
-        expect(response.status).toBe(200)
-        return (await response.json()) as Result[]
-      }
+      const at = (lines: readonly string[]): Promise<Result[]> => sql(id, lines)
       const [write] = await at([
         "mkdir -p /s/p && cd /s/p && head -c 3000000 /dev/zero > big && printf 'b\\na\\n' > f",
       ])
@@ -196,6 +208,39 @@ describe('mirage in workerd', () => {
       const [read, size] = await at(['pwd && sort f', 'wc -c < /s/p/big'])
       expect(read?.stdout).toBe('/s/p\na\nb\n')
       expect(size?.stdout.trim()).toBe('3000000')
+    })
+
+    // A path of `depth` names past the mount: workerd's SQLite answers at
+    // most 100 result columns and an expression 100 deep, which every op's
+    // walk and `mkdir -p`'s batch have to stay under.
+    it.each([19, 20, 31, 32, 96])(`resolves a path %i names deep on ${on}`, async (depth) => {
+      const id = `t-${on}-${crypto.randomUUID()}`
+      const names = [id, ...Array.from({ length: depth - 2 }, (_, i) => `d${String(i)}`)]
+      const dir = `/s/${names.join('/')}`
+      const results = await sql(id, [
+        `mkdir -p ${dir}/g`,
+        `echo hi > ${dir}/f`,
+        `cat ${dir}/f`,
+        `stat -c %F ${dir}/g`,
+        `mv ${dir}/f ${dir}/h && cat ${dir}/h`,
+        `cp ${dir}/h ${dir}/c && cat ${dir}/c`,
+        `rm ${dir}/h && ls ${dir}`,
+        `rm -r /s/${id} && ls /s/${id}`,
+      ])
+      expect(results).toEqual([
+        { exit: 0, stdout: '', stderr: '' },
+        { exit: 0, stdout: '', stderr: '' },
+        { exit: 0, stdout: 'hi\n', stderr: '' },
+        { exit: 0, stdout: 'directory\n', stderr: '' },
+        { exit: 0, stdout: 'hi\n', stderr: '' },
+        { exit: 0, stdout: 'hi\n', stderr: '' },
+        { exit: 0, stdout: 'c\ng\n', stderr: '' },
+        {
+          exit: 2,
+          stdout: '',
+          stderr: `ls: cannot access '/s/${id}': No such file or directory\n`,
+        },
+      ])
     })
   }
 })

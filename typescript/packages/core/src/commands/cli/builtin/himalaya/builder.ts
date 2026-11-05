@@ -23,7 +23,7 @@ import {
   foldContentDisposition,
   foldUnstructured,
 } from '../../../../utils/mime.ts'
-import Hash from 'sha.js'
+import { Digest } from '../../../../utils/hash.ts'
 import type { fetchMessage } from '../../../../core/email/client.ts'
 
 type SourceMode = 'reply' | 'forward'
@@ -60,13 +60,19 @@ export interface Compose {
  * and languages.
  */
 export function mixedBoundary(body: string, attachments: readonly Attachment[]): string {
-  const digest = new Hash.sha256().update(body, 'utf8')
-  for (const attachment of attachments) {
-    digest.update(attachment.filename, 'utf8')
-    digest.update(attachment.contentType, 'utf8')
-    digest.update(attachment.data)
+  const digest = new Digest('sha256')
+  const encoder = new TextEncoder()
+  try {
+    digest.update(encoder.encode(body))
+    for (const attachment of attachments) {
+      digest.update(encoder.encode(attachment.filename))
+      digest.update(encoder.encode(attachment.contentType))
+      digest.update(attachment.data)
+    }
+    return digest.digest().slice(0, 32)
+  } finally {
+    digest.close()
   }
-  return digest.digest('hex').slice(0, 32)
 }
 
 export interface Source {

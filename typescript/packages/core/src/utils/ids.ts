@@ -13,24 +13,23 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type Clock, ManualClock, SystemClock } from './clock.ts'
-
-const MAX_SEED = Number.MAX_SAFE_INTEGER
-const WORD_BITS = 32
-const WORD_MASK = 0xffffffff
-const WORDS_AHEAD = 1024
-const TIMESTAMP_BITS = 48n
-const TIMESTAMP_MASK = (1n << TIMESTAMP_BITS) - 1n
-// rand_a carries the intra-millisecond counter (RFC 9562 section 6.2), seeded
-// well below its maximum so a burst has room to climb, as ids.py does.
-const COUNTER_MAX = 0xfff
-const COUNTER_SEED_BITS = 8
-const RANDOM_BITS = 62
-const VERSION = 7n
-const VARIANT = 0b10n
-const SPLITMIX_GAMMA = 0x9e3779b97f4a7c15n
-const SPLITMIX_MUL1 = 0xbf58476d1ce4e5b9n
-const SPLITMIX_MUL2 = 0x94d049bb133111ebn
-const UINT64_MASK = (1n << 64n) - 1n
+import {
+  COUNTER_MAX,
+  COUNTER_SEED_BITS,
+  MAX_NAME_LENGTH,
+  MAX_SEED,
+  RANDOM_BITS,
+  SPLITMIX_GAMMA,
+  SPLITMIX_MUL1,
+  SPLITMIX_MUL2,
+  TIMESTAMP_MASK,
+  UINT64_MASK,
+  UUID_VARIANT,
+  UUID_VERSION,
+  WORDS_AHEAD,
+  WORD_BITS,
+  WORD_MASK,
+} from './constants.ts'
 
 /**
  * The millisecond and counter of the next id after `lastMs`. Two ids minted in
@@ -53,9 +52,9 @@ function stamp(
 function layout(timestampMs: number, counter: number, high: number, low: number): string {
   const value =
     ((BigInt(timestampMs) & TIMESTAMP_MASK) << 80n) |
-    (VERSION << 76n) |
+    (UUID_VERSION << 76n) |
     (BigInt(counter) << 64n) |
-    (VARIANT << 62n) |
+    (UUID_VARIANT << 62n) |
     (BigInt(high) << BigInt(WORD_BITS)) |
     BigInt(low)
   const digits = value.toString(16).padStart(32, '0')
@@ -88,6 +87,27 @@ export function newWorkspaceId(): string {
 /** Mint a fresh session id (UUIDv7). */
 export function newSessionId(): string {
   return uuid7()
+}
+
+/**
+ * Refuse a session id, profile name or workspace id a caller gave that is
+ * empty, longer than MAX_NAME_LENGTH characters, or holds a control
+ * character. The message leaves the name out, since it may be any size.
+ *
+ * @param kind what the name names, as the error says it.
+ * @param name the name given.
+ */
+export function checkName(kind: string, name: string): void {
+  const chars = Array.from(name)
+  if (
+    chars.length === 0 ||
+    chars.length > MAX_NAME_LENGTH ||
+    chars.some((char) => char < ' ' || char === '\x7f')
+  ) {
+    throw new Error(
+      `invalid ${kind}: must be 1 to ${String(MAX_NAME_LENGTH)} characters with no control characters`,
+    )
+  }
 }
 
 /** Where a workspace's generated ids and random draws come from. */

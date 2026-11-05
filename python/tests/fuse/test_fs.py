@@ -24,6 +24,7 @@ import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
@@ -323,7 +324,7 @@ class _SizelessOps:
 
     async def stat(self, path, nofollow=False):
         s = await self._inner.stat(path, nofollow=nofollow)
-        return s.model_copy(update={"size": None})
+        return replace(s, size=None)
 
     async def read(self, path, offset=0, size=None, raw=False):
         self.read_calls += 1
@@ -397,7 +398,7 @@ class _UnsizedRAM(RAMVFS):
         row = await super().stat(path)
         if row.type == FileType.DIRECTORY:
             return row
-        return row.model_copy(update={"size": None})
+        return replace(row, size=None)
 
     async def read(self, path, offset=0, size=None):
         self.reads += 1

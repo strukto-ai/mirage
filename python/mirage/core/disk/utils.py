@@ -129,8 +129,19 @@ def exact_name(parent: str, part: str, info: os.stat_result) -> bool:
 
 
 def _open_parent(parent: str) -> None:
-    with os.scandir(parent) as entries:
-        next(entries, None)
+    """Prove a parent readable as listing it would: opening it read-only
+    is the check opendir makes, without reading a batch of its entries.
+    Windows cannot open a directory as a file, so there its first entry
+    is read.
+
+    Args:
+        parent (str): the host directory.
+    """
+    if sys.platform == "win32":
+        with os.scandir(parent) as entries:
+            next(entries, None)
+        return
+    os.close(os.open(parent, os.O_RDONLY | os.O_DIRECTORY))
 
 
 def resolve_inside_sync(

@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -13,7 +14,7 @@ from fakeredis.aioredis import FakeRedis
 from redis.asyncio import Redis
 
 from mirage.cache.index import redis as redis_index
-from mirage.cache.index.config import LookupStatus
+from mirage.cache.index.config import LookupStatus, row_json
 from mirage.cache.index.constants import (
     CHILDREN_PREFIX,
     DEFAULT_KEY_PREFIX,
@@ -1140,14 +1141,18 @@ async def test_redis_conditional_replacement_is_atomic(
     await store.set_dir("/dir", [("a", original)], version="v1")
     old = (await store.get("/dir/a")).entry
     key = store._entry_key("/dir/a")
-    sparse = old.model_dump(exclude_defaults=True)
+    sparse = {
+        k: v
+        for k, v in json.loads(row_json(old)).items()
+        if v not in (None, {})
+    }
     await client.set(
         key, json.dumps(dict(reversed(list(sparse.items()))), indent=2)
     )
     raw = await client.get(key)
     listing_key = store._children_key("/dir")
     listing_raw = await client.get(listing_key)
-    latest = old.model_copy(update={"size": 9})
+    latest = replace(old, size=9)
     evaluate = client.eval
     calls = 0
 
@@ -1156,7 +1161,7 @@ async def test_redis_conditional_replacement_is_atomic(
         calls += 1
         assert numkeys == 1 and args[0] == key and args[1] == raw
         if peer == "replace":
-            await client.set(key, latest.model_dump_json())
+            await client.set(key, row_json(latest))
         elif peer == "delete":
             await client.delete(key)
         return await evaluate(script, numkeys, *args)
@@ -1165,13 +1170,8 @@ async def test_redis_conditional_replacement_is_atomic(
         patch.setattr(client, "eval", raced_eval)
         assert await store.replace_if_unchanged(
             "/dir/a",
-            old.model_dump_json(),
-            old.model_copy(
-                update={
-                    "fingerprint": "confirmed",
-                    "name": "confirmed",
-                }
-            ),
+            row_json(old),
+            replace(old, fingerprint="confirmed", name="confirmed"),
         ) is (peer == "none")
     assert calls == 1
     current = (await store.get("/dir/a")).entry

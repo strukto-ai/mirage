@@ -17,13 +17,7 @@ import asyncio
 
 import pytest
 
-from mirage.commands.builtin.general.expr import (
-    DIGIT_CHUNK,
-    _expr_eval,
-    digits_of_int,
-    int_of_digits,
-    is_null,
-)
+from mirage.commands.builtin.general.expr import _expr_eval
 from mirage.commands.errors import UsageError
 from mirage.shell.bytes import byte_view, from_byte_view
 from tests.commands.builtin.conftest import output_bytes as _bytes
@@ -275,8 +269,12 @@ def test_expr_or_and_and_short_circuit(args, value, code):
 def test_expr_truthiness_counts_any_run_of_zeros_as_false():
     # GNU's `null()` is not "empty or the character zero": `00` and
     # `-000` are false too, while a bare `-` is true.
-    assert [is_null(v) for v in ("", "0", "00", "-0", "-000")] == [True] * 5
-    assert [is_null(v) for v in ("-", "1", "0a", "00 ")] == [False] * 4
+    assert [
+        _evaluate(["+", v])[1] == 1 for v in ("", "0", "00", "-0", "-000")
+    ] == [True] * 5
+    assert [_evaluate(["+", v])[1] == 1 for v in ("-", "1", "0a", "00 ")] == [
+        False
+    ] * 4
 
 
 PARENS = [
@@ -577,32 +575,7 @@ def test_expr_unclosed_paren_picks_after_or_instead_of(args, detail):
     assert str(caught.value) == f"expr: syntax error: {detail}"
 
 
-def test_expr_digit_chunker_fast_path_agrees_with_the_chunked_path():
-    # Both conversions short-circuit to `int`/`str` under the chunk
-    # width, because that is the path every operand anyone writes takes
-    # and rebuilding `10**4000` for a two-digit sum made rendering one
-    # 250x slower than `str`. The shortcut has to answer identically.
-    for body in (
-        "0",
-        "7",
-        "1" + "0" * 3999,
-        "1" + "0" * 4000,
-        "1" + "0" * 4000 + "1",
-        "9" * 4301,
-    ):
-        chunked = 0
-        for start in range(0, len(body), DIGIT_CHUNK):
-            chunk = body[start : start + DIGIT_CHUNK]
-            chunked = chunked * 10 ** len(chunk) + int(chunk)
-        assert int_of_digits(body) == chunked
-        assert int_of_digits("-" + body) == -chunked
-
-
-def test_expr_digit_chunker_round_trips_past_the_cpython_cap():
-    # CPython caps a base-10 `int(str)` / `str(int)` at 4300 digits, so
-    # both conversions work in chunks. The awkward widths are the chunk
-    # boundary itself and a value with interior zeros, which a chunker
-    # that forgot to zero-pad would silently shorten.
+def test_expr_preserves_decimal_digits_past_the_host_conversion_cap():
     for body in (
         "0",
         "7",
@@ -614,8 +587,8 @@ def test_expr_digit_chunker_round_trips_past_the_cpython_cap():
         "9" * 8001,
         "1" + "0" * 4000 + "1" + "0" * 4000,
     ):
-        assert digits_of_int(int_of_digits(body)) == body
-        assert digits_of_int(int_of_digits("-" + body)) == (
+        assert _evaluate([body, "+", "0"])[0] == body
+        assert _evaluate(["-" + body, "+", "0"])[0] == (
             "-" + body if body != "0" else "0"
         )
 
@@ -633,7 +606,7 @@ def test_expr_is_arbitrary_precision_past_the_cpython_cap():
     # though neither operand is.
     value, code = _evaluate(["9" * 2200, "*", "9" * 2200])
     assert (len(value), code) == (4400, 0)
-    assert value == digits_of_int(int_of_digits("9" * 2200) ** 2)
+    assert value == "9" * 2199 + "8" + "0" * 2199 + "1"
 
 
 def test_expr_syntax_error_wordings():

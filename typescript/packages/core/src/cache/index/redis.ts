@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { FileStat, FileType } from '../../types.ts'
+import type { FileStat } from '../../types.ts'
+import { FileType } from '../../types.ts'
 import type { Clock } from '../../utils/clock.ts'
 import { SystemIdSource, type IdSource } from '../../utils/ids.ts'
 import { loadOptionalPeer } from '../../utils/optional_peer.ts'
@@ -20,9 +21,10 @@ import { rstripSlash } from '../../utils/slash.ts'
 import { globEscape } from '../file/utils.ts'
 import { KeyLock } from '../lock.ts'
 import {
-  FileStatWireSchema,
   IndexDirectory,
   LookupStatus,
+  parseRow,
+  rowJson,
   type Evicted,
   type ListResult,
   type LookupResult,
@@ -572,10 +574,6 @@ prune(KEYS[4], {ARGV[1], ARGV[2], ARGV[3], ARGV[4]},
   string.sub(KEYS[1], #ARGV[2] + 1))
 `
 
-function row(raw: string): FileStat {
-  return new FileStat(FileStatWireSchema.parse(JSON.parse(raw)))
-}
-
 interface PendingSeed {
   entries: Map<string, FileStat>
   children: Map<string, string[]>
@@ -846,7 +844,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
         )
         for (const [number, seed] of pending.entries()) {
           for (const [path, entry] of seed.entries) {
-            pipe.set(this.entryKey(path), JSON.stringify(entry))
+            pipe.set(this.entryKey(path), rowJson(entry))
           }
           for (const [path, keys] of seed.children) {
             const listing: IndexDirectory = {
@@ -890,7 +888,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     for await (const batch of c.scanIterator({ MATCH: `${globEscape(this.entryPrefix)}*` })) {
       for (const key of Array.isArray(batch) ? batch : [batch]) {
         const raw = await c.get(key)
-        if (raw !== null) entries.set(key.slice(this.entryPrefix.length), row(raw))
+        if (raw !== null) entries.set(key.slice(this.entryPrefix.length), parseRow(raw))
       }
     }
     return entries
@@ -903,7 +901,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     if (cached !== null) return { entry: cached }
     const raw = await c.get(this.entryKey(vfsPath))
     if (raw === null) return { status: LookupStatus.NOT_FOUND }
-    return { entry: row(raw) }
+    return { entry: parseRow(raw) }
   }
 
   override async getMany(vfsPaths: readonly string[]): Promise<Map<string, FileStat>> {
@@ -915,7 +913,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     const found = new Map<string, FileStat>()
     for (const [i, path] of paths.entries()) {
       const raw = rows[i]
-      if (raw != null) found.set(path, row(raw))
+      if (raw != null) found.set(path, parseRow(raw))
     }
     return found
   }
@@ -928,7 +926,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
     pipe.eval(PUT_ENTRY, {
       keys: [this.entryKey(vfsPath), this.tombstonePrefix + folder, this.pathsKey],
-      arguments: [vfsPath, JSON.stringify(entry), folder],
+      arguments: [vfsPath, rowJson(entry), folder],
     })
     try {
       await pipe.exec()
@@ -967,7 +965,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
         ],
         arguments: [
           this.entryKey(vfsPath),
-          JSON.stringify(entry),
+          rowJson(entry),
           vfsPath,
           JSON.stringify(fresh),
           String(now.getTime() / 1000),
@@ -987,13 +985,10 @@ export class RedisIndexCacheStore extends IndexCacheStore {
     const c = await this.client()
     const key = this.entryKey(path)
     const raw = await c.get(key)
-    if (raw === null || JSON.stringify(row(raw)) !== predecessor) return false
+    if (raw === null || rowJson(parseRow(raw)) !== predecessor) return false
     try {
       const stored = entry
-      return (
-        (await c.eval(REPLACE_ENTRY, { keys: [key], arguments: [raw, JSON.stringify(stored)] })) ===
-        1
-      )
+      return (await c.eval(REPLACE_ENTRY, { keys: [key], arguments: [raw, rowJson(stored)] })) === 1
     } finally {
       this.listings.rowWrote(path)
     }
@@ -1087,7 +1082,7 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       const directory = await this.generation(c, `${this.generationKey}:${vfsPath}`)
       const rows: [string, string][] = []
       for (const [name, entry] of entries) {
-        rows.push([prefix + name, JSON.stringify(entry)])
+        rows.push([prefix + name, rowJson(entry)])
       }
       const listing: IndexDirectory = {
         entries: rows.map(([path]) => path),

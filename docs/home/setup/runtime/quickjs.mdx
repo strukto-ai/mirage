@@ -31,6 +31,11 @@ point the runtime's `home`, or `MIRAGE_QUICKJS_HOME`, at its directory.
     is the URL of the folder holding `qjs-wasi.wasm`, and the page needs the
     same [worker setup](/typescript/runtime/python#worker-and-browser-setup)
     as Pyodide.
+
+    QuickJS does not run on Cloudflare Workers: with no worker to stop it,
+    a script that never calls the host would hold the isolate, as the
+    [Cloudflare quickstart](/typescript/cloudflare-quickstart#run-a-workspace)
+    describes.
   </Tab>
 </Tabs>
 

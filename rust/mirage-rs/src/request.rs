@@ -64,6 +64,13 @@ pub(crate) enum Opening {
 /// What the host is asked to do, in the order the run asks.
 #[derive(Debug)]
 pub(crate) enum Request {
+    /// Time-zone facts; a wall lookup preserves host-local date operands.
+    Date {
+        zone: Option<String>,
+        instant: Option<i64>,
+        year: Option<i64>,
+        wall: Option<[i64; 6]>,
+    },
     /// The next chunk of input `fd`; the first read of a named input says
     /// which file, and which operand when it is one still as typed. A file
     /// read whole asks for `least` bytes a reply, the host gathering chunks
@@ -184,6 +191,24 @@ impl Request {
             header.insert(key.to_owned(), value);
         };
         match self {
+            Request::Date {
+                zone,
+                instant,
+                year,
+                wall,
+            } => {
+                put("op", "date".into());
+                put("zone", zone.clone().map_or(Json::Null, Json::String));
+                if let Some(instant) = instant {
+                    put("instant", (*instant).into());
+                }
+                if let Some(year) = year {
+                    put("year", (*year).into());
+                }
+                if let Some(wall) = wall {
+                    put("wall", serde_json::to_value(wall).unwrap());
+                }
+            }
             Request::Read { fd, open, least } => {
                 put("op", "read".into());
                 put("fd", (*fd).into());

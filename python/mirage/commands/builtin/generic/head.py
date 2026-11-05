@@ -1,12 +1,10 @@
 import inspect
-from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Collection, Mapping
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from mirage.commands.builtin.utils.constants import CHAR_DEVICE_MAX_BYTES
 from mirage.commands.builtin.utils.limit import truncate_stream
-from mirage.commands.builtin.utils.lines import record_separator
 from mirage.commands.builtin.utils.operands import (
     normalized_read,
     operands_io,
@@ -33,6 +31,8 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.io.yield_budget import YieldBudget
 from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused, scan
+from mirage.rs.select import progress
+from mirage.rs.stream import close_stream, open_stream
 from mirage.types import FileType, Limit, PathSpec, PolymorphicReadFn, StatFn
 
 
@@ -76,43 +76,6 @@ def parse_flags(flags: Mapping[str, FlagValue]) -> HeadFlags | IOResult:
     )
 
 
-async def _count_lines(
-    chunk: bytes,
-    separator: bytes,
-    wanted: int,
-    budget: YieldBudget,
-    begin: int = 0,
-) -> tuple[int, int]:
-    """The lines of ``chunk`` from ``begin``, at most ``wanted``, and
-    where the last of them ends, just past its separator (``begin`` for
-    none), counted a bounded slice at a time with a turn of the loop
-    between slices, so a large chunk still lets its task be cancelled.
-
-    Args:
-        chunk (bytes): the bytes.
-        separator (bytes): the one byte that ends a line.
-        wanted (int): the most lines to count.
-        budget (YieldBudget): the reader's budget.
-        begin (int): the offset to count from.
-    """
-    found = 0
-    end = begin
-    for start in range(begin, len(chunk), CHUNK_SIZE):
-        stop = start + CHUNK_SIZE
-        count = chunk.count(separator, start, stop)
-        if found + count < wanted:
-            if count:
-                found += count
-                end = chunk.rfind(separator, start, stop) + 1
-            await budget.run()
-            continue
-        at = start
-        for _ in range(wanted - found):
-            at = chunk.find(separator, at, stop) + 1
-        return wanted, at
-    return found, end
-
-
 async def head_stream(
     src: bytes | AsyncIterator[bytes],
     *,
@@ -120,118 +83,63 @@ async def head_stream(
     c: int | None = None,
     zero_terminated: bool = False,
 ) -> AsyncIterator[bytes]:
-    """The first lines or bytes of ``src``, GNU head's cut.
-
-    Closes ``src`` whenever it stops, at its limit, at the end of the
-    input, or when its own reader stops, so a read it leaves unfinished
-    releases its mount at once rather than when it is collected. It
-    writes the producer's chunks on, as much of each as it keeps in one
-    piece, and a line count yields to the loop on every pull.
+    """Select the first bytes or records, leaving unread shared input owned.
 
     Args:
-        src (bytes | AsyncIterator[bytes]): the input.
-        n (int | None): ``-n``, lines; negative for all but the last.
-        c (int | None): ``-c``, bytes; negative for all but the last.
-        zero_terminated (bool): ``-z``, NUL ends a line.
+        src (bytes | AsyncIterator[bytes]): The input source.
+        n (int | None): The record count, negative to exclude a suffix.
+        c (int | None): The byte count, negative to exclude a suffix.
+        zero_terminated (bool): Whether NUL terminates records.
     """
-    stream = ensure_stream(src)
+    count = c if c is not None else n if n is not None else 10
+    engine = open_stream(
+        "select",
+        {
+            "mode": "first" if count >= 0 else "except_last",
+            "unit": "bytes" if c is not None else "records",
+            "count": str(abs(count)),
+            "terminator": 0 if zero_terminated else 10,
+        },
+    )
+    source = ensure_stream(src)
     budget = YieldBudget()
     try:
-        if c is not None:
-            if c == 0:
-                return
-            if c > 0:
-                emitted = 0
-                async for chunk in stream:
-                    remaining = c - emitted
-                    if len(chunk) >= remaining:
-                        if isinstance(src, SharedInput) and src.seekable:
-                            src.lines.unread(chunk[remaining:])
-                        if remaining > 0:
-                            yield chunk[:remaining]
-                        return
-                    yield chunk
-                    emitted += len(chunk)
-                return
-            keep = -c
-            buf = b""
-            async for chunk in stream:
-                buf += chunk
-                if len(buf) > keep:
-                    yield buf[:-keep]
-                    buf = buf[-keep:]
+        if engine.done():
             return
-
-        target = n if n is not None else 10
-        separator = record_separator(zero_terminated)
-
-        if target >= 0:
-            if target == 0:
-                return
-            emitted_lines = 0
-            async for chunk in stream:
-                await budget.run()
-                found, end = await _count_lines(
-                    chunk, separator, target - emitted_lines, budget
-                )
-                emitted_lines += found
-                if emitted_lines < target:
-                    if chunk:
-                        yield chunk
-                    continue
-                if isinstance(src, SharedInput) and src.seekable:
-                    src.lines.unread(chunk[end:])
-                yield chunk[:end]
-                return
-            return
-
-        # The chunks not yet written, each with its lines, the first from
-        # ``skip``: what lies before the last ``keep`` lines goes out as
-        # soon as it is known.
-        keep = -target
-        kept: deque[tuple[bytes, int]] = deque()
-        lines = 0
-        skip = 0
-        async for chunk in stream:
+        async for chunk in source:
             await budget.run()
-            if not chunk:
-                continue
-            count, _ = await _count_lines(
-                chunk, separator, len(chunk) + 1, budget
-            )
-            kept.append((chunk, count))
-            lines += count
-            while lines > keep:
-                first, count = kept[0]
-                over = lines - keep
-                if count < over or (
-                    count == over and first.endswith(separator)
-                ):
-                    kept.popleft()
-                    lines -= count
-                    yield first[skip:]
-                    skip = 0
-                    continue
-                _, end = await _count_lines(
-                    first, separator, over, budget, skip
-                )
-                kept[0] = (first, count - over)
-                lines = keep
-                yield first[skip:end]
-                skip = end
-        if lines == keep and kept and not kept[-1][0].endswith(separator):
-            # The last line lacks its separator and still counts as one,
-            # so one line more is not among the last.
-            while kept:
-                first, count = kept.popleft()
-                if count:
-                    yield first[skip : first.find(separator, skip) + 1]
-                    break
-                yield first[skip:]
-                skip = 0
-
+            selected = 0
+            for offset in range(0, len(chunk), CHUNK_SIZE):
+                output = engine.feed(chunk[offset : offset + CHUNK_SIZE])
+                while True:
+                    done = engine.done()
+                    if done and isinstance(src, SharedInput) and src.seekable:
+                        consumed = progress(engine).consumed
+                        src.lines.unread(chunk[offset + consumed :])
+                    if count >= 0:
+                        selected += len(output)
+                    elif output:
+                        yield output
+                    if done:
+                        if selected:
+                            yield chunk[:selected]
+                        return
+                    if not engine.busy():
+                        break
+                    await budget.run()
+                    output = engine.drain()
+                await budget.run()
+            if selected:
+                yield chunk[:selected]
+        if output := engine.finish():
+            yield output
+        while engine.busy():
+            await budget.run()
+            if output := engine.drain():
+                yield output
     finally:
-        await close_quietly(stream)
+        await close_stream(engine)
+        await close_quietly(source)
 
 
 async def head_multi(

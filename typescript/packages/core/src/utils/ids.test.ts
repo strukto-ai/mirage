@@ -18,7 +18,9 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { ManualClock, SystemClock } from './clock.ts'
+import { MAX_NAME_LENGTH } from './constants.ts'
 import {
+  checkName,
   type IdSource,
   SeededIdSource,
   SystemIdSource,
@@ -444,4 +446,20 @@ describe('the IdSource seam', () => {
     const stale = Object.keys(KEPT_ON_PROCESS_RANDOMNESS).filter((draw) => !draws.has(draw))
     expect(stale).toEqual([])
   })
+})
+
+describe('checkName', () => {
+  it('takes every id mirage and the adapters mint', () => {
+    for (const name of ['default', `sess_${'a'.repeat(12)}`, uuid7(), 'user:42', 'a'.repeat(128)])
+      checkName('session id', name)
+  })
+
+  it.each(['', 'a'.repeat(MAX_NAME_LENGTH + 1), 'a\nb', 'tab\there', 'x\x7f'])(
+    'refuses an empty, long or control name: %j',
+    (name) => {
+      expect(() => {
+        checkName('profile name', name)
+      }).toThrow(/^invalid profile name: must be 1/)
+    },
+  )
 })

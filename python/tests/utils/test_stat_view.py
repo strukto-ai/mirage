@@ -14,6 +14,7 @@
 
 import os
 import time
+from dataclasses import replace
 from datetime import datetime, timezone
 from stat import S_IFDIR, S_IFIFO, S_IFREG
 
@@ -191,9 +192,7 @@ def test_fifo_mode_is_prw_for_its_owner():
     fifo = FileStat(name="63", type=FileType.FIFO)
     assert is_fifo(fifo)
     assert posix_mode(fifo) == FIFO_MODE
-    assert posix_mode(fifo.model_copy(update={"mode": 0o640})) == (
-        S_IFIFO | 0o640
-    )
+    assert posix_mode(replace(fifo, mode=0o640)) == (S_IFIFO | 0o640)
 
 
 def test_size_unknown_spares_a_directory_and_a_fifo():

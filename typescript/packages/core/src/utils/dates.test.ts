@@ -18,6 +18,7 @@ import {
   inMtimeWindow,
   isoToEpoch,
   parseDateExpr,
+  parseDateExprAsync,
   parsePosixTime,
   toIsoZ,
   utcDateFolder,
@@ -444,10 +445,10 @@ describe('parseDateExpr more grammar', () => {
     expect(parsed === null ? null : parsed.getTime()).toBe(want)
   })
 
-  it('refuses a shift other units cancel past what a double holds', () => {
-    // Python keeps it exact, as date does; see test_dates.py.
+  it('keeps a shift exact when other units cancel past what a double holds', () => {
+    // The shared core keeps the intermediate shift exact, as GNU date does.
     const text = '2026-01-15 12:00:01 285426750 years -9007198249190400 seconds'
-    expect(parseDateExpr(text, UTC_ZONE, new Date(1768478400_000))).toBeNull()
+    expect(parseDateExpr(text, UTC_ZONE, new Date(1768478400_000))?.getTime()).toBe(1768478401_000)
   })
 
   it('reads a long run of signs once', () => {
@@ -568,4 +569,27 @@ describe('parsePosixTime', () => {
     const zone = resolveTz('STD0SUM-1,M4.1.0/0,M4.1.0/6')
     expect(parsePosixTime(text, zone)?.getTime()).toBe(epoch * 1000)
   })
+})
+
+it('can cancel a long date expression between shared-core steps', async () => {
+  const controller = new AbortController()
+  const timer = setTimeout(() => {
+    controller.abort()
+  }, 1)
+  try {
+    await expect(
+      parseDateExprAsync(
+        '1 day '.repeat(100000),
+        UTC_ZONE,
+        new Date(Date.UTC(2026, 7, 16)),
+        controller.signal,
+      ),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+  } finally {
+    clearTimeout(timer)
+  }
+})
+
+it('refuses invalid raw UTF-8 as a date', () => {
+  expect(parseDateExpr('\udcff', UTC_ZONE, new Date(Date.UTC(2026, 7, 16)))).toBeNull()
 })

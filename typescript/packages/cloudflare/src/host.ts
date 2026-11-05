@@ -22,6 +22,7 @@ import {
 import { watch } from '@struktoai/mirage-core/io/web/gateway'
 import { refuseUnseenAddresses, watchNetwork } from '@struktoai/mirage-core/io/web/network'
 import { withinRequest } from '@struktoai/mirage-core/io/web/request'
+import type { Runtime, RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
@@ -36,12 +37,28 @@ import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store
 import type {
   ExecuteOptions,
   ExecuteResult,
+  WorkspaceOptions,
 } from '@struktoai/mirage-core/workspace/workspace/types'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ServerHost } from '@struktoai/mirage-server/routes'
 import './monty.ts'
+import { EDGE_RUNTIMES } from './constants.ts'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
+
+/**
+ * Refuse QuickJS, which would run on the isolate's only thread: a script that
+ * never calls the host runs there until Cloudflare's CPU limit ends the
+ * request, holding every workspace in the isolate.
+ */
+function refuseQuickJs(entry: RuntimeEntry): void {
+  if ((typeof entry === 'string' ? entry : entry.name) === 'quickjs') {
+    throw new Error(
+      "runtime 'quickjs' does not run on Cloudflare Workers: a script that never calls the " +
+        'host would hold the isolate',
+    )
+  }
+}
 
 export class Workspace extends CoreWorkspace {
   /** A saved mount rebuilds through the edge's VFS registry. */
@@ -50,12 +67,22 @@ export class Workspace extends CoreWorkspace {
     return build === null ? null : buildVfs(build.name, build.config)
   }
 
-  constructor(...args: ConstructorParameters<typeof CoreWorkspace>) {
-    refuseUnseenAddresses(args[1]?.network)
-    super(...args)
+  constructor(
+    mounts: ConstructorParameters<typeof CoreWorkspace>[0],
+    options: WorkspaceOptions = {},
+  ) {
+    refuseUnseenAddresses(options.network)
+    const runtimes = options.runtimes ?? [...EDGE_RUNTIMES]
+    runtimes.forEach(refuseQuickJs)
+    super(mounts, { ...options, runtimes })
     this.registry.setNetworkWatch(watchNetwork)
     if (this.registry.network !== null) watchNetwork()
     watch()
+  }
+
+  override addRuntime(runtime: RuntimeEntry): Runtime {
+    refuseQuickJs(runtime)
+    return super.addRuntime(runtime)
   }
 
   /**

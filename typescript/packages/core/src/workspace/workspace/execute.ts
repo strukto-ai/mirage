@@ -24,7 +24,7 @@ import { ParseScope } from '../../shell/parse/scope.ts'
 
 import { ExecutionScope } from '../execution.ts'
 import { newExecutionId } from '../../execution/context.ts'
-import { PathSpec } from '../../types.ts'
+import { PathSpec, underCeiling } from '../../types.ts'
 import { literalTree } from '../../shell/literal.ts'
 import { FORK_FAILED, FORK_FAILED_STATUS, INTERRUPTED_STATUS } from '../../shell/constants.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
@@ -118,6 +118,7 @@ import { ExecuteResult, type ExecuteOptions } from './types.ts'
 import { commandName, forkForCall } from './utils.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { runWithSystemClock } from '../../utils/clock.ts'
+import { runWithEnvLimit } from '../session/budget.ts'
 
 /**
  * Everything `executeLine` needs from the workspace, passed explicitly
@@ -455,9 +456,9 @@ async function runPreparedLine(
   // The `@line` limit the frame carries to the outermost line's deadline
   // and to every job the line starts, each from its own start.
   const outerTimeout = context.frame.lineTimeout
-  context.frame.lineTimeout = lineTimeout(
-    env.registry.commandLimits,
-    effectiveSession.commandLimits,
+  context.frame.lineTimeout = underCeiling(
+    lineTimeout(env.registry.commandLimits, effectiveSession.commandLimits),
+    env.registry.ceilings.maxLineSeconds,
   )
   try {
     // The outermost line, recorded or not, runs under its `@line` deadline,
@@ -1309,20 +1310,22 @@ async function runParsedLine(
               runWithMemory(
                 env.registry.memory,
                 () =>
-                  runWithSystemClock(env.registry.systemClock, async () =>
-                    runCommandTree(
-                      deadline === null ? deps : { ...deps, signal: deadline.signal },
-                      rootNode,
-                      context,
-                      stdin,
-                      false,
-                      options.callStack ?? null,
-                      (await env.registry.policies.wantsFor(
-                        'postExecute',
-                        context.session.sessionId,
-                      ))
-                        ? env.router.context(command, context.session, await judged())
-                        : null,
+                  runWithSystemClock(env.registry.systemClock, () =>
+                    runWithEnvLimit(env.registry.maxEnv, async () =>
+                      runCommandTree(
+                        deadline === null ? deps : { ...deps, signal: deadline.signal },
+                        rootNode,
+                        context,
+                        stdin,
+                        false,
+                        options.callStack ?? null,
+                        (await env.registry.policies.wantsFor(
+                          'postExecute',
+                          context.session.sessionId,
+                        ))
+                          ? env.router.context(command, context.session, await judged())
+                          : null,
+                      ),
                     ),
                   ),
                 env.registry.bodyLimit,

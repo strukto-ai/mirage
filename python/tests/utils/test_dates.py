@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -10,6 +11,7 @@ from mirage.utils.dates import (
     now_iso,
     ns_to_iso,
     parse_date_expr,
+    parse_date_expr_async,
     parse_posix_time,
     timestamp_iso,
     to_iso_z,
@@ -745,3 +747,17 @@ def test_ns_to_iso_rounds_as_node_stat_dates(ns, want):
     # Pinned against node 24: `fs.statSync(p).mtime.toISOString()` for a
     # file whose mtime was set to `ns`, and `new Date(-1)` for the last.
     assert ns_to_iso(ns) == want
+
+
+@pytest.mark.asyncio
+async def test_async_date_parser_can_cancel_a_long_expression():
+    task = asyncio.create_task(
+        parse_date_expr_async("1 day " * 100000, tz=timezone.utc, now=NOW)
+    )
+    asyncio.get_running_loop().call_later(0.001, task.cancel)
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+def test_date_parser_refuses_invalid_raw_utf8_as_a_date():
+    assert parse_date_expr("\udcff", tz=timezone.utc, now=NOW) is None

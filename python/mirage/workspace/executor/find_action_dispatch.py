@@ -12,8 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 from mirage.commands.builtin.constants import EXEC_PLACEHOLDER
-from mirage.commands.builtin.find_printf import expand_printf
+from mirage.commands.builtin.find_printf import compile_printf, render_printf
 from mirage.commands.builtin.types import (
     ExecAction,
     FindAction,
@@ -36,6 +38,7 @@ from mirage.errors.types import FsCondition
 from mirage.io.stream import SharedStdin, materialize
 from mirage.io.types import ByteSource, PathRecord
 from mirage.rs.find import FindExpr
+from mirage.rs.stream import OpenStream, close_stream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
@@ -309,12 +312,12 @@ def _ls_row(ps: PathSpec, st: FileStat, identity: Identity | None) -> bytes:
             and group columns.
     """
     path = ps.raw_path or ps.virtual
-    row = format_find_ls(st.model_copy(update={"name": path}), identity)
+    row = format_find_ls(replace(st, name=path), identity)
     return encode_text(row + "\n")
 
 
 async def _printf_row(
-    action: PrintfAction,
+    engine: OpenStream,
     ps: PathSpec,
     start: PathSpec,
     st: FileStat | None,
@@ -328,7 +331,7 @@ async def _printf_row(
     dangling one reads ``N``.
 
     Args:
-        action (PrintfAction): the action.
+        engine (OpenStream): the action's formatter.
         ps (PathSpec): the selected row, with its display spelling.
         start (PathSpec): the start point the row was found under, which
             ``%P`` and ``%d`` measure from.
@@ -347,15 +350,8 @@ async def _printf_row(
         and links.stat_at(ps.virtual) is not None
         else None
     )
-    return encode_text(
-        expand_printf(
-            action.parts,
-            ps.raw_path or ps.virtual,
-            start,
-            st,
-            target,
-            identity,
-        )
+    return await render_printf(
+        engine, ps.raw_path or ps.virtual, start, st, target, identity
     )
 
 
@@ -581,89 +577,108 @@ async def _apply_find_actions(
     stats = any(_reads_stat(a) for a in actions)
     statted = _tests_stat(expr)
     start_virtuals = {s.virtual for s in starts} if starts else {cwd}
-    for match, start in matches:
-        path = match.raw_path or match.virtual
-        # The stat -ls and -printf render is the one find already holds,
-        # taken before any action of the chain can remove the row; a row
-        # it never statted is looked up by the first action that reads
-        # it, and held from there, as GNU stats a row once.
-        held = (
-            await _row_stat(match, vfs, stat_path, [])
-            if stats and (statted or match.virtual in start_virtuals)
-            else None
-        )
+    formatters = {
+        position: compile_printf(action.parts)
+        for position, action in enumerate(actions)
+        if isinstance(action, PrintfAction)
+    }
+    try:
+        for match, start in matches:
+            path = match.raw_path or match.virtual
+            # The stat -ls and -printf render is the one find already holds,
+            # taken before any action of the chain can remove the row; a row
+            # it never statted is looked up by the first action that reads
+            # it, and held from there, as GNU stats a row once.
+            held = (
+                await _row_stat(match, vfs, stat_path, [])
+                if stats and (statted or match.virtual in start_virtuals)
+                else None
+            )
+            for position, action in enumerate(actions):
+                if isinstance(action, ExecAction):
+                    if action.batch:
+                        batches.setdefault(position, []).append(path)
+                        continue
+                    assert execute_fn is not None
+                    if not await _run_exec(
+                        execute_fn,
+                        session_id,
+                        registry,
+                        cwd,
+                        stat_path,
+                        action,
+                        [path],
+                        out,
+                        errors,
+                        once,
+                    ):
+                        break
+                elif _reads_stat(action):
+                    if held is None:
+                        held = await _row_stat(match, vfs, stat_path, errors)
+                    if held is None:
+                        # A row -ls or -printf cannot stat is false, so the
+                        # chain ends for it, as GNU's does.
+                        exit_code = 1
+                        break
+                    out.append(
+                        await _printf_row(
+                            formatters[position],
+                            match,
+                            start,
+                            held,
+                            vfs,
+                            identity,
+                        )
+                        if isinstance(action, PrintfAction)
+                        else _ls_row(match, held, identity)
+                    )
+                elif isinstance(action, PrintfAction):
+                    out.append(
+                        await _printf_row(
+                            formatters[position],
+                            match,
+                            start,
+                            None,
+                            vfs,
+                            identity,
+                        )
+                    )
+                elif action.kind == "delete":
+                    # A structural row is skipped, not refused, the way Unix
+                    # leaves a mount point in place.
+                    if _structural(match, registry):
+                        continue
+                    if not await _delete_row(
+                        match, vfs, dispatch, errors, stat_path
+                    ):
+                        exit_code = 1
+                        break
+                else:
+                    out.append(
+                        encode_text(path)
+                        + (b"\x00" if action.kind == "print0" else b"\n")
+                    )
         for position, action in enumerate(actions):
-            if isinstance(action, ExecAction):
-                if action.batch:
-                    batches.setdefault(position, []).append(path)
-                    continue
-                assert execute_fn is not None
-                if not await _run_exec(
-                    execute_fn,
-                    session_id,
-                    registry,
-                    cwd,
-                    stat_path,
-                    action,
-                    [path],
-                    out,
-                    errors,
-                    once,
-                ):
-                    break
-            elif _reads_stat(action):
-                if held is None:
-                    held = await _row_stat(match, vfs, stat_path, errors)
-                if held is None:
-                    # A row -ls or -printf cannot stat is false, so the
-                    # chain ends for it, as GNU's does.
-                    exit_code = 1
-                    break
-                out.append(
-                    await _printf_row(
-                        action, match, start, held, vfs, identity
-                    )
-                    if isinstance(action, PrintfAction)
-                    else _ls_row(match, held, identity)
-                )
-            elif isinstance(action, PrintfAction):
-                out.append(
-                    await _printf_row(
-                        action, match, start, None, vfs, identity
-                    )
-                )
-            elif action.kind == "delete":
-                # A structural row is skipped, not refused, the way Unix
-                # leaves a mount point in place.
-                if _structural(match, registry):
-                    continue
-                if not await _delete_row(
-                    match, vfs, dispatch, errors, stat_path
-                ):
-                    exit_code = 1
-                    break
-            else:
-                out.append(
-                    encode_text(path)
-                    + (b"\x00" if action.kind == "print0" else b"\n")
-                )
-    for position, action in enumerate(actions):
-        paths = batches.get(position)
-        if not isinstance(action, ExecAction) or not paths:
-            continue
-        assert execute_fn is not None
-        if not await _run_exec(
-            execute_fn,
-            session_id,
-            registry,
-            cwd,
-            stat_path,
-            action,
-            paths,
-            out,
-            errors,
-            once,
-        ):
-            exit_code = 1
-    body = b"".join(out)
-    return (body if body else None), b"".join(errors), exit_code
+            paths = batches.get(position)
+            if not isinstance(action, ExecAction) or not paths:
+                continue
+            assert execute_fn is not None
+            if not await _run_exec(
+                execute_fn,
+                session_id,
+                registry,
+                cwd,
+                stat_path,
+                action,
+                paths,
+                out,
+                errors,
+                once,
+            ):
+                exit_code = 1
+        body = b"".join(out)
+        return (body if body else None), b"".join(errors), exit_code
+    finally:
+        for engine in formatters.values():
+            await close_stream(engine)

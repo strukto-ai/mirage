@@ -15,7 +15,7 @@
 import type { ByteSpool } from '../../io/spool.ts'
 import { sizeOf, sliceOf } from '../../io/spool.ts'
 import { chunks } from '../../io/cooperative.ts'
-import { Sha1 } from '../../utils/hash.ts'
+import { Digest } from '../../utils/hash.ts'
 import { encodeBase64 } from '../../utils/base64.ts'
 import type { ApiResponse } from '../api/client.ts'
 import { rstripSlash } from '../../utils/slash.ts'
@@ -370,7 +370,7 @@ export async function boxUploadMultipart(
   })
 }
 
-function digestHeader(digest: Sha1): string {
+function digestHeader(digest: Digest): string {
   const hex = digest.digest()
   return (
     'sha=' +
@@ -395,16 +395,22 @@ export async function boxUploadSession(
   const endpoints = created.session_endpoints
   const partSize = created.part_size
   const parts: unknown[] = []
-  const digest = new Sha1()
+  const digest = new Digest('sha1')
   try {
     if (!Number.isSafeInteger(partSize) || partSize <= 0 || partSize > 64 * 1024 * 1024)
       throw new Error('Invalid Box upload part size')
     for (let offset = 0; offset < total; offset += partSize) {
       const part = await sliceOf(data, offset, partSize)
-      const partDigest = new Sha1()
-      for await (const chunk of chunks(part)) {
-        digest.update(chunk)
-        partDigest.update(chunk)
+      const partDigest = new Digest('sha1')
+      let partHeader: string
+      try {
+        for await (const chunk of chunks(part)) {
+          digest.update(chunk)
+          partDigest.update(chunk)
+        }
+        partHeader = digestHeader(partDigest)
+      } finally {
+        partDigest.close()
       }
       const response = (await apiRequest('PUT', endpoints.upload_part, {
         timeout: tm.timeout,
@@ -412,7 +418,7 @@ export async function boxUploadSession(
         headers: {
           ...(await boxAuthHeaders(tm)),
           'Content-Type': 'application/octet-stream',
-          Digest: digestHeader(partDigest),
+          Digest: partHeader,
           'Content-Range': `bytes ${String(offset)}-${String(offset + part.length - 1)}/${String(total)}`,
         },
         body: part as unknown as BodyInit,
@@ -450,5 +456,7 @@ export async function boxUploadSession(
       console.debug('Could not abort Box upload session', cleanup)
     }
     throw error
+  } finally {
+    digest.close()
   }
 }

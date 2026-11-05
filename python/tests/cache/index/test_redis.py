@@ -15,13 +15,14 @@
 import asyncio
 import os
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
 
 from mirage.cache.index import LookupStatus
-from mirage.cache.index.config import IndexDirectory
+from mirage.cache.index.config import IndexDirectory, row_json
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.index.store import IndexCacheStore
@@ -141,8 +142,8 @@ async def _seed(store: RedisIndexCacheStore) -> None:
 async def _replace(store: RedisIndexCacheStore) -> None:
     assert await store.replace_if_unchanged(
         "/d/a",
-        _row("a").model_dump_json(),
-        _row("a").model_copy(update={"fingerprint": "new"}),
+        row_json(_row("a")),
+        replace(_row("a"), fingerprint="new"),
     )
 
 
@@ -167,9 +168,7 @@ COUNTING = {
 }
 
 NOT_COUNTING = {
-    "put": lambda s: s.put(
-        "/d/a", _row("a").model_copy(update={"fingerprint": "new"})
-    ),
+    "put": lambda s: s.put("/d/a", replace(_row("a"), fingerprint="new")),
     "replace_if_unchanged": _replace,
 }
 
@@ -356,8 +355,8 @@ async def test_a_row_write_leaves_its_siblings_batched(store, mgets):
             row = (await store.get(path)).entry
             assert await store.replace_if_unchanged(
                 path,
-                row.model_dump_json(),
-                row.model_copy(update={"fingerprint": "new"}),
+                row_json(row),
+                replace(row, fingerprint="new"),
             )
     assert len(mgets) == 2
 
@@ -372,9 +371,7 @@ async def test_a_new_command_reads_rows_changed_outside_the_process(
         await store.get("/d/a")
     await store._client.set(
         store._entry_key("/d/a"),
-        _row("a")
-        .model_copy(update={"fingerprint": "external"})
-        .model_dump_json(),
+        row_json(replace(_row("a"), fingerprint="external")),
     )
     async with command_scope():
         await store.list_dir("/d")

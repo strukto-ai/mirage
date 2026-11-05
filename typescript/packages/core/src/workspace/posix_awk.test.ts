@@ -2,7 +2,9 @@ import { Workspace } from './workspace/workspace.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { OpenStream } from '../rs/stream.ts'
+import { StreamHost } from '../commands/builtin/utils/stream_host.ts'
 import { makeIntegrationWS, runResult } from '../../tests/workspace/fixtures/integration_fixture.ts'
 
 interface Case {
@@ -121,3 +123,103 @@ it.each(CROSS_MOUNT)('keeps ARGV across mounts in %j', async (command, code, out
     await ws.close()
   }
 })
+
+interface InterruptCase {
+  id: string
+  program: string
+  unit: string
+  prefix?: string
+  bytes?: number
+}
+
+const interrupt = JSON.parse(
+  readFileSync(new URL('../../../../../integ/interrupt/awk.json', import.meta.url), 'utf8'),
+) as { bytes: number; cases: InterruptCase[] }
+
+it.each(interrupt.cases)(
+  'cancels during $id and releases its resources',
+  async (test) => {
+    const ram = new RAMVFS()
+    const prefix = new TextEncoder().encode(test.prefix ?? '')
+    const size = test.bytes ?? interrupt.bytes
+    const bytes = new Uint8Array(prefix.length + size + 6)
+    bytes.set(prefix)
+    bytes.fill(test.unit.charCodeAt(0), prefix.length, prefix.length + size)
+    bytes.set(new TextEncoder().encode('\nnext\n'), prefix.length + size)
+    ram.store.files.set('/in', bytes)
+    const ws = new Workspace({ '/data': ram }, { mode: MountMode.WRITE })
+    const controller = new AbortController()
+    const originalDrain = Object.getOwnPropertyDescriptor(OpenStream.prototype, 'drain')
+      ?.value as OpenStream['drain']
+    const originalCancel = Object.getOwnPropertyDescriptor(OpenStream.prototype, 'cancel')
+      ?.value as OpenStream['cancel']
+    const originalInput = Object.getOwnPropertyDescriptor(StreamHost.prototype, 'openInput')
+      ?.value as StreamHost['openInput']
+    const drain = vi.spyOn(OpenStream.prototype, 'drain')
+    const cancel = vi.spyOn(OpenStream.prototype, 'cancel')
+    const input = vi.spyOn(StreamHost.prototype, 'openInput')
+    const retiring = new Set<OpenStream>()
+    let retirementCalls = 0
+    let sources = 0
+    let opened = 0
+    let armed = 0
+    let fired = 0
+    let completed = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    drain.mockImplementation(function (this: OpenStream) {
+      const out = originalDrain.call(this)
+      const text = new TextDecoder().decode(out)
+      if (retiring.has(this)) retirementCalls += 1
+      else if (text.startsWith('ready\n') && timer === undefined) {
+        armed = performance.now()
+        timer = setTimeout(() => {
+          fired = performance.now()
+          controller.abort()
+        }, 0)
+      }
+      completed ||= text.includes('done\n')
+      return out
+    })
+    cancel.mockImplementation(function (this: OpenStream) {
+      retiring.add(this)
+      return originalCancel.call(this)
+    })
+    input.mockImplementation(async function* (
+      this: StreamHost,
+      ...args: Parameters<StreamHost['openInput']>
+    ) {
+      sources += 1
+      opened += 1
+      try {
+        yield* originalInput.apply(this, args)
+      } finally {
+        sources -= 1
+      }
+    })
+    try {
+      await expect(
+        ws.shell(`awk '${test.program}' /data/in`, { signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' })
+      expect(timer).toBeDefined()
+      expect(fired).toBeGreaterThan(0)
+      expect(fired - armed).toBeLessThan(750)
+      expect(completed).toBe(false)
+      expect(opened).toBeGreaterThan(0)
+      await expect.poll(() => sources, { timeout: 3000 }).toBe(0)
+      expect(performance.now() - fired).toBeLessThan(3000)
+      expect(retirementCalls).toBeGreaterThan(test.id === 'array-cleanup' ? 1 : 0)
+      expect([...retiring].every((stream) => !stream.live)).toBe(true)
+      expect(new TextDecoder().decode((await ws.shell('printf recovered')).stdout)).toBe(
+        'recovered',
+      )
+    } finally {
+      clearTimeout(timer)
+      controller.abort()
+      drain.mockRestore()
+      cancel.mockRestore()
+      input.mockRestore()
+      await ws.close()
+    }
+  },
+  10000,
+)

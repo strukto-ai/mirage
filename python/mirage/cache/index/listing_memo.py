@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import copy
 import threading
 from collections import Counter, OrderedDict
 from collections.abc import Awaitable, Callable, Sequence
@@ -243,7 +244,7 @@ class ListingMemo:
             ):
                 kept.rows.update(found)
             row = found[path]
-        return None if row is None else row.model_copy(deep=True)
+        return None if row is None else copy.deepcopy(row)
 
     def row_wrote(self, path: str) -> None:
         """Count a finished write of one row, keeping its siblings' reads.

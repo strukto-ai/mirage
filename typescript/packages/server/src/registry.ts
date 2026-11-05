@@ -27,15 +27,21 @@ import {
   type ProfileScripts,
   type WorkspaceContext,
 } from '@struktoai/mirage-core/policy/types'
-import type { JsonValue } from '@struktoai/mirage-core/types'
+import type { Ceilings, JsonValue } from '@struktoai/mirage-core/types'
+import { parseLimit } from '@struktoai/mirage-core/utils/size'
 import { newWorkspaceId } from '@struktoai/mirage-core/utils/ids'
 import { WorkspaceRunner } from '@struktoai/mirage-core/workspace/runner'
 import type { RecordClient } from '@struktoai/mirage-core/workspace/record/types'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import { resolve } from 'node:path'
 import { DaemonConfigError, readDaemonTable } from './daemon_config.ts'
+import { MAX_SESSIONS } from './constants.ts'
 import {
   ENV_GRACEFUL_TIMEOUT,
+  ENV_MAX_LINE_SECONDS,
+  ENV_MAX_ENV,
+  ENV_MAX_MEMORY,
+  ENV_MAX_PROCESSES,
   ENV_MAX_SESSIONS,
   ENV_MAX_WORKSPACES,
   ENV_POLICY_FILE,
@@ -96,14 +102,93 @@ export function resolveMaxWorkspaces(
 /**
  * The most sessions each workspace holds, its default session among them:
  * `maxSessions` when given, else `$MIRAGE_MAX_SESSIONS`, else the
- * `max_sessions` key in config.toml's `[daemon]` table, else no cap.
- * Mirrors Python's `resolve_max_sessions`.
+ * `max_sessions` key in config.toml's `[daemon]` table, else `fallback`,
+ * the host's own default. Mirrors Python's `resolve_max_sessions`.
  */
 export function resolveMaxSessions(
   maxSessions?: number | null,
   env: Record<string, string | undefined> = process.env,
+  fallback: number = MAX_SESSIONS,
+): number {
+  return cap(maxSessions, env, ENV_MAX_SESSIONS, 'max_sessions') ?? fallback
+}
+
+/**
+ * The most any workspace the server holds may set: each ceiling from its
+ * option when given, else its `$MIRAGE_MAX_*` variable, else its key in
+ * config.toml's `[daemon]` table, else none. Throws DaemonConfigError for a
+ * ceiling that is not a positive size, whole number or number of seconds.
+ * Mirrors Python's `resolve_ceilings`.
+ */
+export function resolveCeilings(
+  options: {
+    maxMemory?: string | number | null
+    maxProcesses?: number | null
+    maxLineSeconds?: number | null
+    maxEnv?: string | number | null
+  } = {},
+  env: Record<string, string | undefined> = process.env,
+): Ceilings {
+  const value = setting(options.maxLineSeconds, env, ENV_MAX_LINE_SECONDS, 'max_line_seconds')
+  const seconds = value === undefined ? null : toSeconds(value)
+  if (seconds !== null && seconds <= 0) {
+    throw new DaemonConfigError(
+      `max_line_seconds must be a number of seconds above 0, got ${JSON.stringify(value)}`,
+    )
+  }
+  return {
+    maxMemory: size(options.maxMemory, env, ENV_MAX_MEMORY, 'max_memory'),
+    maxProcesses: cap(options.maxProcesses, env, ENV_MAX_PROCESSES, 'max_processes'),
+    maxLineSeconds: seconds,
+    maxEnv: size(options.maxEnv, env, ENV_MAX_ENV, 'max_env'),
+  }
+}
+
+/**
+ * A positive size: `given`, else the `name` variable, else `key` in
+ * config.toml's `[daemon]` table, else null. Throws DaemonConfigError for
+ * anything but a size above 0. Mirrors Python's `_size`.
+ */
+function size(
+  given: string | number | null | undefined,
+  env: Record<string, string | undefined>,
+  name: string,
+  key: string,
 ): number | null {
-  return cap(maxSessions, env, ENV_MAX_SESSIONS, 'max_sessions')
+  const value = setting(given, env, name, key)
+  if (value === undefined) return null
+  let held: number
+  try {
+    held = parseLimit(value, key)
+  } catch (err) {
+    throw new DaemonConfigError(err instanceof Error ? err.message : String(err))
+  }
+  if (held < 1) throw new DaemonConfigError(`${key} must be above 0, got ${JSON.stringify(value)}`)
+  return held
+}
+
+/**
+ * A host setting as given: `given`, else the `name` variable, else `key`
+ * in config.toml's `[daemon]` table; undefined when none of them sets it.
+ * Mirrors Python's `_setting`.
+ */
+function setting(
+  given: string | number | null | undefined,
+  env: Record<string, string | undefined>,
+  name: string,
+  key: string,
+): string | number | undefined {
+  if (given != null) return given
+  const fromEnv = env[name]
+  const value =
+    fromEnv !== undefined && fromEnv !== '' ? fromEnv : readDaemonTable(mirageHome(env))[key]
+  return value === undefined || value === '' ? undefined : value
+}
+
+/** A number of seconds as written, -1 for one that is not. Mirrors Python's `_to_seconds`. */
+function toSeconds(value: string | number): number {
+  const seconds = typeof value === 'number' ? value : value.trim() === '' ? NaN : Number(value)
+  return Number.isFinite(seconds) ? seconds : -1
 }
 
 /**
@@ -117,13 +202,8 @@ function cap(
   name: string,
   key: string,
 ): number | null {
-  let value: string | number | undefined = given ?? undefined
-  if (value === undefined) {
-    const fromEnv = env[name]
-    value =
-      fromEnv !== undefined && fromEnv !== '' ? fromEnv : readDaemonTable(mirageHome(env))[key]
-    if (value === undefined || value === '') return null
-  }
+  const value = setting(given, env, name, key)
+  if (value === undefined) return null
   const held = typeof value === 'number' ? value : /^\d+$/.test(value) ? Number(value) : 0
   if (!Number.isSafeInteger(held) || held < 1) {
     throw new DaemonConfigError(
@@ -143,17 +223,10 @@ export function resolveGracefulTimeout(
   gracefulTimeout?: number | null,
   env: Record<string, string | undefined> = process.env,
 ): number {
-  let value: string | number | undefined = gracefulTimeout ?? undefined
-  if (value === undefined) {
-    const fromEnv = env[ENV_GRACEFUL_TIMEOUT]
-    value =
-      fromEnv !== undefined && fromEnv !== ''
-        ? fromEnv
-        : readDaemonTable(mirageHome(env)).graceful_timeout
-    if (value === undefined || value === '') return 0
-  }
-  const seconds = typeof value === 'number' ? value : value.trim() === '' ? NaN : Number(value)
-  if (!Number.isFinite(seconds) || seconds < 0) {
+  const value = setting(gracefulTimeout, env, ENV_GRACEFUL_TIMEOUT, 'graceful_timeout')
+  if (value === undefined) return 0
+  const seconds = toSeconds(value)
+  if (seconds < 0) {
     throw new DaemonConfigError(
       `graceful_timeout must be a number of seconds, 0 or more, got ${JSON.stringify(value)}`,
     )
@@ -203,6 +276,8 @@ export class WorkspaceRegistry {
   private readonly watchNetwork: () => void
   readonly maxWorkspaces: number | null
   readonly maxSessions: number | null
+  /** The most any workspace it builds may set, which every create, clone and load is held to. */
+  readonly ceilings: Ceilings
   readonly policies: readonly Policy[]
   private readonly programs: ProfileScripts
   private readonly admissionPrograms: ScriptPolicy
@@ -236,10 +311,13 @@ export class WorkspaceRegistry {
       programs?: ProfileScripts
       /** The most sessions each workspace holds, its default among them; null for no cap. */
       maxSessions?: number | null
+      /** The most any workspace it builds may set. */
+      ceilings?: Ceilings
     } = {},
   ) {
     this.maxWorkspaces = options.maxWorkspaces ?? null
     this.maxSessions = options.maxSessions ?? null
+    this.ceilings = options.ceilings ?? {}
     this.policies = [...(options.policies ?? [])]
     this.programs = Object.fromEntries(
       Object.entries(options.programs ?? {}).filter(([method]) => method !== 'preWorkspace'),

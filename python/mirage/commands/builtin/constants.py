@@ -15,8 +15,6 @@
 import re
 from enum import Enum
 
-from mirage.types import ContentType
-
 
 class PatternType(str, Enum):
     EXACT = "exact"
@@ -24,38 +22,12 @@ class PatternType(str, Enum):
     REGEX = "regex"
 
 
-FILE_MIME_MAP: dict[str, str] = {
-    "text": "text/plain; charset=us-ascii",
-    "json": "application/json; charset=us-ascii",
-    "csv": "text/csv; charset=us-ascii",
-    "directory": "inode/directory",
-    "binary": "application/octet-stream",
-    "image/png": "image/png",
-    "image/jpeg": "image/jpeg",
-    "image/gif": "image/gif",
-    "application/zip": "application/zip",
-    "application/gzip": "application/gzip",
-    "application/pdf": "application/pdf",
-}
-
 # GNU `file -i` reports a symlink by its inode type, never by whatever
 # the target would have sniffed as.
 MIME_SYMLINK = "inode/symlink; charset=binary"
 
 # How much of a file `file` sniffs: only its first bytes are read.
 FILE_HEADER_BYTES = 512
-
-# The leading bytes `file` recognizes a format by, checked in order.
-MAGIC_SIGNATURES: tuple[tuple[bytes, ContentType], ...] = (
-    (b"\x89PNG", ContentType.IMAGE_PNG),
-    (b"\xff\xd8\xff", ContentType.IMAGE_JPEG),
-    (b"GIF8", ContentType.IMAGE_GIF),
-    (b"PK\x03\x04", ContentType.ZIP),
-    (b"\x1f\x8b", ContentType.GZIP),
-    (b"%PDF", ContentType.PDF),
-    (b"{\n", ContentType.JSON),
-    (b"[{", ContentType.JSON),
-)
 
 # od, split and cmp all skip leading whitespace in a count and allow one
 # '+' before the digits, so `-b +10` and `-b " 10"` are valid while

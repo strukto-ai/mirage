@@ -19,9 +19,15 @@ import { inRequest } from '@struktoai/mirage-core/io/web/request'
 import { registerApi } from '@struktoai/mirage-server/api'
 import { AuthMode, resolveAuthConfig, type AuthConfig } from '@struktoai/mirage-server/auth/config'
 import { authenticator, PUBLIC_PATHS } from '@struktoai/mirage-server/auth/middleware'
-import { WorkspaceRegistry } from '@struktoai/mirage-server/registry'
+import {
+  resolveCeilings,
+  resolveMaxSessions,
+  resolveMaxWorkspaces,
+  WorkspaceRegistry,
+} from '@struktoai/mirage-server/registry'
 import type { RouteReply, RouteRequest } from '@struktoai/mirage-server/routes'
 import { serveCodexSocket } from '@struktoai/mirage-server/ssh/codex'
+import { EDGE_MAX_SESSIONS } from './constants.ts'
 import { edgeHost, RAMRecordClient } from './host.ts'
 import { WebRoutes } from './router.ts'
 
@@ -39,10 +45,37 @@ export interface EdgeAppOptions {
    * the Node server reads.
    */
   auth?: AuthConfig
-  /** The most workspaces held at once; past it a create answers 503. */
+  /**
+   * The most workspaces held at once; past it a create answers 503.
+   * Undefined reads `$MIRAGE_MAX_WORKSPACES`, else sets no cap.
+   */
   maxWorkspaces?: number
-  /** The most sessions each workspace holds; past it a new session answers 429. */
+  /**
+   * The most sessions each workspace holds; past it a new session answers
+   * 429. Undefined reads `$MIRAGE_MAX_SESSIONS`, else 4, since every
+   * workspace shares the isolate's memory.
+   */
   maxSessions?: number
+  /**
+   * The most a workspace's `max_memory` reaches, a lifted one included, as
+   * a size. Undefined reads `$MIRAGE_MAX_MEMORY`, else sets no ceiling.
+   */
+  maxMemory?: string | number
+  /**
+   * The most a session's `processes.max` reaches, a lifted one included.
+   * Undefined reads `$MIRAGE_MAX_PROCESSES`, else sets no ceiling.
+   */
+  maxProcesses?: number
+  /**
+   * The most seconds a line runs, whatever `@line` a config or profile
+   * sets. Undefined reads `$MIRAGE_MAX_LINE_SECONDS`, else sets no ceiling.
+   */
+  maxLineSeconds?: number
+  /**
+   * The most a workspace's `max_env` reaches, a lifted one included, as a
+   * size. Undefined reads `$MIRAGE_MAX_ENV`, else sets no ceiling.
+   */
+  maxEnv?: string | number
   /** The server's own policies, answered before a workspace is built and registered on each. */
   policies?: readonly Policy[]
   /** The S3-like store a snapshot request may name a key in. */
@@ -134,8 +167,9 @@ export function createApp(options: EdgeAppOptions = {}): EdgeApp {
       accountsRequired: auth.mode === AuthMode.Jwt,
       owners: new RAMRecordClient(),
       watchNetwork,
-      ...(options.maxWorkspaces !== undefined ? { maxWorkspaces: options.maxWorkspaces } : {}),
-      ...(options.maxSessions !== undefined ? { maxSessions: options.maxSessions } : {}),
+      maxWorkspaces: resolveMaxWorkspaces(options.maxWorkspaces),
+      maxSessions: resolveMaxSessions(options.maxSessions, process.env, EDGE_MAX_SESSIONS),
+      ceilings: resolveCeilings(options),
       policies: options.policies ?? [],
     })
     const routes = new WebRoutes()

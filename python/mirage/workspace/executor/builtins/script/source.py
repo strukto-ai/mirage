@@ -33,6 +33,7 @@ from mirage.workspace.executor.builtins.shared import builtin_usage
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.control import ended, returning
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.budget import args_bytes, check_env, frames_bytes
 from mirage.workspace.session.state import (
     positional_params,
     set_positional_params,
@@ -102,7 +103,9 @@ async def handle_source(
         else CallStack(session.shell_nesting)
     )
     cs.admit(name)
-    cs.push(args or list(positional_params(session, cs)), "source", True)
+    params = args or list(positional_params(session, cs))
+    check_env(session, 0, args_bytes(params), frames_bytes(cs))
+    cs.push(params, "source", True)
     outer_names = session.function_names
     if outer_names is not None:
         session.function_names = cs.function_names()

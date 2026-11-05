@@ -71,7 +71,6 @@ def stat(size: int | None = 4, mode: int | None = 0o644) -> FileStat:
     """
     return FileStat(
         name="x",
-        path="x",
         type=FileType.FILE,
         content=ContentType.TEXT,
         size=size,

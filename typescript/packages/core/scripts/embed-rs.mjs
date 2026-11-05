@@ -15,13 +15,16 @@ try {
   messages = execFileSync(
     'cargo',
     [
-      'build',
+      'rustc',
       '-p',
       'mirage-rs-wasm',
       '--release',
       '--target',
       target,
       '--message-format=json-render-diagnostics',
+      '--',
+      '-C',
+      'opt-level=2',
     ],
     {
       cwd: workspace,
@@ -36,7 +39,7 @@ try {
   console.error(
     error.code === 'ENOENT'
       ? 'embed-rs: cargo not found. Install rustup (https://rustup.rs); rust/rust-toolchain.toml then fetches the pinned toolchain.'
-      : 'embed-rs: cargo build -p mirage-rs-wasm failed (see above).',
+      : 'embed-rs: cargo rustc -p mirage-rs-wasm failed (see above).',
   )
   process.exit(1)
 }
@@ -51,6 +54,12 @@ const path = messages
   .find((file) => file.endsWith('mirage_rs_wasm.wasm'))
 if (path === undefined) throw new Error('cargo reported no mirage_rs_wasm.wasm')
 const wasm = readFileSync(path)
+const browserLimit = 8 * 1024 * 1024
+if (wasm.byteLength > browserLimit) {
+  throw new Error(
+    `mirage-rs Wasm is ${wasm.byteLength} bytes, exceeding the browser synchronous compilation and instantiation limit of ${browserLimit} bytes`,
+  )
+}
 const output = new URL('../src/generated/', import.meta.url)
 mkdirSync(output, { recursive: true })
 const base64 = JSON.stringify(wasm.toString('base64'))
@@ -60,7 +69,7 @@ writeFileSync(new URL('mirage_rs.wasm', output), wasm)
 // The modules `#mirage-rs-wasm` names, written here rather than by the
 // build so code run from source (tsx, the integ runners) finds them too:
 // under workerd the .wasm its bundler loads, under Node the .wasm read and
-// compiled from beside it, and elsewhere the base64 string.
+// compiled on first use from beside it, and elsewhere the base64 string.
 const built = new URL('../dist/generated/', import.meta.url)
 mkdirSync(built, { recursive: true })
 writeFileSync(new URL('mirage_rs.js', built), `export default ${base64}\n`)
@@ -72,5 +81,7 @@ writeFileSync(
 writeFileSync(
   new URL('mirage_rs.node.js', built),
   "import { readFileSync } from 'node:fs'\n\n" +
-    "export default new WebAssembly.Module(readFileSync(new URL('./mirage_rs.wasm', import.meta.url)))\n",
+    'let module\n\nexport default function loadModule() {\n' +
+    "  return module ??= new WebAssembly.Module(readFileSync(new URL('./mirage_rs.wasm', import.meta.url)))\n" +
+    '}\n',
 )

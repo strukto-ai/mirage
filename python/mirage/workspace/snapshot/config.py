@@ -22,8 +22,10 @@ from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY
 from mirage.io.network import NetworkSetting
 from mirage.policy.profile import SessionProfile
+from mirage.process.config import ProcessPermissions
 from mirage.types import Limit, WritePolicy
 from mirage.vfs.secrets import REDACTED_SECRET, has_redacted_secret
+from mirage.workspace.session.constants import MAX_ENV
 
 
 @dataclass
@@ -45,9 +47,13 @@ class MountArgs:
     # The profile table every session ran under, and its default.
     profiles: dict[str, SessionProfile] = field(default_factory=dict)
     profile: str | None = None
+    # The workspace's processes block, as stated; None when it states none.
+    processes: ProcessPermissions | None = None
     # The workspace's max_memory in bytes, None for no cap.
     max_memory: int | None = MAX_MEMORY
     max_body_bytes: int = MAX_BODY_BYTES
+    # The workspace's max_env in bytes, None for no cap.
+    max_env: int | None = MAX_ENV
     # The workspace's network setting, as written.
     network: NetworkSetting = True
     # The workspace's system_time, as written; None for the host's time.

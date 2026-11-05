@@ -88,6 +88,27 @@ pins high bytes and CRLF display; `unix/zgrep/error.json` pins corrupt trailers
 after count, listing, matching and early selection, against GNU coreutils 9.7
 and gzip 1.13 in `debian:stable-slim`.
 
+The shared Rust `file` signature and MIME catalog and its host adapters use
+the same whole-host filters. The existing file corpus and host prefix-read
+tests cover their output and source lifetime.
+
+The shared Rust `select` stream and `rs/select` adapters use these filters
+for head and tail. The hosts retain range reads, unread stdin, pushdowns
+and follow polling; the stream owns record boundaries and retained windows.
+Find's `-printf` formatter reuses the shared `strftime` calendar fields;
+its host adapters supply only path, stat, link-target and identity facts.
+The existing Rust, builtin and executor filters cover this path.
+The same filters select `expr` grammar, arithmetic and character operations;
+the hosts only pass argument bytes and locale and schedule bounded steps.
+The Rust date parser and calendar use the existing whole-host filters too;
+time-zone lookups stay in the hosts and the date command yields between
+parser steps. Synchronous date convenience helpers retain their interfaces
+and each host's timestamp precision.
+The record kernels bound retained-record scans, copies and output for
+`rev`, `uniq` and `comm`; `column` also yields while discovering rows,
+measuring cells and emitting padding. Their Rust regression tests include
+giants, long equal prefixes, suppressed rows and UTF-8 split at file ends.
+
 Streaming writes are covered by the shared lifecycle corpus and mirrored
 writer, dispatcher, disk and S3 tests. They pin named outputs, duplicate
 tee destinations, split's unterminated final record, sed's buffered

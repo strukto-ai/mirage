@@ -496,3 +496,384 @@ fn a_replacement_past_the_string_limit_is_refused() {
         ("awk: out of memory\n", 2)
     );
 }
+
+#[test]
+fn nested_match_and_record_searches_resume_within_the_vm_budget() {
+    let drive = |config: serde_json::Value, input: &[u8]| {
+        let mut stream = super::open(&serde_json::to_vec(&config).unwrap()).unwrap();
+        let mut out = Vec::new();
+        let mut turns = 0;
+        let mut reads = 0;
+        loop {
+            while stream.busy() {
+                stream.drain(&mut out).unwrap();
+                turns += 1;
+                assert!(turns < 10000);
+            }
+            let mut data = Vec::new();
+            let Some(header) = stream.request(&mut data) else {
+                break;
+            };
+            let request: serde_json::Value = serde_json::from_slice(&header).unwrap();
+            if request["op"] == "read" {
+                assert!(reads < 2);
+                if reads == 0 {
+                    stream.respond(b"{}", input, &mut out).unwrap();
+                } else {
+                    stream.respond(br#"{"end":true}"#, b"", &mut out).unwrap();
+                }
+                reads += 1;
+            } else {
+                stream.respond(b"{}", b"", &mut out).unwrap();
+            }
+        }
+        let mut err = Vec::new();
+        stream.take_stderr(&mut err);
+        assert!(err.is_empty());
+        assert_eq!(stream.status(), 0);
+        (out, turns)
+    };
+    let long = "a".repeat(131073);
+    let config = json!({"program":"BEGIN{print s ~ /x/; print match(s,/a+/), RSTART, RLENGTH}","assignments":[format!("s={long}")]});
+    let (out, turns) = drive(config, b"");
+    assert_eq!(out, b"0\n1 1 131073\n");
+    assert!(turns > 10);
+    for (program, expected) in [
+        (
+            "BEGIN{print split(s,a,\"\"),length(a[131073]); print split(s,a,/a+/),length(a[1]),length(a[2])}",
+            "131073 1\n2 0 0\n".to_owned(),
+        ),
+        (
+            "BEGIN{print split(s,a,/x+/),length(a[1])}",
+            "1 131073\n".to_owned(),
+        ),
+        (
+            "BEGIN{print gsub(/a+/,\"<&>\",s),length(s)}",
+            "1 131075\n".to_owned(),
+        ),
+        (
+            "BEGIN{print gsub(/x*/,\"-\",s),length(s)}",
+            "131074 262147\n".to_owned(),
+        ),
+        (
+            "BEGIN{print sub(/a+/,t,s),length(s)}",
+            "1 131073\n".to_owned(),
+        ),
+        (
+            "BEGIN{$0=s;FS=\"x+\"; print NF; $2=\"b\"; print NF,length($0);NF=0;print length($0)}",
+            "1\n2 131075\n0\n".to_owned(),
+        ),
+    ] {
+        let config =
+            json!({"program":program,"assignments":[format!("s={long}"),format!("t={long}")]});
+        let (out, turns) = drive(config, b"");
+        assert_eq!(out, expected.as_bytes(), "{program}");
+        assert!(turns >= long.len() / super::STEPS, "{program}");
+    }
+    let config = json!({"program":"BEGIN{RS=\"a.*z|END\"} {print length($0)}"});
+    let (out, turns) = drive(config, format!("{long}ENDtail").as_bytes());
+    assert_eq!(out, b"131073\n4\n");
+    assert!(turns > 10);
+    let config = json!({"program":"BEGIN{RS=\"()\"} {print length($0)}"});
+    let (out, turns) = drive(config, long.as_bytes());
+    assert_eq!(out, b"131073\n");
+    assert!(turns > 10);
+    let config = json!({"program":"BEGIN{RS=\"\"} {print}"});
+    let input = format!("{}a\n\n{}b\n", "\n".repeat(131073), "\n".repeat(131073));
+    let (out, turns) = drive(config, input.as_bytes());
+    assert_eq!(out, b"a\nb\n");
+    assert!(turns > 10);
+}
+
+#[test]
+fn formatted_output_yields_and_commits_each_argument_once() {
+    let program =
+        "BEGIN { i=1; s=sprintf(\"%131073s:%d\",\"x\",i++); printf \"%s:%d\\n\",s,i++; print i }";
+    let mut stream = super::open(json!({"program":program}).to_string().as_bytes()).unwrap();
+    let mut out = Vec::new();
+    let mut turns = 0;
+    while stream.busy() {
+        let before = out.len();
+        stream.drain(&mut out).unwrap();
+        assert!(out.len() - before <= super::STEPS + 16);
+        turns += 1;
+        assert!(turns < 1000);
+    }
+    let mut expected = vec![b' '; 131072];
+    expected.extend_from_slice(b"x:1:2\n3\n");
+    assert_eq!(out, expected);
+    assert!(turns > 12);
+    let failed = run_with(
+        "BEGIN { print \"before\"; printf \"%131073s%s\",\"x\"; print \"after\" }",
+        &[],
+        "",
+        &[],
+    );
+    assert_eq!(failed.out, "before\n");
+    assert_eq!(failed.status, 2);
+    assert!(failed.err.contains("not enough arguments"));
+}
+
+#[test]
+fn field_views_keep_their_value_after_record_and_array_changes() {
+    assert_eq!(
+        run(
+            "{ saved=$1; split($0,a); item=a[2]; $1=\"changed\"; NF=1; split(\"replacement\",a); print saved,item,$0; getline; print saved,item,$0 }",
+            "left right\nnext record\n"
+        ),
+        "left right changed\nleft right next record\n"
+    );
+    assert_eq!(
+        run(
+            "BEGIN { s=\"abXcd\"; split(s,a,/X/); a[a[1]]=3; print a[\"ab\"],(\"ab\" in a); delete a[\"ab\"]; print (\"ab\" in a); s=\"other\"; print a[1],a[2] }",
+            ""
+        ),
+        "3 1\n0\nab cd\n"
+    );
+}
+
+#[test]
+fn cancellation_retires_arrays_and_pending_formats_without_more_effects() {
+    for config in [
+        json!({"program": r#"BEGIN { for (i=0;i<100000;i++) a[i]=i; print "ready"; while(1){} }"#}),
+        json!({"program": r#"BEGIN { print "ready"; s=sprintf(fmt); print "after" }"#, "assignments": [format!("fmt={}", "%z".repeat(100000))]}),
+    ] {
+        let mut stream = super::open(config.to_string().as_bytes()).unwrap();
+        let mut out = Vec::new();
+        while out.is_empty() {
+            assert!(stream.busy());
+            stream.drain(&mut out).unwrap();
+        }
+        assert_eq!(out, b"ready\n");
+        assert!(stream.cancel());
+        let mut turns = 0;
+        out.clear();
+        while stream.busy() {
+            stream.drain(&mut out).unwrap();
+            assert!(out.is_empty());
+            assert!(stream.request(&mut out).is_none());
+            assert!(stream.cancel());
+            turns += 1;
+            assert!(turns < 1000);
+        }
+        assert!(turns > 1);
+        assert!(stream.cancel());
+        assert!(!stream.busy());
+        stream.finish(&mut out).unwrap();
+        assert!(out.is_empty());
+    }
+}
+
+#[test]
+fn array_snapshots_and_scope_cleanup_preserve_order_across_small_budgets() {
+    let program = br#"
+        function f(n, local, k) {
+            for (k=0;k<n;k++) local[k]=k
+            for (k in local) return k ":" length(local)
+        }
+        BEGIN {
+            for (i=0;i<65;i++) a[i]=i
+            for (i=0;i<64;i++) delete a[i]
+            a[1]=7; a[2]=8
+            for (k in a) { print k; delete a; a[9]=9 }
+            print length(a),f(65),f(3)
+            for (i=0;i<65;i++) b[i]=i
+            for (k in b) break
+            delete b
+            print length(b)
+        }
+    "#;
+    for budget in [1, 7, 64, super::STEPS] {
+        let code = super::compile::compile(&super::parser::parse(program).unwrap());
+        let mut machine = super::vm::Machine::new(
+            code,
+            super::vm::Setup {
+                operands: Vec::new(),
+                assignments: Vec::new(),
+                fs: None,
+                environ: Vec::new(),
+            },
+        );
+        let mut out = Vec::new();
+        let mut turns = 0;
+        while !machine.done {
+            machine.run(budget);
+            out.append(&mut machine.io.out);
+            assert!(machine.io.idle());
+            turns += 1;
+            assert!(turns < 100000);
+        }
+        assert!(machine.io.err.is_empty());
+        assert_eq!(out, b"64\n1\n2\n1 0:65 0:3\n0\n");
+        assert_eq!(machine.status, 0);
+    }
+    assert_eq!(
+        run(
+            r#"function skip(local,k){for(k=0;k<10000;k++)local[k]=k;for(k in local)next} {print NR;skip();print "after"} END{print "end"}"#,
+            "one\ntwo\n",
+        ),
+        "1\n2\nend\n"
+    );
+    assert_eq!(
+        run(
+            r#"function stop(local,k){for(k=0;k<10000;k++)local[k]=k;for(k in local)exit 7} BEGIN{stop();print "after"} END{print "end"}"#,
+            "",
+        ),
+        "end\n"
+    );
+}
+
+#[test]
+fn large_numeric_values_prepare_before_reads_updates_and_formatting() {
+    let two = format!("{}2", "0".repeat(8193));
+    let input = format!("{two} {two}\n");
+    assert_eq!(
+        run(
+            r#"{n=$1;print n+0;n++;a[1]=$1;print ++a[1],$1++;print $1;i=$2;$(i)=7;print $2;NR=i;FNR=i;print NR,FNR;NF=i;print NF}"#,
+            &input,
+        ),
+        "2\n3 2\n3\n7\n2 2\n2\n"
+    );
+    assert_eq!(
+        run(
+            r#"{print !!$0; s="" $0; print !!s; print s==substr(s,1); print s<(s "1"); $0++; print $0}"#,
+            &format!("{}\n", "0".repeat(8193)),
+        ),
+        "0\n1\n1\n1\n1\n"
+    );
+    let program = r#"BEGIN { printf "%*.*f:%d\n",width,precision,1.25,n; print ++n; print n<4 }"#;
+    for budget in [1, 7, super::STEPS] {
+        let code = super::compile::compile(&super::parser::parse(program.as_bytes()).unwrap());
+        let mut machine = super::vm::Machine::new(
+            code,
+            super::vm::Setup {
+                operands: Vec::new(),
+                assignments: vec![
+                    (
+                        b"width".to_vec(),
+                        format!("{}8", "0".repeat(8193)).into_bytes(),
+                    ),
+                    (b"precision".to_vec(), two.as_bytes().to_vec()),
+                    (b"n".to_vec(), two.as_bytes().to_vec()),
+                ],
+                fs: None,
+                environ: Vec::new(),
+            },
+        );
+        let mut out = Vec::new();
+        let mut turns = 0;
+        while !machine.done {
+            machine.run(budget);
+            out.append(&mut machine.io.out);
+            assert!(machine.io.idle());
+            turns += 1;
+            assert!(turns < 100000);
+        }
+        assert!(machine.io.err.is_empty());
+        assert_eq!(out, b"    1.25:2\n3\n1\n");
+    }
+    assert_eq!(
+        run_with(
+            "{print}",
+            &[&format!("ARGC={}", "0".repeat(8193))],
+            "input\n",
+            &[]
+        )
+        .out,
+        "input\n"
+    );
+}
+
+#[test]
+fn control_formats_preserve_numeric_identity_and_assignment_results() {
+    let program = br#"
+        BEGIN {
+            CONVFMT="%.8193f"; OFMT=CONVFMT; x=1.25; i=0
+            s=sprintf("%s:%s",x+i++,x+i++)
+            print length(s),i
+            r=($1=x); print r==x,r<2,length($1)
+            r=$1++; print r==x,($1+0)==2.25
+            a[x,x+1]=9; print a[x,x+1],length(x)
+            print x==1.25,x=="1.25"
+            print sub(/z/,"Z",x),x==1.25
+            a[1]=x; gsub(/z/,"Z",a[1]); print a[1]==1.25
+            sub(/2/,"8",x); print x+0==1.85
+            CONVFMT="%.1f"; print a[1] "",a[1]<2
+            CONVFMT="%.2f"; printf a[1]; print ""; print sprintf(a[1])
+        }
+    "#;
+    for budget in [1, 7, super::STEPS] {
+        let code = super::compile::compile(&super::parser::parse(program).unwrap());
+        let mut machine = super::vm::Machine::new(
+            code,
+            super::vm::Setup {
+                operands: Vec::new(),
+                assignments: Vec::new(),
+                fs: None,
+                environ: Vec::new(),
+            },
+        );
+        let mut out = Vec::new();
+        let mut turns = 0;
+        while !machine.done {
+            machine.run(budget);
+            out.append(&mut machine.io.out);
+            assert!(machine.io.idle());
+            turns += 1;
+            assert!(turns < 2_000_000);
+        }
+        assert!(machine.io.err.is_empty());
+        assert_eq!(
+            out,
+            b"16391 2\n1 1 8195\n1 1\n9 8195\n1 0\n0 1\n1\n1\n1.2 1\n1.25\n1.25\n"
+        );
+        assert_eq!(machine.status, 0);
+    }
+    let read = run_with(
+        r#"BEGIN { CONVFMT="%.2f"; ARGV[1]=1.25; ARGC=2 } { print FILENAME,$0 }"#,
+        &[],
+        "",
+        &[("1.25", "number file\n")],
+    );
+    assert_eq!(read.out, "1.25 number file\n");
+    assert_eq!(read.status, 0);
+}
+
+#[test]
+fn malformed_large_format_retires_plans_and_emits_diagnostic_in_windows() {
+    let format = format!("{}%s", "%z".repeat(65537));
+    let config = json!({
+        "program": "BEGIN { print \"before\"; printf fmt; print \"after\" }",
+        "assignments": [format!("fmt={format}")],
+    });
+    let mut stream = super::open(config.to_string().as_bytes()).unwrap();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let mut turns = 0;
+    while stream.busy() {
+        stream.drain(&mut out).unwrap();
+        let before = err.len();
+        stream.take_stderr(&mut err);
+        assert!(err.len() - before <= super::STEPS);
+        turns += 1;
+        assert!(turns < 1000);
+    }
+    assert_eq!(out, b"before\n");
+    assert_eq!(stream.status(), 2);
+    assert_eq!(
+        err,
+        format!("awk: not enough arguments to satisfy format string '{format}'\n").into_bytes()
+    );
+    assert!(turns > 50);
+}
+
+#[test]
+fn missing_fields_update_from_zero_and_keep_string_comparison_rules() {
+    assert_eq!(
+        run(
+            r#"BEGIN { print $1++; print NF,$1; print ++$3; print NF,$2,$3; NF=0; print --$2,$2,NF; print ($5==0),($5=="") }"#,
+            ""
+        ),
+        "0\n1 1\n1\n3  1\n-1 -1 2\n0 1\n"
+    );
+}

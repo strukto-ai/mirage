@@ -227,6 +227,32 @@ async def test_a_streamed_write_shows_a_quiet_writers_bytes(store):
     assert store.store.files["/log"] == b"a\nb\n"
 
 
+# Past PUBLISH_BYTES each landing copies more, so the next one waits longer
+# in proportion: a long write copies its file a bounded number of times.
+@pytest.mark.asyncio
+async def test_a_big_streamed_write_lands_less_often(store, monkeypatch):
+    monkeypatch.setattr("mirage.core.ram.write.PUBLISH_BYTES", 2)
+    second = asyncio.Event()
+    hold = asyncio.Event()
+
+    async def source():
+        yield b"0123456789abcdef"
+        await second.wait()
+        yield b"more"
+        await hold.wait()
+
+    writing = asyncio.create_task(write(store, _spec("f"), source()))
+    await asyncio.sleep(STREAM_PUBLISH_SECONDS * 2)
+    assert store.store.files["/f"] == b"0123456789abcdef"
+    second.set()
+    await asyncio.sleep(STREAM_PUBLISH_SECONDS * 1.5)
+    assert store.store.files["/f"] == b"0123456789abcdef"
+    await asyncio.sleep(STREAM_PUBLISH_SECONDS * 8)
+    assert store.store.files["/f"] == b"0123456789abcdefmore"
+    hold.set()
+    await writing
+
+
 # A streamed append lands after what another appender added meanwhile.
 @pytest.mark.asyncio
 async def test_a_streamed_append_keeps_another_appenders_bytes(store):

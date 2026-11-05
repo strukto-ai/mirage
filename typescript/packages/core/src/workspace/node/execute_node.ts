@@ -102,6 +102,7 @@ import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { landedArith } from '../session/elements.ts'
+import { sessionEntry } from '../session/session.ts'
 import { positionalParams, sessionView } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { type Admitted, admitTest } from './admission.ts'
@@ -115,6 +116,7 @@ import { executeProgram } from './program.ts'
 import { expandDoubleBracket } from './test_expr.ts'
 import { timedBy, timingReport } from './timing.ts'
 import type { ExpandedWords } from './types.ts'
+import { checkEnv, entryBytes } from '../session/budget.ts'
 
 const STREAMING_KINDS: ReadonlySet<NodeKind> = new Set([
   NodeKind.PROGRAM,
@@ -1491,6 +1493,8 @@ async function executeNodeBody(
       return fail(`function ${name}`, `bash: ${name}: readonly function\n`)
     }
     const source = getFunctionSource(node)
+    const held = sessionEntry(session.functions, name)
+    checkEnv(session, held === undefined ? 0 : entryBytes(name, held), entryBytes(name, source))
     session.functions[name] = source
     session.functionSites.set(name, {
       source,

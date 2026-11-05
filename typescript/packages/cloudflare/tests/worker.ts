@@ -44,7 +44,8 @@ interface SqlRun {
   readonly id: string
 }
 
-const app = createApp({ maxWorkspaces: 32 })
+// The corpus opens as many sessions a workspace as it does on the server.
+const app = createApp({ maxWorkspaces: 32, maxSessions: 16 })
 
 interface Run {
   readonly lines: readonly string[]
@@ -92,7 +93,11 @@ async function sqlLines(driver: SqlDriver, run: SqlRun): Promise<Response> {
     const results = []
     for (const line of run.lines) {
       const result = await ws.shell(line)
-      results.push({ exit: result.exitCode, stdout: decoder.decode(result.stdout) })
+      results.push({
+        exit: result.exitCode,
+        stdout: decoder.decode(result.stdout),
+        stderr: decoder.decode(result.stderr),
+      })
     }
     return Response.json(results)
   } finally {

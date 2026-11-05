@@ -15,7 +15,7 @@
 import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
 import { IOResult } from '../../../io/types.ts'
-import { parseDateExpr, parsePosixTime } from '../../../utils/dates.ts'
+import { parseDateExprAsync, parsePosixTimeAsync } from '../../../utils/dates.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { gnuStrftime } from '../utils/strftime.ts'
@@ -104,12 +104,12 @@ function lacksPlusError(operand: string): UsageError {
 // the clock, GNU's `MMDDhhmm[[CC]YY][.ss]`: mirage has no clock to set, so it
 // prints the date it names and refuses the setting, as GNU does for a user
 // without the privilege. Beside `-d` it is a usage error.
-function date(
+async function date(
   _accessor: Accessor,
   paths: PathSpec[],
   texts: string[],
   ctx: Context,
-): CommandFnResult {
+): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags, specOf('date'))
   const u = fl.asBool('utc') || fl.asBool('universal')
   const d = fl.asStr('date') ?? null
@@ -128,7 +128,7 @@ function date(
   const zone = named ?? LOCAL_ZONE
   let dt: Date
   if (setting !== null) {
-    const placed = parsePosixTime(setting, zone)
+    const placed = await parsePosixTimeAsync(setting, zone, undefined, ctx.signal)
     if (placed === null) return invalidDate(setting)
     dt = placed
   } else if (d !== null && d.trim() === '') {
@@ -136,11 +136,16 @@ function date(
     // all it names today at midnight. Measured on coreutils 9.4: `date -d
     // ''` and `date -d '   '` both print today 00:00:00 in the command's
     // zone.
-    const midnight = parseDateExpr(gnuStrftime(systemDate(), '%Y-%m-%d', zone), zone)
+    const midnight = await parseDateExprAsync(
+      gnuStrftime(systemDate(), '%Y-%m-%d', zone),
+      zone,
+      undefined,
+      ctx.signal,
+    )
     // Today's own ISO date always parses; the fallback is for the type.
     dt = midnight ?? systemDate()
   } else if (d !== null) {
-    const parsed = parseDateExpr(d, zone)
+    const parsed = await parseDateExprAsync(d, zone, undefined, ctx.signal)
     // GNU's refusal, exit 1: a NaN render with exit 0 poisons whatever
     // consumed it (the 0NaN-NaN-NaN corpus failure).
     if (parsed === null) return invalidDate(d)
