@@ -79,6 +79,7 @@ async def vfs(request: pytest.FixtureRequest) -> AsyncIterator[SqlVFS]:
     v = SqlVFS(driver=driver)
     yield v
     await v.close()
+    driver.close()
 
 
 @pytest.mark.asyncio
