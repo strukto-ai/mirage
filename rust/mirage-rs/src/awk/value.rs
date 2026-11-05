@@ -352,19 +352,20 @@ impl Value {
         }
     }
 
-    /// The value as text, numbers through `convfmt`.
-    pub(super) fn text(&self, convfmt: &[u8]) -> Cow<'_, [u8]> {
+    /// A special variable uses the fixed default conversion.
+    pub(super) fn default_text(&self) -> Cow<'_, [u8]> {
         match self {
             Value::Uninit | Value::Array(_) => Cow::Borrowed(&[]),
-            Value::Num(n) => Cow::Owned(format_num(*n, convfmt)),
+            Value::Num(n) => Cow::Owned(default_number(*n)),
             Value::Str(s) | Value::Strnum(s) => Cow::Borrowed(s),
         }
     }
 
-    pub(super) fn into_text(self, convfmt: &[u8]) -> Text {
+    pub(super) fn into_text(self) -> Text {
         match self {
             Value::Str(s) | Value::Strnum(s) => s,
-            other => other.text(convfmt).into_owned().into(),
+            Value::Uninit | Value::Array(_) => Text::default(),
+            Value::Num(_) => unreachable!("numeric text conversion must be prepared"),
         }
     }
 
@@ -397,23 +398,37 @@ pub(super) fn compare_numbers(lhs: f64, rhs: f64) -> Ordering {
     }
 }
 
-/// A number as awk converts it to text: an integral value prints as an
-/// integer whatever the format, as in every awk; anything else goes
-/// through `convfmt` (CONVFMT, or OFMT for output), or `%.6g` when that
-/// is no single float conversion.
-pub(super) fn format_num(value: f64, convfmt: &[u8]) -> Vec<u8> {
+/// Integers and nonfinite values ignore CONVFMT and OFMT.
+pub(super) fn fixed_number(value: f64) -> Option<Vec<u8>> {
     if value.is_nan() {
-        return b"nan".to_vec();
+        return Some(b"nan".to_vec());
     }
     if value.is_infinite() {
-        return if value > 0.0 {
+        return Some(if value > 0.0 {
             b"inf".to_vec()
         } else {
             b"-inf".to_vec()
-        };
+        });
     }
     if value == value.trunc() && value.abs() < 2f64.powi(63) {
-        return (value as i64).to_string().into_bytes();
+        return Some((value as i64).to_string().into_bytes());
+    }
+    None
+}
+
+pub(super) fn default_number(value: f64) -> Vec<u8> {
+    if let Some(text) = fixed_number(value) {
+        return text;
+    }
+    let mut out = Vec::new();
+    FloatSpec::default().render(value, &mut out);
+    out
+}
+
+#[cfg(test)]
+pub(super) fn format_num(value: f64, convfmt: &[u8]) -> Vec<u8> {
+    if let Some(text) = fixed_number(value) {
+        return text;
     }
     let mut out = Vec::new();
     match float_spec(convfmt) {
@@ -460,6 +475,7 @@ impl FloatSpec<'_> {
     }
 }
 
+#[cfg(test)]
 fn float_spec(format: &[u8]) -> Option<FloatSpec<'_>> {
     let rest = format.strip_prefix(b"%")?;
     let flags = rest.iter().take_while(|c| b"-+ #0".contains(c)).count();
@@ -493,7 +509,8 @@ fn float_spec(format: &[u8]) -> Option<FloatSpec<'_>> {
 }
 
 /// A run of decimal digits, saturating.
-pub(super) fn decimal(digits: &[u8]) -> usize {
+#[cfg(test)]
+fn decimal(digits: &[u8]) -> usize {
     digits.iter().fold(0usize, |acc, d| {
         acc.saturating_mul(10).saturating_add(usize::from(d - b'0'))
     })

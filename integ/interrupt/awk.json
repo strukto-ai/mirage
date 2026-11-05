@@ -153,6 +153,36 @@
       "id": "text-compare",
       "unit": "a",
       "program": "{ s=\"\" $0; t=s \"z\"; print \"ready\"; for(j=0;j<64;j++)x=(s==t); print \"done\" }"
+    },
+    {
+      "id": "conversion-flags",
+      "unit": "+",
+      "program": "{ CONVFMT=\"%\" $0 \"f\"; print \"ready\"; x=1.25 \"\"; print \"done\" }"
+    },
+    {
+      "id": "conversion-width",
+      "unit": "a",
+      "program": "{ CONVFMT=\"%134217728.2f\"; print \"ready\"; for(j=0;j<16;j++) x=1.25 \"\"; print \"done\" }"
+    },
+    {
+      "id": "output-number",
+      "unit": "a",
+      "program": "{ OFMT=\"%.134217728f\"; print \"ready\"; print 1.25; print \"done\" }"
+    },
+    {
+      "id": "format-number-string",
+      "unit": "a",
+      "program": "{ CONVFMT=\"%.134217728f\"; print \"ready\"; for(j=0;j<16;j++) x=sprintf(\"%s\",1.25); print \"done\" }"
+    },
+    {
+      "id": "format-number-source",
+      "unit": "a",
+      "program": "{ CONVFMT=\"%.134217728f\"; print \"ready\"; for(j=0;j<16;j++) x=sprintf(1.25); print \"done\" }"
+    },
+    {
+      "id": "array-component-key",
+      "unit": "a",
+      "program": "{ SUBSEP=$0; print \"ready\"; for(j=0;j<16;j++) a[1,2]=1; print \"done\" }"
     }
   ]
 }

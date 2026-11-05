@@ -783,3 +783,58 @@ fn large_numeric_values_prepare_before_reads_updates_and_formatting() {
         "input\n"
     );
 }
+
+#[test]
+fn control_formats_preserve_numeric_identity_and_assignment_results() {
+    let program = br#"
+        BEGIN {
+            CONVFMT="%.8193f"; OFMT=CONVFMT; x=1.25; i=0
+            s=sprintf("%s:%s",x+i++,x+i++)
+            print length(s),i
+            r=($1=x); print r==x,r<2,length($1)
+            r=$1++; print r==x,($1+0)==2.25
+            a[x,x+1]=9; print a[x,x+1],length(x)
+            print x==1.25,x=="1.25"
+            print sub(/z/,"Z",x),x==1.25
+            a[1]=x; gsub(/z/,"Z",a[1]); print a[1]==1.25
+            sub(/2/,"8",x); print x+0==1.85
+            CONVFMT="%.1f"; print a[1] "",a[1]<2
+            CONVFMT="%.2f"; printf a[1]; print ""; print sprintf(a[1])
+        }
+    "#;
+    for budget in [1, 7, super::STEPS] {
+        let code = super::compile::compile(&super::parser::parse(program).unwrap());
+        let mut machine = super::vm::Machine::new(
+            code,
+            super::vm::Setup {
+                operands: Vec::new(),
+                assignments: Vec::new(),
+                fs: None,
+                environ: Vec::new(),
+            },
+        );
+        let mut out = Vec::new();
+        let mut turns = 0;
+        while !machine.done {
+            machine.run(budget);
+            out.append(&mut machine.io.out);
+            assert!(machine.io.idle());
+            turns += 1;
+            assert!(turns < 2_000_000);
+        }
+        assert!(machine.io.err.is_empty());
+        assert_eq!(
+            out,
+            b"16391 2\n1 1 8195\n1 1\n9 8195\n1 0\n0 1\n1\n1\n1.2 1\n1.25\n1.25\n"
+        );
+        assert_eq!(machine.status, 0);
+    }
+    let read = run_with(
+        r#"BEGIN { CONVFMT="%.2f"; ARGV[1]=1.25; ARGC=2 } { print FILENAME,$0 }"#,
+        &[],
+        "",
+        &[("1.25", "number file\n")],
+    );
+    assert_eq!(read.out, "1.25 number file\n");
+    assert_eq!(read.status, 0);
+}

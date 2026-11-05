@@ -4,7 +4,7 @@ use super::compile::{
     ARGC, ARGV, Arr, CONVFMT, Code, ENVIRON, FILENAME, FS, Math, OFMT, OFS, ORS, Op, RLENGTH, RS,
     RSTART, SUBSEP, Var,
 };
-use super::format::{Formatter, Output, Print};
+use super::format::{Formatter, NumberText, Output, Print};
 use super::io::{
     Io, LIMIT, Next, Ordered, OutFile, OutPipe, Reader, Retired, STDERR_NAME, STDOUT_NAMES,
 };
@@ -13,7 +13,7 @@ use super::text::{
     IndexSearch, Regexes, SplitScan, StringWork, Substitution, split_assignment, substr,
 };
 use super::value::{
-    MAX_LEN, NumberScan, Text, Value, compare_numbers, format_num, string, strnum, to_int,
+    MAX_LEN, NumberScan, Text, Value, compare_numbers, default_number, string, strnum, to_int,
 };
 use crate::regex::Step as SearchStep;
 use crate::request::{Opening, Request, WriteMode};
@@ -260,7 +260,7 @@ impl Arrays {
 
 fn special(globals: &[Slot], index: u32) -> Cow<'_, [u8]> {
     match &globals[index as usize].scalar {
-        Some(value) => value.text(b"%.6g"),
+        Some(value) => value.default_text(),
         None => Cow::Borrowed(&[]),
     }
 }
@@ -327,7 +327,30 @@ struct Snapshot {
     keys: Vec<Text>,
 }
 
+enum CoerceTarget {
+    Stack(usize),
+    Push,
+    Length,
+    Field {
+        index: i128,
+        returned: Value,
+    },
+    Sub {
+        pattern: Text,
+        template: Text,
+        global: bool,
+        target: SubTarget,
+    },
+    Operand,
+}
+
+struct Coercion {
+    text: NumberText,
+    target: CoerceTarget,
+}
+
 enum Pending {
+    Coerce(Box<Coercion>),
     Store {
         var: Var,
         value: Value,
@@ -345,7 +368,7 @@ enum Pending {
     Format(Box<FormatTask>),
     Print {
         print: Print,
-        target: Option<(RedirKind, Text)>,
+        target: OutputTarget,
     },
     Output(OutputTask),
     Index(IndexSearch),
@@ -396,6 +419,7 @@ pub(super) struct Machine {
     arg_index: usize,
     read_operand: bool,
     main_name: Vec<u8>,
+    operand: Option<Text>,
     scratch: f64,
     pub(super) status: i32,
     pub(super) done: bool,
@@ -436,6 +460,7 @@ impl Machine {
             arg_index: 0,
             read_operand: false,
             main_name: Vec::new(),
+            operand: None,
             scratch: 0.0,
             status: 0,
             done: false,
@@ -648,6 +673,55 @@ impl Machine {
         {
             return Ok(false);
         }
+        let at = |offset| self.stack.len().checked_sub(offset + 1);
+        let positions = match op {
+            Op::LoadElem(_)
+            | Op::IncDecElem(..)
+            | Op::In(_)
+            | Op::Delete(_)
+            | Op::Case(_)
+            | Op::Length
+            | Op::Close
+            | Op::Fflush(true)
+            | Op::System
+            | Op::Getline(GetlineKind::File | GetlineKind::Command, _) => [at(0), None, None],
+            Op::StoreElem(_) => [at(1), None, None],
+            Op::Concat
+            | Op::Match(_)
+            | Op::MatchFn
+            | Op::Index
+            | Op::Split(_, true)
+            | Op::SubVar(..) => [at(0), at(1), None],
+            Op::SubField(_) | Op::SubValue(_) => [at(1), at(2), None],
+            Op::SubElem(..) => [at(0), at(1), at(2)],
+            Op::Split(_, false) => [at(0), None, None],
+            Op::Substr(length) => [at(1 + usize::from(length)), None, None],
+            Op::Sprintf(count) => [self.stack.len().checked_sub(count as usize), None, None],
+            Op::Print(formatted, count, redirect) => [
+                redirect.and_then(|_| at(0)),
+                if formatted {
+                    self.stack
+                        .len()
+                        .checked_sub(count as usize + usize::from(redirect.is_some()))
+                } else {
+                    None
+                },
+                None,
+            ],
+            Op::Compare(_) if !self.stack.iter().rev().take(2).all(Value::numeric) => {
+                [at(0), at(1), None]
+            }
+            _ => [None; 3],
+        };
+        for index in positions.into_iter().flatten() {
+            if matches!(self.stack.get(index), Some(Value::Num(_))) {
+                let value = std::mem::replace(&mut self.stack[index], Value::Uninit);
+                self.coerce(value, CoerceTarget::Stack(index), work)?;
+                if self.pending.is_some() || *work == 0 {
+                    return Ok(false);
+                }
+            }
+        }
         let value = match op {
             Op::IncDec(var, ..) => Some(self.load(var)?),
             Op::IncDecField(..) => {
@@ -670,6 +744,10 @@ impl Machine {
     fn resume(&mut self, work: &mut u64) -> Step {
         let pending = self.pending.take().unwrap();
         match pending {
+            Pending::Coerce(mut task) => match task.text.step(work)? {
+                SearchStep::Paused => self.pending = Some(Pending::Coerce(task)),
+                SearchStep::Done(text) => self.finish_text(text, task.target)?,
+            },
             Pending::Store {
                 var,
                 value,
@@ -747,13 +825,16 @@ impl Machine {
                     }));
                 }
             },
-            Pending::Print { mut print, target } => match print.step(work)? {
+            Pending::Print {
+                mut print,
+                mut target,
+            } => match print.step(work)? {
                 SearchStep::Paused => self.pending = Some(Pending::Print { print, target }),
                 SearchStep::Done(output) => {
-                    self.pending = Some(Pending::Output(OutputTask {
-                        output,
-                        target: OutputTarget::Print(target),
-                    }));
+                    if let OutputTarget::Value(bytes) = &mut target {
+                        *bytes = Vec::with_capacity(output.len());
+                    }
+                    self.pending = Some(Pending::Output(OutputTask { output, target }));
                 }
             },
             Pending::Output(mut task) => {
@@ -941,16 +1022,57 @@ impl Machine {
         Ok(())
     }
 
-    fn convfmt(&self) -> Cow<'_, [u8]> {
-        special(&self.globals, CONVFMT)
+    fn coerce(&mut self, value: Value, target: CoerceTarget, work: &mut u64) -> Step {
+        if let Value::Num(value) = value {
+            let mut text = NumberText::new(value, self.special_text(CONVFMT));
+            match text.step(work)? {
+                SearchStep::Paused => {
+                    self.pending = Some(Pending::Coerce(Box::new(Coercion { text, target })))
+                }
+                SearchStep::Done(text) => self.finish_text(text, target)?,
+            }
+        } else {
+            self.finish_text(value.into_text(), target)?;
+        }
+        Ok(())
+    }
+
+    fn finish_text(&mut self, text: Text, target: CoerceTarget) -> Step {
+        match target {
+            CoerceTarget::Stack(index) => self.stack[index] = string(text),
+            CoerceTarget::Push => self.stack.push(string(text)),
+            CoerceTarget::Length => self.stack.push(Value::Num(text.len() as f64)),
+            CoerceTarget::Field { index, returned } => {
+                self.set_field(index, text)?;
+                self.stack.push(returned);
+            }
+            CoerceTarget::Sub {
+                pattern,
+                template,
+                global,
+                target,
+            } => {
+                self.regexes.get(&pattern)?;
+                self.pending = Some(Pending::Sub {
+                    pattern,
+                    substitution: Substitution::new(text, template, global),
+                    target,
+                });
+            }
+            CoerceTarget::Operand => self.operand = Some(text),
+        }
+        Ok(())
     }
 
     fn special_text(&self, index: u32) -> Text {
-        self.globals[index as usize]
+        match self.globals[index as usize]
             .scalar
             .clone()
             .unwrap_or(Value::Uninit)
-            .into_text(b"%.6g")
+        {
+            Value::Num(value) => default_number(value).into(),
+            other => other.into_text(),
+        }
     }
 
     fn pop(&mut self) -> Value {
@@ -959,7 +1081,7 @@ impl Machine {
 
     fn pop_text(&mut self) -> Text {
         let value = self.pop();
-        value.into_text(&self.convfmt())
+        value.into_text()
     }
 
     fn top_text(&self) -> Text {
@@ -967,7 +1089,7 @@ impl Machine {
             .last()
             .cloned()
             .unwrap_or(Value::Uninit)
-            .into_text(&self.convfmt())
+            .into_text()
     }
 
     fn slot(&mut self, var: Var) -> Option<&mut Slot> {
@@ -1165,39 +1287,43 @@ impl Machine {
             Op::StoreField => {
                 let value = self.pop();
                 let index = to_int(self.pop().num());
-                let text = value.clone().into_text(&self.convfmt());
-                self.set_field(index, text)?;
-                self.stack.push(value);
+                self.coerce(
+                    value.clone(),
+                    CoerceTarget::Field {
+                        index,
+                        returned: value,
+                    },
+                    work,
+                )?;
             }
             Op::IncDecField(delta, pre) => {
                 let index = to_int(self.pop().num());
                 let current = self.get_field(index)?.num();
-                let text = format_num(current + delta, &self.convfmt()).into();
-                self.set_field(index, text)?;
-                self.stack
-                    .push(Value::Num(if pre { current + delta } else { current }));
+                self.coerce(
+                    Value::Num(current + delta),
+                    CoerceTarget::Field {
+                        index,
+                        returned: Value::Num(if pre { current + delta } else { current }),
+                    },
+                    work,
+                )?;
             }
             Op::Key(count) => {
                 let count = count as usize;
-                let parts = self.stack.split_off(self.stack.len() - count);
-                let key = if count == 1 {
-                    parts
-                        .into_iter()
-                        .next()
-                        .map(|v| v.into_text(&self.convfmt()))
-                        .unwrap_or_default()
+                let mut parts = self.stack.split_off(self.stack.len() - count);
+                if count == 1 {
+                    self.coerce(parts.pop().unwrap(), CoerceTarget::Push, work)?;
                 } else {
-                    let fmt = self.convfmt();
-                    let sep = special(&self.globals, SUBSEP);
-                    let texts: Vec<Cow<[u8]>> = parts.iter().map(|v| v.text(&fmt)).collect();
-                    let len = texts.iter().map(|text| text.len()).sum::<usize>()
-                        + sep.len().saturating_mul(count - 1);
-                    if len > MAX_LEN {
-                        return Err(no_memory());
-                    }
-                    texts.join(sep.as_ref()).into()
-                };
-                self.stack.push(string(key));
+                    self.pending = Some(Pending::Print {
+                        print: Print::new(
+                            parts,
+                            self.special_text(CONVFMT),
+                            self.special_text(SUBSEP),
+                            Text::default(),
+                        ),
+                        target: OutputTarget::Value(Vec::new()),
+                    });
+                }
             }
             Op::LoadElem(arr) => {
                 let key = self.pop_text();
@@ -1293,8 +1419,8 @@ impl Machine {
                     )));
                 } else {
                     self.pending = Some(Pending::Compare {
-                        left: left.into_text(&self.convfmt()),
-                        right: right.into_text(&self.convfmt()),
+                        left: left.into_text(),
+                        right: right.into_text(),
                         at: 0,
                         cmp,
                     });
@@ -1479,7 +1605,7 @@ impl Machine {
             }
             Op::Sprintf(count) => {
                 let mut args = self.stack.split_off(self.stack.len() - count as usize);
-                let format = args.remove(0).into_text(&self.convfmt());
+                let format = args.remove(0).into_text();
                 self.pending = Some(Pending::Format(Box::new(FormatTask {
                     formatter: Formatter::new(format, args, self.special_text(CONVFMT)),
                     target: OutputTarget::Value(Vec::new()),
@@ -1495,14 +1621,13 @@ impl Machine {
             }
             Op::LengthVar(var) => {
                 let array = self.slot(var).and_then(|slot| slot.array);
-                let len = match array {
-                    Some(id) => self.arrays.items[id].len(),
-                    None => {
-                        let value = self.load(var)?;
-                        value.text(&self.convfmt()).len()
-                    }
-                };
-                self.stack.push(Value::Num(len as f64));
+                if let Some(id) = array {
+                    self.stack
+                        .push(Value::Num(self.arrays.items[id].len() as f64));
+                } else {
+                    let value = self.load(var)?;
+                    self.coerce(value, CoerceTarget::Length, work)?;
+                }
             }
             Op::MatchFn => {
                 let pattern = self.pop_text();
@@ -1516,34 +1641,28 @@ impl Machine {
             }
             Op::SubVar(var, global) => {
                 let subject = self.load(var)?;
-                let subject = subject.into_text(&self.convfmt());
-                self.substitute(subject, global, SubTarget::Var(var))?;
+                self.substitute(subject, global, SubTarget::Var(var), work)?;
             }
             Op::SubField(global) => {
                 let index = to_int(self.pop().num());
-                let subject = self.get_field(index)?.into_text(&self.convfmt());
-                self.substitute(subject, global, SubTarget::Field(index))?;
+                let subject = self.get_field(index)?;
+                self.substitute(subject, global, SubTarget::Field(index), work)?;
             }
             Op::SubElem(arr, global) => {
                 let key = self.pop_text();
                 let id = self.array(arr);
                 let subject = self.arrays.items[id].entry(&key, || Value::Uninit).clone();
-                let subject = subject.into_text(&self.convfmt());
-                self.substitute(subject, global, SubTarget::Element(id, key))?;
+                self.substitute(subject, global, SubTarget::Element(id, key), work)?;
             }
             Op::SubValue(global) => {
-                let subject = self.pop_text();
-                self.substitute(subject, global, SubTarget::Invalid)?;
+                let subject = self.pop();
+                self.substitute(subject, global, SubTarget::Invalid, work)?;
             }
             Op::Split(arr, has_separator) => {
                 let separator = if has_separator {
                     self.pop_text()
                 } else {
-                    self.globals[FS as usize]
-                        .scalar
-                        .clone()
-                        .unwrap_or(Value::Uninit)
-                        .into_text(b"%.6g")
+                    self.special_text(FS)
                 };
                 let subject = self.pop_text();
                 let id = self.array(arr);
@@ -1586,16 +1705,25 @@ impl Machine {
         Ok(())
     }
 
-    fn substitute(&mut self, subject: Text, global: bool, target: SubTarget) -> Step {
+    fn substitute(
+        &mut self,
+        subject: Value,
+        global: bool,
+        target: SubTarget,
+        work: &mut u64,
+    ) -> Step {
         let template = self.pop_text();
         let pattern = self.pop_text();
-        self.regexes.get(&pattern)?;
-        self.pending = Some(Pending::Sub {
-            pattern,
-            substitution: Substitution::new(subject, template, global),
-            target,
-        });
-        Ok(())
+        self.coerce(
+            subject,
+            CoerceTarget::Sub {
+                pattern,
+                template,
+                global,
+                target,
+            },
+            work,
+        )
     }
 
     fn random(&mut self) -> f64 {
@@ -1697,12 +1825,22 @@ impl Machine {
             if (self.arg_index as i128) + 1 >= argc {
                 break;
             }
-            self.arg_index += 1;
-            let key = self.arg_index.to_string().into_bytes();
-            let Some(slot) = self.arrays.items[argv].get(&key) else {
-                continue;
+            let next = self.arg_index + 1;
+            let key = next.to_string().into_bytes();
+            let operand = if let Some(operand) = self.operand.take() {
+                operand
+            } else {
+                let Some(slot) = self.arrays.items[argv].get(&key).cloned() else {
+                    self.arg_index = next;
+                    continue;
+                };
+                self.coerce(slot, CoerceTarget::Operand, work)?;
+                if self.pending.is_some() {
+                    return Ok(true);
+                }
+                self.operand.take().expect("operand conversion finished")
             };
-            let operand = slot.text(&self.convfmt()).into_owned();
+            self.arg_index = next;
             if operand.is_empty() {
                 continue;
             }
@@ -1726,11 +1864,11 @@ impl Machine {
                 continue;
             }
             self.read_operand = true;
-            self.start_file(operand.clone());
+            self.start_file(operand.to_vec());
             let fd = self.io.fd();
             self.io.main = Some(Reader::new(
                 fd,
-                Some((operand, Opening::Operand(self.arg_index))),
+                Some((operand.to_vec(), Opening::Operand(self.arg_index))),
             ));
             return Ok(true);
         }
@@ -1965,7 +2103,7 @@ impl Machine {
             if args.is_empty() {
                 return Err(b"awk: printf needs a format".to_vec());
             }
-            let format = args.remove(0).into_text(&self.convfmt());
+            let format = args.remove(0).into_text();
             self.pending = Some(Pending::Format(Box::new(FormatTask {
                 formatter: Formatter::new(format, args, self.special_text(CONVFMT)),
                 target: OutputTarget::Print(target),
@@ -1981,7 +2119,7 @@ impl Machine {
                     self.special_text(OFS),
                     self.special_text(ORS),
                 ),
-                target,
+                target: OutputTarget::Print(target),
             });
         }
         Ok(())

@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use crate::printf::number::Rendered;
 use crate::regex::Step;
 
-use super::value::{FloatSpec, MAX_LEN, NumberScan, Text, Value, render_int, to_int};
+use super::value::{FloatSpec, MAX_LEN, NumberScan, Text, Value, fixed_number, render_int, to_int};
 use super::vm::no_memory;
 
 enum Piece {
@@ -11,10 +11,20 @@ enum Piece {
     Repeat(u8, usize),
 }
 
-#[derive(Default)]
 pub(super) struct Output {
     pieces: VecDeque<Piece>,
     len: usize,
+    limit: usize,
+}
+
+impl Default for Output {
+    fn default() -> Self {
+        Self {
+            pieces: VecDeque::new(),
+            len: 0,
+            limit: MAX_LEN,
+        }
+    }
 }
 
 impl Output {
@@ -27,7 +37,7 @@ impl Output {
             Piece::Bytes(_, start, end) => end - start,
             Piece::Repeat(_, count) => *count,
         };
-        if self.len.saturating_add(len) > MAX_LEN {
+        if self.len.saturating_add(len) > self.limit {
             return Err(no_memory());
         }
         self.len += len;
@@ -77,7 +87,10 @@ impl Output {
     }
 
     fn rendered(&mut self, rendered: Rendered, spec: &Spec) -> Result<(), Vec<u8>> {
-        let mut body = Output::default();
+        let mut body = Output {
+            limit: self.limit,
+            ..Output::default()
+        };
         body.text(rendered.body.into())?;
         body.repeat(
             b'0',
@@ -152,7 +165,159 @@ enum Scan {
     Error,
 }
 
+enum NumberPhase {
+    Start,
+    Flags,
+    Width,
+    Precision,
+    Conversion,
+}
+
+pub(super) struct NumberText {
+    value: f64,
+    format: Text,
+    phase: NumberPhase,
+    at: usize,
+    spec: Spec,
+    output: Option<Output>,
+    bytes: Vec<u8>,
+}
+
+impl NumberText {
+    pub(super) fn new(value: f64, format: Text) -> Self {
+        Self {
+            value,
+            format,
+            phase: NumberPhase::Start,
+            at: 0,
+            spec: Spec::default(),
+            output: None,
+            bytes: Vec::new(),
+        }
+    }
+
+    fn render(&mut self, conv: u8) -> Result<(), Vec<u8>> {
+        let flags: Vec<u8> = b"-+ #0"
+            .iter()
+            .zip(self.spec.flags)
+            .filter_map(|(&flag, present)| present.then_some(flag))
+            .collect();
+        let rendered = FloatSpec {
+            flags: &flags,
+            width: self.spec.width,
+            precision: self.spec.precision.or(Some(6)),
+            conv,
+        }
+        .rendered(self.value);
+        let len = self
+            .spec
+            .width
+            .max(usize::try_from(rendered.byte_len()).unwrap_or(usize::MAX));
+        let mut output = Output {
+            limit: len,
+            ..Output::default()
+        };
+        output.rendered(rendered, &self.spec)?;
+        self.bytes = Vec::with_capacity(len);
+        self.output = Some(output);
+        Ok(())
+    }
+
+    fn fallback(&mut self) -> Result<(), Vec<u8>> {
+        self.spec = Spec::default();
+        self.render(b'g')
+    }
+
+    pub(super) fn step(&mut self, work: &mut u64) -> Result<Step<Text>, Vec<u8>> {
+        while *work > 0 {
+            if let Some(output) = &mut self.output {
+                return Ok(if output.copy(&mut self.bytes, work) {
+                    Step::Done(std::mem::take(&mut self.bytes).into())
+                } else {
+                    Step::Paused
+                });
+            }
+            *work -= 1;
+            match self.phase {
+                NumberPhase::Start => {
+                    if let Some(text) = fixed_number(self.value) {
+                        self.bytes = Vec::with_capacity(text.len());
+                        let mut output = Output::default();
+                        output.text(text.into())?;
+                        self.output = Some(output);
+                        continue;
+                    }
+                    if self.format.first() != Some(&b'%') {
+                        self.fallback()?;
+                    } else {
+                        self.at = 1;
+                        self.phase = NumberPhase::Flags;
+                    }
+                }
+                NumberPhase::Flags => {
+                    if let Some(flag) = self
+                        .format
+                        .get(self.at)
+                        .and_then(|byte| b"-+ #0".iter().position(|flag| byte == flag))
+                    {
+                        self.spec.flags[flag] = true;
+                        self.at += 1;
+                    } else {
+                        self.phase = NumberPhase::Width;
+                    }
+                }
+                NumberPhase::Width => {
+                    if let Some(byte @ b'0'..=b'9') = self.format.get(self.at) {
+                        self.spec.width = self
+                            .spec
+                            .width
+                            .saturating_mul(10)
+                            .saturating_add((byte - b'0') as usize);
+                        self.at += 1;
+                        if self.spec.width > MAX_LEN {
+                            self.fallback()?;
+                        }
+                    } else if self.format.get(self.at) == Some(&b'.') {
+                        self.spec.precision = Some(0);
+                        self.at += 1;
+                        self.phase = NumberPhase::Precision;
+                    } else {
+                        self.phase = NumberPhase::Conversion;
+                    }
+                }
+                NumberPhase::Precision => {
+                    if let Some(byte @ b'0'..=b'9') = self.format.get(self.at) {
+                        let precision = self
+                            .spec
+                            .precision
+                            .unwrap()
+                            .saturating_mul(10)
+                            .saturating_add((byte - b'0') as usize);
+                        self.spec.precision = Some(precision);
+                        self.at += 1;
+                        if precision > MAX_LEN {
+                            self.fallback()?;
+                        }
+                    } else {
+                        self.phase = NumberPhase::Conversion;
+                    }
+                }
+                NumberPhase::Conversion => {
+                    if self.at + 1 == self.format.len() && b"eEfFgG".contains(&self.format[self.at])
+                    {
+                        self.render(self.format[self.at])?;
+                    } else {
+                        self.fallback()?;
+                    }
+                }
+            }
+        }
+        Ok(Step::Paused)
+    }
+}
+
 pub(super) struct Formatter {
+    text: Option<NumberText>,
     number: Option<NumberScan>,
     format: Text,
     args: std::vec::IntoIter<Value>,
@@ -168,6 +333,7 @@ impl Formatter {
     pub(super) fn new(format: Text, args: Vec<Value>, convfmt: Text) -> Self {
         Self {
             format,
+            text: None,
             number: None,
             args: args.into_iter(),
             convfmt,
@@ -261,7 +427,7 @@ impl Formatter {
         if matches!(conv, b'c' | b's') {
             let body = match (conv, arg) {
                 (b'c', Value::Num(n)) => vec![(to_int(n) & 0xff) as u8].into(),
-                (_, other) => other.into_text(&self.convfmt),
+                (_, other) => other.into_text(),
             };
             let end = if conv == b'c' {
                 body.len().min(1)
@@ -305,6 +471,22 @@ impl Formatter {
                     for arg in self.args.as_slice().iter().take(count) {
                         if !arg.prepare_number(&mut self.number, work) {
                             return Ok(Step::Paused);
+                        }
+                    }
+                    if conv == b's' && spec.width <= MAX_LEN {
+                        let at = usize::from(spec.width_star) + usize::from(spec.precision_star);
+                        if let Some(arg @ Value::Num(_)) = self.args.as_mut_slice().get_mut(at) {
+                            let value = arg.num();
+                            let text = self.text.get_or_insert_with(|| {
+                                NumberText::new(value, self.convfmt.clone())
+                            });
+                            match text.step(work)? {
+                                Step::Paused => return Ok(Step::Paused),
+                                Step::Done(text) => {
+                                    *arg = Value::Str(text);
+                                    self.text = None;
+                                }
+                            }
                         }
                     }
                 }
@@ -426,6 +608,7 @@ impl Formatter {
 }
 
 pub(super) struct Print {
+    text: Option<NumberText>,
     args: std::vec::IntoIter<Value>,
     ofmt: Text,
     ofs: Text,
@@ -451,6 +634,7 @@ impl Print {
     pub(super) fn new(args: Vec<Value>, ofmt: Text, ofs: Text, ors: Text) -> Self {
         Self {
             args: args.into_iter(),
+            text: None,
             ofmt,
             ofs,
             ors,
@@ -461,6 +645,16 @@ impl Print {
 
     pub(super) fn step(&mut self, work: &mut u64) -> Result<Step<Output>, Vec<u8>> {
         while *work > 0 {
+            if let Some(text) = &mut self.text {
+                match text.step(work)? {
+                    Step::Paused => return Ok(Step::Paused),
+                    Step::Done(text) => {
+                        self.output.text(text)?;
+                        self.text = None;
+                    }
+                }
+                continue;
+            }
             *work = work.saturating_sub(16);
             let Some(arg) = self.args.next() else {
                 self.output.text(self.ors.clone())?;
@@ -470,7 +664,10 @@ impl Print {
                 self.output.text(self.ofs.clone())?;
             }
             self.first = false;
-            self.output.text(arg.into_text(&self.ofmt))?;
+            match arg {
+                Value::Num(value) => self.text = Some(NumberText::new(value, self.ofmt.clone())),
+                other => self.output.text(other.into_text())?,
+            }
         }
         Ok(Step::Paused)
     }
@@ -498,6 +695,79 @@ mod tests {
                         assert!(turns < 1_000_000);
                     }
                     return (Ok(bytes), turns);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn control_formats_resume_and_match_scalar_conversion() {
+        let mut formats: Vec<Vec<u8>> = [
+            "",
+            "%",
+            "literal",
+            "prefix%f",
+            "%f suffix",
+            "%s",
+            "%d",
+            "%*f",
+            "%.*g",
+            "%g",
+            "%G",
+            "%e",
+            "%E",
+            "%f",
+            "%F",
+            "%.g",
+            "%.0g",
+            "%.2f",
+            "%12.3e",
+            "%+012.4f",
+            "%#012.3g",
+            "%-012.3g",
+            "%--++  ##00012.4G",
+            "%999999999999f",
+        ]
+        .into_iter()
+        .map(|format| format.as_bytes().to_vec())
+        .collect();
+        formats.push(format!("%{}f", "+".repeat(8193)).into_bytes());
+        formats.push(format!("%.{}f", "0".repeat(8193)).into_bytes());
+        formats.push(b"%8193.2f".to_vec());
+        formats.push(b"%.8193f".to_vec());
+        for format in formats {
+            for value in [
+                0.0,
+                -0.0,
+                17.0,
+                1.25,
+                -1.25,
+                1e23,
+                1e-24,
+                f64::MAX,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::NAN,
+            ] {
+                let expected = super::super::value::format_num(value, &format);
+                for budget in [1, 2, 7, 20000] {
+                    let mut task = NumberText::new(value, format.clone().into());
+                    let mut turns = 0;
+                    let actual = loop {
+                        turns += 1;
+                        assert!(turns < format.len() + expected.len() + 32);
+                        let mut work = budget;
+                        if let Step::Done(text) = task.step(&mut work).unwrap() {
+                            break text;
+                        }
+                        assert_eq!(work, 0);
+                    };
+                    assert_eq!(
+                        actual.as_slice(),
+                        expected,
+                        "value {value}, format size {}, budget {budget}",
+                        format.len()
+                    );
                 }
             }
         }
