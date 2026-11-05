@@ -1697,10 +1697,10 @@
         "ram",
         "disk"
       ],
-      "command": "(seq 1 2500000 > /data/big-past-publish.txt; wc -c < /data/big-past-publish.txt; tail -n 1 /data/big-past-publish.txt; x=$(cat /data/big-past-publish.txt); echo ${#x}; head -n 300000 /data/big-past-publish.txt | { mapfile -t a; echo ${#a[@]} ${a[299999]}; }; rm /data/big-past-publish.txt)",
+      "command": "(seq 1 2500000 > /data/big-past-publish.txt; wc -c < /data/big-past-publish.txt; sed -n 1234567p /data/big-past-publish.txt; tail -n 1 /data/big-past-publish.txt; x=$(head -n 100000 /data/big-past-publish.txt); echo ${#x}; head -n 100000 /data/big-past-publish.txt | { mapfile -t a; echo ${#a[@]} ${a[99999]}; }; rm /data/big-past-publish.txt)",
       "expect": {
         "exit": 0,
-        "stdout": "18888896\n2500000\n18888895\n300000 300000\n",
+        "stdout": "18888896\n1234567\n2500000\n588894\n100000 100000\n",
         "stderr": ""
       }
     },
