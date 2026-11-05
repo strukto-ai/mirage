@@ -123,6 +123,34 @@ describe('mirage in workerd', () => {
     expect(Date.now() - started).toBeLessThan(20_000)
   }, 60_000)
 
+  it('runs node in the isolate itself, reading and writing the workspace', async () => {
+    const [inline, write, read, piped] = await run([
+      'node -e "console.log([1, 2, 3].map((n) => n * 2))"',
+      `node -e "require('fs').writeFileSync('/data/n.json', JSON.stringify({ n: 4 }))"`,
+      `node -e "console.log(JSON.parse(require('fs').readFileSync('/data/n.json', 'utf8')).n + 1)"`,
+      `printf 'a\\nb\\n' | node -e "require('readline').createInterface({ input: process.stdin }).on('line', (l) => console.log(l.toUpperCase()))"`,
+    ])
+    expect(inline).toEqual({ exit: 0, stdout: '[ 2, 4, 6 ]\n', stderr: '' })
+    expect(write?.exit).toBe(0)
+    expect(read?.stdout).toBe('5\n')
+    expect(piped?.stdout).toBe('A\nB\n')
+  })
+
+  it("waits out node's timers, and ends one at its line's deadline as it next calls out", async () => {
+    const [timer, ticking, next] = await run(
+      [
+        `node -e "setTimeout(() => console.log('late'), 50); console.log('first')"`,
+        'node -e "setInterval(() => {}, 10)"',
+        'node -e "console.log(1 + 1)"',
+      ],
+      undefined,
+      2,
+    )
+    expect(timer?.stdout).toBe('first\nlate\n')
+    expect(ticking?.exit).toBe(124)
+    expect(next?.stdout).toBe('2\n')
+  }, 60_000)
+
   it("follows a client's redirect hop by hop under the workspace's rule", async () => {
     const server: Server = createServer((req, res) => {
       const { port } = server.address() as AddressInfo

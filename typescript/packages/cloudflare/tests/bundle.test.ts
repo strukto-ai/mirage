@@ -63,3 +63,7 @@ it('loads the Rust module as a .wasm file, with no base64 copy in the script', (
   for (const run of script.matchAll(/[A-Za-z0-9+/=]+/g)) longest = Math.max(longest, run[0].length)
   expect(longest).toBeLessThan(1024 * 1024)
 })
+
+it('loads qjs as a .wasm file of its own, which the deploy compiles', () => {
+  expect([...files.keys()].some((name) => name.endsWith('qjs-wasi.wasm'))).toBe(true)
+})

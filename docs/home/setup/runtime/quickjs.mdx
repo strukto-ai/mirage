@@ -31,6 +31,11 @@ point the runtime's `home`, or `MIRAGE_QUICKJS_HOME`, at its directory.
     is the URL of the folder holding `qjs-wasi.wasm`, and the page needs the
     same [worker setup](/typescript/runtime/python#worker-and-browser-setup)
     as Pyodide.
+
+    On Cloudflare Workers, `@struktoai/mirage-cloudflare` ships
+    `qjs-wasi.wasm` and needs no `home`: each run executes in the Worker's
+    own isolate, as the [Cloudflare quickstart](/typescript/cloudflare-quickstart#run-a-workspace)
+    describes.
   </Tab>
 </Tabs>
 
