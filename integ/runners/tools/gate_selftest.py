@@ -2236,7 +2236,7 @@ from pathlib import Path
 root = Path(os.environ["RUNNER_TEMP"])
 host = "python" if Path(sys.argv[0]).name == "python" else "typescript"
 suites = sys.argv[2:] if host == "python" else sys.argv[4:]
-shared = set(suites) & {"backend/mongodb", "sandbox/mounts"}
+shared = set(suites) & {"backend/mongodb", "sandbox/mounts", "sandbox/default_route"}
 serial = host == "typescript" and bool(shared)
 name = suites[0].replace("/", "-") if serial and len(suites) == 1 else host
 (root / f"{name}-{os.getpid()}-{time.time_ns()}.json").write_text(
@@ -2260,7 +2260,7 @@ def selftest_runtime_parallel() -> None:
     """Run the CI driver against barriers and deliberate host failures."""
     driver = ROOT / "runtime" / "parallel.sh"
     mixed = "write/append backend/mongodb sandbox/mounts path/stat"
-    shared = {"backend/mongodb", "sandbox/mounts"}
+    shared = {"backend/mongodb", "sandbox/mounts", "sandbox/default_route"}
     for suites, failing in (
         (mixed, ""),
         (mixed, "python"),

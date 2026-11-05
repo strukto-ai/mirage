@@ -367,7 +367,8 @@ runs every supported target.
 `runtime/parallel.sh` overlaps the Python and TypeScript JSON drivers inside
 each existing runtime job. It waits for both even after a failure, then runs
 TypeScript's `backend/mongodb`, whose database Python also drops and seeds,
-and `sandbox/mounts`, which mounts fixed paths in their shared Docker container.
+and `sandbox/mounts` and `sandbox/default_route`, which mount fixed paths in
+their shared Docker container.
 The `integ/runtime/**` filter covers the driver; the gate selftest checks its
 overlap, exact suite coverage, database and mount serialization, duplicate
 launch detection and failure propagation.

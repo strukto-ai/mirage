@@ -1,0 +1,380 @@
+{
+  "cases": [
+    {
+      "id": "a_line_needing_the_box_files_runs_there_whole",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "sdk_only": "Every case mounts /route into the one shared docker box over sshfs; the CLI lane runs beside the SDK drivers on that box, so these run on the SDK pass only, serialized like sandbox/mounts.",
+      "world": {
+        "mounts": {
+          "/route": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ],
+        "config": {
+          "mount_type": "ssh"
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /route",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cd /etc && test -e os-release && echo box; nproc >/dev/null",
+          "expect": {
+            "exit": 0,
+            "stdout": "box\n"
+          }
+        },
+        {
+          "command": "pwd",
+          "expect": {
+            "exit": 0,
+            "stdout": "/route\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_whole_line_runs_in_bash",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "sdk_only": "Every case mounts /route into the one shared docker box over sshfs; the CLI lane runs beside the SDK drivers on that box, so these run on the SDK pass only, serialized like sandbox/mounts.",
+      "world": {
+        "mounts": {
+          "/route": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ],
+        "config": {
+          "mount_type": "ssh"
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /etc && [[ -e os-release ]] && echo bash; nproc >/dev/null",
+          "expect": {
+            "exit": 0,
+            "stdout": "bash\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_line_of_only_mirage_commands_stays_in_mirage",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "sdk_only": "Every case mounts /route into the one shared docker box over sshfs; the CLI lane runs beside the SDK drivers on that box, so these run on the SDK pass only, serialized like sandbox/mounts.",
+      "world": {
+        "mounts": {
+          "/route": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ],
+        "config": {
+          "mount_type": "ssh"
+        }
+      },
+      "steps": [
+        {
+          "command": "cat /etc/os-release",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cat: /etc/os-release: No such file or directory\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_workspace_line_splits_and_python3_runs_in_the_box",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "sdk_only": "Every case mounts /route into the one shared docker box over sshfs; the CLI lane runs beside the SDK drivers on that box, so these run on the SDK pass only, serialized like sandbox/mounts.",
+      "world": {
+        "mounts": {
+          "/route": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ],
+        "config": {
+          "mount_type": "ssh"
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /route && cat a.txt | python3 -c 'import sys; print(sys.stdin.read().strip())'",
+          "expect": {
+            "exit": 0,
+            "stdout": "hello\n"
+          }
+        },
+        {
+          "command": "pwd",
+          "expect": {
+            "exit": 0,
+            "stdout": "/route\n"
+          }
+        },
+        {
+          "command": "python3 -c 'import os; print(os.path.exists(\"/etc/os-release\"))'",
+          "expect": {
+            "exit": 0,
+            "stdout": "True\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_whole_line_with_a_mirage_only_command_is_refused",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "sdk_only": "Every case mounts /route into the one shared docker box over sshfs; the CLI lane runs beside the SDK drivers on that box, so these run on the SDK pass only, serialized like sandbox/mounts.",
+      "world": {
+        "mounts": {
+          "/route": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ],
+        "config": {
+          "mount_type": "ssh"
+        }
+      },
+      "steps": [
+        {
+          "command": "f() { :; }",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cd /etc && f; nproc >/dev/null",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cd: f runs in Mirage, but /etc is on the sandbox; run them on separate lines\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_whole_line_cannot_start_a_job_yet",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "sdk_only": "Every case mounts /route into the one shared docker box over sshfs; the CLI lane runs beside the SDK drivers on that box, so these run on the SDK pass only, serialized like sandbox/mounts.",
+      "world": {
+        "mounts": {
+          "/route": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ],
+        "config": {
+          "mount_type": "ssh"
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /etc && nproc >/dev/null &",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "cd: a line using the sandbox's /etc cannot run with & yet; drop the & or work in a workspace folder\n"
+          }
+        },
+        {
+          "command": "cd /route && nproc >/dev/null &",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "wait %1",
+          "expect": {
+            "exit": 0
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_binary_built_in_a_workspace_folder_runs_in_the_box",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "sdk_only": "Every case mounts /route into the one shared docker box over sshfs; the CLI lane runs beside the SDK drivers on that box, so these run on the SDK pass only, serialized like sandbox/mounts.",
+      "world": {
+        "mounts": {
+          "/route": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ],
+        "config": {
+          "mount_type": "ssh"
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /route",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cp /bin/true ./t && nproc >/dev/null",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "./t; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "0\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_route_policy_keeps_lines_split",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "sdk_only": "Every case mounts /route into the one shared docker box over sshfs; the CLI lane runs beside the SDK drivers on that box, so these run on the SDK pass only, serialized like sandbox/mounts.",
+      "world": {
+        "mounts": {
+          "/route": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        },
+        "route_policy": {
+          "script": "def pre_execute(ctx):\n    return None\n",
+          "runtime": "monty"
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ],
+        "config": {
+          "mount_type": "ssh"
+        }
+      },
+      "steps": [
+        {
+          "command": "cd /etc && test -e os-release && echo box; nproc >/dev/null",
+          "expect": {
+            "exit": 0,
+            "stdout": ""
+          }
+        }
+      ]
+    }
+  ]
+}

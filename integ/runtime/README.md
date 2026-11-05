@@ -125,21 +125,21 @@ bash integ/runtime/cli.sh python/.venv/bin/mirage "node typescript/packages/cli/
 `INTEG_RUNTIMES=e2b` keeps only the named runtimes' variants; CI's
 `integ-e2b` job runs `sandbox` that way.
 
-| Needs                                        | For                                                 |
-| -------------------------------------------- | --------------------------------------------------- |
-| `MIRAGE_WASI_HOME`                           | wasi                                                |
-| `MIRAGE_QUICKJS_HOME`                        | quickjs on the python host                          |
-| `S3_ENDPOINT`                                | `s3` variants and `backend/` on the typescript host |
-| `REDIS_URL`                                  | `redis` variants and `backend/redis.json`           |
-| `MONGODB_URI`                                | `backend/mongodb.json`                              |
-| `MIRAGE_INTEG_DOCKER_CONTAINER`              | docker                                              |
-| `MIRAGE_INTEG_SSH_HOST`, `_USERNAME`, `_KEY` | ssh, and the `ssh` variants                         |
-| `MIRAGE_INTEG_E2B_SANDBOX`                   | e2b                                                 |
-| `MIRAGE_INTEG_BOX_MOUNTS`                    | `sandbox/mounts.json`: sshfs, FUSE, `/boxdata`      |
-| `MIRAGE_INTEG_SMOLVM_MACHINE`                | smolvm                                              |
-| `MIRAGE_INTEG_MICROSANDBOX_SANDBOX`          | microsandbox                                        |
-| `MIRAGE_INTEG_APPLE_CONTAINER`               | apple_container                                     |
-| `MIRAGE_INTEG_SANDLOCK`                      | sandlock                                            |
+| Needs                                        | For                                                                                   |
+| -------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `MIRAGE_WASI_HOME`                           | wasi                                                                                  |
+| `MIRAGE_QUICKJS_HOME`                        | quickjs on the python host                                                            |
+| `S3_ENDPOINT`                                | `s3` variants and `backend/` on the typescript host                                   |
+| `REDIS_URL`                                  | `redis` variants and `backend/redis.json`                                             |
+| `MONGODB_URI`                                | `backend/mongodb.json`                                                                |
+| `MIRAGE_INTEG_DOCKER_CONTAINER`              | docker                                                                                |
+| `MIRAGE_INTEG_SSH_HOST`, `_USERNAME`, `_KEY` | ssh, and the `ssh` variants                                                           |
+| `MIRAGE_INTEG_E2B_SANDBOX`                   | e2b                                                                                   |
+| `MIRAGE_INTEG_BOX_MOUNTS`                    | `sandbox/mounts.json`, `sandbox/default_route.json`: sshfs, FUSE, `/boxdata`, python3 |
+| `MIRAGE_INTEG_SMOLVM_MACHINE`                | smolvm                                                                                |
+| `MIRAGE_INTEG_MICROSANDBOX_SANDBOX`          | microsandbox                                                                          |
+| `MIRAGE_INTEG_APPLE_CONTAINER`               | apple_container                                                                       |
+| `MIRAGE_INTEG_SANDLOCK`                      | sandlock                                                                              |
 
 With `INTEG_RUNTIME_STRICT=1` an unmet requirement fails instead of
 skipping. `MIRAGE_INTEG_BOX_MOUNTS` says the docker, e2b or microsandbox

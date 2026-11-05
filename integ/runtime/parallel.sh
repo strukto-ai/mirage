@@ -7,13 +7,14 @@ case "${1:-}" in
   start)
     integ/scripts/background.sh start json-python '
       ./python/.venv/bin/python integ/runtime/run.py $SUITES'
-    # MongoDB reseeds a shared database; sandbox mounts replace fixed paths
-    # in the same Docker container. Defer those suites until Python exits.
+    # MongoDB reseeds a shared database; sandbox mounts and the sandbox
+    # default replace fixed paths in the same Docker container. Defer those
+    # suites until Python exits.
     integ/scripts/background.sh start json-typescript '
       suites=()
       for suite in $SUITES; do
         case "$suite" in
-          backend/mongodb|sandbox/mounts) ;;
+          backend/mongodb|sandbox/mounts|sandbox/default_route) ;;
           *) suites+=("$suite") ;;
         esac
       done
@@ -28,7 +29,7 @@ case "${1:-}" in
     integ/scripts/background.sh wait json-typescript || status=1
     for suite in $SUITES; do
       case "$suite" in
-        backend/mongodb|sandbox/mounts)
+        backend/mongodb|sandbox/mounts|sandbox/default_route)
           (cd integ && pnpm exec tsx runtime/run.ts "$suite") || status=1
           ;;
       esac

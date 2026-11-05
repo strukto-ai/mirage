@@ -2167,12 +2167,13 @@ jobs:
         if: env.NEEDS_DOCKER == '1'
         run: |
           # FUSE in the box, so mount_type can serve the workspace into it
-          # over sshfs; /boxdata is a mount of the box's own, for `both`.
+          # over sshfs; /boxdata is a mount of the box's own, for `both`;
+          # python3, so the sandbox default runs interpreters there.
           docker run -d --name "$MIRAGE_INTEG_DOCKER_CONTAINER" \
             --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined \
             debian:trixie-slim sleep infinity
           docker exec "$MIRAGE_INTEG_DOCKER_CONTAINER" sh -c \
-            'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshfs >/dev/null &&
+            'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sshfs python3-minimal >/dev/null &&
              mkdir -p /boxdata && mount -t tmpfs tmpfs /boxdata && echo box > /boxdata/own.txt'
           echo "MIRAGE_INTEG_BOX_MOUNTS=1" >> "$GITHUB_ENV"
 
