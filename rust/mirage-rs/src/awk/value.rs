@@ -2,7 +2,7 @@ use std::borrow::{Borrow, Cow};
 use std::cmp::Ordering;
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, Range};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use crate::printf::number::{Rendered, render_float, render_integer};
 
@@ -10,6 +10,7 @@ use crate::printf::number::{Rendered, render_float, render_integer};
 pub(super) struct Text {
     bytes: Arc<Vec<u8>>,
     range: Range<usize>,
+    numeric: Arc<OnceLock<Numeric>>,
 }
 
 impl PartialEq for Text {
@@ -30,6 +31,7 @@ impl From<Vec<u8>> for Text {
         Self {
             bytes: Arc::new(bytes),
             range,
+            numeric: Arc::default(),
         }
     }
 }
@@ -47,14 +49,38 @@ impl Borrow<[u8]> for Text {
 impl Text {
     pub(super) fn slice(&self, range: Range<usize>) -> Self {
         debug_assert!(range.start <= range.end && range.end <= self.len());
+        if range == (0..self.len()) {
+            return self.clone();
+        }
         Self {
             bytes: self.bytes.clone(),
             range: self.range.start + range.start..self.range.start + range.end,
+            numeric: Arc::default(),
         }
     }
 
     pub(super) fn as_slice(&self) -> &[u8] {
         self
+    }
+
+    pub(super) fn prepare_number(&self, scan: &mut Option<NumberScan>, work: &mut u64) -> bool {
+        if self.numeric.get().is_some() {
+            return true;
+        }
+        let pending = scan.get_or_insert_with(NumberScan::default);
+        let Some(numeric) = pending.step(self, work) else {
+            return false;
+        };
+        let _ = self.numeric.set(numeric);
+        *scan = None;
+        true
+    }
+
+    fn number(&self) -> Numeric {
+        *self
+            .numeric
+            .get()
+            .expect("numeric values are prepared before use")
     }
 }
 
@@ -92,6 +118,7 @@ fn blank(c: u8) -> bool {
 
 /// The length of the awk number at the start of `raw`, or 0:
 /// `[+-]?([0-9]+\.?[0-9]*|\.[0-9]+)([eE][+-]?[0-9]+)?`.
+#[cfg(test)]
 fn number_len(raw: &[u8]) -> usize {
     let digits = |from: usize| {
         raw[from..]
@@ -121,6 +148,7 @@ fn number_len(raw: &[u8]) -> usize {
     at
 }
 
+#[cfg(test)]
 fn trimmed(raw: &[u8]) -> &[u8] {
     let start = raw.iter().position(|&c| !blank(c)).unwrap_or(raw.len());
     let end = raw
@@ -131,14 +159,16 @@ fn trimmed(raw: &[u8]) -> &[u8] {
 }
 
 /// Whether text, blanks aside, is an awk number as a whole.
-pub(super) fn looks_numeric(raw: &[u8]) -> bool {
+#[cfg(test)]
+fn looks_numeric(raw: &[u8]) -> bool {
     let body = trimmed(raw);
     !body.is_empty() && number_len(body) == body.len()
 }
 
 /// The number text starts with, strtod style but decimal only; 0 when it
 /// starts with none.
-pub(super) fn parse_number(raw: &[u8]) -> f64 {
+#[cfg(test)]
+fn parse_number(raw: &[u8]) -> f64 {
     let start = raw.iter().position(|&c| !blank(c)).unwrap_or(raw.len());
     let body = &raw[start..];
     let len = number_len(body);
@@ -146,6 +176,149 @@ pub(super) fn parse_number(raw: &[u8]) -> f64 {
         .ok()
         .and_then(|text| text.parse().ok())
         .unwrap_or(0.0)
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Numeric {
+    value: f64,
+    whole: bool,
+}
+
+#[derive(Default)]
+enum NumberPhase {
+    #[default]
+    Space,
+    Start,
+    Mantissa,
+    Power,
+    Tail,
+}
+
+#[derive(Default)]
+pub(super) struct NumberScan {
+    at: usize,
+    phase: NumberPhase,
+    negative: bool,
+    dot: bool,
+    fractional: usize,
+    significant: usize,
+    kept: Vec<u8>,
+    sticky: bool,
+    exponent: i64,
+    exponent_negative: bool,
+}
+
+impl NumberScan {
+    fn result(&self, whole: bool) -> Numeric {
+        let mut token = String::with_capacity(self.kept.len() + 32);
+        if self.negative {
+            token.push('-');
+        }
+        if self.kept.is_empty() {
+            token.push('0');
+        } else {
+            token.push_str(std::str::from_utf8(&self.kept).expect("decimal digits"));
+        }
+        let mut exponent = if self.exponent_negative {
+            -self.exponent
+        } else {
+            self.exponent
+        };
+        exponent = exponent
+            .saturating_sub(self.fractional as i64)
+            .saturating_add(self.significant.saturating_sub(self.kept.len()) as i64);
+        if self.sticky {
+            token.push('1');
+            exponent = exponent.saturating_sub(1);
+        }
+        token.push('e');
+        token.push_str(&exponent.to_string());
+        Numeric {
+            value: token.parse().expect("normalized decimal"),
+            whole,
+        }
+    }
+
+    fn step(&mut self, raw: &[u8], work: &mut u64) -> Option<Numeric> {
+        while *work > 0 {
+            *work -= 1;
+            match self.phase {
+                NumberPhase::Space => {
+                    if raw.get(self.at).is_some_and(|&byte| blank(byte)) {
+                        self.at += 1;
+                    } else {
+                        self.phase = NumberPhase::Start;
+                    }
+                }
+                NumberPhase::Start => {
+                    if matches!(raw.get(self.at), Some(b'+' | b'-')) {
+                        self.negative = raw[self.at] == b'-';
+                        self.at += 1;
+                    }
+                    let valid = raw.get(self.at).is_some_and(u8::is_ascii_digit)
+                        || (raw.get(self.at) == Some(&b'.')
+                            && raw.get(self.at + 1).is_some_and(u8::is_ascii_digit));
+                    if !valid {
+                        return Some(Numeric {
+                            value: 0.0,
+                            whole: false,
+                        });
+                    }
+                    self.phase = NumberPhase::Mantissa;
+                }
+                NumberPhase::Mantissa => {
+                    if let Some(&byte @ b'0'..=b'9') = raw.get(self.at) {
+                        self.fractional += usize::from(self.dot);
+                        if byte != b'0' || self.significant > 0 {
+                            self.significant += 1;
+                            // Every binary64 rounding boundary has fewer than 800
+                            // significant decimal digits; a later nonzero digit
+                            // only distinguishes equality from being above it.
+                            if self.kept.len() < 1200 {
+                                self.kept.push(byte);
+                            } else {
+                                self.sticky |= byte != b'0';
+                            }
+                        }
+                        self.at += 1;
+                    } else if !self.dot && raw.get(self.at) == Some(&b'.') {
+                        self.dot = true;
+                        self.at += 1;
+                    } else {
+                        let next = self.at
+                            + 1
+                            + usize::from(matches!(raw.get(self.at + 1), Some(b'+' | b'-')));
+                        if matches!(raw.get(self.at), Some(b'e' | b'E'))
+                            && raw.get(next).is_some_and(u8::is_ascii_digit)
+                        {
+                            self.exponent_negative = raw.get(self.at + 1) == Some(&b'-');
+                            self.at = next;
+                            self.phase = NumberPhase::Power;
+                        } else {
+                            self.phase = NumberPhase::Tail;
+                        }
+                    }
+                }
+                NumberPhase::Power => {
+                    if let Some(&byte @ b'0'..=b'9') = raw.get(self.at) {
+                        self.exponent = self
+                            .exponent
+                            .saturating_mul(10)
+                            .saturating_add((byte - b'0') as i64);
+                        self.at += 1;
+                    } else {
+                        self.phase = NumberPhase::Tail;
+                    }
+                }
+                NumberPhase::Tail => match raw.get(self.at) {
+                    Some(&byte) if blank(byte) => self.at += 1,
+                    Some(_) => return Some(self.result(false)),
+                    None => return Some(self.result(true)),
+                },
+            }
+        }
+        None
+    }
 }
 
 /// The most bytes one string, or one printf field, may take.
@@ -164,11 +337,18 @@ pub(super) fn to_int(value: f64) -> i128 {
 }
 
 impl Value {
+    pub(super) fn prepare_number(&self, scan: &mut Option<NumberScan>, work: &mut u64) -> bool {
+        match self {
+            Value::Str(raw) | Value::Strnum(raw) => raw.prepare_number(scan, work),
+            _ => true,
+        }
+    }
+
     pub(super) fn num(&self) -> f64 {
         match self {
             Value::Uninit | Value::Array(_) => 0.0,
             Value::Num(n) => *n,
-            Value::Str(s) | Value::Strnum(s) => parse_number(s),
+            Value::Str(s) | Value::Strnum(s) => s.number().value,
         }
     }
 
@@ -189,10 +369,10 @@ impl Value {
     }
 
     /// Whether the value takes part in a numeric comparison.
-    fn numeric(&self) -> bool {
+    pub(super) fn numeric(&self) -> bool {
         match self {
             Value::Uninit | Value::Num(_) => true,
-            Value::Strnum(s) => looks_numeric(s),
+            Value::Strnum(s) => s.number().whole,
             Value::Str(_) | Value::Array(_) => false,
         }
     }
@@ -201,26 +381,19 @@ impl Value {
         match self {
             Value::Uninit | Value::Array(_) => false,
             Value::Num(n) => *n != 0.0,
-            Value::Strnum(s) if looks_numeric(s) => parse_number(s) != 0.0,
+            Value::Strnum(s) if s.number().whole => s.number().value != 0.0,
             Value::Str(s) | Value::Strnum(s) => !s.is_empty(),
         }
     }
 }
 
-/// POSIX's comparison: numeric when both sides are numbers, numeric
-/// strings or unset, by bytes otherwise.
-pub(super) fn compare(left: &Value, right: &Value, convfmt: &[u8]) -> Ordering {
-    if left.numeric() && right.numeric() {
-        let (lhs, rhs) = (left.num(), right.num());
-        if lhs == rhs {
-            Ordering::Equal
-        } else if lhs < rhs {
-            Ordering::Less
-        } else {
-            Ordering::Greater
-        }
+pub(super) fn compare_numbers(lhs: f64, rhs: f64) -> Ordering {
+    if lhs == rhs {
+        Ordering::Equal
+    } else if lhs < rhs {
+        Ordering::Less
     } else {
-        left.text(convfmt).cmp(&right.text(convfmt))
+        Ordering::Greater
     }
 }
 
@@ -376,4 +549,59 @@ pub(super) fn render_int(value: f64, conv: u8, flags: &[u8], precision: Option<u
         .unwrap_or(0)
         .saturating_sub(rendered.suffix.len() as u64);
     rendered
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_scanning_matches_decimal_rounding_and_classification() {
+        let mut cases: Vec<String> = [
+            "", "+", "-", ".", "  ", "0", "-0", "+.5", "-7.", "1e", "1e+", "1e-3", "1e-3x",
+            " 42 \t\n", "1\r", "0x1a", "nan", "inf",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+        let midpoint = "1.00000000000000011102230246251565404236316680908203125";
+        for sign in ["", "-"] {
+            for tail in ["", "1", "9"] {
+                cases.push(format!("{sign}{midpoint}{}{tail}", "0".repeat(5000)));
+            }
+        }
+        let digits = num_bigint::BigUint::from(5u8).pow(1075).to_str_radix(10);
+        let subnormal = format!("0.{}{digits}", "0".repeat(1075 - digits.len()));
+        cases.push(subnormal.clone());
+        cases.push(format!("{subnormal}{}1", "0".repeat(5000)));
+        cases.push(format!("1{}e-5000", "0".repeat(5000)));
+        cases.push(format!("1{}e-5001", "9".repeat(5000)));
+        cases.push(format!("-{}", "0".repeat(5000)));
+        cases.push(format!("{}42{}", " ".repeat(5000), "\t".repeat(5000)));
+        cases.push(format!("1e{}", "9".repeat(5000)));
+        cases.push(format!("1e-{}", "9".repeat(5000)));
+        for raw in cases {
+            for budget in [1, 7, 20000] {
+                let mut scan = NumberScan::default();
+                let mut turns = 0;
+                let found = loop {
+                    let mut work = budget;
+                    if let Some(found) = scan.step(raw.as_bytes(), &mut work) {
+                        break found;
+                    }
+                    assert_eq!(work, 0);
+                    turns += 1;
+                    assert!(turns < raw.len() + 16);
+                };
+                assert_eq!(
+                    found.value.to_bits(),
+                    parse_number(raw.as_bytes()).to_bits(),
+                    "{} bytes at budget {budget}",
+                    raw.len()
+                );
+                assert_eq!(found.whole, looks_numeric(raw.as_bytes()));
+                assert!(scan.kept.len() <= 1200);
+            }
+        }
+    }
 }

@@ -12,7 +12,9 @@ use super::parser::{Cmp, GetlineKind, RedirKind};
 use super::text::{
     IndexSearch, Regexes, SplitScan, StringWork, Substitution, split_assignment, substr,
 };
-use super::value::{MAX_LEN, Text, Value, compare, format_num, string, strnum, to_int};
+use super::value::{
+    MAX_LEN, NumberScan, Text, Value, compare_numbers, format_num, string, strnum, to_int,
+};
 use crate::regex::Step as SearchStep;
 use crate::request::{Opening, Request, WriteMode};
 
@@ -67,7 +69,7 @@ struct RecordJoin {
 #[derive(Default)]
 struct Record {
     text: Text,
-    ranges: Vec<(usize, usize)>,
+    ranges: Vec<Text>,
     fields: Vec<Text>,
     owned: bool,
     split: bool,
@@ -98,7 +100,13 @@ impl Record {
             return Ok(true);
         }
         if !self.split_started {
-            self.ranges.clear();
+            while !self.ranges.is_empty() {
+                if *work == 0 {
+                    return Ok(false);
+                }
+                self.ranges.pop();
+                *work = work.saturating_sub(16);
+            }
             self.scan = SplitScan::default();
             self.split_started = true;
         }
@@ -109,7 +117,7 @@ impl Record {
             {
                 SearchStep::Paused => return Ok(false),
                 SearchStep::Done(Some(range)) => {
-                    self.ranges.push(range);
+                    self.ranges.push(self.text.slice(range.0..range.1));
                     *work = work.saturating_sub(8);
                 }
                 SearchStep::Done(None) => {
@@ -134,8 +142,7 @@ impl Record {
         if self.owned {
             self.fields[index - 1].clone()
         } else {
-            let (start, end) = self.ranges[index - 1];
-            self.text.slice(start..end)
+            self.ranges[index - 1].clone()
         }
     }
 
@@ -162,8 +169,7 @@ impl Record {
             if *work == 0 {
                 return Ok(false);
             }
-            let (start, end) = self.ranges[*index];
-            self.fields.push(self.text.slice(start..end));
+            self.fields.push(self.ranges[*index].clone());
             *index += 1;
             *work = work.saturating_sub(16);
         }
@@ -322,6 +328,17 @@ struct Snapshot {
 }
 
 enum Pending {
+    Store {
+        var: Var,
+        value: Value,
+        scan: Option<NumberScan>,
+    },
+    Compare {
+        left: Text,
+        right: Text,
+        at: usize,
+        cmp: Cmp,
+    },
     Scope(Scope),
     Retire(Retired<Value>),
     Snapshot(Snapshot),
@@ -358,6 +375,7 @@ pub(super) struct Machine {
     code: Code,
     pending: Option<Pending>,
     retirement: Option<Retirement>,
+    number: Option<NumberScan>,
     pc: usize,
     stage: u8,
     stack: Vec<Value>,
@@ -399,6 +417,7 @@ impl Machine {
             code,
             pending: None,
             retirement: None,
+            number: None,
             pc: 0,
             stage: 0,
             stack: Vec::new(),
@@ -487,6 +506,7 @@ impl Machine {
                 || self.locals.pop().is_some()
                 || self.globals.pop().is_some()
                 || self.record.fields.pop().is_some()
+                || self.record.ranges.pop().is_some()
                 || self.code.strings.pop().is_some()
                 || self.code.functions.pop().is_some()
                 || retirement.globals.next().is_some()
@@ -553,6 +573,51 @@ impl Machine {
     }
 
     fn prepare(&mut self, work: &mut u64) -> Result<bool, Vec<u8>> {
+        let op = self.code.ops[self.pc];
+        let count = match op {
+            Op::Arith(_) | Op::ArithAssign(_) | Op::Atan2 | Op::Compare(_) | Op::Substr(true) => 2,
+            Op::LoadField
+            | Op::StoreField
+            | Op::IncDecField(..)
+            | Op::SubField(_)
+            | Op::Neg
+            | Op::ToNum
+            | Op::Not
+            | Op::Truth
+            | Op::JumpIfFalse(_)
+            | Op::RangeEnd(..)
+            | Op::RangeStart(..)
+            | Op::Math(_)
+            | Op::Exit(true)
+            | Op::Srand(true)
+            | Op::Substr(false)
+            | Op::Store(Var::Nf | Var::Nr | Var::Fnr) => 1,
+            _ => 0,
+        };
+        for value in self
+            .stack
+            .iter()
+            .rev()
+            .skip(usize::from(matches!(op, Op::StoreField)))
+            .take(count)
+        {
+            if matches!(value, Value::Str(_))
+                && matches!(
+                    op,
+                    Op::Not
+                        | Op::Truth
+                        | Op::JumpIfFalse(_)
+                        | Op::RangeEnd(..)
+                        | Op::RangeStart(..)
+                        | Op::Compare(_)
+                )
+            {
+                continue;
+            }
+            if !value.prepare_number(&mut self.number, work) {
+                return Ok(false);
+            }
+        }
         let split = match self.code.ops[self.pc] {
             Op::Load(Var::Nf)
             | Op::IncDec(Var::Nf, ..)
@@ -576,16 +641,71 @@ impl Machine {
                 .is_some_and(|value| to_int(value.num()) == 0),
             _ => false,
         };
-        if text {
-            self.record.prepare_text(&special(&self.globals, OFS), work)
-        } else {
-            Ok(true)
+        if text
+            && !self
+                .record
+                .prepare_text(&special(&self.globals, OFS), work)?
+        {
+            return Ok(false);
         }
+        let value = match op {
+            Op::IncDec(var, ..) => Some(self.load(var)?),
+            Op::IncDecField(..) => {
+                let index = self.stack.last().map_or(0, |value| to_int(value.num()));
+                Some(self.get_field(index)?)
+            }
+            Op::IncDecElem(arr, ..) => {
+                let key = self.top_text();
+                let id = self.array(arr);
+                self.arrays.items[id].get(&key).cloned()
+            }
+            Op::NextMain | Op::EnterMain | Op::Getline(GetlineKind::Plain, _) => {
+                Some(self.load(Var::Global(ARGC))?)
+            }
+            _ => None,
+        };
+        Ok(value.is_none_or(|value| value.prepare_number(&mut self.number, work)))
     }
 
     fn resume(&mut self, work: &mut u64) -> Step {
         let pending = self.pending.take().unwrap();
         match pending {
+            Pending::Store {
+                var,
+                value,
+                mut scan,
+            } => {
+                if value.prepare_number(&mut scan, work) {
+                    self.store(var, value)?;
+                } else {
+                    self.pending = Some(Pending::Store { var, value, scan });
+                }
+            }
+            Pending::Compare {
+                left,
+                right,
+                mut at,
+                cmp,
+            } => {
+                let end = left.len().min(right.len());
+                let count = (end - at).min(*work as usize);
+                let order = left[at..at + count].cmp(&right[at..at + count]);
+                at += count;
+                *work = work.saturating_sub(count as u64);
+                if !order.is_eq() {
+                    self.stack.push(num(comparison(cmp, order)));
+                } else if at == end {
+                    self.stack
+                        .push(num(comparison(cmp, left.len().cmp(&right.len()))));
+                } else {
+                    self.pending = Some(Pending::Compare {
+                        left,
+                        right,
+                        at,
+                        cmp,
+                    });
+                }
+            }
             Pending::Retire(mut array) => {
                 if !array.step(work) {
                     self.pending = Some(Pending::Retire(array));
@@ -874,6 +994,13 @@ impl Machine {
     }
 
     fn store(&mut self, var: Var, value: Value) -> Step {
+        if matches!(var, Var::Nf | Var::Nr | Var::Fnr) {
+            let mut scan = None;
+            if !value.prepare_number(&mut scan, &mut 0) {
+                self.pending = Some(Pending::Store { var, value, scan });
+                return Ok(());
+            }
+        }
         match var {
             Var::Nf => {
                 let count = usize::try_from(to_int(value.num()).max(0)).unwrap_or(usize::MAX);
@@ -1159,16 +1286,19 @@ impl Machine {
             Op::Compare(cmp) => {
                 let right = self.pop();
                 let left = self.pop();
-                let order = compare(&left, &right, &self.convfmt());
-                let hit = match cmp {
-                    Cmp::Lt => order.is_lt(),
-                    Cmp::Le => order.is_le(),
-                    Cmp::Gt => order.is_gt(),
-                    Cmp::Ge => order.is_ge(),
-                    Cmp::Eq => order.is_eq(),
-                    Cmp::Ne => order.is_ne(),
-                };
-                self.stack.push(num(hit));
+                if left.numeric() && right.numeric() {
+                    self.stack.push(num(comparison(
+                        cmp,
+                        compare_numbers(left.num(), right.num()),
+                    )));
+                } else {
+                    self.pending = Some(Pending::Compare {
+                        left: left.into_text(&self.convfmt()),
+                        right: right.into_text(&self.convfmt()),
+                        at: 0,
+                        cmp,
+                    });
+                }
             }
             Op::Match(negated) => {
                 let pattern = self.pop_text();
@@ -1552,10 +1682,18 @@ impl Machine {
     /// reading ARGV as it stands when each is reached: an emptied or
     /// deleted slot is skipped, a `var=value` one assigned there. With no
     /// file operand the input is stdin, `-` in FILENAME (mawk 1.3.4).
-    fn open_operand(&mut self) -> Result<bool, Vec<u8>> {
+    fn open_operand(&mut self, work: &mut u64) -> Result<bool, Vec<u8>> {
         let argv = self.array(Arr::Global(ARGV));
         loop {
-            let argc = to_int(self.load(Var::Global(ARGC))?.num());
+            if *work == 0 {
+                return Ok(true);
+            }
+            let argc = self.load(Var::Global(ARGC))?;
+            if !argc.prepare_number(&mut self.number, work) {
+                return Ok(true);
+            }
+            *work = work.saturating_sub(1);
+            let argc = to_int(argc.num());
             if (self.arg_index as i128) + 1 >= argc {
                 break;
             }
@@ -1621,6 +1759,9 @@ impl Machine {
 
     fn next_main_record(&mut self, work: &mut u64) -> Result<Option<Option<Text>>, Vec<u8>> {
         loop {
+            if *work == 0 {
+                return Ok(None);
+            }
             if let Some(main) = &mut self.io.main {
                 let rs = special(&self.globals, RS);
                 match main.next(&rs, &mut self.regexes, work)? {
@@ -1648,7 +1789,7 @@ impl Machine {
                     }
                 }
             }
-            if !self.open_operand()? {
+            if !self.open_operand(work)? {
                 return Ok(Some(None));
             }
             if self.pending.is_some() {
@@ -2008,6 +2149,17 @@ impl Machine {
         self.io.release();
         self.done = true;
         Ok(())
+    }
+}
+
+fn comparison(cmp: Cmp, order: std::cmp::Ordering) -> bool {
+    match cmp {
+        Cmp::Lt => order.is_lt(),
+        Cmp::Le => order.is_le(),
+        Cmp::Gt => order.is_gt(),
+        Cmp::Ge => order.is_ge(),
+        Cmp::Eq => order.is_eq(),
+        Cmp::Ne => order.is_ne(),
     }
 }
 

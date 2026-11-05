@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use crate::printf::number::Rendered;
 use crate::regex::Step;
 
-use super::value::{FloatSpec, MAX_LEN, Text, Value, render_int, to_int};
+use super::value::{FloatSpec, MAX_LEN, NumberScan, Text, Value, render_int, to_int};
 use super::vm::no_memory;
 
 enum Piece {
@@ -153,6 +153,7 @@ enum Scan {
 }
 
 pub(super) struct Formatter {
+    number: Option<NumberScan>,
     format: Text,
     args: std::vec::IntoIter<Value>,
     convfmt: Text,
@@ -167,6 +168,7 @@ impl Formatter {
     pub(super) fn new(format: Text, args: Vec<Value>, convfmt: Text) -> Self {
         Self {
             format,
+            number: None,
             args: args.into_iter(),
             convfmt,
             at: 0,
@@ -295,6 +297,21 @@ impl Formatter {
 
     pub(super) fn step(&mut self, work: &mut u64) -> Result<Step<Output>, Vec<u8>> {
         while *work > 0 {
+            if let Scan::Conversion(spec) = &self.scan {
+                if let Some(&conv) = self.format.get(self.at) {
+                    let count = usize::from(spec.width_star)
+                        + usize::from(spec.precision_star)
+                        + usize::from(b"diouxXeEfFgGaA".contains(&conv));
+                    for arg in self.args.as_slice().iter().take(count) {
+                        if !arg.prepare_number(&mut self.number, work) {
+                            return Ok(Step::Paused);
+                        }
+                    }
+                }
+                if *work == 0 {
+                    return Ok(Step::Paused);
+                }
+            }
             *work -= 1;
             match std::mem::take(&mut self.scan) {
                 Scan::Literal => {

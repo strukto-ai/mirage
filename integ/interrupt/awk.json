@@ -113,6 +113,46 @@
       "unit": "a",
       "bytes": 1,
       "program": "{ for(i=0;i<100000;i++)a[i]=i; print \"ready\"; while(1){} }"
+    },
+    {
+      "id": "numeric-arithmetic",
+      "unit": "0",
+      "program": "{ print \"ready\"; x=$0+0; print \"done\" }"
+    },
+    {
+      "id": "numeric-truth",
+      "unit": "0",
+      "program": "{ print \"ready\"; x=!!$0; print \"done\" }"
+    },
+    {
+      "id": "numeric-compare",
+      "unit": "0",
+      "program": "{ print \"ready\"; x=($0==0); print \"done\" }"
+    },
+    {
+      "id": "numeric-format",
+      "unit": "0",
+      "program": "{ print \"ready\"; printf \"%d\",$0; print \"done\" }"
+    },
+    {
+      "id": "numeric-field",
+      "unit": "0",
+      "program": "{ x=NF; print \"ready\"; $1++; print \"done\" }"
+    },
+    {
+      "id": "numeric-array",
+      "unit": "0",
+      "program": "{ a[1]=$0; print \"ready\"; ++a[1]; print \"done\" }"
+    },
+    {
+      "id": "numeric-index",
+      "unit": "0",
+      "program": "{ i=$0; print \"ready\"; x=$(i); print \"done\" }"
+    },
+    {
+      "id": "text-compare",
+      "unit": "a",
+      "program": "{ s=\"\" $0; t=s \"z\"; print \"ready\"; for(j=0;j<64;j++)x=(s==t); print \"done\" }"
     }
   ]
 }

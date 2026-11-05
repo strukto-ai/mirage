@@ -722,3 +722,64 @@ fn array_snapshots_and_scope_cleanup_preserve_order_across_small_budgets() {
         "end\n"
     );
 }
+
+#[test]
+fn large_numeric_values_prepare_before_reads_updates_and_formatting() {
+    let two = format!("{}2", "0".repeat(8193));
+    let input = format!("{two} {two}\n");
+    assert_eq!(
+        run(
+            r#"{n=$1;print n+0;n++;a[1]=$1;print ++a[1],$1++;print $1;i=$2;$(i)=7;print $2;NR=i;FNR=i;print NR,FNR;NF=i;print NF}"#,
+            &input,
+        ),
+        "2\n3 2\n3\n7\n2 2\n2\n"
+    );
+    assert_eq!(
+        run(
+            r#"{print !!$0; s="" $0; print !!s; print s==substr(s,1); print s<(s "1"); $0++; print $0}"#,
+            &format!("{}\n", "0".repeat(8193)),
+        ),
+        "0\n1\n1\n1\n1\n"
+    );
+    let program = r#"BEGIN { printf "%*.*f:%d\n",width,precision,1.25,n; print ++n; print n<4 }"#;
+    for budget in [1, 7, super::STEPS] {
+        let code = super::compile::compile(&super::parser::parse(program.as_bytes()).unwrap());
+        let mut machine = super::vm::Machine::new(
+            code,
+            super::vm::Setup {
+                operands: Vec::new(),
+                assignments: vec![
+                    (
+                        b"width".to_vec(),
+                        format!("{}8", "0".repeat(8193)).into_bytes(),
+                    ),
+                    (b"precision".to_vec(), two.as_bytes().to_vec()),
+                    (b"n".to_vec(), two.as_bytes().to_vec()),
+                ],
+                fs: None,
+                environ: Vec::new(),
+            },
+        );
+        let mut out = Vec::new();
+        let mut turns = 0;
+        while !machine.done {
+            machine.run(budget);
+            out.append(&mut machine.io.out);
+            assert!(machine.io.idle());
+            turns += 1;
+            assert!(turns < 100000);
+        }
+        assert!(machine.io.err.is_empty());
+        assert_eq!(out, b"    1.25:2\n3\n1\n");
+    }
+    assert_eq!(
+        run_with(
+            "{print}",
+            &[&format!("ARGC={}", "0".repeat(8193))],
+            "input\n",
+            &[]
+        )
+        .out,
+        "input\n"
+    );
+}
