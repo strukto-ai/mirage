@@ -728,35 +728,40 @@ describe('RemoteSandbox interpreters', () => {
     expect(box.offeredCaptures).toEqual(['@external', 'node', 'python3'])
   })
 
-  it('closes only after a programs probe still asking', async () => {
-    let answer = (): void => undefined
-    const asked = new Promise<void>((resolve) => {
-      answer = resolve
+  it('closes at once while a probe still connects, and ends what lands later', async () => {
+    let land = (): void => undefined
+    const landed = new Promise<void>((resolve) => {
+      land = resolve
     })
-    class HeldProbeBox extends ProgramsBox {
-      override async execLine(
-        line: string,
-        stdin: Uint8Array | null,
-        env: Record<string, string>,
-        cwd: string,
-      ): Promise<RunResult> {
-        if (line === programsProbe()) await asked
-        return super.execLine(line, stdin, env, cwd)
+    class StuckConnectBox extends ProgramsBox {
+      open = false
+
+      override async connect(): Promise<void> {
+        await landed
+        this.open = true
+      }
+
+      override async close(): Promise<void> {
+        await super.close()
+        this.open = false
       }
     }
-    const box = new HeldProbeBox()
+    const box = new StuckConnectBox()
     const probe = box.probePrograms()
     await new Promise((resolve) => setTimeout(resolve, 10))
-    let closed = false
-    const closing = box.close().then(() => {
-      closed = true
-    })
-    await new Promise((resolve) => setTimeout(resolve, 10))
-    expect(closed).toBe(false)
-    answer()
-    await probe
-    await closing
+    const closed = await Promise.race([
+      box.close().then(() => true),
+      new Promise<boolean>((resolve) =>
+        setTimeout(() => {
+          resolve(false)
+        }, 200),
+      ),
+    ])
     expect(closed).toBe(true)
+    land()
+    await probe
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(box.open).toBe(false)
   })
 
   it('asks nothing once retired', async () => {

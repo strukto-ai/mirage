@@ -94,6 +94,9 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   // connect, and a failed connect clears the slot so the next line
   // retries.
   private connecting: Promise<void> | null = null
+  // Whether `connecting` has not settled yet, which a close then leaves to end
+  // what it opens when it lands.
+  private connectPending = false
   private mounts: SandboxMounts | null = null
   // The libfaketime each sandbox holds (`sandboxKey`), asked once the first
   // program runs there under a system_time: null for none. Concurrent first
@@ -440,10 +443,19 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
 
   protected async ensureConnected(signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted()
-    this.connecting ??= this.connect().catch((err: unknown) => {
-      this.connecting = null
-      throw err
-    })
+    if (this.connecting === null) {
+      this.connectPending = true
+      this.connecting = this.connect().then(
+        () => {
+          this.connectPending = false
+        },
+        (err: unknown) => {
+          this.connectPending = false
+          this.connecting = null
+          throw err
+        },
+      )
+    }
     await abortable(this.connecting, signal)
     signal?.throwIfAborted()
   }
@@ -494,12 +506,18 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
 
   /**
    * Unmount what the sandbox was served; the sandbox itself is the user's. A
-   * programs probe still asking, which a line past its deadline left running,
-   * ends first, so no connection it opens outlives the close.
+   * connect still pending (a probe a line past its deadline left running) is
+   * not waited for: what it opens when it lands is closed then.
    */
   override async close(): Promise<void> {
-    await this.programsAsking
+    const late = this.connectPending ? this.connecting : null
+    this.connecting = null
     await this.mounts?.close()
     await super.close()
+    if (late !== null)
+      void late.then(
+        () => this.close(),
+        () => undefined,
+      )
   }
 }
