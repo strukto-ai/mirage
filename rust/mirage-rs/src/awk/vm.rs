@@ -66,9 +66,9 @@ struct RecordJoin {
 /// with the FS and RS in force when it arrived.
 #[derive(Default)]
 struct Record {
-    text: Vec<u8>,
+    text: Text,
     ranges: Vec<(usize, usize)>,
-    fields: Vec<Vec<u8>>,
+    fields: Vec<Text>,
     owned: bool,
     split: bool,
     split_started: bool,
@@ -76,16 +76,14 @@ struct Record {
     owning: Option<usize>,
     stale: bool,
     joining: Option<RecordJoin>,
-    fs: Vec<u8>,
+    fs: Text,
     paragraph: bool,
 }
 
 impl Record {
-    fn set(&mut self, text: &[u8], fs: &[u8], paragraph: bool) {
-        self.text.clear();
-        self.text.extend_from_slice(text);
-        self.fs.clear();
-        self.fs.extend_from_slice(fs);
+    fn set(&mut self, text: Text, fs: Text, paragraph: bool) {
+        self.text = text;
+        self.fs = fs;
         self.paragraph = paragraph;
         self.split = false;
         self.split_started = false;
@@ -132,12 +130,12 @@ impl Record {
     }
 
     /// Field `index`, from 1, which must not pass NF.
-    fn field(&self, index: usize) -> &[u8] {
+    fn field(&self, index: usize) -> Text {
         if self.owned {
-            &self.fields[index - 1]
+            self.fields[index - 1].clone()
         } else {
             let (start, end) = self.ranges[index - 1];
-            &self.text[start..end]
+            self.text.slice(start..end)
         }
     }
 
@@ -165,18 +163,9 @@ impl Record {
                 return Ok(false);
             }
             let (start, end) = self.ranges[*index];
-            if self.fields.len() == *index {
-                self.fields.push(Vec::with_capacity(end - start));
-                *work = work.saturating_sub(16);
-            }
-            let field = &mut self.fields[*index];
-            let from = start + field.len();
-            let count = (end - from).min(usize::try_from(*work).unwrap_or(usize::MAX));
-            field.extend_from_slice(&self.text[from..from + count]);
-            *work -= count as u64;
-            if from + count == end {
-                *index += 1;
-            }
+            self.fields.push(self.text.slice(start..end));
+            *index += 1;
+            *work = work.saturating_sub(16);
         }
         self.owning = None;
         self.owned = true;
@@ -232,12 +221,12 @@ impl Record {
                 *work = work.saturating_sub(1);
             }
         }
-        self.text = self.joining.take().unwrap().body.unwrap();
+        self.text = self.joining.take().unwrap().body.unwrap().into();
         self.stale = false;
         Ok(true)
     }
 
-    fn text(&self) -> &[u8] {
+    fn text(&self) -> &Text {
         debug_assert!(!self.stale);
         &self.text
     }
@@ -283,7 +272,7 @@ enum MatchTarget {
 
 enum WriteTarget {
     Nf(usize),
-    Field(usize, Vec<u8>),
+    Field(usize, Text),
 }
 
 struct FieldSplit {
@@ -293,7 +282,6 @@ struct FieldSplit {
     array: usize,
     retired: Retired<Value>,
     count: usize,
-    piece: Option<(usize, usize, Vec<u8>)>,
 }
 
 enum SubTarget {
@@ -574,7 +562,7 @@ impl Machine {
                         if count > 0 {
                             match target {
                                 SubTarget::Var(var) => self.store(var, string(result))?,
-                                SubTarget::Field(index) => self.set_field(index, result)?,
+                                SubTarget::Field(index) => self.set_field(index, result.into())?,
                                 SubTarget::Element(id, key) => {
                                     self.arrays.items[id].insert(key, string(result))
                                 }
@@ -592,21 +580,6 @@ impl Machine {
                     return Ok(());
                 }
                 loop {
-                    if let Some((start, end, piece)) = &mut split.piece {
-                        let from = *start + piece.len();
-                        let count = (*end - from).min(usize::try_from(*work).unwrap_or(usize::MAX));
-                        piece.extend_from_slice(&split.subject[from..from + count]);
-                        *work -= count as u64;
-                        if from + count < *end {
-                            self.pending = Some(Pending::Split(split));
-                            return Ok(());
-                        }
-                        let (_, _, piece) = split.piece.take().unwrap();
-                        split.count += 1;
-                        self.arrays.items[split.array]
-                            .insert(split.count.to_string().into_bytes(), strnum(piece));
-                        *work = work.saturating_sub(16);
-                    }
                     match split.scan.next(
                         &split.subject,
                         &split.separator,
@@ -623,7 +596,12 @@ impl Machine {
                             break;
                         }
                         SearchStep::Done(Some((start, end))) => {
-                            split.piece = Some((start, end, Vec::with_capacity(end - start)))
+                            split.count += 1;
+                            self.arrays.items[split.array].insert(
+                                split.count.to_string().into_bytes(),
+                                strnum(split.subject.slice(start..end)),
+                            );
+                            *work = work.saturating_sub(16);
                         }
                     }
                 }
@@ -641,7 +619,7 @@ impl Machine {
                         self.pending = Some(Pending::Write(target));
                         return Ok(());
                     }
-                    self.record.fields.push(Vec::new());
+                    self.record.fields.push(Text::default());
                     *work = work.saturating_sub(16);
                 }
                 match target {
@@ -815,15 +793,15 @@ impl Machine {
         }
     }
 
-    fn set_record(&mut self, text: &[u8]) {
-        let fs = special(&self.globals, FS);
+    fn set_record(&mut self, text: Text) {
+        let fs = self.special_text(FS);
         let paragraph = special(&self.globals, RS).is_empty();
-        self.record.set(text, &fs, paragraph);
+        self.record.set(text, fs, paragraph);
     }
 
     fn get_field(&mut self, index: i128) -> Result<Value, Vec<u8>> {
         if index == 0 {
-            return Ok(strnum(self.record.text().to_vec()));
+            return Ok(strnum(self.record.text().clone()));
         }
         if index < 0 {
             return Err(format!("awk: trying to access field {index}").into_bytes());
@@ -833,13 +811,13 @@ impl Machine {
         Ok(if index > nf {
             string(Vec::new())
         } else {
-            strnum(self.record.field(index).to_vec())
+            strnum(self.record.field(index))
         })
     }
 
-    fn set_field(&mut self, index: i128, text: Vec<u8>) -> Step {
+    fn set_field(&mut self, index: i128, text: Text) -> Step {
         if index == 0 {
-            self.set_record(&text);
+            self.set_record(text);
             return Ok(());
         }
         if index < 0 {
@@ -908,14 +886,14 @@ impl Machine {
             Op::StoreField => {
                 let value = self.pop();
                 let index = to_int(self.pop().num());
-                let text = value.text(&self.convfmt()).into_owned();
+                let text = value.clone().into_text(&self.convfmt());
                 self.set_field(index, text)?;
                 self.stack.push(value);
             }
             Op::IncDecField(delta, pre) => {
                 let index = to_int(self.pop().num());
                 let current = self.get_field(index)?.num();
-                let text = format_num(current + delta, &self.convfmt());
+                let text = format_num(current + delta, &self.convfmt()).into();
                 self.set_field(index, text)?;
                 self.stack
                     .push(Value::Num(if pre { current + delta } else { current }));
@@ -1284,7 +1262,6 @@ impl Machine {
                     array: id,
                     retired,
                     count: 0,
-                    piece: None,
                 })));
             }
             Op::Close => return self.close(),
@@ -1471,32 +1448,23 @@ impl Machine {
     /// on the host. What the main loop and a plain getline both read.
     fn next_main(&mut self, work: &mut u64) -> Result<Option<bool>, Vec<u8>> {
         Ok(self.next_main_record(work)?.map(|record| match record {
-            Some((start, end)) => {
-                let main = self
-                    .io
-                    .main
-                    .take()
-                    .expect("a record came from the main input");
-                self.set_record(&main.buf[start..end]);
-                self.io.main = Some(main);
+            Some(text) => {
+                self.set_record(text);
                 true
             }
             None => false,
         }))
     }
 
-    fn next_main_record(
-        &mut self,
-        work: &mut u64,
-    ) -> Result<Option<Option<(usize, usize)>>, Vec<u8>> {
+    fn next_main_record(&mut self, work: &mut u64) -> Result<Option<Option<Text>>, Vec<u8>> {
         loop {
             if let Some(main) = &mut self.io.main {
                 let rs = special(&self.globals, RS);
                 match main.next(&rs, &mut self.regexes, work)? {
-                    Next::Record(start, end) => {
+                    Next::Record(text) => {
                         self.nr += 1.0;
                         self.fnr += 1.0;
-                        return Ok(Some(Some((start, end))));
+                        return Ok(Some(Some(text)));
                     }
                     Next::End => self.io.main = None,
                     Next::Failed(detail) => {
@@ -1528,7 +1496,7 @@ impl Machine {
 
     /// Push a getline's result: its status, then the record when it has a
     /// target, else the record becomes `$0`.
-    fn getline_result(&mut self, record: Option<Vec<u8>>, failed: bool, target: bool) {
+    fn getline_result(&mut self, record: Option<Text>, failed: bool, target: bool) {
         let status = match (&record, failed) {
             (_, true) => -1.0,
             (Some(_), _) => 1.0,
@@ -1537,7 +1505,7 @@ impl Machine {
         self.stack.push(Value::Num(status));
         match (record, target) {
             (Some(record), true) => self.stack.push(strnum(record)),
-            (Some(record), false) => self.set_record(&record),
+            (Some(record), false) => self.set_record(record),
             (None, true) => self.stack.push(Value::Uninit),
             (None, false) => {}
         }
@@ -1551,19 +1519,13 @@ impl Machine {
             GetlineKind::Plain => match self.next_main_record(work)? {
                 None => self.wait(0),
                 Some(found) => {
-                    let record = found.and_then(|(start, end)| {
-                        self.io
-                            .main
-                            .as_ref()
-                            .map(|main| main.buf[start..end].to_vec())
-                    });
-                    self.getline_result(record, false, target);
+                    self.getline_result(found, false, target);
                     Ok(())
                 }
             },
             GetlineKind::File => {
                 let name = self.top_text();
-                let rs = special(&self.globals, RS).into_owned();
+                let rs = self.special_text(RS);
                 if !self.io.files_in.contains(&name) {
                     let fd = self.io.fd();
                     let reader = Reader::new(fd, Some((name.to_vec(), Opening::Name)));
@@ -1578,11 +1540,11 @@ impl Machine {
                         self.wait(0)
                     }
                     next => {
+                        let failed = matches!(next, Next::Failed(_));
                         let record = match next {
-                            Next::Record(start, end) => Some(reader.buf[start..end].to_vec()),
+                            Next::Record(text) => Some(text),
                             _ => None,
                         };
-                        let failed = matches!(next, Next::Failed(_));
                         if failed {
                             self.io.files_in.remove(&name);
                         }
@@ -1614,7 +1576,7 @@ impl Machine {
                     });
                     return self.wait(1);
                 }
-                let rs = special(&self.globals, RS).into_owned();
+                let rs = self.special_text(RS);
                 let (reader, _) = self.io.pipes_in.get_mut(&command).expect("just checked");
                 match reader.next(&rs, &mut self.regexes, work)? {
                     Next::Busy => self.wait(0),
@@ -1625,7 +1587,7 @@ impl Machine {
                     }
                     next => {
                         let record = match next {
-                            Next::Record(start, end) => Some(reader.buf[start..end].to_vec()),
+                            Next::Record(text) => Some(text),
                             _ => None,
                         };
                         self.stack.pop();
@@ -1706,7 +1668,7 @@ impl Machine {
             })));
         } else {
             if args.is_empty() {
-                args.push(string(self.record_text()?.to_vec()));
+                args.push(string(self.record.text().clone()));
             }
             self.pending = Some(Pending::Print {
                 print: Print::new(

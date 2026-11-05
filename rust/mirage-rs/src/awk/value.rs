@@ -1,22 +1,42 @@
 use std::borrow::{Borrow, Cow};
 use std::cmp::Ordering;
-use std::ops::Deref;
+use std::hash::{Hash, Hasher};
+use std::ops::{Deref, Range};
 use std::sync::Arc;
 
 use crate::printf::number::{Rendered, render_float, render_integer};
 
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
-pub(super) struct Text(Arc<Vec<u8>>);
+#[derive(Clone, Debug, Default)]
+pub(super) struct Text {
+    bytes: Arc<Vec<u8>>,
+    range: Range<usize>,
+}
+
+impl PartialEq for Text {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_slice() == other.as_slice()
+    }
+}
+impl Eq for Text {}
+impl Hash for Text {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.as_slice().hash(state);
+    }
+}
 
 impl From<Vec<u8>> for Text {
     fn from(bytes: Vec<u8>) -> Self {
-        Self(Arc::new(bytes))
+        let range = 0..bytes.len();
+        Self {
+            bytes: Arc::new(bytes),
+            range,
+        }
     }
 }
 impl Deref for Text {
     type Target = [u8];
     fn deref(&self) -> &[u8] {
-        self.0.as_slice()
+        &self.bytes[self.range.clone()]
     }
 }
 impl Borrow<[u8]> for Text {
@@ -25,6 +45,14 @@ impl Borrow<[u8]> for Text {
     }
 }
 impl Text {
+    pub(super) fn slice(&self, range: Range<usize>) -> Self {
+        debug_assert!(range.start <= range.end && range.end <= self.len());
+        Self {
+            bytes: self.bytes.clone(),
+            range: self.range.start + range.start..self.range.start + range.end,
+        }
+    }
+
     pub(super) fn as_slice(&self) -> &[u8] {
         self
     }

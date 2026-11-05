@@ -153,7 +153,7 @@ fn slot_keys(index: &HashMap<Text, usize>, len: usize) -> Vec<Option<&Text>> {
 }
 
 pub(super) enum Next {
-    Record(usize, usize),
+    Record(Text),
     End,
     Failed(Vec<u8>),
     Pending,
@@ -162,10 +162,17 @@ pub(super) enum Next {
 
 /// One input cut into records with the RS in force at each read, pulled
 /// from the host only as far as the next record needs.
+struct RecordCopy {
+    start: usize,
+    end: usize,
+    out: Vec<u8>,
+}
+
 pub(super) struct Reader {
     pub(super) fd: u32,
     open: Option<(Vec<u8>, Opening)>,
-    pub(super) buf: Vec<u8>,
+    buf: Vec<u8>,
+    copying: Option<RecordCopy>,
     start: usize,
     search: RecordSearch,
     pub(super) ended: bool,
@@ -179,6 +186,7 @@ impl Reader {
             fd,
             open,
             buf: Vec::new(),
+            copying: None,
             start: 0,
             search: RecordSearch::default(),
             ended: false,
@@ -193,6 +201,9 @@ impl Reader {
         regexes: &mut Regexes,
         budget: &mut u64,
     ) -> Result<Next, Vec<u8>> {
+        if self.copying.is_some() {
+            return Ok(self.copy_record(budget));
+        }
         if self.start > self.buf.len() / 2 {
             self.search.shift(self.start);
             self.buf.drain(..self.start);
@@ -213,7 +224,12 @@ impl Reader {
             crate::regex::Step::Done(Some((start, end, next))) => {
                 self.start = next;
                 self.search.reset(next);
-                return Ok(Next::Record(start, end));
+                self.copying = Some(RecordCopy {
+                    start,
+                    end,
+                    out: Vec::with_capacity(end - start),
+                });
+                return Ok(self.copy_record(budget));
             }
             crate::regex::Step::Done(None) => {}
         }
@@ -224,6 +240,19 @@ impl Reader {
             _ if self.buf.len() - self.start > MAX_LEN => return Err(no_memory()),
             _ => Next::Pending,
         })
+    }
+
+    fn copy_record(&mut self, budget: &mut u64) -> Next {
+        let record = self.copying.as_mut().unwrap();
+        let from = record.start + record.out.len();
+        let count = (record.end - from).min(*budget as usize);
+        record.out.extend_from_slice(&self.buf[from..from + count]);
+        *budget -= count as u64;
+        if from + count == record.end {
+            Next::Record(self.copying.take().unwrap().out.into())
+        } else {
+            Next::Busy
+        }
     }
 
     /// The read to ask for, unless one is out; and whether it opens a
@@ -526,6 +555,40 @@ impl Io {
         } else {
             self.requests.clear();
             self.fatal = Some(message);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_transfer_resumes_without_reading_or_delivering_twice() {
+        let size = 131073;
+        let mut reader = Reader::new(1, None);
+        let mut input = vec![b'a'; size];
+        input.extend_from_slice(b"\nnext\n");
+        reader.answer(&Reply::decode(b"{}").unwrap(), &input);
+        let mut regexes = Regexes::default();
+        let mut turns = 0;
+        loop {
+            let mut work = 4096;
+            turns += 1;
+            match reader.next(b"\n", &mut regexes, &mut work).unwrap() {
+                Next::Busy => assert!(!reader.waiting),
+                Next::Record(record) => {
+                    assert_eq!(record.as_slice(), &input[..size]);
+                    break;
+                }
+                _ => panic!("the buffered record must finish before another read"),
+            }
+            assert!(turns < 1000);
+        }
+        assert!(turns >= 2 * size / 4096);
+        match reader.next(b"\n", &mut regexes, &mut 4096).unwrap() {
+            Next::Record(record) => assert_eq!(record.as_slice(), b"next"),
+            _ => panic!("the next buffered record remains available"),
         }
     }
 }

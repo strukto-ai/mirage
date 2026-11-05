@@ -568,7 +568,7 @@ fn nested_match_and_record_searches_resume_within_the_vm_budget() {
             json!({"program":program,"assignments":[format!("s={long}"),format!("t={long}")]});
         let (out, turns) = drive(config, b"");
         assert_eq!(out, expected.as_bytes(), "{program}");
-        assert!(turns > 10, "{program}");
+        assert!(turns >= long.len() / super::STEPS, "{program}");
     }
     let config = json!({"program":"BEGIN{RS=\"a.*z|END\"} {print length($0)}"});
     let (out, turns) = drive(config, format!("{long}ENDtail").as_bytes());
@@ -612,4 +612,22 @@ fn formatted_output_yields_and_commits_each_argument_once() {
     assert_eq!(failed.out, "before\n");
     assert_eq!(failed.status, 2);
     assert!(failed.err.contains("not enough arguments"));
+}
+
+#[test]
+fn field_views_keep_their_value_after_record_and_array_changes() {
+    assert_eq!(
+        run(
+            "{ saved=$1; split($0,a); item=a[2]; $1=\"changed\"; NF=1; split(\"replacement\",a); print saved,item,$0; getline; print saved,item,$0 }",
+            "left right\nnext record\n"
+        ),
+        "left right changed\nleft right next record\n"
+    );
+    assert_eq!(
+        run(
+            "BEGIN { s=\"abXcd\"; split(s,a,/X/); a[a[1]]=3; print a[\"ab\"],(\"ab\" in a); delete a[\"ab\"]; print (\"ab\" in a); s=\"other\"; print a[1],a[2] }",
+            ""
+        ),
+        "3 1\n0\nab cd\n"
+    );
 }
