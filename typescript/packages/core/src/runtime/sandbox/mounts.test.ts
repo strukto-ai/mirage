@@ -364,6 +364,10 @@ describe('topPrefixes', () => {
   })
 })
 
+function lost(prefix: string): string {
+  return `fake: ${prefix} is no longer mounted in the sandbox (did it restart?); the line did not run\n`
+}
+
 describe('SandboxMounts', () => {
   it('serves every prefix the session sees over ssh', async () => {
     const sandbox = new FakeSandbox('ssh')
@@ -796,10 +800,6 @@ describe('SandboxMounts', () => {
     expect(sandbox.served()).toEqual(['/data', '/my notes', '/data'])
     await ws.close()
   })
-
-  function lost(prefix: string): string {
-    return `fake: ${prefix} is no longer mounted in the sandbox (did it restart?); the line did not run\n`
-  }
 
   // A restart after the line was admitted took the sandbox's mounts while
   // the host still serves them: the line never runs over the bare

@@ -16,7 +16,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { EXEC_ID, MOUNT_GUARD, REAP_ABSENT, mountField, reapLine, wrapLine } from './constants.ts'
 
 const PRELUDE = `/bin/sh -c 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"' sh `
@@ -108,24 +108,41 @@ describe.skipIf(!existsSync('/proc/self'))('reapLine', () => {
   })
 })
 
+// The temporary directories the guard's tables live in, removed after each test.
+const tables: string[] = []
+
+function guarded(table: string, ...entries: string[]): ReturnType<typeof spawnSync> {
+  return spawnSync(
+    '/bin/sh',
+    ['-c', MOUNT_GUARD, 'sh', table, ...entries, '--', '/bin/echo', 'ran'],
+    {
+      env: { PATH: '/nowhere' },
+      encoding: 'utf8',
+      timeout: 10_000,
+    },
+  )
+}
+
+function expected(prefix: string, source: string, kind: string): string[] {
+  return [mountField(prefix), mountField(source, true), kind, `lost ${prefix}`]
+}
+
+function tableDir(): string {
+  const dir = mkdtempSync(join(tmpdir(), 'mirage-mounts-'))
+  tables.push(dir)
+  return dir
+}
+
+function tableOf(rows: string): string {
+  const table = join(tableDir(), 'mounts')
+  writeFileSync(table, rows)
+  return table
+}
+
 describe('MOUNT_GUARD', () => {
-  function guarded(table: string, ...entries: string[]): ReturnType<typeof spawnSync> {
-    return spawnSync(
-      '/bin/sh',
-      ['-c', MOUNT_GUARD, 'sh', table, ...entries, '--', '/bin/echo', 'ran'],
-      { env: { PATH: '/nowhere' }, encoding: 'utf8', timeout: 10_000 },
-    )
-  }
-
-  function expected(prefix: string, source: string, kind: string): string[] {
-    return [mountField(prefix), mountField(source, true), kind, `lost ${prefix}`]
-  }
-
-  function tableOf(rows: string): string {
-    const table = join(mkdtempSync(join(tmpdir(), 'mirage-mounts-')), 'mounts')
-    writeFileSync(table, rows)
-    return table
-  }
+  afterEach(() => {
+    for (const dir of tables.splice(0)) rmSync(dir, { recursive: true, force: true })
+  })
 
   it('escapes what the kernel escapes', () => {
     expect(mountField('/a b\tc\nd\\e#')).toBe('/a\\040b\\011c\\012d\\134e#')
@@ -206,7 +223,7 @@ describe('MOUNT_GUARD', () => {
   })
 
   it('refuses without a mount table', () => {
-    const missing = join(mkdtempSync(join(tmpdir(), 'mirage-mounts-')), 'missing')
+    const missing = join(tableDir(), 'missing')
     const done = guarded(missing, ...expected('/data', 'mirage-x:/data', 'fuse.sshfs'))
     expect([done.status, done.stdout, done.stderr]).toEqual([126, '', 'lost /data\n'])
   })
