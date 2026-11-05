@@ -228,6 +228,8 @@ export class SandboxMounts {
   // The sandbox's own mounts as last read, and each prefix held since.
   private own = new Map<string, [string, string]>()
   private owned = new Set<string>()
+  // What each served prefix was laid over (as JSON), which shows again once it ends.
+  private readonly under = new Map<string, string>()
   private lock: Promise<unknown> = Promise.resolve()
   private readonly name = `${SSHFS_SOURCE_PREFIX}${crypto.randomUUID().replaceAll('-', '')}`
 
@@ -460,7 +462,15 @@ export class SandboxMounts {
     }
     this.seen = null
     const present = await this.table(signal)
-    for (const p of this.served.keys()) if (!ended.includes(p) && !present.has(p)) ended.push(p)
+    for (const p of this.served.keys()) {
+      const entry = present.get(p)
+      if (
+        !ended.includes(p) &&
+        (entry === undefined || JSON.stringify(entry) === this.under.get(p))
+      ) {
+        ended.push(p)
+      }
+    }
     const own = [...every]
       .filter(
         (p) =>
@@ -483,6 +493,7 @@ export class SandboxMounts {
         wanted.includes(p) &&
         entry !== undefined &&
         (entry[0] !== this.source(p) || entry[1] !== 'fuse.sshfs') &&
+        JSON.stringify(entry) !== this.under.get(p) &&
         (!ended.includes(p) || entry[1] !== 'fuse.sshfs')
       )
     })
@@ -567,6 +578,7 @@ export class SandboxMounts {
     present: ReadonlyMap<string, [string, string]>,
     signal?: AbortSignal,
   ): Promise<void> {
+    this.under.set(prefix, JSON.stringify(present.get(prefix) ?? null))
     if (present.get(prefix)?.[1] === 'fuse.sshfs') await this.run(unmountLine(prefix), signal)
     const path = singleQuote(prefix)
     const made = await this.run(
@@ -664,6 +676,7 @@ export class SandboxMounts {
     const entry = this.served.get(prefix)
     if (entry === undefined) return
     this.served.delete(prefix)
+    this.under.delete(prefix)
     if (present.get(prefix)?.[0] === this.source(prefix)) {
       try {
         const done = await this.run(unmountLine(prefix))
