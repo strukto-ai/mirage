@@ -1,0 +1,118 @@
+{
+  "bytes": 67108864,
+  "cases": [
+    {
+      "id": "record-match",
+      "unit": "a",
+      "program": "{print \"ready\"} /a+z/ {x=1} END{print \"done\"}"
+    },
+    {
+      "id": "binary-match",
+      "unit": "a",
+      "program": "{print \"ready\"; x=($0~/a+z/); print \"done\"}"
+    },
+    {
+      "id": "match-function",
+      "unit": "a",
+      "program": "{print \"ready\"; x=match($0,/a+z/); print \"done\"}"
+    },
+    {
+      "id": "field-split",
+      "unit": "a",
+      "program": "BEGIN{FS=\"a+z\"} {print \"ready\"; x=NF; print \"done\"}"
+    },
+    {
+      "id": "array-split",
+      "unit": "a",
+      "program": "{s=$0; print \"ready\"; x=split(s,a,/a+z/); print \"done\"}"
+    },
+    {
+      "id": "substitution-short",
+      "unit": "a",
+      "program": "{s=$0; print \"ready\"; gsub(/a/,\"xx\",s); print \"done\"}"
+    },
+    {
+      "id": "substitution-empty",
+      "unit": "a",
+      "program": "{s=$0; print \"ready\"; gsub(/x*/,\"-\",s); print \"done\"}"
+    },
+    {
+      "id": "field-rebuild",
+      "unit": "a",
+      "program": "{s=$0; $1=s; $2=s; print \"ready\"; for (j=0;j<16;j++) { $1=s; $2=s; x=$0; } print \"done\"}"
+    },
+    {
+      "id": "lowercase",
+      "unit": "A",
+      "program": "{s=$0; print \"ready\"; for (j=0;j<16;j++) { x=tolower(s); } print \"done\"}"
+    },
+    {
+      "id": "uppercase",
+      "unit": "a",
+      "program": "{s=$0; print \"ready\"; for (j=0;j<16;j++) { x=toupper(s); } print \"done\"}"
+    },
+    {
+      "id": "substring",
+      "unit": "a",
+      "program": "{s=$0; print \"ready\"; for (j=0;j<16;j++) { x=substr(s,2); } print \"done\"}"
+    },
+    {
+      "id": "concatenate",
+      "unit": "a",
+      "program": "{s=$0; print \"ready\"; for (j=0;j<16;j++) { x=s s; } print \"done\"}"
+    },
+    {
+      "id": "index",
+      "unit": "a",
+      "program": "{s=$0; t=substr(s,2); print \"ready\"; x=index(s,t); print \"done\"}"
+    },
+    {
+      "id": "format-literal",
+      "unit": "a",
+      "program": "{s=$0; print \"ready\"; x=sprintf(s); print \"done\"}"
+    },
+    {
+      "id": "format-flags",
+      "unit": "+",
+      "program": "{s=\"%\" $0 \"d\"; print \"ready\"; x=sprintf(s,1); print \"done\"}"
+    },
+    {
+      "id": "format-padding",
+      "unit": "a",
+      "program": "{print \"ready\"; for (j=0;j<16;j++) { x=sprintf(\"%134217728s\",\"\"); } print \"done\"}"
+    },
+    {
+      "id": "format-precision",
+      "unit": "a",
+      "program": "{print \"ready\"; for (j=0;j<16;j++) { x=sprintf(\"%.134217728f\",1); } print \"done\"}"
+    },
+    {
+      "id": "format-string",
+      "unit": "a",
+      "program": "{s=$0; print \"ready\"; printf \"%s\",s; print \"done\"}"
+    },
+    {
+      "id": "plain-print",
+      "unit": "a",
+      "program": "{s=$0; print \"ready\"; print s; print \"done\"}"
+    },
+    {
+      "id": "record-separator",
+      "unit": "a",
+      "prefix": "header\n",
+      "program": "BEGIN { getline; print \"ready\"; RS=\"a.*z|END\"; getline; print \"done\" }"
+    },
+    {
+      "id": "empty-record-separator",
+      "unit": "a",
+      "prefix": "header\n",
+      "program": "BEGIN { getline; print \"ready\"; RS=\"()\"; getline; print \"done\" }"
+    },
+    {
+      "id": "array-cleanup",
+      "unit": "a",
+      "bytes": 1,
+      "program": "{ for(i=0;i<100000;i++)a[i]=i; print \"ready\"; while(1){} }"
+    }
+  ]
+}
