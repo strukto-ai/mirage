@@ -15,7 +15,7 @@
 import json
 import math
 import time
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Mapping
 from contextlib import closing
 from datetime import datetime, timezone, tzinfo
 
@@ -44,7 +44,18 @@ def _date_request(
         assert isinstance(wall, list)
         values = [value for value in wall if isinstance(value, int)]
         assert len(values) == 6
-        return json.dumps(round(datetime(*values).timestamp())).encode()
+        return json.dumps(
+            round(
+                datetime(
+                    values[0],
+                    values[1],
+                    values[2],
+                    values[3],
+                    values[4],
+                    values[5],
+                ).timestamp()
+            )
+        ).encode()
     if "year" in header:
         year = header["year"]
         assert isinstance(year, int)
@@ -66,7 +77,7 @@ def _date_request(
 
 def _date_steps(
     text: str, mode: str, tz: tzinfo | None, now: datetime | None
-) -> Iterator[bytes]:
+) -> Generator[bytes, None, None]:
     if now is None:
         current, nanos = divmod(
             round(system_now() * 1_000_000_000), 1_000_000_000
@@ -159,7 +170,9 @@ def _date_placed(
     if isinstance(wall, list):
         values = [value for value in wall if isinstance(value, int)]
         assert len(values) == 6
-        return datetime(*values)
+        return datetime(
+            values[0], values[1], values[2], values[3], values[4], values[5]
+        )
     epoch, nanos = result["epoch"], result["nanos"]
     assert isinstance(epoch, int) and isinstance(nanos, int)
     return datetime.fromtimestamp(epoch, tz).replace(microsecond=nanos // 1000)
