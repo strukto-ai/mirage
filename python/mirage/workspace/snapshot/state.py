@@ -94,7 +94,7 @@ from mirage.workspace.mount.read_policy import resolve_read_spec
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.mount.write_policy import coerce_write_policy
-from mirage.workspace.session.budget import MAX_ENV
+from mirage.workspace.session.constants import MAX_ENV
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.resolve import (
     narrow,

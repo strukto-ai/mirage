@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.core.history.constants import HISTSIZE
 from mirage.core.history.read import read
 from mirage.core.history.readdir import readdir
 from mirage.core.history.render import (
-    HISTSIZE,
     render_bash_history,
     render_history_listing,
 )

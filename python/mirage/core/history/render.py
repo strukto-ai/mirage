@@ -14,14 +14,8 @@
 
 from typing import Any
 
+from mirage.core.history.constants import HISTFILESIZE, HISTSIZE
 from mirage.observe.log_entry import EVENT_COMMAND
-
-HISTSIZE = 500
-
-# The most entries a history read hands back, the newest kept: the
-# commands /.bash_history shows and the entries the history API returns,
-# as GNU's HISTFILESIZE bounds the history file.
-HISTFILESIZE = 10_000
 
 
 def render_bash_history(events: list[dict[str, Any]]) -> str:

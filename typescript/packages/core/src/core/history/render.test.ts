@@ -14,7 +14,8 @@
 
 import { describe, expect, it } from 'vitest'
 import type { JsonObject } from '../../types.ts'
-import { HISTFILESIZE, renderBashHistory, renderHistoryListing } from './render.ts'
+import { HISTFILESIZE } from './constants.ts'
+import { renderBashHistory, renderHistoryListing } from './render.ts'
 
 function command(cmd: string, timestamp = 0): JsonObject {
   return { type: 'command', command: cmd, timestamp }

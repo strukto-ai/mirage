@@ -4,7 +4,8 @@ from mirage.io.stream import materialize
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.session.budget import MAX_ENV, args_bytes, entry_bytes
+from mirage.workspace.session.budget import args_bytes, entry_bytes
+from mirage.workspace.session.constants import MAX_ENV
 
 
 def test_entries_count_their_utf8_bytes():

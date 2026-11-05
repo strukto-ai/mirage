@@ -12,8 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.core.history.constants import HISTFILESIZE
 from mirage.core.history.render import (
-    HISTFILESIZE,
     render_bash_history,
     render_history_listing,
 )

@@ -25,6 +25,15 @@ from opentelemetry import trace
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
+from mirage.observe.constants import (
+    NAME_LIMIT,
+    TRACE_CONTENT_ENV,
+    TRACE_CONTENT_MAX_BYTES,
+    TRACE_CONTENT_MAX_BYTES_ENV,
+    TRACE_MAX_SPANS,
+    TRACE_MAX_SPANS_ENV,
+    TRACER_NAME,
+)
 from mirage.observe.log_entry import (
     EVENT_CLEAR,
     EVENT_COMMAND,
@@ -49,33 +58,7 @@ _KNOWN_EVENTS = (
     EVENT_VFS,
 )
 
-_NAME_LIMIT = 200
 _NS_PER_MS = 1_000_000
-
-TRACER_NAME = "mirage.observe"
-
-# Set to ``false`` or ``0`` to keep what lines touched out of their spans:
-# no output on ``command``, no ``vfs.<call>`` spans. Named after
-# OpenTelemetry's ``OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT``.
-TRACE_CONTENT_ENV = "MIRAGE_TRACE_CAPTURE_CONTENT"
-
-# How many bytes of each of a line's stdout and stderr its ``command``
-# span keeps: ``TRACE_CONTENT_MAX_BYTES`` unless this sets a positive
-# whole number. Named after Langfuse's ``LANGFUSE_MAX_EVENT_SIZE_BYTES``.
-TRACE_CONTENT_MAX_BYTES_ENV = "MIRAGE_TRACE_CONTENT_MAX_BYTES"
-
-# 16 KiB a stream: both stay within half of the 64 KB a Cloudflare
-# Workers span holds for all its attributes, and any backend's field.
-TRACE_CONTENT_MAX_BYTES = 16 * 1024
-
-# How many ``vfs.<call>`` spans one line sends at most: ``TRACE_MAX_SPANS``
-# unless this sets a positive whole number. The calls past it are counted
-# on the line's ``command`` span as ``mirage.vfs.dropped``.
-TRACE_MAX_SPANS_ENV = "MIRAGE_TRACE_MAX_SPANS"
-
-# 1000 a line: a walk over a large tree makes a call per entry, and an
-# exporter's queue (2048 spans by default) drops what overflows it anyway.
-TRACE_MAX_SPANS = 1000
 
 
 def _env_var(name: str) -> str:
@@ -130,7 +113,7 @@ def _traced_output(raw: bytes, limit: int) -> str:
 def _session_file(session: str) -> str:
     """The name a session's log goes under in each day: its id
     percent-quoted, so no id spans folders or ends like another's. One
-    that quotes past ``_NAME_LIMIT`` keeps its start and ends in a hash
+    that quotes past ``NAME_LIMIT`` keeps its start and ends in a hash
     of the whole id, a character longer than the limit, so the name fits
     a filesystem and meets no shorter one.
 
@@ -138,9 +121,9 @@ def _session_file(session: str) -> str:
         session (str): the session id.
     """
     quoted = quote(session, safe="")
-    if len(quoted) > _NAME_LIMIT:
+    if len(quoted) > NAME_LIMIT:
         digest = hashlib.sha256(session.encode()).hexdigest()
-        quoted = f"{quoted[: _NAME_LIMIT - len(digest)]}~{digest}"
+        quoted = f"{quoted[: NAME_LIMIT - len(digest)]}~{digest}"
     return f"{quoted}.jsonl"
 
 

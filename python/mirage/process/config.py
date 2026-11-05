@@ -3,14 +3,10 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
+from mirage.process.constants import MAX_PROCESSES
 from mirage.types import ProcessScope
 
 _SCOPES: tuple[ProcessScope, ...] = ("session", "workspace")
-
-# The live processes a session holds when no block names a cap: at the
-# 125 to 235 KiB each one costs, about what `max_memory`'s 32 MB default
-# holds, so a fork bomb meets the cap before it meets the host's memory.
-MAX_PROCESSES = 128
 
 
 class ProcessPermissions(BaseModel):

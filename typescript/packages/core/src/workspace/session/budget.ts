@@ -17,17 +17,8 @@ import { ExitSignal } from '../../shell/errors.ts'
 import type { ShellValue, ShellVar } from '../../shell/variable.ts'
 import { createAsyncContext } from '../../utils/async_context.ts'
 import { byteLength } from '../../utils/sanitize.ts'
+import { ENV_EXHAUSTED_STATUS } from './constants.ts'
 import type { SessionState } from './session.ts'
-
-/**
- * The max_env a workspace runs under when it names none: half of Linux's
- * 2 MiB exec budget for env and argv, so a doubling `x=$x$x` stops in some
- * 20 steps.
- */
-export const MAX_ENV = 1 << 20
-
-/** Bash's own exit when it cannot allocate, a fatal error. */
-export const ENV_EXHAUSTED_STATUS = 2
 
 // The running workspace's max_env, null for no cap.
 const limits = createAsyncContext<number | null>()

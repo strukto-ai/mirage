@@ -2,12 +2,12 @@ import { expect, it } from 'vitest'
 import {
   DEFAULT_PROCESS_PERMISSIONS,
   layerProcesses,
-  MAX_PROCESSES,
   nearer,
   parseProcessPermissions,
   restrictProcesses,
   statedProcesses,
 } from './config.ts'
+import { MAX_PROCESSES } from './constants.ts'
 
 it('an unstated block caps at MAX_PROCESSES', () => {
   expect(DEFAULT_PROCESS_PERMISSIONS).toEqual({

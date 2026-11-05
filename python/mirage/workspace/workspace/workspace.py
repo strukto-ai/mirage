@@ -62,7 +62,7 @@ from mirage.context import (
     set_refusal_sink,
 )
 from mirage.context.session_context import run_with_execution
-from mirage.core.history.render import HISTFILESIZE
+from mirage.core.history.constants import HISTFILESIZE
 from mirage.errors.fs import enoent
 from mirage.events.base import EventRuntime
 from mirage.execution.context import new_execution_id
@@ -189,8 +189,7 @@ from mirage.workspace.node.explain import (
     line_judgments,
 )
 from mirage.workspace.session import SessionManager, SessionState
-from mirage.workspace.session.budget import MAX_ENV
-from mirage.workspace.session.constants import DEFAULT_PROFILE
+from mirage.workspace.session.constants import DEFAULT_PROFILE, MAX_ENV
 from mirage.workspace.session.resolve import (
     compile_profile,
     resolve_profile,

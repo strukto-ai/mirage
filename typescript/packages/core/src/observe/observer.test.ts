@@ -27,13 +27,12 @@ import { MountMode } from '../types.ts'
 import { ManualClock } from '../utils/clock.ts'
 import { EVENT_COMMAND, LogEntry } from './log_entry.ts'
 import {
-  Observer,
   TRACE_CONTENT_ENV,
   TRACE_CONTENT_MAX_BYTES,
   TRACE_CONTENT_MAX_BYTES_ENV,
   TRACE_MAX_SPANS_ENV,
-  logger,
-} from './observer.ts'
+} from './constants.ts'
+import { Observer, logger } from './observer.ts'
 import { OpRecord } from './record.ts'
 import { RAMObserverStore } from './store.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'

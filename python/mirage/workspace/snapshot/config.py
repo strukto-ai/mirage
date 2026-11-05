@@ -25,7 +25,7 @@ from mirage.policy.profile import SessionProfile
 from mirage.process.config import ProcessPermissions
 from mirage.types import Limit, WritePolicy
 from mirage.vfs.secrets import REDACTED_SECRET, has_redacted_secret
-from mirage.workspace.session.budget import MAX_ENV
+from mirage.workspace.session.constants import MAX_ENV
 
 
 @dataclass

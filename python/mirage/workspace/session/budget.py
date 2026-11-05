@@ -20,17 +20,10 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ExitSignal
 from mirage.shell.variable import ShellValue
 from mirage.utils.sanitize import byte_length
+from mirage.workspace.session.constants import ENV_EXHAUSTED_STATUS
 from mirage.workspace.session.session import SessionState
 
 T = TypeVar("T")
-
-# The max_env a workspace runs under when it names none: half of Linux's
-# 2 MiB exec budget for env and argv, so a doubling `x=$x$x` stops in
-# some 20 steps.
-MAX_ENV = 1 << 20
-
-# Bash's own exit when it cannot allocate, a fatal error.
-ENV_EXHAUSTED_STATUS = 2
 
 # The running workspace's max_env, None outside a line or for no cap.
 _limits: ContextVar[int | None] = ContextVar("mirage_env_limit", default=None)

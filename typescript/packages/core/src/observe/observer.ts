@@ -31,6 +31,15 @@ import {
   STDOUT_TRUNCATE,
   type LogEntryInit,
 } from './log_entry.ts'
+import {
+  NAME_LIMIT,
+  TRACE_CONTENT_ENV,
+  TRACE_CONTENT_MAX_BYTES,
+  TRACE_CONTENT_MAX_BYTES_ENV,
+  TRACE_MAX_SPANS,
+  TRACE_MAX_SPANS_ENV,
+  TRACER_NAME,
+} from './constants.ts'
 import type { OpRecord } from './record.ts'
 import { RAMObserverStore, type ObserverStore } from './store.ts'
 
@@ -48,43 +57,6 @@ const KNOWN_EVENTS = new Set<string>([
   EVENT_RESULT,
   EVENT_VFS,
 ])
-
-const NAME_LIMIT = 200
-
-const TRACER_NAME = 'mirage.observe'
-
-/**
- * Set to `false` or `0` to keep what lines touched out of their spans:
- * no output on `command`, no `vfs.<call>` spans. Named after
- * OpenTelemetry's `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT`.
- */
-export const TRACE_CONTENT_ENV = 'MIRAGE_TRACE_CAPTURE_CONTENT'
-
-/**
- * How many bytes of each of a line's stdout and stderr its `command` span
- * keeps: TRACE_CONTENT_MAX_BYTES unless this sets a positive whole number.
- * Named after Langfuse's `LANGFUSE_MAX_EVENT_SIZE_BYTES`.
- */
-export const TRACE_CONTENT_MAX_BYTES_ENV = 'MIRAGE_TRACE_CONTENT_MAX_BYTES'
-
-/**
- * 16 KiB a stream: both stay within half of the 64 KB a Cloudflare
- * Workers span holds for all its attributes, and any backend's field.
- */
-export const TRACE_CONTENT_MAX_BYTES = 16 * 1024
-
-/**
- * How many `vfs.<call>` spans one line sends at most: TRACE_MAX_SPANS unless
- * this sets a positive whole number. The calls past it are counted on the
- * line's `command` span as `mirage.vfs.dropped`.
- */
-export const TRACE_MAX_SPANS_ENV = 'MIRAGE_TRACE_MAX_SPANS'
-
-/**
- * 1000 a line: a walk over a large tree makes a call per entry, and an
- * exporter's queue (2048 spans by default) drops what overflows it anyway.
- */
-export const TRACE_MAX_SPANS = 1000
 
 function envVar(name: string): string | undefined {
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process

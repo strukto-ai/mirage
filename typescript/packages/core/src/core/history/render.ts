@@ -14,13 +14,7 @@
 
 import { EVENT_COMMAND } from '../../observe/log_entry.ts'
 import type { JsonObject } from '../../types.ts'
-
-const HISTSIZE = 500
-
-// The most entries a history read hands back, the newest kept: the commands
-// /.bash_history shows and the entries the history API returns, as GNU's
-// HISTFILESIZE bounds the history file.
-export const HISTFILESIZE = 10_000
+import { HISTFILESIZE, HISTSIZE } from './constants.ts'
 
 /**
  * Render command events as a GNU bash histfile: one `#<epoch-seconds>`

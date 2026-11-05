@@ -3,7 +3,8 @@ import { materialize } from '../../io/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import { argsBytes, entryBytes, MAX_ENV } from './budget.ts'
+import { argsBytes, entryBytes } from './budget.ts'
+import { MAX_ENV } from './constants.ts'
 
 const DEC = new TextDecoder()
 

@@ -1,4 +1,5 @@
 import type { ProcessScope } from '../types.ts'
+import { MAX_PROCESSES } from './constants.ts'
 
 /**
  * How far past its own session a profile reaches into processes. A session
@@ -17,14 +18,6 @@ export interface ProcessPermissions {
 
 /** A `processes` block as written: a bare scope for both, or the fields it states. */
 export type ProcessesBlock = ProcessScope | Partial<ProcessPermissions>
-
-/**
- * The live processes a session holds when no block names a cap: at the 125
- * to 235 KiB each one costs, about what `max_memory`'s 32 MB default holds,
- * so a fork bomb meets the cap before it meets the host's memory. Mirrors
- * Python's `MAX_PROCESSES`.
- */
-export const MAX_PROCESSES = 128
 
 export const DEFAULT_PROCESS_PERMISSIONS: ProcessPermissions = Object.freeze({
   list: 'session',

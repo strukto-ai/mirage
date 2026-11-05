@@ -1,7 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from mirage.process.config import MAX_PROCESSES, ProcessPermissions, nearer
+from mirage.process.config import ProcessPermissions, nearer
+from mirage.process.constants import MAX_PROCESSES
 
 
 def block(doc: object) -> ProcessPermissions:
