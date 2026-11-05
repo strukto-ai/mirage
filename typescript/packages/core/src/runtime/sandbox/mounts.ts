@@ -25,8 +25,10 @@ import { runDetached } from '../../utils/async_context.ts'
 import type { Files } from '../../workspace/files.ts'
 import type { SessionState } from '../../workspace/session/session.ts'
 import { refusedRun, restrictedMountsFor, type WorkspaceBinding } from '../binding.ts'
+import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
 import type { MountType, PipeWriter, RunResult, SandboxPipe } from '../types.ts'
 import {
+  MOUNT_GUARD,
   MOUNT_POLL_SECONDS,
   MOUNT_WAIT_SECONDS,
   PIPE_SERVER_HINT,
@@ -35,6 +37,7 @@ import {
   SSHFS_OPTIONS,
   SSHFS_SOURCE_PREFIX,
   UNMOUNT_WAIT_SECONDS,
+  mountField,
 } from './constants.ts'
 
 /** A served prefix's SFTP server, as `session` (node's PipeServer). */
@@ -116,6 +119,11 @@ export function topPrefixes(prefixes: Iterable<string>): string[] {
 function unmountLine(prefix: string): string {
   const path = singleQuote(prefix)
   return `fusermount3 -uz ${path} || fusermount -uz ${path}`
+}
+
+/** Why a line did not run: the sandbox no longer holds `prefix`. */
+function unmounted(runtime: string, prefix: string): string {
+  return `${runtime}: ${prefix} is no longer mounted in the sandbox (did it restart?); the line did not run`
 }
 
 /**
@@ -200,6 +208,16 @@ interface Served {
  * serves, as another workspace's runtime on the same sandbox does, refuses
  * the line (1) rather than being taken, and one whose sshfs has gone is
  * unmounted and served.
+ *
+ * A sandbox may restart between a line's admit and its exec and come back
+ * without its mounts, so each line runs under `MOUNT_GUARD`, which checks
+ * every mount it holds in the boot the program runs in and exits 126 with
+ * nothing run when one is gone. The next line reads the mounts again: what
+ * the host served is served again, and while a mount of the sandbox's own
+ * is gone lines are refused (126) until the sandbox mounts it again, rather
+ * than served over by the host. Under `fuse` the mounts are read on every
+ * line until the sandbox holds every prefix, so one it mounts late is
+ * guarded too.
  */
 export class SandboxMounts {
   private session: SessionState | null = null
@@ -207,6 +225,9 @@ export class SandboxMounts {
   private readonly lines: (Pick<Caller, 'stop' | 'writeHeld'> & { lent: Set<Promise<void>> })[] = []
   private readonly served = new Map<string, Served>()
   private seen: string | null = null
+  // The sandbox's own mounts as last read, and each prefix held since.
+  private own = new Map<string, [string, string]>()
+  private owned = new Set<string>()
   private lock: Promise<unknown> = Promise.resolve()
   private readonly name = `${SSHFS_SOURCE_PREFIX}${crypto.randomUUID().replaceAll('-', '')}`
 
@@ -232,7 +253,9 @@ export class SandboxMounts {
    * Bring the mounts in step, then refuse a line that may not run: one the
    * session's restrictions reach past the dispatcher is refused as a policy
    * refuses it (126), one the sandbox cannot serve because another session
-   * or another sshfs holds it fails (1). Null when the line may run.
+   * or another sshfs holds it, or another mount covers it, fails (1), and
+   * one over a mount of the sandbox's own that is gone is refused (126). Null
+   * when the line may run.
    */
   async admit(binding: WorkspaceBinding | null, signal?: AbortSignal): Promise<RunResult | null> {
     const files = binding?.files ?? null
@@ -278,15 +301,20 @@ export class SandboxMounts {
       const ruled = new Set(
         restrictedMountsFor(current, mountPrefixes()).map((prefix) => rstripSlash(prefix) || '/'),
       )
-      const taken = await this.reconcile(binding, files, session, every, ruled, signal)
-      if (taken !== null) {
+      const refused = await this.reconcile(binding, files, session, every, ruled, signal)
+      if (refused !== null) {
         return {
           stdout: new Uint8Array(),
-          stderr: new TextEncoder().encode(
-            `${this.runtime}: another sshfs serves ${taken} in this sandbox; ` +
-              'give this workspace a sandbox of its own\n',
-          ),
+          stderr: new TextEncoder().encode(`${this.runtime}: ${refused}\n`),
           exitCode: 1,
+        }
+      }
+      const lost = this.lost()
+      if (lost !== null) {
+        return {
+          stdout: new Uint8Array(),
+          stderr: new TextEncoder().encode(`${unmounted(this.runtime, lost)}\n`),
+          exitCode: CANNOT_EXECUTE_STATUS,
         }
       }
       const unserved = this.unserved(ruled)
@@ -300,6 +328,35 @@ export class SandboxMounts {
           )
         : null
     })
+  }
+
+  /**
+   * `argv` under `MOUNT_GUARD`, holding every mount the sandbox had at the
+   * line's admit; unchanged when it had none.
+   */
+  guarded(argv: readonly string[]): readonly string[] {
+    const held = new Map<string, [string, string]>(
+      [...this.served.keys()].map((p) => [p, [this.source(p), 'fuse.sshfs']]),
+    )
+    for (const [p, entry] of this.own) held.set(p, entry)
+    if (held.size === 0) return argv
+    const words = [...held]
+      .sort(([a], [b]) => compareCodePoints(a, b))
+      .flatMap(([prefix, [source, kind]]) => [
+        mountField(prefix),
+        mountField(source, true),
+        kind,
+        unmounted(this.runtime, prefix),
+      ])
+    return ['/bin/sh', '-c', MOUNT_GUARD, 'sh', '/proc/mounts', ...words, '--', ...argv]
+  }
+
+  /**
+   * Read the mounts again on the next line: a guarded line found one gone,
+   * or its program exited as the guard does.
+   */
+  forget(): void {
+    this.seen = null
   }
 
   /** Unmount every served prefix and end its SFTP server. */
@@ -377,9 +434,11 @@ export class SandboxMounts {
   }
 
   /**
-   * Serve what the session sees and drop what it no longer does. Returns a
-   * prefix another sshfs still serves, which is left alone and nothing new
-   * served, or null once in step.
+   * Serve what the session sees and drop what it no longer does. Returns
+   * why the line may not run, a prefix another sshfs still serves or another
+   * mount covers, which is left alone and nothing new served, or null once
+   * in step, or with a mount of the sandbox's own gone, which `admit`
+   * refuses.
    */
   private async reconcile(
     binding: WorkspaceBinding,
@@ -401,6 +460,7 @@ export class SandboxMounts {
     }
     this.seen = null
     const present = await this.table(signal)
+    for (const p of this.served.keys()) if (!ended.includes(p) && !present.has(p)) ended.push(p)
     const own = [...every]
       .filter(
         (p) =>
@@ -413,7 +473,21 @@ export class SandboxMounts {
           ),
       )
       .sort(compareCodePoints)
+    this.own = new Map(own.map((p) => [p, present.get(p) ?? ['', '']]))
+    this.owned = new Set([...[...this.owned].filter((p) => every.has(p)), ...own])
+    if (this.lost() !== null) return null
     const wanted = visible.filter((p) => !own.includes(p))
+    const covered = [...this.served.keys()].sort(compareCodePoints).find((p) => {
+      const [source, kind] = present.get(p) ?? ['', '']
+      return (
+        wanted.includes(p) &&
+        !ended.includes(p) &&
+        (source !== this.source(p) || kind !== 'fuse.sshfs')
+      )
+    })
+    if (covered !== undefined) {
+      return `another mount covers ${covered} in this sandbox; the line did not run`
+    }
     for (const prefix of wanted) {
       const under = own.find((o) => o.startsWith(prefix + '/'))
       if (under !== undefined) {
@@ -427,7 +501,9 @@ export class SandboxMounts {
     }
     const fresh = wanted.filter((p) => !this.served.has(p))
     for (const prefix of fresh) {
-      if (await this.held(prefix, present, signal)) return prefix
+      if (await this.held(prefix, present, signal)) {
+        return `another sshfs serves ${prefix} in this sandbox; give this workspace a sandbox of its own`
+      }
     }
     if (fresh.length > 0) {
       const make = pipeServer
@@ -449,12 +525,22 @@ export class SandboxMounts {
         throw err
       }
     }
-    this.seen = seen
+    if (this.mountType !== 'fuse' || topPrefixes(every).every((p) => own.includes(p))) {
+      this.seen = seen
+    }
     return null
   }
 
   private source(prefix: string): string {
     return `${this.name}:${prefix}`
+  }
+
+  /**
+   * A mount of the sandbox's own it held and no longer does; the prefixes
+   * held are kept only while the workspace mounts them.
+   */
+  private lost(): string | null {
+    return [...this.owned].sort(compareCodePoints).find((p) => !this.own.has(p)) ?? null
   }
 
   /** Whether another sshfs still serves `prefix`. */

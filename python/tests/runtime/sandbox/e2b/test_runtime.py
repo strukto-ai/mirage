@@ -26,7 +26,7 @@ from mirage.commands.config import Context
 from mirage.context.session_context import run_with_execution
 from mirage.io.types import materialize
 from mirage.process.table import ProcessTable
-from mirage.runtime.sandbox.constants import EXEC_ID, wrap_line
+from mirage.runtime.sandbox.constants import EXEC_ID, MOUNT_GUARD, wrap_line
 from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
 from mirage.runtime.sandbox.e2b.constants import PTY_MARK, PTY_RAW
 from mirage.runtime.types import RunResult, SandboxPipe
@@ -445,6 +445,8 @@ class MountingE2BRuntime(E2BRuntime):
         self.lines: list[str] = []
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if argv[2:3] == (MOUNT_GUARD,):
+            argv = argv[argv.index("--", 5) + 1 :]
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
         data = await materialize(stdin) if stdin is not None else None
         return await self.exec_line(line, data, env, cwd)

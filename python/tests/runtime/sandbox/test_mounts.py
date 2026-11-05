@@ -20,6 +20,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import tempfile
 
 import pytest
 
@@ -33,7 +34,11 @@ from mirage.context import (
 from mirage.io.types import materialize
 from mirage.runtime.sandbox import mounts
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.constants import PIPE_SERVER_HINT, SSHFS_OPTIONS
+from mirage.runtime.sandbox.constants import (
+    MOUNT_GUARD,
+    PIPE_SERVER_HINT,
+    SSHFS_OPTIONS,
+)
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
 from mirage.runtime.sandbox.mounts import (
     mount_table,
@@ -91,11 +96,17 @@ class FakeSandbox(RemoteSandbox, PipeTransportMixin):
         self.pipes: list[str] = []
         self.requests: dict[str, asyncio.StreamReader] = {}
         self.stopped: list[str] = []
+        self.guards: list[tuple[str, ...]] = []
 
     async def connect(self) -> None:
         return None
 
     async def _exec_argv(self, argv, stdin, env, cwd, output, errors):
+        if argv[2:3] == (MOUNT_GUARD,):
+            checked = await self.check(argv)
+            if checked.exit_code != 0:
+                return checked
+            argv = argv[argv.index("--", 5) + 1 :]
         line = argv[2] if argv[:2] == ("/bin/sh", "-c") else shlex.join(argv)
         data = await materialize(stdin) if stdin is not None else None
         return await self.exec_line(line, data, env, cwd)
@@ -105,11 +116,9 @@ class FakeSandbox(RemoteSandbox, PipeTransportMixin):
         if line == "cat /proc/mounts" and self.fail_table:
             return RunResult(stdout=b"", stderr=b"gone\n", exit_code=1)
         if line == "cat /proc/mounts":
-            rows = "".join(
-                f"{escaped(source)} {escaped(p)} {kind} rw 0 0\n"
-                for p, (source, kind) in self.table.items()
+            return RunResult(
+                stdout=self.rows().encode(), stderr=None, exit_code=0
             )
-            return RunResult(stdout=rows.encode(), stderr=None, exit_code=0)
         if line.startswith("cat /proc/[0-9]*/cmdline") and self.fail_check:
             return RunResult(stdout=b"", stderr=b"", exit_code=2)
         if line.startswith("cat /proc/[0-9]*/cmdline"):
@@ -134,6 +143,34 @@ class FakeSandbox(RemoteSandbox, PipeTransportMixin):
             self.running.discard(source)
         return RunResult(stdout=b"ran\n", stderr=None, exit_code=0)
 
+    def rows(self):
+        return "".join(
+            f"{escaped(source, '#')} {escaped(p)} {kind} rw 0 0\n"
+            for p, (source, kind) in self.table.items()
+        )
+
+    async def check(self, argv):
+        """Run a line's mount guard through /bin/sh over this table."""
+        entries = argv[5 : argv.index("--", 5)]
+        self.guards.append(entries)
+        fd, path = tempfile.mkstemp()
+        with os.fdopen(fd, "w") as table:
+            table.write(self.rows())
+        try:
+            done = await asyncio.create_subprocess_exec(
+                *argv[:4],
+                path,
+                *entries,
+                "--",
+                "true",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            out, err = await done.communicate()
+        finally:
+            os.unlink(path)
+        return RunResult(stdout=out, stderr=err, exit_code=done.returncode)
+
     async def open_pipe(self, command):
         self.pipes.append(command)
         source, prefix = shlex.split(command)[5:7]
@@ -156,8 +193,10 @@ class FakeSandbox(RemoteSandbox, PipeTransportMixin):
         self.running.discard(source)
 
 
-def escaped(text):
-    return text.replace(" ", "\\040")
+def escaped(text, more=""):
+    """``text`` as the kernel writes a mount field: a space, and ``more``,
+    as octal escapes."""
+    return "".join(f"\\{ord(c):03o}" if c in " " + more else c for c in text)
 
 
 def sharing(sandbox, mount_type):
@@ -696,6 +735,173 @@ async def test_a_server_that_ended_is_started_again():
         await asyncio.sleep(0)
     assert (await agent.shell("python3 job.py")).exit_code == 0
     assert served(sandbox) == ["/data", "/my notes", "/data"]
+    await ws.close()
+
+
+def lost(prefix):
+    return (
+        f"fake: {prefix} is no longer mounted in the sandbox (did it "
+        "restart?); the line did not run\n"
+    )
+
+
+# A restart after the line was admitted took the sandbox's mounts while
+# the host still serves them: the line never runs over the bare
+# directories, and the next one serves them again.
+@pytest.mark.asyncio
+async def test_a_line_over_mounts_the_sandbox_lost_never_runs():
+    sandbox = FakeSandbox("ssh")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    sandbox.table.clear()
+    sandbox.running.clear()
+    result = await agent.shell("python3 lost.py")
+    assert (result.exit_code, await result.stderr_str()) == (
+        126,
+        lost("/data"),
+    )
+    assert "python3 lost.py" not in sandbox.commands
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert served(sandbox) == ["/data", "/my notes", "/data", "/my notes"]
+    await ws.close()
+
+
+# A mount the sandbox put over a served prefix is left alone: ending the
+# sshfs under it would take it down too.
+@pytest.mark.asyncio
+async def test_a_mount_over_a_served_prefix_is_left_alone():
+    sandbox = FakeSandbox("ssh")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    ours = sandbox.table["/data"]
+    sandbox.table["/data"] = (ours[0], "fuse")
+    first = await agent.shell("python3 covered.py")
+    assert (first.exit_code, await first.stderr_str()) == (126, lost("/data"))
+    second = await agent.shell("python3 covered.py")
+    assert (second.exit_code, await second.stderr_str()) == (
+        1,
+        "fake: another mount covers /data in this sandbox; the line did "
+        "not run\n",
+    )
+    assert "python3 covered.py" not in sandbox.commands
+    assert sandbox.stopped == []
+    assert served(sandbox) == ["/data", "/my notes"]
+    sandbox.table["/data"] = ours
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    await ws.close()
+
+
+# The sandbox mounts its own prefix again once it is back (its entrypoint
+# does): serving it meanwhile would leave the host's sshfs under that mount.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mount_type", ["fuse", "both"])
+async def test_lines_wait_for_a_mount_of_the_sandboxs_own_it_lost(mount_type):
+    sandbox = FakeSandbox(mount_type, own=["/data"])
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    pipes = list(sandbox.pipes)
+    del sandbox.table["/data"]
+    for _ in range(2):
+        result = await agent.shell("python3 lost.py")
+        assert (result.exit_code, await result.stderr_str()) == (
+            126,
+            lost("/data"),
+        )
+    assert "python3 lost.py" not in sandbox.commands
+    assert sandbox.pipes == pipes
+    sandbox.table["/data"] = ("tmpfs", "tmpfs")
+    assert (await agent.shell("python3 back.py")).exit_code == 0
+    assert "python3 back.py" in sandbox.commands
+    assert sandbox.pipes == pipes
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_prefix_with_a_hash_is_served_and_its_lines_run():
+    sandbox = FakeSandbox("ssh")
+    ws = workspace(sandbox)
+    ws.add_mount("/a#b", RAMVFS(), mode=MountMode.WRITE)
+    agent = await ws.session("agent", profile="agent")
+    for _ in range(2):
+        assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert "/a#b" in served(sandbox)
+    await ws.close()
+
+
+# Under fuse the mounts are read again on each line until the sandbox holds
+# every prefix, so one it mounts late is guarded too; then once per change.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("own", "reads"), [(["/data", "/my notes"], 1), (["/data"], 3)]
+)
+async def test_fuse_reads_the_mounts_until_the_sandbox_holds_them_all(
+    own, reads
+):
+    sandbox = FakeSandbox("fuse", own=own)
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    for _ in range(3):
+        assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert sandbox.commands.count("cat /proc/mounts") == reads
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_fuse_guards_a_mount_the_sandbox_lays_after_the_first_line():
+    sandbox = FakeSandbox("fuse")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    sandbox.table["/data"] = ("tmpfs", "tmpfs")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    del sandbox.table["/data"]
+    result = await agent.shell("python3 lost.py")
+    assert (result.exit_code, await result.stderr_str()) == (126, lost("/data"))
+    assert "python3 lost.py" not in sandbox.commands
+    await ws.close()
+
+
+# A covered prefix the workspace no longer mounts is dropped, not refused.
+@pytest.mark.asyncio
+async def test_a_covered_prefix_the_workspace_dropped_is_not_refused():
+    sandbox = FakeSandbox("ssh")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    sandbox.table["/my notes"] = (sandbox.table["/my notes"][0], "fuse")
+    await ws.unmount("/my notes")
+    for _ in range(2):
+        assert (await agent.shell("python3 job.py")).exit_code == 0
+    await ws.close()
+
+
+# A mount the workspace dropped is no longer the sandbox's to wait for, and
+# one added again at that prefix starts afresh.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mount_type", ["fuse", "both"])
+async def test_a_mount_the_workspace_dropped_is_not_waited_for(mount_type):
+    sandbox = FakeSandbox(mount_type, own=["/my notes"])
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    del sandbox.table["/my notes"]
+    await ws.unmount("/my notes")
+    assert (await agent.shell("python3 gone.py")).exit_code == 0
+    ws.add_mount("/my notes", RAMVFS(), mode=MountMode.WRITE)
+    assert (await agent.shell("python3 again.py")).exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_sandbox_holding_no_mount_runs_its_lines_unguarded():
+    sandbox = FakeSandbox("fuse")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    assert sandbox.guards == []
     await ws.close()
 
 

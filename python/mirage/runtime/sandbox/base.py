@@ -41,6 +41,7 @@ from mirage.runtime.types import (
     RunResult,
     RuntimeReach,
 )
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.shell.join import shell_join
 from mirage.types import PathSpec
 from mirage.utils.clock import bound_system_clock
@@ -194,10 +195,12 @@ class RemoteSandbox(
             errors (OutputFn | None): receives stderr as it arrives.
         """
         await self._ensure_connected()
+        run = argv
         if self._mounts is not None:
             refusal = await self._mounts.admit(self._binding)
             if refusal is not None:
                 return refusal
+            run = self._mounts.guarded(argv)
         given = {**self.config.env, **(ctx.env or {})}
         clock = await self._system_time_env(given)
         exec_id = uuid.uuid4().hex
@@ -212,8 +215,8 @@ class RemoteSandbox(
                 },
             )
         try:
-            return await self._exec_argv(
-                argv,
+            done = await self._exec_argv(
+                run,
                 ctx.stdin,
                 {**given, **clock, EXEC_ID: exec_id},
                 ctx.cwd.virtual,
@@ -227,6 +230,12 @@ class RemoteSandbox(
         finally:
             if runner is not None:
                 runner.drop_run(f"box:{exec_id}")
+        if (
+            self._mounts is not None
+            and done.exit_code == CANNOT_EXECUTE_STATUS
+        ):
+            self._mounts.forget()
+        return done
 
     async def reap(self, tag: str, signum: int) -> bool:
         """Stop a run a lapsed workspace left in the box: every process

@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { EXEC_ID, REAP_ABSENT, reapLine, wrapLine } from './constants.ts'
+import { EXEC_ID, MOUNT_GUARD, REAP_ABSENT, mountField, reapLine, wrapLine } from './constants.ts'
 
 const PRELUDE = `/bin/sh -c 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"' sh `
 
@@ -105,5 +105,109 @@ describe.skipIf(!existsSync('/proc/self'))('reapLine', () => {
       timeout: 10_000,
     })
     expect(done.status).toBe(REAP_ABSENT)
+  })
+})
+
+describe('MOUNT_GUARD', () => {
+  function guarded(table: string, ...entries: string[]): ReturnType<typeof spawnSync> {
+    return spawnSync(
+      '/bin/sh',
+      ['-c', MOUNT_GUARD, 'sh', table, ...entries, '--', '/bin/echo', 'ran'],
+      { env: { PATH: '/nowhere' }, encoding: 'utf8', timeout: 10_000 },
+    )
+  }
+
+  function expected(prefix: string, source: string, kind: string): string[] {
+    return [mountField(prefix), mountField(source, true), kind, `lost ${prefix}`]
+  }
+
+  function tableOf(rows: string): string {
+    const table = join(mkdtempSync(join(tmpdir(), 'mirage-mounts-')), 'mounts')
+    writeFileSync(table, rows)
+    return table
+  }
+
+  it('escapes what the kernel escapes', () => {
+    expect(mountField('/a b\tc\nd\\e#')).toBe('/a\\040b\\011c\\012d\\134e#')
+    expect(mountField('m:/a b#', true)).toBe('m:/a\\040b\\043')
+  })
+
+  // The guard runs the program once every mount it expects is on top, read
+  // through the kernel's escapes, with only sh's builtins on the PATH.
+  it('runs the program over its mounts', () => {
+    const table = tableOf(
+      'mirage-x:/my\\040notes /my\\040notes fuse.sshfs rw 0 0\n' + 'tmpfs /a\\134b tmpfs rw 0 0\n',
+    )
+    const done = guarded(
+      table,
+      ...expected('/my notes', 'mirage-x:/my notes', 'fuse.sshfs'),
+      ...expected('/a\\b', 'tmpfs', 'tmpfs'),
+    )
+    expect([done.status, done.stdout, done.stderr]).toEqual([0, 'ran\n', ''])
+  })
+
+  // The kernel escapes a # in a source, never in a mountpoint; an older mount
+  // under ours is no matter.
+  it.each([
+    ['hash', 'mirage-x:/a\\043b /a#b fuse.sshfs rw 0 0\n', '/a#b', 'mirage-x:/a#b'],
+    [
+      'over an older mount',
+      'tmpfs /data tmpfs rw 0 0\nmirage-x:/data /data fuse.sshfs rw 0 0\n',
+      '/data',
+      'mirage-x:/data',
+    ],
+  ])('runs over the top mount (%s)', (_name, rows, prefix, source) => {
+    const done = guarded(tableOf(rows), ...expected(prefix, source, 'fuse.sshfs'))
+    expect([done.status, done.stdout, done.stderr]).toEqual([0, 'ran\n', ''])
+  })
+
+  // The guard's own names never reach the program's environment.
+  it("hands the program its environment", () => {
+    const words = ['t', 'f', 's', 'm', 'k', 'o']
+    const done = spawnSync(
+      '/bin/sh',
+      [
+        '-c',
+        MOUNT_GUARD,
+        'sh',
+        tableOf('mirage-x:/data /data fuse.sshfs rw 0 0\n'),
+        ...expected('/data', 'mirage-x:/data', 'fuse.sshfs'),
+        '--',
+        '/usr/bin/env',
+      ],
+      {
+        env: { PATH: '/nowhere', ...Object.fromEntries(words.map((w) => [w, `keep-${w}`])) },
+        encoding: 'utf8',
+        timeout: 10_000,
+      },
+    )
+    expect(done.status).toBe(0)
+    const lines = done.stdout.split('\n')
+    for (const w of words) expect(lines).toContain(`${w}=keep-${w}`)
+  })
+
+  it('checks every mount', () => {
+    const done = guarded(
+      tableOf('mirage-x:/data /data fuse.sshfs rw 0 0\n'),
+      ...expected('/data', 'mirage-x:/data', 'fuse.sshfs'),
+      ...expected('/a\\b', 'tmpfs', 'tmpfs'),
+    )
+    expect([done.status, done.stdout, done.stderr]).toEqual([126, '', 'lost /a\\b\n'])
+  })
+
+  it.each([
+    ['gone', ''],
+    ['another source', 'mirage-y:/data /data fuse.sshfs rw 0 0\n'],
+    ['another type', 'mirage-x:/data /data tmpfs rw 0 0\n'],
+    ['covered', 'mirage-x:/data /data fuse.sshfs rw 0 0\ntmpfs /data tmpfs rw 0 0\n'],
+  ])('refuses a mount not on top (%s)', (_name, rows) => {
+    const done = guarded(tableOf(rows), ...expected('/data', 'mirage-x:/data', 'fuse.sshfs'))
+    expect([done.status, done.stdout, done.stderr]).toEqual([126, '', 'lost /data\n'])
+  })
+
+  it('refuses without a mount table', () => {
+    const missing = join(mkdtempSync(join(tmpdir(), 'mirage-mounts-')), 'missing')
+    const done = guarded(missing, ...expected('/data', 'mirage-x:/data', 'fuse.sshfs'))
+    expect([done.status, done.stdout, done.stderr]).toEqual([126, '', 'lost /data\n'])
   })
 })

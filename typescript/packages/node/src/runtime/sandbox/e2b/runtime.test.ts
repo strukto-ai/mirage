@@ -25,7 +25,7 @@ import { PTY_MARK, PTY_RAW } from '@struktoai/mirage-core/runtime/sandbox/e2b/co
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
-import { EXEC_ID, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { EXEC_ID, MOUNT_GUARD, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 
 const DEC = new TextDecoder()
 
@@ -546,7 +546,8 @@ class MountingE2BRuntime extends FakedE2BRuntime {
   readonly lines: string[] = []
 
   protected override execArgv(argv: readonly string[]): Promise<RunResult> {
-    return this.execLine(argv[0] === '/bin/sh' ? (argv[2] ?? '') : argv.join(' '))
+    const run = argv[2] === MOUNT_GUARD ? argv.slice(argv.indexOf('--', 5) + 1) : argv
+    return this.execLine(run[0] === '/bin/sh' ? (run[2] ?? '') : run.join(' '))
   }
 
   override execLine(line: string): Promise<RunResult> {
