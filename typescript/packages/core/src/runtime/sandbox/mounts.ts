@@ -228,7 +228,7 @@ export class SandboxMounts {
   // The sandbox's own mounts as last read, and each prefix held since.
   private own = new Map<string, [string, string]>()
   private owned = new Set<string>()
-  // What each served prefix was laid over (as JSON), which shows again once it ends.
+  // What each served prefix was laid over (as JSON), shown again once its server ends.
   private readonly under = new Map<string, string>()
   private lock: Promise<unknown> = Promise.resolve()
   private readonly name = `${SSHFS_SOURCE_PREFIX}${crypto.randomUUID().replaceAll('-', '')}`
@@ -462,15 +462,7 @@ export class SandboxMounts {
     }
     this.seen = null
     const present = await this.table(signal)
-    for (const p of this.served.keys()) {
-      const entry = present.get(p)
-      if (
-        !ended.includes(p) &&
-        (entry === undefined || JSON.stringify(entry) === this.under.get(p))
-      ) {
-        ended.push(p)
-      }
-    }
+    for (const p of this.served.keys()) if (!ended.includes(p) && !present.has(p)) ended.push(p)
     const own = [...every]
       .filter(
         (p) =>
@@ -493,8 +485,8 @@ export class SandboxMounts {
         wanted.includes(p) &&
         entry !== undefined &&
         (entry[0] !== this.source(p) || entry[1] !== 'fuse.sshfs') &&
-        JSON.stringify(entry) !== this.under.get(p) &&
-        (!ended.includes(p) || entry[1] !== 'fuse.sshfs')
+        (!ended.includes(p) || entry[1] !== 'fuse.sshfs') &&
+        !(ended.includes(p) && JSON.stringify(entry) === this.under.get(p))
       )
     })
     if (covered !== undefined) {
