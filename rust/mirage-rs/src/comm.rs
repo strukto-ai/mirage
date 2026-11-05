@@ -72,7 +72,6 @@ enum Phase {
     Order(usize, usize),
     Copy(usize, usize),
     Compare(usize),
-    Advance(usize),
     Done,
 }
 
@@ -277,17 +276,29 @@ impl Comm {
                     self.unpairable |= column != 3;
                     self.counts[column - 1] += 1;
                     if !self.config.suppress[column - 1] {
-                        for before in 0..column - 1 {
-                            if !self.config.suppress[before] {
+                        let prefixes = (0..column - 1)
+                            .filter(|&before| !self.config.suppress[before])
+                            .count();
+                        let side = usize::from(column == 2);
+                        let line = self.lines[side].as_deref().unwrap();
+                        let needed = line
+                            .len()
+                            .saturating_add(prefixes.saturating_mul(self.config.delimiter.len()))
+                            .saturating_add(1);
+                        if needed <= limit - out.len() {
+                            for _ in 0..prefixes {
+                                out.extend_from_slice(&self.config.delimiter);
+                            }
+                            out.extend_from_slice(line);
+                            out.push(self.terminator);
+                        } else {
+                            for _ in 0..prefixes {
                                 self.queue(Part::Delimiter);
                             }
+                            self.queue(Part::Line(side));
+                            self.queue(Part::Terminator);
                         }
-                        self.queue(Part::Line(usize::from(column == 2)));
-                        self.queue(Part::Terminator);
                     }
-                    self.phase = Phase::Advance(column);
-                }
-                Phase::Advance(column) => {
                     if column != 2 {
                         self.pulls.push_back(0);
                     }
