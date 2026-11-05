@@ -64,11 +64,8 @@ export function handleAlias(
         continue
       }
       const value = word.slice(eq + 1)
-      checkEnv(
-        session,
-        entryBytes(name, sessionEntry(session.aliases, name)),
-        entryBytes(name, value),
-      )
+      const held = sessionEntry(session.aliases, name)
+      checkEnv(session, held === undefined ? 0 : entryBytes(name, held), entryBytes(name, value))
       changing(session, name, mark)
       setSessionEntry(session.aliases, name, value)
       continue

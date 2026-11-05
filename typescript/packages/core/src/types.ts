@@ -357,15 +357,6 @@ function tightestWalk(values: (number | null)[]): number | null {
 }
 
 /**
- * A bound on a result: the policy layer's limit arm and the shape
- * every cap config parses into. Carries its fields inline (the Deny
- * precedent: an action is its payload). `kind` is the wire
- * discriminant; `aggr` is the composition law (AND to the tightest
- * per bound, ANY on error mode) and `layered` the resolution law (each
- * field from the most specific layer that sets it). `walkLimit` caps the
- * entries one walk lists on a mount, -1 for no cap.
- */
-/**
  * The most any workspace a host serves may set, which no config, profile
  * document or snapshot passes: a value past a ceiling, or one that lifts
  * its bound, holds at the ceiling. Unset leaves that bound to the
@@ -396,6 +387,15 @@ export function underCeiling(
   return value === null ? ceiling : Math.min(value, ceiling)
 }
 
+/**
+ * A bound on a result: the policy layer's limit arm and the shape
+ * every cap config parses into. Carries its fields inline (the Deny
+ * precedent: an action is its payload). `kind` is the wire
+ * discriminant; `aggr` is the composition law (AND to the tightest
+ * per bound, ANY on error mode) and `layered` the resolution law (each
+ * field from the most specific layer that sets it). `walkLimit` caps the
+ * entries one walk lists on a mount, -1 for no cap.
+ */
 export class Limit {
   readonly kind = 'limit' as const
   readonly maxBytes: number | null

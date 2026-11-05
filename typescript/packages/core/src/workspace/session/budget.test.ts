@@ -59,4 +59,41 @@ describe('max_env', () => {
     expect([out, code]).toEqual(['1024\n', 0])
     expect(MAX_ENV).toBe(1 << 20)
   })
+
+  it('counts fresh names that hold no value', async () => {
+    const names = Array.from({ length: 100 }, (_, i) => `n${String(i)}`)
+    for (const line of [
+      `alias ${names.map((name) => `${name}=`).join(' ')};`,
+      `export ${names.join(' ')};`,
+    ]) {
+      const [, err, code] = await run(`${line} echo after`)
+      expect(code).toBe(2)
+      expect(err).toContain('past max_env of 200 bytes')
+    }
+  })
+
+  it("counts a function's own parameters", async () => {
+    const [out, , code] = await run(
+      '(f() { set -- a; while :; do set -- $1$1; done; }; f); echo rc=$?',
+    )
+    expect([out, code]).toEqual(['rc=2\n', 0])
+  })
+
+  it('refuses a session that would start past it', async () => {
+    expect(
+      () => new Workspace({ '/': new RAMVFS() }, { env: { X: 'x'.repeat(300) }, maxEnv: 200 }),
+    ).toThrow('past max_env of 200 bytes')
+    const ws = new Workspace(
+      { '/': new RAMVFS() },
+      { maxEnv: 200, profiles: { big: { env: { X: 'x'.repeat(300) } } } },
+    )
+    try {
+      expect(() => ws.createSession('agent', { profile: 'big' })).toThrow(
+        'past max_env of 200 bytes',
+      )
+      expect(ws.listSessions().map((s) => s.sessionId)).not.toContain('agent')
+    } finally {
+      await ws.close()
+    }
+  })
 })

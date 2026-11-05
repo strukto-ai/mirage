@@ -235,6 +235,15 @@ def test_resolved_config_defaults_when_nothing_set(monkeypatch, tmp_path):
     assert resolved["policy_file"] == ("", "default")
 
 
+def test_resolved_config_includes_the_host_ceilings(monkeypatch, tmp_path):
+    monkeypatch.setenv(ENV_HOME, str(tmp_path))
+    monkeypatch.setenv("MIRAGE_MAX_ENV", "64KB")
+    monkeypatch.delenv("MIRAGE_MAX_PROCESSES", raising=False)
+    resolved = resolved_config()
+    assert resolved["max_env"] == ("64KB", "env MIRAGE_MAX_ENV")
+    assert resolved["max_processes"] == ("", "default")
+
+
 def test_resolved_config_reads_policy_file(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
     monkeypatch.setenv("MIRAGE_POLICY_FILE", "/p.yaml")

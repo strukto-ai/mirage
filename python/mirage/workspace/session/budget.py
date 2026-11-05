@@ -94,7 +94,29 @@ def env_bytes(session: SessionState) -> int:
     )
 
 
-def check_env(session: SessionState, before: int, after: int) -> None:
+def check_env_fits(session: SessionState, limit: int | None) -> None:
+    """Refuse a session whose shell state is past max_env before it runs a
+    line: what the workspace's ``env``, a profile's ``env`` or a snapshot
+    gave it, which no write grew.
+
+    Args:
+        session (SessionState): the session about to start.
+        limit (int | None): the workspace's max_env, None for no cap.
+
+    Raises:
+        ValueError: the session holds more than ``limit`` bytes.
+    """
+    held = env_bytes(session)
+    if limit is not None and held > limit:
+        raise ValueError(
+            f"session {session.session_id!r} starts with {held} bytes of "
+            f"shell state, past max_env of {limit} bytes"
+        )
+
+
+def check_env(
+    session: SessionState, before: int, after: int, held: int = 0
+) -> None:
     """Refuse a write that grows a session's shell state past max_env.
 
     Bash fails as it does when it cannot allocate, a fatal error, and the
@@ -105,6 +127,9 @@ def check_env(session: SessionState, before: int, after: int) -> None:
         session (SessionState): the session written.
         before (int): the bytes the entry held before the write.
         after (int): the bytes it holds after.
+        held (int): bytes the session holds outside what
+            :func:`env_bytes` counts, such as a function's own
+            positional parameters.
 
     Raises:
         ExitSignal: the write would pass max_env.
@@ -112,7 +137,7 @@ def check_env(session: SessionState, before: int, after: int) -> None:
     limit = _env_limit()
     if limit is None or after <= before:
         return
-    if env_bytes(session) - before + after > limit:
+    if env_bytes(session) + held - before + after > limit:
         raise ExitSignal(
             ENV_EXHAUSTED_STATUS,
             stderr=encode_text(

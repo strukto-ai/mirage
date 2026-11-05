@@ -80,9 +80,10 @@ async def handle_alias(
                 else:
                     errors.append(f"bash: alias: `{name}': invalid alias name")
                 continue
+            held = session.aliases.get(name)
             check_env(
                 session,
-                entry_bytes(name, session.aliases.get(name)),
+                0 if held is None else entry_bytes(name, held),
                 entry_bytes(name, value),
             )
             _changing(session, name, mark)

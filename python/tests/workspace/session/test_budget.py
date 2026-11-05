@@ -65,3 +65,39 @@ async def test_a_lifted_max_env_lets_the_state_grow():
     )
     assert (out, code) == ("1024\n", 0)
     assert MAX_ENV == 1 << 20
+
+
+@pytest.mark.asyncio
+async def test_fresh_names_count_with_no_value():
+    names = [f"n{i}" for i in range(100)]
+    for line in (
+        "alias " + " ".join(f"{name}=" for name in names) + ";",
+        "export " + " ".join(names) + ";",
+    ):
+        _, err, code = await run(f"{line} echo after")
+        assert code == 2 and "past max_env of 200 bytes" in err, line
+
+
+@pytest.mark.asyncio
+async def test_a_function_s_own_parameters_count():
+    out, _, code = await run(
+        "(f() { set -- a; while :; do set -- $1$1; done; }; f); echo rc=$?"
+    )
+    assert (out, code) == ("rc=2\n", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_session_cannot_start_past_max_env():
+    with pytest.raises(ValueError, match="past max_env of 200 bytes"):
+        Workspace({"/": RAMVFS()}, env={"X": "x" * 300}, max_env=200)
+    ws = Workspace(
+        {"/": RAMVFS()},
+        max_env=200,
+        profiles={"big": {"env": {"X": "x" * 300}}},
+    )
+    try:
+        with pytest.raises(ValueError, match="past max_env of 200 bytes"):
+            ws.create_session("agent", profile="big")
+        assert "agent" not in [s.session_id for s in ws.list_sessions()]
+    finally:
+        await ws.close()

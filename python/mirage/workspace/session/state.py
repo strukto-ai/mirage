@@ -1442,6 +1442,8 @@ def set_positional_params(
         values (list[str]): the new parameters.
     """
     if call_stack is not None and call_stack.depth > 1:
+        held = args_bytes(call_stack.get_all_positional())
+        check_env(session, held, args_bytes(values), held)
         call_stack.set_positional(values)
     else:
         check_env(
@@ -1558,7 +1560,10 @@ def set_attr(
             the name and change nothing.
         on (bool): set it, or clear it.
     """
-    existing = session.vars.get(name, ShellVar())
+    existing = session.vars.get(name)
+    if existing is None:
+        check_env(session, 0, entry_bytes(name, None))
+        existing = ShellVar()
     session.vars[name] = (
         existing if attr is None else with_attr(existing, attr, on)
     )

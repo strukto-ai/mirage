@@ -1073,6 +1073,8 @@ export function setPositionalParams(
   values: string[],
 ): void {
   if (callStack !== null && callStack.depth > 1) {
+    const held = argsBytes(callStack.getAllPositional())
+    checkEnv(session, held, argsBytes(values), held)
     callStack.setPositional(values)
   } else {
     checkEnv(session, argsBytes(session.positionalArgs), argsBytes(values))
@@ -1168,7 +1170,11 @@ export function setAttr(
   attr: VarAttr | null,
   on = true,
 ): void {
-  const existing = sessionEntry(session.vars, name) ?? makeVar()
+  let existing = sessionEntry(session.vars, name)
+  if (existing === undefined) {
+    checkEnv(session, 0, entryBytes(name, undefined))
+    existing = makeVar()
+  }
   setSessionEntry(session.vars, name, attr === null ? existing : withAttr(existing, attr, on))
 }
 

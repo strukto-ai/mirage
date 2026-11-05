@@ -16,8 +16,9 @@ Three layers set them:
   set a lower value, never a higher one, and one that lifts a limit with
   `null` gets the ceiling instead.
 - **The workspace** sets each limit for every session it holds.
-- **A profile** narrows `processes` and `command_limits` for its sessions,
-  field by field over the workspace's.
+- **A profile** overrides `processes` and `command_limits` for its
+  sessions, field by field over the workspace's. It may raise a workspace's
+  value as well as lower it; only a host ceiling holds it.
 
 ## What each limit stops
 
@@ -34,7 +35,8 @@ Three layers set them:
 | A burst of requests | `rate_limits` | `ip=1000/minute` | HTTP 429 |
 
 `max_env` counts the bytes of a session's variables, functions, aliases and
-positional parameters. `processes.max` counts every pipeline stage, subshell
+positional parameters, and a session that would start past it, from the
+workspace's `env`, a profile's or a snapshot, is refused. `processes.max` counts every pipeline stage, subshell
 and background job a session has running. `timeout` stops the jobs its
 command started when the time runs out, as GNU's does by signalling its
 process group, unless it is given `--foreground`.

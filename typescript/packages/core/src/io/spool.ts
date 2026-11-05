@@ -116,8 +116,7 @@ export class ByteSpool {
     this.cache = new Uint8Array()
     // With no store to spill to, the spool holds every byte in memory, which
     // the workspace's max_memory bounds as it does any object a command builds.
-    if (this.store === null && factory === null && this.size + data.length > this.memoryLimit)
-      checkMemory(this.size + data.length)
+    if (this.store === null && factory === null) checkMemory(this.size + data.length)
     if (this.store === null && this.size + data.length > this.memoryLimit && factory !== null) {
       this.store = await factory()
       for (const part of this.memory) {

@@ -22,6 +22,7 @@ import { CLI } from '../../commands/cli/types.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOConfig } from '../../io/config.ts'
 import { MAX_BODY_BYTES, MAX_MEMORY } from '../../io/memory.ts'
+import { checkEnvFits } from '../session/budget.ts'
 import { MAX_ENV } from '../session/constants.ts'
 import type { NetworkSetting } from '../../io/network.ts'
 import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE, EVENT_RESULT } from '../../observe/log_entry.ts'
@@ -678,6 +679,7 @@ export async function applyStateDict(
 ): Promise<void> {
   checkFormatVersion(state)
   const [sessions, seed] = await gateRestoredState(ws, state, options.builtForState === true)
+  for (const session of sessions) checkEnvFits(session, ws.registry.maxEnv)
   // A snapshot holds no document bindings, so a load into a live
   // workspace drops its own: one left in place would shadow a file the
   // snapshot restores at the same path.

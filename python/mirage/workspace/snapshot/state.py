@@ -94,6 +94,7 @@ from mirage.workspace.mount.read_policy import resolve_read_spec
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.mount.write_policy import coerce_write_policy
+from mirage.workspace.session.budget import check_env_fits
 from mirage.workspace.session.constants import MAX_ENV
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.resolve import (
@@ -728,6 +729,8 @@ async def apply_state_dict(
     sessions, seed_vars = await _gate_restored_state(
         ws, state, built_for_state
     )
+    for session in sessions:
+        check_env_fits(session, ws.registry.max_env)
     # A snapshot holds no document bindings, so a load into a live
     # workspace drops its own: one left in place would shadow a file the
     # snapshot restores at the same path.

@@ -32,6 +32,7 @@ from mirage.workspace.record.types import (
     RecordFields,
     generation_of,
 )
+from mirage.workspace.session.budget import check_env_fits
 from mirage.workspace.session.resolve import apply_profile, narrow
 from mirage.workspace.session.session import (
     SessionState,
@@ -133,6 +134,9 @@ class SessionManager(SessionOwner):
         self._loaded = False
         self._load_lock = asyncio.Lock()
         self._default_profile: CompiledProfile | None = None
+        # The workspace's max_env, which a created session must start
+        # within; None for no cap.
+        self.max_env: int | None = None
 
     @property
     def loaded(self) -> bool:
@@ -515,6 +519,7 @@ class SessionManager(SessionOwner):
         )
         if profile is not None:
             apply_profile(session, profile)
+        check_env_fits(session, self.max_env)
         self._has_managed = self._has_managed or _holds_managed(session)
         self._sessions[session_id] = session
         self._locks[session_id] = asyncio.Lock()

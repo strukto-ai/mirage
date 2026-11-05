@@ -171,6 +171,7 @@ describe('the line deadline inside a long expansion', () => {
         mode: MountMode.WRITE,
         commandLimits: { '@line': new Limit({ timeoutSeconds: 0.3 }) },
         env: { x },
+        maxEnv: null,
       },
     )
     try {

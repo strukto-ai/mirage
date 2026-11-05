@@ -102,6 +102,7 @@ import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { landedArith } from '../session/elements.ts'
+import { sessionEntry } from '../session/session.ts'
 import { positionalParams, sessionView } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { type Admitted, admitTest } from './admission.ts'
@@ -1492,7 +1493,8 @@ async function executeNodeBody(
       return fail(`function ${name}`, `bash: ${name}: readonly function\n`)
     }
     const source = getFunctionSource(node)
-    checkEnv(session, entryBytes(name, session.functions[name]), entryBytes(name, source))
+    const held = sessionEntry(session.functions, name)
+    checkEnv(session, held === undefined ? 0 : entryBytes(name, held), entryBytes(name, source))
     session.functions[name] = source
     session.functionSites.set(name, {
       source,

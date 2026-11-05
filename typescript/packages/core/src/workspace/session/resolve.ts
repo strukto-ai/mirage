@@ -33,7 +33,7 @@ import { fromUnits, units } from '../../rs/document.ts'
 import { StreamRefusal } from '../../rs/errors.ts'
 import { admissionMatcher, rulesWire, visibilityFrom, type Wire } from '../../rs/policy.ts'
 import type { MountMode } from '../../types.ts'
-import { DEFAULT_VISIBILITY, underCeiling, weakerMode } from '../../types.ts'
+import { DEFAULT_VISIBILITY, weakerMode } from '../../types.ts'
 import { DEFAULT_PROFILE } from './constants.ts'
 import { varsFromEntries, type SessionState } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
@@ -280,21 +280,15 @@ export function compileScripts(effective: SessionProfile, name: string): Profile
 
 /**
  * The session fields a profile compiles to; its `processes` over the
- * workspace's (`workspaceProcesses`), field by field, and its cap under
- * the host's ceiling (`maxProcesses`), which a lifted cap meets too.
+ * workspace's (`workspaceProcesses`), field by field.
  */
 export function compileProfile(
   effective: SessionProfile | null,
   name = '',
   workspaceProcesses: ProcessesBlock | null = null,
-  maxProcesses: number | null = null,
 ): CompiledProfile {
   const profile = name === '' ? null : name
-  const layered = layerProcesses([effective?.processes, workspaceProcesses])
-  const processes = Object.freeze({
-    ...layered,
-    max: underCeiling(layered.max, maxProcesses),
-  })
+  const processes = Object.freeze(layerProcesses([effective?.processes, workspaceProcesses]))
   if (effective === null) {
     return {
       setup: { env: null, cwd: null },

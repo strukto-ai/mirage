@@ -1603,9 +1603,10 @@ async def _execute_node(
                 f"function {name}", f"bash: {name}: readonly function\n"
             )
         source = get_function_source(node)
+        held = session.functions.get(name)
         check_env(
             session,
-            entry_bytes(name, session.functions.get(name)),
+            0 if held is None else entry_bytes(name, held),
             entry_bytes(name, source),
         )
         session.functions[name] = source

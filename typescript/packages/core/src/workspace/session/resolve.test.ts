@@ -509,12 +509,6 @@ describe('workspace processes', () => {
     expect(compileProfile(null).policies.processes).toEqual(DEFAULT_PROCESS_PERMISSIONS)
   })
 
-  it("holds the cap under the host's ceiling, a lifted cap included", () => {
-    const lifted = SessionProfile({ processes: { max: null } })
-    expect(compileProfile(lifted, '', null, 8).policies.processes.max).toBe(8)
-    expect(compileProfile(null, '', { max: 4 }, 8).policies.processes.max).toBe(4)
-  })
-
   it("narrows the workspace's block under a bare profile", () => {
     const workspace = { max: 4 }
     const inline = SessionProfile({ processes: { max: 9 } })

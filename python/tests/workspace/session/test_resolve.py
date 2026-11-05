@@ -422,13 +422,6 @@ def test_compile_profile_layers_the_profile_s_processes_over_the_workspace_s():
     assert compile_profile(None).policies.processes == ProcessPermissions()
 
 
-def test_compile_profile_holds_the_cap_under_the_host_s_ceiling():
-    lifted = SessionProfile.model_validate({"processes": {"max": None}})
-    assert compile_profile(lifted, "", None, 8).policies.processes.max == 8
-    workspace = ProcessPermissions.model_validate({"max": 4})
-    assert compile_profile(None, "", workspace, 8).policies.processes.max == 4
-
-
 def test_with_inline_narrows_the_workspace_s_processes_under_a_bare_profile():
     workspace = ProcessPermissions.model_validate({"max": 4})
     inline = SessionProfile.model_validate({"processes": {"max": 9}})

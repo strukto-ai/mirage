@@ -20,6 +20,7 @@ import type { CompiledProfile } from '../../policy/profile.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
 import { applyProfile, narrow } from './resolve.ts'
+import { checkEnvFits } from './budget.ts'
 import { CAS_MAX_RETRIES, generationOf, type RecordFields } from '../record/types.ts'
 import type { AdmissionRules, Decision, ProfileScripts } from '../../policy/types.ts'
 import type { EnvEntries } from '../../secrets/config.ts'
@@ -78,6 +79,12 @@ export class SessionManager extends SessionOwner {
   private readonly persisted = new Map<string, string>()
 
   private defaultProfileInternal: CompiledProfile | null = null
+
+  /**
+   * The workspace's max_env, which a created session must start within;
+   * null for no cap. Mirrors Python's `max_env`.
+   */
+  maxEnv: number | null = null
 
   // The workspace's env block, translated: seeded onto the default
   // session now and copied into every created session as its template.
@@ -439,6 +446,7 @@ export class SessionManager extends SessionOwner {
     })
     session.ids = this.ids
     if (options.profile !== undefined) applyProfile(session, options.profile)
+    checkEnvFits(session, this.maxEnv)
     this.hasManaged = this.hasManaged || holdsManaged(session)
     this.sessions.set(sessionId, session)
     return session

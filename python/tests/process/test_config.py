@@ -3,9 +3,10 @@ from pydantic import ValidationError
 
 from mirage.process.config import ProcessPermissions, nearer
 from mirage.process.constants import MAX_PROCESSES
+from mirage.types import JsonValue
 
 
-def block(doc: object) -> ProcessPermissions:
+def block(doc: JsonValue) -> ProcessPermissions:
     return ProcessPermissions.model_validate(doc)
 
 

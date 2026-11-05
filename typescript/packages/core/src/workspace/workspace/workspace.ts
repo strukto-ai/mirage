@@ -144,6 +144,7 @@ import { Mount } from '../mount/spec.ts'
 import { checkWriteCapability, coerceWritePolicy } from '../mount/write_policy.ts'
 import { explainedLine, explainLine, holds, lineJudgments } from '../node/explain.ts'
 import { DEFAULT_PROFILE, MAX_ENV } from '../session/constants.ts'
+import { checkEnvFits } from '../session/budget.ts'
 import { SessionManager } from '../session/manager.ts'
 import { compileProfile, resolveProfile, withInline } from '../session/resolve.ts'
 import { type SessionState, varsFromEntries, varsFromEnv } from '../session/session.ts'
@@ -415,9 +416,10 @@ export class Workspace {
     // which each profile's overrides field by field.
     this.workspaceProcesses = options.processes == null ? null : statedProcesses(options.processes)
     // The host's ceilings hold what the workspace sets, a lifted bound
-    // included: a session's processes.max as its profile compiles,
-    // max_memory below, a line's time limit as the line starts.
+    // included: a session's processes.max as a process starts, max_memory
+    // and max_env below, a line's time limit as the line starts.
     this.registry.ceilings = options.ceilings ?? {}
+    this.processes.ceiling = this.registry.ceilings.maxProcesses ?? null
     for (const [name, profile] of Object.entries(options.profiles ?? {})) {
       this.setProfile(name, profile)
     }
@@ -585,6 +587,10 @@ export class Workspace {
       maxEnv === null ? null : parseLimit(maxEnv, 'max_env'),
       this.registry.ceilings.maxEnv,
     )
+    // Every session starts within max_env, this one with the workspace's
+    // env and its profile's.
+    this.sessionManager.maxEnv = this.registry.maxEnv
+    checkEnvFits(this.sessionManager.get(this.sessionManager.defaultId), this.registry.maxEnv)
     // Every connection a line or an op opens must clear the workspace's
     // network setting and the process's ceiling.
     this.networkSetting = options.network ?? true
@@ -1092,28 +1098,22 @@ export class Workspace {
   }
 
   /**
-   * The name of the profile `baseProfile` resolves, which its programs
-   * read as `ctx.profile`; empty for a profile document passed without
-   * one.
-   */
-  /**
-   * A session's profile compiled over the workspace's `processes` and
-   * under the host's `maxProcesses`, the one way a profile reaches a
-   * session. `profile` is what the caller named, for the profile's name.
-   * Mirrors Python's `_compile`.
+   * A session's profile compiled over the workspace's `processes`, the one
+   * way a profile reaches a session. `profile` is what the caller named,
+   * for the profile's name. Mirrors Python's `_compile`.
    */
   private compile(
     effective: SessionProfile | null,
     profile: string | SessionProfile | null,
   ): CompiledProfile {
-    return compileProfile(
-      effective,
-      this.profileName(profile),
-      this.workspaceProcesses,
-      this.registry.ceilings.maxProcesses,
-    )
+    return compileProfile(effective, this.profileName(profile), this.workspaceProcesses)
   }
 
+  /**
+   * The name of the profile `baseProfile` resolves, which its programs
+   * read as `ctx.profile`; empty for a profile document passed without
+   * one.
+   */
   private profileName(profile: string | SessionProfile | null): string {
     if (typeof profile === 'string') return profile
     if (profile === null && this.defaultProfileName !== null) return this.defaultProfileName

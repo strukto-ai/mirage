@@ -90,16 +90,33 @@ export function envBytes(session: SessionState): number {
 }
 
 /**
+ * Refuse a session whose shell state is past max_env before it runs a line:
+ * what the workspace's `env`, a profile's `env` or a snapshot gave it, which
+ * no write grew. Mirrors Python's `check_env_fits`.
+ */
+export function checkEnvFits(session: SessionState, limit: number | null): void {
+  const held = envBytes(session)
+  if (limit !== null && held > limit) {
+    throw new Error(
+      `session '${session.sessionId}' starts with ${String(held)} bytes of ` +
+        `shell state, past max_env of ${String(limit)} bytes`,
+    )
+  }
+}
+
+/**
  * Refuse a write that grows a session's shell state past max_env, from
  * `before` to `after` bytes for the entry written. Bash fails as it does when
  * it cannot allocate, a fatal error, and the message says the bound is a
  * setting, so an agent does not take it for a broken shell. A write that does
- * not grow passes unchecked. Mirrors Python's `check_env`.
+ * not grow passes unchecked. `held` is bytes the session holds outside what
+ * `envBytes` counts, such as a function's own positional parameters. Mirrors
+ * Python's `check_env`.
  */
-export function checkEnv(session: SessionState, before: number, after: number): void {
+export function checkEnv(session: SessionState, before: number, after: number, held = 0): void {
   const limit = envLimit()
   if (limit === null || after <= before) return
-  if (envBytes(session) - before + after > limit) {
+  if (envBytes(session) + held - before + after > limit) {
     throw new ExitSignal(
       ENV_EXHAUSTED_STATUS,
       encodeText(

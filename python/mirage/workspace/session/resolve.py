@@ -46,7 +46,7 @@ from mirage.rs.policy import (
     rules_wire,
     visibility_from,
 )
-from mirage.types import MountMode, ShowEntry, under_ceiling, weaker_mode
+from mirage.types import MountMode, ShowEntry, weaker_mode
 from mirage.workspace.session.constants import DEFAULT_PROFILE
 from mirage.workspace.session.session import SessionState, vars_from_entries
 from mirage.workspace.session.shell_dirs import set_cwd
@@ -347,7 +347,6 @@ def compile_profile(
     effective: SessionProfile | None,
     name: str = "",
     workspace_processes: ProcessPermissions | None = None,
-    max_processes: int | None = None,
 ) -> CompiledProfile:
     """The session fields a profile compiles to.
 
@@ -361,17 +360,12 @@ def compile_profile(
             owner-rendering command shows.
         workspace_processes (ProcessPermissions | None): the workspace's
             ``processes``, which the profile's overrides field by field.
-        max_processes (int | None): the host's ceiling on
-            ``processes.max``, which a lifted cap meets too.
     """
-    layered = ProcessPermissions.layered(
+    processes = ProcessPermissions.layered(
         (
             effective.processes if effective is not None else None,
             workspace_processes,
         )
-    )
-    processes = layered.model_copy(
-        update={"max": under_ceiling(layered.max, max_processes)}
     )
     if effective is None:
         return CompiledProfile(

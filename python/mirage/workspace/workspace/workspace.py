@@ -189,6 +189,7 @@ from mirage.workspace.node.explain import (
     line_judgments,
 )
 from mirage.workspace.session import SessionManager, SessionState
+from mirage.workspace.session.budget import check_env_fits
 from mirage.workspace.session.constants import DEFAULT_PROFILE, MAX_ENV
 from mirage.workspace.session.resolve import (
     compile_profile,
@@ -341,8 +342,8 @@ class Workspace:
         )
         # The host's ceilings hold what the workspace sets, a lifted
         # bound included: max_memory and max_env here, a session's
-        # processes.max as its profile compiles, a line's time limit as
-        # the line starts.
+        # processes.max as a process starts, a line's time limit as the
+        # line starts.
         self._registry.ceilings = ceilings or Ceilings()
         memory = under_ceiling(
             None
@@ -416,6 +417,7 @@ class Workspace:
                 else self._registry.system_clock.now()
             ),
         )
+        self.processes.ceiling = self._registry.ceilings.max_processes
         self.job_table = JobTable(
             stores.jobs, self.processes, clock=self._clock
         )
@@ -613,6 +615,12 @@ class Workspace:
             if default_base is not None
             or self._workspace_processes is not None
             else None
+        )
+        # Every session starts within max_env, this one with the
+        # workspace's env and its profile's.
+        self._session_mgr.max_env = self._registry.max_env
+        check_env_fits(
+            self._session_mgr.get(session_id), self._registry.max_env
         )
 
         self.observer = Observer(
@@ -2415,8 +2423,7 @@ class Workspace:
         profile: str | SessionProfile | None,
     ) -> CompiledProfile:
         """A session's profile compiled over the workspace's
-        ``processes`` and under the host's ``max_processes``, the one way
-        a profile reaches a session.
+        ``processes``, the one way a profile reaches a session.
 
         Args:
             effective (SessionProfile | None): the profile with any
@@ -2428,7 +2435,6 @@ class Workspace:
             effective,
             self._profile_name(profile),
             self._workspace_processes,
-            self._registry.ceilings.max_processes,
         )
 
     def _profile_name(self, profile: str | SessionProfile | None) -> str:

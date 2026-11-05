@@ -230,12 +230,15 @@ it.each([0, 2000000])('overwrites cached and cross-block windows with budget %s'
   }
 })
 
-it('counts what it holds in memory against max_memory when it has nowhere to spill', async () => {
-  const spool = new ByteSpool(4)
-  const budget = new MemoryBudget(10, () => 0)
-  await runWithMemory(budget, async () => {
-    await spool.append(new Uint8Array(8))
-    await expect(spool.append(new Uint8Array(4))).rejects.toBeInstanceOf(MemoryExhausted)
-  })
-  await spool.close()
-})
+it.each([4, undefined])(
+  'counts what it holds in memory against max_memory when it has nowhere to spill (limit %s)',
+  async (limit) => {
+    const spool = new ByteSpool(limit)
+    const budget = new MemoryBudget(10, () => 0)
+    await runWithMemory(budget, async () => {
+      await spool.append(new Uint8Array(8))
+      await expect(spool.append(new Uint8Array(4))).rejects.toBeInstanceOf(MemoryExhausted)
+    })
+    await spool.close()
+  },
+)
