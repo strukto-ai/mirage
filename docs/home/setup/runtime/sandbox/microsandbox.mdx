@@ -80,10 +80,8 @@ Add `mount_type: ssh` to the config (`mountType: 'ssh'` in TypeScript).
 Install `mirage-ai[ssh]` on a Python host or `ssh2` on a Node host. The
 guest needs `sshfs` and access to `/dev/fuse`, but no Mirage installation,
 SSH keys or open port. In `ssh` and `both`, each runtime instance serves
-its first session only. A guest that restarts between commands needs
-nothing: the next command mounts the paths again first. One that restarts
-as a command starts, after Mirage checked the mounts, makes that command
-exit 126 without running.
+its first session only. If the guest restarts, Mirage mounts the paths
+again; a command caught mid-restart exits 126 without running.
 
 ### fuse
 
@@ -110,11 +108,8 @@ msb exec mirage-box -- mirage workspace create /tmp/sandbox.yaml
 The guest's config controls these files, not the host workspace's rules.
 Mirage refuses commands if session rules restrict a guest mount it cannot
 enforce. Matching paths alone does not share data; configure both workspaces
-to use the same backend. Once the guest has mounted a path, a command exits
-126 without running while that mount is gone, as after a restart, until the
-guest mounts it again; with `both`, Mirage does not serve that path in its
-place. Until the guest has mounted every path, each command reads its mounts
-again first, one more call into the guest.
+to use the same backend. If a path the guest mounted goes away, as on a
+restart, commands exit 126 until it is mounted again.
 
 ## Runtime behavior
 

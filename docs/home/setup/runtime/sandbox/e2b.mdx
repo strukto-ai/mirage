@@ -106,11 +106,8 @@ Mirage, so the sandbox must see the mounts there. `mount_type` picks how:
 - An sshfs still serving a path Mirage serves, another workspace's or one
   of your own, is left alone and the line exits 1. Give each workspace its
   own sandbox.
-- A sandbox that restarts between lines needs nothing: the next line
-  mounts the paths again first. One that restarts as a line starts, after
-  Mirage checked the mounts, makes that line exit 126 without running.
-- A mount the sandbox lays over a served path is left alone: the next line
-  exits 126, and the ones after it exit 1 until it is unmounted.
+- If the sandbox restarts, Mirage mounts the paths again. A line caught
+  mid-restart exits 126 without running.
 - The root mount and `/dev` are not served.
 
 ### fuse
@@ -135,12 +132,9 @@ mirage workspace create /tmp/sandbox.yaml
 
 - This workspace's rules do not reach those files, so a line is refused
   while the session's permissions hide or narrow anything under them.
-- Once the sandbox has mounted a path, a line exits 126 without running
-  while that mount is gone, as after a restart, until it is mounted again.
-  Mount it from the image's entrypoint so a restart mounts it again; with
-  `both`, Mirage does not serve that path in its place.
-- Until the sandbox has mounted every path, each line reads its mounts
-  again first, one more call into the sandbox.
+- If a path the sandbox mounted goes away, as on a restart, lines exit
+  126 until it is mounted again. Start Mirage from the image's entrypoint
+  so a restart mounts it again.
 - Keep the sandbox's paths in step with the host's mounts yourself.
   `sandbox.yaml` can differ where it should, such as narrower credentials.
 
