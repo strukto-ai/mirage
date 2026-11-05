@@ -405,12 +405,16 @@ export class Observer {
   }
 
   /**
-   * Append a delete event for one listing entry (history -d). The event
-   * names the entry by its timestamp and text, not its place in the
-   * listing, so a store that drops its oldest lines never turns it on
-   * another entry; two entries alike in both are one listing either way.
+   * Append a delete event for one listing entry (history -d), the one at
+   * `index` in `listing`. The event names the entry by its timestamp and
+   * text and by how many entries alike in both follow it, counted from the
+   * newest end, so a store that drops its oldest lines never turns it on
+   * another entry.
    */
-  async logDelete(session: string, entry: JsonObject): Promise<void> {
+  async logDelete(session: string, listing: readonly JsonObject[], index: number): Promise<void> {
+    const entry = listing[index] ?? {}
+    const alike = (e: JsonObject): boolean =>
+      e.timestamp === entry.timestamp && e.command === entry.command
     await this.log(
       new LogEntry({
         type: EVENT_DELETE,
@@ -418,6 +422,7 @@ export class Observer {
         timestamp: this.nowMs(),
         command: typeof entry.command === 'string' ? entry.command : '',
         target: typeof entry.timestamp === 'number' ? entry.timestamp : 0,
+        after: listing.slice(index + 1).filter(alike).length,
       }),
     )
   }
@@ -465,9 +470,8 @@ export class Observer {
    * One session's visible history listing, append order. Projects the
    * session's events: a line joins the listing when its result is in (an
    * entry added without running, `history -s`, at once), a clear
-   * tombstone empties it, and a delete event drops the oldest entry with
-   * its timestamp and text (history -d renumbers subsequent entries, GNU
-   * behavior).
+   * tombstone empties it, and a delete event drops the entry it names
+   * (history -d renumbers subsequent entries, GNU behavior).
    */
   async sessionCommandEvents(session: string): Promise<JsonObject[]> {
     const entries = parseFiles(await this._store.readMatching(`/${await sessionFile(session)}`))
@@ -485,10 +489,18 @@ export class Observer {
       } else if (e.type === EVENT_CLEAR) {
         visible = []
       } else if (e.type === EVENT_DELETE) {
-        const idx = visible.findIndex(
-          (entry) => entry.timestamp === e.target && entry.command === e.command,
-        )
-        if (idx >= 0) visible.splice(idx, 1)
+        let skip = typeof e.after === 'number' ? e.after : 0
+        for (let idx = visible.length - 1; idx >= 0; idx--) {
+          const entry = visible[idx]
+          if (entry === undefined || entry.timestamp !== e.target || entry.command !== e.command) {
+            continue
+          }
+          if (skip === 0) {
+            visible.splice(idx, 1)
+            break
+          }
+          skip--
+        }
       }
     }
     return visible

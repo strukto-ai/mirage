@@ -206,22 +206,24 @@ async def test_ctrl_c_interrupts_the_running_line(ssh):
     assert "status=130" in seen
 
 
+async def _slow_unwind(awaitable, cancel=None, stop=None):
+    try:
+        return await run_cancellable(awaitable, cancel, stop)
+    except (asyncio.CancelledError, MirageAbortError):
+        await asyncio.sleep(0.3)
+        raise
+
+
+def _put_back(session, snapshot, writer):
+    session.last_exit_code = snapshot.last_exit_code
+
+
 @pytest.mark.asyncio
 async def test_ctrl_c_leaves_130_once_the_line_has_unwound(ssh, monkeypatch):
     # What an interrupted line leaves in `$?` as it unwinds, however late,
     # lands before the interrupt's 130.
-    async def slow(awaitable, cancel=None, stop=None):
-        try:
-            return await run_cancellable(awaitable, cancel, stop)
-        except (asyncio.CancelledError, MirageAbortError):
-            await asyncio.sleep(0.3)
-            raise
-
-    def put_back(session, snapshot, writer):
-        session.last_exit_code = snapshot.last_exit_code
-
-    monkeypatch.setattr(workspace_module, "run_cancellable", slow)
-    monkeypatch.setattr(workspace_module, "restore_status", put_back)
+    monkeypatch.setattr(workspace_module, "run_cancellable", _slow_unwind)
+    monkeypatch.setattr(workspace_module, "restore_status", _put_back)
     async with ssh.connect() as conn:
         process = await conn.create_process(term_type="xterm")
         await _read_until(process, "$ ")

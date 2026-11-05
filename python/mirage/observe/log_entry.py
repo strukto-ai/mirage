@@ -56,6 +56,8 @@ class LogEntry:
         stderr (str | None): Truncated stderr (for type="result").
         target (int | None): The deleted entry's timestamp (for
             type="delete").
+        after (int | None): How many entries with its timestamp and
+            text follow the deleted one (for type="delete").
     """
 
     type: str
@@ -74,6 +76,7 @@ class LogEntry:
     stdout: str | None = None
     stderr: str | None = None
     target: int | None = None
+    after: int | None = None
 
     @staticmethod
     def from_op_record(

@@ -1518,9 +1518,9 @@
         {
           "command": "printf '\\n' | { mapfile -t -O 10000000 a; echo \"n=${#a[@]}\"; }",
           "expect": {
-            "exit": 1,
-            "stdout": "",
-            "stderr": "line: memory exhausted\n"
+            "exit": 0,
+            "stdout": "n=301\n",
+            "stderr": ""
           }
         },
         {

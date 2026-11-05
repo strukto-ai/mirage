@@ -477,18 +477,23 @@ class Observer:
             )
         )
 
-    async def log_delete(self, session: str, entry: dict[str, Any]) -> None:
+    async def log_delete(
+        self, session: str, listing: list[dict[str, Any]], index: int
+    ) -> None:
         """Append a delete event for one listing entry (history -d).
 
-        The event names the entry by its timestamp and text, not its
-        place in the listing, so a store that drops its oldest lines
-        never turns it on another entry; two entries alike in both are
-        one listing either way.
+        The event names the entry by its timestamp and text and by how
+        many entries alike in both follow it, counted from the newest end,
+        so a store that drops its oldest lines never turns it on another
+        entry.
 
         Args:
             session (str): Session ID whose entry is deleted.
-            entry (dict[str, Any]): the listing entry deleted.
+            listing (list[dict[str, Any]]): the session's listing.
+            index (int): the deleted entry's place in it.
         """
+        entry = listing[index]
+        named = (entry.get("timestamp"), entry.get("command"))
         await self._log(
             LogEntry(
                 type=EVENT_DELETE,
@@ -496,6 +501,10 @@ class Observer:
                 timestamp=self._now_ms(),
                 command=entry.get("command", ""),
                 target=entry.get("timestamp", 0),
+                after=sum(
+                    (e.get("timestamp"), e.get("command")) == named
+                    for e in listing[index + 1 :]
+                ),
             )
         )
 
@@ -553,8 +562,8 @@ class Observer:
         Projects the session's events: a line joins the listing when its
         result is in (an entry added without running, ``history -s``,
         at once), a clear tombstone empties it, and a delete event drops
-        the oldest entry with its timestamp and text (history -d
-        renumbers subsequent entries, GNU behavior).
+        the entry it names (history -d renumbers subsequent entries,
+        GNU behavior).
 
         Args:
             session (str): Session ID to project.
@@ -577,10 +586,15 @@ class Observer:
                 visible = []
             elif kind == EVENT_DELETE:
                 named = (e.get("target"), e.get("command"))
-                for idx, entry in enumerate(visible):
-                    if (entry.get("timestamp"), entry.get("command")) == named:
+                skip = e.get("after") or 0
+                for idx in range(len(visible) - 1, -1, -1):
+                    entry = visible[idx]
+                    if (entry.get("timestamp"), entry.get("command")) != named:
+                        continue
+                    if skip == 0:
                         del visible[idx]
                         break
+                    skip -= 1
         return visible
 
     async def load_events(self, events: list[dict[str, Any]]) -> None:

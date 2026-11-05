@@ -13,8 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 
 
+@dataclass(slots=True)
 class ShellArray:
     """An indexed array, as bash keeps one: only its assigned elements,
     by index, in index order. ``a[1000000000]=x`` holds one element, and
@@ -23,26 +25,13 @@ class ShellArray:
     Mirrors TypeScript's ``ShellArray``.
 
     Args:
-        elements (dict[int, str] | None): index to value, in index order.
+        elements (dict[int, str]): index to value, in index order.
     """
 
-    __slots__ = ("elements",)
-
-    def __init__(self, elements: dict[int, str] | None = None) -> None:
-        self.elements: dict[int, str] = {} if elements is None else elements
-
-    def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, ShellArray) and self.elements == other.elements
-        )
-
-    __hash__ = None  # type: ignore[assignment]
+    elements: dict[int, str] = field(default_factory=dict)
 
     def __bool__(self) -> bool:
         return bool(self.elements)
-
-    def __repr__(self) -> str:
-        return f"ShellArray({self.elements!r})"
 
     def copy(self) -> "ShellArray":
         """A copy a write to which leaves this one as it is."""

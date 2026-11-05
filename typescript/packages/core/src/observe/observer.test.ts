@@ -23,7 +23,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { IOResult } from '../io/types.ts'
 import type { Policy } from '../policy/base.ts'
-import { MountMode, type JsonObject } from '../types.ts'
+import { MountMode } from '../types.ts'
 import { ManualClock } from '../utils/clock.ts'
 import { EVENT_COMMAND, LogEntry } from './log_entry.ts'
 import {
@@ -79,13 +79,6 @@ function logCommand(o: Observer, command: string, session: string, ts: number): 
 
 function decode(b: Uint8Array | undefined): string {
   return b === undefined ? '' : new TextDecoder().decode(b)
-}
-
-/** The `index`th entry of a session's history listing. */
-async function shownAt(o: Observer, session: string, index: number): Promise<JsonObject> {
-  const entry = (await o.sessionCommandEvents(session))[index]
-  if (entry === undefined) throw new Error(`no history entry ${String(index)}`)
-  return entry
 }
 
 describe('Observer', () => {
@@ -270,7 +263,7 @@ describe('Observer', () => {
     await logCommand(o, 'one', 's1', 1.0)
     await logCommand(o, 'two', 's1', 2.0)
     await logCommand(o, 'three', 's1', 3.0)
-    await o.logDelete('s1', await shownAt(o, 's1', 1))
+    await o.logDelete('s1', await o.sessionCommandEvents('s1'), 1)
     expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['one', 'three'])
   })
 
@@ -280,7 +273,7 @@ describe('Observer', () => {
     await logCommand(o, 'one', 's1', 1.0)
     await logCommand(o, 'two', 's1', 2.0)
     await logCommand(o, 'three', 's1', 3.0)
-    await o.logDelete('s1', await shownAt(o, 's1', 1))
+    await o.logDelete('s1', await o.sessionCommandEvents('s1'), 1)
     for (const [path, data] of store.files) {
       store.files.set(path, data.subarray(data.indexOf(0x0a) + 1))
       break
@@ -288,10 +281,19 @@ describe('Observer', () => {
     expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['three'])
   })
 
+  it('a delete takes the copy it names', async () => {
+    const o = new Observer()
+    await logCommand(o, 'a', 's1', 1.0)
+    await logCommand(o, 'b', 's1', 1.0)
+    await logCommand(o, 'a', 's1', 1.0)
+    await o.logDelete('s1', await o.sessionCommandEvents('s1'), 2)
+    expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['a', 'b'])
+  })
+
   it('delete applies at its issue-time position', async () => {
     const o = new Observer()
     await logCommand(o, 'one', 's1', 1.0)
-    await o.logDelete('s1', await shownAt(o, 's1', 0))
+    await o.logDelete('s1', await o.sessionCommandEvents('s1'), 0)
     await logCommand(o, 'two', 's1', 2.0)
     expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['two'])
   })
@@ -299,7 +301,7 @@ describe('Observer', () => {
   it('clear discards earlier deletes', async () => {
     const o = new Observer()
     await logCommand(o, 'one', 's1', 1.0)
-    await o.logDelete('s1', await shownAt(o, 's1', 0))
+    await o.logDelete('s1', await o.sessionCommandEvents('s1'), 0)
     await o.logClear('s1')
     await logCommand(o, 'two', 's1', 2.0)
     expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['two'])
@@ -344,7 +346,7 @@ describe('a clock behind stored history', () => {
     await first.logCommandText('a', 's')
     await first.logCommandText('b', 's')
     const reopened = new Observer(store, new ManualClock())
-    await reopened.logDelete('s', await shownAt(reopened, 's', 0))
+    await reopened.logDelete('s', await reopened.sessionCommandEvents('s'), 0)
     expect((await reopened.sessionCommandEvents('s')).map((e) => e.command)).toEqual(['b'])
     await reopened.logClear('s')
     await reopened.logCommandText('c', 's')

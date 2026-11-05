@@ -398,6 +398,35 @@ it('cancellation reaches a grandchild past an exited parent below the group lead
   await root.join()
 })
 
+// A signal the runner's jobs ignore stops the runner alone, under the signal,
+// and leaves what it started running.
+it('stopping a runner alone leaves its children running', async () => {
+  const processes = new ProcessTable()
+  const init = { sessionId: 'a', command: 'runner', cwd: PathSpec.fromStrPath('/') }
+  const held = (parentPid?: number) => {
+    const release = gate()
+    return processes.start({
+      ...init,
+      ...(parentPid === undefined ? {} : { parentPid }),
+      cancel: () => {
+        release.release()
+      },
+      run: async () => {
+        await release.promise
+        return 0
+      },
+    })
+  }
+  const parent = held()
+  const child = held(parent.info.pid)
+  expect(parent.terminate(2, false)).toBe(true)
+  expect(parent.signal).toBe(2)
+  expect((await parent.join()).cancellationRequested).toBe(true)
+  expect(child.info.cancellationRequested).toBe(false)
+  child.terminate()
+  await child.join()
+})
+
 // A runner that already exited has nothing left to cancel, but stopping it
 // still stops what it left running (`sh -c 'sleep 100 &'`).
 it('stopping an exited runner stops what it left running', async () => {

@@ -214,6 +214,7 @@ class PipeRecorder(Recorder):
         self.forward = forward
         self.sink = sink
         self.live = live
+        self.bound: dict[Channel, FileDescription] = {}
         self.writers: dict[Channel, tuple[FileDescription, ByteWriter]] = {}
         self.broken: set[int] = set()
         self.file: FileDescription | None = None
@@ -229,11 +230,29 @@ class PipeRecorder(Recorder):
     def stream_to(
         self, file: FileDescription, channel: Channel = Channel.STDOUT
     ) -> None:
+        self.bound[channel] = file
+
+    def _writer(self, channel: Channel) -> tuple[FileDescription, ByteWriter]:
+        """The writer a bound channel's first bytes start, shared by the
+        channels bound to one description so they keep their order. None
+        starts before bytes come, so a command that writes the file
+        itself (``shuf -o f > f``) is not clobbered by an empty write.
+
+        Args:
+            channel (Channel): a channel ``stream_to`` bound.
+        """
+        live = self.writers.get(channel)
+        if live is not None:
+            return live
+        file = self.bound[channel]
         for held, writer in self.writers.values():
             if held is file:
-                self.writers[channel] = (file, writer)
-                return
-        self.writers[channel] = (file, ByteWriter(partial(self.consume, file)))
+                live = (file, writer)
+                break
+        else:
+            live = (file, ByteWriter(partial(self.consume, file)))
+        self.writers[channel] = live
+        return live
 
     def _distinct(self) -> list[tuple[FileDescription, ByteWriter]]:
         seen: dict[int, tuple[FileDescription, ByteWriter]] = {}
@@ -264,9 +283,10 @@ class PipeRecorder(Recorder):
             self.failure, self.file = exc, file
 
     async def emit(self, channel: Channel, data: bytes) -> None:
-        live = self.writers.get(channel)
-        if live is not None:
-            file, writer = live
+        if channel in self.bound:
+            if not data:
+                return
+            file, writer = self._writer(channel)
             if id(writer) not in self.broken:
                 try:
                     await writer.write(data)
@@ -1002,8 +1022,7 @@ async def _handle_redirect(
                     and errs.source is None
                     and not errs.pipe
                     and (
-                        errs is not target
-                        or Channel.STDOUT in recorder.writers
+                        errs is not target or Channel.STDOUT in recorder.bound
                     )
                 ):
                     recorder.stream_to(errs, Channel.STDERR)
