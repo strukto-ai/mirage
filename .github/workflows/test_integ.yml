@@ -2174,7 +2174,7 @@ jobs:
         run: |
           # FUSE in the box, so mount_type can serve the workspace into it
           # over sshfs; /boxdata is a mount of the box's own, for `both`;
-          # python3, so the sandbox default runs interpreters there.
+          # python3, so the box takes the interpreters it holds.
           docker run -d --name "$MIRAGE_INTEG_DOCKER_CONTAINER" \
             --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined \
             debian:trixie-slim sleep infinity

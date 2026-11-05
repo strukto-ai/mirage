@@ -56,8 +56,9 @@ A program built in a workspace folder (`./a.out`) runs in the sandbox when
 its mount allows `exec`; one on Mirage's own `/` answers 126.
 
 Every other command stays where it binds: in `cd /opt/app && make` the `cd`
-runs in Mirage, where no mount holds `/opt/app`. To run a whole line in the
-sandbox, capture [`@line`](/home/setup/runtime/overview#captures).
+runs in Mirage, where no mount holds `/opt/app`. To run lines whole in the
+sandbox, give it [`@line`](/home/setup/runtime/overview#captures) in
+`captures`; it then takes every line, Mirage's own commands included.
 
 ## Input and answers
 
