@@ -419,6 +419,19 @@
         "stdout": "b\ny\nb\n1 no\n2 1\n3 2\n4 3\n\n\n\na\n\nb\n",
         "stderr": ""
       }
+    },
+    {
+      "id": "awk_a_large_array_leaves_the_next_stream_whole",
+      "seq": 680,
+      "targets": [
+        "ram"
+      ],
+      "command": "seq 1 600000 | awk '{ a[NR] = $0 } END { print length(a), a[600000] }'; seq 3 | sort -rn | tr '\\n' ' '; echo",
+      "expect": {
+        "exit": 0,
+        "stdout": "600000 600000\n3 2 1 \n",
+        "stderr": ""
+      }
     }
   ]
 }
