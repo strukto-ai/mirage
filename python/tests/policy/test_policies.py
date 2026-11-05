@@ -29,6 +29,7 @@ from mirage.policy import (
     ExecuteResultContext,
     MountRootPolicy,
     NetworkContext,
+    NetworkResultContext,
     Pending,
     Policies,
     Policy,
@@ -1061,3 +1062,55 @@ async def test_a_quiet_pre_network_passes_the_same_policies_again():
         "Open",
     ]
     assert second == first
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_check_after_a_quiet_one_keeps_who_passed():
+    entered = asyncio.Event()
+    hold: list[bool] = []
+
+    class Wait(Policy):
+        async def pre_network(self, ctx: NetworkContext) -> Action | None:
+            if hold:
+                entered.set()
+                await asyncio.Event().wait()
+            return None
+
+    policies = Policies([Open(), Wait()])
+    ctx = NetworkContext(host="example.com", address="192.0.2.1", port=443)
+    assert await policies.pre_network(ctx, []) == (None, None)
+    hold.append(True)
+    passed: list[Policy] = []
+    running = asyncio.create_task(policies.pre_network(ctx, passed))
+    await entered.wait()
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    assert [type(policy).__name__ for policy in passed] == [
+        "MountModePolicy",
+        "Open",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_check_among_some_policies_leaves_no_order(monkeypatch):
+    opened = []
+
+    class Counting(Composition):
+        def __init__(self) -> None:
+            super().__init__()
+            opened.append(self)
+
+    class Closing(Policy):
+        async def post_network(self, ctx: NetworkResultContext) -> None:
+            return None
+
+    monkeypatch.setattr("mirage.policy.policies.Composition", Counting)
+    first, second = Closing(), Closing()
+    policies = Policies([first, second])
+    ctx = NetworkResultContext(
+        host="example.com", address="192.0.2.1", port=443
+    )
+    for among in [(first,), (second,), (first,), (first, second)]:
+        await policies.post_network(ctx, among)
+    assert len(opened) == 4

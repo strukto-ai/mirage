@@ -787,15 +787,17 @@ export class Policies {
 
   /**
    * Ask the policies at `method` and settle their answers in mirage-rs,
-   * which also decides who is asked and in what order. An evaluation in
-   * which every policy answered nothing leaves the order mirage-rs asked
-   * in under its key (the method, the flags and who is asked), and the
-   * next evaluation with that key asks the policies in that order itself:
+   * which also decides who is asked and in what order. An evaluation of
+   * every policy in which each answered nothing leaves the order mirage-rs
+   * asked in under its key (the method and the flags), and the next
+   * evaluation with that key asks the policies in that order itself:
    * when all of them answer nothing again it is settled without
    * mirage-rs, else the answers already given are replayed to it, so no
    * policy runs twice. A change to the policies forgets every order. The
    * dry-run flag a deciding policy runs under is bound once for the whole
-   * evaluation.
+   * evaluation. An evaluation `among` some policies always goes to
+   * mirage-rs. `passed` is filled as they answer with the policies that
+   * answered nothing or only a Limit, and those without the method.
    */
   private async evaluate(
     method: PolicyMethod,
@@ -814,11 +816,8 @@ export class Policies {
     if (policies.every((policy) => policy[method] === undefined)) {
       return { answers: [], action: null, route: null, limit: null }
     }
-    const key = `${method} ${String(placed)} ${String(rulesOnly)} ${
-      among === null
-        ? '*'
-        : policies.flatMap((policy, slot) => (among.includes(policy) ? [slot] : [])).join(',')
-    }`
+    const key = `${method} ${String(placed)} ${String(rulesOnly)}`
+    if (passed !== null) passed.push(...policies.filter((policy) => policy[method] === undefined))
     const ran = new Map<number, unknown[]>()
     let seen = ctx
     const signal = callerSignal()
@@ -861,10 +860,11 @@ export class Policies {
       }
       const items: unknown[] = Array.isArray(answered) ? answered : [answered]
       ran.set(slot, items)
+      if (items.every((item) => item === null || item instanceof Limit)) passed?.push(policy)
       return items
     }
     const settle = async (): Promise<CompositionResult> => {
-      const order = orders.get(key)
+      const order = among === null ? orders.get(key) : undefined
       if (order !== undefined) {
         let quiet = true
         for (const slot of order) {
@@ -874,16 +874,7 @@ export class Policies {
           }
         }
         if (hasAborted(signal)) throw makeAbortError(signal)
-        if (quiet) {
-          if (passed !== null) {
-            passed.push(...policies.filter((policy) => policy[method] === undefined))
-            for (const slot of order) {
-              const policy = policies[slot]
-              if (policy?.[method] !== undefined) passed.push(policy)
-            }
-          }
-          return { answers: [], action: null, route: null, limit: null }
-        }
+        if (quiet) return { answers: [], action: null, route: null, limit: null }
       }
       const composition = new Composition()
       try {
@@ -898,7 +889,6 @@ export class Policies {
                 ? 'mount_mode'
                 : 'placement'
           composition.names.set(slot, policy.constructor.name || 'policy')
-          if (passed !== null && policy[method] === undefined) passed.push(policy)
           return { slot, role, hooks: among === null || among.includes(policy) ? [hook] : [] }
         })
         composition.feed({
@@ -925,11 +915,6 @@ export class Policies {
           if (effect.op === 'run_policy') {
             requested.push(effect.slot)
             pending = await answer(effect.slot)
-            if (
-              policy[method] !== undefined &&
-              pending.every((item) => item === null || item instanceof Limit)
-            )
-              passed?.push(policy)
             cursor = 0
           }
           if (hasAborted(signal)) throw makeAbortError(signal)
@@ -938,7 +923,10 @@ export class Policies {
           composition.respond(effect, item, name, cursor < pending.length)
         }
         const result = composition.result(method)
-        if (requested.every((slot) => ran.get(slot)?.every((item) => item === null) ?? true)) {
+        if (
+          among === null &&
+          requested.every((slot) => ran.get(slot)?.every((item) => item === null) ?? true)
+        ) {
           orders.set(key, requested)
         }
         return result

@@ -871,9 +871,7 @@ class Policies:
         self._policies: list[Policy] = list(policies or [])
         self._placement: Policy | None = None
         self._wanted: frozenset[str] = frozenset()
-        self._orders: dict[
-            tuple[str, bool, bool, tuple[int, ...] | None], tuple[int, ...]
-        ] = {}
+        self._orders: dict[tuple[str, bool, bool], tuple[int, ...]] = {}
         self._rescan()
         self._mode = MountModePolicy()
         self.decisions = Decisions()
@@ -997,9 +995,9 @@ class Policies:
         """Ask the policies at ``method`` and settle their answers in
         mirage-rs, which also decides who is asked and in what order.
 
-        An evaluation in which every policy answered nothing leaves the
-        order mirage-rs asked in under its key (the method, the flags and
-        who is asked), and the next evaluation with that key asks the
+        An evaluation of every policy in which each answered nothing
+        leaves the order mirage-rs asked in under its key (the method and
+        the flags), and the next evaluation with that key asks the
         policies in that order itself: when all of them answer nothing
         again it is settled without mirage-rs, else the answers already
         given are replayed to it, so no policy runs twice. A change to
@@ -1013,9 +1011,11 @@ class Policies:
             placed (bool): the caller placed the line.
             rules_only (bool): ask the profile's rules alone.
             projection (str): ``fire`` or ``answers``.
-            among (tuple[Policy, ...] | None): ask only these.
-            passed (list[Policy] | None): filled with the policies that
-                answered nothing or only a Limit.
+            among (tuple[Policy, ...] | None): ask only these; such an
+                evaluation always goes to mirage-rs.
+            passed (list[Policy] | None): filled, as they answer, with
+                the policies that answered nothing or only a Limit, and
+                those without the method.
         """
         snapshot = tuple(self._policies)
         placement = self._placement
@@ -1030,18 +1030,13 @@ class Policies:
             for policy in policies
         ):
             return CompositionResult((), None, None, None)
-        key = (
-            method,
-            placed,
-            rules_only,
-            None
-            if among is None
-            else tuple(
-                slot
-                for slot, policy in enumerate(policies)
-                if any(policy is entry for entry in among)
-            ),
-        )
+        key = (method, placed, rules_only)
+        if passed is not None:
+            passed.extend(
+                policy
+                for policy in policies
+                if getattr(type(policy), method) is getattr(Policy, method)
+            )
         ran: dict[int, tuple[Any, ...]] = {}
         token: CallerToken | None = None
 
@@ -1077,24 +1072,20 @@ class Policies:
             ran[slot] = (
                 answered if isinstance(answered, tuple) else (answered,)
             )
+            if passed is not None and all(
+                item is None or isinstance(item, Limit) for item in ran[slot]
+            ):
+                passed.append(policy)
             return ran[slot]
 
         composition: Composition | None = None
         try:
-            order = orders.get(key)
+            order = orders.get(key) if among is None else None
             if order is not None:
                 for slot in order:
                     if any(item is not None for item in await answer(slot)):
                         break
                 else:
-                    if passed is not None:
-                        passed.extend(
-                            policy
-                            for policy in policies
-                            if getattr(type(policy), method)
-                            is getattr(Policy, method)
-                        )
-                        passed.extend(policies[slot] for slot in order)
                     return CompositionResult((), None, None, None)
             composition = Composition()
             descriptors = []
@@ -1113,8 +1104,6 @@ class Policies:
                 asked = getattr(type(policy), method) is not getattr(
                     Policy, method
                 )
-                if not asked and passed is not None:
-                    passed.append(policy)
                 if among is not None and all(p is not policy for p in among):
                     asked = False
                 descriptors.append(
@@ -1153,11 +1142,6 @@ class Policies:
                 if effect["op"] == "run_policy":
                     requested.append(requested_slot)
                     pending = await answer(requested_slot)
-                    if passed is not None and all(
-                        item is None or isinstance(item, Limit)
-                        for item in pending
-                    ):
-                        passed.append(policy)
                     cursor = 0
                 item = pending[cursor] if cursor < len(pending) else None
                 cursor += 1
@@ -1165,7 +1149,9 @@ class Policies:
                     effect, item, type(policy).__name__, cursor < len(pending)
                 )
             result = composition.result(method)
-            if all(item is None for slot in requested for item in ran[slot]):
+            if among is None and all(
+                item is None for slot in requested for item in ran[slot]
+            ):
                 orders[key] = tuple(requested)
             return result
         finally:

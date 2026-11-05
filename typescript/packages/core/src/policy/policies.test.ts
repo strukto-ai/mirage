@@ -22,6 +22,9 @@ import { record, startOp } from '../observe/context.ts'
 import { norm } from '../utils/path.ts'
 import { type FileStat, Limit, MountMode, OnExceed, PathSpec } from '../types.ts'
 import { MountRegistry } from '../workspace/mount/registry.ts'
+import { EvaluationContext } from '../workspace/evaluation.ts'
+import { SessionState } from '../workspace/session/session.ts'
+import { runWithEvaluation } from '../context/session_context.ts'
 import { Session, Workspace } from '../workspace/workspace/workspace.ts'
 import type { Policy } from './base.ts'
 import { ebusy } from '../errors/fs.ts'
@@ -2282,4 +2285,68 @@ it('a quiet preNetwork passes the same policies again', async () => {
     'Open',
   ])
   expect(second).toEqual(first)
+})
+
+it('a cancelled check after a quiet one keeps who passed', async () => {
+  let hold = false
+  let entered = (): void => undefined
+  const reached = new Promise<void>((resolve) => {
+    entered = resolve
+  })
+  class Open implements Policy {
+    preNetwork(): Action | null {
+      return null
+    }
+  }
+  class Wait implements Policy {
+    async preNetwork(): Promise<Action | null> {
+      if (hold) {
+        entered()
+        await new Promise(() => undefined)
+      }
+      return null
+    }
+  }
+  const policies = new Policies([new Open(), new Wait()])
+  const seen = { host: 'example.com', address: '192.0.2.1', port: 443 }
+  expect(await policies.preNetwork(seen, [])).toEqual([null, null])
+  hold = true
+  const passed: Policy[] = []
+  const controller = new AbortController()
+  const evaluation = new EvaluationContext(new SessionState({ sessionId: 's' }))
+  evaluation.frame.abortSignal = controller.signal
+  const running = runWithEvaluation(evaluation, () => policies.preNetwork(seen, passed))
+  void running.catch(() => undefined)
+  await reached
+  controller.abort()
+  await expect(running).rejects.toMatchObject({ name: 'AbortError' })
+  expect(passed.map((policy) => policy.constructor.name)).toEqual(['MountModePolicy', 'Open'])
+})
+
+it('a check among some policies leaves no order', async () => {
+  class Closing implements Policy {
+    postNetwork(): null {
+      return null
+    }
+  }
+  const first = new Closing()
+  const second = new Closing()
+  const policies = new Policies([first, second])
+  const seen = {
+    host: 'example.com',
+    address: '192.0.2.1',
+    port: 443,
+    bytesSent: 0,
+    bytesReceived: 0,
+    seconds: 0,
+    ended: 'closed' as const,
+  }
+  const close = vi.spyOn(Composition.prototype, 'close')
+  try {
+    for (const among of [[first], [second], [first], [first, second]])
+      await policies.postNetwork(seen, among)
+    expect(close).toHaveBeenCalledTimes(4)
+  } finally {
+    close.mockRestore()
+  }
 })
