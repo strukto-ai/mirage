@@ -18,6 +18,11 @@ from mirage.observe.log_entry import EVENT_COMMAND
 
 HISTSIZE = 500
 
+# The most entries a history read hands back, the newest kept: the
+# commands /.bash_history shows and the entries the history API returns,
+# as GNU's HISTFILESIZE bounds the history file.
+HISTFILESIZE = 10_000
+
 
 def render_bash_history(events: list[dict[str, Any]]) -> str:
     """Render command events as a GNU bash histfile.
@@ -25,7 +30,8 @@ def render_bash_history(events: list[dict[str, Any]]) -> str:
     One `#<epoch-seconds>` timestamp comment line per entry followed by
     the command line (bash HISTTIMEFORMAT file layout). Non-command
     events (ops, clear tombstones) are ignored, exactly as bash's
-    histfile ignores `history -c`.
+    histfile ignores `history -c`. Only the newest HISTFILESIZE commands
+    are written.
 
     Args:
         events (list[dict]): LogEntry dicts, ordered by timestamp.
@@ -34,9 +40,8 @@ def render_bash_history(events: list[dict[str, Any]]) -> str:
         str: Rendered histfile text, empty when no commands exist.
     """
     lines: list[str] = []
-    for e in events:
-        if e.get("type") != EVENT_COMMAND:
-            continue
+    commands = [e for e in events if e.get("type") == EVENT_COMMAND]
+    for e in commands[-HISTFILESIZE:]:
         lines.append(f"#{int(e.get('timestamp', 0) / 1000)}")
         lines.append(e.get("command", ""))
     return "\n".join(lines) + ("\n" if lines else "")

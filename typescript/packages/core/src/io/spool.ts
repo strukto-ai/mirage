@@ -1,6 +1,7 @@
 import { OutputStream, closeQuietly } from './stream.ts'
 import { CHUNK_SIZE, chunks } from './cooperative.ts'
 import { concat } from '../utils/bytes.ts'
+import { checkMemory } from './memory.ts'
 import type { ByteSource } from './types.ts'
 
 export const MEMORY_LIMIT = 1024 * 1024
@@ -113,6 +114,10 @@ export class ByteSpool {
 
   private async appendNow(data: Uint8Array): Promise<void> {
     this.cache = new Uint8Array()
+    // With no store to spill to, the spool holds every byte in memory, which
+    // the workspace's max_memory bounds as it does any object a command builds.
+    if (this.store === null && factory === null && this.size + data.length > this.memoryLimit)
+      checkMemory(this.size + data.length)
     if (this.store === null && this.size + data.length > this.memoryLimit && factory !== null) {
       this.store = await factory()
       for (const part of this.memory) {

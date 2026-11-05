@@ -30,6 +30,7 @@ import { builtinUsage, fail, finish, ok, result } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 import { BAD_NAME_RE } from './constants.ts'
 import type { AliasMark } from './types.ts'
+import { checkEnv, entryBytes } from '../../../session/budget.ts'
 
 /** Define or print aliases. `mark` is the read the definition sits in:
  * bash expands aliases as it reads, so the commands of that read still see
@@ -62,8 +63,14 @@ export function handleAlias(
         )
         continue
       }
+      const value = word.slice(eq + 1)
+      checkEnv(
+        session,
+        entryBytes(name, sessionEntry(session.aliases, name)),
+        entryBytes(name, value),
+      )
       changing(session, name, mark)
-      setSessionEntry(session.aliases, name, word.slice(eq + 1))
+      setSessionEntry(session.aliases, name, value)
       continue
     }
     if (BAD_NAME_RE.test(word)) {

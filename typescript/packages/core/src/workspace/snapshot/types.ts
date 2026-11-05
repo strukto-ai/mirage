@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NetworkSetting } from '../../io/network.ts'
+import type { ProcessPermissions } from '../../process/config.ts'
 import type { JsonObject, JsonValue, MountMode } from '../../types.ts'
 import type { RAMVFSState } from '../../vfs/ram/ram.ts'
 import type { VFSStateBase } from '../../vfs/types.ts'
@@ -169,9 +170,13 @@ export interface WorkspaceStateDict {
    */
   profiles?: Record<string, Record<string, unknown>>
   profile?: string | null
+  /** The workspace's processes block, as stated; null when it states none. */
+  processes?: Partial<ProcessPermissions> | null
   command_limits?: Record<string, unknown>
   /** The workspace's max_memory in bytes, null for no cap. */
   max_memory?: number | null
+  /** The workspace's max_env in bytes, null for no cap. */
+  max_env?: number | null
   max_body_bytes?: number
   /** The workspace's network setting, as written. */
   network?: NetworkSetting

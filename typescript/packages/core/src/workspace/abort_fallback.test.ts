@@ -98,7 +98,7 @@ describe('a nested line on the fallback storage', () => {
   it.each(["eval 'x=${X//+(?)/x}; touched=yes'", 'f() { x=${X//+(?)/x}; touched=yes; }; f'])(
     "answers to the typed line's signal: %s",
     async (line) => {
-      const ws = new Workspace({})
+      const ws = new Workspace({}, { maxEnv: null })
       const controller = new AbortController()
       const spansSpy = vi.spyOn(Glob.prototype, 'spans')
       let work: ReturnType<typeof ws.shell> | undefined

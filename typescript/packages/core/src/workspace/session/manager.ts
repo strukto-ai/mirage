@@ -27,7 +27,7 @@ import type { ShellVar } from '../../shell/variable.ts'
 import type { MountMode } from '../../types.ts'
 import { KeyLock } from '../../cache/lock.ts'
 import { SystemClock, type Clock } from '../../utils/clock.ts'
-import { SystemIdSource, type IdSource } from '../../utils/ids.ts'
+import { checkName, SystemIdSource, type IdSource } from '../../utils/ids.ts'
 
 type StoredSession = Parameters<typeof SessionState.fromDict>[0]
 
@@ -425,6 +425,7 @@ export class SessionManager extends SessionOwner {
       profile?: CompiledProfile
     } = {},
   ): SessionState {
+    checkName('session id', sessionId)
     if (this.sessions.has(sessionId)) {
       throw new Error(`Session ${sessionId} already exists`)
     }

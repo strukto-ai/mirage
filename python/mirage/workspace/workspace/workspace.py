@@ -62,6 +62,7 @@ from mirage.context import (
     set_refusal_sink,
 )
 from mirage.context.session_context import run_with_execution
+from mirage.core.history.render import HISTFILESIZE
 from mirage.errors.fs import enoent
 from mirage.events.base import EventRuntime
 from mirage.execution.context import new_execution_id
@@ -76,6 +77,7 @@ from mirage.observe.observer import Observer
 from mirage.observe.store import ObserverStore
 from mirage.policy import (
     AskHandler,
+    CompiledProfile,
     Decisions,
     Deny,
     HandOff,
@@ -93,6 +95,7 @@ from mirage.policy.builtin import RoutePolicy
 from mirage.policy.builtin.output_cap import check_command_limits
 from mirage.policy.types import DryRun, PolicyCaller, policy_caller
 from mirage.process.child import ChildProcess
+from mirage.process.config import ProcessPermissions
 from mirage.process.stdio import ProcessInput, ProcessOutput
 from mirage.process.table import ProcessTable
 from mirage.process.types import SpawnRequest
@@ -125,6 +128,7 @@ from mirage.shell.literal import literal_tree
 from mirage.shell.parse import parse
 from mirage.shell.variable import VarAttr
 from mirage.types import (
+    Ceilings,
     DriftPolicy,
     FileEvent,
     FileStat,
@@ -137,6 +141,7 @@ from mirage.types import (
     Visibility,
     WritePolicy,
     parse_mount_mode,
+    under_ceiling,
 )
 from mirage.utils.abort import MirageAbortError, run_cancellable
 from mirage.utils.clock import (
@@ -147,7 +152,7 @@ from mirage.utils.clock import (
     system_now,
 )
 from mirage.utils.hidden import path_visible
-from mirage.utils.ids import IdSource, SystemIdSource
+from mirage.utils.ids import IdSource, SystemIdSource, check_name
 from mirage.utils.size import parse_limit
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.bin import BinViewVFS
@@ -184,6 +189,7 @@ from mirage.workspace.node.explain import (
     line_judgments,
 )
 from mirage.workspace.session import SessionManager, SessionState
+from mirage.workspace.session.budget import MAX_ENV
 from mirage.workspace.session.constants import DEFAULT_PROFILE
 from mirage.workspace.session.resolve import (
     compile_profile,
@@ -266,6 +272,7 @@ class Workspace:
         cache_limit: str | int = "32MB",
         max_memory: str | int | None = MAX_MEMORY,
         max_body_bytes: str | int | None = None,
+        max_env: str | int | None = MAX_ENV,
         network: NetworkSetting = True,
         system_time: str | None = None,
         cache: CacheConfig | None = None,
@@ -286,6 +293,8 @@ class Workspace:
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
         profile: str | None = None,
+        processes: ProcessPermissions | Mapping[str, Any] | str | None = None,
+        ceilings: Ceilings | None = None,
         policies: list[Policy] | None = None,
         on_ask: AskHandler | None = None,
         policy_functions: Mapping[str, Callable[..., Any]] | None = None,
@@ -331,13 +340,25 @@ class Workspace:
             if max_body_bytes is None
             else parse_limit(max_body_bytes, "max_body_bytes")
         )
-        self._registry.memory = (
+        # The host's ceilings hold what the workspace sets, a lifted
+        # bound included: max_memory and max_env here, a session's
+        # processes.max as its profile compiles, a line's time limit as
+        # the line starts.
+        self._registry.ceilings = ceilings or Ceilings()
+        memory = under_ceiling(
             None
             if max_memory is None
-            else MemoryBudget(
-                parse_limit(max_memory, "max_memory"),
-                self._registry.held_in_memory,
-            )
+            else parse_limit(max_memory, "max_memory"),
+            self._registry.ceilings.max_memory,
+        )
+        self._registry.memory = (
+            None
+            if memory is None
+            else MemoryBudget(memory, self._registry.held_in_memory)
+        )
+        self._registry.max_env = under_ceiling(
+            None if max_env is None else parse_limit(max_env, "max_env"),
+            self._registry.ceilings.max_env,
         )
         # Every connection a line or an op opens must clear the
         # workspace's network setting and the process's ceiling.
@@ -456,8 +477,13 @@ class Workspace:
                 source_for(var.managed.source)
         # The permission profiles: one per name, and the one a session
         # gets when it names none. A profile is the whole document a
-        # session runs under, so there is no workspace-wide block
-        # above it.
+        # session runs under; only `processes` has a workspace-wide
+        # block, which each profile's overrides field by field.
+        self._workspace_processes = (
+            ProcessPermissions.model_validate(processes)
+            if processes is not None
+            else None
+        )
         self._profiles: dict[str, SessionProfile] = {}
         for name, doc in (profiles or {}).items():
             self.set_profile(name, doc)
@@ -584,8 +610,9 @@ class Workspace:
         # is not the one agent the document cannot reach.
         default_base = self._base_profile(None)
         self._session_mgr.default_profile = (
-            compile_profile(default_base, self._profile_name(None))
+            self._compile(default_base, None)
             if default_base is not None
+            or self._workspace_processes is not None
             else None
         )
 
@@ -648,7 +675,7 @@ class Workspace:
             lambda session_id: (
                 self._facade_session(session_id) or self._call_session()
             ),
-            lambda name: compile_profile(self._base_profile(name), name),
+            lambda name: self._compile(self._base_profile(name), name),
             lambda: self.ensure_sessions_loaded(),
             lambda path: self.unmount(path),
             lambda path: self._namespace.session_links().follow_parent(path),
@@ -712,7 +739,8 @@ class Workspace:
             session_id (str | None): only this session's entries.
             since (int | None): only entries at or after this epoch
                 millisecond.
-            last (int | None): only the newest this many entries.
+            last (int | None): only the newest this many entries; never
+                more than HISTFILESIZE.
             vfs (bool): include the ``vfs`` entries.
 
         Returns:
@@ -725,9 +753,8 @@ class Workspace:
             if e.get("type") in kinds
             and (since is None or e.get("timestamp", 0) >= since)
         ]
-        if last is None:
-            return picked
-        return picked[max(0, len(picked) - last) :]
+        keep = HISTFILESIZE if last is None else min(last, HISTFILESIZE)
+        return picked[max(0, len(picked) - keep) :]
 
     async def explain(
         self, line: str, session_id: str = ""
@@ -1905,6 +1932,7 @@ class Workspace:
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
         profile: str | None = None,
+        ceilings: Ceilings | None = None,
         s3: S3Config | None = None,
         clock: Clock | None = None,
         ids: IdSource | None = None,
@@ -1967,6 +1995,8 @@ class Workspace:
                 of the recorded one. Given either, the restored sessions
                 keep the narrowing the caller's document gives them, as
                 a checkout's do.
+            ceilings (Ceilings | None): the host's ceilings, which hold
+                the limits the snapshot recorded as they hold a config's.
             s3 (S3Config | None): the S3-like store the tar is in.
             max_snapshot_bytes (int | None): decoded and restored member bytes.
             max_snapshot_encoded_bytes (int | None): maximum encoded S3 bytes.
@@ -2008,6 +2038,7 @@ class Workspace:
                 policy_functions=policy_functions,
                 profiles=profiles,
                 profile=profile,
+                ceilings=ceilings,
                 clock=clock,
                 ids=ids,
             )
@@ -2029,6 +2060,7 @@ class Workspace:
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
         profile: str | None = None,
+        ceilings: Ceilings | None = None,
         clock: Clock | None = None,
         ids: IdSource | None = None,
     ) -> "Workspace":
@@ -2072,6 +2104,8 @@ class Workspace:
                 of the recorded one. Given either, the restored sessions
                 keep the narrowing the caller's document gives them, as
                 a checkout's do.
+            ceilings (Ceilings | None): the host's ceilings, which hold
+                the limits the snapshot recorded as they hold a config's.
             clock (Clock | None): the clock the restored workspace reads
                 time through; None means the system clock. A restored
                 entry ages on it from the ``cached_at`` the snapshot
@@ -2091,6 +2125,7 @@ class Workspace:
             policy_functions=policy_functions,
             profiles=profiles,
             profile=profile,
+            ceilings=ceilings,
             clock=clock,
             ids=ids,
         )
@@ -2152,6 +2187,7 @@ class Workspace:
             secrets=self._declared_sources,
             policy_functions=self._policy_functions,
             shared=frozenset(mounts),
+            ceilings=self._registry.ceilings,
             clock=self._clock,
             ids=self._ids,
         )
@@ -2170,6 +2206,7 @@ class Workspace:
         profiles: Mapping[str, SessionProfile | Mapping[str, Any]]
         | None = None,
         profile: str | None = None,
+        ceilings: Ceilings | None = None,
         shared: frozenset[str] = frozenset(),
         clock: Clock | None = None,
         ids: IdSource | None = None,
@@ -2187,6 +2224,7 @@ class Workspace:
             io=args.io,
             max_memory=args.max_memory,
             max_body_bytes=args.max_body_bytes,
+            max_env=args.max_env,
             network=args.network,
             system_time=args.system_time,
             mode=MountMode.READ,
@@ -2197,6 +2235,8 @@ class Workspace:
             command_limits=args.command_limits,
             profiles=args.profiles if profiles is None else profiles,
             profile=args.profile if built_for_state else profile,
+            processes=args.processes,
+            ceilings=ceilings,
             runtimes=runtimes,
             policies=policies,
             policy_functions=policy_functions,
@@ -2286,8 +2326,8 @@ class Workspace:
             inline = with_inline(
                 inline, SessionProfile.model_validate({"mounts": mounts})
             )
-        compiled = compile_profile(
-            with_inline(base, inline), self._profile_name(profile)
+        compiled = self._compile(
+            with_inline(base, inline, self._workspace_processes), profile
         )
         check_cli_verbs(compiled.policies.commands, self._cli_verbs())
         return self._session_mgr.create(session_id, profile=compiled)
@@ -2370,6 +2410,28 @@ class Workspace:
             return self._profiles[self._default_profile_name]
         return resolve_profile(self._profiles, profile)
 
+    def _compile(
+        self,
+        effective: SessionProfile | None,
+        profile: str | SessionProfile | None,
+    ) -> CompiledProfile:
+        """A session's profile compiled over the workspace's
+        ``processes`` and under the host's ``max_processes``, the one way
+        a profile reaches a session.
+
+        Args:
+            effective (SessionProfile | None): the profile with any
+                inline document added.
+            profile (str | SessionProfile | None): what the caller
+                named, for the profile's name.
+        """
+        return compile_profile(
+            effective,
+            self._profile_name(profile),
+            self._workspace_processes,
+            self._registry.ceilings.max_processes,
+        )
+
     def _profile_name(self, profile: str | SessionProfile | None) -> str:
         """The name of the profile ``_base_profile`` resolves, which its
         programs read as ``ctx["profile"]`` and the session reports as
@@ -2412,6 +2474,7 @@ class Workspace:
                 or the plain mapping a YAML file or the TypeScript
                 constructor would hold.
         """
+        check_name("profile name", name)
         doc = SessionProfile.model_validate(profile)
         # Its env names pointers in the workspace env grammar, so the
         # sources it names are checked here too, before a session runs.
@@ -2422,7 +2485,7 @@ class Workspace:
             ):
                 source_for(var.managed.source)
         check_cli_verbs(
-            compile_profile(doc, name).policies.commands, self._cli_verbs()
+            self._compile(doc, name).policies.commands, self._cli_verbs()
         )
         self._profiles[name] = doc
 
@@ -2447,9 +2510,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
         if isinstance(profile, Mapping):
             profile = SessionProfile.model_validate(profile)
-        compiled = compile_profile(
-            self._base_profile(profile), self._profile_name(profile)
-        )
+        compiled = self._compile(self._base_profile(profile), profile)
         check_cli_verbs(compiled.policies.commands, self._cli_verbs())
         was_default = session_id == self.default_session_id
         await self.ensure_sessions_loaded()

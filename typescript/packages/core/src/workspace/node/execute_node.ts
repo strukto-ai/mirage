@@ -115,6 +115,7 @@ import { executeProgram } from './program.ts'
 import { expandDoubleBracket } from './test_expr.ts'
 import { timedBy, timingReport } from './timing.ts'
 import type { ExpandedWords } from './types.ts'
+import { checkEnv, entryBytes } from '../session/budget.ts'
 
 const STREAMING_KINDS: ReadonlySet<NodeKind> = new Set([
   NodeKind.PROGRAM,
@@ -1491,6 +1492,7 @@ async function executeNodeBody(
       return fail(`function ${name}`, `bash: ${name}: readonly function\n`)
     }
     const source = getFunctionSource(node)
+    checkEnv(session, entryBytes(name, session.functions[name]), entryBytes(name, source))
     session.functions[name] = source
     session.functionSites.set(name, {
       source,

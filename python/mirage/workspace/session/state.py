@@ -59,6 +59,11 @@ from mirage.shell.variable import (
 )
 from mirage.utils.hidden import var_hidden
 from mirage.view.types import EnvSet, SessionView
+from mirage.workspace.session.budget import (
+    args_bytes,
+    check_env,
+    entry_bytes,
+)
 from mirage.workspace.session.rng import draw, initial_seed
 from mirage.workspace.session.session import SessionState
 
@@ -1173,6 +1178,11 @@ async def set_var(
     # exports only C.
     if session.shell_options.get("allexport"):
         stored = with_attr(stored, VarAttr.EXPORT)
+    check_env(
+        session,
+        0 if existing is None else entry_bytes(name, existing.value),
+        entry_bytes(name, stored.value),
+    )
     session.vars[name] = stored
     try:
         await post_session_gate(
@@ -1434,6 +1444,9 @@ def set_positional_params(
     if call_stack is not None and call_stack.depth > 1:
         call_stack.set_positional(values)
     else:
+        check_env(
+            session, args_bytes(session.positional_args), args_bytes(values)
+        )
         session.positional_args = values
 
 

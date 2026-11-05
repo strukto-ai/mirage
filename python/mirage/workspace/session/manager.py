@@ -24,7 +24,7 @@ from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
 from mirage.utils.clock import Clock, SystemClock
-from mirage.utils.ids import IdSource, SystemIdSource
+from mirage.utils.ids import IdSource, SystemIdSource, check_name
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.record.types import (
@@ -500,6 +500,7 @@ class SessionManager(SessionOwner):
                 under, applied here so a pointer its env names counts
                 toward ``has_managed_env``.
         """
+        check_name("session id", session_id)
         if session_id in self._sessions:
             raise ValueError(f"Session {session_id!r} already exists")
         seeded = dict(self._seed_vars)

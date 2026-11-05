@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.core.history.render import (
+    HISTFILESIZE,
     render_bash_history,
     render_history_listing,
 )
@@ -43,6 +44,16 @@ def test_render_bash_history_ignores_non_command_events():
         {"type": "vfs", "session": "s1", "timestamp": 2000, "vfs": "read"},
     ]
     assert render_bash_history(events) == ""
+
+
+def test_render_bash_history_keeps_the_newest_histfilesize():
+    events = [
+        {"type": "command", "timestamp": 0, "command": f"echo {i}"}
+        for i in range(HISTFILESIZE + 2)
+    ]
+    lines = render_bash_history(events).splitlines()
+    assert len(lines) == 2 * HISTFILESIZE
+    assert lines[1] == "echo 2" and lines[-1] == f"echo {HISTFILESIZE + 1}"
 
 
 def test_render_history_listing_numbers_and_width():

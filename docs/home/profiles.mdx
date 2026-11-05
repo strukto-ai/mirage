@@ -49,8 +49,22 @@ profiles:
 session's own processes, or `workspace`, for every session's. Both reach
 every [instance](/home/core/shell#jobs-across-instances) of the workspace.
 `kill` cannot reach past `list`, and a bare scope such as
-`processes: workspace` sets both. Starting a process past `max` fails with
+`processes: workspace` sets both. `max` counts every pipeline stage,
+subshell and background job the session has running; it is 128 unless a
+block sets it, and `null` lifts it. Starting a process past `max` fails with
 `Resource temporarily unavailable`.
+
+The workspace takes the same `processes` block beside `profiles`, for every
+session. A profile's block overrides it field by field: here a `batch`
+session holds 512 processes, and every other session 64, with the
+workspace's scopes.
+
+```yaml
+processes: {list: workspace, max: 64}
+profiles:
+  batch:
+    processes: {max: 512}
+```
 
 `network` takes the workspace's grammar, and a session's lines are held to
 both: the profile can narrow where they connect, never widen it. A mount

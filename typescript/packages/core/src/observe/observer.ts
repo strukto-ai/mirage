@@ -73,6 +73,19 @@ export const TRACE_CONTENT_MAX_BYTES_ENV = 'MIRAGE_TRACE_CONTENT_MAX_BYTES'
  */
 export const TRACE_CONTENT_MAX_BYTES = 16 * 1024
 
+/**
+ * How many `vfs.<call>` spans one line sends at most: TRACE_MAX_SPANS unless
+ * this sets a positive whole number. The calls past it are counted on the
+ * line's `command` span as `mirage.vfs.dropped`.
+ */
+export const TRACE_MAX_SPANS_ENV = 'MIRAGE_TRACE_MAX_SPANS'
+
+/**
+ * 1000 a line: a walk over a large tree makes a call per entry, and an
+ * exporter's queue (2048 spans by default) drops what overflows it anyway.
+ */
+export const TRACE_MAX_SPANS = 1000
+
 function envVar(name: string): string | undefined {
   const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process
   return proc?.env?.[name]?.trim()
@@ -84,10 +97,14 @@ function traceContent(): boolean {
   return value !== 'false' && value !== '0'
 }
 
-function traceContentMaxBytes(): number {
-  const value = envVar(TRACE_CONTENT_MAX_BYTES_ENV) ?? ''
+function positiveEnv(name: string, fallback: number): number {
+  const value = envVar(name) ?? ''
   const limit = /^\d+$/.test(value) ? Number(value) : 0
-  return limit > 0 ? limit : TRACE_CONTENT_MAX_BYTES
+  return limit > 0 ? limit : fallback
+}
+
+function traceContentMaxBytes(): number {
+  return positiveEnv(TRACE_CONTENT_MAX_BYTES_ENV, TRACE_CONTENT_MAX_BYTES)
 }
 
 /**
@@ -132,7 +149,8 @@ function tracer(): Tracer {
  * mount. Each span also carries its start or end and its length in
  * milliseconds, as the history's entries have them, for a tracer that
  * can't be given a span's times. TRACE_CONTENT_ENV leaves out the output
- * and the calls. Mirrors Python's `_trace_line`.
+ * and the calls, and past TRACE_MAX_SPANS_ENV calls the rest are only
+ * counted. Mirrors Python's `_trace_line`.
  */
 function traceLine(
   workspaceId: string | undefined,
@@ -152,17 +170,20 @@ function traceLine(
     'mirage.timestamp': span[0],
     'mirage.duration_ms': span[1] - span[0],
   }
+  const calls = records.slice(0, positiveEnv(TRACE_MAX_SPANS_ENV, TRACE_MAX_SPANS))
   if (content) {
     const limit = traceContentMaxBytes()
     attributes['mirage.stdout'] = tracedOutput(output[0], limit)
     attributes['mirage.stderr'] = tracedOutput(output[1], limit)
+    if (calls.length < records.length)
+      attributes['mirage.vfs.dropped'] = records.length - calls.length
   }
   if (workspaceId !== undefined) attributes['mirage.workspace.id'] = workspaceId
   if (cwd !== undefined) attributes['mirage.cwd'] = cwd
   const line = tracer().startSpan('command', { startTime: span[0], attributes })
   if (content && line.isRecording()) {
     const parent = trace.setSpan(context.active(), line)
-    for (const rec of records) {
+    for (const rec of calls) {
       const call = tracer().startSpan(
         `vfs.${rec.op}`,
         {

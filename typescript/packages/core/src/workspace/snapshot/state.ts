@@ -22,12 +22,14 @@ import { CLI } from '../../commands/cli/types.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOConfig } from '../../io/config.ts'
 import { MAX_BODY_BYTES, MAX_MEMORY } from '../../io/memory.ts'
+import { MAX_ENV } from '../session/budget.ts'
 import type { NetworkSetting } from '../../io/network.ts'
 import { EVENT_CLEAR, EVENT_COMMAND, EVENT_DELETE, EVENT_RESULT } from '../../observe/log_entry.ts'
 import type { Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { profileFromDict, profileToDict, type SessionProfile } from '../../policy/profile.ts'
+import { statedProcesses, type ProcessPermissions } from '../../process/config.ts'
 import { ScriptSource } from '../../runtime/types.ts'
 import {
   Channel,
@@ -122,6 +124,7 @@ export interface WorkspaceLike {
   readonly defaultSessionId: string
   readonly profiles: Readonly<Record<string, SessionProfile>>
   readonly defaultProfileName: string | null
+  readonly workspaceProcesses: Partial<ProcessPermissions> | null
   readonly network: NetworkSetting
   readonly systemTime: string | null
   adoptDefaultSession(sessionId: string): Promise<void>
@@ -238,8 +241,10 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
       Object.entries(ws.profiles).map(([name, profile]) => [name, profileToDict(profile)]),
     ),
     profile: ws.defaultProfileName,
+    processes: ws.workspaceProcesses,
     command_limits: commandLimitsToJSON(ws.registry.commandLimits),
     max_memory: ws.registry.memory?.limit ?? null,
+    max_env: ws.registry.maxEnv,
     max_body_bytes: ws.registry.bodyLimit,
     network: ws.network,
     system_time: ws.systemTime,
@@ -533,7 +538,9 @@ export function buildMountArgs(
       Object.entries(state.profiles ?? {}).map(([name, doc]) => [name, profileFromDict(doc)]),
     ),
     profile: state.profile ?? null,
+    processes: state.processes == null ? null : statedProcesses(state.processes),
     maxMemory: state.max_memory === undefined ? MAX_MEMORY : state.max_memory,
+    maxEnv: state.max_env === undefined ? MAX_ENV : state.max_env,
     maxBodyBytes: state.max_body_bytes ?? MAX_BODY_BYTES,
     network: state.network ?? true,
     systemTime: state.system_time ?? null,

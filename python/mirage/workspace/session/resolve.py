@@ -46,7 +46,7 @@ from mirage.rs.policy import (
     rules_wire,
     visibility_from,
 )
-from mirage.types import MountMode, ShowEntry, weaker_mode
+from mirage.types import MountMode, ShowEntry, under_ceiling, weaker_mode
 from mirage.workspace.session.constants import DEFAULT_PROFILE
 from mirage.workspace.session.session import SessionState, vars_from_entries
 from mirage.workspace.session.shell_dirs import set_cwd
@@ -242,7 +242,9 @@ def _compile_plan(profile: SessionProfile) -> Mapping[str, Any]:
 
 
 def with_inline(
-    base: SessionProfile | None, inline: SessionProfile | None
+    base: SessionProfile | None,
+    inline: SessionProfile | None,
+    workspace_processes: ProcessPermissions | None = None,
 ) -> SessionProfile | None:
     """A profile with the inline document of one ``create_session`` added.
 
@@ -258,6 +260,9 @@ def with_inline(
     Args:
         base (SessionProfile | None): the resolved profile.
         inline (SessionProfile | None): what ``create_session`` added.
+        workspace_processes (ProcessPermissions | None): the workspace's
+            ``processes``, which an inline block narrows where the
+            profile states none.
 
     Raises:
         PolicyError: the inline document states an allow list or a
@@ -279,11 +284,11 @@ def with_inline(
             "inline permissions may add ask and deny rules, "
             "not a policy; state one on the profile"
         )
-    processes = (
-        base.processes if base is not None else None
-    ) or ProcessPermissions()
+    processes = base.processes if base is not None else None
     if inline.processes is not None:
-        processes = processes.restrict(inline.processes)
+        processes = ProcessPermissions.layered(
+            (processes, workspace_processes)
+        ).restrict(inline.processes)
     if base is None:
         return (
             inline
@@ -339,7 +344,10 @@ def compile_scripts(effective: SessionProfile, name: str) -> ProfileScripts:
 
 
 def compile_profile(
-    effective: SessionProfile | None, name: str = ""
+    effective: SessionProfile | None,
+    name: str = "",
+    workspace_processes: ProcessPermissions | None = None,
+    max_processes: int | None = None,
 ) -> CompiledProfile:
     """The session fields a profile compiles to.
 
@@ -351,13 +359,28 @@ def compile_profile(
             without one; carried onto its programs for ``ctx["profile"]``,
             for refusals to print, and onto the session as the group an
             owner-rendering command shows.
+        workspace_processes (ProcessPermissions | None): the workspace's
+            ``processes``, which the profile's overrides field by field.
+        max_processes (int | None): the host's ceiling on
+            ``processes.max``, which a lifted cap meets too.
     """
+    layered = ProcessPermissions.layered(
+        (
+            effective.processes if effective is not None else None,
+            workspace_processes,
+        )
+    )
+    processes = layered.model_copy(
+        update={"max": under_ceiling(layered.max, max_processes)}
+    )
     if effective is None:
-        return CompiledProfile(profile=name or None)
+        return CompiledProfile(
+            policies=ProfilePolicies(processes=processes),
+            profile=name or None,
+        )
     value = _compile_plan(effective)
     commands = _rules_from(value["commands"])
     check_rules(commands)
-    processes = effective.processes or ProcessPermissions()
     return CompiledProfile(
         setup=ProfileSetup(
             env=dict(effective.env) if effective.env is not None else None,

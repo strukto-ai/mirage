@@ -520,6 +520,32 @@ def test_span_output_is_cut_at_the_bytes_it_is_told_to(monkeypatch):
     assert (line.attributes or {})["mirage.stdout"] == "éé"
 
 
+def test_a_line_sends_at_most_its_span_cap_and_counts_the_rest(monkeypatch):
+    monkeypatch.setenv(observer_module.TRACE_MAX_SPANS_ENV, "2")
+    exporter = _exported(monkeypatch)
+    obs = Observer(store=RAMObserverStore(), clock=ManualClock(start=NEW_YEAR))
+    start = int(NEW_YEAR * 1000)
+    recs = [
+        OpRecord(
+            op="stat",
+            path=f"/d/{i}",
+            source="ram",
+            bytes=0,
+            timestamp=start,
+            duration_ms=0,
+        )
+        for i in range(5)
+    ]
+    asyncio.run(obs.log_command("find /d", "s1", cwd="/", line="L"))
+    asyncio.run(obs.log_result(IOResult(), recs, "s1", cwd="/", line="L"))
+    *calls, line = exporter.get_finished_spans()
+    assert [c.attributes["mirage.vfs.path"] for c in calls] == ["/d/0", "/d/1"]
+    assert (line.attributes or {})["mirage.vfs.dropped"] == 3
+    # The history still records every call.
+    vfs = [e for e in asyncio.run(obs.events()) if e["type"] == "vfs"]
+    assert len(vfs) == 5
+
+
 def test_span_output_that_is_not_utf8_stays_within_its_bytes(monkeypatch):
     exporter = _exported(monkeypatch)
     obs = Observer(store=RAMObserverStore(), clock=ManualClock(start=NEW_YEAR))

@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
@@ -5,6 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 from mirage.types import ProcessScope
 
 _SCOPES: tuple[ProcessScope, ...] = ("session", "workspace")
+
+# The live processes a session holds when no block names a cap: at the
+# 125 to 235 KiB each one costs, about what `max_memory`'s 32 MB default
+# holds, so a fork bomb meets the cap before it meets the host's memory.
+MAX_PROCESSES = 128
 
 
 class ProcessPermissions(BaseModel):
@@ -14,19 +20,22 @@ class ProcessPermissions(BaseModel):
     what ``ps`` and a handler's process view see; ``kill`` widens what
     they may stop, and never past ``list``. ``max`` caps the live
     processes the session holds, its running line included, as
-    ``ulimit -u`` counts the shell. A bare scope sets both.
+    ``ulimit -u`` counts the shell. A bare scope sets both. The workspace
+    states one for every session and a profile's overrides it field by
+    field (``layered``).
 
     Args:
         list (ProcessScope): whose processes the session sees.
         kill (ProcessScope): whose processes the session may stop.
-        max (int | None): most live processes, None for no cap.
+        max (int | None): most live processes, ``MAX_PROCESSES`` unless
+            stated, None for no cap.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     list: ProcessScope = "session"
     kill: ProcessScope = "session"
-    max: Annotated[StrictInt, Field(ge=1)] | None = None
+    max: Annotated[StrictInt, Field(ge=1)] | None = MAX_PROCESSES
 
     @model_validator(mode="before")
     @classmethod
@@ -41,14 +50,54 @@ class ProcessPermissions(BaseModel):
             raise ValueError("processes.kill cannot reach past processes.list")
         return self
 
+    @classmethod
+    def layered(
+        cls, layers: Iterable["ProcessPermissions | None"]
+    ) -> "ProcessPermissions":
+        """Each field from the first layer that states it, else its
+        default, as ``Limit.layered`` resolves ``command_limits``: a
+        profile naming only ``max`` keeps the workspace's scopes, one
+        naming ``max`` as None lifts the workspace's cap, and an
+        inherited ``kill`` never reaches past the ``list`` above it.
+
+        Args:
+            layers (Iterable[ProcessPermissions | None]): the blocks, most
+                specific first, None for a layer that states none.
+        """
+        merged: dict[str, Any] = cls().model_dump()
+        stated: set[str] = set()
+        for layer in layers:
+            if layer is not None:
+                for name in layer.model_fields_set - stated:
+                    merged[name] = getattr(layer, name)
+                stated |= layer.model_fields_set
+        merged["kill"] = nearer(merged["kill"], merged["list"])
+        return cls(**merged)
+
     def restrict(self, other: "ProcessPermissions") -> "ProcessPermissions":
-        caps = [cap for cap in (self.max, other.max) if cap is not None]
-        return ProcessPermissions(
-            list=_SCOPES[
-                min(_SCOPES.index(self.list), _SCOPES.index(other.list))
-            ],
-            kill=_SCOPES[
-                min(_SCOPES.index(self.kill), _SCOPES.index(other.kill))
-            ],
-            max=min(caps) if caps else None,
-        )
+        """This block narrowed by the fields ``other`` states: the
+        nearer scope of each, ``kill`` never past ``list``, the lower cap.
+
+        Args:
+            other (ProcessPermissions): an inline document's block.
+        """
+        merged: dict[str, Any] = self.model_dump()
+        for name in other.model_fields_set:
+            mine, theirs = getattr(self, name), getattr(other, name)
+            if name == "max":
+                caps = [cap for cap in (mine, theirs) if cap is not None]
+                merged[name] = min(caps) if caps else None
+            else:
+                merged[name] = nearer(mine, theirs)
+        merged["kill"] = nearer(merged["kill"], merged["list"])
+        return ProcessPermissions(**merged)
+
+
+def nearer(a: ProcessScope, b: ProcessScope) -> ProcessScope:
+    """The narrower of two scopes.
+
+    Args:
+        a (ProcessScope): one scope.
+        b (ProcessScope): the other.
+    """
+    return _SCOPES[min(_SCOPES.index(a), _SCOPES.index(b))]

@@ -68,6 +68,15 @@ TRACE_CONTENT_MAX_BYTES_ENV = "MIRAGE_TRACE_CONTENT_MAX_BYTES"
 # Workers span holds for all its attributes, and any backend's field.
 TRACE_CONTENT_MAX_BYTES = 16 * 1024
 
+# How many ``vfs.<call>`` spans one line sends at most: ``TRACE_MAX_SPANS``
+# unless this sets a positive whole number. The calls past it are counted
+# on the line's ``command`` span as ``mirage.vfs.dropped``.
+TRACE_MAX_SPANS_ENV = "MIRAGE_TRACE_MAX_SPANS"
+
+# 1000 a line: a walk over a large tree makes a call per entry, and an
+# exporter's queue (2048 spans by default) drops what overflows it anyway.
+TRACE_MAX_SPANS = 1000
+
 
 def _env_var(name: str) -> str:
     return os.environ.get(name, "").strip()
@@ -79,10 +88,14 @@ def _trace_content() -> bool:
     return _env_var(TRACE_CONTENT_ENV).lower() not in ("false", "0")
 
 
-def _trace_content_max_bytes() -> int:
-    value = _env_var(TRACE_CONTENT_MAX_BYTES_ENV)
+def _positive_env(name: str, default: int) -> int:
+    value = _env_var(name)
     limit = int(value) if value.isdigit() else 0
-    return limit if limit > 0 else TRACE_CONTENT_MAX_BYTES
+    return limit if limit > 0 else default
+
+
+def _trace_content_max_bytes() -> int:
+    return _positive_env(TRACE_CONTENT_MAX_BYTES_ENV, TRACE_CONTENT_MAX_BYTES)
 
 
 def kept_output_bytes() -> int:
@@ -153,7 +166,8 @@ def _trace_line(
     mount. Each span also carries its start or end and its length in
     milliseconds, as the history's entries have them, for a tracer that
     can't be given a span's times. ``TRACE_CONTENT_ENV`` leaves out the
-    output and the calls.
+    output and the calls, and past ``TRACE_MAX_SPANS_ENV`` calls the
+    rest are only counted.
 
     Args:
         workspace_id (str | None): the workspace the line ran in.
@@ -175,10 +189,13 @@ def _trace_line(
         "mirage.timestamp": span[0],
         "mirage.duration_ms": span[1] - span[0],
     }
+    calls = records[: _positive_env(TRACE_MAX_SPANS_ENV, TRACE_MAX_SPANS)]
     if content:
         limit = _trace_content_max_bytes()
         attributes["mirage.stdout"] = _traced_output(output[0], limit)
         attributes["mirage.stderr"] = _traced_output(output[1], limit)
+        if len(calls) < len(records):
+            attributes["mirage.vfs.dropped"] = len(records) - len(calls)
     if workspace_id is not None:
         attributes["mirage.workspace.id"] = workspace_id
     if cwd is not None:
@@ -188,7 +205,7 @@ def _trace_line(
     )
     if content and line.is_recording():
         parent = trace.set_span_in_context(line)
-        for rec in records:
+        for rec in calls:
             call = tracer.start_span(
                 f"vfs.{rec.op}",
                 context=parent,

@@ -30,6 +30,7 @@ import {
 } from './io/network.ts'
 import { parseCommandLimits } from './policy/builtin/output_cap.ts'
 import { parseProgram, SessionProfile, type ProfilePolicySpec } from './policy/profile.ts'
+import { statedProcesses } from './process/config.ts'
 import { validateDocument } from './rs/document.ts'
 import { Runtime, type RuntimeEntry } from './runtime/base.ts'
 import type { RuntimeOptions } from './runtime/config.ts'
@@ -213,6 +214,9 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   if (raw.max_memory !== undefined && raw.max_memory !== null) {
     parseLimit(raw.max_memory as string | number, 'max_memory')
   }
+  if (raw.max_env !== undefined && raw.max_env !== null) {
+    parseLimit(raw.max_env as string | number, 'max_env')
+  }
   if (raw.network !== undefined) {
     const layer = networkLayer(raw.network)
     new NetworkRule(
@@ -271,6 +275,7 @@ function validateConfigKeys(raw: Record<string, unknown>): void {
   if (raw.route_policy !== undefined && raw.route_policy !== null) {
     parseProgram(raw.route_policy, 'route_policy')
   }
+  if (raw.processes !== undefined && raw.processes !== null) statedProcesses(raw.processes)
   if (raw.profile !== undefined && raw.profile !== null) {
     if (typeof raw.profile !== 'string') throw new Error('profile must be a string')
     const known = isPlainObject(raw.profiles) ? Object.keys(raw.profiles) : []
@@ -614,6 +619,8 @@ export interface WorkspaceConfigRaw {
   /** What the RAM mounts store and a command builds may hold; null for no cap. */
   maxMemory?: string | number | null
   maxBodyBytes?: string | number | null
+  /** What each session's shell state may hold; 1MB by default, null for no cap. */
+  maxEnv?: string | number | null
   /** Where the workspace's connections may go; validated by networkLayer. */
   network?: NetworkSetting
   /** The workspace's time when it starts; validated by parseSystemTime. */
@@ -627,6 +634,8 @@ export interface WorkspaceConfigRaw {
   profiles?: unknown
   /** Which profile shapes a session created without one. */
   profile?: unknown
+  /** The workspace-wide `processes` block each profile's overrides; validated by statedProcesses. */
+  processes?: unknown
   mode?: string
   read?: string
   /** The write policy a mount inherits when it declares none. */
@@ -801,6 +810,7 @@ export async function configToWorkspaceArgs(
       commandLimits: parseCommandLimits(cfg.commandLimits),
       ...(cfg.maxBodyBytes !== undefined ? { maxBodyBytes: cfg.maxBodyBytes } : {}),
       ...(cfg.maxMemory !== undefined ? { maxMemory: cfg.maxMemory } : {}),
+      ...(cfg.maxEnv !== undefined ? { maxEnv: cfg.maxEnv } : {}),
       ...(cfg.network !== undefined ? { network: cfg.network } : {}),
       ...(cfg.systemTime !== undefined ? { systemTime: cfg.systemTime } : {}),
       io: new IOConfig(cfg.io),
@@ -831,6 +841,9 @@ export async function configToWorkspaceArgs(
         : {}),
       ...(cfg.profile !== undefined && cfg.profile !== null
         ? { profile: cfg.profile as string }
+        : {}),
+      ...(cfg.processes !== undefined && cfg.processes !== null
+        ? { processes: statedProcesses(cfg.processes) }
         : {}),
       ...(cliEntries !== undefined ? { clis: cliEntries } : {}),
       // Passed through as-is: this entry point resolves mounts, and

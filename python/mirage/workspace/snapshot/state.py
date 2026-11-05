@@ -47,6 +47,7 @@ from mirage.policy.profile import (
     profile_from_dict,
     profile_to_dict,
 )
+from mirage.process.config import ProcessPermissions
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (
     Channel,
@@ -93,6 +94,7 @@ from mirage.workspace.mount.read_policy import resolve_read_spec
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.mount.write_policy import coerce_write_policy
+from mirage.workspace.session.budget import MAX_ENV
 from mirage.workspace.session.manager import SessionManager
 from mirage.workspace.session.resolve import (
     narrow,
@@ -142,6 +144,7 @@ class WorkspaceLike(Protocol):
     _documents: Documents
     _profiles: dict[str, SessionProfile]
     _default_profile_name: str | None
+    _workspace_processes: ProcessPermissions | None
 
     @property
     def registry(self) -> MountRegistry: ...
@@ -429,6 +432,13 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
             for name, profile in ws._profiles.items()
         },
         StateKey.PROFILE: ws._default_profile_name,
+        StateKey.PROCESSES: (
+            None
+            if ws._workspace_processes is None
+            else ws._workspace_processes.model_dump(
+                mode="json", exclude_unset=True
+            )
+        ),
         StateKey.COMMAND_LIMITS: command_limits_to_json(
             ws.registry.command_limits
         ),
@@ -436,6 +446,7 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
         StateKey.MAX_MEMORY: (
             None if ws.registry.memory is None else ws.registry.memory.limit
         ),
+        StateKey.MAX_ENV: ws.registry.max_env,
         StateKey.NETWORK: (
             ws.network if isinstance(ws.network, bool) else dict(ws.network)
         ),
@@ -656,7 +667,13 @@ def build_mount_args(
             for name, doc in state.get(StateKey.PROFILES, {}).items()
         },
         profile=state.get(StateKey.PROFILE),
+        processes=(
+            ProcessPermissions.model_validate(state[StateKey.PROCESSES])
+            if state.get(StateKey.PROCESSES) is not None
+            else None
+        ),
         max_memory=state.get(StateKey.MAX_MEMORY, MAX_MEMORY),
+        max_env=state.get(StateKey.MAX_ENV, MAX_ENV),
         max_body_bytes=state.get(StateKey.MAX_BODY_BYTES, MAX_BODY_BYTES),
         network=state.get(StateKey.NETWORK, True),
         system_time=state.get(StateKey.SYSTEM_TIME),

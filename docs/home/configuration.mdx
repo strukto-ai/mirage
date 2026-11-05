@@ -42,9 +42,11 @@ constructors default to `read`.
 | `runtimes` | Ordered [runtimes](/home/setup/runtime/overview) for programs. |
 | `route_policy` | Choose runtimes with a [routing policy](/home/policy/route-runtime). |
 | `profiles`, `profile` | Define [agent profiles](/home/profiles) and select the default. |
+| `processes` | Set whose processes a session lists and stops, and how many it holds at once; 128 by default. Each profile's block overrides it. See [profiles](/home/profiles). |
 | `command_limits` | Set [output and execution limits](/home/core/output-limits). |
 | `max_body_bytes` | Maximum decoded bytes in one buffered API reply, as a [size](#sizes); `64MB` by default (also when `null`). Per-call caps and the room left under `max_memory` also apply. Error replies retain only their first 64 KiB. |
 | `max_memory` | Bound what the workspace holds in memory, its RAM files and what a command builds, as a [size](#sizes); `32MB` by default, `null` for no cap. See [memory](/home/core/output-limits#limit-a-workspaces-memory). |
+| `max_env` | Bound what each session's variables, functions, aliases and positional parameters hold, as a [size](#sizes); `1MB` by default, `null` for no cap. A write past it ends the line with exit 2 and `bash: xmalloc: cannot allocate N bytes (past max_env of N bytes, a mirage workspace setting)`. |
 | `network` | Choose where the workspace's connections may go, described [below](#network). |
 | `system_time` | Start the workspace's clock at a set time, described [below](#system-time). |
 | `env` | Seed literal or managed environment variables, described below. |

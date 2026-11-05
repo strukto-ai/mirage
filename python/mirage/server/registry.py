@@ -38,17 +38,23 @@ from mirage.policy.types import (
     ProfileScripts,
     WorkspaceContext,
 )
+from mirage.server.constants import MAX_SESSIONS
 from mirage.server.daemon_config import DaemonConfigError, read_daemon_table
 from mirage.server.env import (
     ENV_GRACEFUL_TIMEOUT,
+    ENV_MAX_ENV,
+    ENV_MAX_LINE_SECONDS,
+    ENV_MAX_MEMORY,
+    ENV_MAX_PROCESSES,
     ENV_MAX_SESSIONS,
     ENV_MAX_WORKSPACES,
     ENV_POLICY_FILE,
 )
 from mirage.server.jobs import ExecutionTable
 from mirage.server.paths import mirage_home
-from mirage.types import JsonValue
+from mirage.types import Ceilings, JsonValue
 from mirage.utils.ids import new_workspace_id
+from mirage.utils.size import parse_limit
 from mirage.workspace.record.disk import DiskRecordClient
 
 logger = logging.getLogger(__name__)
@@ -108,11 +114,11 @@ def resolve_max_workspaces(max_workspaces: int | None = None) -> int | None:
     return _cap(max_workspaces, ENV_MAX_WORKSPACES, "max_workspaces")
 
 
-def resolve_max_sessions(max_sessions: int | None = None) -> int | None:
+def resolve_max_sessions(max_sessions: int | None = None) -> int:
     """The most sessions each workspace holds, its default session among
     them: ``max_sessions`` when given, else ``$MIRAGE_MAX_SESSIONS``, else
-    the ``max_sessions`` key in config.toml's ``[daemon]`` table, else no
-    cap. Mirrors TypeScript's ``resolveMaxSessions``.
+    the ``max_sessions`` key in config.toml's ``[daemon]`` table, else
+    ``MAX_SESSIONS``. Mirrors TypeScript's ``resolveMaxSessions``.
 
     Args:
         max_sessions (int | None): the cap the caller set.
@@ -120,7 +126,101 @@ def resolve_max_sessions(max_sessions: int | None = None) -> int | None:
     Raises:
         DaemonConfigError: the cap is not a positive whole number.
     """
-    return _cap(max_sessions, ENV_MAX_SESSIONS, "max_sessions")
+    cap = _cap(max_sessions, ENV_MAX_SESSIONS, "max_sessions")
+    return MAX_SESSIONS if cap is None else cap
+
+
+def resolve_ceilings(
+    max_memory: str | int | None = None,
+    max_processes: int | None = None,
+    max_line_seconds: float | None = None,
+    max_env: str | int | None = None,
+) -> Ceilings:
+    """The most any workspace the server holds may set: each ceiling
+    from its argument when given, else its ``$MIRAGE_MAX_*`` variable,
+    else its key in config.toml's ``[daemon]`` table, else none. Mirrors
+    TypeScript's ``resolveCeilings``.
+
+    Args:
+        max_memory (str | int | None): the most a workspace's
+            ``max_memory`` reaches, as a size.
+        max_processes (int | None): the most a session's
+            ``processes.max`` reaches.
+        max_line_seconds (float | None): the most seconds a line runs.
+        max_env (str | int | None): the most a workspace's ``max_env``
+            reaches, as a size.
+
+    Raises:
+        DaemonConfigError: a ceiling is not a positive size, whole
+            number or number of seconds.
+    """
+    value = _setting(
+        max_line_seconds, ENV_MAX_LINE_SECONDS, "max_line_seconds"
+    )
+    seconds = None if value is None else _to_seconds(value)
+    if seconds is not None and seconds <= 0:
+        raise DaemonConfigError(
+            f"max_line_seconds must be a number of seconds above 0, "
+            f"got {value!r}"
+        )
+    return Ceilings(
+        max_memory=_size(max_memory, ENV_MAX_MEMORY, "max_memory"),
+        max_processes=_cap(max_processes, ENV_MAX_PROCESSES, "max_processes"),
+        max_line_seconds=seconds,
+        max_env=_size(max_env, ENV_MAX_ENV, "max_env"),
+    )
+
+
+def _size(given: str | int | None, env: str, key: str) -> int | None:
+    """A positive size: ``given``, else the ``env`` variable, else
+    ``key`` in config.toml's ``[daemon]`` table, else None. Mirrors
+    TypeScript's ``size``.
+
+    Args:
+        given (str | int | None): the value the caller passed.
+        env (str): the variable that sets it.
+        key (str): the config key that sets it.
+
+    Raises:
+        DaemonConfigError: the value is not a size above 0.
+    """
+    value = _setting(given, env, key)
+    try:
+        size = None if value is None else parse_limit(value, key)
+    except ValueError as exc:
+        raise DaemonConfigError(str(exc)) from exc
+    if size is not None and size < 1:
+        raise DaemonConfigError(f"{key} must be above 0, got {value!r}")
+    return size
+
+
+def _setting(given: Any, env: str, key: str) -> Any:
+    """A host setting as given: ``given``, else the ``env`` variable,
+    else ``key`` in config.toml's ``[daemon]`` table; None when none of
+    them sets it.
+
+    Args:
+        given (Any): the value the caller set.
+        env (str): the environment variable that sets it.
+        key (str): the ``[daemon]`` key that sets it.
+    """
+    if given is not None:
+        return given
+    value = os.environ.get(env) or read_daemon_table(mirage_home()).get(key)
+    return None if value is None or value == "" else value
+
+
+def _to_seconds(value: Any) -> float:
+    """A number of seconds as written, -1 for one that is not.
+
+    Args:
+        value (Any): the setting as given.
+    """
+    try:
+        seconds = float(value) if not isinstance(value, bool) else -1.0
+    except ValueError:
+        return -1.0
+    return seconds if math.isfinite(seconds) else -1.0
 
 
 def _cap(given: int | None, env: str, key: str) -> int | None:
@@ -135,13 +235,9 @@ def _cap(given: int | None, env: str, key: str) -> int | None:
     Raises:
         DaemonConfigError: the cap is not a positive whole number.
     """
-    value: Any = given
+    value = _setting(given, env, key)
     if value is None:
-        value = os.environ.get(env) or read_daemon_table(mirage_home()).get(
-            key
-        )
-        if value is None or value == "":
-            return None
+        return None
     try:
         cap = int(value) if not isinstance(value, (bool, float)) else 0
     except ValueError:
@@ -166,18 +262,13 @@ def resolve_graceful_timeout(graceful_timeout: float | None = None) -> float:
         DaemonConfigError: the value is not a number of seconds, 0 or
             more.
     """
-    value: Any = graceful_timeout
+    value = _setting(
+        graceful_timeout, ENV_GRACEFUL_TIMEOUT, "graceful_timeout"
+    )
     if value is None:
-        value = os.environ.get(ENV_GRACEFUL_TIMEOUT) or read_daemon_table(
-            mirage_home()
-        ).get("graceful_timeout")
-        if value is None or value == "":
-            return 0.0
-    try:
-        seconds = float(value) if not isinstance(value, bool) else -1.0
-    except ValueError:
-        seconds = -1.0
-    if not math.isfinite(seconds) or seconds < 0:
+        return 0.0
+    seconds = _to_seconds(value)
+    if seconds < 0:
         raise DaemonConfigError(
             f"graceful_timeout must be a number of seconds, 0 or more, "
             f"got {value!r}"
@@ -241,6 +332,7 @@ class WorkspaceRegistry:
         policies: Sequence[Policy] = (),
         programs: ProfileScripts | None = None,
         max_sessions: int | None = None,
+        ceilings: Ceilings | None = None,
     ) -> None:
         """Construct an empty registry.
 
@@ -266,10 +358,13 @@ class WorkspaceRegistry:
                 programs, by method, which answer the same way.
             max_sessions (int | None): the most sessions each workspace
                 holds, its default among them; None for no cap.
+            ceilings (Ceilings | None): the most any workspace it builds
+                may set, which every create, clone and load is held to.
         """
         self._entries: dict[str, WorkspaceEntry] = {}
         self.max_workspaces = max_workspaces
         self.max_sessions = max_sessions
+        self.ceilings = ceilings or Ceilings()
         self.policies = tuple(policies)
         self._programs = {
             method: scripts

@@ -209,7 +209,11 @@ describe('background job at the line limit', () => {
   function jobWs(seconds: number): Workspace {
     return new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, commandLimits: { '@line': new Limit({ timeoutSeconds: seconds }) } },
+      {
+        mode: MountMode.WRITE,
+        commandLimits: { '@line': new Limit({ timeoutSeconds: seconds }) },
+        maxMemory: null,
+      },
     )
   }
 

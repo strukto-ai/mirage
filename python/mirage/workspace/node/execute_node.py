@@ -148,6 +148,7 @@ from mirage.workspace.node.test_expr import (
 )
 from mirage.workspace.node.timing import timed_by, timing_report
 from mirage.workspace.node.types import ExpandedWords
+from mirage.workspace.session.budget import check_env, entry_bytes
 from mirage.workspace.session.elements import landed_arith
 from mirage.workspace.session.functions import FunctionSite
 from mirage.workspace.session.state import positional_params, session_view
@@ -1602,6 +1603,11 @@ async def _execute_node(
                 f"function {name}", f"bash: {name}: readonly function\n"
             )
         source = get_function_source(node)
+        check_env(
+            session,
+            entry_bytes(name, session.functions.get(name)),
+            entry_bytes(name, source),
+        )
         session.functions[name] = source
         session._function_sites[name] = FunctionSite(
             source,

@@ -46,6 +46,7 @@ import type { DiffComputer } from '../../rs/diff_types.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import {
+  type Ceilings,
   DEFAULT_READ_SPEC,
   Limit,
   MountMode,
@@ -155,6 +156,11 @@ export class MountRegistry {
   // The workspace's max_memory, over the bytes its RAM mounts hold; null
   // for no cap.
   memory: MemoryBudget | null = null
+  // The workspace's max_env, the bytes each session's shell state may hold;
+  // null for no cap.
+  maxEnv: number | null = null
+  /** The host's ceilings, which hold what the workspace sets. */
+  ceilings: Ceilings = {}
   bodyLimit = MAX_BODY_BYTES
   // The rule the workspace's connections are judged by; null for no limit.
   network: NetworkRule | null = null

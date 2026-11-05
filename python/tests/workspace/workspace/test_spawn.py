@@ -199,3 +199,36 @@ async def test_a_spawned_command_records_under_its_own_execution():
         assert {r.execution_id for r in reads} == {info.execution_id}
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_the_workspace_processes_block_caps_each_session_under_a_profile():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        runtimes=[],
+        processes={"max": 1},
+        profiles={"batch": {"processes": {"max": 4}}},
+    )
+    try:
+        assert ws.get_session(ws.default_session_id).processes.max == 1
+        assert ws.create_session("plain").processes.max == 1
+        assert ws.create_session("batch", profile="batch").processes.max == 4
+        child = ws.spawn(SpawnRequest(("sleep", "30")), "plain")
+        result = await ws.shell("echo leaked", session_id="plain")
+        assert result.exit_code == 254
+        child.terminate()
+        await child.wait()
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_fork_bomb_meets_the_default_cap():
+    ws = Workspace({"/data": RAMVFS()}, runtimes=[])
+    try:
+        result = await ws.shell("b() { b | b; }; b")
+        assert result.exit_code == 254
+        assert b"bash: fork: Resource temporarily unavailable" in result.stderr
+        assert len(ws.processes.live()) == 0
+    finally:
+        await ws.close()

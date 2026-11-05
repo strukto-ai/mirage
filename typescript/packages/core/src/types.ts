@@ -365,6 +365,37 @@ function tightestWalk(values: (number | null)[]): number | null {
  * field from the most specific layer that sets it). `walkLimit` caps the
  * entries one walk lists on a mount, -1 for no cap.
  */
+/**
+ * The most any workspace a host serves may set, which no config, profile
+ * document or snapshot passes: a value past a ceiling, or one that lifts
+ * its bound, holds at the ceiling. Unset leaves that bound to the
+ * workspace. `maxMemory` is in bytes, `maxLineSeconds` in seconds. Mirrors
+ * Python's `Ceilings`.
+ */
+export interface Ceilings {
+  /** The most bytes a workspace's `max_memory` reaches. */
+  readonly maxMemory?: number | null
+  /** The most bytes a workspace's `max_env` reaches. */
+  readonly maxEnv?: number | null
+  /** The most a session's `processes.max` reaches. */
+  readonly maxProcesses?: number | null
+  /** The most seconds a line's `@line` `timeout_seconds` reaches. */
+  readonly maxLineSeconds?: number | null
+}
+
+/**
+ * A bound held to its ceiling: the lower of the two, the ceiling for a
+ * bound that is lifted (null), the bound itself under no ceiling. Mirrors
+ * Python's `under_ceiling`.
+ */
+export function underCeiling(
+  value: number | null,
+  ceiling: number | null | undefined,
+): number | null {
+  if (ceiling == null) return value
+  return value === null ? ceiling : Math.min(value, ceiling)
+}
+
 export class Limit {
   readonly kind = 'limit' as const
   readonly maxBytes: number | null

@@ -366,3 +366,50 @@ async def test_a_workspace_at_max_sessions_refuses_another():
         )
         assert r.status_code == 201, r.text
     await app.state.registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_the_host_ceilings_hold_what_a_tenant_lifts():
+    app = build_app(
+        idle_grace_seconds=10.0,
+        max_memory="1MB",
+        max_processes=8,
+        max_line_seconds=1.5,
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        r = await client.post(
+            "/v1/workspaces",
+            json={
+                "config": {
+                    "mounts": {"/": {"vfs": "ram", "mode": "WRITE"}},
+                    "max_memory": None,
+                    "processes": {"max": None},
+                    "command_limits": {"@line": {"timeout_seconds": 0}},
+                }
+            },
+        )
+        assert r.status_code == 201, r.text
+        wid = r.json()["id"]
+        r = await client.post(
+            f"/v1/workspaces/{wid}/sessions", json={"session_id": "lifted"}
+        )
+        assert r.status_code == 201, r.text
+        r = await client.patch(
+            f"/v1/workspaces/{wid}/sessions/lifted",
+            json={"profile": {"processes": {"max": 1000}}},
+        )
+        assert r.status_code == 200, r.text
+        ws = app.state.registry.get(wid).runner.ws
+        assert ws.registry.memory is not None
+        assert ws.registry.memory.limit == 1 << 20
+        assert ws.get_session(ws.default_session_id).processes.max == 8
+        assert ws.get_session("lifted").processes.max == 8
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell",
+            params={"session_id": "lifted"},
+            json={"command": "sleep 5; echo no"},
+        )
+        assert r.json()["exit_code"] == 124, r.text

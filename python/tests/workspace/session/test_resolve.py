@@ -16,6 +16,7 @@ from mirage.policy.types import (
     HideReason,
     VfsContext,
 )
+from mirage.process.config import ProcessPermissions
 from mirage.shell.variable import VarAttr
 from mirage.types import (
     HiddenPaths,
@@ -400,6 +401,44 @@ def test_the_process_list_scope_is_part_of_what_a_session_sees():
     assert compile_profile(SessionProfile(cwd="/x")).visibility.processes == (
         "session"
     )
+
+
+def test_compile_profile_layers_the_profile_s_processes_over_the_workspace_s():
+    workspace = ProcessPermissions.model_validate(
+        {"list": "workspace", "max": 4}
+    )
+    capped = compile_profile(
+        SessionProfile.model_validate({"processes": {"max": 9}}),
+        "",
+        workspace,
+    )
+    assert capped.policies.processes == ProcessPermissions(
+        list="workspace", max=9
+    )
+    assert capped.visibility.processes == "workspace"
+    assert compile_profile(None, "", workspace).policies.processes == (
+        ProcessPermissions(list="workspace", max=4)
+    )
+    assert compile_profile(None).policies.processes == ProcessPermissions()
+
+
+def test_compile_profile_holds_the_cap_under_the_host_s_ceiling():
+    lifted = SessionProfile.model_validate({"processes": {"max": None}})
+    assert compile_profile(lifted, "", None, 8).policies.processes.max == 8
+    workspace = ProcessPermissions.model_validate({"max": 4})
+    assert compile_profile(None, "", workspace, 8).policies.processes.max == 4
+
+
+def test_with_inline_narrows_the_workspace_s_processes_under_a_bare_profile():
+    workspace = ProcessPermissions.model_validate({"max": 4})
+    inline = SessionProfile.model_validate({"processes": {"max": 9}})
+    merged = with_inline(SessionProfile(cwd="/x"), inline, workspace)
+    assert merged is not None and merged.processes is not None
+    assert merged.processes.max == 4
+    assert compile_profile(merged, "", workspace).policies.processes.max == 4
+    alone = with_inline(None, inline, workspace)
+    assert alone is not None and alone.processes is not None
+    assert alone.processes.max == 4
 
 
 def test_with_inline_cannot_add_show_and_the_bases_survives():

@@ -71,6 +71,12 @@ CONTINUE_SIGNALS = frozenset({0, SIGCHLD, 18, 23, 28})
 # --foreground, so there only the command stays stopped.
 STOP_SIGNALS = frozenset({SIGSTOP, 20, 21, 22})
 
+# What timeout says, exiting 125, when its session already holds
+# `processes.max` and the command cannot start.
+FORK_FAILED = (
+    b"timeout: fork system call failed: Resource temporarily unavailable\n"
+)
+
 # What timeout cannot ignore when it signals its own process group, so
 # it dies of them too: KILL, and the two glibc reserves for itself.
 SELF_KILLING_SIGNALS = frozenset({SIGKILL, 32, 33})

@@ -43,7 +43,9 @@ import type { EventRuntime } from '../../events/base.ts'
 import { newExecutionId } from '../../execution/context.ts'
 import { IOConfig } from '../../io/config.ts'
 import { MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
+import { MAX_ENV } from '../session/budget.ts'
 import { networkRule, type NetworkSetting, runWithNetwork, sameNetwork } from '../../io/network.ts'
+import { HISTFILESIZE } from '../../core/history/render.ts'
 import { EVENT_COMMAND, EVENT_RESULT, EVENT_VFS } from '../../observe/log_entry.ts'
 import { Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
@@ -56,11 +58,13 @@ import type { Policies } from '../../policy/index.ts'
 import {
   parseProfileMounts,
   parseProfilePolicy,
+  type CompiledProfile,
   type SessionProfile,
 } from '../../policy/profile.ts'
 import { ScriptPolicy } from '../../policy/script.ts'
 import { DryRun, Outcome, policyCaller, type ShellExplanation } from '../../policy/types.ts'
 import { ChildProcess } from '../../process/child.ts'
+import { statedProcesses, type ProcessPermissions } from '../../process/config.ts'
 import { ProcessInput, ProcessOutput } from '../../process/stdio.ts'
 import { ProcessTable } from '../../process/table.ts'
 import type { SpawnRequest } from '../../process/types.ts'
@@ -98,6 +102,7 @@ import {
   parseMountMode,
   PathSpec,
   type ReadSpec,
+  underCeiling,
   WritePolicy,
 } from '../../types.ts'
 import { abortable } from '../../utils/abort.ts'
@@ -110,7 +115,7 @@ import {
   systemNow,
 } from '../../utils/clock.ts'
 import { pathVisible } from '../../utils/hidden.ts'
-import { type IdSource, SystemIdSource } from '../../utils/ids.ts'
+import { checkName, type IdSource, SystemIdSource } from '../../utils/ids.ts'
 import { parseLimit } from '../../utils/size.ts'
 import { normDir, rstripSlash } from '../../utils/slash.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -272,6 +277,8 @@ export class Workspace {
   // No prototype, so every name is an own entry: `__proto__` is stored
   // rather than reparenting the table, and `toString` resolves to nothing.
   private readonly profilesInternal = Object.create(null) as Record<string, SessionProfile>
+  /** The workspace's `processes` block as stated, which each profile's overrides. */
+  readonly workspaceProcesses: Partial<ProcessPermissions> | null
   /** The profile table's default. */
   readonly defaultProfileName: string | null
   // True when `/` is an anchor the workspace added or a restore mounted (see syntheticRoot).
@@ -405,7 +412,13 @@ export class Workspace {
     )
     // The permission profiles: one per name, and the one a session
     // gets when it names none. A profile is the whole document a
-    // session runs under, so there is no workspace-wide block above it.
+    // session runs under; only `processes` has a workspace-wide block,
+    // which each profile's overrides field by field.
+    this.workspaceProcesses = options.processes == null ? null : statedProcesses(options.processes)
+    // The host's ceilings hold what the workspace sets, a lifted bound
+    // included: a session's processes.max as its profile compiles,
+    // max_memory below, a line's time limit as the line starts.
+    this.registry.ceilings = options.ceilings ?? {}
     for (const [name, profile] of Object.entries(options.profiles ?? {})) {
       this.setProfile(name, profile)
     }
@@ -550,7 +563,9 @@ export class Workspace {
     // agent is not the one agent the document cannot reach.
     const defaultBase = this.baseProfile(null)
     this.sessionManager.defaultProfile =
-      defaultBase === null ? null : compileProfile(defaultBase, this.profileName(null))
+      defaultBase === null && this.workspaceProcesses === null
+        ? null
+        : this.compile(defaultBase, null)
     checkCommandLimits(options.commandLimits ?? {}, 'workspace', true)
     this.registry.commandLimits = { ...options.commandLimits }
     // What the RAM mounts store and what a command builds share the
@@ -560,10 +575,17 @@ export class Workspace {
         ? MAX_BODY_BYTES
         : parseLimit(options.maxBodyBytes, 'max_body_bytes')
     const maxMemory = options.maxMemory === undefined ? MAX_MEMORY : options.maxMemory
+    const memory = underCeiling(
+      maxMemory === null ? null : parseLimit(maxMemory, 'max_memory'),
+      this.registry.ceilings.maxMemory,
+    )
     this.registry.memory =
-      maxMemory === null
-        ? null
-        : new MemoryBudget(parseLimit(maxMemory, 'max_memory'), () => this.registry.heldInMemory())
+      memory === null ? null : new MemoryBudget(memory, () => this.registry.heldInMemory())
+    const maxEnv = options.maxEnv === undefined ? MAX_ENV : options.maxEnv
+    this.registry.maxEnv = underCeiling(
+      maxEnv === null ? null : parseLimit(maxEnv, 'max_env'),
+      this.registry.ceilings.maxEnv,
+    )
     // Every connection a line or an op opens must clear the workspace's
     // network setting and the process's ceiling.
     this.networkSetting = options.network ?? true
@@ -614,7 +636,7 @@ export class Workspace {
       this.vfs,
       this.sessionManager,
       (sessionId) => this.facadeSession(sessionId) ?? this.callSession(),
-      (name) => compileProfile(this.baseProfile(name), name),
+      (name) => this.compile(this.baseProfile(name), name),
       () => this.ensureSessionsLoaded(),
       (path) => this.unmount(path),
       (path) => this.namespace.sessionLinks().followParent(path),
@@ -763,8 +785,8 @@ export class Workspace {
    * command a line reads starts and a `result` entry when it ends, naming
    * it as its `parent`, and with `vfs` a `vfs` entry for every call it made
    * to a mount. `sessionId` keeps one session's entries, `since`
-   * those at or after an epoch millisecond, `last` the newest that many.
-   * Mirrors Python's `Workspace.history`.
+   * those at or after an epoch millisecond, `last` the newest that many,
+   * never more than HISTFILESIZE. Mirrors Python's `Workspace.history`.
    */
   async history(
     options: { sessionId?: string; since?: number; last?: number; vfs?: boolean } = {},
@@ -776,8 +798,8 @@ export class Workspace {
         kinds.has(e.type) &&
         (since === undefined || (typeof e.timestamp === 'number' ? e.timestamp : 0) >= since),
     )
-    if (last === undefined) return picked
-    return picked.slice(Math.max(0, picked.length - last))
+    const keep = last === undefined ? HISTFILESIZE : Math.min(last, HISTFILESIZE)
+    return picked.slice(Math.max(0, picked.length - keep))
   }
 
   /** The session an op runs under: the bound one, else the default. */
@@ -1075,6 +1097,24 @@ export class Workspace {
    * read as `ctx.profile`; empty for a profile document passed without
    * one.
    */
+  /**
+   * A session's profile compiled over the workspace's `processes` and
+   * under the host's `maxProcesses`, the one way a profile reaches a
+   * session. `profile` is what the caller named, for the profile's name.
+   * Mirrors Python's `_compile`.
+   */
+  private compile(
+    effective: SessionProfile | null,
+    profile: string | SessionProfile | null,
+  ): CompiledProfile {
+    return compileProfile(
+      effective,
+      this.profileName(profile),
+      this.workspaceProcesses,
+      this.registry.ceilings.maxProcesses,
+    )
+  }
+
   private profileName(profile: string | SessionProfile | null): string {
     if (typeof profile === 'string') return profile
     if (profile === null && this.defaultProfileName !== null) return this.defaultProfileName
@@ -1112,9 +1152,9 @@ export class Workspace {
     if (options.mounts != null) {
       inline = withInline(inline, { mounts: parseProfileMounts(options.mounts) })
     }
-    const compiled = compileProfile(
-      withInline(base, inline),
-      this.profileName(options.profile ?? null),
+    const compiled = this.compile(
+      withInline(base, inline, this.workspaceProcesses),
+      options.profile ?? null,
     )
     checkCliVerbs(compiled.policies.commands, this.cliVerbs())
     return this.sessionManager.create(sessionId, { profile: compiled })
@@ -1190,6 +1230,7 @@ export class Workspace {
    * creating a session.
    */
   setProfile(name: string, profile: SessionProfile): void {
+    checkName('profile name', name)
     // A typed caller does not pass the parser, so this entry point repeats
     // its two checks: the old keys are told where they went, and a
     // policy block is whole.
@@ -1216,7 +1257,7 @@ export class Workspace {
         sourceFor(entry.managed.source)
       }
     }
-    checkCliVerbs(compileProfile(profile, name).policies.commands, this.cliVerbs())
+    checkCliVerbs(this.compile(profile, name).policies.commands, this.cliVerbs())
     this.profilesInternal[name] = profile
   }
 
@@ -1232,7 +1273,7 @@ export class Workspace {
     profile: string | SessionProfile | null,
   ): Promise<SessionState> {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
-    const compiled = compileProfile(this.baseProfile(profile), this.profileName(profile))
+    const compiled = this.compile(this.baseProfile(profile), profile)
     checkCliVerbs(compiled.policies.commands, this.cliVerbs())
     const wasDefault = sessionId === this.defaultSessionId
     await this.ensureSessionsLoaded()
@@ -2292,6 +2333,7 @@ export class Workspace {
     const mergedOptions: WorkspaceOptions = {
       io: args.io,
       maxMemory: args.maxMemory,
+      maxEnv: args.maxEnv,
       maxBodyBytes: args.maxBodyBytes,
       network: args.network,
       systemTime: args.systemTime,
@@ -2301,6 +2343,7 @@ export class Workspace {
       // The state's profile table and its default; a caller's own table
       // brings its own default.
       ...(options.profiles === undefined ? { profiles: args.profiles, profile: args.profile } : {}),
+      processes: args.processes,
       ...options,
       write: args.writeDefault,
     }
@@ -2347,6 +2390,8 @@ export class Workspace {
       // included, unless the caller names one.
       ...(options.mode !== undefined ? { mode: options.mode } : {}),
       io: options.io ?? this.io,
+      // The copy stays under the host's ceilings, as a server clone does.
+      ceilings: options.ceilings ?? this.registry.ceilings,
       // The declarations travel with the copy the way a live CLI
       // install does: an env pointer restores from state naming its
       // instance, and without the block the copy would answer the

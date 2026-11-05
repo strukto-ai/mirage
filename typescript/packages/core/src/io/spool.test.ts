@@ -1,6 +1,8 @@
 import { afterEach, expect, it } from 'vitest'
 import { ByteSlice, ByteSpool, setSpoolFactory } from './spool.ts'
 import { materialize } from './types.ts'
+import { MemoryExhausted } from './errors.ts'
+import { MemoryBudget, runWithMemory } from './memory.ts'
 import { concat } from '../utils/bytes.ts'
 
 afterEach(() => {
@@ -226,4 +228,14 @@ it.each([0, 2000000])('overwrites cached and cross-block windows with budget %s'
   } finally {
     await spool.close()
   }
+})
+
+it('counts what it holds in memory against max_memory when it has nowhere to spill', async () => {
+  const spool = new ByteSpool(4)
+  const budget = new MemoryBudget(10, () => 0)
+  await runWithMemory(budget, async () => {
+    await spool.append(new Uint8Array(8))
+    await expect(spool.append(new Uint8Array(4))).rejects.toBeInstanceOf(MemoryExhausted)
+  })
+  await spool.close()
 })

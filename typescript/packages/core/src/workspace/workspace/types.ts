@@ -21,6 +21,7 @@ import type { ByteSource } from '../../io/types.ts'
 import type { ObserverStore } from '../../observe/store.ts'
 import type { AskHandler, Policy } from '../../policy/index.ts'
 import type { SessionProfile } from '../../policy/profile.ts'
+import type { ProcessesBlock } from '../../process/config.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import type { RouteRule } from '../../runtime/routing/index.ts'
@@ -29,7 +30,15 @@ import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { JobConsole, Terminal } from '../../shell/console/index.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
-import type { DriftPolicy, Limit, MountMode, ReadSpec, Refusal, WritePolicy } from '../../types.ts'
+import type {
+  Ceilings,
+  DriftPolicy,
+  Limit,
+  MountMode,
+  ReadSpec,
+  Refusal,
+  WritePolicy,
+} from '../../types.ts'
 import type { Clock } from '../../utils/clock.ts'
 import type { IdSource } from '../../utils/ids.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
@@ -88,6 +97,12 @@ export interface WorkspaceOptions {
    */
   maxMemory?: string | number | null
   maxBodyBytes?: string | number | null
+  /**
+   * What each session's variables, functions and aliases may hold, a size
+   * like `1MB` or a count of bytes; null runs uncapped. Defaults to
+   * `MAX_ENV`.
+   */
+  maxEnv?: string | number | null
   /**
    * Where the workspace's connections may go: true for anywhere, false for
    * nowhere, or `{ allow: [...] }` hosts, `*.` suffixes, addresses and CIDR
@@ -165,6 +180,19 @@ export interface WorkspaceOptions {
    * session included. A name this document does not define is an error.
    */
   profile?: string | null
+  /**
+   * The workspace's `processes`: whose processes a session sees and stops,
+   * and how many it holds. Each profile's block overrides it field by
+   * field; unstated, a session holds at most `MAX_PROCESSES`.
+   */
+  processes?: ProcessesBlock | null
+  /**
+   * The host's ceilings: the most this workspace's `max_memory`, any
+   * session's `processes.max` and a line's time limit reach, whatever its
+   * config, profiles or snapshot set. A server passes its own to every
+   * workspace it builds.
+   */
+  ceilings?: Ceilings | null
   /**
    * Admission policies registered after the document's deny rules.
    * Code only: each defines the lifecycle methods it cares about; on a
