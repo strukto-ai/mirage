@@ -13,6 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 # How often a streamed write shows what has arrived so far: a reader sees a
-# slow writer's file grow, and a fast one copies the bytes a few times at
-# most, since the store keeps each file whole.
+# slow writer's file grow. The store keeps each file whole, so each showing
+# copies the file; past PUBLISH_BYTES the wait grows with the file, so a long
+# write copies about PUBLISH_BYTES a wait rather than its size squared.
 STREAM_PUBLISH_SECONDS = 0.1
+PUBLISH_BYTES = 16 * 1024 * 1024
