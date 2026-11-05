@@ -70,6 +70,10 @@ async def pipeline() -> tuple[int, bytes]:
 
 def main() -> None:
     checks = {
+        "file signature": (
+            run("file", {}, b"%P", b"DF-1.4"),
+            b"application/pdf",
+        ),
         "base64 encode": (
             run("base64", {"mode": "encode", "wrap": 76}, b"hel", b"lo"),
             b"aGVsbG8=\n",

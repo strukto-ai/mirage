@@ -12,8 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ContentType } from '../../types.ts'
-
 export enum PatternType {
   EXACT = 'exact',
   SIMPLE = 'simple',
@@ -26,32 +24,6 @@ export const MIME_SYMLINK = 'inode/symlink; charset=binary'
 
 // How much of a file `file` sniffs: only its first bytes are read.
 export const FILE_HEADER_BYTES = 512
-
-// The leading bytes `file` recognizes a format by, checked in order.
-export const MAGIC_SIGNATURES: readonly (readonly [readonly number[], ContentType])[] = [
-  [[0x89, 0x50, 0x4e, 0x47], ContentType.IMAGE_PNG],
-  [[0xff, 0xd8, 0xff], ContentType.IMAGE_JPEG],
-  [[0x47, 0x49, 0x46, 0x38], ContentType.IMAGE_GIF],
-  [[0x50, 0x4b, 0x03, 0x04], ContentType.ZIP],
-  [[0x1f, 0x8b], ContentType.GZIP],
-  [[0x25, 0x50, 0x44, 0x46], ContentType.PDF],
-  [[0x7b, 0x0a], ContentType.JSON],
-  [[0x5b, 0x7b], ContentType.JSON],
-]
-
-export const FILE_MIME_MAP: Readonly<Record<string, string>> = Object.freeze({
-  text: 'text/plain; charset=us-ascii',
-  json: 'application/json; charset=us-ascii',
-  csv: 'text/csv; charset=us-ascii',
-  directory: 'inode/directory',
-  binary: 'application/octet-stream',
-  'image/png': 'image/png',
-  'image/jpeg': 'image/jpeg',
-  'image/gif': 'image/gif',
-  'application/zip': 'application/zip',
-  'application/gzip': 'application/gzip',
-  'application/pdf': 'application/pdf',
-})
 
 // od, split and cmp all skip leading whitespace in a count and allow one '+'
 // before the digits, so `-b +10` and `-b " 10"` are valid while `+ 10`,
