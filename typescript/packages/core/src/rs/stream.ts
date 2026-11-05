@@ -77,15 +77,22 @@ function retire(exports: Exports, trapped: boolean): void {
   movables.delete(exports)
 }
 
+function moduleSource(
+  source: string | WebAssembly.Module | (() => WebAssembly.Module),
+): string | WebAssembly.Module {
+  if (typeof source === 'string' || source instanceof WebAssembly.Module) return source
+  return source()
+}
+
 /**
  * The compiled module, for the page to hand the workers it starts without a
  * copy. `#mirage-rs-wasm` is the module itself where the host's bundler loads
  * `.wasm` files (the `workerd` condition: no code is compiled at run time)
- * or the host reads it from beside the package (`node`), and its bytes as
+ * or a function that reads it on first use (`node`), and its bytes as
  * base64 everywhere else.
  */
 export function compiledModule(): Promise<WebAssembly.Module> {
-  const source: string | WebAssembly.Module = MIRAGE_RS_WASM
+  const source = moduleSource(MIRAGE_RS_WASM)
   compiled ??=
     typeof source === 'string'
       ? WebAssembly.compile(decodeBase64(source) as BufferSource)
@@ -95,7 +102,7 @@ export function compiledModule(): Promise<WebAssembly.Module> {
 
 /** The compiled module, compiled now if no one has yet, for a caller that cannot wait. */
 export function moduleSync(): WebAssembly.Module {
-  const source: string | WebAssembly.Module = MIRAGE_RS_WASM
+  const source = moduleSource(MIRAGE_RS_WASM)
   compiledSync ??=
     typeof source === 'string'
       ? new WebAssembly.Module(decodeBase64(source) as BufferSource)

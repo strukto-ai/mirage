@@ -652,9 +652,6 @@ importers:
       redis:
         specifier: ^5.0.0
         version: 5.12.1(@opentelemetry/api@1.10.0)
-      sha.js:
-        specifier: ^2.4.12
-        version: 2.4.12
       zod:
         specifier: ^4.6.6
         version: 4.6.7
@@ -677,9 +674,6 @@ importers:
       '@types/pg':
         specifier: ^8.11.0
         version: 8.20.0
-      '@types/sha.js':
-        specifier: ^2.4.4
-        version: 2.4.4
       chromadb:
         specifier: ^3.4.3
         version: 3.4.3
@@ -3836,9 +3830,6 @@ packages:
 
   '@types/retry@0.12.0':
     resolution: {integrity: sha512-wWKOClTTiizcZhXnPY4wikVAwmdYHp8q6DmC+EJUzAMsycb7HB32Kh9RN4+0gExjmPmZSAQjgURXIGATPegAvA==}
-
-  '@types/sha.js@2.4.4':
-    resolution: {integrity: sha512-Qukd+D6S2Hm0wLVt2Vh+/eWBIoUt+wF8jWjBsG4F8EFQRwKtYvtXCPcNl2OEUQ1R+eTr3xuSaBYUyM3WD1x/Qw==}
 
   '@types/sinon@17.0.4':
     resolution: {integrity: sha512-RHnIrhfPO3+tJT0s7cFaXGZvsL4bbR3/k7z3P312qMS4JaS2Tk+KiwiLx1S0rQ56ERj00u1/BtdyVd0FY+Pdew==}
@@ -10394,10 +10385,6 @@ snapshots:
   '@types/picomatch@4.0.3': {}
 
   '@types/retry@0.12.0': {}
-
-  '@types/sha.js@2.4.4':
-    dependencies:
-      '@types/node': 22.19.17
 
   '@types/sinon@17.0.4':
     dependencies:

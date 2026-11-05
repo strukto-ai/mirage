@@ -365,11 +365,6 @@ describe('the gdrive read record', () => {
   })
 
   it('does not block the event loop while hashing', async () => {
-    // md5Hex is a synchronous pure-JS MD5 -- WebCrypto has no MD5 and core
-    // cannot import node:crypto -- so hashing a large read in one go stalls
-    // the loop that serves a TS FUSE mount, and the kernel then fails every
-    // later op with `Device not configured`. Big enough to span several
-    // chunks, small enough to stay fast.
     const BIG = new Uint8Array(4 * 1024 * 1024).fill(7)
     drive.downloadFile.mockResolvedValue(BIG)
     drive.captureFileMetadata.mockResolvedValue([md5Hex(BIG), REVISION])

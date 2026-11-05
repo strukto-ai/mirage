@@ -23,7 +23,7 @@ import {
 } from '../../observe/context.ts'
 import type { DriveApi } from './api.ts'
 import { NATIVE_RESOURCE_TYPES, driveFingerprint } from './fingerprint.ts'
-import { Md5, md5HexAsync } from '../../utils/hash.ts'
+import { Digest, md5HexAsync } from '../../utils/hash.ts'
 import { eisdir, enoent } from '../../errors/fs.ts'
 import { sliceWindow, windowFor } from '../../utils/ranges.ts'
 
@@ -165,20 +165,24 @@ export async function* readStream(
     if (rec !== null) [md5, revision] = await drive.captureFileMetadata(fileId)
     chunks = drive.downloadFileStream(fileId)
   }
-  const digest = md5 !== null && md5 !== '' ? new Md5() : null
-  for await (const chunk of chunks) {
-    digest?.update(chunk)
-    if (rec !== null) rec.bytes += chunk.byteLength
-    yield chunk
+  const digest = md5 !== null && md5 !== '' ? new Digest('md5') : null
+  try {
+    for await (const chunk of chunks) {
+      digest?.update(chunk)
+      if (rec !== null) rec.bytes += chunk.byteLength
+      yield chunk
+    }
+    if (rec !== null) rec.complete = true
+    if (rec === null || pinned !== null) return
+    if (digest !== null && digest.digest() !== md5) return
+    rec.revision = revision
+    rec.fingerprint = driveFingerprint(
+      found.extra.resource_type as string,
+      md5,
+      revision,
+      found.modified,
+    )
+  } finally {
+    digest?.close()
   }
-  if (rec !== null) rec.complete = true
-  if (rec === null || pinned !== null) return
-  if (digest !== null && digest.digest() !== md5) return
-  rec.revision = revision
-  rec.fingerprint = driveFingerprint(
-    found.extra.resource_type as string,
-    md5,
-    revision,
-    found.modified,
-  )
 }

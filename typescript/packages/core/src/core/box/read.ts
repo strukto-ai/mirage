@@ -17,7 +17,7 @@ import { publishRead, writesConditioned } from '../../cache/context.ts'
 import type { BoxAccessor } from '../../accessor/box.ts'
 import { record, recordStream, startOp } from '../../observe/context.ts'
 import { type FileStat, type PathSpec } from '../../types.ts'
-import { Sha1, sha1Hex } from '../../utils/hash.ts'
+import { Digest, sha1Hex } from '../../utils/hash.ts'
 import { downloadFile, downloadFileStream } from './api.ts'
 import { entryToken, readToken } from './fingerprint.ts'
 import { windowFor } from '../../utils/ranges.ts'
@@ -46,8 +46,8 @@ export async function read(
   // Only a whole read through a row with a sha1 can yield a token, so nothing
   // else is hashed. The token never depends on a recorder being bound
   // (read_revalidatable.test.ts holds each declarer to it). A whole buffer
-  // prefers WebCrypto's native SHA-1, falling back to incremental Sha1
-  // when unavailable. Streams use incremental Sha1 without buffering.
+  // prefers WebCrypto's native SHA-1, falling back to the shared digest
+  // when unavailable. Streams hash incrementally without buffering.
   const hashable = window === undefined && entryToken(found) !== null
   const digest = hashable ? await sha1Hex(data) : null
   let fingerprint: string | null = null
@@ -79,19 +79,23 @@ export async function* readStream(
   const found = fileEntry(path, entry)
   const rec = recordStream('read', path.virtual, 'box')
   const conditioned = writesConditioned(path)
-  const digest = rec !== null && entryToken(found) !== null ? new Sha1() : null
-  for await (const chunk of downloadFileStream(
-    accessor.tokenManager,
-    found.extra.box_id as string,
-  )) {
-    digest?.update(chunk)
-    if (rec !== null) rec.bytes += chunk.byteLength
-    yield chunk
-  }
-  if (rec !== null && digest !== null) {
-    const token = digest.digest()
-    rec.fingerprint = conditioned ? token : readToken(found, token)
-  }
+  const digest = rec !== null && entryToken(found) !== null ? new Digest('sha1') : null
+  try {
+    for await (const chunk of downloadFileStream(
+      accessor.tokenManager,
+      found.extra.box_id as string,
+    )) {
+      digest?.update(chunk)
+      if (rec !== null) rec.bytes += chunk.byteLength
+      yield chunk
+    }
+    if (rec !== null && digest !== null) {
+      const token = digest.digest()
+      rec.fingerprint = conditioned ? token : readToken(found, token)
+    }
 
-  if (rec !== null) rec.complete = true
+    if (rec !== null) rec.complete = true
+  } finally {
+    digest?.close()
+  }
 }

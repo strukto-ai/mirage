@@ -30,7 +30,7 @@ vi.mock('../../utils/hash.ts', async () => {
 import { BoxAccessor } from '../../accessor/box.ts'
 import { runWithRecording } from '../../observe/context.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { Sha1, sha1Hex } from '../../utils/hash.ts'
+import { Digest, sha1Hex } from '../../utils/hash.ts'
 import * as api from './api.ts'
 import type { BoxTokenManager } from './client.ts'
 import { read, readStream } from './read.ts'
@@ -141,7 +141,7 @@ describe('box read stamps', () => {
   })
 
   it('reads through a sha1-less entry stamp and hash nothing', async () => {
-    const update = vi.spyOn(Sha1.prototype, 'update')
+    const update = vi.spyOn(Digest.prototype, 'update')
     vi.mocked(sha1Hex).mockClear()
     const row = listed(null)
     const [got, rows] = await recordedRead(row, DATA)
@@ -157,7 +157,7 @@ describe('box read stamps', () => {
 
 describe('box stream stamps', () => {
   it('a drained stream stamps the listed sha1, hashing each chunk as it passes', async () => {
-    const update = vi.spyOn(Sha1.prototype, 'update')
+    const update = vi.spyOn(Digest.prototype, 'update')
     const chunks = [DATA.subarray(0, 1), DATA.subarray(1, 64), DATA.subarray(64)]
     const [got, rows] = await recordedStream(listed(sha1(DATA)), chunks)
     expect(Buffer.concat(got)).toEqual(Buffer.from(DATA))
@@ -188,7 +188,7 @@ describe('box stream stamps', () => {
     vi.mocked(api.downloadFile).mockResolvedValue(DATA)
     expect(await read(makeAccessor(), PATH, undefined, row)).toEqual(DATA)
     // Only whole reads publish a token without an observer.
-    const update = vi.spyOn(Sha1.prototype, 'update')
+    const update = vi.spyOn(Digest.prototype, 'update')
     chunked(DATA)
     const out: Uint8Array[] = []
     for await (const c of readStream(makeAccessor(), PATH, row)) out.push(c)
