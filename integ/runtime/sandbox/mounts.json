@@ -204,6 +204,7 @@
     },
     {
       "id": "mount_type_ssh_runs_no_line_over_a_mount_the_box_lost",
+      "sdk_only": "The case moves /restart's mount away in the one shared docker box; the CLI lanes of both hosts run beside the SDK drivers on that box, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
       "runtimes": [
         "docker"
       ],
