@@ -205,19 +205,18 @@ impl Record {
             if *work == 0 {
                 return Ok(false);
             }
-            let text = if let Some((selected, text)) = &self.selected
-                && *selected == *index + 1
-            {
-                text.clone()
-            } else {
-                let view = self.view.get_or_insert_with(|| {
-                    View::new(self.text.clone(), self.ranges[*index].clone())
-                });
-                match view.step(work) {
-                    SearchStep::Paused => return Ok(false),
-                    SearchStep::Done(text) => {
-                        self.view = None;
-                        text
+            let text = match &self.selected {
+                Some((selected, text)) if *selected == *index + 1 => text.clone(),
+                _ => {
+                    let view = self.view.get_or_insert_with(|| {
+                        View::new(self.text.clone(), self.ranges[*index].clone())
+                    });
+                    match view.step(work) {
+                        SearchStep::Paused => return Ok(false),
+                        SearchStep::Done(text) => {
+                            self.view = None;
+                            text
+                        }
                     }
                 }
             };
