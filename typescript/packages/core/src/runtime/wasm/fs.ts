@@ -48,9 +48,73 @@ const DEC = new TextDecoder()
 type FdKind = 'stdin' | 'stdout' | 'stderr' | 'dir' | 'file'
 
 /**
+ * What a host call gives the guest: the answer itself where the guest
+ * blocks on a worker's bridge, or its promise where the guest runs in the
+ * host's own isolate and JSPI suspends its wasm stack until it settles.
+ */
+export type Answer<T> = T | PromiseLike<T>
+
+/** The steps of a call that reaches the host: each answer it waits on is yielded. */
+export type Calls<T> = Generator<unknown, T, unknown>
+
+/** One host answer, as the call's driver hands it back. */
+function* answer<T>(value: Answer<T>): Calls<T> {
+  return (yield value) as T
+}
+
+const thenable = (value: unknown): value is PromiseLike<unknown> =>
+  typeof (value as { then?: unknown } | null)?.then === 'function'
+
+/**
+ * Run a call's steps: at once while each answer is at hand, as a worker's
+ * blocking calls give them, and from the first promise on by awaiting
+ * each, as a guest that JSPI suspends waits for its host.
+ *
+ * @param calls - the call's steps.
+ */
+export function drive<T>(calls: Calls<T>): T | Promise<T> {
+  let step = calls.next()
+  while (step.done !== true) {
+    if (thenable(step.value)) return resume(calls, step.value)
+    step = calls.next(step.value)
+  }
+  return step.value
+}
+
+async function resume<T>(calls: Calls<T>, first: PromiseLike<unknown>): Promise<T> {
+  let waiting = first
+  for (;;) {
+    const [settled, value] = await waiting.then(
+      (result) => [true, result] as const,
+      (error: unknown) => [false, error] as const,
+    )
+    let step = settled ? calls.next(value) : calls.throw(value)
+    for (;;) {
+      if (step.done === true) return step.value
+      const next = step.value
+      if (thenable(next)) {
+        waiting = next
+        break
+      }
+      step = calls.next(next)
+    }
+  }
+}
+
+/**
+ * Run a call's steps whose answers are all at hand, as a worker's are.
+ *
+ * @param calls - the call's steps.
+ */
+export function settle<T>(calls: Calls<T>): T {
+  const result = drive(calls)
+  if (thenable(result)) throw new Error('a blocking host call answered with a promise')
+  return result
+}
+
+/**
  * One open file the run's view handed out, answered by the host: the
- * guest's twin of the `Descriptor` it holds there, each call made
- * synchronously across the bridge.
+ * guest's twin of the `Descriptor` it holds there.
  */
 export interface GuestFile {
   readonly mode: OpenMode
@@ -59,38 +123,38 @@ export interface GuestFile {
   /** Where the links on `opened` led as it opened, which names its inode. */
   readonly inode: string
   /** The path its file has now; a rename moves it. */
-  path(): string
-  position(): number
-  size(): number
-  read(size: number): Uint8Array
-  pread(offset: number, size: number): Uint8Array
-  write(data: Uint8Array): void
-  pwrite(offset: number, data: Uint8Array): void
-  seek(offset: number, whence: number): number | null
-  truncate(size: number): void
-  land(): void
-  close(): void
+  path(): Answer<string>
+  position(): Answer<number>
+  size(): Answer<number>
+  read(size: number): Answer<Uint8Array>
+  pread(offset: number, size: number): Answer<Uint8Array>
+  write(data: Uint8Array): Answer<void>
+  pwrite(offset: number, data: Uint8Array): Answer<void>
+  seek(offset: number, whence: number): Answer<number | null>
+  truncate(size: number): Answer<void>
+  land(): Answer<void>
+  close(): Answer<void>
   /** The core's row for it, the size it holds counted. */
-  fstat(): VFSStat
+  fstat(): Answer<VFSStat>
   /** Whether the name its file had went, so the file has no link left. */
-  unlinked(): boolean
+  unlinked(): Answer<boolean>
 }
 
-/** The run's `WasmView`, answered synchronously across the bridge. */
+/** The run's `WasmView`, as the host answers it. */
 export interface GuestView {
-  stat(path: string): VFSStat
-  lstat(path: string): VFSStat
-  statOrNull(path: string, nofollow?: boolean): VFSStat | null
-  open(path: string, mode: OpenMode): GuestFile
-  unlink(path: string): void
-  mkdir(path: string): void
-  rmdir(path: string): void
-  rename(src: string, dst: string): void
-  symlink(path: string, target: string): void
-  walked(path: string, follow?: boolean): string
-  readlink(path: string): string
-  setattr(path: string, atime: string | null, mtime: string | null, nofollow: boolean): void
-  readdir(path: string): [string, number][]
+  stat(path: string): Answer<VFSStat>
+  lstat(path: string): Answer<VFSStat>
+  statOrNull(path: string, nofollow?: boolean): Answer<VFSStat | null>
+  open(path: string, mode: OpenMode): Answer<GuestFile>
+  unlink(path: string): Answer<void>
+  mkdir(path: string): Answer<void>
+  rmdir(path: string): Answer<void>
+  rename(src: string, dst: string): Answer<void>
+  symlink(path: string, target: string): Answer<void>
+  walked(path: string, follow?: boolean): Answer<string>
+  readlink(path: string): Answer<string>
+  setattr(path: string, atime: string | null, mtime: string | null, nofollow: boolean): Answer<void>
+  readdir(path: string): Answer<[string, number][]>
 }
 
 /** What ends a guest from inside a host call: `proc_exit`, or a stop met
@@ -146,7 +210,7 @@ class FdEntry {
   constructor(
     readonly kind: FdKind,
     public file: GuestFile | null = null,
-    readonly pipe: ((size: number) => Uint8Array) | null = null,
+    readonly pipe: ((size: number) => Answer<Uint8Array>) | null = null,
     readonly path = '',
     readonly preopen = false,
     public dirents: [string, number][] | null = null,
@@ -155,24 +219,24 @@ class FdEntry {
   ) {}
 
   /** Read from the position, advancing it. */
-  read(size: number): Uint8Array {
+  read(size: number): Answer<Uint8Array> {
     if (this.file !== null) return this.file.read(size)
     if (this.pipe !== null) return size > 0 ? this.pipe(size) : new Uint8Array()
     return new Uint8Array()
   }
 
   /** Read at an explicit offset without moving the position. */
-  pread(offset: number, size: number): Uint8Array {
+  pread(offset: number, size: number): Answer<Uint8Array> {
     return this.file === null ? new Uint8Array() : this.file.pread(offset, size)
   }
 
   /** Where the next read or write lands. */
-  position(): number {
+  position(): Answer<number> {
     return this.file === null ? 0 : this.file.position()
   }
 
   /** The file's length, what was written and not landed counted. */
-  size(): number {
+  size(): Answer<number> {
     return this.file === null ? 0 : this.file.size()
   }
 }
@@ -183,7 +247,9 @@ class FdEntry {
  * keeps each open file's writes on the host until its close (or the
  * guest's exit), and translates the preview1 ABI (iovecs, filestats,
  * dirents) for the view. Mirrors Python's `WasiFs`, the args, environment
- * and clock calls included, which wasmtime serves natively there.
+ * and clock calls included, which wasmtime serves natively there. A call
+ * that reaches the host is its steps (`Calls`), so one table serves a
+ * guest that blocks on a worker and one that JSPI suspends (`drive`).
  *
  * @param fs - the files the guest sees.
  * @param stdin - reads the guest's input as a pipe does; null gives it none.
@@ -201,9 +267,9 @@ export class WasiFs {
 
   constructor(
     private readonly fs: GuestView,
-    stdin: ((size: number) => Uint8Array) | null,
-    private readonly output: (fd: 1 | 2, bytes: Uint8Array) => boolean,
-    private readonly wait: (ms: number) => boolean,
+    stdin: ((size: number) => Answer<Uint8Array>) | null,
+    private readonly output: (fd: 1 | 2, bytes: Uint8Array) => Answer<boolean>,
+    private readonly wait: (ms: number) => Answer<boolean>,
     private readonly argv: readonly string[],
     private readonly env: readonly string[],
     // Seconds the guest's wall clock runs ahead of the host's: the
@@ -251,7 +317,7 @@ export class WasiFs {
     return out
   }
 
-  private pathArg(dirfd: number, ptr: number, length: number): string | null {
+  private *pathArg(dirfd: number, ptr: number, length: number): Calls<string | null> {
     const entry = this.fds.get(dirfd)
     if (entry?.kind !== 'dir') return null
     const rel = DEC.decode(this.load(ptr, length))
@@ -261,13 +327,13 @@ export class WasiFs {
     for (const [index, part] of parts.entries()) {
       if ((part === '.' || part === '..') && index > 1) {
         const ancestor = parts.slice(0, index).join('/')
-        if (!this.fs.stat(ancestor).isDir) throw enotdir(ancestor)
+        if (!(yield* answer(this.fs.stat(ancestor))).isDir) throw enotdir(ancestor)
       }
     }
     const trailing = joined.endsWith('/') || joined.endsWith('/.')
-    const normed = posixNormpath(this.fs.walked(joined, false))
+    const normed = posixNormpath(yield* answer(this.fs.walked(joined, false)))
     if (trailing && normed !== '/') {
-      const row = this.fs.statOrNull(normed)
+      const row = yield* answer(this.fs.statOrNull(normed))
       if (row !== null && !row.isDir) throw enotdir(joined)
     }
     const lexical = posixNormpath(joined)
@@ -363,7 +429,7 @@ export class WasiFs {
     return OK
   }
 
-  poll_oneoff(incoming: number, outgoing: number, count: number, nevents: number): number {
+  *poll_oneoff(incoming: number, outgoing: number, count: number, nevents: number): Calls<number> {
     if (count <= 0) return EINVAL
     const subscriptions = new DataView(this.load(incoming, count * 48).buffer)
     const now = clockNs(1)
@@ -388,7 +454,10 @@ export class WasiFs {
         if (entry === undefined || entry.kind === 'dir') error = EBADF
         else if (kind === 1) {
           if ((entry.file === null && entry.pipe === null) || !entry.readable) error = EBADF
-          else nbytes = Math.max(0, entry.size() - entry.position())
+          else {
+            const size = yield* answer(entry.size())
+            nbytes = Math.max(0, size - (yield* answer(entry.position())))
+          }
         } else if (
           entry.kind === 'stdin' ||
           (entry.kind === 'file' && entry.file?.mode.writable !== true)
@@ -405,7 +474,7 @@ export class WasiFs {
     }
     const soonest = events.reduce((least, [at]) => (at < least ? at : least), events[0]?.[0] ?? now)
     const delay = soonest - clockNs(1)
-    if (this.wait(delay > 0n ? Number(delay / 1_000_000n) : 0)) {
+    if (yield* answer(this.wait(delay > 0n ? Number(delay / 1_000_000n) : 0))) {
       this.exitCode = INTERRUPTED_STATUS
       throw new GuestExit(INTERRUPTED_STATUS)
     }
@@ -438,7 +507,7 @@ export class WasiFs {
 
   // -- open/close ---------------------------------------------------------
 
-  path_open(
+  *path_open(
     dirfd: number,
     dirflags: number,
     ptr: number,
@@ -448,15 +517,15 @@ export class WasiFs {
     _rightsInherit: bigint,
     fdflags: number,
     out: number,
-  ): number {
-    const path = this.pathArg(dirfd, ptr, length)
+  ): Calls<number> {
+    const path = yield* this.pathArg(dirfd, ptr, length)
     if (path === null) return EBADF
     if ((dirflags & LOOKUP_SYMLINK_FOLLOW) === 0) {
-      const row = this.fs.statOrNull(path, true)
+      const row = yield* answer(this.fs.statOrNull(path, true))
       if (row?.isLink === true) return ELOOP
     }
     if ((oflags & OFLAG_DIRECTORY) !== 0) {
-      const st = this.fs.statOrNull(path)
+      const st = yield* answer(this.fs.statOrNull(path))
       if (st === null) return ENOENT
       if (!st.isDir) return ENOTDIR
       return this.openDir(path, out)
@@ -464,7 +533,7 @@ export class WasiFs {
     const mode = openMode(oflags, rightsBase, fdflags)
     let file: GuestFile
     try {
-      file = this.fs.open(path, mode)
+      file = yield* answer(this.fs.open(path, mode))
     } catch (err) {
       // POSIX opens a directory read-only without O_DIRECTORY too; only a
       // mode that would write refuses it.
@@ -481,11 +550,11 @@ export class WasiFs {
     return OK
   }
 
-  fd_close(fd: number): number {
+  *fd_close(fd: number): Calls<number> {
     const entry = this.fds.get(fd)
     if (entry === undefined || entry.preopen) return EBADF
     this.fds.pop(fd)
-    entry.file?.close()
+    if (entry.file !== null) yield* answer(entry.file.close())
     return OK
   }
 
@@ -497,14 +566,14 @@ export class WasiFs {
    *
    * @returns one line per file whose writes could not land.
    */
-  closeAll(): string[] {
+  *closeAll(): Calls<string[]> {
     const failures: string[] = []
     for (const entry of this.fds.values()) {
       const file = entry.file
       entry.file = null
       if (file === null) continue
       try {
-        file.close()
+        yield* answer(file.close())
       } catch (err) {
         failures.push(`${entry.opened}: ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -512,11 +581,11 @@ export class WasiFs {
     return failures
   }
 
-  fd_renumber(fd: number, to: number): number {
+  *fd_renumber(fd: number, to: number): Calls<number> {
     const entry = this.fds.get(fd)
     if (entry === undefined) return EBADF
     if (fd === to) return OK
-    this.fd_close(to)
+    yield* this.fd_close(to)
     this.fds.pop(fd)
     this.fds.set(to, entry)
     return OK
@@ -536,36 +605,38 @@ export class WasiFs {
     return OK
   }
 
-  fd_read(fd: number, iovs: number, count: number, nread: number): number {
+  *fd_read(fd: number, iovs: number, count: number, nread: number): Calls<number> {
     const entry = this.readableEntry(fd)
     if (entry === null) return EBADF
     const vectors = this.iovs(iovs, count)
-    const data = entry.read(vectors.reduce((sum, [, length]) => sum + length, 0))
+    const data = yield* answer(entry.read(vectors.reduce((sum, [, length]) => sum + length, 0)))
     return this.scatter(vectors, data, nread)
   }
 
-  fd_pread(fd: number, iovs: number, count: number, offset: bigint, nread: number): number {
+  *fd_pread(fd: number, iovs: number, count: number, offset: bigint, nread: number): Calls<number> {
     const entry = this.readableEntry(fd)
     if (entry?.kind !== 'file') return EBADF
     const vectors = this.iovs(iovs, count)
-    const data = entry.pread(
-      Number(offset),
-      vectors.reduce((sum, [, length]) => sum + length, 0),
+    const data = yield* answer(
+      entry.pread(
+        Number(offset),
+        vectors.reduce((sum, [, length]) => sum + length, 0),
+      ),
     )
     return this.scatter(vectors, data, nread)
   }
 
-  fd_write(fd: number, iovs: number, count: number, nwritten: number): number {
+  *fd_write(fd: number, iovs: number, count: number, nwritten: number): Calls<number> {
     const entry = this.fds.get(fd)
     if (entry === undefined) return EBADF
     let total = 0
     for (const [bptr, blen] of this.iovs(iovs, count)) {
       const data = this.load(bptr, blen)
       if (entry.kind === 'stdout' || entry.kind === 'stderr') {
-        if (!this.output(entry.kind === 'stdout' ? 1 : 2, data)) return EPIPE
+        if (!(yield* answer(this.output(entry.kind === 'stdout' ? 1 : 2, data)))) return EPIPE
       } else if (entry.kind === 'file') {
         if (entry.file?.mode.writable !== true) return EBADF
-        entry.file.write(data)
+        yield* answer(entry.file.write(data))
       } else return EINVAL
       total += blen
     }
@@ -573,12 +644,18 @@ export class WasiFs {
     return OK
   }
 
-  fd_pwrite(fd: number, iovs: number, count: number, offset: bigint, nwritten: number): number {
+  *fd_pwrite(
+    fd: number,
+    iovs: number,
+    count: number,
+    offset: bigint,
+    nwritten: number,
+  ): Calls<number> {
     const file = this.writer(fd)
     if (file === null) return EBADF
     let [total, pos] = [0, Number(offset)]
     for (const [bptr, blen] of this.iovs(iovs, count)) {
-      file.pwrite(pos, this.load(bptr, blen))
+      yield* answer(file.pwrite(pos, this.load(bptr, blen)))
       pos += blen
       total += blen
     }
@@ -586,22 +663,22 @@ export class WasiFs {
     return OK
   }
 
-  fd_seek(fd: number, offset: bigint, whence: number, out: number): number {
+  *fd_seek(fd: number, offset: bigint, whence: number, out: number): Calls<number> {
     if (fd === 0 || fd === 1 || fd === 2) return ESPIPE
     const entry = this.fds.get(fd)
     if (entry?.kind !== 'file' || entry.file === null) return EBADF
     // preview1's WHENCE_* numbering is POSIX's 0/1/2, which seek speaks.
-    const pos = entry.file.seek(Number(offset), whence)
+    const pos = yield* answer(entry.file.seek(Number(offset), whence))
     if (pos === null) return EINVAL
     this.storeU64(out, BigInt(pos))
     return OK
   }
 
-  fd_tell(fd: number, out: number): number {
+  *fd_tell(fd: number, out: number): Calls<number> {
     if (fd === 0 || fd === 1 || fd === 2) return ESPIPE
     const entry = this.fds.get(fd)
     if (entry?.kind !== 'file') return EBADF
-    this.storeU64(out, BigInt(entry.position()))
+    this.storeU64(out, BigInt(yield* answer(entry.position())))
     return OK
   }
 
@@ -615,17 +692,19 @@ export class WasiFs {
     return OK
   }
 
-  fd_filestat_get(fd: number, buf: number): number {
+  *fd_filestat_get(fd: number, buf: number): Calls<number> {
     const entry = this.fds.get(fd)
     if (entry === undefined) return EBADF
     let packed: Uint8Array
     if (entry.kind === 'file' && entry.file !== null) {
       // The core's row, its size the handle's, which counts what it wrote
       // and has not landed.
-      const posix = posixStat(entry.file.fstat(), entry.file.inode, '/')
-      packed = packFilestat(entry.file.unlinked() ? { ...posix, nlink: 0 } : posix, FT_REG)
+      const posix = posixStat(yield* answer(entry.file.fstat()), entry.file.inode, '/')
+      const unlinked = yield* answer(entry.file.unlinked())
+      packed = packFilestat(unlinked ? { ...posix, nlink: 0 } : posix, FT_REG)
     } else if (entry.kind === 'dir') {
-      packed = packFilestat(posixStat(this.fs.stat(entry.path), entry.path, '/'), FT_DIR)
+      const row = yield* answer(this.fs.stat(entry.path))
+      packed = packFilestat(posixStat(row, entry.path, '/'), FT_DIR)
     } else {
       const stream: VFSStat = { size: 0, isDir: false, mode: CHAR_MODE }
       packed = packFilestat(posixStat(stream, `/dev/fd/${String(fd)}`, '/'), FT_CHR)
@@ -634,37 +713,43 @@ export class WasiFs {
     return OK
   }
 
-  path_filestat_get(
+  *path_filestat_get(
     dirfd: number,
     flags: number,
     ptr: number,
     length: number,
     buf: number,
-  ): number {
-    const path = this.pathArg(dirfd, ptr, length)
+  ): Calls<number> {
+    const path = yield* this.pathArg(dirfd, ptr, length)
     if (path === null) return EBADF
     // The follow bit is how a guest spells stat versus lstat, so it is read
     // rather than ignored.
     const follow = (flags & LOOKUP_SYMLINK_FOLLOW) !== 0 || path.endsWith('/')
-    const st = follow ? this.fs.stat(path) : this.fs.lstat(path)
+    const st = yield* answer(follow ? this.fs.stat(path) : this.fs.lstat(path))
     if (path.endsWith('/') && !st.isDir) return ENOTDIR
     this.store(buf, packFilestat(posixStat(st, path, '/'), filetypeOf(st)))
     return OK
   }
 
-  fd_filestat_set_size(fd: number, size: bigint): number {
+  *fd_filestat_set_size(fd: number, size: bigint): Calls<number> {
     const file = this.writer(fd)
     if (file === null) return EBADF
-    file.truncate(Number(size))
+    yield* answer(file.truncate(Number(size)))
     return OK
   }
 
   // -- readdir ------------------------------------------------------------
 
-  fd_readdir(fd: number, buf: number, bufLen: number, cookie: bigint, used: number): number {
+  *fd_readdir(
+    fd: number,
+    buf: number,
+    bufLen: number,
+    cookie: bigint,
+    used: number,
+  ): Calls<number> {
     const entry = this.fds.get(fd)
     if (entry?.kind !== 'dir') return EBADF
-    entry.dirents ??= this.fs.readdir(entry.path)
+    entry.dirents ??= yield* answer(this.fs.readdir(entry.path))
     const out: Uint8Array[] = []
     let filled = 0
     for (let i = Number(cookie); i < entry.dirents.length && filled < bufLen; i++) {
@@ -686,39 +771,39 @@ export class WasiFs {
 
   // -- fs mutation --------------------------------------------------------
 
-  path_unlink_file(dirfd: number, ptr: number, length: number): number {
-    const path = this.pathArg(dirfd, ptr, length)
+  *path_unlink_file(dirfd: number, ptr: number, length: number): Calls<number> {
+    const path = yield* this.pathArg(dirfd, ptr, length)
     if (path === null) return EBADF
-    this.fs.unlink(path)
+    yield* answer(this.fs.unlink(path))
     return OK
   }
 
-  path_create_directory(dirfd: number, ptr: number, length: number): number {
-    const path = this.pathArg(dirfd, ptr, length)
+  *path_create_directory(dirfd: number, ptr: number, length: number): Calls<number> {
+    const path = yield* this.pathArg(dirfd, ptr, length)
     if (path === null) return EBADF
-    this.fs.mkdir(path)
+    yield* answer(this.fs.mkdir(path))
     return OK
   }
 
-  path_remove_directory(dirfd: number, ptr: number, length: number): number {
-    const path = this.pathArg(dirfd, ptr, length)
+  *path_remove_directory(dirfd: number, ptr: number, length: number): Calls<number> {
+    const path = yield* this.pathArg(dirfd, ptr, length)
     if (path === null) return EBADF
-    this.fs.rmdir(path)
+    yield* answer(this.fs.rmdir(path))
     return OK
   }
 
-  path_rename(
+  *path_rename(
     dirfd: number,
     ptr: number,
     length: number,
     dstDirfd: number,
     dstPtr: number,
     dstLength: number,
-  ): number {
-    const src = this.pathArg(dirfd, ptr, length)
-    const dst = this.pathArg(dstDirfd, dstPtr, dstLength)
+  ): Calls<number> {
+    const src = yield* this.pathArg(dirfd, ptr, length)
+    const dst = yield* this.pathArg(dstDirfd, dstPtr, dstLength)
     if (src === null || dst === null) return EBADF
-    this.fs.rename(src, dst)
+    yield* answer(this.fs.rename(src, dst))
     return OK
   }
 
@@ -728,14 +813,14 @@ export class WasiFs {
     return OK
   }
 
-  fd_datasync(fd: number): number {
+  fd_datasync(fd: number): Calls<number> {
     return this.fd_sync(fd)
   }
 
-  fd_sync(fd: number): number {
+  *fd_sync(fd: number): Calls<number> {
     const entry = this.fds.get(fd)
     if (entry === undefined) return EBADF
-    entry.file?.land()
+    if (entry.file !== null) yield* answer(entry.file.land())
     return OK
   }
 
@@ -744,32 +829,33 @@ export class WasiFs {
   }
 
   /** Store the stamps a utimensat-shaped call selects. */
-  private setTimes(
+  private *setTimes(
     path: string,
     atim: bigint,
     mtim: bigint,
     fstFlags: number,
     nofollow: boolean,
-  ): void {
+  ): Calls<void> {
     const now = Date.now() + this.offset * 1000
     const atime = stamp(fstFlags, FST_ATIM, FST_ATIM_NOW, atim, now)
     const mtime = stamp(fstFlags, FST_MTIM, FST_MTIM_NOW, mtim, now)
     // No stamp selected is a no-op, not an error: utimensat(2) with two
     // UTIME_OMIT values does nothing and succeeds.
     if (atime === null && mtime === null) return
-    this.fs.setattr(path, atime, mtime, nofollow)
+    yield* answer(this.fs.setattr(path, atime, mtime, nofollow))
   }
 
-  fd_filestat_set_times(fd: number, atim: bigint, mtim: bigint, flags: number): number {
+  *fd_filestat_set_times(fd: number, atim: bigint, mtim: bigint, flags: number): Calls<number> {
     const entry = this.fds.get(fd)
     if (entry === undefined || (entry.kind !== 'file' && entry.kind !== 'dir')) return EBADF
     // Writes any fd on the file still owes land first (the core sees to
     // it), or landing them at a close would stamp over the times set here.
-    this.setTimes(entry.file === null ? entry.path : entry.file.path(), atim, mtim, flags, false)
+    const path = entry.file === null ? entry.path : yield* answer(entry.file.path())
+    yield* this.setTimes(path, atim, mtim, flags, false)
     return OK
   }
 
-  path_filestat_set_times(
+  *path_filestat_set_times(
     dirfd: number,
     flags: number,
     ptr: number,
@@ -777,24 +863,24 @@ export class WasiFs {
     atim: bigint,
     mtim: bigint,
     fstFlags: number,
-  ): number {
-    const path = this.pathArg(dirfd, ptr, length)
+  ): Calls<number> {
+    const path = yield* this.pathArg(dirfd, ptr, length)
     if (path === null) return EBADF
-    this.setTimes(path, atim, mtim, fstFlags, (flags & LOOKUP_SYMLINK_FOLLOW) === 0)
+    yield* this.setTimes(path, atim, mtim, fstFlags, (flags & LOOKUP_SYMLINK_FOLLOW) === 0)
     return OK
   }
 
-  path_readlink(
+  *path_readlink(
     dirfd: number,
     ptr: number,
     length: number,
     buf: number,
     bufLen: number,
     used: number,
-  ): number {
-    const path = this.pathArg(dirfd, ptr, length)
+  ): Calls<number> {
+    const path = yield* this.pathArg(dirfd, ptr, length)
     if (path === null) return EBADF
-    const raw = ENC.encode(this.fs.readlink(path)).subarray(0, bufLen)
+    const raw = ENC.encode(yield* answer(this.fs.readlink(path))).subarray(0, bufLen)
     this.store(buf, raw)
     // preview1 truncates rather than refusing a short buffer, and reports
     // what it wrote; a guest that wants the whole target retries with a
@@ -809,19 +895,19 @@ export class WasiFs {
     return LINK_REFUSAL
   }
 
-  path_symlink(
+  *path_symlink(
     oldPtr: number,
     oldLength: number,
     dirfd: number,
     newPtr: number,
     newLength: number,
-  ): number {
+  ): Calls<number> {
     // The old pair is the target string, not a path to resolve: a link
     // stores what was typed.
     const target = DEC.decode(this.load(oldPtr, oldLength))
-    const path = this.pathArg(dirfd, newPtr, newLength)
+    const path = yield* this.pathArg(dirfd, newPtr, newLength)
     if (path === null) return EBADF
-    this.fs.symlink(path, target)
+    yield* answer(this.fs.symlink(path, target))
     return OK
   }
 }
@@ -877,21 +963,31 @@ const CALLS = [
  * passes through, so it ends `_start`. Mirrors Python's `install_wasi_fs`.
  *
  * @param wasi - the run's host-function table.
+ * @param wrap - what each import is handed to the guest as: JSPI's
+ *   `Suspending`, for a guest whose calls the host answers with promises.
  */
-export function wasiImports(wasi: WasiFs): WebAssembly.Imports {
-  const calls: Record<string, (...args: never[]) => unknown> = {
-    proc_exit: (code: number) => wasi.proc_exit(code),
+export function wasiImports(
+  wasi: WasiFs,
+  wrap: (call: (...args: never[]) => unknown) => unknown = (call) => call,
+): WebAssembly.Imports {
+  const failed = (err: unknown): number => {
+    if (err instanceof GuestExit) throw err
+    return errnoFor(err)
+  }
+  const calls: Record<string, unknown> = {
+    proc_exit: wrap((code: number) => wasi.proc_exit(code)),
   }
   for (const name of CALLS) {
-    const method = wasi[name] as (...args: unknown[]) => number
-    calls[name] = (...args: unknown[]) => {
+    const method = wasi[name] as (...args: unknown[]) => number | Calls<number>
+    calls[name] = wrap((...args: unknown[]) => {
       try {
-        return method.apply(wasi, args)
+        const result = method.apply(wasi, args)
+        const errno = typeof result === 'number' ? result : drive(result)
+        return thenable(errno) ? errno.then(undefined, failed) : errno
       } catch (err) {
-        if (err instanceof GuestExit) throw err
-        return errnoFor(err)
+        return failed(err)
       }
-    }
+    })
   }
-  return { wasi_snapshot_preview1: calls }
+  return { wasi_snapshot_preview1: calls as WebAssembly.ModuleImports }
 }

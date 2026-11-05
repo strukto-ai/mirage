@@ -24,11 +24,13 @@ import { RuntimeFiles } from '../../files.ts'
 import type { OutputFn, Program, RunResult } from '../../types.ts'
 import { mergeSignals } from '../../../utils/abort.ts'
 import { WasmExecution, workerUnavailable } from '../../wasm/execution.ts'
+import { JspiExecution, jspiAvailable } from '../../wasm/jspi.ts'
 import { loadWasm } from '../../wasm/loader.ts'
 import { WasmView } from '../../wasm/view.ts'
 import { JsRuntime } from '../base.ts'
 import { QuickJsUnavailableError } from './errors.ts'
 import { cwdPreamble } from './execution.ts'
+import { providedQuickJsModule } from './loader.ts'
 import { nodePreamble } from './node.ts'
 
 export const QUICKJS_HOME_ENV = 'MIRAGE_QUICKJS_HOME'
@@ -40,6 +42,9 @@ const BUILD_HINT =
   'from https://github.com/quickjs-ng/quickjs/releases, and point the runtime entry’s ' +
   'config `home` (yaml `runtimes: [{name: quickjs, config: {home: ...}}]`) or the ' +
   `${QUICKJS_HOME_ENV} environment variable at the directory (a URL on a page) holding it`
+
+/** A worker per run, or the host's own isolate under JSPI. */
+type QuickJsEngine = WasmExecution | JspiExecution
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -60,9 +65,12 @@ const DEC = new TextDecoder()
  * Each run is on a worker of its own (`WasmExecution`), so a stopped run
  * ends its worker, however busy the guest. The module comes from the
  * config `home` or the MIRAGE_QUICKJS_HOME environment variable, a
- * directory on Node and a URL on a page. Mirrors Python's `QuickJsRuntime`.
+ * directory on Node and a URL on a page. An edge isolate, which has no
+ * worker and compiles no wasm, provides its own compiled module instead
+ * (`provideQuickJsModule`), and each run's guest is suspended on its calls
+ * in the isolate itself (`JspiExecution`). Mirrors Python's `QuickJsRuntime`.
  */
-export class QuickJsRuntime extends JsRuntime<WasmExecution> {
+export class QuickJsRuntime extends JsRuntime<QuickJsEngine> {
   readonly name = 'quickjs'
   // The engine is a WASI guest whose `std.open`/`os.readdir` wait on the
   // workspace bridge: guest I/O has no way around the gate.
@@ -73,7 +81,9 @@ export class QuickJsRuntime extends JsRuntime<WasmExecution> {
     super(options, HOME_CONFIG_KEYS)
   }
 
-  protected override async openEngine(): Promise<WasmExecution> {
+  protected override async openEngine(): Promise<QuickJsEngine> {
+    const provided = providedQuickJsModule()
+    if (provided !== undefined && jspiAvailable()) return new JspiExecution(provided, 'js')
     const home = resolveHome(this.config as HomeConfig, QUICKJS_HOME_ENV)
     if (home === undefined) throw new QuickJsUnavailableError(BUILD_HINT)
     const unavailable = await workerUnavailable()
@@ -89,7 +99,7 @@ export class QuickJsRuntime extends JsRuntime<WasmExecution> {
     }, 'js')
   }
 
-  protected override closeEngine(engine: WasmExecution): Promise<void> {
+  protected override closeEngine(engine: QuickJsEngine): Promise<void> {
     return engine.close()
   }
 
@@ -124,7 +134,7 @@ export class QuickJsRuntime extends JsRuntime<WasmExecution> {
    * @param errors - the same for stderr.
    */
   async interpret(
-    engine: WasmExecution,
+    engine: QuickJsEngine,
     program: Program,
     ctx: Context,
     output?: OutputFn,
