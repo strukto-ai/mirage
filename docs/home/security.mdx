@@ -40,14 +40,16 @@ session that would start past it, from the workspace's `env`, a profile's or a
 snapshot, is refused. `processes.max` counts every pipeline stage, subshell
 and background job a session has running. `timeout` stops the jobs its
 command started when the time runs out, as GNU's does by signalling its
-process group, unless it is given `--foreground`.
+process group, unless it is given `--foreground` or `-s INT`, which a
+background job ignores.
 
 Some bounds are fixed:
 
 - A session id, profile name or workspace id is 1 to 128 characters, with no
   control characters.
 - A history read returns the newest 10,000 entries, and `/.bash_history` the
-  newest 10,000 commands.
+  newest 10,000 commands. A workspace that keeps its history in memory holds
+  at most 8 MB of it, and drops the oldest entries first.
 - A line sends at most 1000 `vfs.<call>` spans to
   [OpenTelemetry](/home/infrastructure/history#send-it-to-opentelemetry),
   or as many as `MIRAGE_TRACE_MAX_SPANS` says.

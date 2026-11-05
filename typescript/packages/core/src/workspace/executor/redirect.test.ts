@@ -83,6 +83,18 @@ describe('handleRedirect > / >>', () => {
     expect(decode(writes[0]?.data ?? null)).toBe('hello')
   })
 
+  it('a streamed redirect leaves a file its command wrote', async () => {
+    // `> f` is opened before the command runs; one that writes f itself and
+    // prints nothing keeps what it wrote.
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('shuf -i 1-1 -o /out > /out')
+      expect((await ws.shell('cat /out')).stdoutText).toBe('1\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('>> dispatches append without reading the target', async () => {
     const writes: { path: string; data: Uint8Array }[] = []
     const dispatch = vi.fn<DispatchFn>((op, path, args) => {
@@ -1419,6 +1431,7 @@ describe('a first write across workspaces', () => {
     const started = new Promise<void>((resolve) => (entered = resolve))
     let release = (): void => undefined
     const released = new Promise<void>((resolve) => (release = resolve))
+    let holding = false
     class Held extends RAMVFS {
       override async write(
         path: PathSpec,
@@ -1427,7 +1440,8 @@ describe('a first write across workspaces', () => {
         handed?: Handed,
         atomic = false,
       ): Promise<void> {
-        if (!(data instanceof Uint8Array && data.byteLength === 0)) {
+        if (!holding && !(data instanceof Uint8Array && data.byteLength === 0)) {
+          holding = true
           entered()
           await released
         }

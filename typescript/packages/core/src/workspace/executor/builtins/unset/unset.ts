@@ -52,7 +52,7 @@ async function fatalIndex(
   session: SessionState,
   subscript: string,
   view: SessionView,
-): Promise<number> {
+): Promise<bigint> {
   try {
     return await subscriptIndex(session, subscript, view)
   } catch (err) {
@@ -104,16 +104,16 @@ async function unsetElement(
     // branch's silent no-op instead of a denial that would leak the
     // name's existence.
     if (envGet(session, base) === null) return 'ok'
-    if ((await fatalIndex(session, subscript, view)) !== 0) return 'notarray'
+    if ((await fatalIndex(session, subscript, view)) !== 0n) return 'notarray'
     await view.unset(base)
     return 'ok'
   }
   let idx = await fatalIndex(session, subscript, view)
-  if (idx < 0) {
+  if (idx < 0n) {
     idx += arrayExtent(arr)
-    if (idx < 0) return 'subscript'
+    if (idx < 0n) return 'subscript'
   }
-  const next = [...arr]
+  const next = arr.copy()
   arrayUnset(next, idx)
   await view.set(base, next)
   return 'ok'

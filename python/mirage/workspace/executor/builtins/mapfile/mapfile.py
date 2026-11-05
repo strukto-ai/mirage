@@ -45,8 +45,10 @@ from mirage.workspace.types import ExecutionNode
 
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _DEFAULT_QUANTUM = 5000
-# The bytes one array slot costs, a hole the array pads with included.
+# The bytes one array element's slot costs.
 _SLOT = 8
+# bash keeps each of -n, -O, -s and -c in an unsigned int.
+_COUNT_MAX = 2**32 - 1
 
 
 async def handle_mapfile(
@@ -114,7 +116,7 @@ async def handle_mapfile(
         if key not in flags:
             continue
         value = count_operand(str(flags[key]))
-        if value is None or (key == "c" and value == 0):
+        if value is None or value > _COUNT_MAX or (key == "c" and value == 0):
             return fail(
                 cmd, f"bash: {cmd}: {flags[key]}: invalid {label}\n", 1
             )
@@ -147,18 +149,18 @@ async def handle_mapfile(
     buffer = line_buffer(stdin) if stdin is not None else None
 
     existing = visible_arrays(session).get(name)
-    arr: ShellArray = (
-        list(existing) if existing is not None and "O" in flags else []
+    arr = (
+        existing.copy()
+        if existing is not None and "O" in flags
+        else ShellArray()
     )
     index = origin
     stored = 0
     seen = 0
-    # The array's bytes, its slots and what it keeps in them, so neither
-    # -O appends nor empty records grow it past the workspace's
-    # max_memory a few lines at a time.
-    held = _SLOT * len(arr) + sum(
-        len(encode_text(v)) for v in arr if v is not None
-    )
+    # The array's bytes, a slot for each element and what it keeps in
+    # it, so neither -O appends nor empty records grow it past the
+    # workspace's max_memory a few lines at a time.
+    held = sum(_SLOT + len(encode_text(v)) for v in arr.elements.values())
     outputs: list[bytes] = []
     errors: list[bytes] = []
     while buffer is not None and (limit == 0 or stored < limit):
@@ -169,11 +171,9 @@ async def handle_mapfile(
         if seen <= skip:
             continue
         record = data + delim if found and not strip else data
-        replaced = arr[index] if index < len(arr) else None
-        held += (
-            _SLOT * max(index + 1 - len(arr), 0)
-            + len(record)
-            - (len(encode_text(replaced)) if replaced is not None else 0)
+        replaced = arr.elements.get(index)
+        held += len(record) + (
+            _SLOT if replaced is None else -len(encode_text(replaced))
         )
         check_memory(held)
         text = decode_text(record)

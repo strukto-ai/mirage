@@ -263,22 +263,37 @@ describe('Observer', () => {
     await logCommand(o, 'one', 's1', 1.0)
     await logCommand(o, 'two', 's1', 2.0)
     await logCommand(o, 'three', 's1', 3.0)
-    await o.logDelete('s1', 2)
+    await o.logDelete('s1', await o.sessionCommandEvents('s1'), 1)
     expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['one', 'three'])
   })
 
-  it('delete with a negative offset counts from the end', async () => {
-    const o = new Observer()
+  it('a delete keeps its entry when older lines go', async () => {
+    const store = new RAMObserverStore()
+    const o = new Observer(store)
     await logCommand(o, 'one', 's1', 1.0)
     await logCommand(o, 'two', 's1', 2.0)
-    await o.logDelete('s1', -1)
-    expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['one'])
+    await logCommand(o, 'three', 's1', 3.0)
+    await o.logDelete('s1', await o.sessionCommandEvents('s1'), 1)
+    for (const [path, data] of store.files) {
+      store.files.set(path, data.subarray(data.indexOf(0x0a) + 1))
+      break
+    }
+    expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['three'])
+  })
+
+  it('a delete takes the copy it names', async () => {
+    const o = new Observer()
+    await logCommand(o, 'a', 's1', 1.0)
+    await logCommand(o, 'b', 's1', 1.0)
+    await logCommand(o, 'a', 's1', 1.0)
+    await o.logDelete('s1', await o.sessionCommandEvents('s1'), 2)
+    expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['a', 'b'])
   })
 
   it('delete applies at its issue-time position', async () => {
     const o = new Observer()
     await logCommand(o, 'one', 's1', 1.0)
-    await o.logDelete('s1', 1)
+    await o.logDelete('s1', await o.sessionCommandEvents('s1'), 0)
     await logCommand(o, 'two', 's1', 2.0)
     expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['two'])
   })
@@ -286,7 +301,7 @@ describe('Observer', () => {
   it('clear discards earlier deletes', async () => {
     const o = new Observer()
     await logCommand(o, 'one', 's1', 1.0)
-    await o.logDelete('s1', 1)
+    await o.logDelete('s1', await o.sessionCommandEvents('s1'), 0)
     await o.logClear('s1')
     await logCommand(o, 'two', 's1', 2.0)
     expect((await o.sessionCommandEvents('s1')).map((e) => e.command)).toEqual(['two'])
@@ -331,7 +346,7 @@ describe('a clock behind stored history', () => {
     await first.logCommandText('a', 's')
     await first.logCommandText('b', 's')
     const reopened = new Observer(store, new ManualClock())
-    await reopened.logDelete('s', 1)
+    await reopened.logDelete('s', await reopened.sessionCommandEvents('s'), 0)
     expect((await reopened.sessionCommandEvents('s')).map((e) => e.command)).toEqual(['b'])
     await reopened.logClear('s')
     await reopened.logCommandText('c', 's')

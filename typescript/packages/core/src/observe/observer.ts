@@ -404,9 +404,27 @@ export class Observer {
     await this.log(new LogEntry({ type: EVENT_CLEAR, session, timestamp: this.nowMs() }))
   }
 
-  /** Append a delete event for one listing entry (history -d). */
-  async logDelete(session: string, offset: number): Promise<void> {
-    await this.log(new LogEntry({ type: EVENT_DELETE, session, timestamp: this.nowMs(), offset }))
+  /**
+   * Append a delete event for one listing entry (history -d), the one at
+   * `index` in `listing`. The event names the entry by its timestamp and
+   * text and by how many entries alike in both follow it, counted from the
+   * newest end, so a store that drops its oldest lines never turns it on
+   * another entry.
+   */
+  async logDelete(session: string, listing: readonly JsonObject[], index: number): Promise<void> {
+    const entry = listing[index] ?? {}
+    const alike = (e: JsonObject): boolean =>
+      e.timestamp === entry.timestamp && e.command === entry.command
+    await this.log(
+      new LogEntry({
+        type: EVENT_DELETE,
+        session,
+        timestamp: this.nowMs(),
+        command: typeof entry.command === 'string' ? entry.command : '',
+        target: typeof entry.timestamp === 'number' ? entry.timestamp : 0,
+        after: listing.slice(index + 1).filter(alike).length,
+      }),
+    )
   }
 
   /**
@@ -452,8 +470,8 @@ export class Observer {
    * One session's visible history listing, append order. Projects the
    * session's events: a line joins the listing when its result is in (an
    * entry added without running, `history -s`, at once), a clear
-   * tombstone empties it, and delete events apply at the position they
-   * were issued (history -d renumbers subsequent entries, GNU behavior).
+   * tombstone empties it, and a delete event drops the entry it names
+   * (history -d renumbers subsequent entries, GNU behavior).
    */
   async sessionCommandEvents(session: string): Promise<JsonObject[]> {
     const entries = parseFiles(await this._store.readMatching(`/${await sessionFile(session)}`))
@@ -471,9 +489,18 @@ export class Observer {
       } else if (e.type === EVENT_CLEAR) {
         visible = []
       } else if (e.type === EVENT_DELETE) {
-        const offset = typeof e.offset === 'number' ? e.offset : 0
-        const idx = offset > 0 ? offset - 1 : visible.length + offset
-        if (idx >= 0 && idx < visible.length) visible.splice(idx, 1)
+        let skip = typeof e.after === 'number' ? e.after : 0
+        for (let idx = visible.length - 1; idx >= 0; idx--) {
+          const entry = visible[idx]
+          if (entry === undefined || entry.timestamp !== e.target || entry.command !== e.command) {
+            continue
+          }
+          if (skip === 0) {
+            visible.splice(idx, 1)
+            break
+          }
+          skip--
+        }
       }
     }
     return visible

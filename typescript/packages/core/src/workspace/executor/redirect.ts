@@ -119,6 +119,26 @@ const STREAM_OUTPUT_BUILTINS = new Set([
   'realpath',
   'curl',
   'wget',
+  'seq',
+  'jq',
+  'sort',
+  'shuf',
+  'xxd',
+  'diff',
+  'cmp',
+  'column',
+  'numfmt',
+  'tree',
+  'file',
+  'iconv',
+  'zcat',
+  'md5sum',
+  'b2sum',
+  'sha1sum',
+  'sha224sum',
+  'sha256sum',
+  'sha384sum',
+  'sha512sum',
 ])
 
 /**
@@ -132,24 +152,35 @@ export class PipeRecorder extends Recorder {
   // A channel `streamTo` binds goes into its file as it is written; two
   // channels bound to one description share its writer, so they keep their
   // order (`> f 2>&1`).
+  readonly bound = new Map<Channel, FileDescription>()
   readonly writers = new Map<Channel, [FileDescription, ByteWriter]>()
   private readonly broken = new Set<ByteWriter>()
   file: FileDescription | null = null
   failure: unknown = null
 
   streamTo(file: FileDescription, channel: Channel = Channel.STDOUT): void {
+    this.bound.set(channel, file)
+  }
+
+  /**
+   * The writer a bound channel's first bytes start. None starts before bytes
+   * come, so a command that writes the file itself (`shuf -o f > f`) is not
+   * clobbered by an empty write.
+   */
+  private writerFor(channel: Channel, file: FileDescription): [FileDescription, ByteWriter] {
+    let live = this.writers.get(channel)
+    if (live !== undefined) return live
     for (const [held, writer] of this.writers.values()) {
-      if (held === file) {
-        this.writers.set(channel, [file, writer])
-        return
-      }
+      if (held === file) live = [file, writer]
     }
-    this.writers.set(channel, [
+    live ??= [
       file,
       new ByteWriter(async (source) => {
         await this.dispatch(file.append ? 'append' : 'write', file.scope, [source])
       }),
-    ])
+    ]
+    this.writers.set(channel, live)
+    return live
   }
 
   private distinct(): [FileDescription, ByteWriter][] {
@@ -191,9 +222,10 @@ export class PipeRecorder extends Recorder {
     super()
   }
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {
-    const live = this.writers.get(channel)
-    if (live !== undefined) {
-      const [file, writer] = live
+    const bound = this.bound.get(channel)
+    if (bound !== undefined) {
+      if (data.byteLength === 0) return
+      const [file, writer] = this.writerFor(channel, bound)
       if (!this.broken.has(writer)) {
         try {
           await writer.write(data)
@@ -781,7 +813,7 @@ async function runRedirects(
             files.includes(errs) &&
             errs.source === null &&
             !errs.pipe &&
-            (errs !== target || recorder.writers.has(Channel.STDOUT))
+            (errs !== target || recorder.bound.has(Channel.STDOUT))
           )
             recorder.streamTo(errs, Channel.STDERR)
           const [, execIo] = await drained(recorder, ...result)

@@ -20,6 +20,7 @@ import { SessionState } from './session.ts'
 import { MountMode } from '../../types.ts'
 import type { AdmissionRules, Decision } from '../../policy/types.ts'
 import { Outcome, Scope } from '../../policy/types.ts'
+import { makeArray } from '../../shell/array.ts'
 
 describe('SessionState', () => {
   it('defaults cwd=/ and an env holding only the seeded $PWD', () => {
@@ -171,7 +172,7 @@ describe('SessionState.fork', () => {
       vars: {
         FOO: makeVar('bar'),
         HOME: makeVar(null, new Set([VarAttr.Readonly])),
-        ARGV: makeVar(['a', 'b']),
+        ARGV: makeVar(makeArray(['a', 'b'])),
       },
       positionalArgs: ['x'],
       lastExitCode: 7,
@@ -190,7 +191,7 @@ describe('SessionState.fork', () => {
     expect(forked.mountModes).toBe(original.mountModes)
     expect(forked.shellOptions).toEqual({ errexit: true })
     expect(forked.readonlyVars.has('HOME')).toBe(true)
-    expect(forked.arrays).toEqual({ ARGV: ['a', 'b'] })
+    expect(forked.arrays).toEqual({ ARGV: makeArray(['a', 'b']) })
     expect(forked.positionalArgs).toEqual(['x'])
     expect(forked.lastExitCode).toBe(7)
   })
@@ -245,13 +246,13 @@ describe('SessionState.fork', () => {
   it('deep-copies mutable containers so mutations on the fork do not leak', () => {
     const original = new SessionState({
       sessionId: 'orig',
-      vars: { FOO: makeVar('bar'), A: makeVar(['1']) },
+      vars: { FOO: makeVar('bar'), A: makeVar(makeArray(['1'])) },
     })
     const forked = original.fork({})
     seedVar(forked, 'NEW', 'leaked?')
-    forked.arrays.A?.push('2')
+    forked.arrays.A?.set(1, '2')
     expect('NEW' in original.env).toBe(false)
-    expect(original.arrays.A).toEqual(['1'])
+    expect(original.arrays.A).toEqual(makeArray(['1']))
   })
 
   it('round-trips function marks and keeps each fork its own', () => {
@@ -293,7 +294,7 @@ describe('SessionState.newShell', () => {
       vars: {
         PLAIN: makeVar('p'),
         OUT: makeVar('o', new Set([VarAttr.Export, VarAttr.Readonly])),
-        ARR: makeVar(['a'], exported),
+        ARR: makeVar(makeArray(['a']), exported),
         UNSET: makeVar(null, exported),
         IFS: makeVar(',', exported),
         TOKEN: { value: null, attrs: exported, managed: token },

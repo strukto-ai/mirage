@@ -20,6 +20,7 @@ import { SecretsError } from '../../secrets/errors.ts'
 import { fieldSummary } from '../../secrets/summary.ts'
 import { fetchSecret } from '../../secrets/registry.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
+import { ShellArray } from '../../shell/array.ts'
 import { SHOPT_DEFAULTS } from '../../shell/constants.ts'
 import {
   arithReads,
@@ -502,8 +503,8 @@ function arithTargets(
     // every string in the structure is chased.
     if (typeof value === 'string') {
       for (const item of identifierNames(value)) frontier.push(item)
-    } else if (Array.isArray(value)) {
-      for (const item of value) if (item !== null) frontier.push(...identifierNames(item))
+    } else if (value instanceof ShellArray) {
+      for (const item of value.elements.values()) frontier.push(...identifierNames(item))
     } else if (value !== null) {
       for (const item of Object.values(value)) frontier.push(...identifierNames(item))
     }

@@ -54,6 +54,15 @@ async def test_redirect_target_expands_after_cd_in_list():
 
 
 @pytest.mark.asyncio
+async def test_a_streamed_redirect_leaves_a_file_its_command_wrote():
+    # `> f` is opened before the command runs; one that writes f itself
+    # and prints nothing keeps what it wrote.
+    ws = await _workspace()
+    await ws.shell("shuf -i 1-1 -o /data/out > /data/out")
+    assert await _out(ws, "cat /data/out") == "1\n"
+
+
+@pytest.mark.asyncio
 async def test_redirect_captures_only_last_command():
     ws = await _workspace()
     out = await _out(ws, "echo one && echo two > /data/f")
@@ -1220,7 +1229,7 @@ async def test_a_redirect_takes_the_windows_while_its_store_streams_elsewhere():
 
     class Held(RAMVFS):
         async def write(self, path, data, *, atomic=False):
-            if data != b"":
+            if data != b"" and not entered.is_set():
                 entered.set()
                 await release.wait()
             await super().write(path, data, atomic=atomic)

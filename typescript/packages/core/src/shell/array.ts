@@ -13,69 +13,103 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 /**
- * A shell array: assigned values by index, with `null` for a hole left by
- * `unset arr[i]` or skipped by `arr[9]=v`. Holes are addressable but do
- * not count toward `${#arr[@]}` and do not expand in `${arr[@]}`.
+ * An indexed array, as bash keeps one: only its assigned elements, by
+ * index, in index order. `a[1000000000]=x` holds one element, and an index
+ * no write reached, or `unset` cleared, is no element at all: it does not
+ * count toward `${#a[@]}` or expand in `${a[@]}`. Indices are bigints, so
+ * one past 2^53 is as exact as bash's 64-bit one. Mirrors Python's
+ * `ShellArray`.
  */
-export type ShellArray = (string | null)[]
+export class ShellArray {
+  /** Index to value, in index order. */
+  readonly elements: Map<bigint, string>
+  private top = -1n
+
+  constructor(elements: Iterable<readonly [number | bigint, string]> = []) {
+    const entries = [...elements].map(([index, value]) => [BigInt(index), value] as const)
+    this.elements = new Map(entries.sort(ShellArray.byIndex))
+    for (const index of this.elements.keys()) this.top = index
+  }
+
+  /** One past the highest index assigned. */
+  get extent(): bigint {
+    return this.top + 1n
+  }
+
+  /** Assign `value` at `idx`, keeping the elements in index order. */
+  set(idx: number | bigint, value: string): void {
+    const at = BigInt(idx)
+    const ordered = this.elements.has(at) || at > this.top
+    this.elements.set(at, value)
+    if (ordered) {
+      if (at > this.top) this.top = at
+      return
+    }
+    const sorted = [...this.elements].sort(ShellArray.byIndex)
+    this.elements.clear()
+    for (const [index, item] of sorted) this.elements.set(index, item)
+  }
+
+  /** Clear the element at `idx`, if it holds one. */
+  unset(idx: number | bigint): void {
+    const at = BigInt(idx)
+    if (!this.elements.delete(at) || at !== this.top) return
+    this.top = -1n
+    for (const index of this.elements.keys()) this.top = index
+  }
+
+  /** A copy a write to which leaves this one as it is. */
+  copy(): ShellArray {
+    return new ShellArray(this.elements)
+  }
+
+  private static readonly byIndex = (
+    [a]: readonly [bigint, string],
+    [b]: readonly [bigint, string],
+  ): number => (a < b ? -1 : a > b ? 1 : 0)
+}
 
 /** Build a dense array from consecutive values, starting at index 0. */
-export function makeArray(values: string[]): ShellArray {
-  return [...values]
+export function makeArray(values: readonly string[]): ShellArray {
+  return new ShellArray(values.map((value, index) => [index, value] as const))
 }
 
 /**
  * One past the highest assigned index, which is what bash resolves a
  * negative subscript against.
  */
-export function arrayExtent(arr: ShellArray): number {
-  return arr.length
+export function arrayExtent(arr: ShellArray): bigint {
+  return arr.extent
 }
 
-/** The assigned values in index order, skipping holes. */
+/** The assigned values in index order. */
 export function arrayValues(arr: ShellArray): string[] {
-  return arr.filter((v): v is string => v !== null)
+  return [...arr.elements.values()]
 }
 
-/** The assigned indices in order, skipping holes. */
-export function arrayIndices(arr: ShellArray): number[] {
-  const out: number[] = []
-  arr.forEach((v, i) => {
-    if (v !== null) out.push(i)
-  })
-  return out
+/** The assigned indices in order. */
+export function arrayIndices(arr: ShellArray): bigint[] {
+  return [...arr.elements.keys()]
 }
 
 /** The number of assigned elements, which is `${#arr[@]}`. */
 export function arrayCount(arr: ShellArray): number {
-  return arrayValues(arr).length
+  return arr.elements.size
 }
 
 /** Whether `idx` holds an assigned element. */
-export function arrayHas(arr: ShellArray, idx: number): boolean {
-  return idx >= 0 && idx < arr.length && arr[idx] !== null && arr[idx] !== undefined
+export function arrayHas(arr: ShellArray, idx: number | bigint): boolean {
+  return arr.elements.has(BigInt(idx))
 }
 
-/**
- * The element at `idx`, or the empty string for a hole or an
- * out-of-range index.
- */
-export function arrayGet(arr: ShellArray, idx: number): string {
-  if (idx < 0 || idx >= arr.length) return ''
-  return arr[idx] ?? ''
+/** The element at `idx`, or the empty string for an index that holds none. */
+export function arrayGet(arr: ShellArray, idx: number | bigint): string {
+  return arr.elements.get(BigInt(idx)) ?? ''
 }
 
-/**
- * Assign `value` at `idx`, extending with holes as needed.
- *
- * The subscript comes from script text, so the write goes through
- * `splice` rather than `arr[idx] = value`: an element assignment on a
- * caller-supplied key is a prototype-pollution shape, and `splice`
- * cannot name a property at all.
- */
-export function arraySet(arr: ShellArray, idx: number, value: string): void {
-  while (arr.length <= idx) arr.push(null)
-  arr.splice(idx, 1, value)
+/** Assign `value` at `idx`, keeping the elements in index order. */
+export function arraySet(arr: ShellArray, idx: number | bigint, value: string): void {
+  arr.set(idx, value)
 }
 
 /**
@@ -86,9 +120,9 @@ export function arraySet(arr: ShellArray, idx: number, value: string): void {
  * produces. Building it on a copy is what keeps a refusal from leaving
  * the element applied.
  */
-export function arrayWith(arr: ShellArray, idx: number, value: string): ShellArray {
-  const updated = [...arr]
-  arraySet(updated, idx, value)
+export function arrayWith(arr: ShellArray, idx: number | bigint, value: string): ShellArray {
+  const updated = arr.copy()
+  updated.set(idx, value)
   return updated
 }
 
@@ -101,31 +135,30 @@ export function arrayWith(arr: ShellArray, idx: number, value: string): ShellArr
  * are taken. A negative offset counts back from the extent and yields
  * nothing if it is still negative.
  */
-export function arraySlice(arr: ShellArray, offset: number, length: number | null): string[] {
-  let start = offset
-  if (start < 0) {
+export function arraySlice(
+  arr: ShellArray,
+  offset: number | bigint,
+  length: number | null,
+): string[] {
+  let start = BigInt(offset)
+  if (start < 0n) {
     start += arrayExtent(arr)
-    if (start < 0) return []
+    if (start < 0n) return []
   }
   const picked: string[] = []
-  arr.forEach((v, i) => {
-    if (v !== null && i >= start) picked.push(v)
-  })
+  for (const [i, v] of arr.elements) if (i >= start) picked.push(v)
   if (length === null) return picked
   if (length < 0) return picked.slice(0, Math.max(0, picked.length + length))
   return picked.slice(0, length)
 }
 
 /**
- * Clear one element, keeping the indices of the elements after it.
- *
- * Trailing holes are dropped so the extent stays at one past the highest
- * assigned index, matching how bash resolves `arr[-1]`.
+ * Clear one element, keeping the indices of the elements after it. The
+ * extent stays at one past the highest assigned index, matching how bash
+ * resolves `arr[-1]`.
  */
-export function arrayUnset(arr: ShellArray, idx: number): void {
-  if (idx < 0 || idx >= arr.length) return
-  arr.splice(idx, 1, null)
-  while (arr.length > 0 && arr[arr.length - 1] === null) arr.pop()
+export function arrayUnset(arr: ShellArray, idx: number | bigint): void {
+  arr.unset(idx)
 }
 
 /**
@@ -156,18 +189,18 @@ export async function buildIndexedLiteral(
   base: ShellArray | null,
   words: readonly string[],
   append: boolean,
-  indexOf: (subscript: string) => Promise<number>,
+  indexOf: (subscript: string) => Promise<number | bigint>,
 ): Promise<ShellArray> {
-  const arr: ShellArray = append && base !== null ? [...base] : []
-  let cursor = append ? arrayExtent(arr) : 0
+  const arr = append && base !== null ? base.copy() : new ShellArray()
+  let cursor = append ? arrayExtent(arr) : 0n
   for (const word of words) {
     const keyed = keyedWord(word)
     if (keyed !== null) {
-      let idx = await indexOf(keyed[0])
-      if (idx < 0) idx += arrayExtent(arr)
-      if (idx < 0) continue
+      let idx = BigInt(await indexOf(keyed[0]))
+      if (idx < 0n) idx += arrayExtent(arr)
+      if (idx < 0n) continue
       arraySet(arr, idx, keyed[1])
-      cursor = idx + 1
+      cursor = idx + 1n
     } else {
       arraySet(arr, cursor, word)
       cursor++

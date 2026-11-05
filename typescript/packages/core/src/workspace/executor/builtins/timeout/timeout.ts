@@ -50,6 +50,7 @@ import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 import {
   CONTINUE_SIGNALS,
   FORK_FAILED,
+  JOB_IGNORED_SIGNALS,
   SELF_KILLING_SIGNALS,
   SIGCHLD,
   SIGKILL,
@@ -386,10 +387,10 @@ export async function handleTimeout(
   run.catch(() => undefined)
   const foreground = parse.flags.f === true
   // timeout signals its own process group unless --foreground, so the jobs
-  // the command started end with it.
+  // the command started end with it unless they ignore the signal; the
+  // command itself gets it either way.
   const send = (number: number): void => {
-    if (foreground) abort.abort(new SignalStop(number))
-    else process.terminate(number)
+    process.terminate(number, !foreground && !JOB_IGNORED_SIGNALS.has(number))
   }
   const watch = supervise(run, abort.signal, send, sink, held, seconds, lineSignal, {
     signal,

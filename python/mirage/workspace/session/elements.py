@@ -22,6 +22,7 @@ from mirage.shell.array import (
     array_get,
     array_has,
     array_with,
+    make_array,
 )
 from mirage.shell.errors import ArithError, ReadonlyVariableError
 from mirage.shell.types import ArithWrite
@@ -87,11 +88,10 @@ async def element_is_set(
         # it in arithmetic and as bash removes the quotes.
         return strip_key_quotes(sub) in amap
     scalar = env_get(session, name)
-    held: list[str | None]
     if arr is not None:
         held = arr
     elif scalar is not None:
-        held = [scalar]
+        held = make_array([scalar])
     else:
         return False
     idx = await subscript_index(session, sub, view)
@@ -167,7 +167,7 @@ async def assign_element(
                 # An existing scalar becomes element 0, even when
                 # empty: bash resolves `x[-1]` against the length-1
                 # array that produces.
-                arr = [] if scalar is None else [scalar]
+                arr = make_array([] if scalar is None else [scalar])
             idx = (
                 0
                 if subscript is None

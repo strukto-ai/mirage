@@ -19,13 +19,14 @@ import { nextRandom } from '../session/state.ts'
 import type { ArithWrite } from '../../shell/types.ts'
 import type { RandomReader } from '../session/state.ts'
 import {
-  type ShellArray,
+  ShellArray,
   arrayExtent,
   arrayGet,
   arrayHas,
   arrayIndices,
   arraySlice,
   arrayValues,
+  makeArray,
 } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
@@ -790,7 +791,7 @@ async function sliceArray(
   expandChild: ExpandChild,
   operand: ArithOperand,
 ): Promise<string[]> {
-  const bounds = await sliceBounds(node, expandChild, operand, arrayExtent(arr))
+  const bounds = await sliceBounds(node, expandChild, operand, Number(arrayExtent(arr)))
   return bounds === null ? [] : arraySlice(arr, ...bounds)
 }
 
@@ -947,7 +948,7 @@ async function expansionIndex(
   session: SessionState,
   view: SessionView | undefined,
   subscript: string,
-): Promise<number> {
+): Promise<bigint> {
   try {
     return await subscriptIndex(session, subscript, view ?? null)
   } catch (err) {
@@ -1145,14 +1146,14 @@ async function expandBracesIn(
       // A scalar is element 0 of a one-element array, even when empty:
       // ${#x[@]} is 1 for x="" but 0 for an unset name.
       const scalar = env[baseName]
-      arr = scalar === undefined ? [] : [scalar]
+      arr = makeArray(scalar === undefined ? [] : [scalar])
     }
     const subText = await named(p.subscript, expandSubscriptKey(p, expandChild))
     let idx = await expansionIndex(session, view, subText)
-    if (idx < 0) idx += arrayExtent(arr)
+    if (idx < 0n) idx += arrayExtent(arr)
     val = arrayGet(arr, idx)
     varInEnv = arrayHas(arr, idx)
-    if (idx >= 0) writeKey = String(idx)
+    if (idx >= 0n) writeKey = String(idx)
   } else if (p.varName !== null) {
     if (callStack) {
       const localVal = callStack.getLocal(p.varName)
@@ -1162,7 +1163,7 @@ async function expandBracesIn(
       }
     }
     if (!varInEnv && p.varName in arrays) {
-      val = arrayGet(arrays[p.varName] ?? [], 0)
+      val = arrayGet(arrays[p.varName] ?? new ShellArray(), 0)
       varInEnv = true
     }
     if (!varInEnv && amap !== undefined) {
@@ -1289,17 +1290,17 @@ function splatSource(
     if (p.varName !== '@' && p.varName !== '*') return null
     const params = positionalParams(session, callStack)
     const keys = params.map((_, i) => String(i + 1))
-    return [p.op === ':' ? [session.argv0, ...params] : [...params], keys]
+    return [makeArray(p.op === ':' ? [session.argv0, ...params] : params), keys]
   }
   if (baseName === null || (p.subscript !== '@' && p.subscript !== '*')) return null
   if (amap !== undefined) {
     const keys = Object.keys(amap).sort(compareCodePoints)
-    return [keys.map((k) => amap[k] ?? ''), keys]
+    return [makeArray(keys.map((k) => amap[k] ?? '')), keys]
   }
   let arr = arrays[baseName]
   if (arr === undefined) {
     const scalar = env[baseName]
-    arr = scalar === undefined ? [] : [scalar]
+    arr = makeArray(scalar === undefined ? [] : [scalar])
   }
   return [arr, arrayIndices(arr).map((i) => String(i))]
 }

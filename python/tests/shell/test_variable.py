@@ -14,6 +14,7 @@
 
 import pytest
 
+from mirage.shell.array import ShellArray, make_array
 from mirage.shell.variable import (
     ManagedRef,
     ShellVar,
@@ -44,7 +45,7 @@ def test_print_order_is_the_enum_declaration_order():
 LETTER_CASES = [
     ("irx", "1", {VarAttr.EXPORT, VarAttr.READONLY, VarAttr.INTEGER}),
     ("Aiu", {}, {VarAttr.INTEGER, VarAttr.UPPER}),
-    ("arx", [], {VarAttr.READONLY, VarAttr.EXPORT}),
+    ("arx", ShellArray(), {VarAttr.READONLY, VarAttr.EXPORT}),
     ("nrx", "a", {VarAttr.NAMEREF, VarAttr.READONLY, VarAttr.EXPORT}),
     ("xl", "z", {VarAttr.EXPORT, VarAttr.LOWER}),
     ("", "5", set()),
@@ -82,8 +83,8 @@ def test_attrs_from_letters_ignores_a_letter_it_does_not_know():
     [
         ("x", VarKind.SCALAR),
         (None, VarKind.SCALAR),
-        ([], VarKind.INDEXED),
-        (["a"], VarKind.INDEXED),
+        (ShellArray(), VarKind.INDEXED),
+        (make_array(["a"]), VarKind.INDEXED),
         ({}, VarKind.ASSOC),
     ],
 )

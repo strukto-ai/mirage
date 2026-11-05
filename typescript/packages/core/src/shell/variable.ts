@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ShellArray } from './array.ts'
+import { ShellArray } from './array.ts'
 
 /** What a shell variable can hold. */
 export type ShellValue = string | ShellArray | Record<string, string>
@@ -145,14 +145,14 @@ export function makeVar(
  * no `-a`, so nothing but an actual array value earns the letter.
  */
 export function varKind(v: ShellVar): VarKind {
-  if (Array.isArray(v.value)) return VarKind.Indexed
+  if (v.value instanceof ShellArray) return VarKind.Indexed
   if (v.value !== null && typeof v.value === 'object') return VarKind.Assoc
   return VarKind.Scalar
 }
 
 /** Copy a variable and its mutable array value for a child shell. */
 export function copyVar(v: ShellVar): ShellVar {
-  if (Array.isArray(v.value)) return withValue(v, [...v.value])
+  if (v.value instanceof ShellArray) return withValue(v, v.value.copy())
   if (v.value !== null && typeof v.value === 'object') return withValue(v, { ...v.value })
   return v
 }
@@ -236,15 +236,18 @@ export function coerceValue(
   value: ShellValue,
   attrs: ReadonlySet<VarAttr>,
   integer: Coercer | null,
-  assigned: ReadonlySet<number | string> | null = null,
+  assigned: ReadonlySet<bigint | string> | null = null,
 ): ShellValue {
   if (!attrs.has(VarAttr.Integer) && !attrs.has(VarAttr.Lower) && !attrs.has(VarAttr.Upper)) {
     return value
   }
   if (typeof value === 'string') return coerceScalar(value, attrs, integer)
-  if (Array.isArray(value)) {
-    return value.map((v, i) =>
-      v === null || (assigned !== null && !assigned.has(i)) ? v : coerceScalar(v, attrs, integer),
+  if (value instanceof ShellArray) {
+    return new ShellArray(
+      [...value.elements].map(([i, v]) => [
+        i,
+        assigned !== null && !assigned.has(i) ? v : coerceScalar(v, attrs, integer),
+      ]),
     )
   }
   const out: Record<string, string> = {}

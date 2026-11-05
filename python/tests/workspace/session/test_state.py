@@ -18,7 +18,7 @@ import pytest
 
 from mirage.policy import Action, Deny, Policies, Policy, PolicyDenied
 from mirage.policy.types import SessionContext
-from mirage.shell.array import make_array
+from mirage.shell.array import ShellArray, make_array
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ReadonlyVariableError
 from mirage.shell.variable import ManagedRef, ShellVar, TempEnv, VarAttr
@@ -89,8 +89,8 @@ def test_set_is_general_over_variable_shapes():
 
     async def run():
         view, session = _view()
-        await view.set("A", ["x", "y"])
-        assert session.arrays["A"] == ["x", "y"]
+        await view.set("A", make_array(["x", "y"]))
+        assert session.arrays["A"] == make_array(["x", "y"])
         assert "A" not in session.env
         await view.set("A", "s")
         assert session.env["A"] == "s"
@@ -109,7 +109,7 @@ def test_an_array_write_renders_the_gate_value_as_words():
 
     async def run():
         view, _session = _view(Policies([Capture()]))
-        await view.set("A", ["x", None, "y"])
+        await view.set("A", ShellArray({0: "x", 2: "y"}))
 
     asyncio.run(run())
     assert seen == ["x y"]
@@ -299,7 +299,7 @@ def test_integer_coercion_resolves_elements():
     # the same resolver every other arithmetic entry point uses.
     async def run():
         view, session = _view()
-        seed_var(session, "a", ["1", "2"])
+        seed_var(session, "a", make_array(["1", "2"]))
         seed_var(session, "m", {"x": "4"})
         seed_var(session, "n", "0")
         set_attr(session, "n", VarAttr.INTEGER)
@@ -320,7 +320,7 @@ def test_integer_coercion_resolves_elements():
 def _element_session() -> SessionState:
     session = SessionState(session_id="s", cwd="/")
     seed_var(session, "m", {"a": "1", "k5": "9", "0": "z"})
-    seed_var(session, "arr", ["10", "20", "30"])
+    seed_var(session, "arr", make_array(["10", "20", "30"]))
     seed_var(session, "s5", "5")
     seed_var(session, "i", "1")
     return session

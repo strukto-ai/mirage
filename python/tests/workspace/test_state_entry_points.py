@@ -22,6 +22,7 @@ from mirage.io.types import IOResult
 from mirage.mount.core import MountCore
 from mirage.policy import Action, Deny, Policy, VfsContext
 from mirage.policy.types import SessionContext
+from mirage.shell.array import make_array
 from mirage.shell.variable import VarAttr
 from mirage.types import (
     HiddenPaths,
@@ -638,14 +639,14 @@ def test_scalar_append_onto_an_existing_array_fires_the_gate():
     # write.
     ws = _two_mounts(policies=[DenySecretEnv()])
     sess = ws._session_mgr.get(ws._session_mgr.default_id)
-    seed_var(sess, "SECRET_E", ["a"])
+    seed_var(sess, "SECRET_E", make_array(["a"]))
 
     async def run():
         return await ws.shell("SECRET_E+=x")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert sess.arrays["SECRET_E"] == ["a"]
+    assert sess.arrays["SECRET_E"] == make_array(["a"])
 
 
 def test_declaration_array_assignment_fires_the_gate():
@@ -817,7 +818,7 @@ def test_export_of_an_array_literal_prints_nothing():
     assert io.exit_code == 0
     assert out == ""
     sess = ws._session_mgr.get(ws._session_mgr.default_id)
-    assert sess.arrays.get("ARR") == ["x", "y"]
+    assert sess.arrays.get("ARR") == make_array(["x", "y"])
 
 
 def test_readonly_loop_variable_refuses_before_the_body():
@@ -874,14 +875,14 @@ def test_subscripted_unset_of_a_scalar_fires_the_gate():
 def test_subscripted_unset_of_an_array_element_fires_the_gate():
     ws = _two_mounts(policies=[DenySecretEnv()])
     sess = ws._session_mgr.get(ws._session_mgr.default_id)
-    seed_var(sess, "SECRET_W", ["a", "b"])
+    seed_var(sess, "SECRET_W", make_array(["a", "b"]))
 
     async def run():
         return await ws.shell("unset 'SECRET_W[1]'")
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert sess.arrays["SECRET_W"] == ["a", "b"]
+    assert sess.arrays["SECRET_W"] == make_array(["a", "b"])
 
 
 def test_for_loop_variable_fires_the_gate():
@@ -1076,7 +1077,7 @@ def test_unset_of_a_hidden_var_is_quiet_and_preserves_it():
 def _hidden_array_ws() -> Workspace:
     ws = _two_mounts()
     sess = ws.create_session("agent", mounts={"/a": "write"})
-    seed_var(sess, "SLACK_TOKEN", ["xoxb-real", "xoxb-two"])
+    seed_var(sess, "SLACK_TOKEN", make_array(["xoxb-real", "xoxb-two"]))
     seed_var(sess, "PUBLIC", "ok")
     sess.visibility = Visibility(vars=HiddenVars(names=("SLACK_TOKEN",)))
     return ws
@@ -1160,7 +1161,7 @@ def test_unset_of_a_hidden_array_is_a_quiet_noop():
     assert element.exit_code == 0
     assert whole.exit_code == 0
     sess = ws.get_session("agent")
-    assert sess.arrays["SLACK_TOKEN"] == ["xoxb-real", "xoxb-two"]
+    assert sess.arrays["SLACK_TOKEN"] == make_array(["xoxb-real", "xoxb-two"])
 
 
 def test_bare_export_of_a_hidden_var_is_refused():
@@ -1193,7 +1194,7 @@ def test_subscript_arithmetic_resolves_against_the_visible_env():
 
     io = asyncio.run(run())
     assert io.exit_code == 0
-    assert ws.get_session("agent").arrays["b"] == ["z", "y"]
+    assert ws.get_session("agent").arrays["b"] == make_array(["z", "y"])
 
 
 def test_hidden_home_reads_as_unset_everywhere():

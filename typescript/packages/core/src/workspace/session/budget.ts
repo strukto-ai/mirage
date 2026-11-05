@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { ShellArray } from '../../shell/array.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
@@ -55,8 +56,8 @@ function envLimit(): number | null {
 export function entryBytes(name: string, value: ShellValue | null | undefined): number {
   let held = 0
   if (typeof value === 'string') held = byteLength(value)
-  else if (Array.isArray(value)) {
-    for (const item of value) if (item !== null) held += byteLength(item) + 1
+  else if (value instanceof ShellArray) {
+    for (const item of value.elements.values()) held += byteLength(item) + 1
   } else if (value !== null && value !== undefined) {
     for (const [key, item] of Object.entries(value)) {
       held += byteLength(key) + byteLength(item) + 1

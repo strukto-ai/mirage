@@ -349,7 +349,7 @@ export type EnvSet = (
   name: string,
   value: ShellValue,
   followRef?: boolean,
-  assigned?: ReadonlySet<number | string> | null,
+  assigned?: ReadonlySet<bigint | string> | null,
   added?: string | null,
 ) => Promise<void>
 

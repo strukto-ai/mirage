@@ -39,7 +39,8 @@ export interface LogEntryInit {
   exitCode?: number
   stdout?: string
   stderr?: string
-  offset?: number
+  target?: number
+  after?: number
 }
 
 /**
@@ -65,7 +66,10 @@ export class LogEntry {
   readonly exitCode: number | undefined
   readonly stdout: string | undefined
   readonly stderr: string | undefined
-  readonly offset: number | undefined
+  /** The deleted entry's timestamp (a `delete`), whose text is `command`. */
+  readonly target: number | undefined
+  /** How many entries with its timestamp and text follow the deleted one. */
+  readonly after: number | undefined
 
   constructor(init: LogEntryInit) {
     this.type = init.type
@@ -83,7 +87,8 @@ export class LogEntry {
     this.exitCode = init.exitCode
     this.stdout = init.stdout
     this.stderr = init.stderr
-    this.offset = init.offset
+    this.target = init.target
+    this.after = init.after
   }
 
   static fromOpRecord(rec: OpRecord, session: string, cwd?: string, parent?: string): LogEntry {
@@ -120,7 +125,8 @@ export class LogEntry {
     if (this.exitCode !== undefined) obj.exit_code = this.exitCode
     if (this.stdout !== undefined) obj.stdout = this.stdout
     if (this.stderr !== undefined) obj.stderr = this.stderr
-    if (this.offset !== undefined) obj.offset = this.offset
+    if (this.target !== undefined) obj.target = this.target
+    if (this.after !== undefined) obj.after = this.after
     return JSON.stringify(obj)
   }
 }

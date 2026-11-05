@@ -34,6 +34,7 @@ import { SeededIdSource } from '../../utils/ids.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { stdoutStr } from '../../../tests/workspace/fixtures/workspace_fixture.ts'
+import { makeArray } from '../../shell/array.ts'
 
 function stored(s: SessionState): string | undefined {
   const v = s.vars[RANDOM]?.value
@@ -516,15 +517,15 @@ describe('RANDOM as an array', () => {
 
   it('ends the meaning through every store entry point on a non-string', async () => {
     const s = new SessionState({ sessionId: 's' })
-    seedVar(s, RANDOM, ['1', '2'])
+    seedVar(s, RANDOM, makeArray(['1', '2']))
     expect(nextRandom(s, undefined)).toBeNull()
-    expect(s.vars[RANDOM]?.value).toEqual(['1', '2'])
+    expect(s.vars[RANDOM]?.value).toEqual(makeArray(['1', '2']))
     const t = new SessionState({ sessionId: 't' })
     await sessionView(t, null).set(RANDOM, { k: 'v' })
     expect(nextRandom(t, undefined)).toBeNull()
     expect(t.vars[RANDOM]?.value).toEqual({ k: 'v' })
     const u = new SessionState({ sessionId: 'u' })
-    noteRandomKind(u, 'other', ['1'])
+    noteRandomKind(u, 'other', makeArray(['1']))
     expect(nextRandom(u, undefined)).not.toBeNull()
   })
 
@@ -551,7 +552,7 @@ describe('RANDOM as an array', () => {
     expect(frame.get(RANDOM)?.value).toBe('17772')
     expect(s.localRandom).toEqual(['17772'])
     expect(nextRandom(s, '17772')).toBeNull()
-    seedVar(s, RANDOM, ['7'])
+    seedVar(s, RANDOM, makeArray(['7']))
     restoreLocals(s, frame)
     expect(s.vars[RANDOM]?.value).toBe('17772')
     expect(s.localRandom).toEqual([])

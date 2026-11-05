@@ -127,16 +127,18 @@ export class ProcessHandle {
    * grace that signal gave its program short, as a second `kill -KILL` does.
    *
    * @param signal what the stop stands for, KILL (9) unless a `kill` named another.
+   * @param children stop what the runner started too; false leaves its jobs
+   *   running, for a signal they ignore.
    */
-  terminate(signal = 9): boolean {
+  terminate(signal = 9, children = true): boolean {
     if (this.current.state === 'exited') {
-      this.cancelChildren(signal)
+      if (children) this.cancelChildren(signal)
       return false
     }
     if (this.current.cancellationRequested) {
       if (signal !== 9 || this.stopSignal === 9) return false
       this.stopSignal = signal
-      this.cancelChildren(signal)
+      if (children) this.cancelChildren(signal)
       return true
     }
     const previous = this.current
@@ -147,7 +149,7 @@ export class ProcessHandle {
     })
     this.stopSignal = signal
     try {
-      this.cancelChildren(signal)
+      if (children) this.cancelChildren(signal)
       this.cancel(signal)
     } catch (error) {
       this.current = previous

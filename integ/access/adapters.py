@@ -2228,13 +2228,16 @@ async def mcp_case(
             answer = {"errno": answer.get("errno", answer["detail"])}
         return bytes_answer(step, answer)
     elif op == "cancel":
-        try:
-            await asyncio.wait_for(
-                client.call_tool("shell", {"command": step["command"]}), 1
-            )
-        except TimeoutError:
-            pass
-        if not await server.begun(wid, 15):
+        # The call is cancelled once its line has begun: MCP's cancel is a
+        # message of its own, which, sent on a timer, can reach the server
+        # before the call it names, and the line then runs to its end.
+        call = asyncio.ensure_future(
+            client.call_tool("shell", {"command": step["command"]})
+        )
+        started = await server.begun(wid, 15)
+        call.cancel()
+        await asyncio.wait([call])
+        if not started:
             return {"text": "the line never started"}
         return {"text": await server.outcome(wid)}
     else:

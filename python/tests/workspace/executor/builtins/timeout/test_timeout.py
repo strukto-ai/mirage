@@ -450,7 +450,7 @@ async def test_output_goes_out_as_the_command_writes_it():
 
 # timeout signals its command's whole process group, so the jobs the
 # command started end at the deadline too; --foreground signals the
-# command alone.
+# command alone, and a job ignores INT.
 @pytest.mark.asyncio
 async def test_the_deadline_stops_the_jobs_its_command_started():
     ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
@@ -458,13 +458,15 @@ async def test_the_deadline_stops_the_jobs_its_command_started():
         io = await ws.shell(
             "timeout 0.05 sh -c 'sleep 30 & sleep 30'; echo $?; "
             "timeout --foreground 0.05 sh -c 'sleep 31 & sleep 30'; "
+            "echo $?; timeout -s INT 0.05 sh -c 'sleep 32 & sleep 30'; "
             "echo $?; ps -o args"
         )
         out = (await io.stdout_str()).splitlines()
     finally:
         await ws.close()
-    assert out[:2] == ["124", "124"]
-    assert "sleep 30" not in out and "sleep 31" in out
+    assert out[:3] == ["124", "124", "124"]
+    assert "sleep 30" not in out
+    assert "sleep 31" in out and "sleep 32" in out
 
 
 @pytest.mark.asyncio

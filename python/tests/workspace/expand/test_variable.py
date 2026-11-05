@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from mirage.shell.array import make_array
 from mirage.shell.errors import ExitSignal
 from mirage.shell.parse import parse
 from mirage.shell.variable import ShellVar
@@ -107,7 +108,7 @@ def test_pattern_text_binds_backslash_escapes():
 
 def test_lookup_var_array_first_element():
     session = SessionState(
-        session_id="t", vars={"a": ShellVar(["one", "two"])}
+        session_id="t", vars={"a": ShellVar(make_array(["one", "two"]))}
     )
     assert _lookup_var("a", session, None) == "one"
 
@@ -130,7 +131,9 @@ async def test_slice_array(groups, expected):
         .named_children[-1]
     )
     assert (
-        await _slice_array(["1", "2", "3", "4"], node, AsyncMock(), operand)
+        await _slice_array(
+            make_array(["1", "2", "3", "4"]), node, AsyncMock(), operand
+        )
         == expected
     )
 

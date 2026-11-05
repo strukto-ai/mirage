@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 from mirage.io import IOResult
 from mirage.policy import PolicyDenied
+from mirage.shell.array import ShellArray, make_array
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import DiscardSignal
@@ -378,7 +379,7 @@ async def execute_declaration(
                     f"bash: {cmd_word}: {bare}: {conflict}"
                 )
                 continue
-            if isinstance(held, dict if want_assoc else list):
+            if isinstance(held, dict if want_assoc else ShellArray):
                 continue
             # A local of another kind starts empty; at top level an
             # existing scalar becomes element 0, or the value at the
@@ -390,7 +391,11 @@ async def execute_declaration(
                     session, bare, {} if scalar is None else {"0": scalar}
                 )
             else:
-                seed_var(session, bare, [] if scalar is None else [scalar])
+                seed_var(
+                    session,
+                    bare,
+                    make_array([] if scalar is None else [scalar]),
+                )
     # declare/typeset scope like `local` inside a function (bash
     # semantics) and assign globally at top level, which is exactly
     # handle_local's fallback when no function scope is active. `-r`

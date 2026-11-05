@@ -10,12 +10,13 @@ import {
   withValue,
   type ManagedRef,
 } from './variable.ts'
+import { makeArray } from './array.ts'
 
 describe('attrLetters matches bash 5.2.37 declare -p order', () => {
   const cases: [string, ReturnType<typeof makeVar>][] = [
     ['irx', makeVar('1', new Set([VarAttr.Export, VarAttr.Readonly, VarAttr.Integer]))],
     ['Aiu', makeVar({}, new Set([VarAttr.Integer, VarAttr.Upper]))],
-    ['arx', makeVar([], new Set([VarAttr.Readonly, VarAttr.Export]))],
+    ['arx', makeVar(makeArray([]), new Set([VarAttr.Readonly, VarAttr.Export]))],
     ['nrx', makeVar('a', new Set([VarAttr.Nameref, VarAttr.Readonly, VarAttr.Export]))],
     ['xl', makeVar('z', new Set([VarAttr.Export, VarAttr.Lower]))],
     ['', makeVar('5')],
@@ -27,7 +28,7 @@ describe('attrLetters matches bash 5.2.37 declare -p order', () => {
   }
   it('derives kind from the value', () => {
     expect(varKind(makeVar('x'))).toBe(VarKind.Scalar)
-    expect(varKind(makeVar([]))).toBe(VarKind.Indexed)
+    expect(varKind(makeVar(makeArray([])))).toBe(VarKind.Indexed)
     expect(varKind(makeVar({}))).toBe(VarKind.Assoc)
     expect(varKind(makeVar(null))).toBe(VarKind.Scalar)
   })

@@ -260,11 +260,13 @@ class _VisibleArrays(Mapping[str, ShellArray]):
         if var_hidden(self._session.visibility, name):
             raise KeyError(name)
         if name == PIPESTATUS:
-            return [str(code) for code in self._session.pipe_status]
+            return make_array(
+                [str(code) for code in self._session.pipe_status]
+            )
         if name == FUNCNAME and self._session.function_names is not None:
-            return list(self._session.function_names)
+            return make_array(list(self._session.function_names))
         var = self._session.vars[name]
-        if not isinstance(var.value, list):
+        if not isinstance(var.value, ShellArray):
             raise KeyError(name)
         return var.value
 
@@ -276,7 +278,9 @@ class _VisibleArrays(Mapping[str, ShellArray]):
         # session's record before the store.
         hidden = self._session.visibility
         for name, var in self._session.vars.items():
-            if isinstance(var.value, list) and not var_hidden(hidden, name):
+            if isinstance(var.value, ShellArray) and not var_hidden(
+                hidden, name
+            ):
                 yield name
 
     def __len__(self) -> int:
@@ -931,7 +935,7 @@ def appended(
     """
     if isinstance(held, dict):
         held = held.get("0")
-    elif isinstance(held, list):
+    elif isinstance(held, ShellArray):
         held = array_get(held, 0)
     text = held or ""
     return (text, added) if integer else (join_bytes(text + added), None)
@@ -1159,7 +1163,7 @@ async def set_var(
         diagnostics is not None
         and existing is not None
         and VarAttr.NAMEREF in existing.attrs
-        and isinstance(value, (list, dict))
+        and isinstance(value, (ShellArray, dict))
     ):
         diagnostics.append(
             encode_text(f"bash: warning: {name}: removing nameref attribute\n")

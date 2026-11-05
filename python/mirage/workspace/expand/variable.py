@@ -27,6 +27,7 @@ from mirage.shell.array import (
     array_indices,
     array_slice,
     array_values,
+    make_array,
 )
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -1276,7 +1277,7 @@ async def _expand_braces(
         if arr is None:
             # A scalar is element 0 of a one-element array, even when
             # empty: ${#x[@]} is 1 for x="" but 0 for an unset name.
-            arr = [env[p.var_name]] if p.var_name in env else []
+            arr = make_array([env[p.var_name]] if p.var_name in env else [])
         # Expanded first (`${a[$k]}` resolves $k, `${a[i+1]}` stays
         # arithmetic), then evaluated as an index.
         sub_text = await named(
@@ -1459,11 +1460,11 @@ def _splat_source(
     slice numbers from 1 so that index 0 is the shell's own name
     (``"${@:0}"`` yields it ahead of $1; pinned on bash 5.2.37, macOS
     bash 3.2 drops it). Every element of an array for ``${a[@]...}``
-    and ``${a[*]...}``, holes left by ``unset a[i]`` included so a slice
-    keeps its indices; an associative array walks its keys sorted,
-    since bash's hash order is unpredictable and a deterministic answer
-    beats reproducing noise. A scalar is element 0 of a one-element
-    array. None for any other expansion.
+    and ``${a[*]...}`` by index, so a slice keeps its indices; an
+    associative array walks its keys sorted, since bash's hash order is
+    unpredictable and a deterministic answer beats reproducing noise. A
+    scalar is element 0 of a one-element array. None for any other
+    expansion.
 
     Args:
         p (_BraceParse): the parsed expansion.
@@ -1480,17 +1481,17 @@ def _splat_source(
         params = positional_params(session, call_stack)
         keys = [str(i) for i in range(1, len(params) + 1)]
         if p.op == ":":
-            return [session.argv0, *params], keys
-        return list(params), keys
+            return make_array([session.argv0, *params]), keys
+        return make_array(list(params)), keys
     if p.var_name is None or p.subscript not in ("@", "*"):
         return None
     amap = assocs.get(p.var_name)
     if amap is not None:
         keys = sorted(amap)
-        return [amap[k] for k in keys], keys
+        return make_array([amap[k] for k in keys]), keys
     arr = arrays.get(p.var_name)
     if arr is None:
-        arr = [env[p.var_name]] if p.var_name in env else []
+        arr = make_array([env[p.var_name]] if p.var_name in env else [])
     return arr, [str(i) for i in array_indices(arr)]
 
 
@@ -1520,7 +1521,7 @@ async def _expand_splat(
 
     Args:
         p (_BraceParse): the parsed expansion.
-        arr (ShellArray): the elements, holes included.
+        arr (ShellArray): the elements, by index.
         keys (list[str]): the elements' keys, in order.
         node (TSNodeLike): the expansion node, for slice bounds.
         expand_child (ExpandChild): nested-node expander.

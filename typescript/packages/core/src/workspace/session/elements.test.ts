@@ -18,11 +18,12 @@ import { VarAttr } from '../../shell/variable.ts'
 import { SessionState } from './session.ts'
 import { assignElement, elementIsSet } from './elements.ts'
 import { seedVar, setAttr } from './state.ts'
+import { makeArray } from '../../shell/array.ts'
 
 function makeSession(): SessionState {
   const session = new SessionState({ sessionId: 's', cwd: '/' })
   seedVar(session, 'm', { a: '1', k5: '9', '0': 'z' })
-  seedVar(session, 'arr', ['10', '20', '30'])
+  seedVar(session, 'arr', makeArray(['10', '20', '30']))
   seedVar(session, 's5', '5')
   seedVar(session, 'i', '1')
   return session
@@ -77,7 +78,7 @@ describe('assignElement', () => {
     seedVar(session, 'sc', 'base')
     expect(await assignElement(session, null, 'sc', '1', 'one')).toBe('ok')
     expect(await assignElement(session, null, 'ro', '0', 'x')).toBe('readonly')
-    expect(session.arrays.arr).toEqual(['10', 'X', 'Y'])
-    expect(session.arrays.sc).toEqual(['base', 'one'])
+    expect(session.arrays.arr).toEqual(makeArray(['10', 'X', 'Y']))
+    expect(session.arrays.sc).toEqual(makeArray(['base', 'one']))
   })
 })

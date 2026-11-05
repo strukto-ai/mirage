@@ -479,6 +479,32 @@ async def test_stopping_an_exited_runner_stops_what_it_left_running():
     assert (info.exit_code, info.cancellation_requested) == (143, True)
 
 
+# A signal the runner's jobs ignore stops the runner alone, under the
+# signal, and leaves what it started running.
+@pytest.mark.asyncio
+async def test_stopping_a_runner_alone_leaves_its_children_running():
+    processes = ProcessTable()
+    parent = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=_hangs,
+    )
+    child = processes.start(
+        session_id="a",
+        command="sleep",
+        cwd=PathSpec.from_str_path("/"),
+        run=_hangs,
+        parent_pid=parent.info.pid,
+    )
+    assert parent.terminate(2, children=False)
+    async with asyncio.timeout(5):
+        assert (await parent.join()).exit_code == 130
+    assert not child.info.cancellation_requested
+    child.terminate()
+    await child.join()
+
+
 # A kill reaches the whole group with the signal it named, so a native
 # program a child runner started receives that signal too.
 @pytest.mark.asyncio

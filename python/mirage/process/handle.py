@@ -142,7 +142,7 @@ class ProcessHandle:
         with self._lock:
             self._program_code = code
 
-    def terminate(self, signal: int = 9) -> bool:
+    def terminate(self, signal: int = 9, children: bool = True) -> bool:
         """Request cancellation without waiting for the runner to exit.
 
         A runner that already exited has nothing to cancel, but what it
@@ -154,6 +154,8 @@ class ProcessHandle:
         Args:
             signal (int): what the stop stands for, KILL (9) unless a
                 ``kill`` named another.
+            children (bool): stop what the runner started too; False
+                leaves its jobs running, for a signal they ignore.
         """
         with self._lock:
             exited = self._info.state == ProcessState.EXITED
@@ -174,7 +176,7 @@ class ProcessHandle:
                 )
             elif escalated:
                 self._signal = signal
-        if stopped or exited or escalated:
+        if children and (stopped or exited or escalated):
             self._cancel_children(signal)
         return stopped or escalated
 

@@ -21,6 +21,8 @@ import pytest
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.server.ssh import stream
 from mirage.server.ssh.session import ends_shell, login_env
+from mirage.utils.abort import MirageAbortError, run_cancellable
+from mirage.workspace.workspace import workspace as workspace_module
 from tests.server.ssh.conftest import (
     WORKSPACE_ID,
     bind_key,
@@ -201,6 +203,40 @@ async def test_ctrl_c_interrupts_the_running_line(ssh):
         process.stdin.write("exit\n")
         await asyncio.wait_for(process.wait_closed(), 5)
     assert time.monotonic() - started < 10
+    assert "status=130" in seen
+
+
+async def _slow_unwind(awaitable, cancel=None, stop=None):
+    try:
+        return await run_cancellable(awaitable, cancel, stop)
+    except (asyncio.CancelledError, MirageAbortError):
+        await asyncio.sleep(0.3)
+        raise
+
+
+def _put_back(session, snapshot, writer):
+    session.last_exit_code = snapshot.last_exit_code
+
+
+@pytest.mark.asyncio
+async def test_ctrl_c_leaves_130_once_the_line_has_unwound(ssh, monkeypatch):
+    # What an interrupted line leaves in `$?` as it unwinds, however late,
+    # lands before the interrupt's 130.
+    monkeypatch.setattr(workspace_module, "run_cancellable", _slow_unwind)
+    monkeypatch.setattr(workspace_module, "restore_status", _put_back)
+    async with ssh.connect() as conn:
+        process = await conn.create_process(term_type="xterm")
+        await _read_until(process, "$ ")
+        process.stdin.write("sleep 30\n")
+        await asyncio.sleep(0.5)
+        process.stdin.write("\x03")
+        await _read_until(process, "^C")
+        await asyncio.sleep(0.6)
+        process.stdin.write("echo status=$?\n")
+        seen = await _read_until(process, "status=")
+        seen += await _read_until(process, "\r\n")
+        process.stdin.write("exit\n")
+        await asyncio.wait_for(process.wait_closed(), 5)
     assert "status=130" in seen
 
 

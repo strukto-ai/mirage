@@ -16,9 +16,11 @@ import functools
 
 from mirage.policy import PolicyDenied
 from mirage.shell.array import (
+    ShellArray,
     array_set,
     build_assoc_literal,
     build_indexed_literal,
+    make_array,
 )
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError, DiscardSignal
@@ -171,7 +173,7 @@ def kind_conflict(held: ShellValue | None, kind: VarKind | None) -> str | None:
         held (ShellValue | None): the value the declaration lands on.
         kind (VarKind | None): the kind ``-a`` / ``-A`` asked for.
     """
-    if kind is VarKind.ASSOC and isinstance(held, list):
+    if kind is VarKind.ASSOC and isinstance(held, ShellArray):
         return "cannot convert indexed to associative array"
     if kind is VarKind.INDEXED and isinstance(held, dict):
         return "cannot convert associative to indexed array"
@@ -201,10 +203,12 @@ def scalar_value(
         amap = dict(held) if isinstance(held, dict) else {}
         amap["0"] = value
         return amap, frozenset({"0"})
-    if isinstance(held, list) or kind is VarKind.INDEXED:
-        arr = list(held) if isinstance(held, list) else []
-        if scalar is not None:
-            arr.append(scalar)
+    if isinstance(held, ShellArray) or kind is VarKind.INDEXED:
+        arr = (
+            held.copy()
+            if isinstance(held, ShellArray)
+            else make_array([] if scalar is None else [scalar])
+        )
         array_set(arr, 0, value)
         return arr, frozenset({0})
     return value, None
@@ -353,7 +357,7 @@ def plus_refusal(
         "n" in plus and reference and view.is_readonly(name, False)
     ):
         return readonly_line(cmd, name)
-    if ("a" in plus and isinstance(value, list)) or (
+    if ("a" in plus and isinstance(value, ShellArray)) or (
         "A" in plus and isinstance(value, dict)
     ):
         return (
@@ -497,7 +501,7 @@ async def store_staged_arrays(
                 indexed = session.arrays.get(name)
                 if append and indexed is None:
                     scalar = conversion_scalar(session, name)
-                    indexed = None if scalar is None else [scalar]
+                    indexed = None if scalar is None else make_array([scalar])
                 base = await build_indexed_literal(
                     indexed,
                     items,
@@ -726,11 +730,10 @@ def declare_line(session: SessionState, name: str) -> str | None:
     head = f"declare -{letters}" if letters else "declare --"
     if var.value is None:
         return f"{head} {name}"
-    if isinstance(var.value, list):
+    if isinstance(var.value, ShellArray):
         parts = [
             f"[{i}]={bash_declare_quote(v)}"
-            for i, v in enumerate(var.value)
-            if v is not None
+            for i, v in var.value.elements.items()
         ]
         return f"{head} {name}=({' '.join(parts)})"
     if isinstance(var.value, dict):
@@ -1262,7 +1265,7 @@ def reference_refusal(
         own (ShellVar | None): the record the operand lands on.
         bare (bool): the operand gave no value.
     """
-    if own is not None and isinstance(own.value, (list, dict)):
+    if own is not None and isinstance(own.value, (ShellArray, dict)):
         return f"bash: {cmd}: {name}: reference variable cannot be an array"
     if (
         not bare

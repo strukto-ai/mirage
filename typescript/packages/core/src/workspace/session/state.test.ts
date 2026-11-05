@@ -42,6 +42,7 @@ import {
 } from './state.ts'
 import { RANDOM } from '../../shell/constants.ts'
 import { makeVar } from '../../shell/variable.ts'
+import { makeArray, ShellArray } from '../../shell/array.ts'
 
 class DenySecrets {
   preSession(ctx: SessionContext): Action | null {
@@ -92,8 +93,8 @@ describe('sessionView', () => {
     // One entry point for every write: a string stores a scalar, a list stores
     // a whole array, and the two storages stay exclusive.
     const [view, session] = makeView()
-    await view.set('A', ['x', 'y'])
-    expect(session.arrays.A).toEqual(['x', 'y'])
+    await view.set('A', makeArray(['x', 'y']))
+    expect(session.arrays.A).toEqual(makeArray(['x', 'y']))
     expect('A' in session.env).toBe(false)
     await view.set('A', 's')
     expect(session.env.A).toBe('s')
@@ -111,7 +112,13 @@ describe('sessionView', () => {
     const policies = new Policies()
     policies.add(new Capture())
     const [view] = makeView(policies)
-    await view.set('A', ['x', null, 'y'])
+    await view.set(
+      'A',
+      new ShellArray([
+        [0, 'x'],
+        [2, 'y'],
+      ]),
+    )
     expect(seen).toEqual(['x y'])
   })
 
@@ -145,7 +152,7 @@ describe('sessionView', () => {
     // `n=a[1]+1` under `-i` reads the element, as bash does, through
     // the same resolver every other arithmetic entry point uses.
     const [view, session] = makeView()
-    seedVar(session, 'a', ['1', '2'])
+    seedVar(session, 'a', makeArray(['1', '2']))
     seedVar(session, 'm', { x: '4' })
     seedVar(session, 'n', '0')
     setAttr(session, 'n', VarAttr.Integer)
@@ -286,7 +293,7 @@ describe('hidden vars in the session view', () => {
 function elementSession(): SessionState {
   const session = new SessionState({ sessionId: 's', cwd: '/' })
   seedVar(session, 'm', { a: '1', k5: '9', '0': 'z' })
-  seedVar(session, 'arr', ['10', '20', '30'])
+  seedVar(session, 'arr', makeArray(['10', '20', '30']))
   seedVar(session, 's5', '5')
   seedVar(session, 'i', '1')
   return session
@@ -307,10 +314,10 @@ describe('subscriptIndex', () => {
     const s = new SessionState({ sessionId: 's' })
     seedVar(s, 'i', '1')
     s.vars[RANDOM] = makeVar('1')
-    expect(await subscriptIndex(s, '3')).toBe(3)
-    expect(await subscriptIndex(s, 'i+1')).toBe(2)
+    expect(await subscriptIndex(s, '3')).toBe(3n)
+    expect(await subscriptIndex(s, 'i+1')).toBe(2n)
     // The subscript's assignment lands, bash's `a[x=3]`.
-    expect(await subscriptIndex(s, 'x=3')).toBe(3)
+    expect(await subscriptIndex(s, 'x=3')).toBe(3n)
     expect(s.vars.x?.value).toBe('3')
     // One that fails lands what it assigned before failing, then throws
     // in bash's words rather than reading element 0.
@@ -318,7 +325,7 @@ describe('subscriptIndex', () => {
     expect(s.vars.y?.value).toBe('4')
     // A seed reaches the generator, and the draw after it advances the
     // session past it.
-    expect(await subscriptIndex(s, 'RANDOM=42, RANDOM')).toBe(17772)
+    expect(await subscriptIndex(s, 'RANDOM=42, RANDOM')).toBe(17772n)
     const drawn = s.vars[RANDOM].value
     expect(nextRandom(s, typeof drawn === 'string' ? drawn : undefined)).toBe(26794)
     // Through the session view, a refusal is the gate's.
@@ -447,7 +454,7 @@ describe('gateRestoredVars', () => {
   it('renders what setVar shows a method', () => {
     expect(gateRendering('x')).toBe('x')
     expect(gateRendering({ b: '2', a: '1' })).toBe('1 2')
-    expect(gateRendering(['p', 'q'])).toBe('p q')
+    expect(gateRendering(makeArray(['p', 'q']))).toBe('p q')
     expect(gateRendering(null)).toBeNull()
   })
 })

@@ -49,12 +49,15 @@ class LogEntry:
         bytes (int | None): Bytes transferred (for type="vfs").
         duration_ms (int | None): Duration in ms (for type="vfs" and
             type="result").
-        command (str | None): Shell command (for type="command").
+        command (str | None): Shell command (for type="command"; for
+            type="delete", the deleted entry's).
         exit_code (int | None): Exit code (for type="result").
         stdout (str | None): Truncated stdout (for type="result").
         stderr (str | None): Truncated stderr (for type="result").
-        offset (int | None): 1-based listing position (for
-            type="delete"); negative counts back from the end.
+        target (int | None): The deleted entry's timestamp (for
+            type="delete").
+        after (int | None): How many entries with its timestamp and
+            text follow the deleted one (for type="delete").
     """
 
     type: str
@@ -72,7 +75,8 @@ class LogEntry:
     exit_code: int | None = None
     stdout: str | None = None
     stderr: str | None = None
-    offset: int | None = None
+    target: int | None = None
+    after: int | None = None
 
     @staticmethod
     def from_op_record(

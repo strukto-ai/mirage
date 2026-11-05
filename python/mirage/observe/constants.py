@@ -38,3 +38,8 @@ TRACE_MAX_SPANS_ENV = "MIRAGE_TRACE_MAX_SPANS"
 # 1000 a line: a walk over a large tree makes a call per entry, and an
 # exporter's queue (2048 spans by default) drops what overflows it anyway.
 TRACE_MAX_SPANS = 1000
+
+# The most a workspace's RAM recorder holds. Past it the oldest lines go
+# first, down to three quarters of it, so trimming stays rare however
+# fast lines arrive: 8 MiB keeps thousands of lines with their calls.
+RAM_LOG_BYTES = 8 * 1024 * 1024

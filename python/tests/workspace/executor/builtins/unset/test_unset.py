@@ -1,5 +1,6 @@
 import pytest
 
+from mirage.shell.array import ShellArray, make_array
 from mirage.shell.variable import VarAttr
 from mirage.workspace.executor.builtins.unset import handle_unset
 from mirage.workspace.session.functions import FunctionSite
@@ -53,14 +54,14 @@ async def test_unset_bare_prefers_variable_then_function():
 @pytest.mark.asyncio
 async def test_unset_removes_whole_array_and_one_element():
     session = make_session()
-    seed_var(session, "arr", ["x", "y", "z"])
+    seed_var(session, "arr", make_array(["x", "y", "z"]))
     # An interior element leaves a hole: the later indices keep their
     # positions, as bash does.
     await handle_unset(["arr[1]"], session, state=session_view(session))
-    assert session.arrays["arr"] == ["x", None, "z"]
+    assert session.arrays["arr"] == ShellArray({0: "x", 2: "z"})
     # A trailing element drops off, so the extent shrinks with it.
     await handle_unset(["arr[2]"], session, state=session_view(session))
-    assert session.arrays["arr"] == ["x"]
+    assert session.arrays["arr"] == make_array(["x"])
     await handle_unset(["arr"], session, state=session_view(session))
     assert "arr" not in session.arrays
 
@@ -68,14 +69,14 @@ async def test_unset_removes_whole_array_and_one_element():
 @pytest.mark.asyncio
 async def test_unset_readonly_array_element_is_rejected():
     session = make_session()
-    seed_var(session, "arr", ["x", "y"])
+    seed_var(session, "arr", make_array(["x", "y"]))
     set_attr(session, "arr", VarAttr.READONLY)
     _, io, node = await handle_unset(
         ["arr[1]"], session, state=session_view(session)
     )
     assert node.exit_code == 1
     assert io.stderr == b"bash: unset: arr: cannot unset: readonly variable\n"
-    assert session.arrays["arr"] == ["x", "y"]
+    assert session.arrays["arr"] == make_array(["x", "y"])
 
 
 @pytest.mark.asyncio
@@ -104,25 +105,25 @@ async def test_unset_nonzero_element_of_a_scalar_errors():
 @pytest.mark.asyncio
 async def test_unset_negative_element_outside_the_extent_errors():
     session = make_session()
-    seed_var(session, "arr", ["x"])
+    seed_var(session, "arr", make_array(["x"]))
     _, io, node = await handle_unset(
         ["arr[-2]"], session, state=session_view(session)
     )
     assert node.exit_code == 1
     # bash prints only the bracketed part here, not the base name.
     assert io.stderr == b"bash: unset: [-2]: bad array subscript\n"
-    assert session.arrays["arr"] == ["x"]
+    assert session.arrays["arr"] == make_array(["x"])
 
 
 @pytest.mark.asyncio
 async def test_unset_negative_element_inside_the_extent_works():
     session = make_session()
-    seed_var(session, "arr", ["x", "y"])
+    seed_var(session, "arr", make_array(["x", "y"]))
     _, io, node = await handle_unset(
         ["arr[-2]"], session, state=session_view(session)
     )
     assert node.exit_code == 0
-    assert session.arrays["arr"] == [None, "y"]
+    assert session.arrays["arr"] == ShellArray({1: "y"})
 
 
 @pytest.mark.asyncio

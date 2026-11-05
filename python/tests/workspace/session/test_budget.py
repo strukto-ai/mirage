@@ -1,6 +1,7 @@
 import pytest
 
 from mirage.io.stream import materialize
+from mirage.shell.array import ShellArray
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -12,7 +13,7 @@ def test_entries_count_their_utf8_bytes():
     assert entry_bytes("a", "é") == 3
     assert args_bytes(["ab", "c"]) == 5
     assert args_bytes([""]) == 1
-    assert entry_bytes("a", ["xy", None, "z"]) == 6
+    assert entry_bytes("a", ShellArray({0: "xy", 2: "z"})) == 6
     assert entry_bytes("m", {"k": "vv"}) == 5
 
 

@@ -61,6 +61,7 @@ from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.timeout.constants import (
     CONTINUE_SIGNALS,
     FORK_FAILED,
+    JOB_IGNORED_SIGNALS,
     SELF_KILLING_SIGNALS,
     SIGCHLD,
     SIGKILL,
@@ -572,9 +573,11 @@ async def _deadline(
 
 async def _stop(process: ProcessHandle, signal: int, foreground: bool) -> None:
     # timeout signals its own process group unless --foreground, so the
-    # jobs the command started end with it.
-    if not foreground:
-        process.terminate(signal)
+    # jobs the command started end with it unless they ignore the signal;
+    # the command itself gets it either way.
+    process.terminate(
+        signal, children=not foreground and signal not in JOB_IGNORED_SIGNALS
+    )
     await _cancel(process.task)
 
 
