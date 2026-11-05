@@ -77,10 +77,12 @@ export async function renderPrintf(
   base: string,
   st: PrintfStatFacts | null,
   identity: Identity | null = null,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
+  signal?.throwIfAborted()
   engine.begin(facts(row, base, st, identity))
   const out = [engine.finish()]
-  const budget = new YieldBudget()
+  const budget = new YieldBudget(signal)
   while (engine.busy()) {
     await budget.run()
     out.push(engine.drain())
