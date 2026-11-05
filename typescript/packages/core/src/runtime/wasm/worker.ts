@@ -12,10 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { OpenMode } from '../handles/mode.ts'
-import type { VFSStat } from '../types.ts'
 import type { GuestCall, GuestReply, GuestRun } from './execution.ts'
-import { GuestExit, type GuestFile, type GuestView, WasiFs, wasiImports } from './fs.ts'
+import { GuestExit, settle, WasiFs, wasiImports } from './fs.ts'
+import { guestView } from './guest.ts'
 import { failureText, requestOverBridge, requestSync } from './transport.ts'
 
 // The worker a wasm guest runs on: the module runs here, blocking this
@@ -39,53 +38,7 @@ const call = (request: GuestCall): unknown =>
   (bridge === undefined ? requestSync(post, request) : requestOverBridge(post, request, bridge)) ??
   null
 
-/** One open file of the host's, its calls made across the bridge. */
-function guestFile(id: number, mode: OpenMode, opened: string, inode: string): GuestFile {
-  const on = (method: string, ...args: unknown[]): unknown =>
-    call({ op: 'file', file: id, method, args })
-  return {
-    mode,
-    opened,
-    inode,
-    path: () => on('path') as string,
-    position: () => on('position') as number,
-    size: () => on('size') as number,
-    read: (size) => on('read', size) as Uint8Array,
-    pread: (offset, size) => on('pread', offset, size) as Uint8Array,
-    write: (data) => on('write', data),
-    pwrite: (offset, data) => on('pwrite', offset, data),
-    seek: (offset, whence) => on('seek', offset, whence) as number | null,
-    truncate: (size) => on('truncate', size),
-    land: () => on('land'),
-    close: () => on('close'),
-    fstat: () => on('fstat') as VFSStat,
-    unlinked: () => on('unlinked') as boolean,
-  }
-}
-
-const viewCall = (method: string, ...args: unknown[]): unknown => call({ op: 'view', method, args })
-const view: GuestView = {
-  stat: (path) => viewCall('stat', path) as VFSStat,
-  lstat: (path) => viewCall('lstat', path) as VFSStat,
-  statOrNull: (path, nofollow = false) => viewCall('statOrNull', path, nofollow) as VFSStat | null,
-  open: (path, mode) => {
-    const { id, opened, inode } = viewCall('open', path, mode) as {
-      id: number
-      opened: string
-      inode: string
-    }
-    return guestFile(id, mode, opened, inode)
-  },
-  unlink: (path) => viewCall('unlink', path),
-  mkdir: (path) => viewCall('mkdir', path),
-  rmdir: (path) => viewCall('rmdir', path),
-  rename: (src, dst) => viewCall('rename', src, dst),
-  symlink: (path, target) => viewCall('symlink', path, target),
-  walked: (path, follow = true) => viewCall('walked', path, follow) as string,
-  readlink: (path) => viewCall('readlink', path) as string,
-  setattr: (path, atime, mtime, nofollow) => viewCall('setattr', path, atime, mtime, nofollow),
-  readdir: (path) => viewCall('readdir', path) as [string, number][],
-}
+const view = guestView(call)
 
 async function run(request: GuestRun): Promise<void> {
   bridge = request.bridge
@@ -112,7 +65,7 @@ async function run(request: GuestRun): Promise<void> {
         trap = `wasm trap: ${failureText(err)}`
       }
     }
-    post({ kind: 'result', exitCode, trap, lost: wasi.closeAll() })
+    post({ kind: 'result', exitCode, trap, lost: settle(wasi.closeAll()) })
   } catch (err) {
     post({ kind: 'error', message: failureText(err) })
   }

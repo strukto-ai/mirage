@@ -36,7 +36,8 @@
   },
   "runtime/js/quickjs": {
    "typescript_only": {
-    "errors": "QuickJsUnavailableError, raised when no qjs-wasi.wasm is found or no worker can start, which the interpreter command answers 127 for. Python raises FileNotFoundError at construction, so it has no error module."
+    "errors": "QuickJsUnavailableError, raised when no qjs-wasi.wasm is found or no worker can start, which the interpreter command answers 127 for. Python raises FileNotFoundError at construction, so it has no error module.",
+    "loader": "provideQuickJsModule, through which an edge host (the Cloudflare package) hands in the qjs module its deploy compiled, as provideMontyModule does for monty. Python loads qjs-wasi.wasm from its home and compiles it with wasmtime."
    }
   },
   "utils": {
@@ -193,7 +194,9 @@
    },
    "typescript_only": {
     "transport": "The blocking bridge a worker guest calls the host through (shared memory, or the page's service worker), which Pyodide uses too. Python's guest runs on a thread whose calls wait on the event loop directly.",
-    "worker": "The worker entry a guest runs on, its WasiFs answered across the bridge. Python runs the guest on a thread (WasmExecution._run_sync)."
+    "worker": "The worker entry a guest runs on, its WasiFs answered across the bridge. Python runs the guest on a thread (WasmExecution._run_sync).",
+    "guest": "The guest's view over whatever carries its calls (a worker's blocking bridge, or a JSPI guest's own isolate), shared by worker and jspi. Python's guest calls the host's view directly on its thread.",
+    "jspi": "JspiExecution, which runs a guest in the host's own isolate, suspended on each call it makes (JavaScript Promise Integration), for an edge runtime that has no worker and compiles no wasm. Python runs every guest on a thread under wasmtime."
    }
   },
   "concurrency": {
