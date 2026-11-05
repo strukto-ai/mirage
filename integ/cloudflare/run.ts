@@ -72,10 +72,12 @@ const MCP_PORT = 5110
 
 type Config = Record<string, unknown>
 
-// How long the edge worker may take over one request. A line that hangs it,
-// or a worker that never built (wrangler dev holds a request until one
-// does), then fails the run rather than holding it to the job's time limit.
-const ANSWER_MS = 120_000
+// How long the edge worker may take over one request: well past the
+// corpus's slowest line, a 300,000-pass shell loop that takes minutes on a
+// CI runner. A line that hangs it, or a worker that never built (wrangler
+// dev holds a request until one does), then fails the run rather than
+// holding it to the job's time limit.
+const ANSWER_MS = 600_000
 
 /** A request of the edge worker's, failing once it has not answered in `ms`. */
 async function edgeFetch(url: string, init: RequestInit = {}, ms = ANSWER_MS): Promise<Response> {
