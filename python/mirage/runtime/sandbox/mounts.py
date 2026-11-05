@@ -522,8 +522,9 @@ class SandboxMounts:
                 p
                 for p in sorted(self._served)
                 if p in wanted
-                and p not in ended
+                and p in present
                 and present[p] != (self._source(p), "fuse.sshfs")
+                and (p not in ended or present[p][1] != "fuse.sshfs")
             ),
             None,
         )

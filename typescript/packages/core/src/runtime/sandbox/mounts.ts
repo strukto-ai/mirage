@@ -478,11 +478,12 @@ export class SandboxMounts {
     if (this.lost() !== null) return null
     const wanted = visible.filter((p) => !own.includes(p))
     const covered = [...this.served.keys()].sort(compareCodePoints).find((p) => {
-      const [source, kind] = present.get(p) ?? ['', '']
+      const entry = present.get(p)
       return (
         wanted.includes(p) &&
-        !ended.includes(p) &&
-        (source !== this.source(p) || kind !== 'fuse.sshfs')
+        entry !== undefined &&
+        (entry[0] !== this.source(p) || entry[1] !== 'fuse.sshfs') &&
+        (!ended.includes(p) || entry[1] !== 'fuse.sshfs')
       )
     })
     if (covered !== undefined) {
