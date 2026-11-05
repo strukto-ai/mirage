@@ -253,6 +253,8 @@ class SandboxMounts:
         # The sandbox's own mounts as last read, and each prefix held since.
         self._own: dict[str, tuple[str, str]] = {}
         self._owned: set[str] = set()
+        # What each served prefix was laid over, which shows again once it ends.
+        self._under: dict[str, tuple[str, str] | None] = {}
         self._lock = asyncio.Lock()
         self._name = f"{SSHFS_SOURCE_PREFIX}{uuid.uuid4().hex}"
 
@@ -497,7 +499,10 @@ class SandboxMounts:
         self._seen = None
         present = await self._table()
         ended += [
-            p for p in self._served if p not in ended and p not in present
+            p
+            for p in self._served
+            if p not in ended
+            and (p not in present or present[p] == self._under.get(p))
         ]
         own = tuple(
             sorted(
@@ -523,7 +528,8 @@ class SandboxMounts:
                 for p in sorted(self._served)
                 if p in wanted
                 and p in present
-                and present[p] != (self._source(p), "fuse.sshfs")
+                and present[p]
+                not in ((self._source(p), "fuse.sshfs"), self._under.get(p))
                 and (p not in ended or present[p][1] != "fuse.sshfs")
             ),
             None,
@@ -603,6 +609,7 @@ class SandboxMounts:
         prefix: str,
         present: dict[str, tuple[str, str]],
     ) -> None:
+        self._under[prefix] = present.get(prefix)
         if present.get(prefix, ("", ""))[1] == "fuse.sshfs":
             await self._run(unmount_line(prefix))
         path = single_quote(prefix)
@@ -721,6 +728,7 @@ class SandboxMounts:
             present (dict[str, tuple[str, str]]): the sandbox's mount table.
         """
         pipe, task, _ = self._served.pop(prefix)
+        self._under.pop(prefix, None)
         if present.get(prefix, ("", ""))[0] == self._source(prefix):
             try:
                 done = await self._run(unmount_line(prefix))
