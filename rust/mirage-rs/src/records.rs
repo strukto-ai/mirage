@@ -38,10 +38,6 @@ impl Records {
         self.ended = true;
     }
 
-    pub(crate) fn ended(&self) -> bool {
-        self.ended
-    }
-
     pub(crate) fn next(&mut self, terminator: u8) -> Take {
         match self.next_span(terminator) {
             Take::Record(record) => Take::Record(record.to_vec()),
