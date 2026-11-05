@@ -942,6 +942,23 @@ describe('SandboxMounts', () => {
     await ws.close()
   })
 
+  // While its server still runs, a mount laid over a prefix is a cover even
+  // when it looks like the one the prefix was served over.
+  it('leaves a cover like the mount under a live server alone', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    sandbox.table.set('/data', ['tmpfs', 'tmpfs'])
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    sandbox.table.set('/data', ['tmpfs', 'tmpfs'])
+    const first = await agent.shell('python3 covered.py')
+    expect([first.exitCode, DEC.decode(first.stderr)]).toEqual([126, lost('/data')])
+    expect((await agent.shell('python3 covered.py')).exitCode).toBe(1)
+    expect(sandbox.stopped).toEqual([])
+    expect(sandbox.served()).toEqual(['/data', '/my notes'])
+    await ws.close()
+  })
+
   // A covered prefix the workspace no longer mounts is dropped, not refused.
   it('does not refuse a covered prefix the workspace dropped', async () => {
     const sandbox = new FakeSandbox('ssh')
