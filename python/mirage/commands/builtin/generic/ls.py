@@ -5,7 +5,7 @@ import string
 import sys
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from typing import Any
 
 from mirage.commands.builtin.generic.sort import engine_config
@@ -713,7 +713,7 @@ def _as_operand(s: FileStat, path: PathSpec) -> FileStat:
         s (FileStat): the operand's stat.
         path (PathSpec): the operand.
     """
-    return s.model_copy(update={"name": path.raw_path})
+    return replace(s, name=path.raw_path)
 
 
 def _link_row(path: PathSpec, links: LinkView | None) -> FileStat | None:
@@ -729,7 +729,7 @@ def _link_row(path: PathSpec, links: LinkView | None) -> FileStat | None:
     row = links.stat_at(path.virtual)
     if row is None:
         return None
-    return row.model_copy(update={"name": path.raw_path})
+    return replace(row, name=path.raw_path)
 
 
 def _child_spec(path: PathSpec, name: str) -> PathSpec:
@@ -772,7 +772,7 @@ async def _mount_row(
     if stat_path is not None:
         row = await stat_path(directory.child(name))
         if row is not None:
-            return row.model_copy(update={"name": name})
+            return replace(row, name=name)
     return FileStat(name=name, type=FileType.DIRECTORY)
 
 
@@ -1176,7 +1176,7 @@ async def _operand_row(
             f"ls: cannot access '{path.raw_path}': {_err_text(exc)}", True
         )
     # GNU ls -d prints the operand as given.
-    return listed.model_copy(update={"name": path.raw_path})
+    return replace(listed, name=path.raw_path)
 
 
 async def _operand_key(
@@ -1196,7 +1196,7 @@ async def _operand_key(
         # The stat only supplies a sort key; an operand that cannot be
         # statted sorts as if it had none rather than failing the listing.
         return FileStat(name=operand.path.raw_path, type=FileType.DIRECTORY)
-    return s.model_copy(update={"name": operand.path.raw_path})
+    return replace(s, name=operand.path.raw_path)
 
 
 async def _sort_operands(
@@ -1522,7 +1522,7 @@ async def ls(
                                     ),
                                 )
                             if found is not None:
-                                row = found.model_copy(update={"name": name})
+                                row = replace(found, name=name)
                         except (OSError, ValueError) as exc:
                             logger.debug("ls: stat %s: %r", target, exc)
                             row = _stat_failed_row(name)

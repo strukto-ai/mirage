@@ -1207,9 +1207,9 @@ ${script}`,
     expect(r.status).toBe(LookupStatus.NOT_FOUND)
   })
 
-  // The one wire format: what pydantic writes for a FileStat, snake_case and
-  // every field. `test_redis.py` pins the same literal, so a row either
-  // language writes is one the other reads.
+  // The one wire format: what Python's `row_json` writes for a FileStat,
+  // snake_case and every field. `test_redis.py` pins the same literal, so a
+  // row either language writes is one the other reads.
   it('writes the row JSON Python writes', async () => {
     await store.put(
       '/a.txt',

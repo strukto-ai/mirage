@@ -38,7 +38,6 @@ def stat(mode: int | None) -> FileStat:
     """
     return FileStat(
         name="x",
-        path="x",
         type=FileType.FILE,
         content=ContentType.TEXT,
         size=4,
@@ -279,7 +278,6 @@ def link_stat(target: str) -> FileStat:
     """
     return FileStat(
         name="link",
-        path="link",
         type=FileType.SYMLINK,
         size=len(target),
         extra={LINK_TARGET_KEY: target},

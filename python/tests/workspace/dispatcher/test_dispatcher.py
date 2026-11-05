@@ -16,6 +16,7 @@ import asyncio
 import dataclasses
 import errno
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1541,7 +1542,7 @@ class _CachingRAM(RAMVFS):
 class _UnsizedRAM(_CachingRAM):
     async def stat(self, path):
         row = await super().stat(path)
-        return row.model_copy(update={"size": None})
+        return replace(row, size=None)
 
 
 @pytest.mark.asyncio

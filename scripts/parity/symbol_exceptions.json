@@ -1238,6 +1238,11 @@
    "typescript_only": {
     "QuickJsEngine": "A worker per run, or JSPI in the host's own isolate where no worker can start (an edge runtime); Python always runs qjs on a thread under wasmtime."
    }
+  },
+  "core/ram/constants": {
+   "python_only": {
+    "PUBLISH_BYTES": "A Python RAM file is immutable bytes, so each landing of a streamed write copies the whole file, and past this size the wait grows with it; TypeScript grows one buffer and lands only the new bytes, so its wait stays STREAM_PUBLISH_SECONDS."
+   }
   }
  }
 }

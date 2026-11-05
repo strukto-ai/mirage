@@ -13,8 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { z } from 'zod'
-import type { FileStat } from '../../types.ts'
-import { ContentType, FileType } from '../../types.ts'
+import { ContentType, FileStat, FileType } from '../../types.ts'
 import type { ConfigOf } from '../../vfs/secrets.ts'
 import { parseConfigWithSchema, refuseRepeatedFields } from '../../vfs/secrets.ts'
 
@@ -33,9 +32,9 @@ export const IndexType = Object.freeze({
 export type IndexType = (typeof IndexType)[keyof typeof IndexType]
 
 /**
- * The wire form of a stat row: what pydantic writes for the Python
- * `FileStat`, which `JSON.stringify` of a `FileStat` already matches field
- * for field and in order.
+ * The wire form of a stat row: what Python's `row_json` writes, which
+ * `JSON.stringify` of a `FileStat` already matches field for field and in
+ * order.
  */
 export const FileStatWireSchema = z.object({
   name: z.string(),
@@ -57,6 +56,19 @@ export const FileStatWireSchema = z.object({
   dev: z.number().int().nullable().default(null),
   extra: z.record(z.string(), z.unknown()).default({}),
 })
+
+/** A stat row's wire form, the JSON both hosts' index stores share. */
+export function rowJson(entry: FileStat): string {
+  return JSON.stringify(entry)
+}
+
+/**
+ * A stat row read back from its wire form: a field it lacks takes its default
+ * and one this host does not know is dropped.
+ */
+export function parseRow(raw: string): FileStat {
+  return new FileStat(FileStatWireSchema.parse(JSON.parse(raw)))
+}
 
 /**
  * A child a complete re-list no longer names. `folder` says whether it held

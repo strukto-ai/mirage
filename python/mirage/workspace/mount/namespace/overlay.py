@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
 from typing import Any
 
 from mirage.types import FileStat
@@ -55,4 +56,4 @@ def merge_overlay_stat(meta: NodeMeta | None, stat: FileStat) -> FileStat:
         update["modified"] = epoch_to_iso(meta.observed_mtime)
     if not update:
         return stat
-    return stat.model_copy(update=update)
+    return replace(stat, **update)

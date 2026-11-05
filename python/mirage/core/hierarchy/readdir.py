@@ -162,7 +162,7 @@ def make_readdir(
             and scope.leaf
         ):
             update["content"] = scope.filetype or ContentType.JSON
-        return row.model_copy(update=update) if update else row
+        return replace(row, **update) if update else row
 
     def shown(rows: list[FileStat], folder: str) -> list[FileStat]:
         return [

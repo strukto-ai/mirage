@@ -17,6 +17,7 @@ import errno
 import logging
 import os
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -230,7 +231,7 @@ async def test_may_serve_cached_serves_a_fingerprinted_live_only_backend():
         async def fingerprinted(op, path, **kwargs):
             stat = await real(op, path, **kwargs)
             return (
-                stat.model_copy(update={"fingerprint": "fp1"})
+                replace(stat, fingerprint="fp1")
                 if op == "stat" and stat is not None
                 else stat
             )

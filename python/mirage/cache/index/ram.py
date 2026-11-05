@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import bisect
-import json
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
@@ -22,6 +21,8 @@ from mirage.cache.index.config import (
     ListResult,
     LookupResult,
     LookupStatus,
+    parse_row,
+    row_json,
 )
 from mirage.cache.index.store import IndexCacheStore
 from mirage.cache.lock import KeyLockMixin
@@ -151,9 +152,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     ) -> bool:
         async with self._lock_for(vfs_path):
             current = self._entries.get(vfs_path)
-            if current is None or current.model_dump() != json.loads(
-                predecessor
-            ):
+            if current is None or current != parse_row(predecessor):
                 return False
             self._entries[vfs_path] = entry
             return True
@@ -564,5 +563,5 @@ class ListingCheckStore(RAMIndexCacheStore):
             return None
         entry = (await self._hints.get(vfs_path)).entry
         if entry is not None:
-            self.hinted_rows[vfs_path] = entry.model_dump_json()
+            self.hinted_rows[vfs_path] = row_json(entry)
         return entry

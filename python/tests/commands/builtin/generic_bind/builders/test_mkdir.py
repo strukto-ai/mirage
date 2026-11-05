@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 import pytest
 
 from mirage.errors.fs import eacces
@@ -30,7 +32,7 @@ class _Unattributed(RAMVFS):
     async def stat(self, path: PathSpec) -> FileStat:
         row = await super().stat(path)
         if row.type is FileType.DIRECTORY:
-            return row.model_copy(update={"modified": None})
+            return replace(row, modified=None)
         return row
 
 

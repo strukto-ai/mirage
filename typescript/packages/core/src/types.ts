@@ -823,7 +823,7 @@ export class FileStat {
   }
 
   // Copy with some fields replaced, the mirror of Python's
-  // `model_copy(update=...)`. Callers that rename a row (ls printing an
+  // `dataclasses.replace`. Callers that rename a row (ls printing an
   // operand as typed, a link row taking the link's name) must use this
   // rather than re-listing fields at the call site: a hand-written list
   // silently drops whatever it forgot, which is how link ownership went

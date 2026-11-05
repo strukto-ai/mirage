@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 import pytest
 
 from mirage import MountMode, Workspace
@@ -216,7 +218,7 @@ async def test_a_user_renderer_read_of_a_remotely_deleted_path_fails_under_fresh
 
 async def _stat_with_version(accessor, path: PathSpec, **kwargs) -> FileStat:
     stat = await ram_stat(accessor, path)
-    return stat.model_copy(update={"fingerprint": "v1"})
+    return replace(stat, fingerprint="v1")
 
 
 @pytest.mark.asyncio

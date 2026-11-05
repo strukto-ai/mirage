@@ -20,6 +20,7 @@ import { underPath } from '../../utils/key_prefix.ts'
 import { KeyLock } from '../lock.ts'
 import {
   LookupStatus,
+  rowJson,
   type Evicted,
   type ListResult,
   type LookupResult,
@@ -148,8 +149,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   ): Promise<boolean> {
     return this.lock.withLock(path, () => {
       const current = this.entryMap.get(path)
-      if (current === undefined || JSON.stringify(current) !== predecessor)
-        return Promise.resolve(false)
+      if (current === undefined || rowJson(current) !== predecessor) return Promise.resolve(false)
       this.entryMap.set(path, entry)
       return Promise.resolve(true)
     })
@@ -504,7 +504,7 @@ export class ListingCheckStore extends RAMIndexCacheStore {
   async hint(vfsPath: string): Promise<FileStat | null> {
     if (this.hints === null) return null
     const entry = (await this.hints.get(vfsPath)).entry ?? null
-    if (entry !== null) this.hintedRows.set(vfsPath, JSON.stringify(entry))
+    if (entry !== null) this.hintedRows.set(vfsPath, rowJson(entry))
     return entry
   }
 }

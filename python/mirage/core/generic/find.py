@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from functools import partial
 
 from mirage.cache.context import active_cache_manager
@@ -46,7 +47,7 @@ async def _stat_entry(
         ):
             [size] = await manager.cached_sizes([spec])
             if size is not None:
-                row = row.model_copy(update={"size": size})
+                row = replace(row, size=size)
         return row
     except (FileNotFoundError, NotADirectoryError):
         return None

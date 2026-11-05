@@ -427,7 +427,7 @@ class _Sizeless:
 
     async def stat(self, path, nofollow=False):
         s = await self._inner.stat(path, nofollow=nofollow)
-        return s.model_copy(update={"size": None})
+        return replace(s, size=None)
 
 
 @pytest.mark.asyncio
@@ -1032,7 +1032,7 @@ class _UmaskRAM(RAMVFS):
         if row.mode is not None:
             return row
         mode = 0o700 if row.type == FileType.DIRECTORY else 0o600
-        return row.model_copy(update={"mode": mode})
+        return replace(row, mode=mode)
 
 
 @pytest.mark.asyncio

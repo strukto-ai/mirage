@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from mirage.accessor.chroma import ChromaAccessor
 from mirage.cache.index import IndexCacheStore
 from mirage.core.chroma.client import pages_chunks
@@ -43,4 +45,4 @@ async def ensure_dir_sizes(
     )
     for child, entry in pending.items():
         size = len(render_page(grouped.get(entry.extra["slug"]) or []))
-        await index.put(child, entry.model_copy(update={"size": size}))
+        await index.put(child, replace(entry, size=size))
