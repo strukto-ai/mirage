@@ -108,6 +108,7 @@ async def head_stream(
             return
         async for chunk in source:
             await budget.run()
+            selected = 0
             for offset in range(0, len(chunk), CHUNK_SIZE):
                 output = engine.feed(chunk[offset : offset + CHUNK_SIZE])
                 while True:
@@ -115,14 +116,21 @@ async def head_stream(
                     if done and isinstance(src, SharedInput) and src.seekable:
                         consumed = progress(engine).consumed
                         src.lines.unread(chunk[offset + consumed :])
-                    if output:
+                    if count >= 0:
+                        selected += len(output)
+                    elif output:
                         yield output
                     if done:
+                        if selected:
+                            yield chunk[:selected]
                         return
                     if not engine.busy():
                         break
                     await budget.run()
                     output = engine.drain()
+                await budget.run()
+            if selected:
+                yield chunk[:selected]
         if output := engine.finish():
             yield output
         while engine.busy():

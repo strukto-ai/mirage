@@ -96,6 +96,7 @@ async function* headStream(
     for await (const chunk of pulls) {
       const paused = budget.run()
       if (paused !== undefined) await paused
+      let selected = 0
       for (let offset = 0; offset < chunk.byteLength; offset += CHUNK_SIZE) {
         let output = engine.feed(chunk.subarray(offset, offset + CHUNK_SIZE))
         for (;;) {
@@ -104,14 +105,21 @@ async function* headStream(
             const { consumed } = progress(engine)
             source.lines.unread(chunk.subarray(offset + consumed))
           }
-          if (output.byteLength > 0) yield output
-          if (done) return
+          if (count >= 0) selected += output.byteLength
+          else if (output.byteLength > 0) yield output
+          if (done) {
+            if (selected > 0) yield chunk.subarray(0, selected)
+            return
+          }
           if (!engine.busy()) break
           const paused = budget.run()
           if (paused !== undefined) await paused
           output = engine.drain()
         }
+        const paused = budget.run()
+        if (paused !== undefined) await paused
       }
+      if (selected > 0) yield chunk.subarray(0, selected)
     }
     const tail = engine.finish()
     if (tail.byteLength > 0) yield tail
