@@ -247,20 +247,26 @@ export function programsProbe(): string {
 
 /**
  * The argv that runs a whole line in a sandbox's bash, through the
- * `/bin/sh -c` every box has. The line travels as `$1` and the runtime's
- * name as `$2`, never re-quoted, so no quoting the box's sh could misread;
- * a box without bash answers 127 and says so. Mirrors Python's
- * `bash_line_argv`.
+ * `/bin/sh -c` every box has. The line travels as `$1`, the runtime's name
+ * as `$2` and bash's options after them, never re-quoted, so no quoting the
+ * box's sh could misread; a box without bash answers 127 and says so.
+ * Mirrors Python's `bash_line_argv`.
  *
  * @param name the runtime's name, for the missing-bash message.
  * @param line the raw command line.
+ * @param options the arguments that set bash's options (`-o noclobber`),
+ *   the session's own.
  */
-export function bashLineArgv(name: string, line: string): string[] {
+export function bashLineArgv(
+  name: string,
+  line: string,
+  options: readonly string[] = [],
+): string[] {
   const script =
     'command -v bash >/dev/null 2>&1 || ' +
     '{ echo "mirage: $2 has no bash; a line using the sandbox\'s own ' +
-    'files needs bash" >&2; exit 127; }; exec bash -c "$1"'
-  return ['/bin/sh', '-c', script, 'sh', line, name]
+    'files needs bash" >&2; exit 127; }; l=$1; shift 2; exec bash "$@" -c "$l"'
+  return ['/bin/sh', '-c', script, 'sh', line, name, ...options]
 }
 
 // How long a sandbox gets to answer the libfaketime probe, which every run

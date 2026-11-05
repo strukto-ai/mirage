@@ -155,11 +155,26 @@ def test_bash_line_argv_passes_the_line_and_the_name_as_positional_words():
         "-c",
         "command -v bash >/dev/null 2>&1 || "
         "{ echo \"mirage: $2 has no bash; a line using the sandbox's own "
-        'files needs bash" >&2; exit 127; }; exec bash -c "$1"',
+        'files needs bash" >&2; exit 127; }; l=$1; shift 2; '
+        'exec bash "$@" -c "$l"',
         "sh",
         "x",
         "box",
     )
+
+
+def test_bash_line_argv_starts_bash_with_the_options_it_is_given():
+    ran = subprocess.run(
+        bash_line_argv(
+            "box",
+            "case $- in *C*) echo C;; esac; shopt -q nullglob && echo on",
+            ("-o", "noclobber", "-O", "nullglob"),
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ran.stdout == "C\non\n"
 
 
 def guarded(table, *entries):

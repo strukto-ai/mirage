@@ -171,8 +171,19 @@ class RemoteSandbox(
         line = ctx.flags.get("c")
         text = line if isinstance(line, str) else ""
         if ctx.flags.get("bash") is True:
+            options = ctx.flags.get("bash_options")
             return await self._run_argv(
-                bash_line_argv(self.name, text), ctx, output, errors, text
+                bash_line_argv(
+                    self.name,
+                    text,
+                    tuple(str(option) for option in options)
+                    if isinstance(options, list)
+                    else (),
+                ),
+                ctx,
+                output,
+                errors,
+                text,
             )
         return await self._run_argv(
             ("/bin/sh", "-c", text),

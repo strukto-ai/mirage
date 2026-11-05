@@ -130,7 +130,7 @@ describe('bashLineArgv', () => {
     expect(bashLineArgv('box', 'x')).toEqual([
       '/bin/sh',
       '-c',
-      'command -v bash >/dev/null 2>&1 || { echo "mirage: $2 has no bash; a line using the sandbox\'s own files needs bash" >&2; exit 127; }; exec bash -c "$1"',
+      'command -v bash >/dev/null 2>&1 || { echo "mirage: $2 has no bash; a line using the sandbox\'s own files needs bash" >&2; exit 127; }; l=$1; shift 2; exec bash "$@" -c "$l"',
       'sh',
       'x',
       'box',
@@ -147,6 +147,15 @@ describe('bashLineArgv', () => {
     expect(missing.stderr).toBe(
       "mirage: box has no bash; a line using the sandbox's own files needs bash\n",
     )
+  })
+
+  it('starts bash with the options it is given', () => {
+    const [program = '', ...args] = bashLineArgv(
+      'box',
+      'case $- in *C*) echo C;; esac; shopt -q nullglob && echo on',
+      ['-o', 'noclobber', '-O', 'nullglob'],
+    )
+    expect(spawnSync(program, args, { encoding: 'utf8' }).stdout).toBe('C\non\n')
   })
 })
 

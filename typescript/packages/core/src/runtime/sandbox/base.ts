@@ -146,7 +146,8 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
    * @param _texts unused.
    * @param ctx the line in `flags.c`, the bytes piped into it, the session
    *   environment and working directory, the signal that stops it;
-   *   `flags.bash` runs the line in the sandbox's bash (`bashLineArgv`).
+   *   `flags.bash` runs the line in the sandbox's bash (`bashLineArgv`),
+   *   started with `flags.bash_options`.
    * @param output receives stdout as it arrives.
    * @param errors receives stderr as it arrives.
    */
@@ -160,8 +161,16 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   ): Promise<RunResult> {
     const line = ctx.flags.c
     const text = typeof line === 'string' ? line : ''
-    if (ctx.flags.bash === true)
-      return this.runArgv(bashLineArgv(this.name, text), ctx, output ?? null, errors ?? null, text)
+    if (ctx.flags.bash === true) {
+      const options = ctx.flags.bash_options
+      return this.runArgv(
+        bashLineArgv(this.name, text, Array.isArray(options) ? options.map(String) : []),
+        ctx,
+        output ?? null,
+        errors ?? null,
+        text,
+      )
+    }
     return this.runArgv(['/bin/sh', '-c', text], ctx, output ?? null, errors ?? null)
   }
 
