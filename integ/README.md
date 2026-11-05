@@ -92,6 +92,10 @@ The shared Rust `file` signature and MIME catalog and its host adapters use
 the same whole-host filters. The existing file corpus and host prefix-read
 tests cover their output and source lifetime.
 
+The shared Rust `select` stream and `rs/select` adapters use these filters
+for head and tail. The hosts retain range reads, unread stdin, pushdowns
+and follow polling; the stream owns record boundaries and retained windows.
+
 Streaming writes are covered by the shared lifecycle corpus and mirrored
 writer, dispatcher, disk and S3 tests. They pin named outputs, duplicate
 tee destinations, split's unterminated final record, sed's buffered
