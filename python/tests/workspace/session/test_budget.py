@@ -64,7 +64,7 @@ async def test_a_lifted_max_env_lets_the_state_grow():
         None,
     )
     assert (out, code) == ("1024\n", 0)
-    assert MAX_ENV == 1 << 20
+    assert MAX_ENV == 1 << 21
 
 
 @pytest.mark.asyncio

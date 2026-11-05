@@ -57,7 +57,7 @@ describe('max_env', () => {
       null,
     )
     expect([out, code]).toEqual(['1024\n', 0])
-    expect(MAX_ENV).toBe(1 << 20)
+    expect(MAX_ENV).toBe(1 << 21)
   })
 
   it('counts fresh names that hold no value', async () => {

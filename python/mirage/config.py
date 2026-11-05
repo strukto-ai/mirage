@@ -691,7 +691,7 @@ class WorkspaceConfig(BaseModel):
     max_memory: str | int | None = None
     max_body_bytes: str | int | None = None
     # The bytes each session's variables, functions and aliases may hold:
-    # a size, 1MB by default, null for no cap.
+    # a size, 2MB by default, null for no cap.
     max_env: str | int | None = None
     # Where the workspace's connections may go: true for anywhere, false
     # for nowhere, or {allow: [hosts and ranges]}.

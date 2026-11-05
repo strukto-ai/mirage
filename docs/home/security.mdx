@@ -26,7 +26,7 @@ Three layers set them:
 | --- | --- | --- | --- |
 | A loop that never ends | `command_limits` `@line` `timeout_seconds` | 600 seconds | exit 124, `line: timed out after 600s` |
 | A fork bomb, `b() { b \| b; }; b` | `processes.max` | 128 per session | exit 254, `bash: fork: Resource temporarily unavailable` |
-| A variable that keeps doubling, `x=$x$x` | `max_env` | `1MB` per session | exit 2, `bash: xmalloc: cannot allocate N bytes (past max_env of N bytes, a mirage workspace setting)` |
+| A variable that keeps doubling, `x=$x$x` | `max_env` | `2MB` per session | exit 2, `bash: xmalloc: cannot allocate N bytes (past max_env of N bytes, a mirage workspace setting)` |
 | A file or a command's output held in memory | `max_memory` | `32MB` per workspace | exit 1, `line: memory exhausted`; a write to a RAM file fails with `Disk quota exceeded` |
 | One API reply read whole | `max_body_bytes` | `64MB` | the call fails |
 | Deep recursion in functions, `source`, `eval` or `bash -c` | 32 levels | fixed; `FUNCNEST` can lower it | exit 1, `bash: f: maximum function nesting level exceeded (32)` |
@@ -55,7 +55,7 @@ Some bounds are fixed:
 
 ```yaml
 max_memory: 32MB
-max_env: 1MB
+max_env: 2MB
 processes: {max: 64}
 command_limits:
   "@line": {timeout_seconds: 120}
@@ -90,7 +90,7 @@ app's option, else its environment variable, else its key in
 ```toml
 [daemon]
 max_memory = "64MB"
-max_env = "1MB"
+max_env = "2MB"
 max_processes = 64
 max_line_seconds = 300
 max_sessions = 8

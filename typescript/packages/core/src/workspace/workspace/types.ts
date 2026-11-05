@@ -99,7 +99,7 @@ export interface WorkspaceOptions {
   maxBodyBytes?: string | number | null
   /**
    * What each session's variables, functions and aliases may hold, a size
-   * like `1MB` or a count of bytes; null runs uncapped. Defaults to
+   * like `2MB` or a count of bytes; null runs uncapped. Defaults to
    * `MAX_ENV`.
    */
   maxEnv?: string | number | null
