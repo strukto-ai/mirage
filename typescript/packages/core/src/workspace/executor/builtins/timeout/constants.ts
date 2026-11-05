@@ -79,6 +79,10 @@ export const CONTINUE_SIGNALS: ReadonlySet<number> = new Set([0, SIGCHLD, 18, 23
 // --foreground, so there only the command stays stopped.
 export const STOP_SIGNALS: ReadonlySet<number> = new Set([SIGSTOP, 20, 21, 22])
 
+// What timeout says, exiting 125, when its session already holds
+// `processes.max` and the command cannot start.
+export const FORK_FAILED = 'timeout: fork system call failed: Resource temporarily unavailable\n'
+
 // What timeout cannot ignore when it signals its own process group, so it
 // dies of them too: KILL, and the two glibc reserves for itself.
 export const SELF_KILLING_SIGNALS: ReadonlySet<number> = new Set([SIGKILL, 32, 33])

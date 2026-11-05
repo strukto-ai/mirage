@@ -24,7 +24,7 @@ from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
 from mirage.utils.clock import Clock, SystemClock
-from mirage.utils.ids import IdSource, SystemIdSource
+from mirage.utils.ids import IdSource, SystemIdSource, check_name
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.record.types import (
@@ -32,6 +32,7 @@ from mirage.workspace.record.types import (
     RecordFields,
     generation_of,
 )
+from mirage.workspace.session.budget import check_env_fits
 from mirage.workspace.session.resolve import apply_profile, narrow
 from mirage.workspace.session.session import (
     SessionState,
@@ -133,6 +134,9 @@ class SessionManager(SessionOwner):
         self._loaded = False
         self._load_lock = asyncio.Lock()
         self._default_profile: CompiledProfile | None = None
+        # The workspace's max_env, which a created session must start
+        # within; None for no cap.
+        self.max_env: int | None = None
 
     @property
     def loaded(self) -> bool:
@@ -500,6 +504,7 @@ class SessionManager(SessionOwner):
                 under, applied here so a pointer its env names counts
                 toward ``has_managed_env``.
         """
+        check_name("session id", session_id)
         if session_id in self._sessions:
             raise ValueError(f"Session {session_id!r} already exists")
         seeded = dict(self._seed_vars)
@@ -514,6 +519,7 @@ class SessionManager(SessionOwner):
         )
         if profile is not None:
             apply_profile(session, profile)
+        check_env_fits(session, self.max_env)
         self._has_managed = self._has_managed or _holds_managed(session)
         self._sessions[session_id] = session
         self._locks[session_id] = asyncio.Lock()

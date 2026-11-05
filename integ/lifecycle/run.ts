@@ -88,6 +88,7 @@ interface Case {
     mounts: Record<string, ResourceConfig>
     mode: MountMode
     profiles?: Record<string, unknown>
+    processes?: WorkspaceOptions['processes']
     runtimes?: string[]
     clis?: Record<string, { cli: string }>
   }
@@ -860,6 +861,9 @@ async function run(host: Host, testCase: Case): Promise<number> {
   let ws = new host.workspace(mounts, {
     mode: testCase.settings.mode,
     profiles,
+    ...(testCase.settings.processes !== undefined
+      ? { processes: testCase.settings.processes }
+      : {}),
     ...(testCase.settings.runtimes !== undefined ? { runtimes: testCase.settings.runtimes } : {}),
   })
   for (const [name, block] of Object.entries(testCase.settings.clis ?? {})) {

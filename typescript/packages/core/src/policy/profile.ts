@@ -13,11 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { networkLayer, networkRoutes, NetworkRule, type NetworkSetting } from '../io/network.ts'
-import { parseProcessPermissions, type ProcessPermissions } from '../process/config.ts'
+import { statedProcesses, type ProcessesBlock, type ProcessPermissions } from '../process/config.ts'
 import { validateDocument } from '../rs/document.ts'
 import { type Language, ScriptSource } from '../runtime/types.ts'
 import { type EnvEntries, EnvVar, SecretRef } from '../secrets/config.ts'
-import type { Limit, ProcessScope, ShowEntry, Visibility } from '../types.ts'
+import type { Limit, ShowEntry, Visibility } from '../types.ts'
 import { type MountMode, parseMountMode, weakerMode } from '../types.ts'
 import { normalizeFields, snakeToCamel } from '../utils/normalize.ts'
 import { norm } from '../utils/path.ts'
@@ -174,7 +174,7 @@ export interface SessionProfile {
   readonly policy?: ProfilePolicy | null
   readonly commandLimits?: Readonly<Record<string, Limit>> | null
   /** A bare scope for both `list` and `kill`, or any of the fields. */
-  readonly processes?: ProcessScope | Partial<ProcessPermissions> | null
+  readonly processes?: ProcessesBlock | null
   /**
    * Where the session's lines may connect, the workspace's `network`
    * grammar, held besides the workspace's own; unset leaves the
@@ -598,7 +598,7 @@ export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile 
     commands?: CommandsBlock | null
     policy?: ProfilePolicy | null
     commandLimits?: Readonly<Record<string, Limit>> | null
-    processes?: ProcessPermissions
+    processes?: Partial<ProcessPermissions>
     network?: NetworkSetting
   } = {}
   if (obj.network != null) {
@@ -614,7 +614,7 @@ export function SessionProfile(raw: unknown, where = 'profile'): SessionProfile 
     out.commandLimits = parseCommandLimits(obj.command_limits)
     checkCommandLimits(out.commandLimits, 'profile', true)
   }
-  if (obj.processes != null) out.processes = parseProcessPermissions(obj.processes)
+  if (obj.processes != null) out.processes = statedProcesses(obj.processes)
   if (obj.policy !== undefined && obj.policy !== null) {
     out.policy = parseProfilePolicy(obj.policy, `${where}.policy`)
   }
@@ -690,7 +690,7 @@ export function profileToDict(profile: SessionProfile): Record<string, unknown> 
     )
   }
   if (profile.commandLimits != null) doc.command_limits = commandLimitsToJSON(profile.commandLimits)
-  if (profile.processes != null) doc.processes = parseProcessPermissions(profile.processes)
+  if (profile.processes != null) doc.processes = statedProcesses(profile.processes)
   if (profile.network != null) doc.network = profile.network
   if (profile.mounts != null) {
     doc.mounts = Object.fromEntries(

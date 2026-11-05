@@ -25,6 +25,15 @@ from opentelemetry import trace
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
+from mirage.observe.constants import (
+    NAME_LIMIT,
+    TRACE_CONTENT_ENV,
+    TRACE_CONTENT_MAX_BYTES,
+    TRACE_CONTENT_MAX_BYTES_ENV,
+    TRACE_MAX_SPANS,
+    TRACE_MAX_SPANS_ENV,
+    TRACER_NAME,
+)
 from mirage.observe.log_entry import (
     EVENT_CLEAR,
     EVENT_COMMAND,
@@ -49,24 +58,7 @@ _KNOWN_EVENTS = (
     EVENT_VFS,
 )
 
-_NAME_LIMIT = 200
 _NS_PER_MS = 1_000_000
-
-TRACER_NAME = "mirage.observe"
-
-# Set to ``false`` or ``0`` to keep what lines touched out of their spans:
-# no output on ``command``, no ``vfs.<call>`` spans. Named after
-# OpenTelemetry's ``OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT``.
-TRACE_CONTENT_ENV = "MIRAGE_TRACE_CAPTURE_CONTENT"
-
-# How many bytes of each of a line's stdout and stderr its ``command``
-# span keeps: ``TRACE_CONTENT_MAX_BYTES`` unless this sets a positive
-# whole number. Named after Langfuse's ``LANGFUSE_MAX_EVENT_SIZE_BYTES``.
-TRACE_CONTENT_MAX_BYTES_ENV = "MIRAGE_TRACE_CONTENT_MAX_BYTES"
-
-# 16 KiB a stream: both stay within half of the 64 KB a Cloudflare
-# Workers span holds for all its attributes, and any backend's field.
-TRACE_CONTENT_MAX_BYTES = 16 * 1024
 
 
 def _env_var(name: str) -> str:
@@ -79,10 +71,14 @@ def _trace_content() -> bool:
     return _env_var(TRACE_CONTENT_ENV).lower() not in ("false", "0")
 
 
-def _trace_content_max_bytes() -> int:
-    value = _env_var(TRACE_CONTENT_MAX_BYTES_ENV)
+def _positive_env(name: str, default: int) -> int:
+    value = _env_var(name)
     limit = int(value) if value.isdigit() else 0
-    return limit if limit > 0 else TRACE_CONTENT_MAX_BYTES
+    return limit if limit > 0 else default
+
+
+def _trace_content_max_bytes() -> int:
+    return _positive_env(TRACE_CONTENT_MAX_BYTES_ENV, TRACE_CONTENT_MAX_BYTES)
 
 
 def kept_output_bytes() -> int:
@@ -117,7 +113,7 @@ def _traced_output(raw: bytes, limit: int) -> str:
 def _session_file(session: str) -> str:
     """The name a session's log goes under in each day: its id
     percent-quoted, so no id spans folders or ends like another's. One
-    that quotes past ``_NAME_LIMIT`` keeps its start and ends in a hash
+    that quotes past ``NAME_LIMIT`` keeps its start and ends in a hash
     of the whole id, a character longer than the limit, so the name fits
     a filesystem and meets no shorter one.
 
@@ -125,9 +121,9 @@ def _session_file(session: str) -> str:
         session (str): the session id.
     """
     quoted = quote(session, safe="")
-    if len(quoted) > _NAME_LIMIT:
+    if len(quoted) > NAME_LIMIT:
         digest = hashlib.sha256(session.encode()).hexdigest()
-        quoted = f"{quoted[: _NAME_LIMIT - len(digest)]}~{digest}"
+        quoted = f"{quoted[: NAME_LIMIT - len(digest)]}~{digest}"
     return f"{quoted}.jsonl"
 
 
@@ -153,7 +149,8 @@ def _trace_line(
     mount. Each span also carries its start or end and its length in
     milliseconds, as the history's entries have them, for a tracer that
     can't be given a span's times. ``TRACE_CONTENT_ENV`` leaves out the
-    output and the calls.
+    output and the calls, and past ``TRACE_MAX_SPANS_ENV`` calls the
+    rest are only counted.
 
     Args:
         workspace_id (str | None): the workspace the line ran in.
@@ -175,10 +172,13 @@ def _trace_line(
         "mirage.timestamp": span[0],
         "mirage.duration_ms": span[1] - span[0],
     }
+    calls = records[: _positive_env(TRACE_MAX_SPANS_ENV, TRACE_MAX_SPANS)]
     if content:
         limit = _trace_content_max_bytes()
         attributes["mirage.stdout"] = _traced_output(output[0], limit)
         attributes["mirage.stderr"] = _traced_output(output[1], limit)
+        if len(calls) < len(records):
+            attributes["mirage.vfs.dropped"] = len(records) - len(calls)
     if workspace_id is not None:
         attributes["mirage.workspace.id"] = workspace_id
     if cwd is not None:
@@ -188,7 +188,7 @@ def _trace_line(
     )
     if content and line.is_recording():
         parent = trace.set_span_in_context(line)
-        for rec in records:
+        for rec in calls:
             call = tracer.start_span(
                 f"vfs.{rec.op}",
                 context=parent,

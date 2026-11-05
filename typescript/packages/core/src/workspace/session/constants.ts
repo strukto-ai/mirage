@@ -29,3 +29,12 @@ export const STARTUP_VALUES: Readonly<Record<string, ShellVar>> = {
   OPTIND: makeVar('1', new Set([VarAttr.Integer])),
   OPTERR: makeVar('1'),
 }
+
+/**
+ * The max_env a workspace runs under when it names none: the 2 MiB Linux
+ * gives env and argv at exec, so a doubling `x=$x$x` stops in some 21 steps.
+ */
+export const MAX_ENV = 1 << 21
+
+/** Bash's own exit when it cannot allocate, a fatal error. */
+export const ENV_EXHAUSTED_STATUS = 2

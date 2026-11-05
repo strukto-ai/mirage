@@ -30,6 +30,7 @@ from typing import (
     Literal,
     Protocol,
     TypeAlias,
+    TypeVar,
 )
 
 from pydantic import (
@@ -38,6 +39,8 @@ from pydantic import (
     Field,
     NonNegativeFloat,
     NonNegativeInt,
+    PositiveFloat,
+    PositiveInt,
 )
 
 from mirage.utils.path import dotted_spelling, resolve_path
@@ -865,6 +868,50 @@ class Limit(BaseModel):
                     kwargs[name] = getattr(layer, name)
                     break
         return cls(**kwargs)
+
+
+class Ceilings(BaseModel):
+    """The most any workspace a host serves may set, which no config,
+    profile document or snapshot passes: a value past a ceiling, or one
+    that lifts its bound, holds at the ceiling. None leaves that bound to
+    the workspace.
+
+    Args:
+        max_memory (int | None): the most bytes a workspace's
+            ``max_memory`` reaches.
+        max_processes (int | None): the most a session's
+            ``processes.max`` reaches.
+        max_line_seconds (float | None): the most seconds a line's
+            ``@line`` ``timeout_seconds`` reaches.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    max_memory: PositiveInt | None = None
+    max_env: PositiveInt | None = None
+    max_processes: PositiveInt | None = None
+    max_line_seconds: Annotated[
+        PositiveFloat | None, Field(allow_inf_nan=False)
+    ] = None
+
+
+_Bound = TypeVar("_Bound", int, float)
+
+
+def under_ceiling(
+    value: _Bound | None, ceiling: _Bound | None
+) -> _Bound | None:
+    """A bound held to its ceiling: the lower of the two, the ceiling for
+    a bound that is lifted (None), the bound itself under no ceiling.
+
+    Args:
+        value (int | float | None): the bound a workspace set, None for
+            none.
+        ceiling (int | float | None): the host's ceiling, None for none.
+    """
+    if ceiling is None:
+        return value
+    return ceiling if value is None else min(value, ceiling)
 
 
 @dataclass(frozen=True, slots=True)

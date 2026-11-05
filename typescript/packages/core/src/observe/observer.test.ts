@@ -27,12 +27,12 @@ import { MountMode } from '../types.ts'
 import { ManualClock } from '../utils/clock.ts'
 import { EVENT_COMMAND, LogEntry } from './log_entry.ts'
 import {
-  Observer,
   TRACE_CONTENT_ENV,
   TRACE_CONTENT_MAX_BYTES,
   TRACE_CONTENT_MAX_BYTES_ENV,
-  logger,
-} from './observer.ts'
+  TRACE_MAX_SPANS_ENV,
+} from './constants.ts'
+import { Observer, logger } from './observer.ts'
 import { OpRecord } from './record.ts'
 import { RAMObserverStore } from './store.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
@@ -554,6 +554,31 @@ describe('a damaged history file', () => {
     const io = new IOResult({ stdout: new TextEncoder().encode('ééé') })
     await o.logResult(io, [], 's1', '/', 'L')
     expect(spans[0]?.attributes?.['mirage.stdout']).toBe('éé')
+  })
+
+  it('sends at most its span cap a line and counts the rest', async () => {
+    vi.stubEnv(TRACE_MAX_SPANS_ENV, '2')
+    const spans = exported()
+    const o = new Observer(new RAMObserverStore(), new ManualClock(NEW_YEAR))
+    const recs = Array.from(
+      { length: 5 },
+      (_, i) =>
+        new OpRecord({
+          op: 'stat',
+          path: `/d/${String(i)}`,
+          source: 'ram',
+          bytes: 0,
+          timestamp: NEW_YEAR * 1000,
+          durationMs: 0,
+        }),
+    )
+    await o.logCommand('find /d', 's1', '/', 'L')
+    await o.logResult(new IOResult(), recs, 's1', '/', 'L')
+    const [line, ...calls] = spans
+    expect(calls.map((c) => c.attributes['mirage.vfs.path'])).toEqual(['/d/0', '/d/1'])
+    expect(line?.attributes['mirage.vfs.dropped']).toBe(3)
+    // The history still records every call.
+    expect((await o.events()).filter((e) => e.type === 'vfs')).toHaveLength(5)
   })
 
   it('keeps span output that is not UTF-8 within its bytes', async () => {

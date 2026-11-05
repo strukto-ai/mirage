@@ -157,5 +157,9 @@ async def clone(
     # The clone shares the source's remote mounts, whose clients run on
     # the source's clock, so it runs on that clock too.
     return await Workspace._from_state(
-        state, mounts=merged, secrets=secrets, clock=src_ws.clock
+        state,
+        mounts=merged,
+        secrets=secrets,
+        ceilings=src_ws.registry.ceilings,
+        clock=src_ws.clock,
     )

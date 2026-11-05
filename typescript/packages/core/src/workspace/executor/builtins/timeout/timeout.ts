@@ -31,6 +31,8 @@ import { runAsProgram } from '../../../../context/session_context.ts'
 import { ensureStream, OutputStream, yieldBytes } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult, materialize, OutputState } from '../../../../io/types.ts'
+import type { ProcessHandle } from '../../../../process/handle.ts'
+import { ProcessTable } from '../../../../process/table.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
@@ -38,14 +40,16 @@ import { NOT_FOUND_STATUS, TIMEOUT_STATUS } from '../../../../shell/constants.ts
 import { STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { abortable, atDeadline, runCancellable, SignalStop } from '../../../../utils/abort.ts'
+import { PathSpec } from '../../../../types.ts'
 import { concat } from '../../../../utils/bytes.ts'
+import { childContext, type EvaluationContext } from '../../../evaluation.ts'
 import { execs } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
-import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 import {
   CONTINUE_SIGNALS,
+  FORK_FAILED,
   SELF_KILLING_SIGNALS,
   SIGCHLD,
   SIGKILL,
@@ -197,14 +201,15 @@ export function signalName(number: number): string {
 async function executeDrained(
   executeFn: ExecuteStringFn,
   inner: string,
-  sessionId: string,
+  context: EvaluationContext,
   stdin: ByteSource | null,
   sink: JobConsole,
   held: IOResult[],
   signal: AbortSignal,
 ): Promise<IOResult> {
   const io = await executeFn(inner, {
-    sessionId,
+    sessionId: context.session.sessionId,
+    context,
     signal,
     sink,
     ...(stdin !== null ? { stdin } : {}),
@@ -253,16 +258,18 @@ interface Supervision {
  *
  * The inner line is built with shellJoin so already-expanded words survive
  * re-parsing as one token each (GNU timeout execs the command without a
- * shell). The command reads timeout's stdin. At the deadline the command
- * gets -s's signal (TERM by default), and a command here is a promise, not a
- * process, so the signal's default action decides: one that terminates
- * aborts the run, and 124 reports it, or the status a shell would show with
- * --preserve-status; one that is ignored (0, CHLD, CONT, URG, WINCH) lets
- * the run carry on, and -k's KILL ends it later with 137; a stop halts it
- * until that KILL. timeout signals its own process group unless
- * --foreground, so it dies of what it cannot ignore (KILL, 32, 33), stops
- * itself on STOP, and never wakes after CHLD; each ends as GNU's does. -v
- * says each signal on stderr. The deadline aborts the inner run, not just
+ * shell). The command reads timeout's stdin and runs as a process of its
+ * own, a child of the caller's, so the jobs it starts are its children. At
+ * the deadline the command gets -s's signal (TERM by default), and a process
+ * here is a promise, so the signal's default action decides: one that
+ * terminates aborts the run, and 124 reports it, or the status a shell would
+ * show with --preserve-status; one that is ignored (0, CHLD, CONT, URG,
+ * WINCH) lets the run carry on, and -k's KILL ends it later with 137; a stop
+ * halts it until that KILL. timeout signals its own process group unless
+ * --foreground, so the jobs the command started get the signal too, and it
+ * dies of what it cannot ignore (KILL, 32, 33), stops itself on STOP, and
+ * never wakes after CHLD; each ends as GNU's does. -v says each signal on
+ * stderr. The deadline aborts the inner run, not just
  * the wait for it: a promise cannot be cancelled, so the signal is what
  * stops a `tail -f` from polling on after 124 was already returned. The
  * command's stdout goes out as it writes it, as GNU's command writes to
@@ -273,11 +280,13 @@ interface Supervision {
 export async function handleTimeout(
   executeFn: ExecuteStringFn,
   args: readonly string[],
-  session: SessionState,
+  context: EvaluationContext,
   stdin: ByteSource | null = null,
   registry: MountRegistry | null = null,
   lineSignal?: AbortSignal,
+  processes: ProcessTable = new ProcessTable(),
 ): Promise<RedirectResult> {
+  const session = context.session
   const parse = parseShellOptions(SHELL_SPECS.timeout, args)
   let signal = 15
   let killAfter = 0
@@ -334,26 +343,58 @@ export async function handleTimeout(
   // The inner result lands here as soon as it exists.
   const held: IOResult[] = []
   const abort = new AbortController()
-  // timeout execs its command, so a builtin that is also a program answers
-  // as the program.
-  const run = runAsProgram(session, () =>
-    executeDrained(
-      executeFn,
-      shellJoin(command),
-      session.sessionId,
-      stdin,
-      sink,
-      held,
-      abort.signal,
-    ),
-  )
+  const inner = shellJoin(command)
+  const child = childContext(context)
+  let ran: IOResult | undefined
+  let process: ProcessHandle
+  try {
+    process = processes.start({
+      sessionId: session.sessionId,
+      command: inner,
+      cwd: PathSpec.fromStrPath(session.cwd),
+      parentPid: session.processId,
+      cancel: () => {
+        abort.abort(new SignalStop(process.signal ?? SIGKILL))
+      },
+      limit: session.processes.max,
+      started: (info) => {
+        child.session.processId = info.pid
+      },
+      run: async () => {
+        // timeout execs its command, so a builtin that is also a program
+        // answers as the program.
+        try {
+          ran = await runAsProgram(child.session, () =>
+            executeDrained(executeFn, inner, child, stdin, sink, held, abort.signal),
+          )
+        } finally {
+          await child.session.closeInputs()
+        }
+        return ran.exitCode
+      },
+    })
+  } catch (error) {
+    if ((error as { code?: unknown }).code === 'EAGAIN') return refuse(encodeText(FORK_FAILED))
+    throw error
+  }
+  const run = process.task.then(() => {
+    if (ran === undefined) throw new Error('timeout: the command completed without a result')
+    return ran
+  })
   // The run may be abandoned and reject later; without a handler that
   // becomes an unhandled rejection and can crash the process.
   run.catch(() => undefined)
-  const watch = supervise(run, abort, sink, held, seconds, lineSignal, {
+  const foreground = parse.flags.f === true
+  // timeout signals its own process group unless --foreground, so the jobs
+  // the command started end with it.
+  const send = (number: number): void => {
+    if (foreground) abort.abort(new SignalStop(number))
+    else process.terminate(number)
+  }
+  const watch = supervise(run, abort.signal, send, sink, held, seconds, lineSignal, {
     signal,
     killAfter,
-    foreground: parse.flags.f === true,
+    foreground,
     preserve: parse.flags.p === true,
     verbose: parse.flags.v === true,
     name,
@@ -396,10 +437,14 @@ async function* streamed(
   io.stderr = result.stderr
 }
 
-/** Wait for the run, and at the deadline do what the signal does. */
+/**
+ * Wait for the run, and at the deadline do what the signal does: `send`
+ * signals the command, and `aborted` fires once the run was told to stop.
+ */
 async function supervise(
   run: Promise<IOResult>,
-  abort: AbortController,
+  aborted: AbortSignal,
+  send: (signal: number) => void,
   sink: PipeConsole,
   held: IOResult[],
   seconds: number,
@@ -417,12 +462,12 @@ async function supervise(
     cancel: () => undefined,
   }
   const reached = (): void => {
-    if (stops || !carriesOn) abort.abort(new SignalStop(signal))
+    if (stops || !carriesOn) send(signal)
     if (!carriesOn || killAfter === 0) return
     kill.at = new Promise((resolve) => {
       kill.cancel = atDeadline(killAfter, () => {
         resolve(TIMED_OUT)
-        abort.abort(new SignalStop(SIGKILL))
+        send(SIGKILL)
       })
     })
   }
@@ -438,7 +483,7 @@ async function supervise(
   const stop = async (said: readonly string[], exitCode: number): Promise<RedirectResult> => {
     sink.mute()
     try {
-      await runCancellable(run, abort.signal, STOP_WAIT_SECONDS * 1000)
+      await runCancellable(run, aborted, STOP_WAIT_SECONDS * 1000)
     } catch (err) {
       console.debug(`timeout: the stopped run ended: ${String(err)}`)
     }
@@ -529,9 +574,10 @@ export async function timeoutBuiltin(call: BuiltinCall): Promise<RedirectResult>
   return handleTimeout(
     call.executeFn,
     [...call.argv.args],
-    call.context.session,
+    call.context,
     call.stdin,
     call.registry,
     call.signal,
+    call.jobTable?.processes,
   )
 }
