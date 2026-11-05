@@ -12,9 +12,14 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { parseFindExpression } from '../../rs/find.ts'
-import { expandPrintf as render, type PrintfStatFacts } from './find_printf.ts'
+import {
+  compilePrintf,
+  renderPrintf,
+  expandPrintf as render,
+  type PrintfStatFacts,
+} from './find_printf.ts'
 import type { Identity } from './utils/identity.ts'
 
 function compiled(fmt: string) {
@@ -187,4 +192,22 @@ describe('printfNeedsStat', () => {
     expect(printfNeedsStat('%p %f %h %P %d\n')).toBe(false)
     expect(printfNeedsStat('100%%score\n')).toBe(false)
   })
+})
+
+it('honors an abort while formatting a final row', async () => {
+  const { action } = compiled('x'.repeat(1 << 18))
+  const engine = compilePrintf(action.parts)
+  const abort = new AbortController()
+  let now = 0
+  const clock = vi.spyOn(performance, 'now').mockImplementation(() => (now += 20))
+  const timer = setImmediate(() => abort.abort())
+  try {
+    await expect(
+      renderPrintf(engine, '/data/a', '/data', null, null, abort.signal),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+  } finally {
+    clearImmediate(timer)
+    clock.mockRestore()
+    engine.close()
+  }
 })

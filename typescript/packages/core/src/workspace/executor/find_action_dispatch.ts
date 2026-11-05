@@ -498,11 +498,12 @@ export async function applyFindActions(
                   base,
                   await printfFacts(match, held, vfs),
                   identity,
+                  signal,
                 )
               : lsRow(match, held, identity),
           )
         } else if (formatter !== undefined) {
-          out.push(await renderPrintf(formatter, path, base, null, identity))
+          out.push(await renderPrintf(formatter, path, base, null, identity, signal))
         } else if (action.kind === 'delete') {
           // A structural row is skipped, not refused, the way Unix leaves
           // a mount point in place.
