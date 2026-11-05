@@ -1,4 +1,4 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use super::text::{RecordSearch, Regexes, take_record};
 use super::value::{MAX_LEN, Text};
@@ -9,26 +9,26 @@ use crate::request::{Opening, Reply, Request, WriteMode, bytes};
 /// to the host.
 pub(super) const LIMIT: usize = 64 * 1024;
 
-/// Values keyed by byte strings, in the order the keys were first
-/// inserted, as awk's arrays iterate and its outputs flush. Each key is
-/// held once, in the index; a value's slot keeps the insertion order.
+/// Values keyed by byte strings, in the order the keys were first inserted.
 pub(super) struct Ordered<T> {
-    index: HashMap<Text, usize>,
-    slots: Vec<Option<T>>,
+    index: HashMap<Text, u64>,
+    slots: BTreeMap<u64, (Text, T)>,
+    next: u64,
 }
 
 impl<T> Default for Ordered<T> {
     fn default() -> Self {
         Ordered {
             index: HashMap::new(),
-            slots: Vec::new(),
+            slots: BTreeMap::new(),
+            next: 0,
         }
     }
 }
 
 pub(super) struct Retired<T> {
-    keys: std::collections::hash_map::IntoIter<Text, usize>,
-    slots: std::vec::IntoIter<Option<T>>,
+    keys: std::collections::hash_map::IntoIter<Text, u64>,
+    slots: std::collections::btree_map::IntoIter<u64, (Text, T)>,
 }
 
 impl<T> Retired<T> {
@@ -46,6 +46,7 @@ impl<T> Retired<T> {
 
 impl<T> Ordered<T> {
     pub(super) fn retire(&mut self) -> Retired<T> {
+        self.next = 0;
         Retired {
             keys: std::mem::take(&mut self.index).into_iter(),
             slots: std::mem::take(&mut self.slots).into_iter(),
@@ -65,91 +66,63 @@ impl<T> Ordered<T> {
     }
 
     pub(super) fn get(&self, key: &[u8]) -> Option<&T> {
-        self.slots[*self.index.get(key)?].as_ref()
+        self.slots.get(self.index.get(key)?).map(|(_, value)| value)
     }
 
     pub(super) fn get_mut(&mut self, key: &[u8]) -> Option<&mut T> {
-        self.slots[*self.index.get(key)?].as_mut()
+        self.slots
+            .get_mut(self.index.get(key)?)
+            .map(|(_, value)| value)
     }
 
     pub(super) fn entry(&mut self, key: &Text, make: impl FnOnce() -> T) -> &mut T {
         let at = match self.index.get(key) {
             Some(&at) => at,
             None => {
-                self.slots.push(Some(make()));
-                self.index.insert(key.clone(), self.slots.len() - 1);
-                self.slots.len() - 1
+                let at = self.next;
+                self.next = self
+                    .next
+                    .checked_add(1)
+                    .expect("insertion sequence fits u64");
+                self.index.insert(key.clone(), at);
+                self.slots.insert(at, (key.clone(), make()));
+                at
             }
         };
-        self.slots[at].as_mut().expect("indexed slots are live")
+        &mut self.slots.get_mut(&at).expect("indexed slots are live").1
     }
 
     pub(super) fn insert(&mut self, key: impl Into<Text>, value: T) {
         let key = key.into();
-        match self.index.get(&key) {
-            Some(&at) => self.slots[at] = Some(value),
-            None => {
-                self.index.insert(key, self.slots.len());
-                self.slots.push(Some(value));
-            }
+        if let Some(&at) = self.index.get(&key) {
+            self.slots.get_mut(&at).expect("indexed slots are live").1 = value;
+        } else {
+            self.entry(&key, || value);
         }
     }
 
     pub(super) fn remove(&mut self, key: &[u8]) -> Option<T> {
         let at = self.index.remove(key)?;
-        let removed = self.slots[at].take();
-        if self.slots.len() > 32 && self.index.len() * 2 < self.slots.len() {
-            let mut moved = vec![0; self.slots.len()];
-            let mut next = 0;
-            for (at, slot) in self.slots.iter().enumerate() {
-                if slot.is_some() {
-                    moved[at] = next;
-                    next += 1;
-                }
-            }
-            self.slots.retain(Option::is_some);
-            for at in self.index.values_mut() {
-                *at = moved[*at];
-            }
-        }
-        removed
+        self.slots.remove(&at).map(|(_, value)| value)
     }
 
-    pub(super) fn clear(&mut self) {
-        self.index.clear();
-        self.slots.clear();
-    }
-
-    pub(super) fn keys(&self) -> Vec<Text> {
-        slot_keys(&self.index, self.slots.len())
-            .into_iter()
-            .flatten()
-            .cloned()
-            .collect()
+    pub(super) fn next_key(&self, at: &mut u64) -> Option<Text> {
+        let (&id, (key, _)) = self.slots.range(*at..).next()?;
+        *at = id + 1;
+        Some(key.clone())
     }
 
     pub(super) fn iter_mut(&mut self) -> impl Iterator<Item = (&[u8], &mut T)> {
-        let keys = slot_keys(&self.index, self.slots.len());
         self.slots
-            .iter_mut()
-            .zip(keys)
-            .filter_map(|(slot, key)| Some((key?.as_slice(), slot.as_mut()?)))
+            .values_mut()
+            .map(|(key, value)| (key.as_slice(), value))
     }
 
     pub(super) fn pop_last(&mut self) -> Option<(Text, T)> {
-        let at = self.slots.iter().rposition(Option::is_some)?;
-        let key = slot_keys(&self.index, self.slots.len())[at]?.clone();
-        self.remove(&key).map(|value| (key, value))
+        let (_, (key, value)) = self.slots.pop_last()?;
+        self.index.remove(&key);
+        Some((key, value))
     }
-}
-
-/// Each slot's key, in slot order.
-fn slot_keys(index: &HashMap<Text, usize>, len: usize) -> Vec<Option<&Text>> {
-    let mut keys = vec![None; len];
-    for (key, &at) in index {
-        keys[at] = Some(key);
-    }
-    keys
 }
 
 pub(super) enum Next {

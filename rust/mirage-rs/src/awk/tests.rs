@@ -663,3 +663,62 @@ fn cancellation_retires_arrays_and_pending_formats_without_more_effects() {
         assert!(out.is_empty());
     }
 }
+
+#[test]
+fn array_snapshots_and_scope_cleanup_preserve_order_across_small_budgets() {
+    let program = br#"
+        function f(n, local, k) {
+            for (k=0;k<n;k++) local[k]=k
+            for (k in local) return k ":" length(local)
+        }
+        BEGIN {
+            for (i=0;i<65;i++) a[i]=i
+            for (i=0;i<64;i++) delete a[i]
+            a[1]=7; a[2]=8
+            for (k in a) { print k; delete a; a[9]=9 }
+            print length(a),f(65),f(3)
+            for (i=0;i<65;i++) b[i]=i
+            for (k in b) break
+            delete b
+            print length(b)
+        }
+    "#;
+    for budget in [1, 7, 64, super::STEPS] {
+        let code = super::compile::compile(&super::parser::parse(program).unwrap());
+        let mut machine = super::vm::Machine::new(
+            code,
+            super::vm::Setup {
+                operands: Vec::new(),
+                assignments: Vec::new(),
+                fs: None,
+                environ: Vec::new(),
+            },
+        );
+        let mut out = Vec::new();
+        let mut turns = 0;
+        while !machine.done {
+            machine.run(budget);
+            out.append(&mut machine.io.out);
+            assert!(machine.io.idle());
+            turns += 1;
+            assert!(turns < 100000);
+        }
+        assert!(machine.io.err.is_empty());
+        assert_eq!(out, b"64\n1\n2\n1 0:65 0:3\n0\n");
+        assert_eq!(machine.status, 0);
+    }
+    assert_eq!(
+        run(
+            r#"function skip(local,k){for(k=0;k<10000;k++)local[k]=k;for(k in local)next} {print NR;skip();print "after"} END{print "end"}"#,
+            "one\ntwo\n",
+        ),
+        "1\n2\nend\n"
+    );
+    assert_eq!(
+        run(
+            r#"function stop(local,k){for(k=0;k<10000;k++)local[k]=k;for(k in local)exit 7} BEGIN{stop();print "after"} END{print "end"}"#,
+            "",
+        ),
+        "end\n"
+    );
+}

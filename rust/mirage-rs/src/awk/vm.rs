@@ -246,9 +246,9 @@ impl Arrays {
         })
     }
 
-    fn release(&mut self, id: usize) {
-        self.items[id].clear();
+    fn release(&mut self, id: usize) -> Retired<Value> {
         self.free.push(id);
+        self.items[id].retire()
     }
 }
 
@@ -306,7 +306,25 @@ struct OutputTask {
     target: OutputTarget,
 }
 
+struct Scope {
+    stack: usize,
+    locals: usize,
+    iters: usize,
+    frames: usize,
+    array: Option<Retired<Value>>,
+    returned: Option<Value>,
+}
+
+struct Snapshot {
+    array: usize,
+    next: u64,
+    keys: Vec<Text>,
+}
+
 enum Pending {
+    Scope(Scope),
+    Retire(Retired<Value>),
+    Snapshot(Snapshot),
     Format(Box<FormatTask>),
     Print {
         print: Print,
@@ -445,6 +463,17 @@ impl Machine {
                 Pending::Print { print, .. } => print.retire(&mut work),
                 Pending::Output(task) => task.output.retire(&mut work),
                 Pending::Split(split) => split.retired.step(&mut work),
+                Pending::Retire(array) => array.step(&mut work),
+                Pending::Scope(scope) => scope
+                    .array
+                    .as_mut()
+                    .is_none_or(|array| array.step(&mut work)),
+                Pending::Snapshot(snapshot) => {
+                    while work > 0 && snapshot.keys.pop().is_some() {
+                        work = work.saturating_sub(16);
+                    }
+                    snapshot.keys.is_empty()
+                }
                 _ => true,
             };
             if !done {
@@ -557,6 +586,35 @@ impl Machine {
     fn resume(&mut self, work: &mut u64) -> Step {
         let pending = self.pending.take().unwrap();
         match pending {
+            Pending::Retire(mut array) => {
+                if !array.step(work) {
+                    self.pending = Some(Pending::Retire(array));
+                }
+            }
+            Pending::Scope(mut scope) => {
+                if self.retire_scope(&mut scope, work) {
+                    if let Some(value) = scope.returned {
+                        self.stack.push(value);
+                    }
+                } else {
+                    self.pending = Some(Pending::Scope(scope));
+                }
+            }
+            Pending::Snapshot(mut snapshot) => {
+                while *work > 0 {
+                    *work = work.saturating_sub(16);
+                    let Some(key) = self.arrays.items[snapshot.array].next_key(&mut snapshot.next)
+                    else {
+                        self.iters.push(Iter {
+                            keys: snapshot.keys,
+                            at: 0,
+                        });
+                        return Ok(());
+                    };
+                    snapshot.keys.push(key);
+                }
+                self.pending = Some(Pending::Snapshot(snapshot));
+            }
             Pending::Format(mut task) => match task.formatter.step(work)? {
                 SearchStep::Paused => self.pending = Some(Pending::Format(task)),
                 SearchStep::Done(output) => {
@@ -898,16 +956,47 @@ impl Machine {
         Ok(self.record.text())
     }
 
-    /// Unwind every call and loop, as `next` and `exit` do.
-    fn unwind(&mut self) {
-        while let Some(frame) = self.frames.pop() {
-            for id in frame.arrays {
-                self.arrays.release(id);
+    fn retire_scope(&mut self, scope: &mut Scope, work: &mut u64) -> bool {
+        while *work > 0 {
+            if let Some(array) = &mut scope.array {
+                if !array.step(work) {
+                    return false;
+                }
+                scope.array = None;
+                continue;
+            }
+            *work = work.saturating_sub(16);
+            if self.stack.len() > scope.stack {
+                self.stack.pop();
+            } else if self.locals.len() > scope.locals {
+                self.locals.pop();
+            } else if self.iters.len() > scope.iters {
+                if self.iters.last_mut().unwrap().keys.pop().is_none() {
+                    self.iters.pop();
+                }
+            } else if self.frames.len() > scope.frames {
+                if let Some(id) = self.frames.last_mut().unwrap().arrays.pop() {
+                    scope.array = Some(self.arrays.release(id));
+                } else {
+                    self.frames.pop();
+                }
+            } else {
+                return true;
             }
         }
-        self.stack.clear();
-        self.locals.clear();
-        self.iters.clear();
+        false
+    }
+
+    /// Unwind every call and loop, as `next` and `exit` do.
+    fn unwind(&mut self) {
+        self.pending = Some(Pending::Scope(Scope {
+            stack: 0,
+            locals: 0,
+            iters: 0,
+            frames: 0,
+            array: None,
+            returned: None,
+        }));
         self.stage = 0;
     }
 
@@ -1018,7 +1107,7 @@ impl Machine {
             }
             Op::DeleteAll(arr) => {
                 let id = self.array(arr);
-                self.arrays.items[id].clear();
+                self.pending = Some(Pending::Retire(self.arrays.items[id].retire()));
             }
             Op::Pop => {
                 self.stack.pop();
@@ -1106,14 +1195,15 @@ impl Machine {
             Op::Call(function, count) => self.call(function, count as usize)?,
             Op::Return => {
                 let value = self.pop();
-                let frame = self.frames.pop().expect("a return runs in a call");
-                self.stack.truncate(frame.stack);
-                self.locals.truncate(frame.locals);
-                self.iters.truncate(frame.iters);
-                for id in frame.arrays {
-                    self.arrays.release(id);
-                }
-                self.stack.push(value);
+                let frame = self.frames.last().expect("a return runs in a call");
+                self.pending = Some(Pending::Scope(Scope {
+                    stack: frame.stack,
+                    locals: frame.locals,
+                    iters: frame.iters,
+                    frames: self.frames.len() - 1,
+                    array: None,
+                    returned: Some(value),
+                }));
                 self.pc = frame.ret;
             }
             Op::Fatal(at) => return Err(self.code.strings[at as usize].to_vec()),
@@ -1123,8 +1213,11 @@ impl Machine {
             Op::Getline(kind, target) => return self.getline(kind, target, work),
             Op::ForIn(arr) => {
                 let id = self.array(arr);
-                let keys = self.arrays.items[id].keys();
-                self.iters.push(Iter { keys, at: 0 });
+                self.pending = Some(Pending::Snapshot(Snapshot {
+                    array: id,
+                    next: 0,
+                    keys: Vec::with_capacity(self.arrays.items[id].len()),
+                }));
             }
             Op::ForInNext(var, exit) => {
                 let iter = self.iters.last_mut().expect("a loop is open");
@@ -1138,7 +1231,14 @@ impl Machine {
                 }
             }
             Op::ForInEnd => {
-                self.iters.pop();
+                self.pending = Some(Pending::Scope(Scope {
+                    stack: self.stack.len(),
+                    locals: self.locals.len(),
+                    iters: self.iters.len() - 1,
+                    frames: self.frames.len(),
+                    array: None,
+                    returned: None,
+                }));
             }
             Op::Next | Op::NextFile => {
                 let edge = match self.phase {
