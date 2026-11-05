@@ -1,4 +1,5 @@
 use crate::records::{Records, Take};
+use crate::utf8::previous_lossy as previous;
 use crate::{Stream, StreamError};
 
 const WORK: usize = 16384;
@@ -19,22 +20,6 @@ struct Rev {
     records: Records,
     remaining: Option<usize>,
     busy: bool,
-}
-
-fn previous(line: &[u8], end: usize) -> (usize, &[u8]) {
-    if line[end - 1].is_ascii() {
-        return (end - 1, &line[end - 1..end]);
-    }
-    for start in end.saturating_sub(4)..end {
-        match std::str::from_utf8(&line[start..end]) {
-            Ok(text) if text.chars().count() == 1 => return (start, text.as_bytes()),
-            Err(error) if error.valid_up_to() == 0 && error.error_len().is_none() => {
-                return (start, b"\xef\xbf\xbd");
-            }
-            _ => {}
-        }
-    }
-    (end - 1, b"\xef\xbf\xbd")
 }
 
 impl Rev {

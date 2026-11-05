@@ -104,6 +104,10 @@ The Rust date parser and calendar use the existing whole-host filters too;
 time-zone lookups stay in the hosts and the date command yields between
 parser steps. Synchronous date convenience helpers retain their interfaces
 and each host's timestamp precision.
+The record kernels bound retained-record scans, copies and output for
+`rev`, `uniq` and `comm`; `column` also yields while discovering rows,
+measuring cells and emitting padding. Their Rust regression tests include
+giants, long equal prefixes, suppressed rows and UTF-8 split at file ends.
 
 Streaming writes are covered by the shared lifecycle corpus and mirrored
 writer, dispatcher, disk and S3 tests. They pin named outputs, duplicate

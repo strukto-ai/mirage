@@ -332,4 +332,66 @@ mod scalar_tests {
             }
         }
     }
+
+    #[test]
+    fn strict_lossy_units_match_standard_replacement_boundaries() {
+        let check = |bytes: &[u8]| {
+            let mut decoded = String::new();
+            let mut at = 0;
+            while let Some((c, used)) = next_lossy(bytes, at, bytes.len()) {
+                decoded.push(c);
+                at += used;
+            }
+            assert_eq!(decoded, String::from_utf8_lossy(bytes), "{bytes:x?}");
+        };
+        for a in 0..=255 {
+            for b in 0..=255 {
+                check(&[a, b]);
+            }
+        }
+        for bytes in [
+            b"\xf4\x90\x80\x80".as_slice(),
+            b"\xf0\x90\x80x",
+            b"\xed\xa0\x80",
+            b"\xe2\x82",
+        ] {
+            check(bytes);
+        }
+    }
+}
+
+/// One scalar or maximal invalid subpart under standard lossy UTF-8 decoding.
+pub(crate) fn next_lossy(bytes: &[u8], at: usize, end: usize) -> Option<(char, usize)> {
+    let &byte = bytes[..end].get(at)?;
+    if byte.is_ascii() {
+        return Some((char::from(byte), 1));
+    }
+    let width = match byte {
+        0xc2..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf4 => 4,
+        _ => 1,
+    };
+    let piece = &bytes[at..(at + width).min(end)];
+    Some(match std::str::from_utf8(piece) {
+        Ok(text) => (text.chars().next().unwrap(), piece.len()),
+        Err(error) => ('\u{fffd}', error.error_len().unwrap_or(piece.len())),
+    })
+}
+
+/// The preceding standard lossy UTF-8 unit, inspecting at most four bytes.
+pub(crate) fn previous_lossy(line: &[u8], end: usize) -> (usize, &[u8]) {
+    if line[end - 1].is_ascii() {
+        return (end - 1, &line[end - 1..end]);
+    }
+    for start in end.saturating_sub(4)..end {
+        match std::str::from_utf8(&line[start..end]) {
+            Ok(text) if text.chars().count() == 1 => return (start, text.as_bytes()),
+            Err(error) if error.valid_up_to() == 0 && error.error_len().is_none() => {
+                return (start, b"\xef\xbf\xbd");
+            }
+            _ => {}
+        }
+    }
+    (end - 1, b"\xef\xbf\xbd")
 }
