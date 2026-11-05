@@ -32,8 +32,10 @@ import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
 const DEFAULT_QUANTUM = 5000
-// The bytes one array slot costs, a hole the array pads with included.
+// The bytes one array element's slot costs.
 const SLOT = 8
+// bash keeps each of -n, -O, -s and -c in an unsigned int.
+const COUNT_MAX = 2 ** 32 - 1
 
 /**
  * Read input into an indexed array, one element per line. `-d C` splits
@@ -79,7 +81,7 @@ export async function handleMapfile(
     const raw = flags[key]
     if (typeof raw !== 'string') continue
     const value = countOperand(raw)
-    if (value === null || (key === 'c' && value === 0)) {
+    if (value === null || value > COUNT_MAX || (key === 'c' && value === 0)) {
       return fail(cmd, `bash: ${cmd}: ${raw}: invalid ${label}\n`, 1)
     }
     apply(value)

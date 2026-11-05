@@ -45,8 +45,10 @@ from mirage.workspace.types import ExecutionNode
 
 _IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _DEFAULT_QUANTUM = 5000
-# The bytes one array slot costs, a hole the array pads with included.
+# The bytes one array element's slot costs.
 _SLOT = 8
+# bash keeps each of -n, -O, -s and -c in an unsigned int.
+_COUNT_MAX = 2**32 - 1
 
 
 async def handle_mapfile(
@@ -114,7 +116,7 @@ async def handle_mapfile(
         if key not in flags:
             continue
         value = count_operand(str(flags[key]))
-        if value is None or (key == "c" and value == 0):
+        if value is None or value > _COUNT_MAX or (key == "c" and value == 0):
             return fail(
                 cmd, f"bash: {cmd}: {flags[key]}: invalid {label}\n", 1
             )
