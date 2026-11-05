@@ -3,7 +3,8 @@ use regex_automata::{Anchored, Input};
 use super::backtrack::{Program, Scratch, Shape, unit_at};
 use super::hir::Lower;
 use super::parse::{self, Ast, Dialect, Unit};
-use super::{Automata, Step, has_raw_byte};
+use super::search::Automata;
+use super::{Step, has_raw_byte};
 
 pub(crate) struct Options {
     pub(crate) extended: bool,
@@ -75,6 +76,8 @@ pub(crate) struct Posix {
     /// substring search: a long fixed interval (`a\{32767\}`) makes an
     /// automaton too large to run fast.
     literal: Option<Vec<u8>>,
+    literal_failure: Vec<usize>,
+    literal_scan: (usize, usize),
     automata: Option<Automata>,
     program: Program,
     /// The program `test` runs when it reads the pattern otherwise: a
@@ -140,9 +143,8 @@ impl Posix {
                 dot_skips_nul: shape.dot_skips_nul,
             };
             Some(Automata::new(
-                &[lower.pattern(ast, options.word, false)],
+                &lower.pattern(ast, options.word, false),
                 b'\n',
-                true,
             )?)
         };
         // A raw byte under UTF-8 could be found inside a character, where
@@ -153,8 +155,23 @@ impl Posix {
         } else {
             fixed_text(ast).filter(|text| !text.is_empty())
         };
+        let mut literal_failure = vec![0; literal.as_ref().map_or(0, Vec::len)];
+        if let Some(text) = &literal {
+            let mut prefix = 0;
+            for at in 1..text.len() {
+                while prefix > 0 && text[at] != text[prefix] {
+                    prefix = literal_failure[prefix - 1];
+                }
+                if text[at] == text[prefix] {
+                    prefix += 1;
+                }
+                literal_failure[at] = prefix;
+            }
+        }
         Ok(Posix {
             literal,
+            literal_failure,
+            literal_scan: (0, 0),
             automata,
             program,
             tester,
@@ -186,39 +203,59 @@ impl Posix {
             return true;
         }
         self.scratch.forget();
+        if let Some(automata) = &mut self.automata {
+            automata.reset();
+        }
         false
     }
 
     /// Where the leftmost-longest match at or after `at` lies.
     fn extent(&mut self, hay: &[u8], at: usize, budget: &mut u64) -> Step<Option<(usize, usize)>> {
         let call = Pause::Extent { at, len: hay.len() };
-        self.resumes(call);
+        if !self.resumes(call) {
+            self.literal_scan = (at, 0);
+        }
         let end = hay.len();
         if let Some(literal) = &self.literal {
-            let found = hay
-                .get(at..)
-                .and_then(|rest| memchr::memmem::find(rest, literal));
-            return Step::Done(found.map(|found| (at + found, at + found + literal.len())));
-        }
-        let (from, fallback) = match &mut self.automata {
-            Some(automata) => {
-                let Some((start, first_end)) = automata.first(hay, at, end, self.utf8) else {
-                    return Step::Done(None);
-                };
-                if let Some(stop) = automata.longest_end(hay, start, end) {
-                    return Step::Done(Some((start, stop.max(first_end))));
+            let (offset, matched) = &mut self.literal_scan;
+            while *offset < hay.len() {
+                if *budget == 0 {
+                    self.paused = Some(call);
+                    return Step::Paused;
                 }
-                (start, Some((start, first_end)))
+                *budget -= 1;
+                if hay[*offset] == literal[*matched] {
+                    *offset += 1;
+                    *matched += 1;
+                    if *matched == literal.len() {
+                        return Step::Done(Some((*offset - literal.len(), *offset)));
+                    }
+                } else if *matched > 0 {
+                    *matched = self.literal_failure[*matched - 1];
+                } else {
+                    *offset += 1;
+                }
             }
-            None => (at, None),
-        };
+            return Step::Done(None);
+        }
+        if let Some(automata) = &mut self.automata {
+            match automata.find(hay, at, self.utf8, budget) {
+                Ok(found) => {
+                    if found == Step::Paused {
+                        self.paused = Some(call);
+                    }
+                    return found;
+                }
+                Err(()) => self.automata = None,
+            }
+        }
         let found = self
             .program
-            .find(hay, 0, end, from, true, &mut self.scratch, budget);
+            .find(hay, 0, end, at, true, &mut self.scratch, budget);
         if found == Step::Paused {
             self.paused = Some(call);
         }
-        found.map(|found| found.or(fallback))
+        found
     }
 
     /// The leftmost-longest match at or after `at`, a unit boundary.
@@ -750,6 +787,76 @@ mod tests {
             .iter()
             .map(|span| span.map_or("-".to_owned(), |(a, b)| subject[a..b].to_owned()))
             .collect()
+    }
+
+    #[test]
+    fn fast_searches_resume_at_every_state_and_preserve_leftmost_longest() {
+        let patterns = [
+            "a",
+            "abab",
+            "a+",
+            "a.*z|b",
+            "b|a.*z",
+            "a*",
+            "^a|b$",
+            "(ab|a)*",
+            "[ab]+",
+            "a?b*",
+            "[[:alpha:]]*",
+        ];
+        for pattern in patterns {
+            for size in 0..=5 {
+                for bits in 0..3usize.pow(size) {
+                    let mut bits = bits;
+                    let subject: Vec<u8> = (0..size)
+                        .map(|_| {
+                            let byte = b"ab\n"[bits % 3];
+                            bits /= 3;
+                            byte
+                        })
+                        .collect();
+                    let mut reference = compile(pattern, true, "");
+                    reference.automata = None;
+                    reference.literal = None;
+                    let expected = unbounded(|work| reference.find(&subject, 0, work));
+                    for quantum in [1, 7] {
+                        let mut regex = compile(pattern, true, "");
+                        let found = loop {
+                            let mut work = quantum;
+                            match regex.find(&subject, 0, &mut work) {
+                                Step::Paused => assert_eq!(work, 0),
+                                Step::Done(found) => break found,
+                            }
+                        };
+                        assert_eq!(
+                            found, expected,
+                            "{pattern:?} over {subject:?}, budget {quantum}"
+                        );
+                    }
+                }
+            }
+        }
+        let long = format!("{}b{}z", "a".repeat(131073), "a".repeat(131073));
+        for pattern in ["ab", "a.*z|b", "b|a.*z", "z+", "no-match"] {
+            let mut regex = compile(pattern, true, "");
+            let mut turns = 0;
+            let found = loop {
+                let mut work = 4096;
+                turns += 1;
+                match regex.find(long.as_bytes(), 0, &mut work) {
+                    Step::Paused => assert_eq!(work, 0),
+                    Step::Done(found) => break found,
+                }
+            };
+            assert!(turns > 10, "{pattern}");
+            let expected = match pattern {
+                "ab" => Some((131072, 131074)),
+                "a.*z|b" | "b|a.*z" => Some((0, long.len())),
+                "z+" => Some((long.len() - 1, long.len())),
+                _ => None,
+            };
+            assert_eq!(found, expected);
+        }
     }
 
     #[test]

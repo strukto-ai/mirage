@@ -1,7 +1,8 @@
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
+use super::buffer::Buffer;
 use super::text::{RecordSearch, Regexes, take_record};
-use super::value::MAX_LEN;
+use super::value::{MAX_LEN, Text};
 use super::vm::no_memory;
 use crate::request::{Opening, Reply, Request, WriteMode, bytes};
 
@@ -9,24 +10,50 @@ use crate::request::{Opening, Reply, Request, WriteMode, bytes};
 /// to the host.
 pub(super) const LIMIT: usize = 64 * 1024;
 
-/// Values keyed by byte strings, in the order the keys were first
-/// inserted, as awk's arrays iterate and its outputs flush. Each key is
-/// held once, in the index; a value's slot keeps the insertion order.
+/// Values keyed by byte strings, in the order the keys were first inserted.
 pub(super) struct Ordered<T> {
-    index: HashMap<Vec<u8>, usize>,
-    slots: Vec<Option<T>>,
+    index: HashMap<Text, u64>,
+    slots: BTreeMap<u64, (Text, T)>,
+    next: u64,
 }
 
 impl<T> Default for Ordered<T> {
     fn default() -> Self {
         Ordered {
             index: HashMap::new(),
-            slots: Vec::new(),
+            slots: BTreeMap::new(),
+            next: 0,
         }
     }
 }
 
+pub(super) struct Retired<T> {
+    keys: std::collections::hash_map::IntoIter<Text, u64>,
+    slots: std::collections::btree_map::IntoIter<u64, (Text, T)>,
+}
+
+impl<T> Retired<T> {
+    pub(super) fn step(&mut self, work: &mut u64) -> bool {
+        while *work > 0 {
+            if self.keys.next().is_some() || self.slots.next().is_some() {
+                *work = work.saturating_sub(16);
+            } else {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 impl<T> Ordered<T> {
+    pub(super) fn retire(&mut self) -> Retired<T> {
+        self.next = 0;
+        Retired {
+            keys: std::mem::take(&mut self.index).into_iter(),
+            slots: std::mem::take(&mut self.slots).into_iter(),
+        }
+    }
+
     pub(super) fn len(&self) -> usize {
         self.index.len()
     }
@@ -40,105 +67,87 @@ impl<T> Ordered<T> {
     }
 
     pub(super) fn get(&self, key: &[u8]) -> Option<&T> {
-        self.slots[*self.index.get(key)?].as_ref()
+        self.slots.get(self.index.get(key)?).map(|(_, value)| value)
     }
 
     pub(super) fn get_mut(&mut self, key: &[u8]) -> Option<&mut T> {
-        self.slots[*self.index.get(key)?].as_mut()
+        self.slots
+            .get_mut(self.index.get(key)?)
+            .map(|(_, value)| value)
     }
 
-    pub(super) fn entry(&mut self, key: &[u8], make: impl FnOnce() -> T) -> &mut T {
+    pub(super) fn entry(&mut self, key: &Text, make: impl FnOnce() -> T) -> &mut T {
         let at = match self.index.get(key) {
             Some(&at) => at,
             None => {
-                self.slots.push(Some(make()));
-                self.index.insert(key.to_vec(), self.slots.len() - 1);
-                self.slots.len() - 1
+                let at = self.next;
+                self.next = self
+                    .next
+                    .checked_add(1)
+                    .expect("insertion sequence fits u64");
+                self.index.insert(key.clone(), at);
+                self.slots.insert(at, (key.clone(), make()));
+                at
             }
         };
-        self.slots[at].as_mut().expect("indexed slots are live")
+        &mut self.slots.get_mut(&at).expect("indexed slots are live").1
     }
 
-    pub(super) fn insert(&mut self, key: Vec<u8>, value: T) {
-        match self.index.get(&key) {
-            Some(&at) => self.slots[at] = Some(value),
-            None => {
-                self.index.insert(key, self.slots.len());
-                self.slots.push(Some(value));
-            }
+    pub(super) fn insert(&mut self, key: impl Into<Text>, value: T) {
+        let key = key.into();
+        if let Some(&at) = self.index.get(&key) {
+            self.slots.get_mut(&at).expect("indexed slots are live").1 = value;
+        } else {
+            self.entry(&key, || value);
         }
     }
 
     pub(super) fn remove(&mut self, key: &[u8]) -> Option<T> {
         let at = self.index.remove(key)?;
-        let removed = self.slots[at].take();
-        if self.slots.len() > 32 && self.index.len() * 2 < self.slots.len() {
-            let mut moved = vec![0; self.slots.len()];
-            let mut next = 0;
-            for (at, slot) in self.slots.iter().enumerate() {
-                if slot.is_some() {
-                    moved[at] = next;
-                    next += 1;
-                }
-            }
-            self.slots.retain(Option::is_some);
-            for at in self.index.values_mut() {
-                *at = moved[*at];
-            }
-        }
-        removed
+        self.slots.remove(&at).map(|(_, value)| value)
     }
 
-    pub(super) fn clear(&mut self) {
-        self.index.clear();
-        self.slots.clear();
-    }
-
-    pub(super) fn keys(&self) -> Vec<Vec<u8>> {
-        slot_keys(&self.index, self.slots.len())
-            .into_iter()
-            .flatten()
-            .map(<[u8]>::to_vec)
-            .collect()
+    pub(super) fn next_key(&self, at: &mut u64) -> Option<Text> {
+        let (&id, (key, _)) = self.slots.range(*at..).next()?;
+        *at = id + 1;
+        Some(key.clone())
     }
 
     pub(super) fn iter_mut(&mut self) -> impl Iterator<Item = (&[u8], &mut T)> {
-        let keys = slot_keys(&self.index, self.slots.len());
         self.slots
-            .iter_mut()
-            .zip(keys)
-            .filter_map(|(slot, key)| Some((key?, slot.as_mut()?)))
+            .values_mut()
+            .map(|(key, value)| (key.as_slice(), value))
     }
 
-    pub(super) fn pop_last(&mut self) -> Option<(Vec<u8>, T)> {
-        let at = self.slots.iter().rposition(Option::is_some)?;
-        let key = slot_keys(&self.index, self.slots.len())[at]?.to_vec();
-        self.remove(&key).map(|value| (key, value))
+    pub(super) fn pop_last(&mut self) -> Option<(Text, T)> {
+        let (_, (key, value)) = self.slots.pop_last()?;
+        self.index.remove(&key);
+        Some((key, value))
     }
-}
-
-/// Each slot's key, in slot order.
-fn slot_keys(index: &HashMap<Vec<u8>, usize>, len: usize) -> Vec<Option<&[u8]>> {
-    let mut keys = vec![None; len];
-    for (key, &at) in index {
-        keys[at] = Some(key.as_slice());
-    }
-    keys
 }
 
 pub(super) enum Next {
-    Record(usize, usize),
+    Record(Text),
     End,
     Failed(Vec<u8>),
     Pending,
+    Busy,
 }
 
 /// One input cut into records with the RS in force at each read, pulled
 /// from the host only as far as the next record needs.
+struct RecordCopy {
+    start: usize,
+    end: usize,
+    out: Vec<u8>,
+}
+
 pub(super) struct Reader {
     pub(super) fd: u32,
     open: Option<(Vec<u8>, Opening)>,
-    pub(super) buf: Vec<u8>,
+    buf: Buffer<u8>,
+    incoming: Option<(Vec<u8>, usize)>,
+    copying: Option<RecordCopy>,
     start: usize,
     search: RecordSearch,
     pub(super) ended: bool,
@@ -151,7 +160,9 @@ impl Reader {
         Reader {
             fd,
             open,
-            buf: Vec::new(),
+            buf: Buffer::default(),
+            incoming: None,
+            copying: None,
             start: 0,
             search: RecordSearch::default(),
             ended: false,
@@ -160,25 +171,65 @@ impl Reader {
         }
     }
 
-    pub(super) fn next(&mut self, rs: &[u8], regexes: &mut Regexes) -> Result<Next, Vec<u8>> {
-        if self.start > self.buf.len() / 2 {
+    pub(super) fn next(
+        &mut self,
+        rs: &[u8],
+        regexes: &mut Regexes,
+        budget: &mut u64,
+    ) -> Result<Next, Vec<u8>> {
+        if self.copying.is_some() {
+            return Ok(self.copy_record(budget));
+        }
+        if !self.buf.reserve(0, budget) {
+            return Ok(Next::Busy);
+        }
+        if self.start > self.buf.len() / 2 || (self.start > 0 && self.incoming.is_some()) {
             self.search.shift(self.start);
-            self.buf.drain(..self.start);
+            let additional = self
+                .incoming
+                .as_ref()
+                .map_or(0, |(bytes, at)| bytes.len() - at);
+            self.buf.compact(self.start, additional);
             self.start = 0;
-            crate::release_capacity(&mut self.buf);
+            if !self.buf.reserve(0, budget) {
+                return Ok(Next::Busy);
+            }
+        }
+        if let Some((bytes, at)) = &mut self.incoming {
+            if !self.buf.reserve(bytes.len() - *at, budget) {
+                return Ok(Next::Busy);
+            }
+            let count = (bytes.len() - *at).min(*budget as usize);
+            self.buf.values.extend_from_slice(&bytes[*at..*at + count]);
+            *at += count;
+            *budget -= count as u64;
+            if *at < bytes.len() {
+                return Ok(Next::Busy);
+            }
+            self.incoming = None;
         }
 
-        if let Some((start, end, next)) = take_record(
+        match take_record(
             &self.buf,
             self.start,
             rs,
             self.ended,
             regexes,
             &mut self.search,
+            budget,
         )? {
-            self.start = next;
-            self.search.reset(next);
-            return Ok(Next::Record(start, end));
+            crate::regex::Step::Paused => return Ok(Next::Busy),
+            crate::regex::Step::Done(Some((start, end, next))) => {
+                self.start = next;
+                self.search.reset(next);
+                self.copying = Some(RecordCopy {
+                    start,
+                    end,
+                    out: Vec::with_capacity(end - start),
+                });
+                return Ok(self.copy_record(budget));
+            }
+            crate::regex::Step::Done(None) => {}
         }
         Ok(match (&self.failed, self.ended) {
             (_, true) => Next::End,
@@ -187,6 +238,19 @@ impl Reader {
             _ if self.buf.len() - self.start > MAX_LEN => return Err(no_memory()),
             _ => Next::Pending,
         })
+    }
+
+    fn copy_record(&mut self, budget: &mut u64) -> Next {
+        let record = self.copying.as_mut().unwrap();
+        let from = record.start + record.out.len();
+        let count = (record.end - from).min(*budget as usize);
+        record.out.extend_from_slice(&self.buf[from..from + count]);
+        *budget -= count as u64;
+        if from + count == record.end {
+            Next::Record(self.copying.take().unwrap().out.into())
+        } else {
+            Next::Busy
+        }
     }
 
     /// The read to ask for, unless one is out; and whether it opens a
@@ -219,11 +283,8 @@ impl Reader {
         } else if reply.end {
             self.ended = true;
         } else {
-            self.search.shift(self.start);
-            self.buf.drain(..self.start);
-            crate::release_capacity(&mut self.buf);
-            self.start = 0;
-            self.buf.extend_from_slice(data);
+            assert!(self.incoming.is_none());
+            self.incoming = Some((data.to_vec(), 0));
         }
     }
 }
@@ -248,6 +309,8 @@ pub(super) struct OutPipe {
 pub(super) struct Io {
     pub(super) out: Vec<u8>,
     pub(super) err: Vec<u8>,
+    diagnostics: VecDeque<Vec<u8>>,
+    diagnostic_at: usize,
     /// Standard output held while an output pipe is open, since the
     /// pipe's command prints ahead of it when it runs.
     pub(super) held: Vec<u8>,
@@ -266,6 +329,22 @@ pub(super) struct Io {
     pub(super) salvaging: bool,
 }
 
+pub(super) struct Retirement {
+    files_in: Retired<Reader>,
+    pipes_in: Retired<(Reader, f64)>,
+    files_out: Retired<OutFile>,
+    pipes_out: Retired<OutPipe>,
+}
+
+impl Retirement {
+    pub(super) fn step(&mut self, work: &mut u64) -> bool {
+        self.files_in.step(work)
+            && self.pipes_in.step(work)
+            && self.files_out.step(work)
+            && self.pipes_out.step(work)
+    }
+}
+
 pub(super) const STDOUT_NAMES: [&[u8]; 2] = [b"/dev/stdout", b"-"];
 pub(super) const STDERR_NAME: &[u8] = b"/dev/stderr";
 
@@ -281,6 +360,44 @@ fn output_error(path: &[u8], detail: &[u8]) -> Vec<u8> {
 }
 
 impl Io {
+    pub(super) fn diagnose(&mut self, message: Vec<u8>) {
+        self.diagnostics.push_back(message);
+    }
+
+    pub(super) fn reporting(&self) -> bool {
+        !self.diagnostics.is_empty()
+    }
+
+    pub(super) fn report(&mut self, work: &mut u64) {
+        while *work > 0 && self.err.len() < LIMIT {
+            let Some(message) = self.diagnostics.front() else {
+                break;
+            };
+            let count = (message.len() - self.diagnostic_at)
+                .min(*work as usize)
+                .min(LIMIT - self.err.len());
+            self.err
+                .extend_from_slice(&message[self.diagnostic_at..self.diagnostic_at + count]);
+            self.diagnostic_at += count;
+            *work -= count as u64;
+            if self.diagnostic_at == message.len() && *work > 0 && self.err.len() < LIMIT {
+                self.err.push(b'\n');
+                self.diagnostics.pop_front();
+                self.diagnostic_at = 0;
+                *work -= 1;
+            }
+        }
+    }
+
+    pub(super) fn retire(&mut self) -> Retirement {
+        Retirement {
+            files_in: self.files_in.retire(),
+            pipes_in: self.pipes_in.retire(),
+            files_out: self.files_out.retire(),
+            pipes_out: self.pipes_out.retire(),
+        }
+    }
+
     pub(super) fn idle(&self) -> bool {
         self.requests.is_empty() && self.in_flight.is_none()
     }
@@ -482,13 +599,87 @@ impl Io {
     /// already the failure is reported and the files' writes stop.
     fn fail(&mut self, message: Vec<u8>) {
         if self.salvaging {
-            self.err.extend_from_slice(&message);
-            self.err.push(b'\n');
+            self.diagnose(message);
             self.requests
                 .retain(|r| !matches!(r, Request::Write { .. } | Request::Flush { .. }));
         } else {
             self.requests.clear();
             self.fatal = Some(message);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn buffered_suffix_compaction_and_later_growth_preserve_records() {
+        let prefix = vec![b'a'; 16387];
+        let suffix = vec![b'b'; 8193];
+        let mut input = prefix.clone();
+        input.push(b'\n');
+        input.extend_from_slice(&suffix);
+        for budget in [1, 17, 20000] {
+            let mut reader = Reader::new(1, None);
+            reader.answer(&Reply::decode(b"{}").unwrap(), &input);
+            let mut regexes = Regexes::default();
+            let mut records = Vec::new();
+            let mut more = false;
+            let mut turns = 0;
+            loop {
+                turns += 1;
+                assert!(turns < 200000);
+                match reader.next(b"\n", &mut regexes, &mut { budget }).unwrap() {
+                    Next::Record(record) => records.push(record.to_vec()),
+                    Next::Busy => {}
+                    Next::Pending if !more => {
+                        assert_eq!(records, vec![prefix.clone()]);
+                        let mut tail = suffix.clone();
+                        tail.extend_from_slice(b"\nlast");
+                        reader.answer(&Reply::decode(b"{}").unwrap(), &tail);
+                        more = true;
+                    }
+                    Next::Pending => {
+                        reader.answer(&Reply::decode(br#"{"end":true}"#).unwrap(), &[])
+                    }
+                    Next::End => break,
+                    Next::Failed(_) => panic!("input should remain readable"),
+                }
+            }
+            assert_eq!(
+                records,
+                vec![prefix.clone(), suffix.repeat(2), b"last".to_vec()]
+            );
+        }
+    }
+
+    #[test]
+    fn record_transfer_resumes_without_reading_or_delivering_twice() {
+        let size = 131073;
+        let mut reader = Reader::new(1, None);
+        let mut input = vec![b'a'; size];
+        input.extend_from_slice(b"\nnext\n");
+        reader.answer(&Reply::decode(b"{}").unwrap(), &input);
+        let mut regexes = Regexes::default();
+        let mut turns = 0;
+        loop {
+            let mut work = 4096;
+            turns += 1;
+            match reader.next(b"\n", &mut regexes, &mut work).unwrap() {
+                Next::Busy => assert!(!reader.waiting),
+                Next::Record(record) => {
+                    assert_eq!(record.as_slice(), &input[..size]);
+                    break;
+                }
+                _ => panic!("the buffered record must finish before another read"),
+            }
+            assert!(turns < 1000);
+        }
+        assert!(turns >= 2 * size / 4096);
+        match reader.next(b"\n", &mut regexes, &mut 4096).unwrap() {
+            Next::Record(record) => assert_eq!(record.as_slice(), b"next"),
+            _ => panic!("the next buffered record remains available"),
         }
     }
 }
