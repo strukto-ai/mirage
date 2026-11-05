@@ -1,6 +1,6 @@
 /// One unit of a pattern or subject: a character, or a byte that is no
 /// part of one (every byte is a unit of its own outside a UTF-8 locale).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub(crate) enum Unit {
     Char(char),
     Byte(u8),

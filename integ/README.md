@@ -98,6 +98,8 @@ and follow polling; the stream owns record boundaries and retained windows.
 Find's `-printf` formatter reuses the shared `strftime` calendar fields;
 its host adapters supply only path, stat, link-target and identity facts.
 The existing Rust, builtin and executor filters cover this path.
+The same filters select `expr` grammar, arithmetic and character operations;
+the hosts only pass argument bytes and locale and schedule bounded steps.
 
 Streaming writes are covered by the shared lifecycle corpus and mirrored
 writer, dispatcher, disk and S3 tests. They pin named outputs, duplicate

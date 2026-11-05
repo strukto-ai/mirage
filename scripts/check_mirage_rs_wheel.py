@@ -74,6 +74,10 @@ def main() -> None:
             run("file", {}, b"%P", b"DF-1.4"),
             b"application/pdf",
         ),
+        "expression evaluator": (
+            run("expr", {"words": ["2", "+", "3", "*", "4"], "utf8": False}),
+            b"14",
+        ),
         "record selection": (
             run(
                 "select",
