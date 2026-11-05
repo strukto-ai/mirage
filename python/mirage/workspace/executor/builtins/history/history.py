@@ -162,7 +162,7 @@ async def handle_history(
         idx = offset - 1 if offset > 0 else len(visible) + offset
         if not 0 <= idx < len(visible):
             return _out_of_range(d)
-        await observer.log_delete(session=sid, offset=offset)
+        await observer.log_delete(session=sid, entry=visible[idx])
     if s and texts:
         await observer.log_command_text(
             " ".join(texts), session=sid, cwd=session.cwd

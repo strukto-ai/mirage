@@ -14,6 +14,8 @@
 
 from typing import Protocol, runtime_checkable
 
+from mirage.observe.constants import RAM_LOG_BYTES
+
 
 @runtime_checkable
 class ObserverStore(Protocol):
@@ -100,10 +102,20 @@ class ObserverStoreBase:
 
 
 class RAMObserverStore(ObserverStoreBase):
-    """In-memory ObserverStore backed by a plain dict (the default)."""
+    """In-memory ObserverStore backed by a plain dict (the default).
 
-    def __init__(self) -> None:
+    It holds at most ``max_bytes``: past it the oldest lines go first,
+    from the file made first (one session's day), down to three quarters
+    of it. Mirrors TypeScript's ``RAMObserverStore``.
+
+    Args:
+        max_bytes (int): the most it holds.
+    """
+
+    def __init__(self, max_bytes: int = RAM_LOG_BYTES) -> None:
         self.files: dict[str, bytearray] = {}
+        self.max_bytes = max_bytes
+        self._size = 0
 
     async def append(self, path: str, data: bytes) -> None:
         """Append bytes to the file at path.
@@ -115,6 +127,8 @@ class RAMObserverStore(ObserverStoreBase):
         if path not in self.files:
             self.files[path] = bytearray()
         self.files[path] += data
+        self._size += len(data)
+        self._trim()
 
     async def write(self, path: str, data: bytes) -> None:
         """Overwrite the file at path.
@@ -123,7 +137,26 @@ class RAMObserverStore(ObserverStoreBase):
             path (str): File key.
             data (bytes): Full new content.
         """
+        self._size += len(data) - len(self.files.get(path, b""))
         self.files[path] = bytearray(data)
+        self._trim()
+
+    def _trim(self) -> None:
+        if self._size <= self.max_bytes:
+            return
+        excess = self._size - self.max_bytes * 3 // 4
+        for path in list(self.files):
+            if excess <= 0:
+                break
+            data = self.files[path]
+            cut = len(data)
+            if cut > excess:
+                cut = data.find(b"\n", excess - 1) + 1 or cut
+            del data[:cut]
+            if not data:
+                del self.files[path]
+            self._size -= cut
+            excess -= cut
 
     async def read_matching(self, suffix: str) -> dict[str, bytes]:
         """Read only the files whose key ends with suffix.
@@ -141,3 +174,4 @@ class RAMObserverStore(ObserverStoreBase):
     async def clear(self) -> None:
         """Delete every stored file (snapshot-restore rewind)."""
         self.files.clear()
+        self._size = 0

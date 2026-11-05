@@ -82,4 +82,14 @@ describe('RAMObserverStore', () => {
     await store.clear()
     expect((await store.readAll()).size).toBe(0)
   })
+
+  it('past its cap the oldest lines go first', async () => {
+    const store = new RAMObserverStore(8)
+    await store.append('/d1/s.jsonl', ENC.encode('a1\n'))
+    await store.append('/d2/s.jsonl', ENC.encode('b2\n'))
+    await store.append('/d2/s.jsonl', ENC.encode('c3\n'))
+    expect(decode(await store.readAll())).toEqual({ '/d2/s.jsonl': 'b2\nc3\n' })
+    await store.append('/d2/s.jsonl', ENC.encode('d4\ne5\n'))
+    expect(decode(await store.readAll())).toEqual({ '/d2/s.jsonl': 'd4\ne5\n' })
+  })
 })

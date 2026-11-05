@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { RAM_LOG_BYTES } from './constants.ts'
+
 /**
  * Storage seam for the hidden recorder.
  *
@@ -66,6 +68,16 @@ export class RAMObserverStore extends ObserverStoreBase {
   // does. Copying the whole log on every append made a long session's
   // ops quadratic.
   private readonly room = new Map<string, Uint8Array>()
+  private size = 0
+
+  /**
+   * @param maxBytes - the most it holds: past it the oldest lines go first,
+   *   from the file made first (one session's day), down to three quarters
+   *   of it. Mirrors Python's `RAMObserverStore`.
+   */
+  constructor(readonly maxBytes: number = RAM_LOG_BYTES) {
+    super()
+  }
 
   append(path: string, data: Uint8Array): Promise<void> {
     const existing = this.files.get(path) ?? new Uint8Array(0)
@@ -81,13 +93,32 @@ export class RAMObserverStore extends ObserverStoreBase {
     }
     room.set(data, existing.byteLength)
     this.files.set(path, room.subarray(0, size))
+    this.size += data.byteLength
+    this.trim()
     return Promise.resolve()
   }
 
   write(path: string, data: Uint8Array): Promise<void> {
+    this.size += data.byteLength - (this.files.get(path)?.byteLength ?? 0)
     this.files.set(path, data)
     this.room.delete(path)
+    this.trim()
     return Promise.resolve()
+  }
+
+  private trim(): void {
+    if (this.size <= this.maxBytes) return
+    let excess = this.size - Math.floor((this.maxBytes * 3) / 4)
+    for (const [path, data] of this.files) {
+      if (excess <= 0) break
+      let cut = data.byteLength
+      if (cut > excess) cut = data.indexOf(0x0a, excess - 1) + 1 || cut
+      this.room.delete(path)
+      if (cut === data.byteLength) this.files.delete(path)
+      else this.files.set(path, data.slice(cut))
+      this.size -= cut
+      excess -= cut
+    }
   }
 
   readMatching(suffix: string): Promise<Map<string, Uint8Array>> {
@@ -101,6 +132,7 @@ export class RAMObserverStore extends ObserverStoreBase {
   clear(): Promise<void> {
     this.files.clear()
     this.room.clear()
+    this.size = 0
     return Promise.resolve()
   }
 }

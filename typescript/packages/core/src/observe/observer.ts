@@ -404,9 +404,22 @@ export class Observer {
     await this.log(new LogEntry({ type: EVENT_CLEAR, session, timestamp: this.nowMs() }))
   }
 
-  /** Append a delete event for one listing entry (history -d). */
-  async logDelete(session: string, offset: number): Promise<void> {
-    await this.log(new LogEntry({ type: EVENT_DELETE, session, timestamp: this.nowMs(), offset }))
+  /**
+   * Append a delete event for one listing entry (history -d). The event
+   * names the entry by its timestamp and text, not its place in the
+   * listing, so a store that drops its oldest lines never turns it on
+   * another entry; two entries alike in both are one listing either way.
+   */
+  async logDelete(session: string, entry: JsonObject): Promise<void> {
+    await this.log(
+      new LogEntry({
+        type: EVENT_DELETE,
+        session,
+        timestamp: this.nowMs(),
+        command: typeof entry.command === 'string' ? entry.command : '',
+        target: typeof entry.timestamp === 'number' ? entry.timestamp : 0,
+      }),
+    )
   }
 
   /**
@@ -452,8 +465,9 @@ export class Observer {
    * One session's visible history listing, append order. Projects the
    * session's events: a line joins the listing when its result is in (an
    * entry added without running, `history -s`, at once), a clear
-   * tombstone empties it, and delete events apply at the position they
-   * were issued (history -d renumbers subsequent entries, GNU behavior).
+   * tombstone empties it, and a delete event drops the oldest entry with
+   * its timestamp and text (history -d renumbers subsequent entries, GNU
+   * behavior).
    */
   async sessionCommandEvents(session: string): Promise<JsonObject[]> {
     const entries = parseFiles(await this._store.readMatching(`/${await sessionFile(session)}`))
@@ -471,9 +485,10 @@ export class Observer {
       } else if (e.type === EVENT_CLEAR) {
         visible = []
       } else if (e.type === EVENT_DELETE) {
-        const offset = typeof e.offset === 'number' ? e.offset : 0
-        const idx = offset > 0 ? offset - 1 : visible.length + offset
-        if (idx >= 0 && idx < visible.length) visible.splice(idx, 1)
+        const idx = visible.findIndex(
+          (entry) => entry.timestamp === e.target && entry.command === e.command,
+        )
+        if (idx >= 0) visible.splice(idx, 1)
       }
     }
     return visible

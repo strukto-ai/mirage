@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { GuestCall, GuestReply, GuestRun } from './execution.ts'
-import { GuestExit, settle, WasiFs, wasiImports } from './fs.ts'
+import { GuestExit, WasiFs, wasiImports } from './fs.ts'
 import { guestView } from './guest.ts'
 import { failureText, requestOverBridge, requestSync } from './transport.ts'
 
@@ -65,7 +65,7 @@ async function run(request: GuestRun): Promise<void> {
         trap = `wasm trap: ${failureText(err)}`
       }
     }
-    post({ kind: 'result', exitCode, trap, lost: settle(wasi.closeAll()) })
+    post({ kind: 'result', exitCode, trap, lost: wasi.closeAll() })
   } catch (err) {
     post({ kind: 'error', message: failureText(err) })
   }

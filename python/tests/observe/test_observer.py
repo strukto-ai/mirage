@@ -240,24 +240,31 @@ def test_delete_event_removes_entry_and_renumbers():
     _log_command(obs, "one", "s1", 1.0)
     _log_command(obs, "two", "s1", 2.0)
     _log_command(obs, "three", "s1", 3.0)
-    asyncio.run(obs.log_delete(session="s1", offset=2))
+    shown = asyncio.run(obs.session_command_events("s1"))
+    asyncio.run(obs.log_delete(session="s1", entry=shown[1]))
     events = asyncio.run(obs.session_command_events("s1"))
     assert [e["command"] for e in events] == ["one", "three"]
 
 
-def test_delete_negative_offset_counts_from_end():
-    obs = Observer()
+def test_a_delete_keeps_its_entry_when_older_lines_go():
+    store = RAMObserverStore()
+    obs = Observer(store=store)
     _log_command(obs, "one", "s1", 1.0)
     _log_command(obs, "two", "s1", 2.0)
-    asyncio.run(obs.log_delete(session="s1", offset=-1))
+    _log_command(obs, "three", "s1", 3.0)
+    shown = asyncio.run(obs.session_command_events("s1"))
+    asyncio.run(obs.log_delete(session="s1", entry=shown[1]))
+    path = next(iter(store.files))
+    del store.files[path][: store.files[path].index(b"\n") + 1]
     events = asyncio.run(obs.session_command_events("s1"))
-    assert [e["command"] for e in events] == ["one"]
+    assert [e["command"] for e in events] == ["three"]
 
 
 def test_delete_applies_at_issue_time_position():
     obs = Observer()
     _log_command(obs, "one", "s1", 1.0)
-    asyncio.run(obs.log_delete(session="s1", offset=1))
+    shown = asyncio.run(obs.session_command_events("s1"))
+    asyncio.run(obs.log_delete(session="s1", entry=shown[0]))
     _log_command(obs, "two", "s1", 2.0)
     events = asyncio.run(obs.session_command_events("s1"))
     assert [e["command"] for e in events] == ["two"]
@@ -266,7 +273,8 @@ def test_delete_applies_at_issue_time_position():
 def test_clear_discards_earlier_deletes():
     obs = Observer()
     _log_command(obs, "one", "s1", 1.0)
-    asyncio.run(obs.log_delete(session="s1", offset=1))
+    shown = asyncio.run(obs.session_command_events("s1"))
+    asyncio.run(obs.log_delete(session="s1", entry=shown[0]))
     asyncio.run(obs.log_clear(session="s1"))
     _log_command(obs, "two", "s1", 2.0)
     events = asyncio.run(obs.session_command_events("s1"))
@@ -312,7 +320,8 @@ def test_a_clock_behind_stored_history_does_not_reorder_it():
     asyncio.run(first.log_command_text("a", session="s"))
     asyncio.run(first.log_command_text("b", session="s"))
     reopened = Observer(store=store, clock=ManualClock())
-    asyncio.run(reopened.log_delete("s", 1))
+    shown = asyncio.run(reopened.session_command_events("s"))
+    asyncio.run(reopened.log_delete("s", shown[0]))
     shown = asyncio.run(reopened.session_command_events("s"))
     assert [e["command"] for e in shown] == ["b"]
     asyncio.run(reopened.log_clear("s"))

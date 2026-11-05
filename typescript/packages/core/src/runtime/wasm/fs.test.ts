@@ -19,7 +19,7 @@ import type { VFSStat } from '../types.ts'
 import { DIR_MODE, FILE_MODE } from '../../utils/stat_view.ts'
 import { FST_ATIM, FST_ATIM_NOW, FST_MTIM, FT_DIR, FT_REG } from './constants.ts'
 import { EBADF, EIO, ENOENT, ENOTDIR, EPIPE, ESPIPE, OK } from './errors.ts'
-import { GuestExit, type GuestFile, type GuestView, settle, WasiFs, wasiImports } from './fs.ts'
+import { GuestExit, type GuestFile, type GuestView, WasiFs, wasiImports } from './fs.ts'
 
 const ENC = new TextEncoder()
 const DIR: VFSStat = { size: 0, isDir: true, mode: DIR_MODE }
@@ -146,7 +146,7 @@ function setTimes(fstFlags: number, atim: bigint, mtim: bigint): unknown[][] {
   const fs = view()
   const wasi = guest(fs)
   const length = put(wasi, PATH, 'd/f.txt')
-  expect(settle(wasi.path_filestat_set_times(3, 1, PATH, length, atim, mtim, fstFlags))).toBe(OK)
+  expect(wasi.path_filestat_set_times(3, 1, PATH, length, atim, mtim, fstFlags)).toBe(OK)
   return fs.calls
 }
 
@@ -154,7 +154,7 @@ function setTimes(fstFlags: number, atim: bigint, mtim: bigint): unknown[][] {
 function opened(handle: GuestFile): [WasiFs & { memory: WebAssembly.Memory }, number] {
   const wasi = guest(view({ open: () => handle }))
   const length = put(wasi, PATH, 'd/f.txt')
-  expect(settle(wasi.path_open(3, 1, PATH, length, 0, 1n << 6n, 0n, 0, OUT))).toBe(OK)
+  expect(wasi.path_open(3, 1, PATH, length, 0, 1n << 6n, 0n, 0, OUT)).toBe(OK)
   return [wasi, u32(wasi, OUT)]
 }
 
@@ -202,21 +202,21 @@ describe('open files', () => {
   it('lands what a file owes at fd_sync, before its close', () => {
     const handle = file()
     const [wasi, fd] = opened(handle)
-    expect(settle(wasi.fd_sync(fd))).toBe(OK)
-    expect(settle(wasi.fd_close(fd))).toBe(OK)
+    expect(wasi.fd_sync(fd)).toBe(OK)
+    expect(wasi.fd_close(fd)).toBe(OK)
     expect(handle.calls).toEqual(['land', 'close'])
   })
 
   it('reports a landing the mount cannot take as the run ends', () => {
     const [wasi] = opened(file(new Error('no space')))
-    expect(settle(wasi.closeAll())).toEqual(['/d/f.txt: no space'])
+    expect(wasi.closeAll()).toEqual(['/d/f.txt: no space'])
   })
 
   it('refuses a seek and a tell on the standard streams', () => {
     const [wasi] = opened(file())
-    expect(settle(wasi.fd_seek(1, 0n, 0, OUT))).toBe(ESPIPE)
-    expect(settle(wasi.fd_tell(0, OUT))).toBe(ESPIPE)
-    expect(settle(wasi.fd_seek(99, 0n, 0, OUT))).toBe(EBADF)
+    expect(wasi.fd_seek(1, 0n, 0, OUT)).toBe(ESPIPE)
+    expect(wasi.fd_tell(0, OUT)).toBe(ESPIPE)
+    expect(wasi.fd_seek(99, 0n, 0, OUT)).toBe(EBADF)
   })
 })
 
@@ -233,9 +233,9 @@ describe('paths', () => {
   it('lists a directory in records a cookie resumes', () => {
     const wasi = guest(view())
     const length = put(wasi, PATH, 'd')
-    expect(settle(wasi.path_open(3, 1, PATH, length, 2, 0n, 0n, 0, OUT))).toBe(OK)
+    expect(wasi.path_open(3, 1, PATH, length, 2, 0n, 0n, 0, OUT)).toBe(OK)
     const fd = u32(wasi, OUT)
-    expect(settle(wasi.fd_readdir(fd, 4096, 1024, 1n, OUT))).toBe(OK)
+    expect(wasi.fd_readdir(fd, 4096, 1024, 1n, OUT)).toBe(OK)
     expect(u32(wasi, OUT)).toBe(24 + 3)
     expect(new TextDecoder().decode(new Uint8Array(wasi.memory.buffer, 4096 + 24, 3))).toBe('sub')
   })
@@ -247,7 +247,7 @@ describe('streams', () => {
     const view32 = new DataView(wasi.memory.buffer)
     view32.setUint32(OUT, PATH, true)
     view32.setUint32(OUT + 4, put(wasi, PATH, 'hi'), true)
-    expect(settle(wasi.fd_write(1, OUT, 1, OUT + 64))).toBe(EPIPE)
+    expect(wasi.fd_write(1, OUT, 1, OUT + 64)).toBe(EPIPE)
   })
 
   it('holds the guest for a clock subscription, and ends it when the run stops', () => {
@@ -262,9 +262,9 @@ describe('streams', () => {
     sub.setUint8(8, 0)
     sub.setUint32(16, 1, true)
     sub.setBigUint64(24, 50_000_000n, true)
-    expect(settle(wasi.poll_oneoff(512, 4096, 1, OUT))).toBe(OK)
+    expect(wasi.poll_oneoff(512, 4096, 1, OUT)).toBe(OK)
     expect(waited[0]).toBeGreaterThan(40)
-    expect(() => settle(wasi.poll_oneoff(512, 4096, 1, OUT))).toThrow(GuestExit)
+    expect(() => wasi.poll_oneoff(512, 4096, 1, OUT)).toThrow(GuestExit)
     expect(wasi.exitCode).toBe(130)
   })
 })

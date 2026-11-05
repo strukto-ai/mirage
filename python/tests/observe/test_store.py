@@ -59,3 +59,13 @@ def test_clear_empties_store():
     asyncio.run(store.append("/d/s.jsonl", b"a\n"))
     asyncio.run(store.clear())
     assert asyncio.run(store.read_all()) == {}
+
+
+def test_past_its_cap_the_oldest_lines_go_first():
+    store = RAMObserverStore(max_bytes=8)
+    asyncio.run(store.append("/d1/s.jsonl", b"a1\n"))
+    asyncio.run(store.append("/d2/s.jsonl", b"b2\n"))
+    asyncio.run(store.append("/d2/s.jsonl", b"c3\n"))
+    assert asyncio.run(store.read_all()) == {"/d2/s.jsonl": b"b2\nc3\n"}
+    asyncio.run(store.append("/d2/s.jsonl", b"d4\ne5\n"))
+    assert asyncio.run(store.read_all()) == {"/d2/s.jsonl": b"d4\ne5\n"}

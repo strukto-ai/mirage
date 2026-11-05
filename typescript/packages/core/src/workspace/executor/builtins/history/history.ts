@@ -137,8 +137,9 @@ export async function handleHistory(
     if (offset === null) return outOfRange(d)
     const visible = await observer.sessionCommandEvents(sid)
     const idx = offset > 0 ? offset - 1 : visible.length + offset
-    if (idx < 0 || idx >= visible.length) return outOfRange(d)
-    await observer.logDelete(sid, offset)
+    const entry = visible[idx]
+    if (entry === undefined) return outOfRange(d)
+    await observer.logDelete(sid, entry)
   }
   if (s && texts.length > 0) {
     await observer.logCommandText(texts.join(' '), sid, session.cwd)

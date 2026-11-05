@@ -477,20 +477,25 @@ class Observer:
             )
         )
 
-    async def log_delete(self, session: str, offset: int) -> None:
+    async def log_delete(self, session: str, entry: dict[str, Any]) -> None:
         """Append a delete event for one listing entry (history -d).
+
+        The event names the entry by its timestamp and text, not its
+        place in the listing, so a store that drops its oldest lines
+        never turns it on another entry; two entries alike in both are
+        one listing either way.
 
         Args:
             session (str): Session ID whose entry is deleted.
-            offset (int): 1-based listing position; negative counts
-                back from the end at the time of the delete.
+            entry (dict[str, Any]): the listing entry deleted.
         """
         await self._log(
             LogEntry(
                 type=EVENT_DELETE,
                 session=session,
                 timestamp=self._now_ms(),
-                offset=offset,
+                command=entry.get("command", ""),
+                target=entry.get("timestamp", 0),
             )
         )
 
@@ -547,9 +552,9 @@ class Observer:
 
         Projects the session's events: a line joins the listing when its
         result is in (an entry added without running, ``history -s``,
-        at once), a clear tombstone empties it, and delete events apply
-        at the position they were issued (history -d renumbers
-        subsequent entries, GNU behavior).
+        at once), a clear tombstone empties it, and a delete event drops
+        the oldest entry with its timestamp and text (history -d
+        renumbers subsequent entries, GNU behavior).
 
         Args:
             session (str): Session ID to project.
@@ -571,10 +576,12 @@ class Observer:
             elif kind == EVENT_CLEAR:
                 visible = []
             elif kind == EVENT_DELETE:
-                offset = e.get("offset", 0)
-                idx = offset - 1 if offset > 0 else len(visible) + offset
-                if 0 <= idx < len(visible):
-                    visible.pop(idx)
+                for idx, entry in enumerate(visible):
+                    if entry.get("timestamp") == e.get(
+                        "target"
+                    ) and entry.get("command") == e.get("command"):
+                        del visible[idx]
+                        break
         return visible
 
     async def load_events(self, events: list[dict[str, Any]]) -> None:

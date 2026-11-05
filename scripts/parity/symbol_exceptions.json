@@ -1130,12 +1130,6 @@
     "GuestView": "The run's WasmView, answered across the bridge; Python's WasiFs holds the view itself.",
     "clockNs": "Reads the clocks preview1 asks for in nanoseconds; Python's time module answers in them (time.time_ns, monotonic_ns).",
     "wasiImports": "The import table for WebAssembly.instantiate, the twin of install_wasi_fs.",
-    "Calls": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly.",
-    "answer": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly.",
-    "drive": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly. drive runs the steps, at once or awaiting each answer.",
-    "resume": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly. resume is drive from its first promise on.",
-    "settle": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly. settle runs them where every answer is at hand, as a worker's are.",
-    "thenable": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly. thenable tells a promise answer from one at hand.",
     "failed": "Maps a failed import to its errno, passing GuestExit through, which _call_guarded does in Python."
    }
   },
@@ -1233,11 +1227,6 @@
   "runtime/python/monty/constants": {
    "typescript_only": {
     "SHARED_THREAD_SECONDS": "Python runs monty on worker processes it kills at a deadline; a TypeScript host that runs it on its own thread (an edge isolate) fires no timer while a run holds that thread, so the run is handed the deadline it runs under, or a cap if sooner, as monty's own limit."
-   }
-  },
-  "runtime/js/quickjs/runtime": {
-   "typescript_only": {
-    "QuickJsEngine": "A worker per run, or JSPI in the host's own isolate where no worker can start (an edge runtime); Python always runs qjs on a thread under wasmtime."
    }
   },
   "core/ram/constants": {

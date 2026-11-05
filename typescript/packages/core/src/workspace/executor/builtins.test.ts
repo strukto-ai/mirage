@@ -3040,18 +3040,20 @@ describe('handleTimeout', () => {
 
   // timeout signals its command's whole process group, so the jobs the
   // command started end at the deadline too; --foreground signals the
-  // command alone.
+  // command alone, and a job ignores INT.
   it('stops the jobs its command started at the deadline', async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
       const io = await ws.shell(
         "timeout 0.05 sh -c 'sleep 30 & sleep 30'; echo $?; " +
-          "timeout --foreground 0.05 sh -c 'sleep 31 & sleep 30'; echo $?; ps -o args",
+          "timeout --foreground 0.05 sh -c 'sleep 31 & sleep 30'; echo $?; " +
+          "timeout -s INT 0.05 sh -c 'sleep 32 & sleep 30'; echo $?; ps -o args",
       )
       const out = decode(io.stdout).split('\n')
-      expect(out.slice(0, 2)).toEqual(['124', '124'])
+      expect(out.slice(0, 3)).toEqual(['124', '124', '124'])
       expect(out).not.toContain('sleep 30')
       expect(out).toContain('sleep 31')
+      expect(out).toContain('sleep 32')
     } finally {
       await ws.close()
     }
