@@ -728,6 +728,37 @@ describe('RemoteSandbox interpreters', () => {
     expect(box.offeredCaptures).toEqual(['@external', 'node', 'python3'])
   })
 
+  it('closes only after a programs probe still asking', async () => {
+    let answer = (): void => undefined
+    const asked = new Promise<void>((resolve) => {
+      answer = resolve
+    })
+    class HeldProbeBox extends ProgramsBox {
+      override async execLine(
+        line: string,
+        stdin: Uint8Array | null,
+        env: Record<string, string>,
+        cwd: string,
+      ): Promise<RunResult> {
+        if (line === programsProbe()) await asked
+        return super.execLine(line, stdin, env, cwd)
+      }
+    }
+    const box = new HeldProbeBox()
+    const probe = box.probePrograms()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    let closed = false
+    const closing = box.close().then(() => {
+      closed = true
+    })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(closed).toBe(false)
+    answer()
+    await probe
+    await closing
+    expect(closed).toBe(true)
+  })
+
   it('asks nothing once retired', async () => {
     const box = new ProgramsBox()
     await box.retire()

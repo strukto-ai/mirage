@@ -492,8 +492,13 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     return this.execArgv(['/bin/sh', '-c', line], stdin, env, cwd, null, null, signal)
   }
 
-  /** Unmount what the sandbox was served; the sandbox itself is the user's. */
+  /**
+   * Unmount what the sandbox was served; the sandbox itself is the user's. A
+   * programs probe still asking, which a line past its deadline left running,
+   * ends first, so no connection it opens outlives the close.
+   */
   override async close(): Promise<void> {
+    await this.programsAsking
     await this.mounts?.close()
     await super.close()
   }
