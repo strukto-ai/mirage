@@ -619,7 +619,7 @@ export interface WorkspaceConfigRaw {
   /** What the RAM mounts store and a command builds may hold; null for no cap. */
   maxMemory?: string | number | null
   maxBodyBytes?: string | number | null
-  /** What each session's shell state may hold; 1MB by default, null for no cap. */
+  /** What each session's shell state may hold; 2MB by default, null for no cap. */
   maxEnv?: string | number | null
   /** Where the workspace's connections may go; validated by networkLayer. */
   network?: NetworkSetting
