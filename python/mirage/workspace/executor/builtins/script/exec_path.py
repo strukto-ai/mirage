@@ -25,6 +25,8 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.runtime.constants import EXTERNAL_COMMANDS
+from mirage.runtime.table import is_sandbox
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
@@ -32,6 +34,7 @@ from mirage.shell.console import JobConsole
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
 from mirage.shell.job_table import JobTable
 from mirage.shell.join import shell_join
+from mirage.types import word_text
 from mirage.utils.path import resolve_path
 from mirage.vfs.bin import BinViewVFS
 from mirage.workspace.evaluation import EvaluationContext, child_context
@@ -44,6 +47,8 @@ from mirage.workspace.executor.builtins.script.script import (
     read_script_bytes,
     script_error,
 )
+from mirage.workspace.executor.command.external import run_external
+from mirage.workspace.expand.argv import Argv
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.types import ExecutionNode
@@ -96,11 +101,10 @@ def shebang_words(script: str) -> list[str]:
 async def handle_exec_path(
     dispatch: DispatchFn,
     execute_fn: Callable[..., Any],
-    path: str,
-    args: list[str],
     context: EvaluationContext,
     registry: MountRegistry,
     namespace: Namespace,
+    argv: Argv,
     stdin: ByteSource | None = None,
     sink: JobConsole | None = None,
     job_table: JobTable | None = None,
@@ -125,14 +129,19 @@ async def handle_exec_path(
     and an interpreter nobody registers answers with its own "command
     not found".
 
+    A binary runs in the sandbox bound to ``@external`` when that
+    sandbox serves the workspace (``mount_type: ssh``), both the path as
+    typed and its link target are on a mount other than ``/`` or
+    ``/dev``, and the target's mount allows ``exec``; otherwise it
+    answers 126.
+
     Args:
         dispatch (DispatchFn): op dispatcher, used to read the file.
         execute_fn (Callable): runs a program line in this session.
-        path (str): the head word, as typed.
-        args (list[str]): the words after it, positional for the script.
         context (EvaluationContext): the evaluation's session and frame.
         registry (MountRegistry): identifies the program view.
         namespace (Namespace): resolves links to program files.
+        argv (Argv): the admitted command.
         stdin (ByteSource | None): input stream for the script.
         sink (JobConsole | None): where the script's statements write as
             they finish, None to return them.
@@ -142,6 +151,8 @@ async def handle_exec_path(
             a shell script counts on from.
     """
     session = context.session
+    path = argv.name
+    args = [word_text(a) for a in argv.args]
     try:
         data = await read_script_bytes(dispatch, path, session.cwd)
     except FS_ERRORS as exc:
@@ -154,16 +165,30 @@ async def handle_exec_path(
             else CANNOT_EXECUTE_STATUS
         )
         return script_error(path, strerror, code)
+    typed = resolve_path(path, session.cwd)
+    target = namespace.session_links(session).follow(typed)
     if is_binary(data):
+        routing = context.frame.routing
+        if (
+            routing is not None
+            and is_sandbox(runs := routing.bindings.get(EXTERNAL_COMMANDS))
+            and runs.file_effects_dispatched
+            and not registry.unserved(typed)
+            and not registry.unserved(target)
+        ):
+            if not registry.exec_allowed_at(target):
+                return script_error(
+                    path, "not in EXEC mode", CANNOT_EXECUTE_STATUS
+                )
+            return await run_external(
+                argv, stdin, session, registry, routing, sink
+            )
         return script_error(
             path,
             "cannot execute binary file: Exec format error",
             CANNOT_EXECUTE_STATUS,
         )
     script = decode_text(data)
-    target = namespace.session_links(session).follow(
-        resolve_path(path, session.cwd)
-    )
     vfs, key, _ = registry.resolve(target)
     if isinstance(vfs, BinViewVFS):
         # The read above enforces visibility and path policy. Dispatch the

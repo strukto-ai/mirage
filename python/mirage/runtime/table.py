@@ -14,7 +14,7 @@
 
 import importlib
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, TypeGuard
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
@@ -235,6 +235,20 @@ def whole_line_runtime(
     if isinstance(whole, LineExecutorMixin):
         return whole
     return None
+
+
+def is_sandbox(entry: RuntimeIdentity | None) -> TypeGuard[Runtime[Any]]:
+    """Whether a runtime is a sandbox: a line executor on another
+    machine.
+
+    Args:
+        entry (RuntimeIdentity | None): the runtime, None for none.
+    """
+    return (
+        isinstance(entry, Runtime)
+        and isinstance(entry, LineExecutorMixin)
+        and entry.reach == "remote"
+    )
 
 
 def catch_all(entries: list[Runtime[Any]]) -> Runtime[Any] | None:

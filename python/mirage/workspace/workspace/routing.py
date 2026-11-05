@@ -33,7 +33,12 @@ from mirage.policy.types import (
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import WHOLE_LINE
 from mirage.runtime.routing import RouteError
-from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
+from mirage.runtime.table import (
+    bind_commands,
+    catch_all,
+    runtime_bindings_for,
+    whole_line_runtime,
+)
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
@@ -230,13 +235,17 @@ class Router:
     def runtime_for(
         self, command: str, decision: RouteDecision[RuntimeIdentity]
     ) -> str:
-        """The runtime entry that serves a command under a decision,
-        empty when the workspace runs it itself.
+        """The runtime entry that serves a command under a decision: the
+        ``@line`` runtime when one takes the line, empty when the
+        workspace runs it itself.
 
         Args:
             command (str): the command name.
             decision (RouteDecision): the line's placement.
         """
+        whole = whole_line_runtime(decision.bindings)
+        if isinstance(whole, Runtime):
+            return whole.name
         serving = decision.bindings.get(command, decision.fallback)
         if serving is None or isinstance(serving, WorkspaceRuntime):
             return ""

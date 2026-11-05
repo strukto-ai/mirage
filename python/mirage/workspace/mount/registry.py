@@ -760,10 +760,11 @@ class MountRegistry:
         """Whether code may be loaded from this path: the per-script
         form of ``is_exec_allowed``, read by an interpreter running a
         file operand (``python3 path.py``, ``js app.js``, or a
-        ``./script`` whose shebang names one). Shell scripts (``bash
-        script.sh``, ``source``, a ``./script`` with no shebang or an sh
-        one) never ask: they run in the shell, which checks each of
-        their commands like a typed one.
+        ``./script`` whose shebang names one), or a binary run in a
+        sandbox (``./a.out``). Shell scripts (``bash script.sh``,
+        ``source``, a ``./script`` with no shebang or an sh one) never
+        ask: they run in the shell, which checks each of their commands
+        like a typed one.
 
         Args:
             virtual (str): the script's absolute virtual path.
@@ -1095,6 +1096,16 @@ class MountRegistry:
         """The decision ledger an Ask is taken to, which the policies
         hold (``Policies.decisions``) so a session write reaches it too."""
         return self.policies.decisions
+
+    def unserved(self, path: str) -> bool:
+        """Whether ``path`` is on no mount, or on the mount at ``/`` or
+        ``/dev``.
+
+        Args:
+            path (str): an absolute virtual path.
+        """
+        mount = self.try_mount_for(path)
+        return mount is None or mount.prefix in ("/", DEV_PREFIX)
 
     def anchor_root(self, entry: MountEntry) -> None:
         """Mark `entry` as the root the workspace added, not one mounted.

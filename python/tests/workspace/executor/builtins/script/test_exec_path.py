@@ -18,6 +18,9 @@ import pytest
 
 from mirage.policy import CommandRule
 from mirage.policy.profile import CommandsBlock, SessionProfile
+from mirage.runtime.base import Runtime
+from mirage.runtime.mixin import LineExecutorMixin
+from mirage.runtime.types import RunResult
 from mirage.types import MountMode, PathSpec
 from mirage.vfs import RAMVFS
 from mirage.workspace import Workspace
@@ -279,3 +282,116 @@ def test_binary_probe_preserves_shell_text_rules(ws, data, command, expected):
     result = _run(ws, command)
     assert result.exit_code == 0
     assert result.stdout == expected
+
+
+class Box(Runtime, LineExecutorMixin):
+    """A sandbox taking ``@external``, serving the workspace when
+    ``serves``; it records each line it runs."""
+
+    name = "box"
+    reach = "remote"
+    captures = ("@external",)
+
+    def __init__(self, serves: bool = True) -> None:
+        super().__init__()
+        self.serves = serves
+        self.lines: list[str] = []
+
+    @property
+    def file_effects_dispatched(self) -> bool:
+        return self.serves
+
+    def _serves_session(self, restricted_mounts: tuple[str, ...]) -> bool:
+        return True
+
+    async def run_line(self, engine, paths, texts, ctx):
+        self.lines.append(ctx.flags["c"])
+        return RunResult(stdout=b"box\n", stderr=None, exit_code=0)
+
+
+BINARY = b"\x7fELF\x02\x01\x01\0binary"
+
+
+async def _binary(
+    box: Box, mode: MountMode, setup: str, line: str, profile=None
+):
+    ws = Workspace(
+        {"/ram": RAMVFS()},
+        mode=mode,
+        runtimes=[box, "workspace"],
+        profiles={"p": profile or {}},
+    )
+    try:
+        await ws.vfs.write("/ram/t", BINARY)
+        await ws.vfs.write("/t", BINARY)
+        ws.create_session("s", profile="p")
+        assert (await ws.shell(setup, session_id="s")).exit_code == 0
+        return await ws.shell(line, session_id="s")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_served_binary_runs_in_the_sandbox():
+    box = Box()
+    io = await _binary(box, MountMode.EXEC, "cd /ram", "./t a")
+    assert (io.exit_code, await io.stdout_str()) == (0, "box\n")
+    assert box.lines == ["./t a"]
+
+
+FORMAT = "cannot execute binary file: Exec format error"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "serves, mode, setup, line, profile, stderr",
+    [
+        (
+            True,
+            MountMode.EXEC,
+            "ln -s /ram/t /entry",
+            "/entry a",
+            None,
+            f"/entry: {FORMAT}\n",
+        ),
+        (
+            True,
+            MountMode.EXEC,
+            "ln -s /t /ram/l",
+            "/ram/l a",
+            None,
+            f"/ram/l: {FORMAT}\n",
+        ),
+        (
+            True,
+            MountMode.WRITE,
+            "true",
+            "/ram/t a",
+            None,
+            "/ram/t: not in EXEC mode\n",
+        ),
+        (
+            True,
+            MountMode.EXEC,
+            "true",
+            "/ram/t a",
+            {"mounts": {"/ram": "write"}},
+            "/ram/t: not in EXEC mode\n",
+        ),
+        (
+            False,
+            MountMode.EXEC,
+            "true",
+            "/ram/t a",
+            None,
+            f"/ram/t: {FORMAT}\n",
+        ),
+    ],
+)
+async def test_a_binary_the_sandbox_may_not_run_answers_126(
+    serves, mode, setup, line, profile, stderr
+):
+    box = Box(serves)
+    io = await _binary(box, mode, setup, line, profile)
+    assert (io.exit_code, await io.stderr_str()) == (126, stderr)
+    assert box.lines == []

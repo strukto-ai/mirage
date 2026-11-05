@@ -825,9 +825,8 @@ class Workspace:
             # The run leaves a held line on its static bindings for the
             # gate to answer (``Router.decide``), whole when they take it
             # whole.
-            whole_line = (
-                whole_line_runtime(self._registry.runtime_bindings) is not None
-            )
+            whole = whole_line_runtime(self._registry.runtime_bindings)
+            whole_line = whole is not None
             judged = await explain_line(
                 ast,
                 session,
@@ -839,7 +838,9 @@ class Workspace:
                 line,
                 judged,
                 judged if whole_line else verdicts,
-                lambda command: "",
+                lambda command: (
+                    whole.name if isinstance(whole, Runtime) else ""
+                ),
                 whole_line,
                 aliases,
             )
@@ -1527,7 +1528,8 @@ class Workspace:
         return left
 
     def add_runtime(self, runtime: Runtime[Any] | str) -> Runtime[Any]:
-        """Append a runtime entry to the workspace's ordered set.
+        """Add a runtime entry to the workspace's ordered set;
+        ``Runtimes.add`` places it.
 
         Args:
             runtime (Runtime | str): a Runtime instance or a registry

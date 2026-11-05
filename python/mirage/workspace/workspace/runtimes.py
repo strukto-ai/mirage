@@ -17,11 +17,13 @@ from typing import Any
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
+from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.table import (
     DEFAULT_ENTRIES,
     NAMED,
     bind_commands,
     build_runtime,
+    is_sandbox,
 )
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.workspace.mount import MountRegistry
@@ -100,12 +102,12 @@ class Runtimes:
         return entries
 
     def add(self, runtime: Runtime[Any] | str) -> Runtime[Any]:
-        """Append an entry to the ordered list.
+        """Add an entry to the ordered list.
 
-        The entry lands last, so it never steals a command an earlier
-        entry already captures (first capturer still wins). A name
-        builds like a config entry and fails loud; a duplicate name is
-        rejected before any state changes.
+        A sandbox (``is_sandbox``) lands after the last sandbox listed,
+        else before the first language runtime, else last; any other
+        entry lands last. A name builds like a config entry and fails
+        loud; a duplicate name is rejected before any state changes.
 
         Args:
             runtime (Runtime | str): a Runtime instance or a registry
@@ -115,7 +117,21 @@ class Runtimes:
             ValueError: unknown name or duplicate entry.
         """
         entry = build_runtime(runtime) if isinstance(runtime, str) else runtime
-        candidate = [*self._entries, entry]
+        at = len(self._entries)
+        if is_sandbox(entry):
+            sandboxes = [
+                i + 1 for i, e in enumerate(self._entries) if is_sandbox(e)
+            ]
+            languages = [
+                i
+                for i, e in enumerate(self._entries)
+                if isinstance(e, LanguageRuntime)
+            ]
+            if sandboxes:
+                at = sandboxes[-1]
+            elif languages:
+                at = languages[0]
+        candidate = [*self._entries[:at], entry, *self._entries[at:]]
         bindings = bind_commands(candidate)
         entry.bind(self._binding)
         self._install(candidate, bindings)

@@ -258,11 +258,6 @@ class SandboxMounts:
         self._lock = asyncio.Lock()
         self._name = f"{SSHFS_SOURCE_PREFIX}{uuid.uuid4().hex}"
 
-    @property
-    def file_effects_dispatched(self) -> bool:
-        """SSH mode serves every workspace prefix through the host's gate."""
-        return self._mount_type == "ssh"
-
     async def admit(
         self, binding: WorkspaceBinding | None
     ) -> RunResult | None:

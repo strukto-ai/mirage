@@ -1034,7 +1034,6 @@ async def _route_argv(
     """
     session = context.session
     name = argv.name
-    args = list(argv.args)
     operands = list(argv.operands)
 
     # ── path execution ─────────────────────────
@@ -1045,11 +1044,10 @@ async def _route_argv(
         return await handle_exec_path(
             dispatch,
             execute_fn,
-            name,
-            [word_text(a) for a in args],
             context,
             registry,
             namespace,
+            argv,
             stdin,
             sink,
             job_table,
