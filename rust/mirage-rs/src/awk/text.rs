@@ -926,3 +926,54 @@ mod record_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod string_tests {
+    use super::*;
+
+    #[test]
+    fn index_matches_slice_search_at_every_budget_boundary() {
+        for budget in [1, 2, 7] {
+            for haystack in [
+                b"".as_slice(),
+                b"a",
+                b"aaaaabaaaaab",
+                b"ababababac",
+                b"\x00\xff\x00",
+            ] {
+                for needle in [
+                    b"".as_slice(),
+                    b"a",
+                    b"aaaaab",
+                    b"ababac",
+                    b"aaaac",
+                    b"\xff\x00",
+                ] {
+                    let expected = if needle.is_empty() {
+                        1
+                    } else {
+                        haystack
+                            .windows(needle.len())
+                            .position(|s| s == needle)
+                            .map_or(0, |at| at + 1)
+                    };
+                    let mut search =
+                        IndexSearch::new(haystack.to_vec().into(), needle.to_vec().into());
+                    let mut turns = 0;
+                    loop {
+                        turns += 1;
+                        assert!(turns < 1000);
+                        let mut work = budget;
+                        match search.step(&mut work) {
+                            Step::Paused => {}
+                            Step::Done(actual) => {
+                                assert_eq!(actual, expected);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

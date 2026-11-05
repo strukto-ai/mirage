@@ -584,3 +584,32 @@ fn nested_match_and_record_searches_resume_within_the_vm_budget() {
     assert_eq!(out, b"a\nb\n");
     assert!(turns > 10);
 }
+
+#[test]
+fn formatted_output_yields_and_commits_each_argument_once() {
+    let program =
+        "BEGIN { i=1; s=sprintf(\"%131073s:%d\",\"x\",i++); printf \"%s:%d\\n\",s,i++; print i }";
+    let mut stream = super::open(json!({"program":program}).to_string().as_bytes()).unwrap();
+    let mut out = Vec::new();
+    let mut turns = 0;
+    while stream.busy() {
+        let before = out.len();
+        stream.drain(&mut out).unwrap();
+        assert!(out.len() - before <= super::STEPS + 16);
+        turns += 1;
+        assert!(turns < 1000);
+    }
+    let mut expected = vec![b' '; 131072];
+    expected.extend_from_slice(b"x:1:2\n3\n");
+    assert_eq!(out, expected);
+    assert!(turns > 12);
+    let failed = run_with(
+        "BEGIN { print \"before\"; printf \"%131073s%s\",\"x\"; print \"after\" }",
+        &[],
+        "",
+        &[],
+    );
+    assert_eq!(failed.out, "before\n");
+    assert_eq!(failed.status, 2);
+    assert!(failed.err.contains("not enough arguments"));
+}

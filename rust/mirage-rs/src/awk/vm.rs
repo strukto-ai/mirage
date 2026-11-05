@@ -4,7 +4,7 @@ use super::compile::{
     ARGC, ARGV, Arr, CONVFMT, Code, ENVIRON, FILENAME, FS, Math, OFMT, OFS, ORS, Op, RLENGTH, RS,
     RSTART, SUBSEP, Var,
 };
-use super::format::sprintf;
+use super::format::{Formatter, Output, Print};
 use super::io::{
     Io, LIMIT, Next, Ordered, OutFile, OutPipe, Reader, Retired, STDERR_NAME, STDOUT_NAMES,
 };
@@ -303,7 +303,28 @@ enum SubTarget {
     Invalid,
 }
 
+enum OutputTarget {
+    Value(Vec<u8>),
+    Print(Option<(RedirKind, Text)>),
+}
+
+struct FormatTask {
+    formatter: Formatter,
+    target: OutputTarget,
+}
+
+struct OutputTask {
+    output: Output,
+    target: OutputTarget,
+}
+
 enum Pending {
+    Format(Box<FormatTask>),
+    Print {
+        print: Print,
+        target: Option<(RedirKind, Text)>,
+    },
+    Output(OutputTask),
     Index(IndexSearch),
     String(StringWork),
     Sub {
@@ -485,6 +506,45 @@ impl Machine {
     fn resume(&mut self, work: &mut u64) -> Step {
         let pending = self.pending.take().unwrap();
         match pending {
+            Pending::Format(mut task) => match task.formatter.step(work)? {
+                SearchStep::Paused => self.pending = Some(Pending::Format(task)),
+                SearchStep::Done(output) => {
+                    if let OutputTarget::Value(bytes) = &mut task.target {
+                        *bytes = Vec::with_capacity(output.len());
+                    }
+                    self.pending = Some(Pending::Output(OutputTask {
+                        output,
+                        target: task.target,
+                    }));
+                }
+            },
+            Pending::Print { mut print, target } => match print.step(work)? {
+                SearchStep::Paused => self.pending = Some(Pending::Print { print, target }),
+                SearchStep::Done(output) => {
+                    self.pending = Some(Pending::Output(OutputTask {
+                        output,
+                        target: OutputTarget::Print(target),
+                    }));
+                }
+            },
+            Pending::Output(mut task) => {
+                let done = match &mut task.target {
+                    OutputTarget::Value(bytes) => task.output.copy(bytes, work),
+                    OutputTarget::Print(target) => {
+                        let mut bytes = Vec::with_capacity(task.output.len().min(*work as usize));
+                        let done = task.output.copy(&mut bytes, work);
+                        self.emit(&bytes, target.as_ref());
+                        done
+                    }
+                };
+                if done {
+                    if let OutputTarget::Value(bytes) = task.target {
+                        self.stack.push(string(bytes));
+                    }
+                } else {
+                    self.pending = Some(Pending::Output(task));
+                }
+            }
             Pending::Index(mut search) => match search.step(work) {
                 SearchStep::Paused => self.pending = Some(Pending::Index(search)),
                 SearchStep::Done(index) => self.stack.push(Value::Num(index as f64)),
@@ -664,6 +724,14 @@ impl Machine {
 
     fn convfmt(&self) -> Cow<'_, [u8]> {
         special(&self.globals, CONVFMT)
+    }
+
+    fn special_text(&self, index: u32) -> Text {
+        self.globals[index as usize]
+            .scalar
+            .clone()
+            .unwrap_or(Value::Uninit)
+            .into_text(b"%.6g")
     }
 
     fn pop(&mut self) -> Value {
@@ -1139,12 +1207,12 @@ impl Machine {
                 }));
             }
             Op::Sprintf(count) => {
-                let args = self.stack.split_off(self.stack.len() - count as usize);
-                let fmt = self.convfmt();
-                let format = args[0].text(&fmt);
-                let text = sprintf(&format, &args[1..], &fmt)?;
-                drop(fmt);
-                self.stack.push(string(text));
+                let mut args = self.stack.split_off(self.stack.len() - count as usize);
+                let format = args.remove(0).into_text(&self.convfmt());
+                self.pending = Some(Pending::Format(Box::new(FormatTask {
+                    formatter: Formatter::new(format, args, self.special_text(CONVFMT)),
+                    target: OutputTarget::Value(Vec::new()),
+                })));
             }
             Op::Length => {
                 let len = self.pop_text().len();
@@ -1569,40 +1637,6 @@ impl Machine {
         }
     }
 
-    /// The text a print or printf statement writes.
-    fn render(&mut self, formatted: bool, args: &[Value]) -> Result<Vec<u8>, Vec<u8>> {
-        let fmt = self.convfmt();
-        if formatted {
-            let Some(format) = args.first() else {
-                return Err(b"awk: printf needs a format".to_vec());
-            };
-            return sprintf(&format.text(&fmt), &args[1..], &fmt);
-        }
-        let mut body = if args.is_empty() {
-            drop(fmt);
-            self.record_text()?.to_vec()
-        } else {
-            let ofmt = special(&self.globals, OFMT);
-            let ofs = special(&self.globals, OFS);
-            let mut body = Vec::new();
-            for (at, arg) in args.iter().enumerate() {
-                let text = match arg {
-                    Value::Num(n) => Cow::Owned(format_num(*n, &ofmt)),
-                    other => other.text(&fmt),
-                };
-                let sep: &[u8] = if at > 0 { &ofs } else { &[] };
-                if body.len() + sep.len() + text.len() > MAX_LEN {
-                    return Err(no_memory());
-                }
-                body.extend_from_slice(sep);
-                body.extend_from_slice(&text);
-            }
-            body
-        };
-        body.extend_from_slice(&special(&self.globals, ORS));
-        Ok(body)
-    }
-
     /// print and printf. A file opened with `>` is emptied when it is
     /// opened, and what is printed to it waits until a flush, a close or
     /// the end of a record, so reading it back before closing it reads
@@ -1658,30 +1692,61 @@ impl Machine {
         }
         self.stage = 0;
         let base = self.stack.len() - count - usize::from(redirect.is_some());
-        let args = self.stack.split_off(base);
-        let body = self.render(formatted, &args[..count])?;
-        let Some((kind, name)) = redirect.zip(name) else {
-            self.io.stdout(&body);
-            return Ok(());
+        let mut args = self.stack.split_off(base);
+        args.truncate(count);
+        let target = redirect.zip(name);
+        if formatted {
+            if args.is_empty() {
+                return Err(b"awk: printf needs a format".to_vec());
+            }
+            let format = args.remove(0).into_text(&self.convfmt());
+            self.pending = Some(Pending::Format(Box::new(FormatTask {
+                formatter: Formatter::new(format, args, self.special_text(CONVFMT)),
+                target: OutputTarget::Print(target),
+            })));
+        } else {
+            if args.is_empty() {
+                args.push(string(self.record_text()?.to_vec()));
+            }
+            self.pending = Some(Pending::Print {
+                print: Print::new(
+                    args,
+                    self.special_text(OFMT),
+                    self.special_text(OFS),
+                    self.special_text(ORS),
+                ),
+                target,
+            });
+        }
+        Ok(())
+    }
+
+    fn emit(&mut self, body: &[u8], target: Option<&(RedirKind, Text)>) {
+        let Some((kind, name)) = target else {
+            self.io.stdout(body);
+            return;
         };
-        if kind == RedirKind::Pipe {
-            let pipe = self.io.pipes_out.get_mut(&name).expect("opened above");
-            pipe.buf.extend_from_slice(&body);
+        if *kind == RedirKind::Pipe {
+            let pipe = self
+                .io
+                .pipes_out
+                .get_mut(name)
+                .expect("opened before rendering");
+            pipe.buf.extend_from_slice(body);
             if pipe.buf.len() >= LIMIT {
                 let (fd, data) = (pipe.fd, std::mem::take(&mut pipe.buf));
                 self.io.push(Request::Spool { fd, data });
             }
         } else if STDOUT_NAMES.contains(&name.as_slice()) {
-            self.io.stdout(&body);
+            self.io.stdout(body);
         } else if name.as_slice() == STDERR_NAME {
-            self.io.err.extend_from_slice(&body);
-        } else if let Some(file) = self.io.files_out.get_mut(&name) {
-            file.buf.extend_from_slice(&body);
+            self.io.err.extend_from_slice(body);
+        } else if let Some(file) = self.io.files_out.get_mut(name) {
+            file.buf.extend_from_slice(body);
             if file.buf.len() >= LIMIT {
-                self.io.send_file(&name);
+                self.io.send_file(name);
             }
         }
-        Ok(())
     }
 
     /// Run an output pipe's command on everything printed to it.
