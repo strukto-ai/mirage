@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 from mirage.commands.builtin.constants import EXEC_PLACEHOLDER
 from mirage.commands.builtin.find_printf import expand_printf
 from mirage.commands.builtin.types import (
@@ -309,7 +311,7 @@ def _ls_row(ps: PathSpec, st: FileStat, identity: Identity | None) -> bytes:
             and group columns.
     """
     path = ps.raw_path or ps.virtual
-    row = format_find_ls(st.model_copy(update={"name": path}), identity)
+    row = format_find_ls(replace(st, name=path), identity)
     return encode_text(row + "\n")
 
 

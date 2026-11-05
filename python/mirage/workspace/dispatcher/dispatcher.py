@@ -26,7 +26,7 @@ from collections.abc import (
     Mapping,
 )
 from contextlib import AbstractAsyncContextManager, AsyncExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Literal, cast, overload
 
@@ -205,7 +205,7 @@ async def _sized(mount: MountEntry, path: PathSpec, row: Any) -> Any:
     ):
         return row
     [size] = await manager.cached_sizes([path])
-    return row if size is None else row.model_copy(update={"size": size})
+    return row if size is None else replace(row, size=size)
 
 
 async def _sized_tree(
@@ -233,7 +233,7 @@ async def _sized_tree(
         [PathSpec.from_str_path(f"{base}/{rel}") for rel in unsized]
     )
     found = {
-        rel: tree[rel].model_copy(update={"size": size})
+        rel: replace(tree[rel], size=size)
         for rel, size in zip(unsized, sizes, strict=True)
         if size is not None
     }
@@ -2992,7 +2992,7 @@ class Dispatcher:
             if result.name == "/" and name:
                 # A mount's root answers as the backend's own root; in
                 # the namespace it is the name it is mounted at.
-                result = result.model_copy(update={"name": name})
+                result = replace(result, name=name)
             return self._on_device(
                 call.name,
                 call.path.virtual,
@@ -3073,13 +3073,9 @@ class Dispatcher:
         mount = self._namespace.try_mount_for(virtual)
         dev = ident("/" if mount is None else mount.prefix)
         if isinstance(result, FileStat):
-            return result.model_copy(update={"dev": dev})
+            return replace(result, dev=dev)
         return {
-            key: (
-                row.model_copy(update={"dev": dev})
-                if isinstance(row, FileStat)
-                else row
-            )
+            key: (replace(row, dev=dev) if isinstance(row, FileStat) else row)
             for key, row in result.items()
         }
 

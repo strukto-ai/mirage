@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 from mirage.accessor.base import Accessor
 from mirage.commands.builtin.aggregators import header_aggregate
 from mirage.commands.builtin.generic.tail import parse_flags, tail_generic
@@ -43,7 +45,7 @@ async def tail(
 
     async def stat(path: PathSpec) -> FileStat:
         row = await backend_stat(path)
-        return row.model_copy(update={"size": await read_size(path)})
+        return replace(row, size=await read_size(path))
 
     return await tail_generic(
         parsed,

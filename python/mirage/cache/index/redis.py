@@ -38,6 +38,8 @@ from mirage.cache.index.config import (
     ListResult,
     LookupResult,
     LookupStatus,
+    parse_row,
+    row_json,
 )
 from mirage.cache.index.constants import (
     CHILDREN_PREFIX,
@@ -57,15 +59,6 @@ from mirage.utils.ids import IdSource, SystemIdSource
 
 def _text(value: str | bytes) -> str:
     return value.decode() if isinstance(value, bytes) else value
-
-
-def _row(raw: str | bytes) -> FileStat:
-    """An index row read back from its JSON.
-
-    Args:
-        raw (str | bytes): the stored JSON.
-    """
-    return FileStat.model_validate(json.loads(raw))
 
 
 _PendingSeed = tuple[
@@ -936,9 +929,7 @@ class RedisIndexCacheStore(IndexCacheStore):
                     version,
                 ) in enumerate(pending):
                     for vfs_path, entry in entries.items():
-                        pipe.set(
-                            self._entry_key(vfs_path), entry.model_dump_json()
-                        )
+                        pipe.set(self._entry_key(vfs_path), row_json(entry))
                     for vfs_path, child_keys in children.items():
                         listing = IndexDirectory(
                             entries=child_keys,
@@ -990,7 +981,7 @@ class RedisIndexCacheStore(IndexCacheStore):
         raw = await self._client.get(self._entry_key(vfs_path))
         if raw is None:
             return LookupResult(status=LookupStatus.NOT_FOUND)
-        return LookupResult(entry=_row(raw))
+        return LookupResult(entry=parse_row(raw))
 
     async def get_many(self, vfs_paths: Sequence[str]) -> dict[str, FileStat]:
         paths = list(dict.fromkeys(vfs_paths))
@@ -1001,7 +992,7 @@ class RedisIndexCacheStore(IndexCacheStore):
             [self._entry_key(path) for path in paths]
         )
         return {
-            path: _row(raw)
+            path: parse_row(raw)
             for path, raw in zip(paths, rows, strict=True)
             if raw is not None
         }
@@ -1018,7 +1009,7 @@ class RedisIndexCacheStore(IndexCacheStore):
             self._tombstone_prefix + folder,
             self._paths_key,
             vfs_path,
-            entry.model_dump_json(),
+            row_json(entry),
             folder,
         )
         try:
@@ -1061,7 +1052,7 @@ class RedisIndexCacheStore(IndexCacheStore):
             self._tombstone_prefix + folder,
             f"{self._directory_generation_prefix}{vfs_path}",
             self._entry_key(vfs_path),
-            entry.model_dump_json(),
+            row_json(entry),
             vfs_path,
             fresh.model_dump_json(),
             str(now.timestamp()),
@@ -1075,13 +1066,13 @@ class RedisIndexCacheStore(IndexCacheStore):
         await self._flush_seed()
         key = self._entry_key(vfs_path)
         raw = await self._client.get(key)
-        if raw is None or _row(raw).model_dump() != json.loads(predecessor):
+        if raw is None or parse_row(raw) != parse_row(predecessor):
             return False
         try:
             result = await cast(
                 Awaitable[int],
                 self._client.eval(
-                    _REPLACE_ENTRY, 1, key, raw, entry.model_dump_json()
+                    _REPLACE_ENTRY, 1, key, raw, row_json(entry)
                 ),
             )
             return result == 1
@@ -1201,7 +1192,7 @@ class RedisIndexCacheStore(IndexCacheStore):
         )
         rows: list[tuple[str, str]] = []
         for name, entry in entries:
-            rows.append((prefix + name, entry.model_dump_json()))
+            rows.append((prefix + name, row_json(entry)))
 
         expiry = (
             expired_at
@@ -1290,7 +1281,7 @@ class RedisIndexCacheStore(IndexCacheStore):
                 raw = await self._client.get(key)
                 if raw is not None:
                     vfs_path = key_text.removeprefix(self._entry_prefix)
-                    entries[vfs_path] = _row(raw)
+                    entries[vfs_path] = parse_row(raw)
             if cursor == 0:
                 return entries
 

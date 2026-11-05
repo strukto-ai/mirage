@@ -17,6 +17,7 @@
 
 import { LookupStatus } from '@struktoai/mirage-core/cache/index/config'
 import {
+  ContentType,
   FileStat,
   FileType,
   RAMVFS,
@@ -38,7 +39,7 @@ const FOLDER_NAME = 'sub'
 const FILE = `${DIR}/${FILE_NAME}`
 const CHILDREN = [FILE, `${DIR}/${FOLDER_NAME}`]
 const REMOTE_TIME = '2026-01-01T00:00:00Z'
-const EXTRA = { etag: 'abc' }
+const EXTRA = { etag: 'abc', title: 'café → ü', tags: ['a', 'b'] }
 
 let fail = 0
 
@@ -86,6 +87,10 @@ async function write(prefix: string): Promise<void> {
     modified: REMOTE_TIME,
     size: 6,
     fingerprint: FILE,
+    content: ContentType.TEXT,
+    mode: 0o644,
+    uid: 501,
+    gid: 'staff',
     extra: { ...EXTRA },
   })
   const folderEntry = new FileStat({
@@ -126,6 +131,10 @@ async function read(prefix: string): Promise<void> {
       entry.type === FileType.FILE &&
       entry.modified === REMOTE_TIME &&
       entry.size === 6 &&
+      entry.content === ContentType.TEXT &&
+      entry.mode === 0o644 &&
+      entry.uid === 501 &&
+      entry.gid === 'staff' &&
       JSON.stringify(entry.extra) === JSON.stringify(EXTRA),
     JSON.stringify(got),
   )

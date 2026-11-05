@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from dataclasses import dataclass
 from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
-from mirage.types import FileStat
+from mirage.types import ContentType, FileStat, FileType
 
 
 class IndexType(str, Enum):
@@ -28,6 +29,47 @@ class IndexType(str, Enum):
 class LookupStatus(str, Enum):
     EXPIRED = "expired"
     NOT_FOUND = "not_found"
+
+
+def row_json(entry: FileStat) -> str:
+    """A stat row's wire form, the JSON both hosts' index stores share:
+    every field in declaration order, compact, as TypeScript's
+    ``JSON.stringify`` writes a ``FileStat``.
+
+    Args:
+        entry (FileStat): the row.
+    """
+    return json.dumps(
+        {name: getattr(entry, name) for name in FileStat.__dataclass_fields__},
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+
+
+def parse_row(raw: str | bytes) -> FileStat:
+    """A stat row read back from its wire form: a field it lacks takes
+    its default and one this host does not know is dropped, as
+    TypeScript's ``FileStatWireSchema`` parses it.
+
+    Args:
+        raw (str | bytes): the stored JSON.
+
+    Raises:
+        ValueError: the JSON is not a row: no name or type, or a type or
+            content this host does not know.
+    """
+    data = json.loads(raw)
+    if not isinstance(data, dict) or not {"name", "type"} <= data.keys():
+        raise ValueError("an index row needs a name and a type")
+    known = {
+        name: data[name]
+        for name in FileStat.__dataclass_fields__
+        if name in data
+    }
+    content = known.get("content")
+    known["type"] = FileType(data["type"])
+    known["content"] = None if content is None else ContentType(content)
+    return FileStat(**known)
 
 
 @dataclass(frozen=True, slots=True)

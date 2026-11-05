@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 import pytest
 
 from mirage.commands.builtin.utils import formatting
@@ -180,7 +182,7 @@ def test_format_ls_long_owner_and_group_are_the_profile():
     [line] = formatting.format_ls_long([stat], identity=identity)
     assert line == "-rw-r--r-- 1 admin admin 5 Jan  1  2026 file.txt"
     # A reported uid/gid (disk, or a chown in the overlay) wins over both.
-    owned = stat.model_copy(update={"uid": 501, "gid": "staff"})
+    owned = replace(stat, uid=501, gid="staff")
     [line] = formatting.format_ls_long([owned], identity=identity)
     assert line == "-rw-r--r-- 1 501 staff 5 Jan  1  2026 file.txt"
 

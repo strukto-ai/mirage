@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import replace
+
 from mirage.commands.builtin.utils.formatting import ls_mode_string
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.usage import missing_operand_error
@@ -51,10 +53,10 @@ def mode_line(name: str, stat: FileStat, new: int, failed: bool) -> str:
     """
     old = stat.mode if stat.mode is not None else 0
     shown = shell_quote_always(name)
-    perms = ls_mode_string(stat.model_copy(update={"mode": new}))[1:]
+    perms = ls_mode_string(replace(stat, mode=new))[1:]
     if not failed and old == new:
         return f"mode of {shown} retained as {new:04o} ({perms})\n"
-    was = ls_mode_string(stat.model_copy(update={"mode": old}))[1:]
+    was = ls_mode_string(replace(stat, mode=old))[1:]
     lead = (
         f"failed to change mode of {shown}" if failed else f"mode of {shown}"
     )
@@ -126,12 +128,11 @@ async def handle_chmod(
             # Backends without a mode default to what ls renders: 755 for
             # directories, 644 for files (symbolic clauses build on this).
             if path_stat.mode is None:
-                path_stat = path_stat.model_copy(
-                    update={
-                        "mode": DEFAULT_DIR_MODE
-                        if path_stat.type == FileType.DIRECTORY
-                        else DEFAULT_FILE_MODE
-                    }
+                path_stat = replace(
+                    path_stat,
+                    mode=DEFAULT_DIR_MODE
+                    if path_stat.type == FileType.DIRECTORY
+                    else DEFAULT_FILE_MODE,
                 )
             new_mode = parse_chmod(mode_text, path_stat.mode or 0)
             if new_mode is None:

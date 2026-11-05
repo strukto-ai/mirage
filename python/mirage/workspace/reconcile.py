@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import logging
+from dataclasses import replace
 from enum import Enum
 from functools import partial
 
@@ -437,10 +438,7 @@ class Reconciler:
         )
         same = (
             stored is not None
-            and stored.model_copy(
-                update={"name": row.name, "extra": row.extra}
-            )
-            == row
+            and replace(stored, name=row.name, extra=row.extra) == row
         )
         if same and (vouched or not held):
             return

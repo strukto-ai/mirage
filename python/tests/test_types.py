@@ -15,7 +15,6 @@
 from dataclasses import FrozenInstanceError
 
 import pytest
-from pydantic import ValidationError
 
 from mirage.types import (
     DEFAULT_READ_TTL,
@@ -43,7 +42,7 @@ def test_filestat_defaults():
 
 def test_filestat_immutable():
     fs = FileStat(type=FileType.FILE, name="foo.txt")
-    with pytest.raises(ValidationError):
+    with pytest.raises(FrozenInstanceError):
         fs.name = "bar.txt"
 
 

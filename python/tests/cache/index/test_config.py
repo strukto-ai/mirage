@@ -22,7 +22,7 @@ from mirage.cache.index import (
     LookupStatus,
     RedisIndexConfig,
 )
-from mirage.cache.index.config import IndexType
+from mirage.cache.index.config import IndexType, parse_row, row_json
 from mirage.types import ContentType, FileStat, FileType
 
 # The one wire format a row is stored in: what pydantic writes for a
@@ -45,8 +45,15 @@ def test_a_rows_json_is_the_shared_wire_format():
         type=FileType.FILE,
         content=ContentType.TEXT,
     )
-    assert row.model_dump_json() == WIRE
-    assert FileStat.model_validate_json(WIRE) == row
+    assert row_json(row) == WIRE
+    assert parse_row(WIRE) == row
+
+
+# A row the schema refuses is an error, as TypeScript's parseRow throws,
+# never a hit with the field empty.
+def test_a_row_missing_its_type_is_refused():
+    with pytest.raises(ValueError):
+        parse_row('{"name":"c"}')
 
 
 def test_lookup_result_not_found():

@@ -34,7 +34,7 @@ sys.path[:] = [p for p in sys.path if p not in (_INTEG_DIR, "")]
 import asyncio
 import os
 
-from mirage import FileStat, FileType, Workspace
+from mirage import ContentType, FileStat, FileType, Workspace
 from mirage.cache.index import (
     LookupStatus,
     RedisIndexCacheStore,
@@ -55,7 +55,7 @@ FOLDER_NAME = "sub"
 FILE = f"{DIR}/{FILE_NAME}"
 CHILDREN = [FILE, f"{DIR}/{FOLDER_NAME}"]
 REMOTE_TIME = "2026-01-01T00:00:00Z"
-EXTRA = {"etag": "abc"}
+EXTRA = {"etag": "abc", "title": "café → ü", "tags": ["a", "b"]}
 
 fail = 0
 
@@ -99,6 +99,10 @@ async def write(prefix: str) -> None:
         modified=REMOTE_TIME,
         size=6,
         fingerprint=FILE,
+        content=ContentType.TEXT,
+        mode=0o644,
+        uid=501,
+        gid="staff",
         extra=dict(EXTRA),
     )
     folder_entry = FileStat(
@@ -140,6 +144,10 @@ async def read(prefix: str) -> None:
         and entry.type is FileType.FILE
         and entry.modified == REMOTE_TIME
         and entry.size == 6
+        and entry.content is ContentType.TEXT
+        and entry.mode == 0o644
+        and entry.uid == 501
+        and entry.gid == "staff"
         and entry.extra == EXTRA,
         f"got {got!r}",
     )

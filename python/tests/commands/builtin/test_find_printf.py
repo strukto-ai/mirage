@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from mirage.commands.builtin.find_printf import expand_printf
 from mirage.commands.builtin.utils.identity import Identity
 from mirage.rs.find import parse_find_expression
@@ -98,7 +100,7 @@ def test_expand_owner_directives():
         == "admin admin admin admin\n"
     )
     # A reported owner wins; `-` when nothing names one.
-    owned = _stat().model_copy(update={"uid": 501, "gid": "staff"})
+    owned = replace(_stat(), uid=501, gid="staff")
     assert (
         _expand(
             "%u %g\n",

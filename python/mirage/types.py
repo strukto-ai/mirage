@@ -38,7 +38,6 @@ from pydantic import (
     Field,
     NonNegativeFloat,
     NonNegativeInt,
-    model_validator,
 )
 
 from mirage.utils.path import dotted_spelling, resolve_path
@@ -227,9 +226,8 @@ DEVICE_NUMBERS_KEY = "device_numbers"
 LIVE_KEY = "mirage.live"
 
 
-class FileStat(BaseModel):
-    model_config = ConfigDict(frozen=True)
-
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FileStat:
     name: str
     size: int | None = None
     modified: str | None = None
@@ -244,10 +242,9 @@ class FileStat(BaseModel):
     ctime: str | None = None
     birthtime: str | None = None
     dev: int | None = None
-    extra: dict[str, Any] = Field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
-    @model_validator(mode="after")
-    def _content_only_on_file(self) -> "FileStat":
+    def __post_init__(self) -> None:
         # content is a FILE's rendering hint; a directory or symlink has
         # none. None on a FILE means "unknown", which is allowed.
         if self.type is not FileType.FILE and self.content is not None:
@@ -255,7 +252,6 @@ class FileStat(BaseModel):
                 f"content must be None for {self.type.value}, "
                 f"got {self.content.value}"
             )
-        return self
 
 
 @dataclass(frozen=True, slots=True)

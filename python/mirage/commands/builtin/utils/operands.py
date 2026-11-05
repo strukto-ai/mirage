@@ -14,6 +14,7 @@
 
 import inspect
 from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import replace
 from functools import partial
 
 from mirage.errors.constants import FS_ERRORS, READ_FAILURES
@@ -125,7 +126,7 @@ async def operand_stat(
             raise
         return fallback
     if mounts is not None and mounts.is_root(path.virtual):
-        return row.model_copy(update={"name": operand_name(path)})
+        return replace(row, name=operand_name(path))
     return row
 
 

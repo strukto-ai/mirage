@@ -1,5 +1,6 @@
 import asyncio
 import os
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ from fakeredis.aioredis import FakeRedis
 
 from mirage.cache.file.ram import RAMFileCacheStore
 from mirage.cache.index import Evicted, LookupStatus, RAMIndexCacheStore
+from mirage.cache.index.config import row_json
 from mirage.cache.index.redis import RedisIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.index.store import IndexCacheStore
@@ -783,43 +785,41 @@ async def test_conditional_replacement_preserves_listing(store, expired):
     old = (await store.get("/dir/a")).entry
     replacement = entry("confirmed")
     assert await store.replace_if_unchanged(
-        "/dir/a", old.model_dump_json(), replacement
+        "/dir/a", row_json(old), replacement
     )
     current = (await store.get("/dir/a")).entry
     assert current == replacement
     assert await store.list_dir("/dir") == listing
-    pinned = replacement.model_copy(update={"modified": "pinned"})
+    pinned = replace(replacement, modified="pinned")
     assert await store.replace_if_unchanged(
-        "/dir/a", current.model_dump_json(), pinned
+        "/dir/a", row_json(current), pinned
     )
     assert (await store.get("/dir/a")).entry == pinned
     assert await store.list_dir("/dir") == listing
     assert not await store.replace_if_unchanged(
-        "/dir/a", old.model_dump_json(), replacement
+        "/dir/a", row_json(old), replacement
     )
     assert not await store.replace_if_unchanged(
-        "/missing", old.model_dump_json(), replacement
+        "/missing", row_json(old), replacement
     )
     assert not await IndexCacheStore.replace_if_unchanged(
-        store, "/dir/a", pinned.model_dump_json(), old
+        store, "/dir/a", row_json(pinned), old
     )
     assert (await store.get("/dir/a")).entry == pinned
 
 
 @pytest.mark.asyncio
 async def test_conditional_replacement_observes_pending_seed(store):
-    old = entry().model_copy(update={"modified": "old"})
+    old = replace(entry(), modified="old")
     await store.put("/dir/a", old)
-    seeded = old.model_copy(
-        update={"extra": {"nested": {"tags": ["changed"]}}}
-    )
+    seeded = replace(old, extra={"nested": {"tags": ["changed"]}})
     store.seed(
         {"/dir/a": seeded},
         {"/dir": ["/dir/a"]},
         datetime.now(timezone.utc) + timedelta(hours=1),
     )
     assert not await store.replace_if_unchanged(
-        "/dir/a", old.model_dump_json(), entry("confirmed")
+        "/dir/a", row_json(old), entry("confirmed")
     )
     assert (await store.get("/dir/a")).entry == seeded
 

@@ -471,7 +471,7 @@ async function operandStat(stat: StatFn, path: PathSpec): Promise<FileStat | nul
 // GNU ls prints a file operand as given (`ls sub/x.txt` shows sub/x.txt,
 // not x.txt); the row carries the operand spelling. `with` preserves
 // every other field (mode/uid/gid/atime overlay attrs included), the
-// mirror of Python `s.model_copy(update={"name": ...})`.
+// mirror of Python `replace(s, name=...)`.
 function asOperand(s: FileStat, path: PathSpec): FileStat {
   return s.with({ name: path.rawPath })
 }

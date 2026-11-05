@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import functools
+from dataclasses import replace
 
 from mirage.commands.builtin.generic.crossmount.types import CrossResult
 from mirage.commands.builtin.generic.crossmount.utils import flat_scopes
@@ -85,7 +86,7 @@ async def relayed_stat(dispatch: DispatchFn, path: PathSpec) -> FileStat:
     name = gnu_basename(path.virtual)
     if name in ("", "/") or info.name == name:
         return info
-    return info.model_copy(update={"name": name})
+    return replace(info, name=name)
 
 
 async def run_ls(

@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable, Iterable, Sequence
+from dataclasses import replace
 from typing import Any
 
 from mirage.context import get_admission, session_visibility
@@ -309,4 +310,4 @@ async def followed_stat(
     target = await links.target_stat(virtual)
     if target is None:
         return row
-    return target.model_copy(update={"name": row.name})
+    return replace(target, name=row.name)

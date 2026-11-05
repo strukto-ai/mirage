@@ -29,6 +29,7 @@ from mirage.cache.index.config import (
     IndexConfig,
     LookupStatus,
     RedisIndexConfig,
+    row_json,
 )
 from mirage.cache.index.ram import ListingCheckStore, RAMIndexCacheStore
 from mirage.cache.index.redis import RedisIndexCacheStore
@@ -228,7 +229,7 @@ def _owns_none(_key: str) -> bool:
 
 _FENCED = {
     "replace_if_unchanged": lambda view: view.replace_if_unchanged(
-        "/data/a", _row().model_dump_json(), _row("new")
+        "/data/a", row_json(_row()), _row("new")
     ),
     "get": lambda view: view.get("/data/a"),
     "get_many": lambda view: view.get_many(["/data/a"]),
@@ -883,9 +884,7 @@ async def test_conditional_replacement_keeps_ownership(owned):
     old = (await store.get("/data/a")).entry
     view = IndexView(store, RAMFileCacheStore(), "/data", lambda _: owned)
     assert (
-        await view.replace_if_unchanged(
-            "/data/a", old.model_dump_json(), _row("new")
-        )
+        await view.replace_if_unchanged("/data/a", row_json(old), _row("new"))
         is owned
     )
     assert (await store.get("/data/a")).entry.fingerprint == (

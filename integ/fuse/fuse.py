@@ -24,6 +24,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable
+from dataclasses import replace
 from typing import IO
 
 from mirage import Mount, MountBackend, MountMode, Workspace
@@ -63,7 +64,7 @@ class SizelessRAM(RAMVFS):
 def _sizeless(row: FileStat) -> FileStat:
     if row.type == FileType.DIRECTORY:
         return row
-    return row.model_copy(update={"size": None})
+    return replace(row, size=None)
 
 
 API_CONTENT = b'{"messages": 2}\n'
