@@ -1099,6 +1099,21 @@ class MountRegistry:
         """
         return entry is self._anchor
 
+    def unserved(self, path: str) -> bool:
+        """Whether no sandbox is served ``path``: it is on no mount, on
+        the workspace's scratch root (``is_anchor``), or on a mount at
+        ``/``.
+
+        Args:
+            path (str): an absolute virtual path.
+        """
+        mount = self.try_mount_for(path)
+        return (
+            mount is None
+            or self.is_anchor(mount)
+            or mount.prefix.rstrip("/") == ""
+        )
+
     def anchor_root(self, entry: MountEntry) -> None:
         """Mark `entry` as the root the workspace added, not one mounted.
 

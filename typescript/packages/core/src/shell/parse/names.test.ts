@@ -22,7 +22,7 @@ import {
 } from './index.ts'
 import type { TSNodeLike } from '../types.ts'
 import { parse } from './parse.ts'
-import { assignedNames } from './names.ts'
+import { inheritedReads } from './names.ts'
 
 describe('referencedNames', () => {
   it.each<[string, string[]]>([
@@ -176,12 +176,18 @@ describe('assignmentValues', () => {
   })
 })
 
-describe('assignedNames', () => {
+describe('inheritedReads', () => {
   it.each<[string, string[]]>([
-    ['X=1; Y=2 cmd', ['X', 'Y']],
-    ['export Z=3', ['Z']],
-    ['echo $X', []],
-  ])('lists every assignment in %j', (line, names) => {
-    expect(assignedNames(parse(line) as unknown as TSNodeLike)).toEqual(new Set(names))
+    ['X=1; echo $X', []],
+    ['export X=1; echo $X', []],
+    ['X=1 Y=2; echo $X $Y', []],
+    ['echo $X; X=1', ['X']],
+    ['X=$X; echo $X', ['X']],
+    ['X=1 cmd $X', ['X']],
+    ['true && X=1; echo $X', ['X']],
+    ['if true; then X=1; fi; echo $X', ['X']],
+    ['echo $X', ['X']],
+  ])('skips reads after a definite assignment in %j', (line, names) => {
+    expect(inheritedReads(parse(line) as unknown as TSNodeLike)).toEqual(new Set(names))
   })
 })

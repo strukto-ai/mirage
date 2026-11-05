@@ -42,6 +42,12 @@ export interface RouteDecision<R extends RuntimeIdentity> {
    * then exit 126.
    */
   readonly fallback: R | null
+  /**
+   * Where an interpreter a sandbox learned runs instead when one invocation
+   * stands on, or runs a script on, a path no sandbox is served
+   * (`invocationRouting`).
+   */
+  readonly unserved?: Readonly<Record<string, R | null>>
 }
 
 /**

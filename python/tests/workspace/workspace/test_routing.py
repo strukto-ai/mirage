@@ -233,6 +233,11 @@ SANDBOX_OPT = "but the line runs in the sandbox for /opt"
             f"cd: D is not exported, {SANDBOX_OPT}",
         ),
         (
+            "D=old",
+            'D=$D; cd /opt && echo "$D"; make',
+            f"D=$D;: D is not exported, {SANDBOX_OPT}",
+        ),
+        (
             "true",
             "cd /opt && echo $1; make",
             f"cd: $1 would read Mirage's value, {SANDBOX_OPT}",
@@ -296,6 +301,8 @@ async def test_a_whole_line_that_would_change_meaning_is_refused(
         ("true", "cd /opt && PATH=$PATH:/opt/bin make"),
         ("true", "cd /opt && echo $PATH $IFS; make"),
         ("export Z", "cd /opt && echo $Z; make"),
+        ("D=old", "D=new; cd /opt && echo $D; make"),
+        ("D=old", "export D=new; cd /opt && echo $D; make"),
     ],
 )
 async def test_a_whole_line_may_read_what_the_box_also_has(setup, line):
@@ -357,7 +364,7 @@ async def test_a_whole_line_runs_in_bash_and_a_line_capture_keeps_sh():
         await ws.shell("cd /opt/app && make")
         argv = box.argvs[-1]
         assert argv[:2] == ("/bin/sh", "-c")
-        assert 'exec bash -c "$1"' in argv[2]
+        assert 'exec bash "$@" -c "$l"' in argv[2]
         assert argv[3:] == ("sh", "cd /opt/app && make", "box")
         await by_line.shell("cd /opt/app && make")
         assert lined.argvs[-1] == ("/bin/sh", "-c", "cd /opt/app && make")
@@ -677,5 +684,185 @@ async def test_the_exec_rule_reads_the_interpreters_own_options(
                 b"python3: /w/x.py: not in EXEC mode\n",
             )
             assert box.lines == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_whole_line_keeps_the_exec_rule_for_an_interpreter_bound_elsewhere():
+    box = Box()
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.WRITE,
+        runtimes=[Monty(), box, "workspace"],
+    )
+    try:
+        await ws.vfs.write("/data/x.py", b"print(1)")
+        assert await run(ws, "python3 /data/x.py > /tmp/log; make") == (
+            1,
+            b"",
+            b"python3: /data/x.py is not in EXEC mode, and the line runs in "
+            b"the sandbox for /tmp/log\n",
+        )
+        assert box.whole == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_whole_line_naming_a_file_mirage_holds_on_its_root_is_refused():
+    box = Box(holds="")
+    ws = workspace(box)
+    try:
+        await ws.shell("echo old > /notes.txt")
+        await ws.shell("cd /ram")
+        assert await run(ws, "nproc > /tmp/count; echo new > /notes.txt") == (
+            1,
+            b"",
+            b"nproc: /notes.txt is in Mirage, but /tmp/count is on the "
+            b"sandbox; run them on separate lines\n",
+        )
+        assert box.whole == []
+        assert await out(ws, "cat /notes.txt") == b"old\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, split",
+    [("nproc > /out", ["nproc"]), ("cat /out | gcc -", ["gcc -"])],
+)
+async def test_a_link_mirage_holds_on_its_root_is_followed(line, split):
+    box = Box(holds="")
+    ws = workspace(box)
+    try:
+        await ws.shell("echo hi > /ram/result; ln -s /ram/result /out")
+        await ws.shell(line)
+        assert box.whole == []
+        assert box.lines == split
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line", ["/hello.py", "env python3 /hello.py", "sh -c 'python3 /hello.py'"]
+)
+async def test_an_interpreter_reached_on_mirages_own_root_stays_on_its_runtime(
+    line,
+):
+    box = Box()
+    ws = workspace(box)
+    try:
+        await ws.shell("cd /ram && python3 -c 1")
+        await ws.vfs.write("/hello.py", b"#!/usr/bin/env python3\nprint(1)\n")
+        await ws.shell("chmod +x /hello.py")
+        box.lines.clear()
+        await ws.shell("cd /ram")
+        assert await out(ws, line) == b"monty\n"
+        assert box.lines == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_the_root_fallback_is_chosen_per_invocation():
+    box = Box()
+    ws = workspace(box)
+    try:
+        await ws.shell("cd /ram && python3 -c 1")
+        await ws.shell("cd /")
+        line = "python3 -c 1; cd /ram; python3 -c 2"
+        assert await out(ws, line) == b"monty\nbox\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_explain_names_the_runtime_an_interpreter_falls_back_to():
+    box = Box()
+    ws = workspace(box)
+    try:
+        await ws.shell("cd /ram && python3 -c 1")
+        await ws.shell("cd /")
+        said = await ws.explain("python3 -c 1; cd /ram; python3 -c 2")
+        assert runtimes(said.node) == ["monty", "", "box"]
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_no_sandbox_that_learned_an_interpreter_keeps_it_in_mirage():
+    class Keep(Policy):
+        async def pre_execute(self, ctx):
+            return Route("workspace")
+
+    first, second = Box(), Box()
+    second.name = "box2"
+    kept = Workspace(
+        {"/ram": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[first, second, Monty(), "workspace"],
+        policies=[Keep()],
+    )
+    third, fourth = Box(), Box()
+    fourth.name = "box2"
+    rooted = Workspace(
+        {"/ram": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[third, fourth, Monty(), "workspace"],
+    )
+    try:
+        await kept.shell("cd /ram")
+        assert await out(kept, "python3 -c x") == b"monty\n"
+        assert first.lines == [] and second.lines == []
+        await rooted.shell("cd /ram && python3 -c 1")
+        await rooted.shell("cd /")
+        assert await out(rooted, "python3 -c x") == b"monty\n"
+    finally:
+        await kept.close()
+        await rooted.close()
+
+
+@pytest.mark.asyncio
+async def test_a_binary_on_mirages_own_root_answers_126():
+    box = Box(holds="")
+    ws = workspace(box)
+    try:
+        await ws.vfs.write("/t", BINARY)
+        code, _, _ = await run(ws, "/t a")
+        assert code == 126
+        assert box.lines == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "setup, options",
+    [
+        ("set -C", ("-o", "noclobber")),
+        (
+            "set -euo pipefail",
+            ("-o", "errexit", "-o", "nounset", "-o", "pipefail"),
+        ),
+        ("set +B", ("+o", "braceexpand")),
+        ("shopt -s nullglob", ("-O", "nullglob")),
+        ("set -C; set +C", ()),
+    ],
+)
+async def test_a_whole_line_carries_the_sessions_shell_options(setup, options):
+    box = Box(holds="")
+    ws = workspace(box)
+    try:
+        await ws.shell(setup)
+        await ws.shell("cd /opt/app && make")
+        assert box.argvs[-1][3:] == (
+            "sh",
+            "cd /opt/app && make",
+            "box",
+            *options,
+        )
     finally:
         await ws.close()

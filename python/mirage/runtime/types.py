@@ -51,10 +51,15 @@ class RouteDecision(Generic[_R]):
         fallback (_R | None): where commands no entry captures run:
             the catch-all workspace runtime, or None when the workspace
             runtime declares captures; unbound commands then exit 126.
+        unserved (Mapping[str, _R | None]): where an interpreter a
+            sandbox learned runs instead when one invocation stands on,
+            or runs a script on, a path no sandbox is served
+            (``invocation_routing``).
     """
 
     bindings: Mapping[str, _R | None] = field(default_factory=dict)
     fallback: _R | None = None
+    unserved: Mapping[str, _R | None] = field(default_factory=dict)
 
 
 # The languages a runtime can interpret. A Literal, not str, so a typo is

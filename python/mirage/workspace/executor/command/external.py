@@ -21,15 +21,12 @@ from mirage.commands.builtin.general.interpreter import (
     run_output,
 )
 from mirage.commands.config import Context
-from mirage.commands.spec import SPECS, parse_command
-from mirage.commands.spec.types import WordKind
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import ProcessExecutorMixin
-from mirage.runtime.source import STDIN_OPERAND
 from mirage.runtime.types import (
     CommandRuntime,
     ExecutionKind,
@@ -43,9 +40,10 @@ from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.types import PathSpec, Producer
 from mirage.utils.abort import MirageAbortError
+from mirage.workspace.executor.command.routing import interpreter_script
 from mirage.workspace.executor.command.run import admission_denial
 from mirage.workspace.expand.argv import Argv
-from mirage.workspace.lookup.constants import INLINE_FLAGS, INTERPRETER_NAMES
+from mirage.workspace.lookup.constants import INTERPRETER_NAMES
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
@@ -211,20 +209,7 @@ def _learned_exec_refusal(
         and entry.learned(argv.name)
     ):
         return None
-    words = list(argv.args)
-    parsed = parse_command(SPECS[argv.name], words, session.cwd, argv.name)
-    inline = any(parsed.flags.get(flag) is not None for flag in INLINE_FLAGS)
-    operands = [
-        word
-        for word, role in zip(words, parsed.word_roles, strict=False)
-        if role is WordKind.OPERAND
-    ]
-    first = operands[0] if operands else None
-    script = (
-        None
-        if inline or first is None or first == STDIN_OPERAND
-        else PathSpec.from_str_path(first, cwd=session.cwd)
-    )
+    script = interpreter_script(argv.name, argv.args, session.cwd)
     refused = exec_refusal(
         argv.name,
         script,

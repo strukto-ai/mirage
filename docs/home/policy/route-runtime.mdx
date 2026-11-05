@@ -50,11 +50,13 @@ itself:
 A path is the sandbox's own when Mirage would resolve it (a Mirage
 command's operand, a redirect target, a `cd` target) and no mount holds it.
 `/` and a folder that holds mounts are the workspace's, and a file Mirage
-itself wrote outside the mounts, such as `/notes.txt`, stays Mirage's. A program's own arguments (`gcc /opt/x.c`) never count: the
-program runs in the sandbox either way.
+itself wrote outside the mounts, such as `/notes.txt`, stays Mirage's. A
+link Mirage holds counts as the path it points to. A program's own
+arguments (`gcc /opt/x.c`) never count: the program runs in the sandbox
+either way.
 
-A whole line runs in a fresh `bash` with the session's working directory
-and exported variables:
+A whole line runs in a fresh `bash` with the session's working directory,
+exported variables and shell options (`set -o`, `shopt`):
 
 - `cd`, `export`, aliases and traps it sets stay in the sandbox, and it
   reports one exit status.
@@ -65,10 +67,13 @@ and exported variables:
 
 Mirage refuses a whole line, and says why, when it would mean something
 else in the sandbox: it runs a command only Mirage has (an installed CLI,
-a shell function, `ln`, a job such as `kill %1`), an alias, `&`, a variable
-set without `export`, `$1` and the other special parameters, `$?` or
-`PIPESTATUS` in its first pipeline (before the first `;`, `&&` or `||`), or
-a script whose mount is not in `exec` mode. Run it as two lines.
+a shell function, `ln`, a job such as `kill %1`), a file Mirage wrote
+outside the mounts, an alias, `&`, a variable set without `export` that the
+line reads before assigning it at its top level, `$1` and the other special
+parameters, `$?` or `PIPESTATUS` in its first pipeline (before the first
+`;`, `&&` or `||`), or a script or inline code whose run the mounts' `exec`
+rule refuses, whichever runtime the interpreter is bound to. Run it as two
+lines.
 
 With or without a `route_policy`, the sandbox also runs `python3`, `python`,
 `node` and `js` when it has them and comes before Monty and QuickJS in
@@ -78,10 +83,14 @@ keeps the mounts' `exec` rule: a script or inline code the rule refuses
 stays on Monty or QuickJS, which refuse it as they do today. So does an
 interpreter run from Mirage's own `/`, a mount at `/`, or on a script there,
 since the sandbox cannot see those files; with no other runtime capturing
-it, it stays on the sandbox. Script CLIs run on Monty or QuickJS.
+it, it stays on the sandbox. This is judged at each run, so a script's
+shebang counts, and `python3 -c 1; cd /data; python3 -c 2` runs the first on
+Monty and the second in the sandbox; `ws.explain(line)` names the runtime of
+each. A line placed on a sandbox by name (`runtime=`, a `Route`) runs its
+interpreters there. Script CLIs run on Monty or QuickJS.
 
 A program built in a workspace folder (`./a.out`) runs in the sandbox when
-its mount allows `exec`.
+its mount allows `exec`; one on Mirage's own `/` answers 126.
 
 To keep per-command placement, configure a `route_policy` that returns
 `None`. A coded policy's `Route("workspace")` keeps one line in Mirage.

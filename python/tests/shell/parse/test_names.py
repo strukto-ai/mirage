@@ -23,7 +23,7 @@ from mirage.shell.parse import (
     parse,
     referenced_names,
 )
-from mirage.shell.parse.names import assigned_names
+from mirage.shell.parse.names import inherited_reads
 
 
 @pytest.mark.parametrize(
@@ -192,10 +192,16 @@ def test_assignment_values(command, values):
 @pytest.mark.parametrize(
     "line, names",
     [
-        ("X=1; Y=2 cmd", {"X", "Y"}),
-        ("export Z=3", {"Z"}),
-        ("echo $X", set()),
+        ("X=1; echo $X", set()),
+        ("export X=1; echo $X", set()),
+        ("X=1 Y=2; echo $X $Y", set()),
+        ("echo $X; X=1", {"X"}),
+        ("X=$X; echo $X", {"X"}),
+        ("X=1 cmd $X", {"X"}),
+        ("true && X=1; echo $X", {"X"}),
+        ("if true; then X=1; fi; echo $X", {"X"}),
+        ("echo $X", {"X"}),
     ],
 )
-def test_assigned_names_lists_every_assignment(line, names):
-    assert assigned_names(parse(line)) == frozenset(names)
+def test_inherited_reads_skips_reads_after_a_definite_assignment(line, names):
+    assert inherited_reads(parse(line)) == frozenset(names)

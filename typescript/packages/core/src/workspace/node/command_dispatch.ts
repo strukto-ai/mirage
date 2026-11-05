@@ -94,6 +94,7 @@ import { BUILTINS } from '../executor/builtins/table.ts'
 import { fillTreeEnv, handleCommand, madeByCommand } from '../executor/command/command.ts'
 import { runExternal } from '../executor/command/external.ts'
 import { argumentListTooLong } from '../executor/command/handler.ts'
+import { invocationRouting } from '../executor/command/routing.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { Argv, expandArgv } from '../expand/argv.ts'
 import { expandBoundaryGlobs } from '../expand/globs.ts'
@@ -669,7 +670,12 @@ async function runArgv(
   // MountRootPolicy cannot recognize a mount root inside one, so
   // `tar -cf out.tar /base/*` would archive a whole backend the same
   // operand typed by hand is refused for.
-  const refusedExternal = runtimeRefused(name, session, registry, context.frame.routing)
+  const refusedExternal = runtimeRefused(
+    name,
+    session,
+    registry,
+    invocationRouting(name, argv.args, session.cwd, registry, context.frame.routing),
+  )
   const boundary = refusedExternal
     ? [...argv.operands]
     : await expandBoundaryGlobs(
@@ -981,7 +987,7 @@ async function routeArgv(
     ]
   }
 
-  const routing = context.frame.routing
+  const routing = invocationRouting(name, argv.args, session.cwd, registry, context.frame.routing)
   const consumer = lookup(name, session, registry, routing)
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)

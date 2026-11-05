@@ -375,6 +375,104 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_whole_line_carries_the_sessions_shell_options",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "sdk_only": "Every case mounts /route into the one shared docker box over sshfs; the CLI lane runs beside the SDK drivers on that box, so these run on the SDK pass only, serialized like sandbox/mounts.",
+      "world": {
+        "mounts": {
+          "/route": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ],
+        "config": {
+          "mount_type": "ssh"
+        }
+      },
+      "steps": [
+        {
+          "command": "set -C",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cd /tmp && rm -f noclobber.txt && echo a > noclobber.txt && echo b > noclobber.txt; nproc >/dev/null; cat /tmp/noclobber.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "a\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_whole_line_naming_a_file_mirage_holds_is_refused",
+      "runtimes": [
+        "docker",
+        "e2b",
+        "microsandbox"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "sdk_only": "Every case mounts /route into the one shared docker box over sshfs; the CLI lane runs beside the SDK drivers on that box, so these run on the SDK pass only, serialized like sandbox/mounts.",
+      "world": {
+        "mounts": {
+          "/route": {
+            "vfs": "ram",
+            "files": {
+              "a.txt": "hello\n"
+            }
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ],
+        "config": {
+          "mount_type": "ssh"
+        }
+      },
+      "steps": [
+        {
+          "command": "echo old > /notes.txt",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "nproc > /tmp/count; echo new > /notes.txt",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "nproc: /notes.txt is in Mirage, but /tmp/count is on the sandbox; run them on separate lines\n"
+          }
+        },
+        {
+          "command": "cat /notes.txt",
+          "expect": {
+            "exit": 0,
+            "stdout": "old\n"
+          }
+        }
+      ]
     }
   ]
 }

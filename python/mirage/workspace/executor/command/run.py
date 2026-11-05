@@ -42,6 +42,7 @@ from mirage.types import PathSpec
 from mirage.view.types import FollowOperands
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.command.flags import parse_flags
+from mirage.workspace.executor.command.routing import invocation_routing
 from mirage.workspace.files import Files
 from mirage.workspace.mount import (
     MountCommandUnsupported,
@@ -256,7 +257,9 @@ async def run_on_mount(
     if cmd_name == "find":
         flag_kwargs = scalar_find_flags(flag_kwargs)
 
-    routing = context.frame.routing
+    routing = invocation_routing(
+        cmd_name, argv, session.cwd, registry, context.frame.routing
+    )
     assert routing is not None
     line_runtime, denial = line_runtime_for(cmd_name, routing)
     if denial is not None:

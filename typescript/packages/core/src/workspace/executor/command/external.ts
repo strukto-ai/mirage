@@ -18,14 +18,11 @@ import type { Runtime } from '../../../runtime/base.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { hasAborted } from '../../../utils/abort.ts'
 import { execRefusal, runOutput } from '../../../commands/builtin/general/interpreter.ts'
-import { parseCommand, SPECS } from '../../../commands/spec/index.ts'
-import { WordKind } from '../../../commands/spec/types.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { isProcessExecutor } from '../../../runtime/mixin.ts'
 import type { RouteDecision } from '../../../runtime/types.ts'
-import { STDIN_OPERAND } from '../../../runtime/source.ts'
-import { INLINE_FLAGS, INTERPRETER_NAMES } from '../../lookup/constants.ts'
+import { INTERPRETER_NAMES } from '../../lookup/constants.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { PathSpec } from '../../../types.ts'
 import type { Argv } from '../../expand/argv.ts'
@@ -33,6 +30,7 @@ import type { MountRegistry } from '../../mount/registry.ts'
 import type { SessionState } from '../../session/session.ts'
 import { envSnapshot } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
+import { interpreterScript } from './routing.ts'
 import { admissionDenial } from './run.ts'
 import { encodeText } from '../../../shell/bytes.ts'
 import { concat } from '../../../utils/bytes.ts'
@@ -180,16 +178,7 @@ function learnedExecRefusal(
   registry: MountRegistry,
 ): IOResult | null {
   if (!INTERPRETER_NAMES.has(argv.name) || entry?.learned(argv.name) !== true) return null
-  const words = [...argv.args]
-  const spec = SPECS[argv.name]
-  if (spec === undefined) return null
-  const parsed = parseCommand(spec, words, session.cwd, argv.name)
-  const inline = [...INLINE_FLAGS].some((flag) => parsed.flags[flag] != null)
-  const first = words.find((_, i) => parsed.wordRoles[i] === WordKind.OPERAND)
-  const script =
-    inline || first === undefined || first === STDIN_OPERAND
-      ? null
-      : PathSpec.fromStrPath(first, undefined, session.cwd)
+  const script = interpreterScript(argv.name, argv.args, session.cwd)
   const refused = execRefusal(argv.name, script, {
     execAllowed: registry.isExecAllowed(),
     execPathAllowed: registry.execAllowedAt,

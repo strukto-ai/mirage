@@ -22,7 +22,7 @@ import { hasGlob, literalWord, markGlobs, unmarkGlobs } from '../../utils/glob_w
 import type { MountRegistry } from '../mount/registry.ts'
 import { INTERPRETER_NAMES } from '../lookup/constants.ts'
 import { TEST_NAMES, fileOperands } from '../executor/builtins/condition/operands.ts'
-import { commandTree } from '../executor/command/routing.ts'
+import { commandTree, invocationRouting } from '../executor/command/routing.ts'
 import { envSnapshot } from '../session/state.ts'
 import {
   Consumer,
@@ -134,8 +134,15 @@ export async function expandArgv(
   // function for its inner run, which is exactly when the rewrite
   // applies again. A CLI cannot reach here at all, since registerCli
   // refuses a shell builtin's name.
-  const consumer = lookup(name, session, registry, context.frame.routing)
-  const refused = runtimeRefused(name, session, registry, context.frame.routing)
+  const routing = invocationRouting(
+    name,
+    expanded.slice(consumed).map((word) => unmarkGlobs(word)),
+    session.cwd,
+    registry,
+    context.frame.routing,
+  )
+  const consumer = lookup(name, session, registry, routing)
+  const refused = runtimeRefused(name, session, registry, routing)
   const shadowed = Object.hasOwn(session.functions, name) || consumer === Consumer.EXTERNAL
   const line = expanded.slice(consumed)
   const tail = shadowed ? line : endOptionsAfterProgram(name, line)

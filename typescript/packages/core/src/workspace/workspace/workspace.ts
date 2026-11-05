@@ -636,7 +636,7 @@ export class Workspace {
     })
     this.closers.push(() => this.runtimeWorld.close())
     this.closers.push(() => this.registry.clis.close())
-    this.router = new Router(this.registry, this.runtimeWorld)
+    this.router = new Router(this.registry, this.runtimeWorld, this.namespace)
     if (options.routePolicy !== undefined) {
       this.registry.policies.place(new RoutePolicy(options.routePolicy, this.scriptPolicy))
     }
@@ -1393,7 +1393,7 @@ export class Workspace {
         line,
         judged,
         wholeLine ? judged : verdicts,
-        (command) => this.router.runtimeFor(command, placed),
+        (one) => this.router.runtimeFor(one, placed),
         reparse,
         wholeLine,
       )

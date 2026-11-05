@@ -41,6 +41,7 @@ import type { SessionState } from '../../session/session.ts'
 import { envSnapshot, sessionView } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { parseFlags } from './flags.ts'
+import { invocationRouting } from './routing.ts'
 import type { Flags } from './types.ts'
 
 export interface RunOnMountCtx {
@@ -230,7 +231,13 @@ export async function runOnMount(
   let flags = flagKwargs
   if (cmdName === 'find') flags = scalarFindFlags(flags)
 
-  const routing = context.frame.routing
+  const routing = invocationRouting(
+    cmdName,
+    opts.argv ?? [],
+    session.cwd,
+    registry,
+    context.frame.routing,
+  )
   if (routing === undefined) throw new Error(`${cmdName}: run outside a routed line`)
   const [lineRuntime, denial] = lineRuntimeFor(cmdName, routing)
   if (denial !== null) return [null, denial]

@@ -614,6 +614,18 @@ export class MountRegistry {
   }
 
   /**
+   * Whether no sandbox is served `path`: it is on no mount, on the
+   * workspace's scratch root (`isAnchor`), or on a mount at `/`. Mirrors
+   * Python's `unserved`.
+   *
+   * @param path an absolute virtual path.
+   */
+  unserved(path: string): boolean {
+    const mount = this.tryMountFor(path)
+    return mount === null || this.isAnchor(mount) || rstripSlash(mount.prefix) === ''
+  }
+
+  /**
    * Mark `entry` as the root the workspace added, not one mounted. Mirrors
    * Python's `anchor_root`.
    *

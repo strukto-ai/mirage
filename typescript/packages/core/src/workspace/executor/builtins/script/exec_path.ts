@@ -137,7 +137,12 @@ export async function handleExecPath(
   if (isBinary(data)) {
     const routing = context.frame.routing
     const runs = routing?.bindings[EXTERNAL_COMMANDS]
-    if (routing !== undefined && servesWorkspace(runs) && registry.execAllowedAt(target))
+    if (
+      routing !== undefined &&
+      servesWorkspace(runs) &&
+      !registry.unserved(target) &&
+      registry.execAllowedAt(target)
+    )
       return runExternal(argv, stdin, session, registry, routing, signal, sink)
     return scriptError(path, 'cannot execute binary file: Exec format error', CANNOT_EXECUTE_STATUS)
   }

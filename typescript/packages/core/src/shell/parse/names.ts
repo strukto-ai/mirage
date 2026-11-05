@@ -314,17 +314,28 @@ export function assignmentValues(node: TSNodeLike): [string, string | null, Read
 }
 
 /**
- * Every variable name a parsed program assigns, wherever it sits. Mirrors
- * Python's `assigned_names`.
+ * Every variable name a parsed program may read with the value it started
+ * with: each name it reads (`referencedNames`) unless a statement of its own
+ * top level assigned it first, bare (`X=1`) or declared (`export X=1`). An
+ * assignment anywhere else (a prefix, a branch, after `&&`) may not run
+ * before the read. Mirrors Python's `inherited_reads`.
  *
  * @param node root node from parse().
  */
-export function assignedNames(node: TSNodeLike): ReadonlySet<string> {
+export function inheritedReads(node: TSNodeLike): ReadonlySet<string> {
   const out = new Set<string>()
-  for (const one of walkTree(node)) {
-    if (one.type !== 'variable_assignment') continue
-    const target = one.childForFieldName?.('name') ?? null
-    if (target !== null && target.text !== '') out.add(target.text)
+  const assigned = new Set<string>()
+  for (const statement of node.namedChildren) {
+    for (const name of referencedNames(statement)) if (!assigned.has(name)) out.add(name)
+    let ones: readonly TSNodeLike[]
+    if (statement.type === 'variable_assignment') ones = [statement]
+    else if (constants.ASSIGNING_STATEMENTS.has(statement.type)) ones = statement.namedChildren
+    else continue
+    for (const one of ones) {
+      const target =
+        one.type === 'variable_assignment' ? (one.childForFieldName?.('name') ?? null) : null
+      if (target !== null && target.text !== '') assigned.add(target.text)
+    }
   }
   return out
 }

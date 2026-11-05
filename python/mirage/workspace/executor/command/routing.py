@@ -33,8 +33,11 @@ from mirage.commands.spec.types import CommandSpec, WordKind
 from mirage.io.types import ByteSource, DeviceInput
 from mirage.policy.types import CommandWord
 from mirage.rs.find import find_layout
+from mirage.runtime.source import STDIN_OPERAND
+from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.types import PathSpec
 from mirage.workspace.expand.classify.path import classify_bare_path
+from mirage.workspace.lookup.constants import INLINE_FLAGS
 from mirage.workspace.mount import MountRegistry
 
 # Commands a bare invocation points at the working directory, mapped to
@@ -539,3 +542,62 @@ def command_words(
         for p in redirects
     )
     return tuple(words)
+
+
+def interpreter_script(
+    name: str, words: Sequence[str], cwd: str
+) -> PathSpec | None:
+    """The script an interpreter command runs, None for inline code
+    (``-c``, ``-m``, ``-e``), stdin or no operand.
+
+    Args:
+        name (str): the interpreter's name.
+        words (Sequence[str]): the words after the name.
+        cwd (str): the working directory a relative script resolves in.
+    """
+    parsed = parse_command(SPECS[name], list(words), cwd, name)
+    if any(parsed.flags.get(flag) is not None for flag in INLINE_FLAGS):
+        return None
+    first = next(
+        (
+            word
+            for word, role in zip(words, parsed.word_roles, strict=False)
+            if role is WordKind.OPERAND
+        ),
+        None,
+    )
+    if first is None or first == STDIN_OPERAND:
+        return None
+    return PathSpec.from_str_path(first, cwd=cwd)
+
+
+def invocation_routing(
+    name: str,
+    words: Sequence[str],
+    cwd: str,
+    registry: MountRegistry,
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> RouteDecision[RuntimeIdentity] | None:
+    """The decision one invocation runs under: its line's, except that an
+    interpreter the decision keeps off a sandbox (``unserved``) runs on
+    that runtime when the invocation stands on, or runs a script on, a
+    path no sandbox is served (``MountRegistry.unserved``). Judged per
+    invocation, however the line reached it (a nested line, a shebang).
+
+    Args:
+        name (str): the command name.
+        words (Sequence[str]): the words after the name.
+        cwd (str): the invocation's working directory.
+        registry (MountRegistry): the mounts.
+        routing (RouteDecision | None): the line's decision.
+    """
+    if routing is None or name not in routing.unserved:
+        return routing
+    script = interpreter_script(name, words, cwd)
+    spots = [cwd] if script is None else [cwd, script.virtual]
+    if not any(registry.unserved(spot) for spot in spots):
+        return routing
+    return dataclasses.replace(
+        routing,
+        bindings={**routing.bindings, name: routing.unserved[name]},
+    )

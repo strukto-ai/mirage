@@ -139,8 +139,8 @@ async def handle_exec_path(
         registry (MountRegistry): identifies the program view.
         namespace (Namespace): resolves links to program files.
         argv (Argv): the admitted command; a binary goes with it to the
-            sandbox that serves the workspace, where the mount allows
-            exec, and answers 126 otherwise.
+            sandbox that serves the workspace, where it is served and its
+            mount allows exec, and answers 126 otherwise.
         stdin (ByteSource | None): input stream for the script.
         sink (JobConsole | None): where the script's statements write as
             they finish, None to return them.
@@ -175,6 +175,7 @@ async def handle_exec_path(
         if (
             routing is not None
             and serves_workspace(runs)
+            and not registry.unserved(target)
             and registry.exec_allowed_at(target)
         ):
             return await run_external(

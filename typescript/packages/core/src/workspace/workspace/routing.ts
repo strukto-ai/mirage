@@ -39,10 +39,10 @@ import { WordKind } from '../../commands/spec/types.ts'
 import { fsError } from '../../errors/fs.ts'
 import { startsAJob } from '../../shell/helpers.ts'
 import { parameterReads } from '../../shell/parse/env.ts'
-import { assignedNames, commandWords, referencedNames } from '../../shell/parse/names.ts'
+import { commandWords, inheritedReads } from '../../shell/parse/names.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { VarAttr } from '../../shell/variable.ts'
-import { resolvePath } from '../../utils/path.ts'
+import { CycleError, resolvePath } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { expandingAliases } from '../executor/builtins/alias/alias.ts'
@@ -53,6 +53,8 @@ import {
   WORKSPACE_JOB_WORDS,
 } from '../lookup/constants.ts'
 import { Consumer } from '../lookup/types.ts'
+import { invocationRouting } from '../executor/command/routing.ts'
+import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Judged, Walked } from '../node/explain.ts'
 import type { SessionState } from '../session/session.ts'
@@ -65,8 +67,9 @@ import { makeAbortError } from '../../utils/abort.ts'
  * The policy ladder for one typed line: runtime argument, the placement
  * stage (`preExecute`: the configured route policy as a built-in, then
  * the coded policies), then the sandbox default (`defaulted`: a line
- * needing a sandbox's own files whole on it, an interpreter it took kept
- * off it where it cannot run there), then each command's first capturer.
+ * needing a sandbox's own files whole on it), then each command's first
+ * capturer, an interpreter a sandbox took kept off it where one invocation
+ * cannot run there (`RouteDecision.unserved`).
  * Mirrors the Python `Router` in `workspace/routing.py`. `ast`, the parsed
  * line, is what the default reads; absent leaves it out, in `decide` and
  * in `placement` alike.
@@ -98,13 +101,23 @@ declare module '../frame.ts' {
   }
 }
 
+// Where the router's debug lines go: unset by default, so it logs nothing.
+export const logger: { debug?: (message: string) => void } = {}
+
 export class Router {
   private readonly registry: MountRegistry
   private readonly runtimes: Runtimes
+  private readonly namespace: Namespace
 
-  constructor(registry: MountRegistry, runtimes: Runtimes) {
+  /**
+   * @param registry carries the resolved static bindings.
+   * @param runtimes the ordered runtime entries.
+   * @param namespace the links a path the line names follows.
+   */
+  constructor(registry: MountRegistry, runtimes: Runtimes, namespace: Namespace) {
     this.registry = registry
     this.runtimes = runtimes
+    this.namespace = namespace
   }
 
   async decide(
@@ -122,7 +135,7 @@ export class Router {
     const policies = this.registry.policies
     const placing = await policies.wantsFor('preExecute', session.sessionId)
     const placed = options.runtime === undefined ? null : this.placed(options.runtime)
-    if (!placing && placed === null && this.defaults()) {
+    if (!placing && placed === null && this.sandbox() !== null) {
       if (held !== undefined && (await held())) return this.unplaced()
       return await this.defaulted(session, ast, judged)
     }
@@ -206,26 +219,9 @@ export class Router {
   }
 
   /**
-   * Whether the sandbox default may change a line's placement: a sandbox
-   * takes lines whole, or one holds an interpreter that a line on Mirage's
-   * own root keeps off it. Mirrors Python's `Router._defaults`.
-   */
-  private defaults(): boolean {
-    const bindings = this.registry.runtimeBindings
-    return (
-      this.sandbox() !== null ||
-      [...INTERPRETER_NAMES].some((name) =>
-        learned(Object.hasOwn(bindings, name) ? bindings[name] : undefined, name),
-      )
-    )
-  }
-
-  /**
    * The decision for a line nothing else placed: whole on the sandbox when
    * it needs the sandbox's own files (`whole`), else each command on its
-   * first capturer, with an interpreter the sandbox took kept off it where
-   * the line stands on Mirage's own root (`anchored`). Mirrors Python's
-   * `Router._defaulted`.
+   * first capturer (`unplaced`). Mirrors Python's `Router._defaulted`.
    *
    * @param session the effective session.
    * @param ast the parsed line; undefined for none.
@@ -236,14 +232,9 @@ export class Router {
     ast: TSNodeLike | undefined,
     judged: () => Promise<readonly [Walked, Judged[]][]>,
   ): Promise<RouteDecision<Runtime> | Deny> {
-    if (ast === undefined || !this.defaults()) return this.unplaced()
-    const items = await judged()
     const box = this.sandbox()
-    if (box !== null) {
-      const whole = await this.whole(box, session, ast, items)
-      if (whole !== null) return whole
-    }
-    return this.anchored(items)
+    if (ast === undefined || box === null) return this.unplaced()
+    return (await this.whole(box, session, ast, await judged())) ?? this.unplaced()
   }
 
   /**
@@ -272,7 +263,7 @@ export class Router {
     let program = false
     const mirage: string[] = []
     const unexecutable: string[] = []
-    const paths: string[] = []
+    const paths: [string, SessionState][] = []
     for (const [walked, explained] of items) {
       const named = explained.flatMap((one) =>
         one.ctx === undefined ? [] : [{ ctx: one.ctx, stand: one.session ?? walked.session }],
@@ -281,6 +272,10 @@ export class Router {
       for (const { ctx, stand } of named) {
         const name = ctx.command
         consumer = lookup(name, stand, this.registry)
+        if (INTERPRETER_NAMES.has(name) && !WORKSPACE_ONLY.has(consumer)) {
+          const refused = this.execRefused(ctx)
+          if (refused !== null) unexecutable.push(refused)
+        }
         if (consumer === Consumer.EXTERNAL) {
           const runs = Object.hasOwn(bindings, name) ? bindings[name] : bindings[EXTERNAL_COMMANDS]
           program ||= runs === box
@@ -289,8 +284,6 @@ export class Router {
             if (!this.registry.execAllowedAt(target))
               unexecutable.push(`${target} is not in EXEC mode`)
           }
-          const refused = learned(runs, name) ? this.execRefused(ctx) : null
-          if (refused !== null) unexecutable.push(refused)
         } else if (
           WORKSPACE_ONLY.has(consumer) ||
           (consumer === Consumer.SESSION && WORKSPACE_JOB_WORDS.has(name))
@@ -303,18 +296,23 @@ export class Router {
       if (consumer === Consumer.EXTERNAL) {
         for (const word of walked.redirects) {
           if (word.text !== null && word.text !== '')
-            paths.push(resolvePath(word.text, last.stand.cwd))
+            paths.push([resolvePath(word.text, last.stand.cwd), last.stand])
         }
       } else {
-        paths.push(...last.ctx.paths.map((path) => path.virtual))
+        for (const path of last.ctx.paths) paths.push([path.virtual, last.stand])
       }
     }
     if (!program) return null
     const outside: string[] = []
-    for (const path of paths) if (await this.sandboxPath(path)) outside.push(path)
+    const held: string[] = []
+    for (const [path, stand] of paths) {
+      const place = await this.place(this.followed(path, stand))
+      if (place === 'sandbox') outside.push(path)
+      else if (place === 'held') held.push(path)
+    }
     const first = outside[0]
     if (first === undefined) return null
-    const reason = wholeRefusal(session, ast, mirage, unexecutable, first)
+    const reason = wholeRefusal(session, ast, mirage, held, unexecutable, first)
     if (reason !== null)
       return { kind: 'deny', reason, policy: 'sandbox', error: fsError(first, 'EPERM', reason) }
     return {
@@ -326,64 +324,40 @@ export class Router {
   }
 
   /**
-   * Whether a path Mirage resolves is the sandbox's own: on no mount, or on
-   * the workspace's scratch root where Mirage holds nothing at that path.
-   * `/` and a directory holding mounts are the workspace's. Mirrors
-   * Python's `Router._sandbox_path`.
+   * `path` with the links Mirage holds followed, as the session sees them;
+   * as named when they loop. Mirrors Python's `Router._followed`.
    *
    * @param path an absolute virtual path.
+   * @param session the session the path is named in.
    */
-  private async sandboxPath(path: string): Promise<boolean> {
+  private followed(path: string, session: SessionState): string {
+    try {
+      return this.namespace.sessionLinks(session).follow(path)
+    } catch (caught) {
+      if (!(caught instanceof CycleError)) throw caught
+      logger.debug?.(`${path}: links loop; judged as named: ${String(caught)}`)
+      return path
+    }
+  }
+
+  /**
+   * Whose a path Mirage resolves is: the sandbox's own when it is on no
+   * mount or on the workspace's scratch root where Mirage holds nothing at
+   * it; Mirage's alone (`held`) where Mirage holds a file there; the
+   * workspace's otherwise. `/` and a directory holding mounts are the
+   * workspace's. Mirrors Python's `Router._place`.
+   *
+   * @param path an absolute virtual path, its links followed.
+   */
+  private async place(path: string): Promise<'workspace' | 'held' | 'sandbox'> {
     const holding = `${rstripSlash(path)}/`
     if (path === '/' || this.registry.allMounts().some((m) => m.prefix.startsWith(holding)))
-      return false
+      return 'workspace'
     const mount = this.registry.tryMountFor(path)
-    if (mount === null) return true
-    if (!this.registry.isAnchor(mount)) return false
+    if (mount === null) return 'sandbox'
+    if (!this.registry.isAnchor(mount)) return 'workspace'
     const [vfs, spec] = this.registry.resolve(path)
-    return !(await vfs.exists(spec))
-  }
-
-  /**
-   * Each command on its first capturer, except an interpreter the sandbox
-   * took (`Runtime.learned`) where the line runs it from a path no sandbox
-   * is served or on a script there (`unserved`): that one stays on the
-   * runtime that captures it next. Mirrors Python's `Router._anchored`.
-   *
-   * @param items the line pass's reading of the line.
-   */
-  private anchored(items: readonly [Walked, Judged[]][]): RouteDecision<Runtime> {
-    const entries = this.runtimes.entries
-    const bindings: Record<string, Runtime | null> = Object.assign(
-      Object.create(null) as Record<string, Runtime | null>,
-      this.registry.runtimeBindings,
-    )
-    for (const [walked, explained] of items) {
-      for (const one of explained) {
-        if (one.ctx === undefined || !INTERPRETER_NAMES.has(one.ctx.command)) continue
-        const name = one.ctx.command
-        const runtime = bindings[name]
-        if (!learned(runtime, name)) continue
-        const stand = one.session ?? walked.session
-        const spots = [stand.cwd, ...one.ctx.paths.map((path) => path.virtual)]
-        if (!spots.some((spot) => this.unserved(spot))) continue
-        const others = bindCommands(entries.filter((entry) => entry !== runtime))
-        if (Object.hasOwn(others, name)) bindings[name] = others[name] ?? null
-      }
-    }
-    return { bindings, fallback: catchAll(entries) }
-  }
-
-  /**
-   * Whether a path is one no sandbox is served: on no mount, on the
-   * workspace's scratch root, or on a mount at `/`. Mirrors Python's
-   * `Router._unserved`.
-   *
-   * @param path an absolute virtual path.
-   */
-  private unserved(path: string): boolean {
-    const mount = this.registry.tryMountFor(path)
-    return mount === null || this.registry.isAnchor(mount) || rstripSlash(mount.prefix) === ''
+    return (await vfs.exists(spec)) ? 'held' : 'sandbox'
   }
 
   /**
@@ -427,38 +401,60 @@ export class Router {
       for (const command of entry.offeredCaptures) bindings[command] = null
     }
     Object.assign(bindings, bindCommands(kept))
+    const own = captured(kept)
     for (const [name, runtime] of Object.entries(bindings)) {
-      if (learned(runtime, name))
-        bindings[name] = bindCommands(kept.filter((entry) => entry !== runtime))[name] ?? null
+      if (learned(runtime, name)) bindings[name] = own.get(name) ?? null
     }
     return { bindings, fallback: catchAll(entries) }
   }
 
   /**
    * The decision for a line no policy placed: each command on its first
-   * capturer, kept for the line's nested evals. Mirrors Python's
+   * capturer, kept for the line's nested evals, and each interpreter a
+   * sandbox took on the first runtime that captures it for an invocation
+   * that sandbox cannot see (`unserved`). Mirrors Python's
    * `Router._unplaced`.
    */
   private unplaced(): RouteDecision<Runtime> {
+    const bindings = this.registry.runtimeBindings
+    const own = captured(this.runtimes.entries)
+    const unserved = Object.create(null) as Record<string, Runtime | null>
+    for (const name of INTERPRETER_NAMES) {
+      const runtime = own.get(name)
+      if (
+        runtime !== undefined &&
+        learned(Object.hasOwn(bindings, name) ? bindings[name] : null, name)
+      )
+        unserved[name] = runtime
+    }
     return {
-      bindings: Object.assign(
-        Object.create(null) as Record<string, Runtime | null>,
-        this.registry.runtimeBindings,
-      ),
+      bindings: Object.assign(Object.create(null) as Record<string, Runtime | null>, bindings),
       fallback: catchAll(this.runtimes.entries),
+      unserved,
     }
   }
 
   /**
    * The runtime entry that serves a command under a decision, empty when
-   * the workspace runs it itself. Mirrors Python's `Router.runtime_for`.
+   * the workspace runs it itself; judged per invocation
+   * (`invocationRouting`), as its run will be. Mirrors Python's
+   * `Router.runtime_for`.
+   *
+   * @param one the command's judgment and context.
+   * @param decision the line's placement.
    */
-  runtimeFor(command: string, decision: RouteDecision<Runtime>): string {
+  runtimeFor(one: Judged, decision: RouteDecision<Runtime>): string {
     const whole = wholeLineRuntime(decision.bindings)
     if (whole !== null) return whole.name
-    const serving = Object.hasOwn(decision.bindings, command)
-      ? (decision.bindings[command] ?? null)
-      : decision.fallback
+    const command = one.judgment.command
+    const routed =
+      one.ctx === undefined
+        ? decision
+        : (invocationRouting(command, one.ctx.argv, one.ctx.cwd, this.registry, decision) ??
+          decision)
+    const serving = Object.hasOwn(routed.bindings, command)
+      ? (routed.bindings[command] ?? null)
+      : routed.fallback
     if (serving === null || serving instanceof WorkspaceRuntime) return ''
     return serving.name
   }
@@ -521,6 +517,21 @@ const WORKSPACE_ONLY: ReadonlySet<Consumer> = new Set([
 ])
 
 /**
+ * Each command on the first entry whose own captures name it, none an entry
+ * only learned it can run (`Runtime.learned`). Mirrors Python's
+ * `_captured`.
+ *
+ * @param entries ordered runtimes.
+ */
+function captured(entries: readonly Runtime[]): Map<string, Runtime> {
+  const out = new Map<string, Runtime>()
+  for (const entry of entries) {
+    for (const command of entry.captures) if (!out.has(command)) out.set(command, entry)
+  }
+  return out
+}
+
+/**
  * Whether `name` binds to a runtime that learned it can run it
  * (`Runtime.learned`), a sandbox holding the interpreter. Mirrors Python's
  * `_learned`.
@@ -534,13 +545,15 @@ function learned(runtime: Runtime | null | undefined, name: string): boolean {
 
 /**
  * Why a line that needs the sandbox's own files may not run there whole,
- * null when it may: it runs something only Mirage has, uses an alias,
- * starts a job, or reads a value only Mirage holds. Mirrors Python's
- * `_whole_refusal`.
+ * null when it may: it runs something only Mirage has, names a file only
+ * Mirage holds, uses an alias, starts a job, or reads a value only Mirage
+ * holds. Mirrors Python's `_whole_refusal`.
  *
  * @param session the effective session.
  * @param ast the parsed line.
  * @param mirage the line's commands only Mirage runs.
+ * @param held the line's paths only Mirage holds, files on its scratch root
+ *   (`Router.place`).
  * @param unexecutable why the mounts' exec rule refuses an interpreter the
  *   sandbox took (`Router.execRefused`).
  * @param path a path of the line that is the sandbox's own.
@@ -549,6 +562,7 @@ function wholeRefusal(
   session: SessionState,
   ast: TSNodeLike,
   mirage: readonly string[],
+  held: readonly string[],
   unexecutable: readonly string[],
   path: string,
 ): string | null {
@@ -556,6 +570,9 @@ function wholeRefusal(
     const names = [...new Set(mirage)].join(', ')
     return `${names} runs in Mirage, but ${path} is on the sandbox; run them on separate lines`
   }
+  const mine = held[0]
+  if (mine !== undefined)
+    return `${mine} is in Mirage, but ${path} is on the sandbox; run them on separate lines`
   const refused = unexecutable[0]
   if (refused !== undefined) return `${refused}, and the line runs in the sandbox for ${path}`
   const expanding = expandingAliases(session)
@@ -569,11 +586,9 @@ function wholeRefusal(
   const params = [...parameterReads(ast)].sort(compareCodePoints)
   if (params.length > 0)
     return `${params[0] ?? ''} would read Mirage's value, but the line runs in the sandbox for ${path}`
-  const assigned = assignedNames(ast)
-  const unexported = [...referencedNames(ast)]
+  const unexported = [...inheritedReads(ast)]
     .filter(
       (name) =>
-        !assigned.has(name) &&
         Object.hasOwn(session.vars, name) &&
         session.vars[name]?.attrs.has(VarAttr.Export) !== true &&
         !FRESH_SHELL_NAMES.has(name),

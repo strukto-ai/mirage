@@ -669,7 +669,7 @@ class Workspace:
         )
         self._runtimes = Runtimes(self._registry, self._runtime_binding)
         self._runtimes.resolve(runtimes)
-        self._router = Router(self._registry, self._runtimes)
+        self._router = Router(self._registry, self._runtimes, self._namespace)
         if route_policy is not None:
             self._registry.policies.place(
                 RoutePolicy(route_policy, self._script_policy)
@@ -805,7 +805,7 @@ class Workspace:
                 line,
                 judged,
                 judged if whole_line else verdicts,
-                lambda command: "",
+                lambda one: "",
                 whole_line,
                 aliases,
             )
@@ -833,7 +833,7 @@ class Workspace:
         if isinstance(placed, (Deny, Pending)):
             refused = placement_refused(placed, line)
             said = explained_line(
-                line, judged, verdicts, lambda command: "", aliases=aliases
+                line, judged, verdicts, lambda one: "", aliases=aliases
             )
             return dataclasses.replace(
                 said,
@@ -853,7 +853,7 @@ class Workspace:
             line,
             judged,
             judged if whole_line else verdicts,
-            lambda command: self._router.runtime_for(command, placed),
+            lambda one: self._router.runtime_for(one, placed),
             whole_line,
             aliases,
         )

@@ -31,6 +31,9 @@ import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { parseCommand, parseToKwargs } from '../../../commands/spec/parser.ts'
 import { DeviceInput, type ByteSource } from '../../../io/types.ts'
 import { PathSpec } from '../../../types.ts'
+import { STDIN_OPERAND } from '../../../runtime/source.ts'
+import type { RouteDecision, RuntimeIdentity } from '../../../runtime/types.ts'
+import { INLINE_FLAGS } from '../../lookup/constants.ts'
 import { type MountRegistry } from '../../mount/registry.ts'
 import type { SessionAccess } from '../../../view/types.ts'
 import { classifyBarePath } from '../../expand/classify/index.ts'
@@ -429,4 +432,61 @@ export function commandWords(
     )
   }
   return words
+}
+
+/**
+ * The script an interpreter command runs, null for inline code (`-c`, `-m`,
+ * `-e`), stdin or no operand. Mirrors Python's `interpreter_script`.
+ *
+ * @param name the interpreter's name.
+ * @param words the words after the name.
+ * @param cwd the working directory a relative script resolves in.
+ */
+export function interpreterScript(
+  name: string,
+  words: readonly string[],
+  cwd: string,
+): PathSpec | null {
+  const spec = SPECS[name]
+  if (spec === undefined) return null
+  const parsed = parseCommand(spec, [...words], cwd, name)
+  if ([...INLINE_FLAGS].some((flag) => parsed.flags[flag] != null)) return null
+  const first = words.find((_, i) => parsed.wordRoles[i] === WordKind.OPERAND)
+  if (first === undefined || first === STDIN_OPERAND) return null
+  return PathSpec.fromStrPath(first, undefined, cwd)
+}
+
+/**
+ * The decision one invocation runs under: its line's, except that an
+ * interpreter the decision keeps off a sandbox (`unserved`) runs on that
+ * runtime when the invocation stands on, or runs a script on, a path no
+ * sandbox is served (`MountRegistry.unserved`). Judged per invocation,
+ * however the line reached it (a nested line, a shebang). Mirrors Python's
+ * `invocation_routing`.
+ *
+ * @param name the command name.
+ * @param words the words after the name.
+ * @param cwd the invocation's working directory.
+ * @param registry the mounts.
+ * @param routing the line's decision.
+ */
+export function invocationRouting<R extends RuntimeIdentity>(
+  name: string,
+  words: readonly string[],
+  cwd: string,
+  registry: MountRegistry,
+  routing: RouteDecision<R> | undefined,
+): RouteDecision<R> | undefined {
+  const unserved = routing?.unserved
+  if (routing === undefined || unserved === undefined || !Object.hasOwn(unserved, name))
+    return routing
+  const script = interpreterScript(name, words, cwd)
+  const spots = script === null ? [cwd] : [cwd, script.virtual]
+  if (!spots.some((spot) => registry.unserved(spot))) return routing
+  return {
+    ...routing,
+    bindings: Object.assign(Object.create(null) as Record<string, R | null>, routing.bindings, {
+      [name]: unserved[name] ?? null,
+    }),
+  }
 }

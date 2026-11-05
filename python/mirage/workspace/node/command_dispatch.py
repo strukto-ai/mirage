@@ -116,6 +116,7 @@ from mirage.workspace.executor.command.command import (
 )
 from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.executor.command.handler import argument_list_too_long
+from mirage.workspace.executor.command.routing import invocation_routing
 from mirage.workspace.expand import expand_node
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.globs import expand_boundary_globs
@@ -759,7 +760,12 @@ async def _run_argv(
     # `tar -cf out.tar /base/*` would archive a whole backend the same
     # operand typed by hand is refused for.
     refused_external = runtime_refused(
-        name, session, registry, context.frame.routing
+        name,
+        session,
+        registry,
+        invocation_routing(
+            name, argv.args, session.cwd, registry, context.frame.routing
+        ),
     )
     boundary = (
         list(argv.operands)
@@ -1069,7 +1075,9 @@ async def _route_argv(
             ExecutionNode(command=name, exit_code=2, stderr=err),
         )
 
-    routing = context.frame.routing
+    routing = invocation_routing(
+        name, argv.args, session.cwd, registry, context.frame.routing
+    )
     consumer = lookup(name, session, registry, routing)
     if consumer is Consumer.EXTERNAL:
         assert routing is not None

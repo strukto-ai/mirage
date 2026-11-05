@@ -114,3 +114,9 @@ ARITH_TEST_OPERATORS = frozenset({"-eq", "-ne", "-lt", "-le", "-gt", "-ge"})
 
 # A shell identifier, as the names a word reads are found.
 IDENTIFIER_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+# The top-level statements holding assignments that run before the next
+# statement reads them: ``X=1 Y=2`` and ``export X=1``.
+ASSIGNING_STATEMENTS = frozenset(
+    {"variable_assignments", "declaration_command"}
+)
