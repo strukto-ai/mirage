@@ -13,9 +13,11 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { runAsProgram } from '../../../../context/session_context.ts'
+import { runAsProgram, sessionAccess } from '../../../../context/session_context.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import type { ByteSource } from '../../../../io/types.ts'
+import { EXTERNAL_COMMANDS } from '../../../../runtime/constants.ts'
+import { isSandbox } from '../../../../runtime/table.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
@@ -27,9 +29,11 @@ import { resolvePath } from '../../../../utils/path.ts'
 import { stripSlash } from '../../../../utils/slash.ts'
 import { BinViewVFS } from '../../../../vfs/bin/bin.ts'
 import { type EvaluationContext, childContext } from '../../../evaluation.ts'
+import type { Argv } from '../../../expand/argv.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import { ExecutionNode } from '../../../types.ts'
+import { runExternal } from '../../command/external.ts'
 import { handleCommandBuiltin } from '../command/command.ts'
 import type { ExecuteStringFn } from '../types.ts'
 import { handleBash } from './bash.ts'
@@ -98,22 +102,29 @@ function shebangWords(script: string): string[] {
  * line, so `#!/usr/bin/env python3` reaches the python3 command wherever
  * the workspace routes it, `exec` check included, and an interpreter
  * nobody registers answers with its own "command not found".
+ *
+ * A binary runs in the sandbox bound to `@external` when that sandbox
+ * serves the workspace (`mountType: 'ssh'`), both the path as typed and its
+ * link target are on a mount other than `/` or `/dev`, and the target's
+ * mount allows `exec`; otherwise it answers 126. `signal` stops it there.
  */
 export async function handleExecPath(
   dispatch: DispatchFn,
   executeFn: ExecuteStringFn,
-  path: string,
-  args: string[],
   context: EvaluationContext,
   registry: MountRegistry,
   namespace: Namespace,
+  argv: Argv,
   stdin: ByteSource | null = null,
   sink?: JobConsole,
   jobTable?: JobTable,
   // The caller's frames, whose nesting a shell script counts on from.
   callStack: CallStack | null = null,
+  signal?: AbortSignal,
 ): Promise<RedirectResult> {
   let session = context.session
+  const path = argv.name
+  const args = [...argv.args]
   let data: Uint8Array
   try {
     data = await readScriptBytes(dispatch, path, session.cwd)
@@ -123,10 +134,25 @@ export async function handleExecPath(
     const code = (exc as { code?: string }).code
     return scriptError(path, strerror, code === 'ENOENT' ? NOT_FOUND_STATUS : CANNOT_EXECUTE_STATUS)
   }
-  if (isBinary(data))
+  const typed = resolvePath(path, session.cwd)
+  const target = namespace.sessionLinks(session).follow(typed)
+  if (isBinary(data)) {
+    const routing = context.frame.routing
+    const runs = routing?.bindings[EXTERNAL_COMMANDS]
+    if (
+      routing !== undefined &&
+      isSandbox(runs) &&
+      runs.fileEffectsDispatched &&
+      !registry.unserved(typed) &&
+      !registry.unserved(target)
+    ) {
+      if (!registry.execAllowedAt(target, sessionAccess(session)))
+        return scriptError(path, 'not in EXEC mode', CANNOT_EXECUTE_STATUS)
+      return runExternal(argv, stdin, session, registry, routing, signal, sink)
+    }
     return scriptError(path, 'cannot execute binary file: Exec format error', CANNOT_EXECUTE_STATUS)
+  }
   const script = decodeText(data)
-  const target = namespace.sessionLinks(session).follow(resolvePath(path, session.cwd))
   const [vfs, spec] = registry.resolve(target)
   if (vfs instanceof BinViewVFS) {
     // The read enforces visibility and path policy; the target still passes

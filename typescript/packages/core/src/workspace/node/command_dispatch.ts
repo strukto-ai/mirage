@@ -944,7 +944,6 @@ async function routeArgv(
   // abort or timeout to fire.
   const dispatch = guardDispatch(dispatchIn, mergeSignals(signal, context.frame.abortSignal))
   const name = argv.name
-  const args = [...argv.args]
   let operands = [...argv.operands]
 
   // Path execution: bash hands a slash-carrying head word to the
@@ -955,15 +954,15 @@ async function routeArgv(
     return handleExecPath(
       dispatch,
       executeFn,
-      name,
-      args,
       context,
       registry,
       namespace,
+      argv,
       stdin,
       sink,
       jobTable ?? undefined,
       callStack,
+      signal,
     )
   }
 

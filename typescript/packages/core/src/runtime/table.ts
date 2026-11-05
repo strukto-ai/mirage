@@ -243,6 +243,16 @@ export function wholeLineRuntime(
 }
 
 /**
+ * Whether a runtime is a sandbox: a line executor on another machine.
+ * Mirrors Python's `is_sandbox`.
+ *
+ * @param entry the runtime, null or undefined for none.
+ */
+export function isSandbox(entry: Runtime | null | undefined): entry is Runtime & LineExecutorMixin {
+  return entry != null && isLineExecutor(entry) && entry.reach === 'remote'
+}
+
+/**
  * The runtime that serves commands no entry captures, if any.
  *
  * That is the world's WorkspaceRuntime, unless it declares captures (then it

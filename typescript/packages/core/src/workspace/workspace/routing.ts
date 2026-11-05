@@ -27,7 +27,12 @@ import { opQuestion } from '../../policy/decisions.ts'
 import { agreed, settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import { WHOLE_LINE } from '../../runtime/constants.ts'
-import { bindCommands, catchAll, runtimeBindingsFor } from '../../runtime/table.ts'
+import {
+  bindCommands,
+  catchAll,
+  runtimeBindingsFor,
+  wholeLineRuntime,
+} from '../../runtime/table.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Judged, Walked } from '../node/explain.ts'
@@ -166,10 +171,13 @@ export class Router {
   }
 
   /**
-   * The runtime entry that serves a command under a decision, empty when
-   * the workspace runs it itself. Mirrors Python's `Router.runtime_for`.
+   * The runtime entry that serves a command under a decision: the `@line`
+   * runtime when one takes the line, empty when the workspace runs it
+   * itself. Mirrors Python's `Router.runtime_for`.
    */
   runtimeFor(command: string, decision: RouteDecision<Runtime>): string {
+    const whole = wholeLineRuntime(decision.bindings)
+    if (whole !== null) return whole.name
     const serving = Object.hasOwn(decision.bindings, command)
       ? (decision.bindings[command] ?? null)
       : decision.fallback

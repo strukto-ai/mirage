@@ -13,6 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import type { Context } from '../../../../commands/config.ts'
+import { SessionProfile } from '../../../../policy/profile.ts'
+import { Runtime } from '../../../../runtime/base.ts'
+import { LINE_EXECUTOR, type LineExecutorMixin } from '../../../../runtime/mixin.ts'
+import type { RunResult } from '../../../../runtime/types.ts'
+import { Limit, type PathSpec } from '../../../../types.ts'
 import { RAMVFS } from '../../../../vfs/ram/ram.ts'
 import { MountMode } from '../../../../types.ts'
 import { stderrStr, stdoutStr } from '../../../../../tests/workspace/fixtures/workspace_fixture.ts'
@@ -246,4 +252,125 @@ it.each([
   const result = await ws.shell(command)
   expect(result.exitCode).toBe(0)
   expect(result.stdout).toEqual(Uint8Array.from(expected, (c) => c.charCodeAt(0)))
+})
+
+class Box extends Runtime implements LineExecutorMixin {
+  readonly [LINE_EXECUTOR] = true as const
+  override readonly reach = 'remote'
+  readonly name = 'box'
+  readonly lines: string[] = []
+
+  constructor(private readonly serves = true) {
+    super({ captures: ['@external'] })
+  }
+
+  override get fileEffectsDispatched(): boolean {
+    return this.serves
+  }
+
+  protected override servesSession(): boolean {
+    return true
+  }
+
+  runLine(_e: unknown, _p: PathSpec[], _t: string[], ctx: Context): Promise<RunResult> {
+    this.lines.push(ctx.flags.c as string)
+    return Promise.resolve({ stdout: new TextEncoder().encode('box\n'), stderr: null, exitCode: 0 })
+  }
+}
+
+const BINARY = new Uint8Array([0x7f, 0x45, 0x4c, 0x46, 0x02, 0x01, 0x01, 0x00])
+
+async function binary(
+  box: Box,
+  mode: MountMode,
+  setup: string,
+  line: string,
+  profile: Record<string, unknown> = {},
+) {
+  const ws = new Workspace(
+    { '/ram': new RAMVFS() },
+    { mode, runtimes: [box, 'workspace'], profiles: { p: SessionProfile(profile) } },
+  )
+  try {
+    await ws.vfs.write('/ram/t', BINARY)
+    await ws.vfs.write('/t', BINARY)
+    ws.createSession('s', { profile: 'p' })
+    expect((await ws.shell(setup, { sessionId: 's' })).exitCode).toBe(0)
+    return await ws.shell(line, { sessionId: 's' })
+  } finally {
+    await ws.close()
+  }
+}
+
+describe('a binary run by path', () => {
+  it('runs in the sandbox when served', async () => {
+    const box = new Box()
+    const io = await binary(box, MountMode.EXEC, 'cd /ram', './t a')
+    expect([io.exitCode, stdoutStr(io)]).toEqual([0, 'box\n'])
+    expect(box.lines).toEqual(['./t a'])
+  })
+
+  const FORMAT = 'cannot execute binary file: Exec format error'
+
+  it.each([
+    [true, MountMode.EXEC, 'ln -s /ram/t /entry', '/entry a', {}, `/entry: ${FORMAT}\n`],
+    [true, MountMode.EXEC, 'ln -s /t /ram/l', '/ram/l a', {}, `/ram/l: ${FORMAT}\n`],
+    [true, MountMode.WRITE, 'true', '/ram/t a', {}, '/ram/t: not in EXEC mode\n'],
+    [
+      true,
+      MountMode.EXEC,
+      'true',
+      '/ram/t a',
+      { mounts: { '/ram': 'write' } },
+      '/ram/t: not in EXEC mode\n',
+    ],
+    [false, MountMode.EXEC, 'true', '/ram/t a', {}, `/ram/t: ${FORMAT}\n`],
+  ] as [boolean, MountMode, string, string, Record<string, unknown>, string][])(
+    'answers 126 where the sandbox may not run it (%s, %s, %s, %s, %j)',
+    async (serves, mode, setup, line, profile, stderr) => {
+      const box = new Box(serves)
+      const io = await binary(box, mode, setup, line, profile)
+      expect([io.exitCode, stderrStr(io)]).toEqual([126, stderr])
+      expect(box.lines).toEqual([])
+    },
+  )
+
+  it('stops a binary in the sandbox when its line times out', async () => {
+    class Waiting extends Box {
+      stopped = false
+
+      override async runLine(
+        _e: unknown,
+        _p: PathSpec[],
+        _t: string[],
+        ctx: Context,
+      ): Promise<RunResult> {
+        await new Promise<void>((resolve) => {
+          ctx.signal?.addEventListener('abort', () => {
+            this.stopped = true
+            resolve()
+          })
+          setTimeout(resolve, 2000)
+        })
+        return { stdout: new Uint8Array(), stderr: null, exitCode: 0 }
+      }
+    }
+    const box = new Waiting()
+    const ws = new Workspace(
+      { '/ram': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        runtimes: [box, 'workspace'],
+        commandLimits: { '@line': new Limit({ timeoutSeconds: 0.05 }) },
+      },
+    )
+    try {
+      await ws.vfs.write('/ram/t', BINARY)
+      const io = await ws.shell('/ram/t')
+      expect(io.exitCode).toBe(124)
+      expect(box.stopped).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  })
 })
