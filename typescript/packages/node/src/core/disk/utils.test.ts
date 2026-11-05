@@ -145,6 +145,16 @@ describe('resolveInside', () => {
     )
     await new Promise((settled) => setTimeout(settled, 20))
   })
+  it('logs a failure of a probe the walk never awaits', async () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    vi.mocked(fs.open).mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }))
+    await expect(resolveInside(root, spec('/lib64/a.txt'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await new Promise((settled) => setTimeout(settled, 20))
+    expect(debug).toHaveBeenCalledWith('Disk probe failed:', 'EACCES')
+    debug.mockRestore()
+  })
   it('refuses a link out of the root as the leaf', async () => {
     await expect(resolveInside(root, spec('/abs'))).rejects.toMatchObject({ code: 'ENOENT' })
   })

@@ -48,15 +48,23 @@ async function nativeRealpath(file: string): Promise<string> {
 }
 
 /**
+ * A probe the walk may stop short of awaiting: a failure nothing awaits is
+ * logged, past the absence a walk ends on, instead of left unhandled.
+ */
+function settles<T>(pending: Promise<T>): Promise<T> {
+  pending.catch((err: unknown) => {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') console.debug('Disk probe failed:', code)
+  })
+  return pending
+}
+
+/**
  * Start a name's probes at once: its lstat, the lstat of its spelling with one
  * letter's case flipped, and the parent's open. All stay inside a parent the
  * walk has already proved is no link.
  */
 function probeName(parent: string, part: string) {
-  const settles = <T>(pending: Promise<T>): Promise<T> => {
-    pending.catch(() => undefined)
-    return pending
-  }
   const at = path.join(parent, part)
   const index = part.search(/[A-Za-z]/)
   let alternate: string | undefined
@@ -110,8 +118,7 @@ async function exactName(probe: ReturnType<typeof probeName>, info: Stats): Prom
   if (folds && alternate !== undefined && ['darwin', 'win32'].includes(process.platform)) {
     try {
       const canonical = nativeRealpath(probe.at)
-      const aliased = nativeRealpath(alternate)
-      aliased.catch(() => undefined)
+      const aliased = settles(nativeRealpath(alternate))
       if (path.basename(await canonical) === part && (await aliased) === (await canonical)) {
         await probe.opened
         return true
