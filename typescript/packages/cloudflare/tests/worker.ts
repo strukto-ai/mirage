@@ -132,7 +132,7 @@ export default {
       },
       {
         mode: MountMode.EXEC,
-        runtimes: ['workspace', 'monty', 'quickjs'],
+        runtimes: ['workspace', 'monty'],
         ...(run.maxMemory !== undefined ? { maxMemory: run.maxMemory } : {}),
         ...(run.lineSeconds !== undefined
           ? { commandLimits: { '@line': new Limit({ timeoutSeconds: run.lineSeconds }) } }

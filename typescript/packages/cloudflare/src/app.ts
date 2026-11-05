@@ -27,12 +27,9 @@ import {
 } from '@struktoai/mirage-server/registry'
 import type { RouteReply, RouteRequest } from '@struktoai/mirage-server/routes'
 import { serveCodexSocket } from '@struktoai/mirage-server/ssh/codex'
+import { EDGE_MAX_SESSIONS } from './constants.ts'
 import { edgeHost, RAMRecordClient } from './host.ts'
 import { WebRoutes } from './router.ts'
-
-// The sessions each workspace holds when the app names no cap: every
-// workspace shares the isolate's 128 MB.
-const EDGE_MAX_SESSIONS = 4
 
 interface Served {
   check: NonNullable<ReturnType<typeof authenticator>>

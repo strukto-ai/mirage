@@ -63,6 +63,7 @@ from mirage.workspace.session.budget import (
     args_bytes,
     check_env,
     entry_bytes,
+    frames_bytes,
 )
 from mirage.workspace.session.rng import draw, initial_seed
 from mirage.workspace.session.session import SessionState
@@ -1442,8 +1443,12 @@ def set_positional_params(
         values (list[str]): the new parameters.
     """
     if call_stack is not None and call_stack.depth > 1:
-        held = args_bytes(call_stack.get_all_positional())
-        check_env(session, held, args_bytes(values), held)
+        check_env(
+            session,
+            args_bytes(call_stack.get_all_positional()),
+            args_bytes(values),
+            frames_bytes(call_stack),
+        )
         call_stack.set_positional(values)
     else:
         check_env(

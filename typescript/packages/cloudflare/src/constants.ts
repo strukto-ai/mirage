@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { provideQuickJsModule } from '@struktoai/mirage-core/runtime/js/quickjs/loader'
-import qjs from './generated/qjs-wasi.wasm'
+// The sessions each workspace holds when the app names no cap: every
+// workspace shares the isolate's 128 MB.
+export const EDGE_MAX_SESSIONS = 4
 
-// The node and js commands' engine, compiled as the Worker deploys, since an
-// isolate compiles no wasm as it runs: each run's guest runs in the isolate
-// itself, its wasm stack suspended on every call it makes of the host (JSPI).
-provideQuickJsModule(() => Promise.resolve(qjs))
+// What a workspace runs when its options name no runtimes: Monty and the
+// shell, the default world without QuickJS, which the edge refuses.
+export const EDGE_RUNTIMES: readonly string[] = ['monty', 'workspace']

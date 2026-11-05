@@ -35,8 +35,9 @@ Three layers set them:
 | A burst of requests | `rate_limits` | `ip=1000/minute` | HTTP 429 |
 
 `max_env` counts the bytes of a session's variables, functions, aliases and
-positional parameters, and a session that would start past it, from the
-workspace's `env`, a profile's or a snapshot, is refused. `processes.max` counts every pipeline stage, subshell
+positional parameters, one more for each array element and parameter, and a
+session that would start past it, from the workspace's `env`, a profile's or a
+snapshot, is refused. `processes.max` counts every pipeline stage, subshell
 and background job a session has running. `timeout` stops the jobs its
 command started when the time runs out, as GNU's does by signalling its
 process group, unless it is given `--foreground`.

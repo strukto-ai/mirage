@@ -17,6 +17,7 @@ from contextvars import ContextVar
 from typing import TypeVar
 
 from mirage.shell.bytes import encode_text
+from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.variable import ShellValue
 from mirage.utils.sanitize import byte_length
@@ -53,7 +54,8 @@ def _env_limit() -> int | None:
 
 def entry_bytes(name: str, value: ShellValue | None) -> int:
     """The bytes one name and its value hold: a variable, a function and
-    its body, or an alias and its text.
+    its body, or an alias and its text. An array element counts one byte
+    more, so an empty one is not free.
 
     Args:
         name (str): the name.
@@ -64,19 +66,32 @@ def entry_bytes(name: str, value: ShellValue | None) -> int:
     elif isinstance(value, str):
         held = byte_length(value)
     elif isinstance(value, dict):
-        held = sum(byte_length(k) + byte_length(v) for k, v in value.items())
+        held = sum(
+            byte_length(k) + byte_length(v) + 1 for k, v in value.items()
+        )
     else:
-        held = sum(byte_length(v) for v in value if v is not None)
+        held = sum(byte_length(v) + 1 for v in value if v is not None)
     return byte_length(name) + held
 
 
 def args_bytes(args: Iterable[str]) -> int:
-    """The bytes a list of positional parameters holds.
+    """The bytes a list of positional parameters holds, one more for
+    each, so an empty one is not free.
 
     Args:
         args (Iterable[str]): the parameters.
     """
-    return sum(byte_length(arg) for arg in args)
+    return sum(byte_length(arg) + 1 for arg in args)
+
+
+def frames_bytes(call_stack: CallStack) -> int:
+    """The bytes the frames on a call stack hold in positional
+    parameters, which :func:`env_bytes` does not count.
+
+    Args:
+        call_stack (CallStack): the running function and sourced frames.
+    """
+    return sum(args_bytes(args) for args in call_stack.positionals())
 
 
 def env_bytes(session: SessionState) -> int:
@@ -94,7 +109,9 @@ def env_bytes(session: SessionState) -> int:
     )
 
 
-def check_env_fits(session: SessionState, limit: int | None) -> None:
+def check_env_fits(
+    session: SessionState, limit: int | None, added: int = 0
+) -> None:
     """Refuse a session whose shell state is past max_env before it runs a
     line: what the workspace's ``env``, a profile's ``env`` or a snapshot
     gave it, which no write grew.
@@ -102,11 +119,13 @@ def check_env_fits(session: SessionState, limit: int | None) -> None:
     Args:
         session (SessionState): the session about to start.
         limit (int | None): the workspace's max_env, None for no cap.
+        added (int): bytes the session gains before it starts, such as
+            the workspace's ``env`` entries a stored record lacks.
 
     Raises:
         ValueError: the session holds more than ``limit`` bytes.
     """
-    held = env_bytes(session)
+    held = env_bytes(session) + added
     if limit is not None and held > limit:
         raise ValueError(
             f"session {session.session_id!r} starts with {held} bytes of "

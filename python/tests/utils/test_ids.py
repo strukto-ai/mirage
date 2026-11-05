@@ -25,8 +25,8 @@ import pytest
 
 import mirage
 from mirage.utils.clock import ManualClock, SystemClock
+from mirage.utils.constants import MAX_NAME_LENGTH
 from mirage.utils.ids import (
-    MAX_NAME_LENGTH,
     IdSource,
     SeededIdSource,
     SystemIdSource,

@@ -58,7 +58,7 @@ import {
   withValue,
 } from '../../shell/variable.ts'
 import type { SessionState } from './session.ts'
-import { argsBytes, checkEnv, entryBytes } from './budget.ts'
+import { argsBytes, checkEnv, entryBytes, framesBytes } from './budget.ts'
 
 /**
  * The one copy-out of a session's environment.
@@ -1073,8 +1073,12 @@ export function setPositionalParams(
   values: string[],
 ): void {
   if (callStack !== null && callStack.depth > 1) {
-    const held = argsBytes(callStack.getAllPositional())
-    checkEnv(session, held, argsBytes(values), held)
+    checkEnv(
+      session,
+      argsBytes(callStack.getAllPositional()),
+      argsBytes(values),
+      framesBytes(callStack),
+    )
     callStack.setPositional(values)
   } else {
     checkEnv(session, argsBytes(session.positionalArgs), argsBytes(values))

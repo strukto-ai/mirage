@@ -123,56 +123,6 @@ describe('mirage in workerd', () => {
     expect(Date.now() - started).toBeLessThan(20_000)
   }, 60_000)
 
-  it('runs node in the isolate itself, reading and writing the workspace', async () => {
-    const [inline, write, read, piped] = await run([
-      'node -e "console.log([1, 2, 3].map((n) => n * 2))"',
-      `node -e "require('fs').writeFileSync('/data/n.json', JSON.stringify({ n: 4 }))"`,
-      `node -e "console.log(JSON.parse(require('fs').readFileSync('/data/n.json', 'utf8')).n + 1)"`,
-      `printf 'a\\nb\\n' | node -e "require('readline').createInterface({ input: process.stdin }).on('line', (l) => console.log(l.toUpperCase()))"`,
-    ])
-    expect(inline).toEqual({ exit: 0, stdout: '[ 2, 4, 6 ]\n', stderr: '' })
-    expect(write?.exit).toBe(0)
-    expect(read?.stdout).toBe('5\n')
-    expect(piped?.stdout).toBe('A\nB\n')
-  })
-
-  it('holds node to 64 MiB, so a runaway heap fails in the script, not the isolate', async () => {
-    const [heap, next] = await run([
-      `node -e "const a = []; try { for (;;) a.push(new Array(1e5).fill(a.length)) } catch (e) { console.log(e.message, a.length > 10) }"`,
-      'node -e "console.log(1 + 1)"',
-    ])
-    expect(heap).toEqual({ exit: 0, stdout: 'out of memory true\n', stderr: '' })
-    expect(next?.stdout).toBe('2\n')
-  })
-
-  it('runs one node in the isolate at a time, refusing a second at once', async () => {
-    const [both, next] = await run([
-      `node -e "setTimeout(() => console.log('a'), 200)" | node -e "console.log('b')"`,
-      'node -e "console.log(1 + 1)"',
-    ])
-    expect(both?.stderr).toBe(
-      'js: another program is running in this isolate, which runs one at a time\n',
-    )
-    expect(next?.stdout).toBe('2\n')
-  })
-
-  it("waits out node's timers, and ends one at its line's deadline as it next calls out", async () => {
-    const [timer, ticking, statting, next] = await run(
-      [
-        `node -e "setTimeout(() => console.log('late'), 50); console.log('first')"`,
-        'node -e "setInterval(() => {}, 10)"',
-        `node -e "const fs = require('fs'); fs.writeFileSync('/data/s', ''); for (;;) fs.statSync('/data/s')"`,
-        'node -e "console.log(1 + 1)"',
-      ],
-      undefined,
-      2,
-    )
-    expect(timer?.stdout).toBe('first\nlate\n')
-    expect(ticking?.exit).toBe(124)
-    expect(statting?.exit).toBe(124)
-    expect(next?.stdout).toBe('2\n')
-  }, 60_000)
-
   it("follows a client's redirect hop by hop under the workspace's rule", async () => {
     const server: Server = createServer((req, res) => {
       const { port } = server.address() as AddressInfo

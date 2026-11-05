@@ -24,9 +24,10 @@ async function run(
 describe('max_env', () => {
   it('counts each entry in UTF-8 bytes', () => {
     expect(entryBytes('a', 'é')).toBe(3)
-    expect(argsBytes(['ab', 'c'])).toBe(3)
-    expect(entryBytes('a', ['xy', null, 'z'])).toBe(4)
-    expect(entryBytes('m', { k: 'vv' })).toBe(4)
+    expect(argsBytes(['ab', 'c'])).toBe(5)
+    expect(argsBytes([''])).toBe(1)
+    expect(entryBytes('a', ['xy', null, 'z'])).toBe(6)
+    expect(entryBytes('m', { k: 'vv' })).toBe(5)
   })
 
   it('stops the line at a variable that doubles past it', async () => {
@@ -67,6 +68,19 @@ describe('max_env', () => {
       `export ${names.join(' ')};`,
     ]) {
       const [, err, code] = await run(`${line} echo after`)
+      expect(code).toBe(2)
+      expect(err).toContain('past max_env of 200 bytes')
+    }
+  })
+
+  it('counts the arguments a call or source passes', async () => {
+    for (const line of [
+      'FUNCNEST=30; f() { f "$@" "$@"; }; f aaaaaaaa',
+      `FUNCNEST=30; f() { f "$@" "$@"; }; f ''`,
+      `echo 'source /s "$@" "$@"' > /s; source /s aaaaaaaa`,
+      `set -- aaaaaaaa; echo 'source /s' > /s; source /s`,
+    ]) {
+      const [, err, code] = await run(line)
       expect(code).toBe(2)
       expect(err).toContain('past max_env of 200 bytes')
     }
