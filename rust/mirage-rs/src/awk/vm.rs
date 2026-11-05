@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use super::buffer::Buffer;
 use super::compile::{
     ARGC, ARGV, Arr, CONVFMT, Code, ENVIRON, FILENAME, FS, Math, OFMT, OFS, ORS, Op, RLENGTH, RS,
     RSTART, SUBSEP, Var,
@@ -69,8 +70,8 @@ struct RecordJoin {
 #[derive(Default)]
 struct Record {
     text: Text,
-    ranges: Vec<Text>,
-    fields: Vec<Text>,
+    ranges: Buffer<Text>,
+    fields: Buffer<Text>,
     owned: bool,
     split: bool,
     split_started: bool,
@@ -111,13 +112,16 @@ impl Record {
             self.split_started = true;
         }
         loop {
+            if !self.ranges.reserve(1, work) || *work == 0 {
+                return Ok(false);
+            }
             match self
                 .scan
                 .next(&self.text, &self.fs, self.paragraph, regexes, work)?
             {
                 SearchStep::Paused => return Ok(false),
                 SearchStep::Done(Some(range)) => {
-                    self.ranges.push(self.text.slice(range.0..range.1));
+                    self.ranges.values.push(self.text.slice(range.0..range.1));
                     *work = work.saturating_sub(8);
                 }
                 SearchStep::Done(None) => {
@@ -161,7 +165,9 @@ impl Record {
                 self.fields.pop();
                 *work = work.saturating_sub(16);
             }
-            self.fields.reserve(self.ranges.len());
+            if !self.fields.reserve(self.ranges.len(), work) {
+                return Ok(false);
+            }
             self.owning = Some(0);
         }
         let index = self.owning.as_mut().unwrap();
@@ -169,7 +175,7 @@ impl Record {
             if *work == 0 {
                 return Ok(false);
             }
-            self.fields.push(self.ranges[*index].clone());
+            self.fields.values.push(self.ranges[*index].clone());
             *index += 1;
             *work = work.saturating_sub(16);
         }
@@ -566,9 +572,9 @@ impl Machine {
     pub(super) fn run(&mut self, budget: usize) {
         if let Some(message) = self.io.fatal.take() {
             self.salvage(message);
-            return;
         }
         let mut work = budget as u64;
+        self.io.report(&mut work);
         while !self.done
             && self.io.idle()
             && work > 0
@@ -936,12 +942,20 @@ impl Machine {
                     self.pending = Some(Pending::Write(target));
                     return Ok(());
                 }
+                if !self
+                    .record
+                    .fields
+                    .reserve(count.saturating_sub(self.record.fields.len()), work)
+                {
+                    self.pending = Some(Pending::Write(target));
+                    return Ok(());
+                }
                 while self.record.fields.len() < count {
                     if *work == 0 {
                         self.pending = Some(Pending::Write(target));
                         return Ok(());
                     }
-                    self.record.fields.push(Text::default());
+                    self.record.fields.values.push(Text::default());
                     *work = work.saturating_sub(16);
                 }
                 match target {
@@ -1004,8 +1018,7 @@ impl Machine {
     /// its buffers and nothing else).
     fn salvage(&mut self, message: Vec<u8>) {
         self.io.requests.clear();
-        self.io.err.extend_from_slice(&message);
-        self.io.err.push(b'\n');
+        self.io.diagnose(message);
         self.status = 2;
         self.io.salvaging = true;
         self.io.send_files();

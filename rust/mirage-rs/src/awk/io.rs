@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 
+use super::buffer::Buffer;
 use super::text::{RecordSearch, Regexes, take_record};
 use super::value::{MAX_LEN, Text};
 use super::vm::no_memory;
@@ -144,7 +145,8 @@ struct RecordCopy {
 pub(super) struct Reader {
     pub(super) fd: u32,
     open: Option<(Vec<u8>, Opening)>,
-    buf: Vec<u8>,
+    buf: Buffer<u8>,
+    incoming: Option<(Vec<u8>, usize)>,
     copying: Option<RecordCopy>,
     start: usize,
     search: RecordSearch,
@@ -158,7 +160,8 @@ impl Reader {
         Reader {
             fd,
             open,
-            buf: Vec::new(),
+            buf: Buffer::default(),
+            incoming: None,
             copying: None,
             start: 0,
             search: RecordSearch::default(),
@@ -177,11 +180,33 @@ impl Reader {
         if self.copying.is_some() {
             return Ok(self.copy_record(budget));
         }
-        if self.start > self.buf.len() / 2 {
+        if !self.buf.reserve(0, budget) {
+            return Ok(Next::Busy);
+        }
+        if self.start > self.buf.len() / 2 || (self.start > 0 && self.incoming.is_some()) {
             self.search.shift(self.start);
-            self.buf.drain(..self.start);
+            let additional = self
+                .incoming
+                .as_ref()
+                .map_or(0, |(bytes, at)| bytes.len() - at);
+            self.buf.compact(self.start, additional);
             self.start = 0;
-            crate::release_capacity(&mut self.buf);
+            if !self.buf.reserve(0, budget) {
+                return Ok(Next::Busy);
+            }
+        }
+        if let Some((bytes, at)) = &mut self.incoming {
+            if !self.buf.reserve(bytes.len() - *at, budget) {
+                return Ok(Next::Busy);
+            }
+            let count = (bytes.len() - *at).min(*budget as usize);
+            self.buf.values.extend_from_slice(&bytes[*at..*at + count]);
+            *at += count;
+            *budget -= count as u64;
+            if *at < bytes.len() {
+                return Ok(Next::Busy);
+            }
+            self.incoming = None;
         }
 
         match take_record(
@@ -258,11 +283,8 @@ impl Reader {
         } else if reply.end {
             self.ended = true;
         } else {
-            self.search.shift(self.start);
-            self.buf.drain(..self.start);
-            crate::release_capacity(&mut self.buf);
-            self.start = 0;
-            self.buf.extend_from_slice(data);
+            assert!(self.incoming.is_none());
+            self.incoming = Some((data.to_vec(), 0));
         }
     }
 }
@@ -287,6 +309,8 @@ pub(super) struct OutPipe {
 pub(super) struct Io {
     pub(super) out: Vec<u8>,
     pub(super) err: Vec<u8>,
+    diagnostics: VecDeque<Vec<u8>>,
+    diagnostic_at: usize,
     /// Standard output held while an output pipe is open, since the
     /// pipe's command prints ahead of it when it runs.
     pub(super) held: Vec<u8>,
@@ -336,6 +360,35 @@ fn output_error(path: &[u8], detail: &[u8]) -> Vec<u8> {
 }
 
 impl Io {
+    pub(super) fn diagnose(&mut self, message: Vec<u8>) {
+        self.diagnostics.push_back(message);
+    }
+
+    pub(super) fn reporting(&self) -> bool {
+        !self.diagnostics.is_empty()
+    }
+
+    pub(super) fn report(&mut self, work: &mut u64) {
+        while *work > 0 && self.err.len() < LIMIT {
+            let Some(message) = self.diagnostics.front() else {
+                break;
+            };
+            let count = (message.len() - self.diagnostic_at)
+                .min(*work as usize)
+                .min(LIMIT - self.err.len());
+            self.err
+                .extend_from_slice(&message[self.diagnostic_at..self.diagnostic_at + count]);
+            self.diagnostic_at += count;
+            *work -= count as u64;
+            if self.diagnostic_at == message.len() && *work > 0 && self.err.len() < LIMIT {
+                self.err.push(b'\n');
+                self.diagnostics.pop_front();
+                self.diagnostic_at = 0;
+                *work -= 1;
+            }
+        }
+    }
+
     pub(super) fn retire(&mut self) -> Retirement {
         Retirement {
             files_in: self.files_in.retire(),
@@ -546,8 +599,7 @@ impl Io {
     /// already the failure is reported and the files' writes stop.
     fn fail(&mut self, message: Vec<u8>) {
         if self.salvaging {
-            self.err.extend_from_slice(&message);
-            self.err.push(b'\n');
+            self.diagnose(message);
             self.requests
                 .retain(|r| !matches!(r, Request::Write { .. } | Request::Flush { .. }));
         } else {
@@ -560,6 +612,47 @@ impl Io {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn buffered_suffix_compaction_and_later_growth_preserve_records() {
+        let prefix = vec![b'a'; 16387];
+        let suffix = vec![b'b'; 8193];
+        let mut input = prefix.clone();
+        input.push(b'\n');
+        input.extend_from_slice(&suffix);
+        for budget in [1, 17, 20000] {
+            let mut reader = Reader::new(1, None);
+            reader.answer(&Reply::decode(b"{}").unwrap(), &input);
+            let mut regexes = Regexes::default();
+            let mut records = Vec::new();
+            let mut more = false;
+            let mut turns = 0;
+            loop {
+                turns += 1;
+                assert!(turns < 200000);
+                match reader.next(b"\n", &mut regexes, &mut { budget }).unwrap() {
+                    Next::Record(record) => records.push(record.to_vec()),
+                    Next::Busy => {}
+                    Next::Pending if !more => {
+                        assert_eq!(records, vec![prefix.clone()]);
+                        let mut tail = suffix.clone();
+                        tail.extend_from_slice(b"\nlast");
+                        reader.answer(&Reply::decode(b"{}").unwrap(), &tail);
+                        more = true;
+                    }
+                    Next::Pending => {
+                        reader.answer(&Reply::decode(br#"{"end":true}"#).unwrap(), &[])
+                    }
+                    Next::End => break,
+                    Next::Failed(_) => panic!("input should remain readable"),
+                }
+            }
+            assert_eq!(
+                records,
+                vec![prefix.clone(), suffix.repeat(2), b"last".to_vec()]
+            );
+        }
+    }
 
     #[test]
     fn record_transfer_resumes_without_reading_or_delivering_twice() {

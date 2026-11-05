@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::LinkedList;
 
 use crate::printf::number::Rendered;
 use crate::regex::Step;
@@ -12,7 +12,7 @@ enum Piece {
 }
 
 pub(super) struct Output {
-    pieces: VecDeque<Piece>,
+    pieces: LinkedList<Piece>,
     len: usize,
     limit: usize,
 }
@@ -20,7 +20,7 @@ pub(super) struct Output {
 impl Default for Output {
     fn default() -> Self {
         Self {
-            pieces: VecDeque::new(),
+            pieces: LinkedList::new(),
             len: 0,
             limit: MAX_LEN,
         }
@@ -162,6 +162,7 @@ enum Scan {
     Width(Spec),
     Precision(Spec),
     Conversion(Spec),
+    Done,
     Error,
 }
 
@@ -317,6 +318,7 @@ impl NumberText {
 }
 
 pub(super) struct Formatter {
+    failure: Option<Vec<u8>>,
     text: Option<NumberText>,
     number: Option<NumberScan>,
     format: Text,
@@ -333,6 +335,7 @@ impl Formatter {
     pub(super) fn new(format: Text, args: Vec<Value>, convfmt: Text) -> Self {
         Self {
             format,
+            failure: None,
             text: None,
             number: None,
             args: args.into_iter(),
@@ -462,6 +465,20 @@ impl Formatter {
     }
 
     pub(super) fn step(&mut self, work: &mut u64) -> Result<Step<Output>, Vec<u8>> {
+        if self.failure.is_none() {
+            match self.advance(work) {
+                Err(error) => self.failure = Some(error),
+                result => return result,
+            }
+        }
+        if self.retire(work) {
+            Err(self.failure.take().unwrap())
+        } else {
+            Ok(Step::Paused)
+        }
+    }
+
+    fn advance(&mut self, work: &mut u64) -> Result<Step<Output>, Vec<u8>> {
         while *work > 0 {
             if let Scan::Conversion(spec) = &self.scan {
                 if let Some(&conv) = self.format.get(self.at) {
@@ -499,7 +516,8 @@ impl Formatter {
                 Scan::Literal => {
                     if self.at == self.format.len() {
                         self.output.range(&self.format, self.literal, self.at)?;
-                        return Ok(Step::Done(std::mem::take(&mut self.output)));
+                        self.scan = Scan::Done;
+                        continue;
                     }
                     if self.format[self.at] == b'%' {
                         self.output.range(&self.format, self.literal, self.at)?;
@@ -577,11 +595,18 @@ impl Formatter {
                 Scan::Conversion(spec) => {
                     let Some(&conv) = self.format.get(self.at) else {
                         self.output.repeat(b'%', 1)?;
-                        return Ok(Step::Done(std::mem::take(&mut self.output)));
+                        self.scan = Scan::Done;
+                        continue;
                     };
                     self.conversion(spec, conv)?;
                     self.at += 1;
                     self.literal = self.at;
+                }
+                Scan::Done => {
+                    if self.args.next().is_none() {
+                        return Ok(Step::Done(std::mem::take(&mut self.output)));
+                    }
+                    self.scan = Scan::Done;
                 }
                 Scan::Error => {
                     if self.error.is_none() {
@@ -593,7 +618,8 @@ impl Formatter {
                         )?;
                         output.text(self.format.clone())?;
                         output.repeat(b'\'', 1)?;
-                        self.error = Some((output, Vec::new()));
+                        let bytes = Vec::with_capacity(output.len());
+                        self.error = Some((output, bytes));
                     }
                     let (output, bytes) = self.error.as_mut().unwrap();
                     if output.copy(bytes, work) {
@@ -608,6 +634,7 @@ impl Formatter {
 }
 
 pub(super) struct Print {
+    failure: Option<Vec<u8>>,
     text: Option<NumberText>,
     args: std::vec::IntoIter<Value>,
     ofmt: Text,
@@ -634,6 +661,7 @@ impl Print {
     pub(super) fn new(args: Vec<Value>, ofmt: Text, ofs: Text, ors: Text) -> Self {
         Self {
             args: args.into_iter(),
+            failure: None,
             text: None,
             ofmt,
             ofs,
@@ -644,6 +672,20 @@ impl Print {
     }
 
     pub(super) fn step(&mut self, work: &mut u64) -> Result<Step<Output>, Vec<u8>> {
+        if self.failure.is_none() {
+            match self.advance(work) {
+                Err(error) => self.failure = Some(error),
+                result => return result,
+            }
+        }
+        if self.retire(work) {
+            Err(self.failure.take().unwrap())
+        } else {
+            Ok(Step::Paused)
+        }
+    }
+
+    fn advance(&mut self, work: &mut u64) -> Result<Step<Output>, Vec<u8>> {
         while *work > 0 {
             if let Some(text) = &mut self.text {
                 match text.step(work)? {

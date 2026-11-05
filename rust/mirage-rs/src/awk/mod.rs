@@ -3,6 +3,7 @@
 //! of steps per call, so the host can yield between any two. Every file
 //! and command the program reaches is a request the host serves.
 
+mod buffer;
 mod compile;
 mod format;
 mod io;
@@ -106,7 +107,8 @@ impl Stream for Awk {
     fn busy(&self) -> bool {
         match self {
             Awk::Running(machine) => {
-                machine.io.idle() && (!machine.done || machine.io.fatal.is_some())
+                machine.io.idle()
+                    && (!machine.done || machine.io.fatal.is_some() || machine.io.reporting())
             }
             Awk::Retiring { machine, .. } => machine.is_some(),
             Awk::Refused(_) => false,

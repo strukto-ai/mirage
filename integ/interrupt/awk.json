@@ -183,6 +183,16 @@
       "id": "array-component-key",
       "unit": "a",
       "program": "{ SUBSEP=$0; print \"ready\"; for(j=0;j<16;j++) a[1,2]=1; print \"done\" }"
+    },
+    {
+      "id": "field-byte-split",
+      "unit": "a",
+      "program": "BEGIN { FS=\"\" } { print \"ready\"; x=NF; print \"done\" }"
+    },
+    {
+      "id": "format-pieces",
+      "unit": "%",
+      "program": "{ s=$0 \"%s\"; print \"ready\"; x=sprintf(s); print \"done\" }"
     }
   ]
 }

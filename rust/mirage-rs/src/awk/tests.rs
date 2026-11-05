@@ -838,3 +838,31 @@ fn control_formats_preserve_numeric_identity_and_assignment_results() {
     assert_eq!(read.out, "1.25 number file\n");
     assert_eq!(read.status, 0);
 }
+
+#[test]
+fn malformed_large_format_retires_plans_and_emits_diagnostic_in_windows() {
+    let format = format!("{}%s", "%z".repeat(65537));
+    let config = json!({
+        "program": "BEGIN { print \"before\"; printf fmt; print \"after\" }",
+        "assignments": [format!("fmt={format}")],
+    });
+    let mut stream = super::open(config.to_string().as_bytes()).unwrap();
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    let mut turns = 0;
+    while stream.busy() {
+        stream.drain(&mut out).unwrap();
+        let before = err.len();
+        stream.take_stderr(&mut err);
+        assert!(err.len() - before <= super::STEPS);
+        turns += 1;
+        assert!(turns < 1000);
+    }
+    assert_eq!(out, b"before\n");
+    assert_eq!(stream.status(), 2);
+    assert_eq!(
+        err,
+        format!("awk: not enough arguments to satisfy format string '{format}'\n").into_bytes()
+    );
+    assert!(turns > 50);
+}

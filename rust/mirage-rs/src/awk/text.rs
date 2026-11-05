@@ -4,6 +4,7 @@ use crate::regex::Step;
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
 
+use super::buffer::Buffer;
 use super::value::{MAX_LEN, Text};
 
 /// Read one string escape whose backslash ends at `pos`, appending what it
@@ -464,8 +465,12 @@ impl IndexSearch {
     pub(super) fn new(haystack: Text, needle: Text) -> Self {
         Self {
             haystack,
+            prefix: {
+                let mut prefix = Vec::with_capacity(needle.len().max(1));
+                prefix.push(0);
+                prefix
+            },
             needle,
-            prefix: vec![0],
             building: 1,
             matched: 0,
             at: 0,
@@ -637,7 +642,7 @@ enum SubPhase {
 pub(super) struct Substitution {
     subject: Text,
     template: Text,
-    out: Vec<u8>,
+    out: Buffer<u8>,
     phase: SubPhase,
     global: bool,
     pos: usize,
@@ -646,7 +651,7 @@ pub(super) struct Substitution {
 }
 
 fn copy_piece(
-    out: &mut Vec<u8>,
+    out: &mut Buffer<u8>,
     bytes: &[u8],
     at: &mut usize,
     end: usize,
@@ -655,8 +660,11 @@ fn copy_piece(
     if out.len().saturating_add(end - *at) > MAX_LEN {
         return Err(());
     }
+    if !out.reserve(end - *at, work) {
+        return Ok(false);
+    }
     let count = (end - *at).min(usize::try_from(*work).unwrap_or(usize::MAX));
-    out.extend_from_slice(&bytes[*at..*at + count]);
+    out.values.extend_from_slice(&bytes[*at..*at + count]);
     *at += count;
     *work -= count as u64;
     Ok(*at == end)
@@ -665,7 +673,7 @@ fn copy_piece(
 impl Substitution {
     pub(super) fn new(subject: Text, template: Text, global: bool) -> Self {
         Self {
-            out: Vec::with_capacity(subject.len()),
+            out: Buffer::with_capacity(subject.len()),
             subject,
             template,
             global,
@@ -682,6 +690,21 @@ impl Substitution {
         work: &mut u64,
     ) -> Result<Step<(usize, Vec<u8>)>, ()> {
         while *work > 0 {
+            let byte = match self.phase {
+                SubPhase::Template { at, .. } => {
+                    self.template.get(at).is_some_and(|byte| *byte != b'&')
+                }
+                SubPhase::Advance { from, to } => from == to && from < self.subject.len(),
+                _ => false,
+            };
+            if byte {
+                if self.out.len() == MAX_LEN {
+                    return Err(());
+                }
+                if !self.out.reserve(1, work) || *work == 0 {
+                    return Ok(Step::Paused);
+                }
+            }
             match &mut self.phase {
                 SubPhase::Search => {
                     if self.pos > self.subject.len() {
@@ -750,11 +773,11 @@ impl Substitution {
                             }
                         }
                         b'\\' if self.template.get(*at + 1) == Some(&b'&') => {
-                            self.out.push(b'&');
+                            self.out.values.push(b'&');
                             *at += 2;
                         }
                         b'\\' if self.template.get(*at + 1..*at + 3) == Some(&b"\\&"[..]) => {
-                            self.out.push(b'\\');
+                            self.out.values.push(b'\\');
                             self.phase = SubPhase::Matched {
                                 from: *from,
                                 to: *to,
@@ -763,7 +786,7 @@ impl Substitution {
                             };
                         }
                         byte => {
-                            self.out.push(byte);
+                            self.out.values.push(byte);
                             *at += 1;
                         }
                     }
@@ -788,7 +811,7 @@ impl Substitution {
                             if self.out.len() == MAX_LEN {
                                 return Err(());
                             }
-                            self.out.push(byte);
+                            self.out.values.push(byte);
                         }
                         self.pos = *from + 1;
                     } else {
@@ -807,7 +830,7 @@ impl Substitution {
                     if !copy_piece(&mut self.out, &self.subject, at, self.subject.len(), work)? {
                         return Ok(Step::Paused);
                     }
-                    return Ok(Step::Done((self.count, std::mem::take(&mut self.out))));
+                    return Ok(Step::Done((self.count, self.out.take())));
                 }
             }
         }
