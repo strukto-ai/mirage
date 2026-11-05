@@ -341,7 +341,7 @@ describe('Router whole lines', () => {
       await ws.shell('cd /opt/app && make')
       const argv = box.argvs.at(-1) ?? []
       expect(argv.slice(0, 2)).toEqual(['/bin/sh', '-c'])
-      expect(argv[2]).toContain('exec bash "$@" -c "$l"')
+      expect(argv[2]).toContain('set -- "$@" -c "$1"; shift 2; exec bash "$@"')
       expect(argv.slice(3)).toEqual(['sh', 'cd /opt/app && make', 'box'])
       await byLine.shell('cd /opt/app && make')
       expect(lined.argvs.at(-1)).toEqual(['/bin/sh', '-c', 'cd /opt/app && make'])

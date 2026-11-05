@@ -249,7 +249,8 @@ export function programsProbe(): string {
  * The argv that runs a whole line in a sandbox's bash, through the
  * `/bin/sh -c` every box has. The line travels as `$1`, the runtime's name
  * as `$2` and bash's options after them, never re-quoted, so no quoting the
- * box's sh could misread; a box without bash answers 127 and says so.
+ * box's sh could misread, and the wrapper sets no variable the line could
+ * see; a box without bash answers 127 and says so.
  * Mirrors Python's `bash_line_argv`.
  *
  * @param name the runtime's name, for the missing-bash message.
@@ -265,7 +266,7 @@ export function bashLineArgv(
   const script =
     'command -v bash >/dev/null 2>&1 || ' +
     '{ echo "mirage: $2 has no bash; a line using the sandbox\'s own ' +
-    'files needs bash" >&2; exit 127; }; l=$1; shift 2; exec bash "$@" -c "$l"'
+    'files needs bash" >&2; exit 127; }; set -- "$@" -c "$1"; shift 2; exec bash "$@"'
   return ['/bin/sh', '-c', script, 'sh', line, name, ...options]
 }
 

@@ -364,7 +364,7 @@ async def test_a_whole_line_runs_in_bash_and_a_line_capture_keeps_sh():
         await ws.shell("cd /opt/app && make")
         argv = box.argvs[-1]
         assert argv[:2] == ("/bin/sh", "-c")
-        assert 'exec bash "$@" -c "$l"' in argv[2]
+        assert 'set -- "$@" -c "$1"; shift 2; exec bash "$@"' in argv[2]
         assert argv[3:] == ("sh", "cd /opt/app && make", "box")
         await by_line.shell("cd /opt/app && make")
         assert lined.argvs[-1] == ("/bin/sh", "-c", "cd /opt/app && make")
