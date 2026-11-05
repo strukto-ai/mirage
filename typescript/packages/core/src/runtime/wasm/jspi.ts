@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ByteSource } from '../../io/types.ts'
+import { YieldBudget } from '../../io/yield_budget.ts'
 import { INTERRUPTED_STATUS } from '../../shell/constants.ts'
 import { abortable, makeAbortError } from '../../utils/abort.ts'
 import { boundSystemClock, systemNow } from '../../utils/clock.ts'
@@ -31,6 +32,13 @@ interface Jspi {
 
 const jspi = WebAssembly as unknown as Partial<Jspi>
 
+// Guests run in the isolate's own memory, which every workspace there
+// shares: a Worker's 128 MB holds Mirage and one guest's heap, held to
+// 64 MiB, but not two. A run that would be a second is refused rather than
+// held back, since a pipeline's stages wait on each other.
+const GUESTS = 1
+let guests = 0
+
 /** Whether this engine can suspend a wasm guest on a promise (JSPI). */
 export function jspiAvailable(): boolean {
   return typeof jspi.Suspending === 'function' && typeof jspi.promising === 'function'
@@ -46,7 +54,8 @@ export function jspiAvailable(): boolean {
  *
  * The guest holds the isolate's thread between its calls: a stop ends it
  * at the next call it makes, and one that never calls out runs on until
- * the host's own limit ends it.
+ * the host's own limit ends it. One guest runs in an isolate at a time,
+ * since each holds its heap in the isolate's memory.
  *
  * @param module - the compiled module.
  * @param trapPrefix - the command name a wasm trap's stderr line starts with.
@@ -63,7 +72,8 @@ export class JspiExecution {
    * Run the module once and return `[stdout, stderr, exitCode]`, as
    * `WasmExecution.run` does: a write to a stream with a sink waits until
    * the sink takes it, and a stop ends the guest at its next call, lands
-   * the files it left open, and rejects with the stop.
+   * the files it left open, and rejects with the stop. A run while another
+   * guest runs in the isolate fails at once, saying so.
    *
    * @param argv - full argv, the program name included.
    * @param stdin - the run's input, which the guest takes as it reads it.
@@ -83,6 +93,32 @@ export class JspiExecution {
     stop?: AbortSignal,
   ): Promise<[Uint8Array, Uint8Array | null, number]> {
     if (this.closed) throw new Error('WASM execution is closed')
+    if (guests >= GUESTS) {
+      const refusal = `${this.trapPrefix}: another program is running in this isolate, which runs one at a time\n`
+      return [new Uint8Array(), new TextEncoder().encode(refusal), 1]
+    }
+    guests += 1
+    try {
+      return await this.runGuest(argv, stdin, env, view, output, errors, stop)
+    } finally {
+      guests -= 1
+    }
+  }
+
+  close(): Promise<void> {
+    this.closed = true
+    return Promise.resolve()
+  }
+
+  private async runGuest(
+    argv: string[],
+    stdin: ByteSource | null,
+    env: [string, string][],
+    view: WasmView,
+    output?: OutputFn,
+    errors?: OutputFn,
+    stop?: AbortSignal,
+  ): Promise<[Uint8Array, Uint8Array | null, number]> {
     const { Suspending, promising } = jspi as Jspi
     const module = await abortable(this.module(), stop)
     // A call still waiting when the run ends (input that has not come)
@@ -91,9 +127,14 @@ export class JspiExecution {
     const halt = stop === undefined ? ended.signal : AbortSignal.any([stop, ended.signal])
     const host = new GuestHost(view, stdin, output, errors, halt, this.trapPrefix)
     const stopped = (): boolean => stop?.aborted === true
+    // A guest whose calls the host answers at once, from what it holds,
+    // resumes before the loop runs a timer, a deadline's among them; the
+    // budget gives the loop its turns.
+    const budget = new YieldBudget()
     // A stop ends the guest at the call it makes, as a signal ends a
     // process at its next syscall.
     const call = async (request: GuestCall): Promise<unknown> => {
+      await budget.run()
       if (stopped()) throw new GuestExit(INTERRUPTED_STATUS)
       try {
         return await host.answer(request)
@@ -129,16 +170,15 @@ export class JspiExecution {
         }
       }
       if (stopped()) throw makeAbortError(stop)
-      return host.result({ exitCode, trap, lost: await drive(wasi.closeAll()) })
+      const lost = await drive(wasi.closeAll())
+      // A stop while the guest's files close still ends the run as a stop,
+      // as a worker's does.
+      if (stopped()) throw makeAbortError(stop)
+      return host.result({ exitCode, trap, lost })
     } finally {
       ended.abort()
       // A stopped guest left its files open; what they wrote still lands.
       await host.land()
     }
-  }
-
-  close(): Promise<void> {
-    this.closed = true
-    return Promise.resolve()
   }
 }

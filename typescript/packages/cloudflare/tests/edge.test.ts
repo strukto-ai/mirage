@@ -145,11 +145,23 @@ describe('mirage in workerd', () => {
     expect(next?.stdout).toBe('2\n')
   })
 
+  it('runs one node in the isolate at a time, refusing a second at once', async () => {
+    const [both, next] = await run([
+      `node -e "setTimeout(() => console.log('a'), 200)" | node -e "console.log('b')"`,
+      'node -e "console.log(1 + 1)"',
+    ])
+    expect(both?.stderr).toBe(
+      'js: another program is running in this isolate, which runs one at a time\n',
+    )
+    expect(next?.stdout).toBe('2\n')
+  })
+
   it("waits out node's timers, and ends one at its line's deadline as it next calls out", async () => {
-    const [timer, ticking, next] = await run(
+    const [timer, ticking, statting, next] = await run(
       [
         `node -e "setTimeout(() => console.log('late'), 50); console.log('first')"`,
         'node -e "setInterval(() => {}, 10)"',
+        `node -e "const fs = require('fs'); fs.writeFileSync('/data/s', ''); for (;;) fs.statSync('/data/s')"`,
         'node -e "console.log(1 + 1)"',
       ],
       undefined,
@@ -157,6 +169,7 @@ describe('mirage in workerd', () => {
     )
     expect(timer?.stdout).toBe('first\nlate\n')
     expect(ticking?.exit).toBe(124)
+    expect(statting?.exit).toBe(124)
     expect(next?.stdout).toBe('2\n')
   }, 60_000)
 

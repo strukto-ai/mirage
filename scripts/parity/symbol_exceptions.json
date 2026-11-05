@@ -1133,7 +1133,8 @@
     "drive": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly. drive runs the steps, at once or awaiting each answer.",
     "resume": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly. resume is drive from its first promise on.",
     "settle": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly. settle runs them where every answer is at hand, as a worker's are.",
-    "thenable": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly. thenable tells a promise answer from one at hand."
+    "thenable": "A host call that a worker guest blocks on and a JSPI guest awaits is written once, as the steps it yields; Python's guest always blocks on its thread, so its WasiFs calls the host directly. thenable tells a promise answer from one at hand.",
+    "failed": "Maps a failed import to its errno, passing GuestExit through, which _call_guarded does in Python."
    }
   },
   "runtime/wasm/loader": {

@@ -81,4 +81,19 @@ describe.skipIf(home === undefined || !jspiAvailable())('qjs in the host isolate
     const [, , code] = await run('timeout 1 node -e "setInterval(() => {}, 10)"')
     expect(code).toBe(124)
   })
+
+  it('ends a guest whose calls the host answers at once, at its deadline', async () => {
+    const [, , code] = await run(
+      `timeout 1 node -e "const fs = require('fs'); fs.writeFileSync('/data/s', ''); for (;;) fs.statSync('/data/s')"`,
+    )
+    expect(code).toBe(124)
+  })
+
+  it('runs one guest in the isolate at a time, and refuses a second at once', async () => {
+    const [, err] = await run(
+      `node -e "setTimeout(() => console.log('a'), 200)" | node -e "console.log('b')"`,
+    )
+    expect(err).toBe('js: another program is running in this isolate, which runs one at a time\n')
+    expect(await run('node -e "console.log(1)"')).toEqual(['1\n', '', 0])
+  })
 })

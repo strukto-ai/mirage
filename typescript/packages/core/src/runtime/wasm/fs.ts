@@ -955,6 +955,12 @@ const CALLS = [
   'path_unlink_file',
 ] as const
 
+/** A failed call's errno; a `GuestExit` passes through, so it ends `_start`. */
+function failed(err: unknown): number {
+  if (err instanceof GuestExit) throw err
+  return errnoFor(err)
+}
+
 /**
  * The guest's preview1 imports over one run's `WasiFs`, each mapping a
  * failure to a guest errno. Filesystem-shaped errors get their own errno;
@@ -970,10 +976,6 @@ export function wasiImports(
   wasi: WasiFs,
   wrap: (call: (...args: never[]) => unknown) => unknown = (call) => call,
 ): WebAssembly.Imports {
-  const failed = (err: unknown): number => {
-    if (err instanceof GuestExit) throw err
-    return errnoFor(err)
-  }
   const calls: Record<string, unknown> = {
     proc_exit: wrap((code: number) => wasi.proc_exit(code)),
   }
