@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { expect, it, vi } from 'vitest'
-import { Md5, Sha1, md5Hex, md5HexAsync, sha1Hex, sha1LengthTrailer } from './hash.ts'
+import { Digest, md5Hex, md5HexAsync, sha1Hex } from './hash.ts'
 
 it.each([0, 1, 55, 56, 63, 64, 65, 127, 128, 16383, 16384, 16385, 1000000])(
   'preserves MD5 across block/padding boundaries (%i bytes)',
@@ -47,33 +47,22 @@ function splitAt(data: Uint8Array, sizes: readonly number[]): Uint8Array[] {
 }
 
 it.each([0, 55, 56, 64, 200_000])(
-  'Sha1 fed in uneven chunks agrees with sha1Hex (%i bytes)',
+  'SHA-1 fed in uneven chunks agrees with sha1Hex (%i bytes)',
   async (size) => {
     const data = seeded(size, size + 1)
-    const hasher = new Sha1()
+    const hasher = new Digest('sha1')
     for (const chunk of splitAt(data, [1, 63, 65, 16_387])) hasher.update(chunk)
     expect(hasher.digest()).toBe(await sha1Hex(data))
   },
 )
 
 it.each([0, 55, 56, 64, 200_000])(
-  'Md5 fed in uneven chunks agrees with node (%i bytes)',
+  'MD5 fed in uneven chunks agrees with node (%i bytes)',
   (size) => {
     const data = seeded(size, size + 1)
-    const hasher = new Md5()
+    const hasher = new Digest('md5')
     for (const chunk of splitAt(data, [1, 63, 65, 16_387])) hasher.update(chunk)
     expect(hasher.digest()).toBe(createHash('md5').update(data).digest('hex'))
-  },
-)
-
-// Hashing 512 MiB in a unit test is too slow, so the length trailer is
-// checked directly where the bit length crosses 32 bits.
-it.each([2 ** 29 - 1, 2 ** 29, 2 ** 32 + 3])(
-  'sha1LengthTrailer is the big-endian 64-bit bit length (%i bytes)',
-  (byteLength) => {
-    const expected = new Uint8Array(8)
-    new DataView(expected.buffer).setBigUint64(0, BigInt(byteLength) * 8n, false)
-    expect(sha1LengthTrailer(byteLength)).toEqual(expected)
   },
 )
 
@@ -97,4 +86,38 @@ it.each([
     clearTimeout(timer)
     vi.unstubAllGlobals()
   }
+})
+
+it.each(['md5', 'sha1', 'sha256'] as const)(
+  'keeps concurrent %s digests independent across input windows',
+  (algorithm) => {
+    const data = seeded(1024 * 1024 + 65, 42).subarray(7)
+    const first = new Digest(algorithm)
+    const second = new Digest(algorithm)
+    try {
+      first.update(data.subarray(0, 63))
+      second.update(data.subarray(63))
+      first.update(data.subarray(63))
+      expect(first.digest()).toBe(createHash(algorithm).update(data).digest('hex'))
+      expect(second.digest()).toBe(createHash(algorithm).update(data.subarray(63)).digest('hex'))
+    } finally {
+      first.close()
+      second.close()
+    }
+  },
+)
+
+it('releases a digest after completion or abandonment', () => {
+  const completed = new Digest('md5')
+  expect(completed.digest()).toBe(createHash('md5').digest('hex'))
+  expect(() => {
+    completed.update(new Uint8Array([1]))
+  }).toThrow()
+  completed.close()
+  const abandoned = new Digest('sha1')
+  abandoned.update(new Uint8Array([1, 2]))
+  abandoned.close()
+  abandoned.close()
+  expect(() => abandoned.digest()).toThrow()
+  expect(md5Hex(new Uint8Array())).toBe(createHash('md5').digest('hex'))
 })
