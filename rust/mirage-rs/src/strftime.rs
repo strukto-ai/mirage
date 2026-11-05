@@ -93,43 +93,14 @@ impl Strftime {
     }
 
     pub(crate) fn utc(epoch: i64, nanosecond: u32) -> Result<Self, StreamError> {
-        let days = epoch.div_euclid(86400);
-        let cycle = days.div_euclid(146097);
-        let mut year = 1970 + cycle * 400;
-        let mut day = days.rem_euclid(146097);
-        while day >= 365 + i64::from(leap(year)) {
-            day -= 365 + i64::from(leap(year));
-            year += 1;
-        }
-        let mut month = 1;
-        for length in [
-            31,
-            28 + i64::from(leap(year)),
-            31,
-            30,
-            31,
-            30,
-            31,
-            31,
-            30,
-            31,
-            30,
-            31,
-        ] {
-            if day < length {
-                break;
-            }
-            day -= length;
-            month += 1;
-        }
-        let seconds = epoch.rem_euclid(86400);
+        let (year, month, day, hour, minute, second) = crate::calendar::fields(i128::from(epoch));
         Self::new(Config {
-            year,
-            month,
-            day: day + 1,
-            hour: seconds / 3600,
-            minute: seconds / 60 % 60,
-            second: seconds % 60,
+            year: year as i64,
+            month: month as usize,
+            day: day as i64,
+            hour: hour as i64,
+            minute: minute as i64,
+            second: second as i64,
             nanosecond,
             epoch,
             offset: 0,

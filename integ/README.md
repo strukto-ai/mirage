@@ -100,6 +100,10 @@ its host adapters supply only path, stat, link-target and identity facts.
 The existing Rust, builtin and executor filters cover this path.
 The same filters select `expr` grammar, arithmetic and character operations;
 the hosts only pass argument bytes and locale and schedule bounded steps.
+The Rust date parser and calendar use the existing whole-host filters too;
+time-zone lookups stay in the hosts and the date command yields between
+parser steps. Synchronous date convenience helpers retain their interfaces
+and each host's timestamp precision.
 
 Streaming writes are covered by the shared lifecycle corpus and mirrored
 writer, dispatcher, disk and S3 tests. They pin named outputs, duplicate
