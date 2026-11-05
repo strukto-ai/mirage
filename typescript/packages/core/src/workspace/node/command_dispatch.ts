@@ -674,7 +674,14 @@ async function runArgv(
     name,
     session,
     registry,
-    invocationRouting(name, argv.args, session.cwd, registry, context.frame.routing),
+    invocationRouting(
+      name,
+      argv.args,
+      session.cwd,
+      registry,
+      context.frame.routing,
+      namespace.sessionLinks(session),
+    ),
   )
   const boundary = refusedExternal
     ? [...argv.operands]
@@ -987,7 +994,14 @@ async function routeArgv(
     ]
   }
 
-  const routing = invocationRouting(name, argv.args, session.cwd, registry, context.frame.routing)
+  const routing = invocationRouting(
+    name,
+    argv.args,
+    session.cwd,
+    registry,
+    context.frame.routing,
+    namespace.sessionLinks(session),
+  )
   const consumer = lookup(name, session, registry, routing)
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)

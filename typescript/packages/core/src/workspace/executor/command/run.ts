@@ -237,6 +237,7 @@ export async function runOnMount(
     session.cwd,
     registry,
     context.frame.routing,
+    namespace === undefined ? null : namespace.sessionLinks(session),
   )
   if (routing === undefined) throw new Error(`${cmdName}: run outside a routed line`)
   const [lineRuntime, denial] = lineRuntimeFor(cmdName, routing)

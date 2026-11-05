@@ -168,6 +168,8 @@ async def expand_argv(
         session.cwd,
         registry,
         context.frame.routing,
+        namespace,
+        session,
     )
     consumer = lookup(name, session, registry, routing)
     refused = runtime_refused(name, session, registry, routing)

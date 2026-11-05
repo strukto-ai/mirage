@@ -808,3 +808,20 @@ describe('Router review fixes', () => {
     }
   })
 })
+
+describe('Router linked scripts', () => {
+  it("keeps a script linked to Mirage's own root on its runtime", async () => {
+    const box = new Box()
+    const ws = workspace(box)
+    try {
+      await ws.shell('cd /ram && python3 -c 1')
+      await ws.vfs.write('/hello.py', ENC.encode('print(1)\n'))
+      await ws.shell('ln -s /hello.py /ram/link.py')
+      box.lines.length = 0
+      expect(await out(ws, 'python3 /ram/link.py')).toBe('monty\n')
+      expect(box.lines).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+})

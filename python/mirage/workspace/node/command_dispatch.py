@@ -764,7 +764,13 @@ async def _run_argv(
         session,
         registry,
         invocation_routing(
-            name, argv.args, session.cwd, registry, context.frame.routing
+            name,
+            argv.args,
+            session.cwd,
+            registry,
+            context.frame.routing,
+            namespace,
+            session,
         ),
     )
     boundary = (
@@ -1076,7 +1082,13 @@ async def _route_argv(
         )
 
     routing = invocation_routing(
-        name, argv.args, session.cwd, registry, context.frame.routing
+        name,
+        argv.args,
+        session.cwd,
+        registry,
+        context.frame.routing,
+        namespace,
+        session,
     )
     consumer = lookup(name, session, registry, routing)
     if consumer is Consumer.EXTERNAL:

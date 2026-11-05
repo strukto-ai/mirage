@@ -35,7 +35,8 @@ import { STDIN_OPERAND } from '../../../runtime/source.ts'
 import type { RouteDecision, RuntimeIdentity } from '../../../runtime/types.ts'
 import { INLINE_FLAGS } from '../../lookup/constants.ts'
 import { type MountRegistry } from '../../mount/registry.ts'
-import type { SessionAccess } from '../../../view/types.ts'
+import type { NamespaceLinks, SessionAccess } from '../../../view/types.ts'
+import { CycleError } from '../../../utils/path.ts'
 import { classifyBarePath } from '../../expand/classify/index.ts'
 import { isAssignment } from '../../../commands/builtin/generic/awk.ts'
 
@@ -460,15 +461,16 @@ export function interpreterScript(
  * The decision one invocation runs under: its line's, except that an
  * interpreter the decision keeps off a sandbox (`unserved`) runs on that
  * runtime when the invocation stands on, or runs a script on, a path no
- * sandbox is served (`MountRegistry.unserved`). Judged per invocation,
- * however the line reached it (a nested line, a shebang). Mirrors Python's
- * `invocation_routing`.
+ * sandbox is served (`MountRegistry.unserved`), the script's links followed.
+ * Judged per invocation, however the line reached it (a nested line, a
+ * shebang). Mirrors Python's `invocation_routing`.
  *
  * @param name the command name.
  * @param words the words after the name.
  * @param cwd the invocation's working directory.
  * @param registry the mounts.
  * @param routing the line's decision.
+ * @param links the session's links a script follows; null for none.
  */
 export function invocationRouting<R extends RuntimeIdentity>(
   name: string,
@@ -476,17 +478,39 @@ export function invocationRouting<R extends RuntimeIdentity>(
   cwd: string,
   registry: MountRegistry,
   routing: RouteDecision<R> | undefined,
+  links: NamespaceLinks | null,
 ): RouteDecision<R> | undefined {
   const unserved = routing?.unserved
   if (routing === undefined || unserved === undefined || !Object.hasOwn(unserved, name))
     return routing
   const script = interpreterScript(name, words, cwd)
-  const spots = script === null ? [cwd] : [cwd, script.virtual]
+  const spots = script === null ? [cwd] : [cwd, followed(script.virtual, links)]
   if (!spots.some((spot) => registry.unserved(spot))) return routing
   return {
     ...routing,
     bindings: Object.assign(Object.create(null) as Record<string, R | null>, routing.bindings, {
       [name]: unserved[name] ?? null,
     }),
+  }
+}
+
+// Where this module's debug lines go: unset by default, so it logs nothing.
+export const logger: { debug?: (message: string) => void } = {}
+
+/**
+ * `path` with the session's links followed; as named without links or when
+ * they loop. Mirrors Python's `_followed`.
+ *
+ * @param path an absolute virtual path.
+ * @param links the session's links; null for none.
+ */
+function followed(path: string, links: NamespaceLinks | null): string {
+  if (links === null) return path
+  try {
+    return links.follow(path)
+  } catch (caught) {
+    if (!(caught instanceof CycleError)) throw caught
+    logger.debug?.(`${path}: links loop; judged as named: ${String(caught)}`)
+    return path
   }
 }

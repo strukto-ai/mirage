@@ -866,3 +866,18 @@ async def test_a_whole_line_carries_the_sessions_shell_options(setup, options):
         )
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_script_linked_to_mirages_own_root_stays_on_its_runtime():
+    box = Box()
+    ws = workspace(box)
+    try:
+        await ws.shell("cd /ram && python3 -c 1")
+        await ws.vfs.write("/hello.py", b"print(1)\n")
+        await ws.shell("ln -s /hello.py /ram/link.py")
+        box.lines.clear()
+        assert await out(ws, "python3 /ram/link.py") == b"monty\n"
+        assert box.lines == []
+    finally:
+        await ws.close()

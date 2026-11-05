@@ -450,8 +450,14 @@ export class Router {
     const routed =
       one.ctx === undefined
         ? decision
-        : (invocationRouting(command, one.ctx.argv, one.ctx.cwd, this.registry, decision) ??
-          decision)
+        : (invocationRouting(
+            command,
+            one.ctx.argv,
+            one.ctx.cwd,
+            this.registry,
+            decision,
+            this.namespace.sessionLinks(one.session ?? null),
+          ) ?? decision)
     const serving = Object.hasOwn(routed.bindings, command)
       ? (routed.bindings[command] ?? null)
       : routed.fallback

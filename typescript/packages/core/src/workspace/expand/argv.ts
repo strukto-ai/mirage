@@ -140,6 +140,7 @@ export async function expandArgv(
     session.cwd,
     registry,
     context.frame.routing,
+    links,
   )
   const consumer = lookup(name, session, registry, routing)
   const refused = runtimeRefused(name, session, registry, routing)

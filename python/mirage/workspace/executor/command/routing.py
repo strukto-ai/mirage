@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import dataclasses
+import logging
 from collections.abc import Mapping, Sequence
 
 from mirage.commands.builtin.generic.awk import is_assignment
@@ -36,9 +37,14 @@ from mirage.rs.find import find_layout
 from mirage.runtime.source import STDIN_OPERAND
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.types import PathSpec
+from mirage.utils.path import CycleError
 from mirage.workspace.expand.classify.path import classify_bare_path
 from mirage.workspace.lookup.constants import INLINE_FLAGS
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.mount.namespace import Namespace
+from mirage.workspace.session import SessionState
+
+logger = logging.getLogger(__name__)
 
 # Commands a bare invocation points at the working directory, mapped to
 # the typed spelling their synthetic operand carries. GNU find/tree/du/
@@ -577,12 +583,15 @@ def invocation_routing(
     cwd: str,
     registry: MountRegistry,
     routing: RouteDecision[RuntimeIdentity] | None,
+    namespace: Namespace | None,
+    session: SessionState | None,
 ) -> RouteDecision[RuntimeIdentity] | None:
     """The decision one invocation runs under: its line's, except that an
     interpreter the decision keeps off a sandbox (``unserved``) runs on
     that runtime when the invocation stands on, or runs a script on, a
-    path no sandbox is served (``MountRegistry.unserved``). Judged per
-    invocation, however the line reached it (a nested line, a shebang).
+    path no sandbox is served (``MountRegistry.unserved``), the script's
+    links followed. Judged per invocation, however the line reached it (a
+    nested line, a shebang).
 
     Args:
         name (str): the command name.
@@ -590,14 +599,40 @@ def invocation_routing(
         cwd (str): the invocation's working directory.
         registry (MountRegistry): the mounts.
         routing (RouteDecision | None): the line's decision.
+        namespace (Namespace | None): the links a script follows; None
+            for none.
+        session (SessionState | None): the session whose links those
+            are; None for the one the current context runs as.
     """
     if routing is None or name not in routing.unserved:
         return routing
     script = interpreter_script(name, words, cwd)
-    spots = [cwd] if script is None else [cwd, script.virtual]
+    spots = [cwd]
+    if script is not None:
+        spots.append(_followed(script.virtual, namespace, session))
     if not any(registry.unserved(spot) for spot in spots):
         return routing
     return dataclasses.replace(
         routing,
         bindings={**routing.bindings, name: routing.unserved[name]},
     )
+
+
+def _followed(
+    path: str, namespace: Namespace | None, session: SessionState | None
+) -> str:
+    """``path`` with the session's links followed; as named without a
+    namespace or when they loop.
+
+    Args:
+        path (str): an absolute virtual path.
+        namespace (Namespace | None): the links; None for none.
+        session (SessionState | None): whose view of them.
+    """
+    if namespace is None:
+        return path
+    try:
+        return namespace.session_links(session).follow(path)
+    except CycleError:
+        logger.debug("%s: links loop; judged as named", path, exc_info=True)
+        return path

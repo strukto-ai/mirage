@@ -549,7 +549,13 @@ class Router:
         command = one.judgment.command
         if one.ctx is not None:
             routed = invocation_routing(
-                command, one.ctx.argv, one.ctx.cwd, self._registry, decision
+                command,
+                one.ctx.argv,
+                one.ctx.cwd,
+                self._registry,
+                decision,
+                self._namespace,
+                one.session,
             )
             assert routed is not None
             decision = routed

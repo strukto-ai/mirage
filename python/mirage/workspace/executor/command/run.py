@@ -258,7 +258,13 @@ async def run_on_mount(
         flag_kwargs = scalar_find_flags(flag_kwargs)
 
     routing = invocation_routing(
-        cmd_name, argv, session.cwd, registry, context.frame.routing
+        cmd_name,
+        argv,
+        session.cwd,
+        registry,
+        context.frame.routing,
+        namespace,
+        session,
     )
     assert routing is not None
     line_runtime, denial = line_runtime_for(cmd_name, routing)
