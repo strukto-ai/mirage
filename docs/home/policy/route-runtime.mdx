@@ -48,9 +48,9 @@ on a script there, since the sandbox cannot see those files; with no other
 runtime capturing it, it stays on the sandbox. This is judged at each run,
 so a script's shebang counts, and `python3 -c 1; cd /data; python3 -c 2`
 runs the first on Monty and the second in the sandbox; `ws.explain(line)`
-names the runtime of each. A line placed on a sandbox by name (`runtime=`,
-a `Route`) runs its interpreters there, and `Route("workspace")` keeps them
-on Monty or QuickJS. Script CLIs run on Monty or QuickJS.
+names the runtime of each. A line a policy routes to a sandbox (a `Route`)
+runs its interpreters there, and `Route("workspace")` keeps them on Monty or
+QuickJS. Script CLIs run on Monty or QuickJS.
 
 A program built in a workspace folder (`./a.out`) runs in the sandbox when
 its mount allows `exec`; one on Mirage's own `/` answers 126.
