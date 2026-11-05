@@ -65,6 +65,9 @@ To choose a runtime for each command line, see [Route Runtime](/home/policy/rout
 - `@external` does not take `python`, `python3`, `node` or `js`: Mirage has
   those itself and gives them to the Python or JavaScript runtime in the list.
   Name them to send them somewhere else.
+- With `mount_type: ssh`, a binary on a mount other than `/` (`./a.out`)
+  runs in the sandbox that takes `@external` when its mount's mode is `exec`;
+  otherwise it exits 126.
 - A program no runtime takes exits 127, `command not found`.
 - A name only `@external` takes has no file, so `which`, `command -v` and
   `type` report it missing; running it still works.
