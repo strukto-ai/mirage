@@ -926,6 +926,22 @@ describe('SandboxMounts', () => {
     await ws.close()
   })
 
+  // A mount the sandbox held at a prefix before it was served is no cover:
+  // once the server ends it shows again, and the prefix is served over it.
+  it("serves again a prefix served over a mount of the sandbox's", async () => {
+    const sandbox = new FakeSandbox('ssh')
+    sandbox.table.set('/data', ['vol', 'ext4'])
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    sandbox.ends.get('/data')?.()
+    sandbox.table.set('/data', ['vol', 'ext4'])
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect((await agent.shell('python3 again.py')).exitCode).toBe(0)
+    expect(sandbox.served()).toEqual(['/data', '/my notes', '/data'])
+    await ws.close()
+  })
+
   // A covered prefix the workspace no longer mounts is dropped, not refused.
   it('does not refuse a covered prefix the workspace dropped', async () => {
     const sandbox = new FakeSandbox('ssh')
