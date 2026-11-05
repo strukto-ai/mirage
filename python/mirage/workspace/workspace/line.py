@@ -36,6 +36,7 @@ from mirage.policy import (
 from mirage.policy.builtin.output_cap import LINE_NAME
 from mirage.policy.types import RouteContext
 from mirage.runtime.base import Runtime
+from mirage.runtime.constants import WHOLE_LINE
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import OutputFn, RunResult
 from mirage.shell.console import Channel, JobConsole
@@ -100,7 +101,7 @@ async def run_whole_line(
         profile_limits=session.command_limits,
     )
     ctx = Context(
-        flags={"c": command},
+        flags={"c": command, "bash": WHOLE_LINE not in runtime.captures},
         stdin=stdin,
         env=env_snapshot(session),
         cwd=PathSpec.from_str_path(session.cwd),

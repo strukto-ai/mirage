@@ -15,6 +15,7 @@
 import pytest
 
 from mirage.shell.parse import env_reads, implicit_reads, opaque_reads, parse
+from mirage.shell.parse.env import parameter_reads
 
 
 @pytest.mark.parametrize(
@@ -156,3 +157,23 @@ def test_opaque_reads(command, opaque):
 )
 def test_implicit_reads(command, names):
     assert implicit_reads(parse(command)) == frozenset(names)
+
+
+@pytest.mark.parametrize(
+    "line, reads",
+    [
+        (
+            "echo $1 ${10} $# $@ $* $$ $! $- $_",
+            {"$1", "$10", "$#", "$@", "$*", "$$", "$!", "$-", "$_"},
+        ),
+        ("echo $? | cat", {"$?"}),
+        ("true | echo $?", {"$?"}),
+        ("cat <<EOF\n$?\nEOF", {"$?"}),
+        ("a && b; echo $?", set()),
+        ("a; echo $PIPESTATUS", set()),
+        ("echo $PIPESTATUS", {"PIPESTATUS"}),
+        ("echo $X '$1'", set()),
+    ],
+)
+def test_parameter_reads_names_what_a_fresh_shell_answers_itself(line, reads):
+    assert parameter_reads(parse(line)) == frozenset(reads)

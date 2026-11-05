@@ -14,6 +14,7 @@
 
 import asyncio
 import logging
+import time
 import uuid
 from collections.abc import Sequence
 from typing import Any, ClassVar
@@ -28,10 +29,14 @@ from mirage.runtime.sandbox.config import SandboxConfig, check_mount_type
 from mirage.runtime.sandbox.constants import (
     EXEC_ID,
     FAKETIME_PROBE_SECONDS,
+    PROGRAMS_PROBE_SECONDS,
+    PROGRAMS_RETRY_SECONDS,
     REAP_ABSENT,
     REAP_WAIT_SECONDS,
+    bash_line_argv,
     faketime_env,
     faketime_probe,
+    programs_probe,
     reap_line,
 )
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
@@ -44,6 +49,7 @@ from mirage.runtime.types import (
 from mirage.shell.join import shell_join
 from mirage.types import PathSpec
 from mirage.utils.clock import bound_system_clock
+from mirage.workspace.lookup.constants import INTERPRETER_NAMES
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +107,12 @@ class RemoteSandbox(
         # so a later run asks again.
         self._faketime: dict[str, str | None] = {}
         self._faketime_locks: dict[str, asyncio.Lock] = {}
+        # The interpreters this box holds, asked once by the first line
+        # that may run one: None until asked; after a failed ask, none
+        # until the retry time passes.
+        self._programs: frozenset[str] | None = None
+        self._programs_retry: float | None = None
+        self._programs_lock = asyncio.Lock()
         check_mount_type(self.name, self.config.mount_type)
         if self.config.mount_type is not None:
             if not isinstance(self, PipeTransportMixin):
@@ -156,8 +168,13 @@ class RemoteSandbox(
             errors (OutputFn | None): receives stderr as it arrives.
         """
         line = ctx.flags.get("c")
+        text = line if isinstance(line, str) else ""
+        if ctx.flags.get("bash") is True:
+            return await self._run_argv(
+                bash_line_argv(self.name, text), ctx, output, errors, text
+            )
         return await self._run_argv(
-            ("/bin/sh", "-c", line if isinstance(line, str) else ""),
+            ("/bin/sh", "-c", text),
             ctx,
             output,
             errors,
@@ -184,6 +201,7 @@ class RemoteSandbox(
         ctx: Context,
         output: OutputFn | None,
         errors: OutputFn | None,
+        shown: str | None = None,
     ) -> RunResult:
         """Connect once, bring the served mounts in step, then run.
 
@@ -192,6 +210,8 @@ class RemoteSandbox(
             ctx (Context): the run's stdin, environment and cwd.
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
+            shown (str | None): what the run record names, None for the
+                argv itself (a wrapped line names the line).
         """
         await self._ensure_connected()
         if self._mounts is not None:
@@ -208,7 +228,9 @@ class RemoteSandbox(
                 {
                     "runtime": self.name,
                     "tag": exec_id,
-                    "command": shell_join(argv),
+                    "command": shown
+                    if shown is not None
+                    else shell_join(argv),
                 },
             )
         try:
@@ -347,6 +369,73 @@ class RemoteSandbox(
                         "%s: no libfaketime, so programs run on its clock",
                         self.name,
                     )
+
+    @property
+    def offered_captures(self) -> tuple[str, ...]:
+        found = self._programs if self._serves_interpreters() else None
+        if not found:
+            return self.captures
+        return (*self.captures, *sorted(found - set(self.captures)))
+
+    @property
+    def programs_pending(self) -> bool:
+        if not self._serves_interpreters():
+            return False
+        if self._programs is None:
+            return True
+        return (
+            self._programs_retry is not None
+            and time.monotonic() >= self._programs_retry
+        )
+
+    async def probe_programs(self) -> None:
+        """Ask the box once which interpreters it holds, so its
+        ``@external`` takes those (``offered_captures``) and the language
+        runtimes keep the rest. Concurrent first lines share one ask; a
+        failed ask offers none until ``PROGRAMS_RETRY_SECONDS`` pass.
+        Mirrors TypeScript's ``SandboxRuntime.probePrograms``."""
+        async with self._programs_lock:
+            if not self.programs_pending:
+                return
+            try:
+                await self._ensure_connected()
+                async with asyncio.timeout(PROGRAMS_PROBE_SECONDS):
+                    found = await self.exec_line(
+                        programs_probe(), None, dict(self.config.env), "/"
+                    )
+            except Exception:
+                logger.debug(
+                    "%s: interpreter probe failed", self.name, exc_info=True
+                )
+                found = None
+            if found is not None and found.exit_code != 0:
+                logger.debug(
+                    "%s: interpreter probe exited %d: %r",
+                    self.name,
+                    found.exit_code,
+                    found.stderr,
+                )
+            if found is None or found.exit_code != 0:
+                self._programs = frozenset()
+                self._programs_retry = (
+                    time.monotonic() + PROGRAMS_RETRY_SECONDS
+                )
+                return
+            self._programs = (
+                frozenset(found.stdout.decode().split()) & INTERPRETER_NAMES
+            )
+            self._programs_retry = None
+
+    def _serves_interpreters(self) -> bool:
+        """Whether this box may take the interpreters: its captures hold
+        ``@external`` and it serves the workspace over SFTP, so a script
+        resolves there as in Mirage. A ``mount_type`` box is one box for
+        every session (a provider refuses it beside per-session boxes),
+        so one probe answers for all of them."""
+        return (
+            EXTERNAL_COMMANDS in self.captures
+            and self.config.mount_type == "ssh"
+        )
 
     def _sandbox_key(self) -> str:
         """Which sandbox a run of the current session goes to, which the

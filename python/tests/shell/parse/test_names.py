@@ -23,6 +23,7 @@ from mirage.shell.parse import (
     parse,
     referenced_names,
 )
+from mirage.shell.parse.names import assigned_names
 
 
 @pytest.mark.parametrize(
@@ -186,3 +187,15 @@ def test_arith_reads(command, names):
 )
 def test_assignment_values(command, values):
     assert assignment_values(parse(command)) == values
+
+
+@pytest.mark.parametrize(
+    "line, names",
+    [
+        ("X=1; Y=2 cmd", {"X", "Y"}),
+        ("export Z=3", {"Z"}),
+        ("echo $X", set()),
+    ],
+)
+def test_assigned_names_lists_every_assignment(line, names):
+    assert assigned_names(parse(line)) == frozenset(names)

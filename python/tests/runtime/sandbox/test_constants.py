@@ -21,6 +21,8 @@ import pytest
 from mirage.runtime.sandbox.constants import (
     EXEC_ID,
     REAP_ABSENT,
+    bash_line_argv,
+    programs_probe,
     reap_line,
     wrap_line,
 )
@@ -114,3 +116,45 @@ def test_the_stop_line_ends_a_run_that_ignores_term(path):
         if program.poll() is None:
             program.kill()
         program.stdout.close()
+
+
+def test_bash_line_argv_runs_the_line_in_bash_and_names_a_missing_bash():
+    ran = subprocess.run(
+        bash_line_argv("box", '[[ a == a ]] && echo "$0" ok'),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert ran.stdout == "bash ok\n"
+    missing = subprocess.run(
+        bash_line_argv("box", "true"),
+        capture_output=True,
+        text=True,
+        check=False,
+        env={"PATH": "/nonexistent"},
+    )
+    assert missing.returncode == 127
+    assert missing.stderr == (
+        "mirage: box has no bash; a line using the sandbox's own files "
+        "needs bash\n"
+    )
+
+
+def test_programs_probe_asks_each_interpreter_in_sorted_order():
+    assert programs_probe() == (
+        "for p in js node python python3; do "
+        'command -v "$p" >/dev/null 2>&1 && echo "$p"; done; true'
+    )
+
+
+def test_bash_line_argv_passes_the_line_and_the_name_as_positional_words():
+    assert bash_line_argv("box", "x") == (
+        "/bin/sh",
+        "-c",
+        "command -v bash >/dev/null 2>&1 || "
+        "{ echo \"mirage: $2 has no bash; a line using the sandbox's own "
+        'files needs bash" >&2; exit 127; }; exec bash -c "$1"',
+        "sh",
+        "x",
+        "box",
+    )

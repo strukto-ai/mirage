@@ -897,6 +897,12 @@ class Policies:
         self._placement = placement
         self._rescan()
 
+    @property
+    def has_placement(self) -> bool:
+        """Whether the workspace configured a ``route_policy``, which then
+        decides every line's placement on its own."""
+        return self._placement is not None
+
     def add(self, policy: Policy) -> None:
         """Register a policy after the existing ones.
 

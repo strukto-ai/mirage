@@ -17,6 +17,7 @@ from typing import Any
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
+from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.table import (
     DEFAULT_ENTRIES,
     NAMED,
@@ -100,12 +101,16 @@ class Runtimes:
         return entries
 
     def add(self, runtime: Runtime[Any] | str) -> Runtime[Any]:
-        """Append an entry to the ordered list.
+        """Add an entry to the ordered list.
 
-        The entry lands last, so it never steals a command an earlier
-        entry already captures (first capturer still wins). A name
-        builds like a config entry and fails loud; a duplicate name is
-        rejected before any state changes.
+        A remote line executor (a sandbox) lands after the ones already
+        listed, or first when there are none, so it takes the
+        interpreters it holds ahead of the language runtimes while an
+        earlier sandbox keeps what it took. Any other entry lands last
+        and never steals a command an earlier entry captures (first
+        capturer still wins). A name builds like a config entry and
+        fails loud; a duplicate name is rejected before any state
+        changes.
 
         Args:
             runtime (Runtime | str): a Runtime instance or a registry
@@ -115,11 +120,26 @@ class Runtimes:
             ValueError: unknown name or duplicate entry.
         """
         entry = build_runtime(runtime) if isinstance(runtime, str) else runtime
-        candidate = [*self._entries, entry]
+        at = len(self._entries)
+        if _remote_line(entry):
+            at = max(
+                (
+                    i + 1
+                    for i, e in enumerate(self._entries)
+                    if _remote_line(e)
+                ),
+                default=0,
+            )
+        candidate = [*self._entries[:at], entry, *self._entries[at:]]
         bindings = bind_commands(candidate)
         entry.bind(self._binding)
         self._install(candidate, bindings)
         return entry
+
+    def rebind(self) -> None:
+        """Bind the entries again, for one that learned what it can
+        serve (``Runtime.probe_programs``)."""
+        self._install(self._entries, bind_commands(self._entries))
 
     async def remove(self, name: str) -> None:
         """Unbind an entry's commands now and close it once it is idle.
@@ -175,3 +195,12 @@ class Runtimes:
 async def _retire(entry: Runtime[Any]) -> None:
     await entry.retire()
     await entry.close()
+
+
+def _remote_line(entry: Runtime[Any]) -> bool:
+    """Whether an entry runs whole lines on another machine (a sandbox).
+
+    Args:
+        entry (Runtime): the runtime entry.
+    """
+    return isinstance(entry, LineExecutorMixin) and entry.reach == "remote"

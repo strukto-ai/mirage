@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING
 
@@ -36,6 +37,28 @@ from mirage.workspace.session import SessionState
 
 if TYPE_CHECKING:
     from mirage.workspace.mount import MountRegistry
+
+
+def may_run_program(line: str, heads: frozenset[str]) -> bool:
+    """Whether a line may run an interpreter: it names one as a word
+    (``python3 x``, ``env python3 x``, ``xargs node``), or one of its
+    commands is a path a shebang could start one from (``./train.py``).
+
+    A cheap reading of the text: a line it lets through costs a box its
+    one probe, and one it misses (an interpreter named only through a
+    variable, ``$PY x.py``) runs where the bindings already put it until
+    a later line names the interpreter. A path that is only an operand
+    (``cat /data/x``) is not a program, so a line of Mirage's own
+    commands never reaches a box.
+
+    Args:
+        line (str): the raw command line.
+        heads (frozenset[str]): the first word of each of its commands.
+    """
+    return any("/" in head for head in heads) or any(
+        word in INTERPRETER_NAMES
+        for word in re.split(r"[\s;&|()<>`'\"]+", line)
+    )
 
 
 def is_tool(name: str, session: SessionState) -> bool:

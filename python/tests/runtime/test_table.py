@@ -198,3 +198,27 @@ def test_register_runtime_replaces_a_custom_name():
         assert isinstance(build_runtime("fake"), Other)
     finally:
         NAMED.pop("fake", None)
+
+
+class OfferingBox(Runtime, LineExecutorMixin):
+    """A box whose probe found python3 beside its ``@external``."""
+
+    name = "offering"
+    captures = ("@external",)
+    reach = "remote"
+
+    @property
+    def offered_captures(self) -> tuple[str, ...]:
+        return (*self.captures, "python3")
+
+    async def run_line(
+        self, engine, paths, texts, ctx, output=None, errors=None
+    ):
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+def test_bind_commands_binds_what_a_runtime_offers_first_capturer_wins():
+    box, fake = OfferingBox(), FakeRuntime()
+    assert bind_commands([box, fake])["python3"] is box
+    assert bind_commands([fake, box])["python3"] is fake
+    assert runtime_bindings_for([fake, box], "offering")["python3"] is box

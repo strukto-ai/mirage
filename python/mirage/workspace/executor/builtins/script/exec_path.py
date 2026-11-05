@@ -25,6 +25,8 @@ from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
+from mirage.runtime.constants import EXTERNAL_COMMANDS
+from mirage.runtime.table import serves_workspace
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
@@ -44,6 +46,8 @@ from mirage.workspace.executor.builtins.script.script import (
     read_script_bytes,
     script_error,
 )
+from mirage.workspace.executor.command.external import run_external
+from mirage.workspace.expand.argv import Argv
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.types import ExecutionNode
@@ -101,6 +105,7 @@ async def handle_exec_path(
     context: EvaluationContext,
     registry: MountRegistry,
     namespace: Namespace,
+    argv: Argv,
     stdin: ByteSource | None = None,
     sink: JobConsole | None = None,
     job_table: JobTable | None = None,
@@ -133,6 +138,9 @@ async def handle_exec_path(
         context (EvaluationContext): the evaluation's session and frame.
         registry (MountRegistry): identifies the program view.
         namespace (Namespace): resolves links to program files.
+        argv (Argv): the admitted command; a binary goes with it to the
+            sandbox that serves the workspace, where the mount allows
+            exec, and answers 126 otherwise.
         stdin (ByteSource | None): input stream for the script.
         sink (JobConsole | None): where the script's statements write as
             they finish, None to return them.
@@ -154,16 +162,30 @@ async def handle_exec_path(
             else CANNOT_EXECUTE_STATUS
         )
         return script_error(path, strerror, code)
+    target = namespace.session_links(session).follow(
+        resolve_path(path, session.cwd)
+    )
     if is_binary(data):
+        routing = context.frame.routing
+        runs = (
+            routing.bindings.get(EXTERNAL_COMMANDS)
+            if routing is not None
+            else None
+        )
+        if (
+            routing is not None
+            and serves_workspace(runs)
+            and registry.exec_allowed_at(target)
+        ):
+            return await run_external(
+                argv, stdin, session, registry, routing, sink
+            )
         return script_error(
             path,
             "cannot execute binary file: Exec format error",
             CANNOT_EXECUTE_STATUS,
         )
     script = decode_text(data)
-    target = namespace.session_links(session).follow(
-        resolve_path(path, session.cwd)
-    )
     vfs, key, _ = registry.resolve(target)
     if isinstance(vfs, BinViewVFS):
         # The read above enforces visibility and path policy. Dispatch the

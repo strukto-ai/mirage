@@ -172,7 +172,11 @@ def _select_runtime(
         )
         if chosen is None:
             return None, admission_denial(prog)
-        if isinstance(chosen, WorkspaceRuntime):
+        if isinstance(chosen, WorkspaceRuntime) or (
+            bool(heads)
+            and isinstance(chosen, Runtime)
+            and chosen.learned(heads[0])
+        ):
             chosen = entry
     if (
         not isinstance(chosen, LanguageRuntime)

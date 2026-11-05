@@ -18,6 +18,7 @@ from mirage.process.handle import ProcessHandle
 from mirage.runtime.types import MountType
 from mirage.utils.clock import bound_system_clock, system_now
 from mirage.utils.quote import single_quote
+from mirage.workspace.lookup.constants import INTERPRETER_NAMES
 
 
 def not_running_hint(
@@ -206,6 +207,45 @@ def reap_line(exec_id: str, signum: int = 15) -> str:
         "for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; "
         "kill -KILL $l 2>/dev/null; true"
     )
+
+
+# How long a sandbox gets to answer which interpreters it holds; the
+# connect before it is not counted, so a slow first connect is not taken
+# for a box that holds none.
+PROGRAMS_PROBE_SECONDS = 5
+
+# How long a box whose interpreter probe failed offers none before the
+# next interpreter line asks again.
+PROGRAMS_RETRY_SECONDS = 60
+
+
+def programs_probe() -> str:
+    """A shell line that prints, one per line, each interpreter name a
+    sandbox finds on its PATH. Mirrors TypeScript's ``programsProbe``."""
+    names = " ".join(sorted(INTERPRETER_NAMES))
+    return (
+        f"for p in {names}; do "
+        'command -v "$p" >/dev/null 2>&1 && echo "$p"; done; true'
+    )
+
+
+def bash_line_argv(name: str, line: str) -> tuple[str, ...]:
+    """The argv that runs a whole line in a sandbox's bash, through the
+    ``/bin/sh -c`` every box has. The line travels as ``$1`` and the
+    runtime's name as ``$2``, never re-quoted, so no quoting the box's sh
+    could misread; a box without bash answers 127 and says so. Mirrors
+    TypeScript's ``bashLineArgv``.
+
+    Args:
+        name (str): the runtime's name, for the missing-bash message.
+        line (str): the raw command line.
+    """
+    script = (
+        "command -v bash >/dev/null 2>&1 || "
+        "{ echo \"mirage: $2 has no bash; a line using the sandbox's own "
+        'files needs bash" >&2; exit 127; }; exec bash -c "$1"'
+    )
+    return ("/bin/sh", "-c", script, "sh", line, name)
 
 
 # How long a sandbox gets to answer the libfaketime probe, which every run

@@ -1050,6 +1050,7 @@ async def _route_argv(
             context,
             registry,
             namespace,
+            argv,
             stdin,
             sink,
             job_table,

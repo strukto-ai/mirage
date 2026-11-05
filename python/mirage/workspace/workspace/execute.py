@@ -886,6 +886,7 @@ async def run_prepared_line(
                 admission_holds,
                 claimant_for(ast, line_handed),
                 cancel,
+                ast,
             )
             if isinstance(placed, (Deny, Pending)):
                 # A question on the line as a whole holds it for its

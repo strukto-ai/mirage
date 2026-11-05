@@ -691,6 +691,18 @@ class LineBox(Runtime):
     name = "box"
 
 
+class OfferingBox(Runtime):
+    """A box that took python3 because its probe found it, not because
+    it was told to capture it."""
+
+    name = "box"
+    captures = ("@external",)
+
+    @property
+    def offered_captures(self) -> tuple[str, ...]:
+        return (*self.captures, "python3")
+
+
 @pytest.mark.asyncio
 async def test_script_runs_where_the_line_runs_its_interpreter():
     # A route policy or a runtime's script that places this line's
@@ -1724,3 +1736,21 @@ async def test_a_mounts_tree_runs_like_an_installed_cli_on_its_mount():
         assert vfs.accessor.store.files["/a.md"] == b"tags: work\n"
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_script_stays_on_its_language_runtime_where_a_box_took_python3():
+    # A sandbox that gained python3 from its probe runs the line's python3,
+    # but a script CLI is mirage's own command and keeps its interpreter.
+    py = TierPyRuntime("first")
+    _, io, _ = await drained(
+        script_install(),
+        ["pager"],
+        SessionState("t"),
+        context=CLIContext(
+            entries=[py],
+            routing=RouteDecision(bindings={"python3": OfferingBox()}),
+        ),
+    )
+    assert io.exit_code == 0
+    assert len(py.seen) == 1

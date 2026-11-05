@@ -30,10 +30,13 @@ from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
 from mirage.runtime.sandbox.constants import (
     EXEC_ID,
+    PROGRAMS_RETRY_SECONDS,
     REAP_ABSENT,
     faketime_probe,
+    programs_probe,
     reap_line,
 )
+from mirage.runtime.sandbox.docker import DockerRuntime
 from mirage.runtime.types import RunResult
 from mirage.types import FileStat, FileType, Limit, PathSpec
 
@@ -497,3 +500,118 @@ async def test_each_sandbox_is_asked_once_and_again_after_a_failed_probe():
         assert box.probes == ["a", "a", "b"]
     finally:
         await ws.close()
+
+
+class ProgramsBox(RecordingSandbox):
+    """A box serving the workspace that holds ``holds`` of the
+    interpreters; ``exit_code`` is what its programs probe exits with."""
+
+    def __init__(self, holds: str = "python3\nnode\n", **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.holds = holds
+        self.exit_code = 0
+        self.probes = 0
+
+    def _serves_interpreters(self) -> bool:
+        return "@external" in self.captures
+
+    async def exec_line(
+        self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
+    ) -> RunResult:
+        if line != programs_probe():
+            return await super().exec_line(line, stdin, env, cwd)
+        self.probes += 1
+        return RunResult(
+            stdout=self.holds.encode(), stderr=None, exit_code=self.exit_code
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_box_offers_the_interpreters_it_holds_after_one_probe():
+    box = ProgramsBox()
+    assert box.offered_captures == ("@external",)
+    assert box.programs_pending
+    await asyncio.gather(box.probe_programs(), box.probe_programs())
+    assert box.probes == 1
+    assert box.connected == 1
+    assert box.offered_captures == ("@external", "node", "python3")
+    assert not box.programs_pending
+    await box.probe_programs()
+    assert box.probes == 1
+
+
+@pytest.mark.asyncio
+async def test_a_failed_programs_probe_offers_none_and_retries_later(
+    monkeypatch,
+):
+    box = ProgramsBox()
+    box.exit_code = 1
+    now = [1000.0]
+    monkeypatch.setattr(
+        "mirage.runtime.sandbox.base.time.monotonic", lambda: now[0]
+    )
+    await box.probe_programs()
+    assert box.offered_captures == ("@external",)
+    assert not box.programs_pending
+    now[0] += PROGRAMS_RETRY_SECONDS
+    assert box.programs_pending
+    box.exit_code = 0
+    await box.probe_programs()
+    assert box.offered_captures == ("@external", "node", "python3")
+    assert not box.programs_pending
+
+
+@pytest.mark.asyncio
+async def test_a_box_named_captures_offer_no_interpreters():
+    box = ProgramsBox(captures=("gcc",))
+    assert not box.programs_pending
+    await box.probe_programs()
+    assert box.probes == 0
+    assert box.offered_captures == ("gcc",)
+
+
+def test_only_a_box_serving_the_workspace_over_ssh_offers_interpreters():
+    assert DockerRuntime(
+        config={"container": "c", "mount_type": "ssh"}
+    ).programs_pending
+    assert not DockerRuntime(config={"container": "c"}).programs_pending
+    assert not DockerRuntime(
+        config={"container": "c", "mount_type": "fuse"}
+    ).programs_pending
+
+
+@pytest.mark.asyncio
+async def test_a_probe_offers_only_interpreter_names():
+    box = ProgramsBox(holds="python3\nrm\n")
+    await box.probe_programs()
+    assert box.offered_captures == ("@external", "python3")
+
+
+class RaisingProbeBox(ProgramsBox):
+    async def exec_line(self, line, stdin, env, cwd) -> RunResult:
+        if line == programs_probe():
+            raise ConnectionError("box down")
+        return await super().exec_line(line, stdin, env, cwd)
+
+
+@pytest.mark.asyncio
+async def test_a_probe_that_raises_offers_none_and_asks_again_later():
+    box = RaisingProbeBox()
+    await box.probe_programs()
+    assert box.offered_captures == ("@external",)
+    assert not box.programs_pending
+    assert box._programs_retry is not None
+
+
+@pytest.mark.asyncio
+async def test_an_ssh_box_serves_the_workspace_before_its_first_run():
+    box = DockerRuntime(config={"container": "c", "mount_type": "ssh"})
+    ws = Workspace({"/data": RAMVFS()}, runtimes=[box, "workspace"])
+    rooted = DockerRuntime(config={"container": "c", "mount_type": "ssh"})
+    root = Workspace({"/": RAMVFS()}, runtimes=[rooted, "workspace"])
+    try:
+        assert box.file_effects_dispatched
+        assert not rooted.file_effects_dispatched
+    finally:
+        await ws.close()
+        await root.close()

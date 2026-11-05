@@ -815,6 +815,7 @@ class Workspace:
             lambda: line_judgments(
                 ast, session, self._registry, self._namespace, HandOff()
             ),
+            ast,
         )
         # The run reads a line its placed runtime takes whole as typed,
         # and that reading is its only gate (``admit_line``).

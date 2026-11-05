@@ -166,7 +166,7 @@ def runtime_bindings_for(
         )
     for entry in entries:
         if entry.name == name:
-            return {command: entry for command in entry.captures}
+            return {command: entry for command in entry.offered_captures}
     known = ", ".join(repr(e.name) for e in entries)
     raise ValueError(
         f"unknown runtime: {name!r} (workspace runtimes: {known})"
@@ -210,7 +210,7 @@ def bind_commands(entries: list[Runtime[Any]]) -> dict[str, Runtime[Any]]:
         if entry.name in seen:
             raise ValueError(f"duplicate runtime entry: {entry.name!r}")
         seen.add(entry.name)
-        for command in entry.captures:
+        for command in entry.offered_captures:
             if command not in bindings:
                 bindings[command] = entry
     return bindings
@@ -235,6 +235,24 @@ def whole_line_runtime(
     if isinstance(whole, LineExecutorMixin):
         return whole
     return None
+
+
+def serves_workspace(entry: RuntimeIdentity | None) -> bool:
+    """Whether a runtime is a sandbox that sees every workspace path at
+    the same prefix, each read and write through the workspace's gate:
+    a remote line executor serving the mounts over SFTP with no mount at
+    ``/`` (``file_effects_dispatched``). Only such a box takes a line
+    whole, or the interpreters it holds, by default.
+
+    Args:
+        entry (RuntimeIdentity | None): the runtime, None for none.
+    """
+    return (
+        isinstance(entry, Runtime)
+        and isinstance(entry, LineExecutorMixin)
+        and entry.reach == "remote"
+        and entry.file_effects_dispatched
+    )
 
 
 def catch_all(entries: list[Runtime[Any]]) -> Runtime[Any] | None:

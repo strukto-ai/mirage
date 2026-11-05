@@ -16,15 +16,22 @@ import logging
 import shlex
 from typing import Any
 
-from mirage.commands.builtin.general.interpreter import run_output
+from mirage.commands.builtin.general.interpreter import (
+    exec_refusal,
+    run_output,
+)
 from mirage.commands.config import Context
+from mirage.commands.spec import SPECS, parse_command
+from mirage.commands.spec.types import WordKind
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import ProcessExecutorMixin
+from mirage.runtime.source import STDIN_OPERAND
 from mirage.runtime.types import (
+    CommandRuntime,
     ExecutionKind,
     OutputFn,
     RouteDecision,
@@ -38,6 +45,7 @@ from mirage.types import PathSpec, Producer
 from mirage.utils.abort import MirageAbortError
 from mirage.workspace.executor.command.run import admission_denial
 from mirage.workspace.expand.argv import Argv
+from mirage.workspace.lookup.constants import INLINE_FLAGS, INTERPRETER_NAMES
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode
@@ -65,6 +73,17 @@ async def run_external(
     bindings = routing.bindings
     entry = bindings.get(argv.name, bindings.get(EXTERNAL_COMMANDS))
     command = shlex.join(argv.tokens)
+    refused = _learned_exec_refusal(argv, entry, session, registry)
+    if refused is not None:
+        return (
+            None,
+            refused,
+            ExecutionNode(
+                command=command,
+                exit_code=refused.exit_code,
+                stderr=await refused.materialize_stderr(),
+            ),
+        )
     if entry is None:
         denied = admission_denial(argv.name)
         err = await denied.materialize_stderr()
@@ -166,3 +185,52 @@ async def _execute_program(
         return RunResult(
             stdout=b"", stderr=encode_text(f"{name}: {exc}\n"), exit_code=1
         )
+
+
+def _learned_exec_refusal(
+    argv: Argv,
+    entry: RuntimeIdentity | None,
+    session: SessionState,
+    registry: MountRegistry,
+) -> IOResult | None:
+    """The mounts' exec rule for an interpreter a sandbox took
+    (``Runtime.learned``), as Monty applies it (``exec_refusal``), so a
+    script or inline code the rule refuses never reaches the sandbox,
+    however the line reached it (a nested line, a shebang, ``eval``);
+    None when it may run there.
+
+    Args:
+        argv (Argv): the admitted command.
+        entry (RuntimeIdentity | None): the runtime it is bound to.
+        session (SessionState): the session it runs in.
+        registry (MountRegistry): the mounts and their modes.
+    """
+    if not (
+        argv.name in INTERPRETER_NAMES
+        and isinstance(entry, Runtime)
+        and entry.learned(argv.name)
+    ):
+        return None
+    words = list(argv.args)
+    parsed = parse_command(SPECS[argv.name], words, session.cwd, argv.name)
+    inline = any(parsed.flags.get(flag) is not None for flag in INLINE_FLAGS)
+    operands = [
+        word
+        for word, role in zip(words, parsed.word_roles, strict=False)
+        if role is WordKind.OPERAND
+    ]
+    first = operands[0] if operands else None
+    script = (
+        None
+        if inline or first is None or first == STDIN_OPERAND
+        else PathSpec.from_str_path(first, cwd=session.cwd)
+    )
+    refused = exec_refusal(
+        argv.name,
+        script,
+        CommandRuntime(
+            exec_allowed=registry.is_exec_allowed(),
+            exec_path_allowed=registry.exec_allowed_at,
+        ),
+    )
+    return None if refused is None else refused[1]

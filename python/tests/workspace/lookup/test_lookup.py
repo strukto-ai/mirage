@@ -37,6 +37,7 @@ from mirage.workspace.lookup import (
     program_note,
     programs,
 )
+from mirage.workspace.lookup.lookup import may_run_program
 from mirage.workspace.session import SessionState
 
 
@@ -364,3 +365,20 @@ def test_program_note_names_the_runtime_a_capture_runs_on():
         "gcc runs on the workspace's sandbox runtime."
     )
     assert program_note("native-tool", session, ws._registry) is None
+
+
+@pytest.mark.parametrize(
+    "line, heads, may",
+    [
+        ("cat /data/x", {"cat"}, False),
+        ("echo 'python3'", {"echo"}, True),
+        ("xargs node < list", {"xargs"}, True),
+        ("$(python3 -c 1)", set(), True),
+        ("./train.py", {"./train.py"}, True),
+        ("ls", {"ls"}, False),
+    ],
+)
+def test_may_run_program_reads_interpreter_words_and_path_heads(
+    line, heads, may
+):
+    assert may_run_program(line, frozenset(heads)) is may

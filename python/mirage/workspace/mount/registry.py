@@ -1090,6 +1090,15 @@ class MountRegistry:
         hold (``Policies.decisions``) so a session write reaches it too."""
         return self.policies.decisions
 
+    def is_anchor(self, entry: MountEntry) -> bool:
+        """Whether ``entry`` is the scratch root the workspace added
+        (``anchor_root``), which no sandbox is served.
+
+        Args:
+            entry (MountEntry): a mount of this registry.
+        """
+        return entry is self._anchor
+
     def anchor_root(self, entry: MountEntry) -> None:
         """Mark `entry` as the root the workspace added, not one mounted.
 

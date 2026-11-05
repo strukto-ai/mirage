@@ -118,6 +118,32 @@ class Runtime(ABC, Generic[E]):
         self.config = self.config_cls.coerce(config)
 
     @property
+    def offered_captures(self) -> tuple[str, ...]:
+        """The commands this runtime binds: its captures, plus any it
+        learned it can serve (a sandbox's interpreters)."""
+        return self.captures
+
+    def learned(self, command: str) -> bool:
+        """Whether this runtime runs ``command`` because it learned it can
+        (``probe_programs``), not because it captures it.
+
+        Args:
+            command (str): the command name.
+        """
+        return (
+            command in self.offered_captures and command not in self.captures
+        )
+
+    @property
+    def programs_pending(self) -> bool:
+        """Whether ``probe_programs`` would learn something now."""
+        return False
+
+    async def probe_programs(self) -> None:
+        """Learn which programs this runtime can serve; nothing to learn
+        by default."""
+
+    @property
     def file_effects_dispatched(self) -> bool:
         """Whether workspace file mutations already invalidate through dispatch."""
         return self.reach == "workspace"

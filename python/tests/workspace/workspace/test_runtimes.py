@@ -167,3 +167,44 @@ async def test_a_cancelled_removal_still_reports_its_close_failure():
     await line
     with pytest.raises(RuntimeError, match="close failed"):
         await ws.close()
+
+
+class Remote(Runtime, LineExecutorMixin):
+    """A remote line executor, as a sandbox is."""
+
+    reach = "remote"
+    captures = ("@external",)
+
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        self.name = name
+
+    async def run_line(
+        self, engine, paths, texts, ctx, output=None, errors=None
+    ):
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+@pytest.mark.asyncio
+async def test_an_added_sandbox_goes_after_the_sandboxes_and_before_the_rest():
+    ws = workspace(Engine("a"))
+    ws.add_runtime(Remote("box1"))
+    ws.add_runtime(Remote("box2"))
+    ws.add_runtime(Engine("b"))
+    assert [r.name for r in ws.runtimes()] == [
+        "box1",
+        "box2",
+        "a",
+        "workspace",
+        "b",
+    ]
+    listed = workspace(Engine("a"), Remote("box1"))
+    listed.add_runtime(Remote("box2"))
+    assert [r.name for r in listed.runtimes()] == [
+        "a",
+        "box1",
+        "box2",
+        "workspace",
+    ]
+    await ws.close()
+    await listed.close()

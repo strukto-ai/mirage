@@ -357,3 +357,19 @@ def assignment_values(
         reads = referenced_names(n) if literal is None else frozenset()
         out.append((decode_text(text), literal, reads))
     return tuple(out)
+
+
+def assigned_names(node: TSNodeLike) -> frozenset[str]:
+    """Every variable name a parsed program assigns, wherever it sits.
+
+    Args:
+        node (TSNodeLike): root node from parse().
+    """
+    out: set[str] = set()
+    for one in walk_tree(node):
+        if one.type != "variable_assignment":
+            continue
+        target = one.child_by_field_name("name")
+        if target is not None and target.text:
+            out.add(decode_text(target.text))
+    return frozenset(out)

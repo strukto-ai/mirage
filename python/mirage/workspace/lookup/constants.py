@@ -92,6 +92,19 @@ KEYWORDS = frozenset(
 # ShellBuiltin subset handled through the job table in the executor.
 JOB_BUILTINS = frozenset({"wait", "fg", "kill", "jobs", "disown", "ps"})
 
+# Options that hand an interpreter its program inline rather than as a
+# script operand (python3 -c/-m, node -e/-p), which the exec rule judges
+# as code from no path.
+INLINE_FLAGS = frozenset({"-c", "-m", "-e", "-p", "--eval", "--print"})
+
+# Shell words that act on Mirage's own job table, so a sandbox running the
+# line would answer them about jobs it never started.
+WORKSPACE_JOB_WORDS = JOB_BUILTINS | frozenset({"bg"})
+
+# Variables a fresh shell sets for itself, which Mirage seeds unexported:
+# a line the sandbox runs whole reads the sandbox's own.
+FRESH_SHELL_NAMES = frozenset({"PATH", "IFS", "OPTIND", "OPTERR"})
+
 SHELL_NAMES = frozenset(str(b) for b in ShellBuiltin) | UNSUPPORTED_BUILTINS
 
 # bash 5.2's own builtins (`compgen -b` on debian:stable-slim). `type`
