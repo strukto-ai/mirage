@@ -175,3 +175,35 @@ describe('removeRuntime', () => {
     )
   })
 })
+
+// A remote line executor, as a sandbox is.
+class Remote extends Runtime implements LineExecutorMixin {
+  readonly [LINE_EXECUTOR] = true as const
+  override readonly reach = 'remote'
+
+  constructor(readonly name: string) {
+    super({ captures: ['@external'] })
+  }
+
+  runLine(): Promise<RunResult> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+}
+
+describe('addRuntime', () => {
+  it('places an added sandbox after the sandboxes and before the rest', async () => {
+    const ws = workspace(new Engine('a'))
+    const listed = workspace(new Engine('a'), new Remote('box1'))
+    try {
+      ws.addRuntime(new Remote('box1'))
+      ws.addRuntime(new Remote('box2'))
+      ws.addRuntime(new Engine('b'))
+      expect(ws.runtimes().map((r) => r.name)).toEqual(['box1', 'box2', 'a', 'workspace', 'b'])
+      listed.addRuntime(new Remote('box2'))
+      expect(listed.runtimes().map((r) => r.name)).toEqual(['a', 'box1', 'box2', 'workspace'])
+    } finally {
+      await ws.close()
+      await listed.close()
+    }
+  })
+})

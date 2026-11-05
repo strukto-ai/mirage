@@ -17,11 +17,15 @@ import type { ExecutionKind, OutputFn, RunResult } from '../../../runtime/types.
 import type { Runtime } from '../../../runtime/base.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import { hasAborted } from '../../../utils/abort.ts'
-import { runOutput } from '../../../commands/builtin/general/interpreter.ts'
+import { execRefusal, runOutput } from '../../../commands/builtin/general/interpreter.ts'
+import { parseCommand, SPECS } from '../../../commands/spec/index.ts'
+import { WordKind } from '../../../commands/spec/types.ts'
 import type { ByteSource, IOResult } from '../../../io/types.ts'
 import { EXTERNAL_COMMANDS } from '../../../runtime/constants.ts'
 import { isProcessExecutor } from '../../../runtime/mixin.ts'
 import type { RouteDecision } from '../../../runtime/types.ts'
+import { STDIN_OPERAND } from '../../../runtime/source.ts'
+import { INLINE_FLAGS, INTERPRETER_NAMES } from '../../lookup/constants.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { PathSpec } from '../../../types.ts'
 import type { Argv } from '../../expand/argv.ts'
@@ -58,6 +62,11 @@ export async function runExternal(
   const key = Object.hasOwn(bindings, argv.name) ? argv.name : EXTERNAL_COMMANDS
   const runtime = bindings[key]
   const command = shellJoin(argv.tokens)
+  const refused = learnedExecRefusal(argv, runtime, session, registry)
+  if (refused !== null) {
+    const stderr = await refused.materializeStderr()
+    return [null, refused, new ExecutionNode({ command, exitCode: refused.exitCode, stderr })]
+  }
   if (runtime == null) {
     const denied = admissionDenial(argv.name)
     const stderr = await denied.materializeStderr()
@@ -150,4 +159,40 @@ async function executeProgram(
       exitCode: 1,
     }
   }
+}
+
+/**
+ * The mounts' exec rule for an interpreter a sandbox took
+ * (`Runtime.learned`), as Monty applies it (`execRefusal`), so a script or
+ * inline code the rule refuses never reaches the sandbox, however the line
+ * reached it (a nested line, a shebang, `eval`); null when it may run
+ * there. Mirrors Python's `_learned_exec_refusal`.
+ *
+ * @param argv the admitted command.
+ * @param entry the runtime it is bound to.
+ * @param session the session it runs in.
+ * @param registry the mounts and their modes.
+ */
+function learnedExecRefusal(
+  argv: Argv,
+  entry: Runtime | null | undefined,
+  session: SessionState,
+  registry: MountRegistry,
+): IOResult | null {
+  if (!INTERPRETER_NAMES.has(argv.name) || entry?.learned(argv.name) !== true) return null
+  const words = [...argv.args]
+  const spec = SPECS[argv.name]
+  if (spec === undefined) return null
+  const parsed = parseCommand(spec, words, session.cwd, argv.name)
+  const inline = [...INLINE_FLAGS].some((flag) => parsed.flags[flag] != null)
+  const first = words.find((_, i) => parsed.wordRoles[i] === WordKind.OPERAND)
+  const script =
+    inline || first === undefined || first === STDIN_OPERAND
+      ? null
+      : PathSpec.fromStrPath(first, undefined, session.cwd)
+  const refused = execRefusal(argv.name, script, {
+    execAllowed: registry.isExecAllowed(),
+    execPathAllowed: registry.execAllowedAt,
+  })
+  return refused === null ? null : refused[1]
 }

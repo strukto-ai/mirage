@@ -611,6 +611,7 @@ async function runPreparedLine(
                 held,
                 claimantFor(rootNode, handed),
                 mergeSignals(options.signal, context.frame.abortSignal),
+                rootNode,
               )
             placed = await abortable(
               asyncContextIsolatesTasks ? runWithEvaluation(context, decide) : decide(),

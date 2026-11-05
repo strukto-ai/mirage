@@ -24,6 +24,8 @@ import {
   EXEC_ID,
   FAKETIME_PROBE_SECONDS,
   faketimeProbe,
+  PROGRAMS_RETRY_SECONDS,
+  programsProbe,
   REAP_ABSENT,
   REAP_WAIT_SECONDS,
   reapLine,
@@ -625,5 +627,138 @@ describe('RemoteSandbox', () => {
   it('rejects unknown config keys', () => {
     const options = { config: { snapshot: 'mirage-fuse' } } as Record<string, unknown>
     expect(() => new RecordingSandbox(options)).toThrow("unknown runtime config key 'snapshot'")
+  })
+})
+
+// A box serving the workspace that holds `holds` of the interpreters;
+// `exitCode` is what its programs probe exits with.
+class ProgramsBox extends RecordingSandbox {
+  exitCode = 0
+  probes = 0
+
+  constructor(
+    options: RuntimeOptions = {},
+    readonly holds = 'python3\nnode\n',
+  ) {
+    super(options)
+  }
+
+  protected override servesInterpreters(): boolean {
+    return this.captures.includes('@external')
+  }
+
+  override execLine(
+    line: string,
+    stdin: Uint8Array | null,
+    env: Record<string, string>,
+    cwd: string,
+  ): Promise<RunResult> {
+    if (line !== programsProbe()) return super.execLine(line, stdin, env, cwd)
+    this.probes += 1
+    return Promise.resolve({
+      stdout: ENC.encode(this.holds),
+      stderr: null,
+      exitCode: this.exitCode,
+    })
+  }
+}
+
+describe('RemoteSandbox interpreters', () => {
+  it('offers the interpreters it holds after one probe', async () => {
+    const box = new ProgramsBox()
+    expect(box.offeredCaptures).toEqual(['@external'])
+    expect(box.programsPending).toBe(true)
+    await Promise.all([box.probePrograms(), box.probePrograms()])
+    expect(box.probes).toBe(1)
+    expect(box.connectedCount).toBe(1)
+    expect(box.offeredCaptures).toEqual(['@external', 'node', 'python3'])
+    expect(box.programsPending).toBe(false)
+    await box.probePrograms()
+    expect(box.probes).toBe(1)
+  })
+
+  it('offers none after a failed probe and asks again later', async () => {
+    const box = new ProgramsBox()
+    box.exitCode = 1
+    let now = 1_000_000
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    try {
+      await box.probePrograms()
+      expect(box.offeredCaptures).toEqual(['@external'])
+      expect(box.programsPending).toBe(false)
+      now += PROGRAMS_RETRY_SECONDS * 1000
+      expect(box.programsPending).toBe(true)
+      box.exitCode = 0
+      await box.probePrograms()
+      expect(box.offeredCaptures).toEqual(['@external', 'node', 'python3'])
+      expect(box.programsPending).toBe(false)
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
+  it('offers no interpreters for named captures', async () => {
+    const box = new ProgramsBox({ captures: ['gcc'] })
+    expect(box.programsPending).toBe(false)
+    await box.probePrograms()
+    expect(box.probes).toBe(0)
+    expect(box.offeredCaptures).toEqual(['gcc'])
+  })
+
+  // A box takes lines whole (servesWorkspace) before it ran any: the first
+  // line that needs it is the one the Router places.
+  it('dispatches its file effects over ssh before its first run', async () => {
+    const box = new RecordingSandbox({ config: { mountType: 'ssh' } })
+    const ws = sandboxWorkspace(box)
+    const rooted = new RecordingSandbox({ config: { mountType: 'ssh' } })
+    const root = new Workspace({ '/': new RAMVFS() }, { runtimes: [rooted, 'workspace'] })
+    try {
+      expect(box.fileEffectsDispatched).toBe(true)
+      expect(rooted.fileEffectsDispatched).toBe(false)
+      expect(new RecordingSandbox({ config: { mountType: 'fuse' } }).fileEffectsDispatched).toBe(
+        false,
+      )
+    } finally {
+      await ws.close()
+      await root.close()
+    }
+  })
+
+  it('offers only interpreter names from a probe', async () => {
+    const box = new ProgramsBox({}, 'python3\nrm\n')
+    await box.probePrograms()
+    expect(box.offeredCaptures).toEqual(['@external', 'python3'])
+  })
+
+  it('offers none after a probe that raises and asks again later', async () => {
+    class RaisingProbeBox extends ProgramsBox {
+      override execLine(
+        line: string,
+        stdin: Uint8Array | null,
+        env: Record<string, string>,
+        cwd: string,
+      ): Promise<RunResult> {
+        if (line === programsProbe()) return Promise.reject(new Error('box down'))
+        return super.execLine(line, stdin, env, cwd)
+      }
+    }
+    const box = new RaisingProbeBox()
+    let now = 1_000_000
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    try {
+      await box.probePrograms()
+      expect(box.offeredCaptures).toEqual(['@external'])
+      expect(box.programsPending).toBe(false)
+      now += PROGRAMS_RETRY_SECONDS * 1000
+      expect(box.programsPending).toBe(true)
+    } finally {
+      clock.mockRestore()
+    }
+  })
+
+  it('offers interpreters only from a box serving the workspace over ssh', () => {
+    expect(new RecordingSandbox({ config: { mountType: 'ssh' } }).programsPending).toBe(true)
+    expect(new RecordingSandbox().programsPending).toBe(false)
+    expect(new RecordingSandbox({ config: { mountType: 'fuse' } }).programsPending).toBe(false)
   })
 })

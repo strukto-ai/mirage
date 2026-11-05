@@ -40,13 +40,21 @@ import {
   FAKETIME_PROBE_SECONDS,
   faketimeEnv,
   faketimeProbe,
+  bashLineArgv,
+  PROGRAMS_PROBE_SECONDS,
+  PROGRAMS_RETRY_SECONDS,
+  programsProbe,
   REAP_ABSENT,
   REAP_WAIT_SECONDS,
   reapLine,
 } from './constants.ts'
 import { boundSystemClock } from '../../utils/clock.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
+import { INTERPRETER_NAMES } from '../../workspace/lookup/constants.ts'
 import { isPipeTransport } from './mixin.ts'
 import { SandboxMounts } from './mounts.ts'
+
+export const logger: { debug?: (message: string) => void } = {}
 
 /**
  * A runtime that executes programs in a sandbox the user runs.
@@ -91,6 +99,12 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   // runs share the probe; a failed probe clears its slot so a later run asks
   // again.
   private readonly faketime = new Map<string, Promise<string | null>>()
+  // The interpreters this box holds, asked once by the first line that may
+  // run one: null until asked; after a failed ask, none until the retry
+  // time passes. Concurrent first lines share the ask in flight.
+  private programs: ReadonlySet<string> | null = null
+  private programsRetry: number | null = null
+  private programsAsking: Promise<void> | null = null
 
   constructor(options: RuntimeOptions<C> = {}, configKeys?: readonly string[]) {
     super(options as RuntimeOptions, [EXTERNAL_COMMANDS], configKeys ?? BASE_CONFIG_KEYS)
@@ -102,8 +116,10 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   }
 
   override get fileEffectsDispatched(): boolean {
+    // The mounts are served at the first run; until then the config says
+    // what they will be, as Python's constructor serves them.
     return (
-      this.mounts?.fileEffectsDispatched === true &&
+      (this.mounts?.fileEffectsDispatched ?? this.config.mountType === 'ssh') &&
       this.binding?.mountPrefixes != null &&
       !this.binding.mountPrefixes().includes('/')
     )
@@ -128,7 +144,8 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
    * @param _paths unused; the line names its paths.
    * @param _texts unused.
    * @param ctx the line in `flags.c`, the bytes piped into it, the session
-   *   environment and working directory, the signal that stops it.
+   *   environment and working directory, the signal that stops it;
+   *   `flags.bash` runs the line in the sandbox's bash (`bashLineArgv`).
    * @param output receives stdout as it arrives.
    * @param errors receives stderr as it arrives.
    */
@@ -141,12 +158,10 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     errors?: OutputFn,
   ): Promise<RunResult> {
     const line = ctx.flags.c
-    return this.runArgv(
-      ['/bin/sh', '-c', typeof line === 'string' ? line : ''],
-      ctx,
-      output ?? null,
-      errors ?? null,
-    )
+    const text = typeof line === 'string' ? line : ''
+    if (ctx.flags.bash === true)
+      return this.runArgv(bashLineArgv(this.name, text), ctx, output ?? null, errors ?? null, text)
+    return this.runArgv(['/bin/sh', '-c', text], ctx, output ?? null, errors ?? null)
   }
 
   runProcess(
@@ -171,12 +186,15 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
    * @param ctx the run's stdin, environment, cwd and signal.
    * @param output receives stdout as it arrives.
    * @param errors receives stderr as it arrives.
+   * @param shown what the run record names, null for the argv itself (a
+   *   wrapped line names the line).
    */
   private async runArgv(
     argv: readonly string[],
     ctx: Context,
     output: OutputFn | null,
     errors: OutputFn | null,
+    shown: string | null = null,
   ): Promise<RunResult> {
     // Served here rather than in the constructor, which runs before a
     // subclass names itself.
@@ -190,7 +208,11 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     ctx.signal?.throwIfAborted()
     const execId = crypto.randomUUID().replaceAll('-', '')
     const runner = currentCaller().process
-    runner?.addRun(`box:${execId}`, { runtime: this.name, tag: execId, command: shellJoin(argv) })
+    runner?.addRun(`box:${execId}`, {
+      runtime: this.name,
+      tag: execId,
+      command: shown ?? shellJoin(argv),
+    })
     try {
       return await this.execArgv(
         argv,
@@ -317,6 +339,75 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
       return {}
     }
     return library === null ? {} : faketimeEnv(library, env)
+  }
+
+  override get offeredCaptures(): readonly string[] {
+    const found = this.servesInterpreters() ? this.programs : null
+    if (found === null || found.size === 0) return this.captures
+    const extra = [...found].filter((name) => !this.captures.includes(name))
+    return [...this.captures, ...extra.sort(compareCodePoints)]
+  }
+
+  override get programsPending(): boolean {
+    if (!this.servesInterpreters()) return false
+    if (this.programs === null) return true
+    return this.programsRetry !== null && performance.now() >= this.programsRetry
+  }
+
+  /**
+   * Ask the box once which interpreters it holds, so its `@external` takes
+   * those (`offeredCaptures`) and the language runtimes keep the rest.
+   * Concurrent first lines share one ask; a failed ask offers none until
+   * `PROGRAMS_RETRY_SECONDS` pass. Mirrors Python's
+   * `SandboxRuntime.probe_programs`.
+   */
+  override async probePrograms(): Promise<void> {
+    this.programsAsking ??= this.askPrograms().finally(() => {
+      this.programsAsking = null
+    })
+    await this.programsAsking
+  }
+
+  /** The one ask `probePrograms` shares; it never throws. */
+  private async askPrograms(): Promise<void> {
+    if (!this.programsPending) return
+    let found: RunResult | null
+    try {
+      await this.ensureConnected()
+      const deadline = AbortSignal.timeout(PROGRAMS_PROBE_SECONDS * 1000)
+      found = await abortable(
+        this.execLine(programsProbe(), null, { ...this.config.env }, '/', deadline),
+        deadline,
+      )
+    } catch (error) {
+      logger.debug?.(`${this.name}: interpreter probe failed: ${String(error)}`)
+      found = null
+    }
+    if (found !== null && found.exitCode !== 0) {
+      const said = found.stderr === null ? '' : new TextDecoder().decode(found.stderr)
+      logger.debug?.(
+        `${this.name}: interpreter probe exited ${String(found.exitCode)}: ${JSON.stringify(said)}`,
+      )
+    }
+    if (found?.exitCode !== 0) {
+      this.programs = new Set()
+      this.programsRetry = performance.now() + PROGRAMS_RETRY_SECONDS * 1000
+      return
+    }
+    const said = new TextDecoder().decode(found.stdout).split(/\s+/)
+    this.programs = new Set(said.filter((name) => INTERPRETER_NAMES.has(name)))
+    this.programsRetry = null
+  }
+
+  /**
+   * Whether this box may take the interpreters: its captures hold
+   * `@external` and it serves the workspace over SFTP, so a script resolves
+   * there as in Mirage. A `mountType` box is one box for every session (a
+   * provider refuses it beside per-session boxes), so one probe answers for
+   * all of them.
+   */
+  protected servesInterpreters(): boolean {
+    return this.captures.includes(EXTERNAL_COMMANDS) && this.config.mountType === 'ssh'
   }
 
   /**

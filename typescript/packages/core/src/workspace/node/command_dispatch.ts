@@ -960,10 +960,12 @@ async function routeArgv(
       context,
       registry,
       namespace,
+      argv,
       stdin,
       sink,
       jobTable ?? undefined,
       callStack,
+      signal,
     )
   }
 

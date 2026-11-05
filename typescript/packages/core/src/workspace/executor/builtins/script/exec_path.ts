@@ -16,6 +16,8 @@ import type { RedirectResult } from '../../../../context/session_context.ts'
 import { runAsProgram } from '../../../../context/session_context.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import type { ByteSource } from '../../../../io/types.ts'
+import { EXTERNAL_COMMANDS } from '../../../../runtime/constants.ts'
+import { servesWorkspace } from '../../../../runtime/table.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText } from '../../../../shell/bytes.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
@@ -31,6 +33,8 @@ import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { handleCommandBuiltin } from '../command/command.ts'
+import { runExternal } from '../../command/external.ts'
+import type { Argv } from '../../../expand/argv.ts'
 import type { ExecuteStringFn } from '../types.ts'
 import { handleBash } from './bash.ts'
 import { isBinary, readScriptBytes, scriptError } from './script.ts'
@@ -98,6 +102,10 @@ function shebangWords(script: string): string[] {
  * line, so `#!/usr/bin/env python3` reaches the python3 command wherever
  * the workspace routes it, `exec` check included, and an interpreter
  * nobody registers answers with its own "command not found".
+ *
+ * A binary goes with `argv`, the admitted command, to the sandbox that
+ * serves the workspace, where the mount allows exec, and answers 126
+ * otherwise; `signal` stops it there.
  */
 export async function handleExecPath(
   dispatch: DispatchFn,
@@ -107,11 +115,13 @@ export async function handleExecPath(
   context: EvaluationContext,
   registry: MountRegistry,
   namespace: Namespace,
+  argv: Argv,
   stdin: ByteSource | null = null,
   sink?: JobConsole,
   jobTable?: JobTable,
   // The caller's frames, whose nesting a shell script counts on from.
   callStack: CallStack | null = null,
+  signal?: AbortSignal,
 ): Promise<RedirectResult> {
   let session = context.session
   let data: Uint8Array
@@ -123,10 +133,19 @@ export async function handleExecPath(
     const code = (exc as { code?: string }).code
     return scriptError(path, strerror, code === 'ENOENT' ? NOT_FOUND_STATUS : CANNOT_EXECUTE_STATUS)
   }
-  if (isBinary(data))
-    return scriptError(path, 'cannot execute binary file: Exec format error', CANNOT_EXECUTE_STATUS)
-  const script = decodeText(data)
   const target = namespace.sessionLinks(session).follow(resolvePath(path, session.cwd))
+  if (isBinary(data)) {
+    const routing = context.frame.routing
+    const runs = routing?.bindings[EXTERNAL_COMMANDS]
+    if (
+      routing !== undefined &&
+      servesWorkspace(runs) &&
+      registry.execAllowedAt(target)
+    )
+      return runExternal(argv, stdin, session, registry, routing, signal, sink)
+    return scriptError(path, 'cannot execute binary file: Exec format error', CANNOT_EXECUTE_STATUS)
+  }
+  const script = decodeText(data)
   const [vfs, spec] = registry.resolve(target)
   if (vfs instanceof BinViewVFS) {
     // The read enforces visibility and path policy; the target still passes

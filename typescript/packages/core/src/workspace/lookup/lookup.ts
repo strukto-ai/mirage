@@ -35,6 +35,28 @@ import { shellQuote } from '../../utils/quote.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 
 /**
+ * Whether a line may run an interpreter: it names one as a word
+ * (`python3 x`, `env python3 x`, `xargs node`), or one of its commands is a
+ * path a shebang could start one from (`./train.py`).
+ *
+ * A cheap reading of the text: a line it lets through costs a box its one
+ * probe, and one it misses (an interpreter named only through a variable,
+ * `$PY x.py`) runs where the bindings already put it until a later line
+ * names the interpreter. A path that is only an operand (`cat /data/x`) is
+ * not a program, so a line of Mirage's own commands never reaches a box.
+ * Mirrors Python's `may_run_program`.
+ *
+ * @param line the raw command line.
+ * @param heads the first word of each of its commands.
+ */
+export function mayRunProgram(line: string, heads: ReadonlySet<string>): boolean {
+  return (
+    [...heads].some((head) => head.includes('/')) ||
+    line.split(/[\s;&|()<>`'"]+/).some((word) => INTERPRETER_NAMES.has(word))
+  )
+}
+
+/**
  * Whether a command word is a tool the allow lists govern. Every named
  * command is a subject, shell builtins included: an allow list stating
  * `cat` leaves no `echo` and no `cd`. Two kinds of word are not,

@@ -305,6 +305,20 @@ class LineBox extends Runtime {
   readonly name = 'box'
 }
 
+// A box that took python3 because its probe found it, not because it was
+// told to capture it.
+class OfferingBox extends Runtime {
+  readonly name = 'box'
+
+  constructor() {
+    super({ captures: ['@external'] })
+  }
+
+  override get offeredCaptures(): readonly string[] {
+    return [...this.captures, 'python3']
+  }
+}
+
 class GonePyRuntime extends FakePyRuntime {
   override interpret(): Promise<RunResult> {
     return Promise.reject(noWorker())
@@ -645,6 +659,21 @@ describe('handleCli script arm', () => {
       "pager: runtime 'box' does not run python scripts\n",
     )
     expect(py.seen).toEqual([])
+  })
+
+  // A sandbox that gained python3 from its probe runs the line's python3,
+  // but a script CLI is mirage's own command and keeps its interpreter.
+  it('stays on its language runtime where a box took python3', async () => {
+    const py = new TierPyRuntime('first')
+    const [, io] = await drained(
+      scriptInstall(),
+      ['pager'],
+      new SessionState({ sessionId: 't' }),
+      null,
+      { entries: [py], routing: { bindings: { python3: new OfferingBox() }, fallback: null } },
+    )
+    expect(io.exitCode).toBe(0)
+    expect(py.seen).toHaveLength(1)
   })
 
   // The interpreter is missing, not the program: 127, as python3 answers.

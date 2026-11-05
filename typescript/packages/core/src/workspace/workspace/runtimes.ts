@@ -14,6 +14,7 @@
 
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import type { WorkspaceBinding } from '../../runtime/binding.ts'
+import { isLineExecutor } from '../../runtime/mixin.ts'
 import { bindCommands, buildRuntime, DEFAULT_ENTRIES } from '../../runtime/table.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -57,20 +58,31 @@ export class Runtimes {
   }
 
   /**
-   * Append a runtime entry to the ordered world.
+   * Add a runtime entry to the ordered world.
    *
-   * The entry lands last, so it never steals a command an earlier entry
-   * already captures (first capturer still wins). A name builds like a
-   * config entry and fails loud; a duplicate name is rejected before
-   * any state changes.
+   * A remote line executor (a sandbox) lands after the ones already
+   * listed, or first when there are none, so it takes the interpreters it
+   * holds ahead of the language runtimes while an earlier sandbox keeps
+   * what it took. Any other entry lands last and never steals a command an
+   * earlier entry captures (first capturer still wins). A name builds like
+   * a config entry and fails loud; a duplicate name is rejected before any
+   * state changes.
    */
   add(runtime: RuntimeEntry): Runtime {
     const entry: Runtime = typeof runtime === 'string' ? buildRuntime(runtime) : runtime
-    const candidate = [...this.entries, entry]
+    const at = remoteLine(entry)
+      ? this.entries.reduce((last, existing, i) => (remoteLine(existing) ? i + 1 : last), 0)
+      : this.entries.length
+    const candidate = [...this.entries.slice(0, at), entry, ...this.entries.slice(at)]
     const bindings = bindCommands(candidate)
     entry.bind(this.binding)
     this.install(candidate, bindings)
     return entry
+  }
+
+  /** Bind the entries again, for one that learned what it can serve (`Runtime.probePrograms`). */
+  rebind(): void {
+    this.install(this.entries, bindCommands(this.entries))
   }
 
   /** Unbind an entry's commands now and close it once it is idle. */
@@ -114,4 +126,9 @@ export class Runtimes {
 async function retire(entry: Runtime): Promise<void> {
   await entry.retire()
   await entry.close()
+}
+
+/** Whether an entry runs whole lines on another machine (a sandbox). */
+function remoteLine(entry: Runtime): boolean {
+  return isLineExecutor(entry) && entry.reach === 'remote'
 }

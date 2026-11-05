@@ -24,6 +24,8 @@ import {
   runtimeBindingsFor,
 } from './table.ts'
 import { WorkspaceRuntime } from './workspace.ts'
+import { LINE_EXECUTOR, type LineExecutorMixin } from './mixin.ts'
+import type { RunResult } from './types.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
@@ -220,5 +222,34 @@ describe('registerRuntime', () => {
     registerRuntime('fake-replaced', FakeRuntime)
     registerRuntime('fake-replaced', Other)
     expect(buildRuntime('fake-replaced')).toBeInstanceOf(Other)
+  })
+})
+
+// A box whose probe found python3 beside its `@external`.
+class OfferingBox extends Runtime implements LineExecutorMixin {
+  readonly [LINE_EXECUTOR] = true as const
+  readonly name = 'offering'
+  override readonly reach = 'remote'
+
+  constructor() {
+    super({ captures: ['@external'] })
+  }
+
+  override get offeredCaptures(): readonly string[] {
+    return [...this.captures, 'python3']
+  }
+
+  runLine(): Promise<RunResult> {
+    return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+  }
+}
+
+describe('offered captures', () => {
+  it('binds what a runtime offers, first capturer wins', () => {
+    const box = new OfferingBox()
+    const fake = new FakeRuntime()
+    expect(bindCommands([box, fake]).python3).toBe(box)
+    expect(bindCommands([fake, box]).python3).toBe(fake)
+    expect(runtimeBindingsFor([fake, box], 'offering').python3).toBe(box)
   })
 })

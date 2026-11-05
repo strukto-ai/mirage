@@ -28,6 +28,7 @@ import {
 } from '../../policy/index.ts'
 import type { RouteContext } from '../../policy/types.ts'
 import type { Runtime } from '../../runtime/base.ts'
+import { WHOLE_LINE } from '../../runtime/constants.ts'
 import type { LineExecutorMixin } from '../../runtime/mixin.ts'
 import type { OutputFn, RunResult } from '../../runtime/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
@@ -88,7 +89,7 @@ export async function runWholeLine(
     session.commandLimits,
   )
   const ctx: Context = {
-    flags: { c: command },
+    flags: { c: command, bash: !runtime.captures.includes(WHOLE_LINE) },
     stdin,
     env: envSnapshot(session),
     cwd: PathSpec.fromStrPath(session.cwd),

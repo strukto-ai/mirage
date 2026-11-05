@@ -16,6 +16,8 @@ import { singleQuote } from '../../utils/quote.ts'
 import { boundSystemClock, systemNow } from '../../utils/clock.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { MountType } from '../types.ts'
+import { INTERPRETER_NAMES } from '../../workspace/lookup/constants.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 
 /**
  * Why a sandbox cannot take a line, named by the state its status command
@@ -185,6 +187,42 @@ export function reapLine(execId: string, signum = 15): string {
     'for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; ' +
     'kill -KILL $l 2>/dev/null; true'
   )
+}
+
+// How long a sandbox gets to answer which interpreters it holds; the
+// connect before it is not counted, so a slow first connect is not taken
+// for a box that holds none.
+export const PROGRAMS_PROBE_SECONDS = 5
+
+// How long a box whose interpreter probe failed offers none before the
+// next interpreter line asks again.
+export const PROGRAMS_RETRY_SECONDS = 60
+
+/**
+ * A shell line that prints, one per line, each interpreter name a sandbox
+ * finds on its PATH. Mirrors Python's `programs_probe`.
+ */
+export function programsProbe(): string {
+  const names = [...INTERPRETER_NAMES].sort(compareCodePoints).join(' ')
+  return `for p in ${names}; do command -v "$p" >/dev/null 2>&1 && echo "$p"; done; true`
+}
+
+/**
+ * The argv that runs a whole line in a sandbox's bash, through the
+ * `/bin/sh -c` every box has. The line travels as `$1` and the runtime's
+ * name as `$2`, never re-quoted, so no quoting the box's sh could misread;
+ * a box without bash answers 127 and says so. Mirrors Python's
+ * `bash_line_argv`.
+ *
+ * @param name the runtime's name, for the missing-bash message.
+ * @param line the raw command line.
+ */
+export function bashLineArgv(name: string, line: string): string[] {
+  const script =
+    'command -v bash >/dev/null 2>&1 || ' +
+    '{ echo "mirage: $2 has no bash; a line using the sandbox\'s own ' +
+    'files needs bash" >&2; exit 127; }; exec bash -c "$1"'
+  return ['/bin/sh', '-c', script, 'sh', line, name]
 }
 
 // How long a sandbox gets to answer the libfaketime probe, which every run

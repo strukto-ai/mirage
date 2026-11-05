@@ -150,7 +150,8 @@ function selectRuntime(
           ? routing.bindings[head]
           : routing.fallback
     if (chosen === null || chosen === undefined) return [null, admissionDenial(prog)]
-    if (chosen instanceof WorkspaceRuntime) chosen = entry
+    if (chosen instanceof WorkspaceRuntime || (head !== undefined && chosen.learned(head)))
+      chosen = entry
   }
   if (!(chosen instanceof LanguageRuntime) || chosen.language !== script.language) {
     return [

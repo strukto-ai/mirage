@@ -22,6 +22,7 @@ import {
 } from './index.ts'
 import type { TSNodeLike } from '../types.ts'
 import { parse } from './parse.ts'
+import { assignedNames } from './names.ts'
 
 describe('referencedNames', () => {
   it.each<[string, string[]]>([
@@ -172,5 +173,15 @@ describe('assignmentValues', () => {
     expect(assignmentValues(root)).toEqual(
       values.map(([name, literal, reads]) => [name, literal, new Set(reads)]),
     )
+  })
+})
+
+describe('assignedNames', () => {
+  it.each<[string, string[]]>([
+    ['X=1; Y=2 cmd', ['X', 'Y']],
+    ['export Z=3', ['Z']],
+    ['echo $X', []],
+  ])('lists every assignment in %j', (line, names) => {
+    expect(assignedNames(parse(line) as unknown as TSNodeLike)).toEqual(new Set(names))
   })
 })

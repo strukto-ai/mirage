@@ -172,7 +172,7 @@ export function runtimeBindingsFor(
     if (entry.name === name) {
       // Null prototype: captures are arbitrary command names.
       const bindings: Record<string, Runtime> = Object.create(null) as Record<string, Runtime>
-      for (const command of entry.captures) bindings[command] = entry
+      for (const command of entry.offeredCaptures) bindings[command] = entry
       return bindings
     }
   }
@@ -219,7 +219,7 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
       throw new Error(`duplicate runtime entry: '${entry.name}'`)
     }
     seen.add(entry.name)
-    for (const command of entry.captures) {
+    for (const command of entry.offeredCaptures) {
       if (!(command in bindings)) bindings[command] = entry
     }
   }
@@ -240,6 +240,24 @@ export function wholeLineRuntime(
   const whole = Object.hasOwn(bindings, WHOLE_LINE) ? bindings[WHOLE_LINE] : null
   if (whole != null && isLineExecutor(whole)) return whole
   return null
+}
+
+/**
+ * Whether a runtime is a sandbox that sees every workspace path at the same
+ * prefix, each read and write through the workspace's gate: a remote line
+ * executor serving the mounts over SFTP with no mount at `/`
+ * (`fileEffectsDispatched`). Only such a box takes a line whole, or the
+ * interpreters it holds, by default. Mirrors Python's `serves_workspace`.
+ *
+ * @param entry the runtime, null or undefined for none.
+ */
+export function servesWorkspace(entry: Runtime | null | undefined): boolean {
+  return (
+    entry != null &&
+    isLineExecutor(entry) &&
+    entry.reach === 'remote' &&
+    entry.fileEffectsDispatched
+  )
 }
 
 /**

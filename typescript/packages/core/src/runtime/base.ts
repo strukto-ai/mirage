@@ -88,6 +88,35 @@ export abstract class Runtime<E = unknown> {
     this.config = coerceRuntimeConfig(options.config, configKeys)
   }
 
+  /**
+   * The commands this runtime binds: its captures, plus any it learned it
+   * can serve (a sandbox's interpreters).
+   */
+  get offeredCaptures(): readonly string[] {
+    return this.captures
+  }
+
+  /**
+   * Whether this runtime runs `command` because it learned it can
+   * (`probePrograms`), not because it captures it.
+   *
+   * @param command the command name.
+   */
+  learned(command: string): boolean {
+    return this.offeredCaptures.includes(command) && !this.captures.includes(command)
+  }
+
+  /** Whether `probePrograms` would learn something now. */
+  // eslint-disable-next-line @typescript-eslint/class-literal-property-style -- a sandbox overrides it with a getter
+  get programsPending(): boolean {
+    return false
+  }
+
+  /** Learn which programs this runtime can serve; nothing to learn by default. */
+  probePrograms(): Promise<void> {
+    return Promise.resolve()
+  }
+
   /** Whether workspace file mutations already invalidate through dispatch. */
   get fileEffectsDispatched(): boolean {
     return this.reach === 'workspace'

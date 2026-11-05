@@ -540,9 +540,11 @@ export class Workspace {
       // would stamp on it exactly the combination the verdict refuses. It
       // is snapshotted like any other mount, so that stray policy came
       // back as a refusal on restore.
-      this.registry.mount('/', new RAMVFS(), options.mode ?? MountMode.READ, DEFAULT_READ_SPEC, {
-        write: WritePolicy.UNCONDITIONAL,
-      })
+      this.registry.anchorRoot(
+        this.registry.mount('/', new RAMVFS(), options.mode ?? MountMode.READ, DEFAULT_READ_SPEC, {
+          write: WritePolicy.UNCONDITIONAL,
+        }),
+      )
       this.syntheticRootAnchor = true
     }
     // The workspace's own session is a session created without a name,
@@ -1349,15 +1351,19 @@ export class Workspace {
           wholeLine,
         )
       }
-      const [answers, placed] = await this.router.placement(line, session, () =>
-        lineJudgments(
-          root,
-          session,
-          this.registry,
-          this.namespace,
-          { claimed: [], parent: null, origin: null },
-          reparse,
-        ),
+      const [answers, placed] = await this.router.placement(
+        line,
+        session,
+        () =>
+          lineJudgments(
+            root,
+            session,
+            this.registry,
+            this.namespace,
+            { claimed: [], parent: null, origin: null },
+            reparse,
+          ),
+        root,
       )
       // The run reads a line its placed runtime takes whole as typed, and
       // that reading is its only gate (`admitLine`).
@@ -2305,7 +2311,10 @@ export class Workspace {
       write: args.writeDefault,
     }
     const ws = new this(mounts, mergedOptions) as InstanceType<T>
-    if (args.anchored === true) ws.syntheticRootAnchor = true
+    if (args.anchored === true) {
+      ws.syntheticRootAnchor = true
+      ws.registry.anchorRoot(ws.registry.mountForPrefix('/'))
+    }
     for (const override of Object.values(overrides)) {
       ws.sharedMounts.add(override instanceof Mount ? override.vfs : override)
     }

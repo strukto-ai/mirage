@@ -20,6 +20,7 @@ import {
   literalText,
   sameNode,
   walkNamedOutsideDefs,
+  walkTree,
 } from './names.ts'
 
 interface DeclarationParts {
@@ -326,6 +327,35 @@ export function implicitReads(node: TSNodeLike): ReadonlySet<string> {
     const reads = head === null ? undefined : IMPLICIT_HEAD_READS.get(head)
     if (reads !== undefined) for (const name of reads) out.add(name)
     if (head === 'cd') for (const name of cdReads(args)) out.add(name)
+  }
+  return out
+}
+
+/**
+ * The parameters a line reads that a fresh shell answers with its own
+ * value, as typed (`$1`, `$?`): positional and special parameters anywhere,
+ * and the last status (`$?`, `PIPESTATUS`) inside the line's first
+ * pipeline, which bash answers with the status from before the line. After
+ * the first `;`, `&&`, `||` or newline the status is the line's own.
+ * Mirrors Python's `parameter_reads`.
+ *
+ * @param node root node from parse().
+ */
+export function parameterReads(node: TSNodeLike): ReadonlySet<string> {
+  let first = node.children[0]
+  while (first?.type === 'list' && first.children.length > 0) first = first.children[0]
+  const end = first?.endIndex ?? 0
+  const out = new Set<string>()
+  for (const one of walkTree(node)) {
+    const text = one.text
+    const start = one.startIndex ?? 0
+    if (one.type === 'special_variable_name') {
+      if (text !== '?' || start < end) out.add(`$${text}`)
+    } else if (one.type === 'variable_name' && /^\d+$/.test(text)) {
+      out.add(`$${text}`)
+    } else if (one.type === 'variable_name' && text === 'PIPESTATUS' && start < end) {
+      out.add(text)
+    }
   }
   return out
 }

@@ -312,3 +312,19 @@ export function assignmentValues(node: TSNodeLike): [string, string | null, Read
   }
   return out
 }
+
+/**
+ * Every variable name a parsed program assigns, wherever it sits. Mirrors
+ * Python's `assigned_names`.
+ *
+ * @param node root node from parse().
+ */
+export function assignedNames(node: TSNodeLike): ReadonlySet<string> {
+  const out = new Set<string>()
+  for (const one of walkTree(node)) {
+    if (one.type !== 'variable_assignment') continue
+    const target = one.childForFieldName?.('name') ?? null
+    if (target !== null && target.text !== '') out.add(target.text)
+  }
+  return out
+}

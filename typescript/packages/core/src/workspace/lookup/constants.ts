@@ -457,6 +457,26 @@ export const SHELL_ONLY_BUILTINS: ReadonlySet<string> = new Set([
   'wait',
 ])
 
+// Options that hand an interpreter its program inline rather than as a
+// script operand (python3 -c/-m, node -e/-p), which the exec rule judges as
+// code from no path.
+export const INLINE_FLAGS: ReadonlySet<string> = new Set([
+  '-c',
+  '-m',
+  '-e',
+  '-p',
+  '--eval',
+  '--print',
+])
+
+// Shell words that act on Mirage's own job table, so a sandbox running the
+// line would answer them about jobs it never started.
+export const WORKSPACE_JOB_WORDS: ReadonlySet<string> = new Set([...JOB_BUILTINS, 'bg'])
+
+// Variables a fresh shell sets for itself, which Mirage seeds unexported: a
+// line the sandbox runs whole reads the sandbox's own.
+export const FRESH_SHELL_NAMES: ReadonlySet<string> = new Set(['PATH', 'IFS', 'OPTIND', 'OPTERR'])
+
 export const SHELL_NAMES: ReadonlySet<string> = new Set([
   ...Object.values(ShellBuiltin),
   ...UNSUPPORTED_BUILTINS,

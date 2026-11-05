@@ -45,6 +45,7 @@ import {
   programs,
   SHELL_CONSUMERS,
 } from './index.ts'
+import { mayRunProgram } from './lookup.ts'
 
 class Sandbox extends Runtime implements ProcessExecutorMixin {
   readonly [PROCESS_EXECUTOR] = true as const
@@ -908,5 +909,18 @@ describe('reading a line once', () => {
     expect(() => {
       ;(facts as { writes: boolean }).writes = false
     }).toThrow(TypeError)
+  })
+})
+
+describe('mayRunProgram', () => {
+  it.each<[string, string[], boolean]>([
+    ['cat /data/x', ['cat'], false],
+    ["echo 'python3'", ['echo'], true],
+    ['xargs node < list', ['xargs'], true],
+    ['$(python3 -c 1)', [], true],
+    ['./train.py', ['./train.py'], true],
+    ['ls', ['ls'], false],
+  ])('reads interpreter words and path heads in %j', (line, heads, may) => {
+    expect(mayRunProgram(line, new Set(heads))).toBe(may)
   })
 })

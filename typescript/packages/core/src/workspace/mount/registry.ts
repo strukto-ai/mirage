@@ -133,6 +133,7 @@ export class MountRegistry {
   readonly retiringMounts = new Map<BaseVFS, Promise<void>>()
   readonly retiredMounts = new WeakSet<BaseVFS>()
   private rootRef: MountEntry | null = null
+  private anchor: MountEntry | null = null
   private defaultRead: ReadSpec = DEFAULT_READ_SPEC
   private defaultWrite: WritePolicy = WritePolicy.UNCONDITIONAL
   private cacheStore: FileCacheMixin | null = null
@@ -603,6 +604,27 @@ export class MountRegistry {
   }
 
   /**
+   * Whether `entry` is the scratch root the workspace added (`anchorRoot`),
+   * which no sandbox is served. Mirrors Python's `is_anchor`.
+   *
+   * @param entry a mount of this registry.
+   */
+  isAnchor(entry: MountEntry): boolean {
+    return entry === this.anchor
+  }
+
+  /**
+   * Mark `entry` as the root the workspace added, not one mounted. Mirrors
+   * Python's `anchor_root`.
+   *
+   * @param entry the scratch root the workspace made because no mount claims
+   *   `/`, or the one a restore mounts from a saved scratch root.
+   */
+  anchorRoot(entry: MountEntry): void {
+    this.anchor = entry
+  }
+
+  /**
    * Remove a mount by exact prefix. Mirrors Python's `registry.unmount(...)`.
    * Per-mount commands and ops live on the Mount instance and die with it.
    * The /dev/ mount is reserved and cannot be removed.
@@ -622,6 +644,7 @@ export class MountRegistry {
       throw new Error(`no mount at prefix: ${norm}`)
     }
     if (removed === this.rootRef) this.rootRef = null
+    if (removed === this.anchor) this.anchor = null
     return removed
   }
 
