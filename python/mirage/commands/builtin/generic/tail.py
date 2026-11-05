@@ -500,8 +500,8 @@ async def _tail_file(
             from_line=counts.from_line,
             from_byte=counts.from_byte,
         )
-    ) as selected:
-        async for part in selected:
+    ) as output:
+        async for part in output:
             yield part
 
 
