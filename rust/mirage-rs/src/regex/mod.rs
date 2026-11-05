@@ -3,6 +3,7 @@ mod class;
 mod hir;
 pub(crate) mod parse;
 pub(crate) mod posix;
+mod search;
 pub(crate) mod stream;
 
 use regex_automata::nfa::thompson::{self, WhichCaptures};
@@ -40,6 +41,7 @@ impl<T> Step<T> {
 pub(crate) const STEPS: u64 = 1 << 16;
 
 /// What a search given every step it asks for finds: it never pauses.
+#[cfg(test)]
 pub(crate) fn unbounded<T>(search: impl FnOnce(&mut u64) -> Step<T>) -> T {
     let mut budget = u64::MAX;
     match search(&mut budget) {
@@ -95,7 +97,12 @@ impl RecordScan {
         self.at = at;
         self.anchored = anchored;
     }
-    pub(crate) fn scan(&mut self, bytes: &[u8], last: bool) -> Result<bool, ()> {
+    pub(crate) fn scan(
+        &mut self,
+        bytes: &[u8],
+        last: bool,
+        budget: &mut u64,
+    ) -> Result<Step<bool>, ()> {
         let mut state = match self.state {
             Some(state) => state,
             None => self
@@ -113,6 +120,11 @@ impl RecordScan {
                 .map_err(|_| ())?,
         };
         while self.at < bytes.len() {
+            if *budget == 0 {
+                self.state = Some(state);
+                return Ok(Step::Paused);
+            }
+            *budget -= 1;
             state = self
                 .dfa
                 .next_state(&mut self.cache, state, bytes[self.at])
@@ -140,14 +152,14 @@ impl RecordScan {
                 state.is_match()
             } {
                 self.state = Some(state);
-                return Ok(true);
+                return Ok(Step::Done(true));
             }
         }
         self.state = Some(state);
         if last {
-            return Ok(true);
+            return Ok(Step::Done(true));
         }
-        Ok(false)
+        Ok(Step::Done(false))
     }
 }
 
@@ -257,21 +269,6 @@ impl Automata {
             first,
             cache,
             longest,
-        })
-    }
-
-    pub(crate) fn record_scanner(&self) -> Option<RecordScan> {
-        if self.first.is_match(b"") {
-            return None;
-        }
-        let dfa = self.longest.as_ref()?.0.clone();
-        let cache = dfa.create_cache();
-        Some(RecordScan {
-            dfa,
-            cache,
-            state: None,
-            at: 0,
-            anchored: false,
         })
     }
 

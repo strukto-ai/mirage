@@ -496,3 +496,91 @@ fn a_replacement_past_the_string_limit_is_refused() {
         ("awk: out of memory\n", 2)
     );
 }
+
+#[test]
+fn nested_match_and_record_searches_resume_within_the_vm_budget() {
+    let drive = |config: serde_json::Value, input: &[u8]| {
+        let mut stream = super::open(&serde_json::to_vec(&config).unwrap()).unwrap();
+        let mut out = Vec::new();
+        let mut turns = 0;
+        let mut reads = 0;
+        loop {
+            while stream.busy() {
+                stream.drain(&mut out).unwrap();
+                turns += 1;
+                assert!(turns < 10000);
+            }
+            let mut data = Vec::new();
+            let Some(header) = stream.request(&mut data) else {
+                break;
+            };
+            let request: serde_json::Value = serde_json::from_slice(&header).unwrap();
+            if request["op"] == "read" {
+                assert!(reads < 2);
+                if reads == 0 {
+                    stream.respond(b"{}", input, &mut out).unwrap();
+                } else {
+                    stream.respond(br#"{"end":true}"#, b"", &mut out).unwrap();
+                }
+                reads += 1;
+            } else {
+                stream.respond(b"{}", b"", &mut out).unwrap();
+            }
+        }
+        let mut err = Vec::new();
+        stream.take_stderr(&mut err);
+        assert!(err.is_empty());
+        assert_eq!(stream.status(), 0);
+        (out, turns)
+    };
+    let long = "a".repeat(131073);
+    let config = json!({"program":"BEGIN{print s ~ /x/; print match(s,/a+/), RSTART, RLENGTH}","assignments":[format!("s={long}")]});
+    let (out, turns) = drive(config, b"");
+    assert_eq!(out, b"0\n1 1 131073\n");
+    assert!(turns > 10);
+    for (program, expected) in [
+        (
+            "BEGIN{print split(s,a,\"\"),length(a[131073]); print split(s,a,/a+/),length(a[1]),length(a[2])}",
+            "131073 1\n2 0 0\n".to_owned(),
+        ),
+        (
+            "BEGIN{print split(s,a,/x+/),length(a[1])}",
+            "1 131073\n".to_owned(),
+        ),
+        (
+            "BEGIN{print gsub(/a+/,\"<&>\",s),length(s)}",
+            "1 131075\n".to_owned(),
+        ),
+        (
+            "BEGIN{print gsub(/x*/,\"-\",s),length(s)}",
+            "131074 262147\n".to_owned(),
+        ),
+        (
+            "BEGIN{print sub(/a+/,t,s),length(s)}",
+            "1 131073\n".to_owned(),
+        ),
+        (
+            "BEGIN{$0=s;FS=\"x+\"; print NF; $2=\"b\"; print NF,length($0);NF=0;print length($0)}",
+            "1\n2 131075\n0\n".to_owned(),
+        ),
+    ] {
+        let config =
+            json!({"program":program,"assignments":[format!("s={long}"),format!("t={long}")]});
+        let (out, turns) = drive(config, b"");
+        assert_eq!(out, expected.as_bytes(), "{program}");
+        assert!(turns > 10, "{program}");
+    }
+    let config = json!({"program":"BEGIN{RS=\"a.*z|END\"} {print length($0)}"});
+    let (out, turns) = drive(config, format!("{long}ENDtail").as_bytes());
+    assert_eq!(out, b"131073\n4\n");
+    assert!(turns > 10);
+    let config = json!({"program":"BEGIN{RS=\"()\"} {print length($0)}"});
+    let (out, turns) = drive(config, long.as_bytes());
+    assert_eq!(out, b"131073\n");
+    assert!(turns > 10);
+    let config = json!({"program":"BEGIN{RS=\"\"} {print}"});
+    let input = format!("{}a\n\n{}b\n", "\n".repeat(131073), "\n".repeat(131073));
+    let (out, turns) = drive(config, input.as_bytes());
+    assert_eq!(out, b"a\nb\n");
+    assert!(turns > 10);
+}

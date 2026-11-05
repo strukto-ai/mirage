@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use crate::regex::Step;
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
-use crate::regex::unbounded;
 
 use super::value::MAX_LEN;
 
@@ -130,72 +130,100 @@ fn blank(c: u8) -> bool {
     matches!(c, b' ' | b'\t' | b'\n')
 }
 
-/// Split `record` into fields by an FS value, as ranges of it. A blank FS
-/// splits at runs of blanks with the ends trimmed, an empty one makes
-/// each byte a field, one byte is literal and anything longer an ERE. A
-/// record read in paragraph mode also splits at each newline when FS is
-/// one byte, as in gawk and onetrueawk; a regex FS does not.
-pub(super) fn split(
-    record: &[u8],
-    fs: &[u8],
-    paragraph: bool,
-    regexes: &mut Regexes,
-    out: &mut Vec<(usize, usize)>,
-) -> Result<(), Vec<u8>> {
-    out.clear();
-    match fs {
-        b"" => out.extend((0..record.len()).map(|at| (at, at + 1))),
-        b" " => {
-            let mut at = 0;
-            while at < record.len() {
-                while at < record.len() && blank(record[at]) {
-                    at += 1;
-                }
-                let start = at;
-                while at < record.len() && !blank(record[at]) {
-                    at += 1;
-                }
-                if at > start {
-                    out.push((start, at));
-                }
-            }
+/// A field scan keeps its next search and field boundary between VM turns.
+#[derive(Default)]
+pub(super) struct SplitScan {
+    at: usize,
+    start: usize,
+    active: bool,
+    done: bool,
+}
+
+impl SplitScan {
+    pub(super) fn next(
+        &mut self,
+        record: &[u8],
+        fs: &[u8],
+        paragraph: bool,
+        regexes: &mut Regexes,
+        work: &mut u64,
+    ) -> Result<Step<Option<(usize, usize)>>, Vec<u8>> {
+        if self.done || record.is_empty() {
+            return Ok(Step::Done(None));
         }
-        &[sep] => {
-            if record.is_empty() {
-                return Ok(());
+        loop {
+            if *work == 0 {
+                return Ok(Step::Paused);
             }
-            let mut start = 0;
-            for (at, &c) in record.iter().enumerate() {
-                if c == sep || (paragraph && c == b'\n') {
-                    out.push((start, at));
-                    start = at + 1;
+            match fs {
+                b"" => {
+                    *work -= 1;
+                    if self.at == record.len() {
+                        self.done = true;
+                        return Ok(Step::Done(None));
+                    }
+                    let at = self.at;
+                    self.at += 1;
+                    return Ok(Step::Done(Some((at, at + 1))));
+                }
+                b" " => {
+                    *work -= 1;
+                    if self.at == record.len() {
+                        self.done = true;
+                        return Ok(Step::Done(self.active.then_some((self.start, self.at))));
+                    }
+                    let at = self.at;
+                    self.at += 1;
+                    if blank(record[at]) {
+                        if self.active {
+                            self.active = false;
+                            return Ok(Step::Done(Some((self.start, at))));
+                        }
+                    } else if !self.active {
+                        self.active = true;
+                        self.start = at;
+                    }
+                }
+                &[sep] => {
+                    *work -= 1;
+                    if self.at == record.len() {
+                        self.done = true;
+                        return Ok(Step::Done(Some((self.start, self.at))));
+                    }
+                    let at = self.at;
+                    self.at += 1;
+                    if record[at] == sep || (paragraph && record[at] == b'\n') {
+                        let start = self.start;
+                        self.start = self.at;
+                        return Ok(Step::Done(Some((start, at))));
+                    }
+                }
+                _ => {
+                    if self.at > record.len() {
+                        self.done = true;
+                        return Ok(Step::Done(Some((self.start, record.len()))));
+                    }
+                    match regexes.get(fs)?.find(record, self.at, work) {
+                        Step::Paused => return Ok(Step::Paused),
+                        Step::Done(Some((from, to))) if from == to => {
+                            *work = work.saturating_sub(1);
+                            self.at = from + 1;
+                        }
+                        Step::Done(Some((from, to))) => {
+                            let start = self.start;
+                            self.start = to;
+                            self.at = to;
+                            return Ok(Step::Done(Some((start, from))));
+                        }
+                        Step::Done(None) => {
+                            self.done = true;
+                            return Ok(Step::Done(Some((self.start, record.len()))));
+                        }
+                    }
                 }
             }
-            out.push((start, record.len()));
-        }
-        _ => {
-            if record.is_empty() {
-                return Ok(());
-            }
-            let regex = regexes.get(fs)?;
-            let (mut start, mut pos) = (0, 0);
-            while pos <= record.len() {
-                let Some((from, to)) = unbounded(|budget| regex.find(record, pos, budget)) else {
-                    break;
-                };
-                if from == to {
-                    // A separator that matches nothing separates nothing.
-                    pos = from + 1;
-                    continue;
-                }
-                out.push((start, from));
-                start = to;
-                pos = to;
-            }
-            out.push((start, record.len()));
         }
     }
-    Ok(())
 }
 
 #[derive(Default)]
@@ -206,10 +234,14 @@ pub(super) struct RecordSearch {
     paragraph_start: usize,
     paragraph_end: Option<usize>,
     initialized: bool,
+    position: usize,
+    finding: bool,
+    anchoring: bool,
 }
 impl RecordSearch {
     pub(super) fn shift(&mut self, count: usize) {
         self.scanned = self.scanned.saturating_sub(count);
+        self.position = self.position.saturating_sub(count);
         self.paragraph_start = self.paragraph_start.saturating_sub(count);
         if let Some(end) = &mut self.paragraph_end {
             *end = end.saturating_sub(count);
@@ -222,6 +254,9 @@ impl RecordSearch {
     }
     pub(super) fn reset(&mut self, start: usize) {
         self.scanned = start;
+        self.position = start;
+        self.finding = false;
+        self.anchoring = false;
         self.paragraph_start = start;
         self.paragraph_end = None;
         if let Some(regex) = &mut self.regex {
@@ -236,6 +271,8 @@ impl RecordSearch {
 /// anything longer an ERE, where a match of nothing separates nothing;
 /// until the input ends, a separator reaching the end of `buf` could
 /// still grow.
+type RecordSpan = (usize, usize, usize);
+
 pub(super) fn take_record(
     buf: &[u8],
     start: usize,
@@ -243,7 +280,8 @@ pub(super) fn take_record(
     last: bool,
     regexes: &mut Regexes,
     search: &mut RecordSearch,
-) -> Result<Option<(usize, usize, usize)>, Vec<u8>> {
+    budget: &mut u64,
+) -> Result<Step<Option<RecordSpan>>, Vec<u8>> {
     if !search.initialized || search.rs != rs {
         search.rs.clear();
         search.rs.extend_from_slice(rs);
@@ -255,91 +293,147 @@ pub(super) fn take_record(
         search.initialized = true;
         search.reset(start);
     }
-    let tail = |start: usize| (last && start < buf.len()).then_some((start, buf.len(), buf.len()));
+    let tail = |start| (last && start < buf.len()).then_some((start, buf.len(), buf.len()));
     match rs {
-        b"" => Ok(paragraph(buf, start, last, search)),
+        b"" => Ok(paragraph(buf, start, last, search, budget)),
         &[sep] => {
             let from = search.scanned.max(start);
-            Ok(match memchr::memchr(sep, &buf[from..]) {
-                Some(at) => Some((start, from + at, from + at + 1)),
-                None => {
-                    search.scanned = buf.len();
-                    tail(start)
-                }
-            })
+            let end = buf
+                .len()
+                .min(from.saturating_add(usize::try_from(*budget).unwrap_or(usize::MAX)));
+            if let Some(at) = memchr::memchr(sep, &buf[from..end]) {
+                *budget -= (at + 1) as u64;
+                Ok(Step::Done(Some((start, from + at, from + at + 1))))
+            } else {
+                *budget -= (end - from) as u64;
+                search.scanned = end;
+                Ok(if end < buf.len() {
+                    Step::Paused
+                } else {
+                    Step::Done(tail(start))
+                })
+            }
         }
         _ => {
-            if let Some(scanner) = &mut search.regex {
-                match scanner.scan(buf, last) {
-                    Ok(false) => return Ok(None),
-                    Ok(true) => {}
-                    Err(()) => search.regex = None,
+            if search.anchoring {
+                if let Some(scanner) = &mut search.regex {
+                    match scanner.scan(buf, false, budget) {
+                        Ok(Step::Paused) => return Ok(Step::Paused),
+                        Err(()) => search.regex = None,
+                        _ => {}
+                    }
                 }
+                search.anchoring = false;
+                search.finding = false;
+                search.position = start;
+                return Ok(Step::Done(None));
+            }
+            if !search.finding {
+                if let Some(scanner) = &mut search.regex {
+                    match scanner.scan(buf, last, budget) {
+                        Ok(Step::Paused) => return Ok(Step::Paused),
+                        Ok(Step::Done(false)) => return Ok(Step::Done(None)),
+                        Ok(Step::Done(true)) => {}
+                        Err(()) => search.regex = None,
+                    }
+                }
+                search.finding = true;
+                search.position = start;
             }
             let regex = regexes.get(rs)?;
-            let mut pos = start;
-            while pos <= buf.len() {
-                let Some((from, to)) = unbounded(|budget| regex.find(buf, pos, budget)) else {
-                    break;
+            while search.position <= buf.len() {
+                if *budget == 0 {
+                    return Ok(Step::Paused);
+                }
+                *budget -= 1;
+                let (from, to) = match regex.find(buf, search.position, budget) {
+                    Step::Paused => return Ok(Step::Paused),
+                    Step::Done(None) => break,
+                    Step::Done(Some(found)) => found,
                 };
                 if from == to {
-                    pos = from + 1;
+                    search.position = from + 1;
                     continue;
                 }
                 if to == buf.len() && !last {
-                    // Anchoring later would discard earlier unfinished alternatives.
                     if from == start {
                         if let Some(scanner) = &mut search.regex {
                             scanner.reset(start, true);
-                            if scanner.scan(buf, false).is_err() {
-                                search.regex = None;
+                            search.anchoring = true;
+                            match scanner.scan(buf, false, budget) {
+                                Ok(Step::Paused) => return Ok(Step::Paused),
+                                Err(()) => search.regex = None,
+                                _ => {}
                             }
+                            search.anchoring = false;
                         }
                     }
-                    return Ok(None);
+                    search.finding = false;
+                    search.position = start;
+                    return Ok(Step::Done(None));
                 }
-                return Ok(Some((start, from, to)));
+                return Ok(Step::Done(Some((start, from, to))));
             }
-            Ok(tail(start))
+            search.finding = false;
+            search.position = start;
+            Ok(Step::Done(tail(start)))
         }
     }
 }
 
-/// Paragraph mode: records are separated by blank lines, and leading or
-/// trailing newlines never make an empty record. The whole run of
-/// newlines is the separator, so a run reaching the end of `buf` waits.
 fn paragraph(
     buf: &[u8],
     start: usize,
     last: bool,
     search: &mut RecordSearch,
-) -> Option<(usize, usize, usize)> {
+    budget: &mut u64,
+) -> Step<Option<(usize, usize, usize)>> {
     let mut start = start.max(search.paragraph_start);
     while start < buf.len() && buf[start] == b'\n' {
+        if *budget == 0 {
+            search.paragraph_start = start;
+            return Step::Paused;
+        }
+        *budget -= 1;
         start += 1;
     }
     search.paragraph_start = start;
     if let Some(end) = search.paragraph_end {
         let mut stop = search.scanned.max(end + 2);
         while stop < buf.len() && buf[stop] == b'\n' {
+            if *budget == 0 {
+                search.scanned = stop;
+                return Step::Paused;
+            }
+            *budget -= 1;
             stop += 1;
         }
         search.scanned = stop;
-        return (stop < buf.len() || last).then_some((start, end, stop));
+        return Step::Done((stop < buf.len() || last).then_some((start, end, stop)));
     }
-    let from = start.max(search.scanned.saturating_sub(1));
-    if let Some(at) = memchr::memmem::find(&buf[from..], b"\n\n") {
-        let end = from + at;
-        search.paragraph_end = Some(end);
-        search.scanned = end + 2;
-        return paragraph(buf, start, last, search);
+    let mut at = start.max(search.scanned);
+    while at < buf.len() {
+        if *budget == 0 {
+            search.scanned = at;
+            return Step::Paused;
+        }
+        *budget -= 1;
+        if at > start && buf[at - 1] == b'\n' && buf[at] == b'\n' {
+            search.paragraph_end = Some(at - 1);
+            search.scanned = at + 1;
+            return paragraph(buf, start, last, search, budget);
+        }
+        at += 1;
     }
     search.scanned = buf.len();
     if !last || start == buf.len() {
-        return None;
+        return Step::Done(None);
     }
-    let end = buf.len() - usize::from(buf.ends_with(b"\n"));
-    Some((start, end, buf.len()))
+    Step::Done(Some((
+        start,
+        buf.len() - usize::from(buf.ends_with(b"\n")),
+        buf.len(),
+    )))
 }
 
 /// An awk substring: positions count from 1 and truncate toward zero; a
@@ -360,82 +454,234 @@ pub(super) fn substr(subject: &[u8], start: f64, length: Option<f64>) -> &[u8] {
     }
 }
 
-/// Append `piece`, or None when the string would pass the longest one
-/// awk keeps.
-fn grow(out: &mut Vec<u8>, piece: &[u8]) -> Option<()> {
-    (out.len() + piece.len() <= MAX_LEN).then(|| out.extend_from_slice(piece))
+enum SubPhase {
+    Search,
+    Prefix {
+        from: usize,
+        to: usize,
+        at: usize,
+    },
+    Template {
+        from: usize,
+        to: usize,
+        at: usize,
+    },
+    Matched {
+        from: usize,
+        to: usize,
+        at: usize,
+        next: usize,
+    },
+    Advance {
+        from: usize,
+        to: usize,
+    },
+    Tail {
+        at: usize,
+    },
 }
 
-/// A sub/gsub replacement with `&` the match: `\&` is a literal
-/// ampersand and `\\&` a backslash and the match; any other backslash is
-/// itself, as in gawk, mawk and onetrueawk.
-fn expand(template: &[u8], matched: &[u8], out: &mut Vec<u8>) -> Option<()> {
-    let mut at = 0;
-    while at < template.len() {
-        let Some(found) = memchr::memchr2(b'\\', b'&', &template[at..]) else {
-            return grow(out, &template[at..]);
-        };
-        grow(out, &template[at..at + found])?;
-        at += found;
-        if template[at] == b'&' {
-            grow(out, matched)?;
-            at += 1;
-        } else if template.get(at + 1) == Some(&b'&') {
-            grow(out, b"&")?;
-            at += 2;
-        } else if template[at + 1..].starts_with(b"\\&") {
-            grow(out, b"\\")?;
-            grow(out, matched)?;
-            at += 3;
-        } else {
-            grow(out, b"\\")?;
-            at += 1;
-        }
-    }
-    Some(())
-}
-
-/// sub, or gsub when `global`: the count of replacements and the result,
-/// or None when the result would pass the longest string awk keeps. An
-/// empty match touching the previous match is no match, so
-/// `gsub(/l*/, "-")` turns "hello" into "-h-e-o-".
-pub(super) fn substitute(
-    regex: &mut Posix,
-    template: &[u8],
-    subject: &[u8],
+pub(super) struct Substitution {
+    subject: Vec<u8>,
+    template: Vec<u8>,
+    out: Vec<u8>,
+    phase: SubPhase,
     global: bool,
-) -> Option<(usize, Vec<u8>)> {
-    let mut out = Vec::with_capacity(subject.len());
-    let (mut count, mut pos, mut last_end) = (0, 0, None);
-    while pos <= subject.len() {
-        let Some((from, to)) = unbounded(|budget| regex.find(subject, pos, budget)) else {
-            break;
-        };
-        grow(&mut out, &subject[pos..from])?;
-        if !(from == to && last_end == Some(from)) {
-            expand(template, &subject[from..to], &mut out)?;
-            count += 1;
-        }
-        if from == to {
-            if let Some(&c) = subject.get(from) {
-                grow(&mut out, &[c])?;
-            }
-            pos = from + 1;
-        } else {
-            pos = to;
-            last_end = Some(to);
-        }
-        if !global {
-            break;
+    pos: usize,
+    count: usize,
+    last_end: Option<usize>,
+}
+
+fn copy_piece(
+    out: &mut Vec<u8>,
+    bytes: &[u8],
+    at: &mut usize,
+    end: usize,
+    work: &mut u64,
+) -> Result<bool, ()> {
+    if out.len().saturating_add(end - *at) > MAX_LEN {
+        return Err(());
+    }
+    let count = (end - *at).min(usize::try_from(*work).unwrap_or(usize::MAX));
+    out.extend_from_slice(&bytes[*at..*at + count]);
+    *at += count;
+    *work -= count as u64;
+    Ok(*at == end)
+}
+
+impl Substitution {
+    pub(super) fn new(subject: Vec<u8>, template: Vec<u8>, global: bool) -> Self {
+        Self {
+            out: Vec::with_capacity(subject.len()),
+            subject,
+            template,
+            global,
+            phase: SubPhase::Search,
+            pos: 0,
+            count: 0,
+            last_end: None,
         }
     }
-    grow(&mut out, subject.get(pos..).unwrap_or_default())?;
-    Some((count, out))
+
+    pub(super) fn step(
+        &mut self,
+        regex: &mut Posix,
+        work: &mut u64,
+    ) -> Result<Step<(usize, Vec<u8>)>, ()> {
+        while *work > 0 {
+            match &mut self.phase {
+                SubPhase::Search => {
+                    if self.pos > self.subject.len() {
+                        self.phase = SubPhase::Tail {
+                            at: self.subject.len(),
+                        };
+                        continue;
+                    }
+                    match regex.find(&self.subject, self.pos, work) {
+                        Step::Paused => return Ok(Step::Paused),
+                        Step::Done(None) => self.phase = SubPhase::Tail { at: self.pos },
+                        Step::Done(Some((from, to))) => {
+                            self.phase = SubPhase::Prefix {
+                                from,
+                                to,
+                                at: self.pos,
+                            }
+                        }
+                    }
+                    *work = work.saturating_sub(1);
+                }
+                SubPhase::Prefix { from, to, at } => {
+                    if !copy_piece(&mut self.out, &self.subject, at, *from, work)? {
+                        return Ok(Step::Paused);
+                    }
+                    self.phase = if from == to && self.last_end == Some(*from) {
+                        SubPhase::Advance {
+                            from: *from,
+                            to: *to,
+                        }
+                    } else {
+                        self.count += 1;
+                        SubPhase::Template {
+                            from: *from,
+                            to: *to,
+                            at: 0,
+                        }
+                    };
+                }
+                SubPhase::Template { from, to, at } => {
+                    if *at == self.template.len() {
+                        self.phase = SubPhase::Advance {
+                            from: *from,
+                            to: *to,
+                        };
+                        continue;
+                    }
+                    if !matches!(self.template[*at], b'\\' | b'&') {
+                        let end = self
+                            .template
+                            .len()
+                            .min(at.saturating_add(usize::try_from(*work).unwrap_or(usize::MAX)));
+                        let end = memchr::memchr2(b'\\', b'&', &self.template[*at..end])
+                            .map_or(end, |offset| *at + offset);
+                        copy_piece(&mut self.out, &self.template, at, end, work)?;
+                        continue;
+                    }
+                    *work -= 1;
+                    match self.template[*at] {
+                        b'&' => {
+                            self.phase = SubPhase::Matched {
+                                from: *from,
+                                to: *to,
+                                at: *from,
+                                next: *at + 1,
+                            }
+                        }
+                        b'\\' if self.template.get(*at + 1) == Some(&b'&') => {
+                            self.out.push(b'&');
+                            *at += 2;
+                        }
+                        b'\\' if self.template.get(*at + 1..*at + 3) == Some(&b"\\&"[..]) => {
+                            self.out.push(b'\\');
+                            self.phase = SubPhase::Matched {
+                                from: *from,
+                                to: *to,
+                                at: *from,
+                                next: *at + 3,
+                            };
+                        }
+                        byte => {
+                            self.out.push(byte);
+                            *at += 1;
+                        }
+                    }
+                    if self.out.len() > MAX_LEN {
+                        return Err(());
+                    }
+                }
+                SubPhase::Matched { from, to, at, next } => {
+                    if !copy_piece(&mut self.out, &self.subject, at, *to, work)? {
+                        return Ok(Step::Paused);
+                    }
+                    self.phase = SubPhase::Template {
+                        from: *from,
+                        to: *to,
+                        at: *next,
+                    };
+                }
+                SubPhase::Advance { from, to } => {
+                    *work -= 1;
+                    if from == to {
+                        if let Some(&byte) = self.subject.get(*from) {
+                            if self.out.len() == MAX_LEN {
+                                return Err(());
+                            }
+                            self.out.push(byte);
+                        }
+                        self.pos = *from + 1;
+                    } else {
+                        self.pos = *to;
+                        self.last_end = Some(*to);
+                    }
+                    self.phase = if self.global {
+                        SubPhase::Search
+                    } else {
+                        SubPhase::Tail {
+                            at: self.pos.min(self.subject.len()),
+                        }
+                    };
+                }
+                SubPhase::Tail { at } => {
+                    if !copy_piece(&mut self.out, &self.subject, at, self.subject.len(), work)? {
+                        return Ok(Step::Paused);
+                    }
+                    return Ok(Step::Done((self.count, std::mem::take(&mut self.out))));
+                }
+            }
+        }
+        Ok(Step::Paused)
+    }
 }
 
 #[cfg(test)]
 mod record_tests {
     use super::*;
+
+    fn complete_record(
+        buf: &[u8],
+        start: usize,
+        rs: &[u8],
+        last: bool,
+        regexes: &mut Regexes,
+        search: &mut RecordSearch,
+    ) -> Result<Option<(usize, usize, usize)>, Vec<u8>> {
+        loop {
+            let mut work = 7;
+            match take_record(buf, start, rs, last, regexes, search, &mut work)? {
+                Step::Done(record) => return Ok(record),
+                Step::Paused => {}
+            }
+        }
+    }
 
     #[test]
     fn incremental_record_search_matches_full_search_at_every_boundary() {
@@ -469,7 +715,7 @@ mod record_tests {
                     {
                         let last = end == text.len();
                         loop {
-                            let got = take_record(
+                            let got = complete_record(
                                 &text[..end],
                                 start,
                                 rs,
@@ -483,7 +729,7 @@ mod record_tests {
                                 initialized: true,
                                 ..RecordSearch::default()
                             };
-                            let expected = take_record(
+                            let expected = complete_record(
                                 &text[..end],
                                 start,
                                 rs,
@@ -514,7 +760,7 @@ mod record_tests {
             let text = vec![b'a'; 1024 * 1024];
             for end in (4096..=text.len()).step_by(4096) {
                 assert!(
-                    take_record(&text[..end], 0, rs, false, &mut regexes, &mut search)
+                    complete_record(&text[..end], 0, rs, false, &mut regexes, &mut search)
                         .unwrap()
                         .is_none()
                 );

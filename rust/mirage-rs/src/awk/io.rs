@@ -26,7 +26,32 @@ impl<T> Default for Ordered<T> {
     }
 }
 
+pub(super) struct Retired<T> {
+    keys: std::collections::hash_map::IntoIter<Vec<u8>, usize>,
+    slots: std::vec::IntoIter<Option<T>>,
+}
+
+impl<T> Retired<T> {
+    pub(super) fn step(&mut self, work: &mut u64) -> bool {
+        while *work > 0 {
+            if self.keys.next().is_some() || self.slots.next().is_some() {
+                *work = work.saturating_sub(16);
+            } else {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 impl<T> Ordered<T> {
+    pub(super) fn retire(&mut self) -> Retired<T> {
+        Retired {
+            keys: std::mem::take(&mut self.index).into_iter(),
+            slots: std::mem::take(&mut self.slots).into_iter(),
+        }
+    }
+
     pub(super) fn len(&self) -> usize {
         self.index.len()
     }
@@ -131,6 +156,7 @@ pub(super) enum Next {
     End,
     Failed(Vec<u8>),
     Pending,
+    Busy,
 }
 
 /// One input cut into records with the RS in force at each read, pulled
@@ -160,7 +186,12 @@ impl Reader {
         }
     }
 
-    pub(super) fn next(&mut self, rs: &[u8], regexes: &mut Regexes) -> Result<Next, Vec<u8>> {
+    pub(super) fn next(
+        &mut self,
+        rs: &[u8],
+        regexes: &mut Regexes,
+        budget: &mut u64,
+    ) -> Result<Next, Vec<u8>> {
         if self.start > self.buf.len() / 2 {
             self.search.shift(self.start);
             self.buf.drain(..self.start);
@@ -168,17 +199,22 @@ impl Reader {
             crate::release_capacity(&mut self.buf);
         }
 
-        if let Some((start, end, next)) = take_record(
+        match take_record(
             &self.buf,
             self.start,
             rs,
             self.ended,
             regexes,
             &mut self.search,
+            budget,
         )? {
-            self.start = next;
-            self.search.reset(next);
-            return Ok(Next::Record(start, end));
+            crate::regex::Step::Paused => return Ok(Next::Busy),
+            crate::regex::Step::Done(Some((start, end, next))) => {
+                self.start = next;
+                self.search.reset(next);
+                return Ok(Next::Record(start, end));
+            }
+            crate::regex::Step::Done(None) => {}
         }
         Ok(match (&self.failed, self.ended) {
             (_, true) => Next::End,
