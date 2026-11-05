@@ -32,17 +32,16 @@ point the runtime's `home`, or `MIRAGE_QUICKJS_HOME`, at its directory.
     same [worker setup](/typescript/runtime/python#worker-and-browser-setup)
     as Pyodide.
 
-    On Cloudflare Workers, `@struktoai/mirage-cloudflare` ships
-    `qjs-wasi.wasm` and needs no `home`, but runs QuickJS only when a
-    workspace's `runtimes` names it: each run executes in the Worker's own
-    isolate, as the [Cloudflare quickstart](/typescript/cloudflare-quickstart#run-a-workspace)
+    QuickJS does not run on Cloudflare Workers: with no worker to stop it,
+    a script that never calls the host would hold the isolate, as the
+    [Cloudflare quickstart](/typescript/cloudflare-quickstart#run-a-workspace)
     describes.
   </Tab>
 </Tabs>
 
 ## Usage
 
-QuickJS is in the default runtimes, except on Cloudflare Workers, so `node` works once its engine is found.
+QuickJS is in the default runtimes, so `node` works once its engine is found.
 To list it yourself:
 
 <Tabs>

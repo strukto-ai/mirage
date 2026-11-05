@@ -64,6 +64,6 @@ it('loads the Rust module as a .wasm file, with no base64 copy in the script', (
   expect(longest).toBeLessThan(1024 * 1024)
 })
 
-it('loads qjs as a .wasm file of its own, which the deploy compiles', () => {
-  expect([...files.keys()].some((name) => name.endsWith('qjs-wasi.wasm'))).toBe(true)
+it('ships no QuickJS', () => {
+  expect([...files.keys()].some((name) => name.includes('qjs'))).toBe(false)
 })

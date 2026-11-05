@@ -176,17 +176,17 @@ describe('the server API in workerd', () => {
     expect([ran.exit_code, ran.stdout]).toEqual([0, '8\n'])
   })
 
-  it('runs no QuickJS unless a config names it', async () => {
+  it('runs no QuickJS, and refuses a config that names it', async () => {
     const config = { mounts: { '/': { vfs: 'ram' } }, mode: 'exec' }
     await call('POST', '/v1/workspaces', { id: 'nojs', config })
     const plain = await shell('nojs', 'node -e "console.log(1)"; python3 -c "print(2)"')
     expect([plain.exit_code, plain.stdout]).toEqual([0, '2\n'])
-    await call('POST', '/v1/workspaces', {
+    const named = await call('POST', '/v1/workspaces', {
       id: 'js',
-      config: { ...config, runtimes: ['workspace', 'monty', 'quickjs'] },
+      config: { ...config, runtimes: ['workspace', 'quickjs'] },
     })
-    const named = await shell('js', 'node -e "console.log(1)"')
-    expect([named.exit_code, named.stdout]).toEqual([0, '1\n'])
+    expect(named.status).toBe(400)
+    expect(JSON.stringify(named.json)).toContain("runtime 'quickjs' does not run on Cloudflare")
   })
 
   it('reopens a closed workspace with its sessions', async () => {

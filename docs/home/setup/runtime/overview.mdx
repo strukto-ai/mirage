@@ -24,7 +24,7 @@ A runtime runs the programs in a line. Mirage's own commands (`grep`, `cat`, pip
 
 ## Routing
 
-`runtimes` is an ordered list: the first runtime whose `captures` name a program runs it, and `workspace` takes the rest. Without the key, the list is `[monty, quickjs, workspace]` in both SDKs, and `[monty, workspace]` on [Cloudflare Workers](/typescript/cloudflare-quickstart), where a busy script would hold the isolate.
+`runtimes` is an ordered list: the first runtime whose `captures` name a program runs it, and `workspace` takes the rest. Without the key, the list is `[monty, quickjs, workspace]` in both SDKs, and `[monty, workspace]` on [Cloudflare Workers](/typescript/cloudflare-quickstart), which runs no QuickJS.
 
 ```yaml
 runtimes:

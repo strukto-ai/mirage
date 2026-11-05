@@ -5,9 +5,9 @@ description: Run Mirage workspaces and the Mirage server API on Cloudflare Worke
 keywords: ["Mirage Cloudflare", "@struktoai/mirage-cloudflare", "Cloudflare Workers", "Durable Objects", "serverless terminal"]
 ---
 
-`@struktoai/mirage-cloudflare` runs Mirage on Cloudflare Workers. A workspace runs in the Worker's own isolate: the shell, the commands built on Rust, `python3` on [Monty](/typescript/runtime/python), and `node` on [QuickJS](/home/setup/runtime/quickjs), all in one thread.
+`@struktoai/mirage-cloudflare` runs Mirage on Cloudflare Workers. A workspace runs in the Worker's own isolate: the shell, the commands built on Rust and `python3` on [Monty](/typescript/runtime/python), all in one thread.
 
-The Worker needs `nodejs_compat` for Node's `buffer`, `crypto`, `path`, `process` and `util` modules. Wrangler loads Mirage's Rust module, Monty and QuickJS as compiled `WebAssembly.Module` imports.
+The Worker needs `nodejs_compat` for Node's `buffer`, `crypto`, `path`, `process` and `util` modules. Wrangler loads Mirage's Rust module and Monty as compiled `WebAssembly.Module` imports.
 
 ## Install
 
@@ -33,7 +33,7 @@ export default {
     const { command } = (await request.json()) as { command: string }
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: ['workspace', 'monty', 'quickjs'], maxMemory: '32MB' },
+      { mode: MountMode.EXEC, runtimes: ['workspace', 'monty'], maxMemory: '32MB' },
     )
     try {
       const result = await ws.shell(command)
@@ -52,7 +52,7 @@ curl -s localhost:8787 -d '{"command": "seq 1 100 | sort -rn | head -3"}'
 
 `python3` runs on Monty in the isolate's own thread, where no timer can interrupt it, so Monty's own clock stops a run: at the line's time limit, which ends the line with exit 124, or after 30 seconds with `TimeoutError` if that comes first. A loop that never ends leaves the isolate free for the next line.
 
-`node` and `js` run QuickJS in the isolate too when a workspace's `runtimes` names `quickjs`, as above; without it an edge workspace runs Monty and the shell. Its wasm is suspended on each call it makes of the host ([JSPI](https://github.com/WebAssembly/js-promise-integration)): reading a file, writing output, waiting on a timer. A line's time limit or a stop ends a script at its next such call, with exit 124 at the time limit. A loop that never makes one, such as `for (;;) {}`, holds the isolate until Cloudflare's CPU limit ends the request, since QuickJS has no clock of its own to stop it; any other workspace in that isolate waits too, a Durable Object sharing it included. A run's memory is held to 64 MiB: past it, the script gets `InternalError: out of memory`, which it can catch, and the isolate runs on. Since every run holds its memory in the isolate's, one runs in an isolate at a time: a second, such as the other side of `node a.js | node b.js`, fails at once with exit 1.
+`node` and `js` do not run on Cloudflare Workers. [QuickJS](/home/setup/runtime/quickjs) would run on the isolate's one thread, where a script that never calls the host, such as `for (;;) {}`, runs until Cloudflare's CPU limit ends the request while every workspace in the isolate waits, a Durable Object sharing it included. A config whose `runtimes` names `quickjs` is refused.
 
 For anything else from core, import its subpaths (`@struktoai/mirage-core/vfs/registry`), not its package root: the root also imports optional packages, such as Pyodide, that a Worker bundle cannot resolve.
 

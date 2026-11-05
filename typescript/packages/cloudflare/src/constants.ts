@@ -16,8 +16,6 @@
 // workspace shares the isolate's 128 MB.
 export const EDGE_MAX_SESSIONS = 4
 
-// What a workspace runs when its options name no runtimes: the shell and
-// Monty. QuickJS joins only when named, since a script that never calls the
-// host holds the isolate, and every workspace in it, until Cloudflare's CPU
-// limit ends the request.
+// What a workspace runs when its options name no runtimes: Monty and the
+// shell, the default world without QuickJS, which the edge refuses.
 export const EDGE_RUNTIMES: readonly string[] = ['monty', 'workspace']
