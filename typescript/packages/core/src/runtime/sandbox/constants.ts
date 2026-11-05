@@ -101,6 +101,40 @@ export const PIPE_SERVER_HINT =
 export const EXEC_PRELUDE = 'CDPATH= cd -- "$1" || exit 126; shift; exec "$@"'
 
 /**
+ * A line in a sandbox holding mounts runs under this guard, inside its own
+ * exec, so it checks the boot the program runs in: a sandbox that restarted
+ * after the line was admitted has lost its mounts, and a program run over
+ * the bare directories would write to the sandbox's own disk. `$1` is the
+ * mount table, then four words per mount (mountpoint and source as the
+ * table escapes them, type, the message), then `--` and the argv. Each
+ * mount must be the top entry at its mountpoint, or the guard prints its
+ * message and exits 126 with nothing run. The check runs in a subshell, so
+ * its names never reach the program's environment, and needs only sh's
+ * builtins, so a PATH with no tools still runs it.
+ */
+export const MOUNT_GUARD =
+  '( t=$1; shift; ' +
+  `[ -r "$t" ] || { printf '%s\\n' "$4" >&2; exit 126; }; ` +
+  'while [ "$1" != -- ]; do f=; ' +
+  'while read -r s m k o; do [ "$m" = "$1" ] || continue; ' +
+  'f=; [ "$s" = "$2" ] && [ "$k" = "$3" ] && f=1; ' +
+  'done < "$t"; ' +
+  `[ -n "$f" ] || { printf '%s\\n' "$4" >&2; exit 126; }; ` +
+  'shift 4; done ) || exit 126; ' +
+  'shift; while [ "$1" != -- ]; do shift 4; done; shift; exec "$@"'
+
+/**
+ * `text` as `/proc/mounts` writes it in a field: space, tab, newline and
+ * backslash as octal escapes, and in a source `#` too.
+ */
+export function mountField(text: string, source = false): string {
+  return text.replace(
+    source ? /[ \t\n\\#]/g : /[ \t\n\\]/g,
+    (c) => `\\${c.charCodeAt(0).toString(8).padStart(3, '0')}`,
+  )
+}
+
+/**
  * Every process a run starts in a sandbox carries this variable, set to the
  * run's own id, so a run cancelled midway can be stopped in the box:
  * stopping the client that started it does not reach the box everywhere

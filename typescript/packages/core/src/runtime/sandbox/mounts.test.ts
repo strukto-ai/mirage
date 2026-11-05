@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
@@ -33,7 +33,7 @@ import { shellJoin } from '../../shell/join.ts'
 import type { MountType, OutputFn, RunResult, SandboxPipe } from '../types.ts'
 import { RemoteSandbox } from './base.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from './mixin.ts'
-import { SSHFS_OPTIONS } from './constants.ts'
+import { MOUNT_GUARD, SSHFS_OPTIONS } from './constants.ts'
 import {
   mountTable,
   registerPipeServer,
@@ -64,6 +64,7 @@ class FakeSandbox extends RemoteSandbox implements PipeTransport {
   readonly pipes: string[] = []
   readonly ends = new Map<string, () => void>()
   readonly stopped: string[] = []
+  readonly guards: string[][] = []
   failUnmount = false
   failTable = false
   failCheck = false
@@ -92,8 +93,39 @@ class FakeSandbox extends RemoteSandbox implements PipeTransport {
     _errors: OutputFn | null,
     signal?: AbortSignal,
   ): Promise<RunResult> {
+    let run = argv
+    if (argv[2] === MOUNT_GUARD) {
+      const checked = this.check(argv)
+      if (checked.exitCode !== 0) return checked
+      run = argv.slice(argv.indexOf('--', 5) + 1)
+    }
     const data = stdin === null ? null : await materialize(stdin)
-    return this.execLine(lineOf(argv), data, env, cwd, signal)
+    return this.execLine(lineOf(run), data, env, cwd, signal)
+  }
+
+  rows(): string {
+    return [...this.table]
+      .map(([p, [source, kind]]) => `${escaped(source, '#')} ${escaped(p)} ${kind} rw 0 0\n`)
+      .join('')
+  }
+
+  /** Run a line's mount guard through /bin/sh over this table. */
+  check(argv: readonly string[]): RunResult {
+    const entries = argv.slice(5, argv.indexOf('--', 5))
+    this.guards.push(entries)
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-guard-'))
+    const table = join(dir, 'mounts')
+    writeFileSync(table, this.rows())
+    try {
+      const done = spawnSync('/bin/sh', [...argv.slice(1, 4), table, ...entries, '--', 'true'])
+      return {
+        stdout: new Uint8Array(done.stdout),
+        stderr: new Uint8Array(done.stderr),
+        exitCode: done.status ?? 1,
+      }
+    } finally {
+      rmSync(dir, { recursive: true })
+    }
   }
 
   override execLine(
@@ -119,10 +151,7 @@ class FakeSandbox extends RemoteSandbox implements PipeTransport {
       })
     }
     if (line === 'cat /proc/mounts') {
-      const rows = [...this.table]
-        .map(([p, [source, kind]]) => `${escaped(source)} ${escaped(p)} ${kind} rw 0 0\n`)
-        .join('')
-      return Promise.resolve({ stdout: ENC.encode(rows), stderr: null, exitCode: 0 })
+      return Promise.resolve({ stdout: ENC.encode(this.rows()), stderr: null, exitCode: 0 })
     }
     if (line.startsWith('cat /proc/[0-9]*/cmdline') && this.failCheck) {
       return Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 2 })
@@ -195,8 +224,12 @@ class FakeSandbox extends RemoteSandbox implements PipeTransport {
   }
 }
 
-function escaped(text: string): string {
-  return text.replaceAll(' ', '\\040')
+// `text` as the kernel writes a mount field: a space, and `more`, as octal escapes.
+function escaped(text: string, more = ''): string {
+  return text.replace(
+    new RegExp(`[ ${more}]`, 'g'),
+    (c) => `\\${c.charCodeAt(0).toString(8).padStart(3, '0')}`,
+  )
 }
 
 // Another workspace's runtime on the same sandbox.
@@ -761,6 +794,154 @@ describe('SandboxMounts', () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
     expect(sandbox.served()).toEqual(['/data', '/my notes', '/data'])
+    await ws.close()
+  })
+
+  function lost(prefix: string): string {
+    return `fake: ${prefix} is no longer mounted in the sandbox (did it restart?); the line did not run\n`
+  }
+
+  // A restart after the line was admitted took the sandbox's mounts while
+  // the host still serves them: the line never runs over the bare
+  // directories, and the next one serves them again.
+  it('never runs a line over mounts the sandbox lost', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    sandbox.table.clear()
+    sandbox.running.clear()
+    const result = await agent.shell('python3 lost.py')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([126, lost('/data')])
+    expect(sandbox.commands).not.toContain('python3 lost.py')
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.served()).toEqual(['/data', '/my notes', '/data', '/my notes'])
+    await ws.close()
+  })
+
+  // A mount the sandbox put over a served prefix is left alone: ending the
+  // sshfs under it would take it down too.
+  it('leaves a mount over a served prefix alone', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    const ours = sandbox.table.get('/data') ?? ['', '']
+    sandbox.table.set('/data', [ours[0], 'fuse'])
+    const first = await agent.shell('python3 covered.py')
+    expect([first.exitCode, DEC.decode(first.stderr)]).toEqual([126, lost('/data')])
+    const second = await agent.shell('python3 covered.py')
+    expect([second.exitCode, DEC.decode(second.stderr)]).toEqual([
+      1,
+      'fake: another mount covers /data in this sandbox; the line did not run\n',
+    ])
+    expect(sandbox.commands).not.toContain('python3 covered.py')
+    expect(sandbox.stopped).toEqual([])
+    expect(sandbox.served()).toEqual(['/data', '/my notes'])
+    sandbox.table.set('/data', ours)
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    await ws.close()
+  })
+
+  // The sandbox mounts its own prefix again once it is back (its entrypoint
+  // does): serving it meanwhile would leave the host's sshfs under that mount.
+  it.each(['fuse', 'both'] as const)(
+    'waits for a mount of its own it lost (%s)',
+    async (mountType) => {
+      const sandbox = new FakeSandbox(mountType, ['/data'])
+      const ws = workspace(sandbox)
+      const agent = await ws.session('agent', { profile: 'agent' })
+      expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+      const pipes = [...sandbox.pipes]
+      sandbox.table.delete('/data')
+      for (let i = 0; i < 2; i++) {
+        const result = await agent.shell('python3 lost.py')
+        expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([126, lost('/data')])
+      }
+      expect(sandbox.commands).not.toContain('python3 lost.py')
+      expect(sandbox.pipes).toEqual(pipes)
+      sandbox.table.set('/data', ['tmpfs', 'tmpfs'])
+      expect((await agent.shell('python3 back.py')).exitCode).toBe(0)
+      expect(sandbox.commands).toContain('python3 back.py')
+      expect(sandbox.pipes).toEqual(pipes)
+      await ws.close()
+    },
+  )
+
+  it('serves a prefix with a hash and runs its lines', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    const ws = workspace(sandbox)
+    ws.addMount('/a#b', new RAMVFS(), MountMode.WRITE)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    for (let i = 0; i < 2; i++) expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.served()).toContain('/a#b')
+    await ws.close()
+  })
+
+  // Under fuse the mounts are read again on each line until the sandbox holds
+  // every prefix, so one it mounts late is guarded too; then once per change.
+  it.each([
+    [['/data', '/my notes'], 1],
+    [['/data'], 3],
+  ])('reads the mounts over fuse until the sandbox holds them all (%j)', async (own, reads) => {
+    const sandbox = new FakeSandbox('fuse', own)
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    for (let i = 0; i < 3; i++) expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.commands.filter((c) => c === 'cat /proc/mounts')).toHaveLength(reads)
+    await ws.close()
+  })
+
+  it('guards a mount the sandbox lays after the first line over fuse', async () => {
+    const sandbox = new FakeSandbox('fuse')
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    sandbox.table.set('/data', ['tmpfs', 'tmpfs'])
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    sandbox.table.delete('/data')
+    const result = await agent.shell('python3 lost.py')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([126, lost('/data')])
+    expect(sandbox.commands).not.toContain('python3 lost.py')
+    await ws.close()
+  })
+
+  // A covered prefix the workspace no longer mounts is dropped, not refused.
+  it('does not refuse a covered prefix the workspace dropped', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    sandbox.table.set('/my notes', [sandbox.table.get('/my notes')?.[0] ?? '', 'fuse'])
+    await ws.unmount('/my notes')
+    for (let i = 0; i < 2; i++) expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    await ws.close()
+  })
+
+  // A mount the workspace dropped is no longer the sandbox's to wait for, and
+  // one added again at that prefix starts afresh.
+  it.each(['fuse', 'both'] as const)(
+    'does not wait for a mount the workspace dropped (%s)',
+    async (mountType) => {
+      const sandbox = new FakeSandbox(mountType, ['/my notes'])
+      const ws = workspace(sandbox)
+      const agent = await ws.session('agent', { profile: 'agent' })
+      expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+      sandbox.table.delete('/my notes')
+      await ws.unmount('/my notes')
+      expect((await agent.shell('python3 gone.py')).exitCode).toBe(0)
+      ws.addMount('/my notes', new RAMVFS(), MountMode.WRITE)
+      expect((await agent.shell('python3 again.py')).exitCode).toBe(0)
+      await ws.close()
+    },
+  )
+
+  it('runs lines unguarded in a sandbox holding no mount', async () => {
+    const sandbox = new FakeSandbox('fuse')
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    expect(sandbox.guards).toEqual([])
     await ws.close()
   })
 

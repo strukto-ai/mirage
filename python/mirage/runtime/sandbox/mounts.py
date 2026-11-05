@@ -34,6 +34,7 @@ from mirage.runtime.binding import (
     restricted_mounts_for,
 )
 from mirage.runtime.sandbox.constants import (
+    MOUNT_GUARD,
     MOUNT_POLL_SECONDS,
     MOUNT_WAIT_SECONDS,
     PIPE_SERVER_HINT,
@@ -42,8 +43,10 @@ from mirage.runtime.sandbox.constants import (
     SSHFS_OPTIONS,
     SSHFS_SOURCE_PREFIX,
     UNMOUNT_WAIT_SECONDS,
+    mount_field,
 )
 from mirage.runtime.types import MountType, RunResult, SandboxPipe
+from mirage.shell.constants import CANNOT_EXECUTE_STATUS
 from mirage.utils.quote import single_quote
 from mirage.workspace.files import Files
 from mirage.workspace.session import SessionState
@@ -141,6 +144,19 @@ def unmount_line(prefix: str) -> str:
     return f"fusermount3 -uz {path} || fusermount -uz {path}"
 
 
+def unmounted(runtime: str, prefix: str) -> str:
+    """Why a line did not run: the sandbox no longer holds ``prefix``.
+
+    Args:
+        runtime (str): the runtime's name.
+        prefix (str): the mountpoint.
+    """
+    return (
+        f"{runtime}: {prefix} is no longer mounted in the sandbox (did it "
+        "restart?); the line did not run"
+    )
+
+
 def running_line(source: str) -> str:
     """The sandbox command that exits 0 while a program runs with
     ``source`` as one of its arguments, as an sshfs serving it does, 1
@@ -196,6 +212,16 @@ class SandboxMounts:
     the same sandbox does, refuses the line (1) rather than being taken,
     and one whose sshfs has gone is unmounted and served.
 
+    A sandbox may restart between a line's admit and its exec and come
+    back without its mounts, so each line runs under ``MOUNT_GUARD``,
+    which checks every mount it holds in the boot the program runs in
+    and exits 126 with nothing run when one is gone. The next line reads
+    the mounts again: what the host served is served again, and while a
+    mount of the sandbox's own is gone lines are refused (126) until the
+    sandbox mounts it again, rather than served over by the host. Under
+    ``fuse`` the mounts are read on every line until the sandbox holds
+    every prefix, so one it mounts late is guarded too.
+
     Args:
         runtime (str): the runtime's name, for messages.
         mount_type (MountType): ssh, fuse or both.
@@ -224,6 +250,9 @@ class SandboxMounts:
             str, tuple[SandboxPipe, asyncio.Task[None], Any]
         ] = {}
         self._seen: tuple[frozenset[str], frozenset[str]] | None = None
+        # The sandbox's own mounts as last read, and each prefix held since.
+        self._own: dict[str, tuple[str, str]] = {}
+        self._owned: set[str] = set()
         self._lock = asyncio.Lock()
         self._name = f"{SSHFS_SOURCE_PREFIX}{uuid.uuid4().hex}"
 
@@ -238,7 +267,9 @@ class SandboxMounts:
         """Bring the mounts in step, then refuse a line that may not run:
         one the session's restrictions reach past the dispatcher is
         refused as a policy refuses it (126), one the sandbox cannot
-        serve because another session or another sshfs holds it fails (1).
+        serve because another session or another sshfs holds it, or
+        another mount covers it, fails (1), and one over a mount of the
+        sandbox's own that is gone is refused (126).
 
         Args:
             binding (WorkspaceBinding | None): the runtime's workspace.
@@ -300,18 +331,21 @@ class SandboxMounts:
                     current, binding.mount_prefixes()
                 )
             )
-            taken = await self._reconcile(
+            refused = await self._reconcile(
                 binding, binding.files, session, every, ruled
             )
-            if taken is not None:
+            if refused is not None:
                 return RunResult(
                     stdout=b"",
-                    stderr=(
-                        f"{self._runtime}: another sshfs serves {taken} in "
-                        "this sandbox; give this workspace a sandbox of its "
-                        "own\n"
-                    ).encode(),
+                    stderr=f"{self._runtime}: {refused}\n".encode(),
                     exit_code=1,
+                )
+            lost = self._lost()
+            if lost is not None:
+                return RunResult(
+                    stdout=b"",
+                    stderr=f"{unmounted(self._runtime, lost)}\n".encode(),
+                    exit_code=CANNOT_EXECUTE_STATUS,
                 )
             unserved = self._unserved(ruled)
             if self._mount_type != "fuse" and (not unserved or self._served):
@@ -323,6 +357,42 @@ class SandboxMounts:
                 "dispatcher",
             )
         return None
+
+    def guarded(self, argv: tuple[str, ...]) -> tuple[str, ...]:
+        """``argv`` under ``MOUNT_GUARD``, holding every mount the sandbox
+        had at the line's admit; unchanged when it had none.
+
+        Args:
+            argv (tuple[str, ...]): the program and its arguments.
+        """
+        held = {
+            p: (self._source(p), "fuse.sshfs") for p in self._served
+        } | self._own
+        if not held:
+            return argv
+        words: list[str] = []
+        for prefix, (source, kind) in sorted(held.items()):
+            words += [
+                mount_field(prefix),
+                mount_field(source, source=True),
+                kind,
+                unmounted(self._runtime, prefix),
+            ]
+        return (
+            "/bin/sh",
+            "-c",
+            MOUNT_GUARD,
+            "sh",
+            "/proc/mounts",
+            *words,
+            "--",
+            *argv,
+        )
+
+    def forget(self) -> None:
+        """Read the mounts again on the next line: a guarded line found
+        one gone, or its program exited as the guard does."""
+        self._seen = None
 
     async def close(self) -> None:
         """Unmount every served prefix and end its SFTP server."""
@@ -407,8 +477,10 @@ class SandboxMounts:
         """Serve what the session sees and drop what it no longer does.
 
         Returns:
-            str | None: a prefix another sshfs still serves, which is left
-            alone and nothing new served; None once in step.
+            str | None: why the line may not run, a prefix another sshfs
+            still serves or another mount covers, which is left alone and
+            nothing new served; None once in step, or with a mount of the
+            sandbox's own gone, which ``admit`` refuses.
         """
         visible = frozenset(
             top_prefixes(binding.resolver.prefixes())
@@ -424,6 +496,9 @@ class SandboxMounts:
             return None
         self._seen = None
         present = await self._table()
+        ended += [
+            p for p in self._served if p not in ended and p not in present
+        ]
         own = tuple(
             sorted(
                 p
@@ -437,7 +512,26 @@ class SandboxMounts:
                 )
             )
         )
+        self._own = {p: present[p] for p in own}
+        self._owned = (self._owned & every) | set(own)
+        if self._lost() is not None:
+            return None
         wanted = sorted(p for p in visible if p not in own)
+        covered = next(
+            (
+                p
+                for p in sorted(self._served)
+                if p in wanted
+                and p not in ended
+                and present[p] != (self._source(p), "fuse.sshfs")
+            ),
+            None,
+        )
+        if covered is not None:
+            return (
+                f"another mount covers {covered} in this sandbox; the line "
+                "did not run"
+            )
         for prefix in wanted:
             under = [o for o in own if o.startswith(prefix + "/")]
             if under:
@@ -452,7 +546,10 @@ class SandboxMounts:
         new = [p for p in wanted if p not in self._served]
         for prefix in new:
             if await self._held(prefix, present):
-                return prefix
+                return (
+                    f"another sshfs serves {prefix} in this sandbox; give "
+                    "this workspace a sandbox of its own"
+                )
         if new:
             server = pipe_server()
             if (await self._run("command -v sshfs")).exit_code != 0:
@@ -467,11 +564,17 @@ class SandboxMounts:
             except BaseException:
                 await self._unmount()
                 raise
-        self._seen = (frozenset(every), visible)
+        if self._mount_type != "fuse" or set(top_prefixes(every)) <= set(own):
+            self._seen = (frozenset(every), visible)
         return None
 
     def _source(self, prefix: str) -> str:
         return f"{self._name}:{prefix}"
+
+    def _lost(self) -> str | None:
+        """A mount of the sandbox's own it held and no longer does; the
+        prefixes held are kept only while the workspace mounts them."""
+        return min(self._owned - self._own.keys(), default=None)
 
     async def _held(
         self, prefix: str, present: dict[str, tuple[str, str]]
