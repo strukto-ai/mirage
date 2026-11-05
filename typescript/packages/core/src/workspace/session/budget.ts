@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { encodeText } from '../../shell/bytes.ts'
+import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import type { ShellValue, ShellVar } from '../../shell/variable.ts'
 import { createAsyncContext } from '../../utils/async_context.ts'
@@ -65,6 +66,16 @@ export function entryBytes(name: string, value: ShellValue | null | undefined): 
 export function argsBytes(args: readonly string[]): number {
   let held = 0
   for (const arg of args) held += byteLength(arg)
+  return held
+}
+
+/**
+ * The bytes the frames on a call stack hold in positional parameters, which
+ * `envBytes` does not count. Mirrors Python's `frames_bytes`.
+ */
+export function framesBytes(callStack: CallStack): number {
+  let held = 0
+  for (const args of callStack.positionals()) held += argsBytes(args)
   return held
 }
 

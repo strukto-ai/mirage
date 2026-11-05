@@ -153,6 +153,15 @@ describe('SessionManager with a session table', () => {
     expect(s.exportedFunctions).toEqual(new Set(['f']))
   })
 
+  it('refuses the load when a stored session is past max_env', async () => {
+    const store = new RAMNamespaceStore()
+    await store.set('big', { session_id: 'big', env: { K: 'x'.repeat(300) }, created_at: 1.0 })
+    const m = new SessionManager('def', store)
+    m.maxEnv = 200
+    await expect(m.ensureLoaded()).rejects.toThrow('past max_env of 200 bytes')
+    expect(m.has('big')).toBe(false)
+  })
+
   it('locally created sessions win a hydration conflict', async () => {
     const store = new RAMNamespaceStore()
     await store.set('s1', { session_id: 's1', cwd: '/stale' })

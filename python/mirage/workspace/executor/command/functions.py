@@ -42,6 +42,7 @@ from mirage.workspace.executor.traps import (
     restore_function_traps,
 )
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.budget import args_bytes, check_env, frames_bytes
 from mirage.workspace.session.state import restore_locals
 from mirage.workspace.types import ExecutionNode
 
@@ -121,6 +122,10 @@ async def run_shell_function(
             )
         )
     cs.admit(cmd_name)
+    # Positional args carry the word as typed ($1 stays sub/a.txt), a
+    # copy for the call's own frame, as bash's.
+    text_args = [word_text(p) for p in parts[1:]]
+    check_env(session, 0, args_bytes(text_args), frames_bytes(cs))
     scope = ParseScope()
     try:
         func_body = parse_function(
@@ -134,8 +139,6 @@ async def run_shell_function(
         execute_node = partial(execute_node, sink=sink)
     # The body's statements read the caller's stdin in turn.
     stdin = share(stdin)
-    # Positional args carry the word as typed ($1 stays sub/a.txt).
-    text_args = [word_text(p) for p in parts[1:]]
     cs.push(text_args, function_name=cmd_name)
     lifted = lift_function_traps(session)
     outer_names = session.function_names

@@ -305,9 +305,13 @@ export class SessionManager extends SessionOwner {
   }
 
   private async hydrate(): Promise<void> {
-    const entries = await this.sessionStore.load()
-    for (const [sid, fields] of entries) {
-      const stored = SessionState.fromDict(fields as StoredSession)
+    // A record past max_env refuses the load before any session changes, as a
+    // snapshot past it does.
+    const records = [...(await this.sessionStore.load())].map(
+      ([sid, fields]) => [sid, SessionState.fromDict(fields as StoredSession)] as const,
+    )
+    for (const [, record] of records) checkEnvFits(record, this.maxEnv)
+    for (const [sid, stored] of records) {
       if (sid === this.defaultId) {
         const dflt = this.defaultSession()
         setCwd(dflt, stored.cwd)

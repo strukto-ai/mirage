@@ -17,6 +17,7 @@ from contextvars import ContextVar
 from typing import TypeVar
 
 from mirage.shell.bytes import encode_text
+from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.variable import ShellValue
 from mirage.utils.sanitize import byte_length
@@ -77,6 +78,16 @@ def args_bytes(args: Iterable[str]) -> int:
         args (Iterable[str]): the parameters.
     """
     return sum(byte_length(arg) for arg in args)
+
+
+def frames_bytes(call_stack: CallStack) -> int:
+    """The bytes the frames on a call stack hold in positional
+    parameters, which :func:`env_bytes` does not count.
+
+    Args:
+        call_stack (CallStack): the running function and sourced frames.
+    """
+    return sum(args_bytes(args) for args in call_stack.positionals())
 
 
 def env_bytes(session: SessionState) -> int:

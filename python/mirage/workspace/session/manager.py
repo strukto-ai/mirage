@@ -343,10 +343,16 @@ class SessionManager(SessionOwner):
         async with self._load_lock:
             if self._loaded:
                 return
-            entries = await self._store.load()
-            for sid, fields in entries.items():
+            # A record past max_env refuses the load before any session
+            # changes, as a snapshot past it does.
+            records = {
+                sid: SessionState.from_dict(fields)
+                for sid, fields in (await self._store.load()).items()
+            }
+            for record in records.values():
+                check_env_fits(record, self.max_env)
+            for sid, stored in records.items():
                 if sid == self._default_id:
-                    stored = SessionState.from_dict(fields)
                     default = self._sessions[self._default_id]
                     set_cwd(default, stored.cwd)
                     default.vars = stored.vars
@@ -387,15 +393,12 @@ class SessionManager(SessionOwner):
                     continue
                 if sid in self._sessions:
                     continue
-                session = SessionState.from_dict(fields)
-                session.ids = self._ids
-                self._sessions[sid] = session
+                stored.ids = self._ids
+                self._sessions[sid] = stored
                 self._locks[sid] = asyncio.Lock()
-                self._persisted[sid] = copy.deepcopy(session.to_dict())
-                _merge_seed_vars(session, self._seed_vars)
-                self._has_managed = self._has_managed or _holds_managed(
-                    session
-                )
+                self._persisted[sid] = copy.deepcopy(stored.to_dict())
+                _merge_seed_vars(stored, self._seed_vars)
+                self._has_managed = self._has_managed or _holds_managed(stored)
             self._loaded = True
 
     async def flush(self, session_id: str | None = None) -> None:

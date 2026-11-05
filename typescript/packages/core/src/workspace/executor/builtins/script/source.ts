@@ -21,6 +21,7 @@ import type { JobConsole } from '../../../../shell/console/index.ts'
 import { ExitSignal, ReturnSignal } from '../../../../shell/errors.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { wordText } from '../../../../types.ts'
+import { argsBytes, checkEnv, framesBytes } from '../../../session/budget.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { positionalParams, setPositionalParams } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -67,6 +68,7 @@ export async function handleSource(
   }
   const cs = callStack ?? new CallStack(session.shellNesting)
   cs.admit(name)
+  checkEnv(session, 0, argsBytes(args), framesBytes(cs))
   cs.push(args.length > 0 ? args : [...positionalParams(session, cs)], 'source', true)
   const outerNames = session.functionNames
   if (outerNames !== null) session.functionNames = cs.functionNames()

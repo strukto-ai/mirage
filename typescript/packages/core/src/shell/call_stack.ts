@@ -193,6 +193,11 @@ export class CallStack {
     this.current.positional = values
   }
 
+  /** Every frame's positional parameters, outermost first. Mirrors Python's `positionals`. */
+  positionals(): string[][] {
+    return this.frames.map((frame) => frame.positional)
+  }
+
   setLocal(name: string, value: string): void {
     this.current.locals[name] = value
   }

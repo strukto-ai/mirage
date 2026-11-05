@@ -199,6 +199,20 @@ async def test_manager_hydrates_from_store():
 
 
 @pytest.mark.asyncio
+async def test_a_stored_session_past_max_env_refuses_the_load():
+    store = RAMNamespaceStore()
+    await store.set(
+        "big",
+        {"session_id": "big", "env": {"K": "x" * 300}, "created_at": 1.0},
+    )
+    mgr = SessionManager("default", store=store)
+    mgr.max_env = 200
+    with pytest.raises(ValueError, match="past max_env of 200 bytes"):
+        await mgr.ensure_loaded()
+    assert not mgr.has("big")
+
+
+@pytest.mark.asyncio
 async def test_manager_hydration_local_wins():
     store = RAMNamespaceStore()
     await store.set("s1", {"session_id": "s1", "cwd": "/stale"})

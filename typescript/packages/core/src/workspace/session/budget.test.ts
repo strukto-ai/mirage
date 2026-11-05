@@ -72,6 +72,17 @@ describe('max_env', () => {
     }
   })
 
+  it('counts the arguments a call or source passes', async () => {
+    for (const line of [
+      'FUNCNEST=30; f() { f "$@" "$@"; }; f aaaaaaaa',
+      `echo 'source /s "$@" "$@"' > /s; source /s aaaaaaaa`,
+    ]) {
+      const [, err, code] = await run(line)
+      expect(code).toBe(2)
+      expect(err).toContain('past max_env of 200 bytes')
+    }
+  })
+
   it("counts a function's own parameters", async () => {
     const [out, , code] = await run(
       '(f() { set -- a; while :; do set -- $1$1; done; }; f); echo rc=$?',

@@ -1,0 +1,23 @@
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+// ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+// The sessions each workspace holds when the app names no cap: every
+// workspace shares the isolate's 128 MB.
+export const EDGE_MAX_SESSIONS = 4
+
+// What a workspace runs when its options name no runtimes: the shell and
+// Monty. QuickJS joins only when named, since a script that never calls the
+// host holds the isolate, and every workspace in it, until Cloudflare's CPU
+// limit ends the request.
+export const EDGE_RUNTIMES: readonly string[] = ['monty', 'workspace']

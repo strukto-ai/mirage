@@ -52,7 +52,7 @@ curl -s localhost:8787 -d '{"command": "seq 1 100 | sort -rn | head -3"}'
 
 `python3` runs on Monty in the isolate's own thread, where no timer can interrupt it, so Monty's own clock stops a run: at the line's time limit, which ends the line with exit 124, or after 30 seconds with `TimeoutError` if that comes first. A loop that never ends leaves the isolate free for the next line.
 
-`node` and `js` run QuickJS in the isolate too, its wasm suspended on each call it makes of the host ([JSPI](https://github.com/WebAssembly/js-promise-integration)): reading a file, writing output, waiting on a timer. A line's time limit or a stop ends a script at its next such call, with exit 124 at the time limit. A loop that never makes one, such as `for (;;) {}`, holds the isolate until Cloudflare's CPU limit ends the request, since QuickJS has no clock of its own to stop it. A run's memory is held to 64 MiB: past it, the script gets `InternalError: out of memory`, which it can catch, and the isolate runs on. Since every run holds its memory in the isolate's, one runs in an isolate at a time: a second, such as the other side of `node a.js | node b.js`, fails at once with exit 1.
+`node` and `js` run QuickJS in the isolate too when a workspace's `runtimes` names `quickjs`, as above; without it an edge workspace runs Monty and the shell. Its wasm is suspended on each call it makes of the host ([JSPI](https://github.com/WebAssembly/js-promise-integration)): reading a file, writing output, waiting on a timer. A line's time limit or a stop ends a script at its next such call, with exit 124 at the time limit. A loop that never makes one, such as `for (;;) {}`, holds the isolate until Cloudflare's CPU limit ends the request, since QuickJS has no clock of its own to stop it; any other workspace in that isolate waits too, a Durable Object sharing it included. A run's memory is held to 64 MiB: past it, the script gets `InternalError: out of memory`, which it can catch, and the isolate runs on. Since every run holds its memory in the isolate's, one runs in an isolate at a time: a second, such as the other side of `node a.js | node b.js`, fails at once with exit 1.
 
 For anything else from core, import its subpaths (`@struktoai/mirage-core/vfs/registry`), not its package root: the root also imports optional packages, such as Pyodide, that a Worker bundle cannot resolve.
 
@@ -100,7 +100,7 @@ curl -s localhost:8787/v1/workspaces/demo/shell -H "Authorization: Bearer $MIRAG
 
 ## Keep a workspace's files
 
-A Worker's memory goes with its isolate. To keep a workspace's files and sessions, put them in SQL: [`SqlVFS`](/typescript/setup/sql) over a Durable Object's own storage or a D1 database, and `SqlWorkspaceStateStore` over the same driver for each session's working directory, variables and functions. One database holds one filesystem, so a Durable Object per workspace gives each workspace its own.
+A Worker's memory goes with its isolate. To keep a workspace's files and sessions, put them in SQL: [`SqlVFS`](/typescript/setup/sql) over a Durable Object's own storage or a D1 database, and `SqlWorkspaceStateStore` over the same driver for each session's working directory, variables and functions. One database holds one filesystem, so a Durable Object per workspace gives each workspace its own. It does not give each its own memory: Cloudflare may run several Durable Objects of one class in one isolate, where they share its 128 MB and run one at a time.
 
 ```ts
 import { DurableObjectSqlDriver, SqlVFS, SqlWorkspaceStateStore, Workspace } from '@struktoai/mirage-cloudflare'
@@ -129,7 +129,7 @@ CLIs: `airtable`, `discord`, `gh`, `git`, `gws`, `hf`, `himalaya`, `linear`, `mc
 
 ## Limits
 
-- A Worker's isolate has 128 MB of memory and no disk. Set `max_memory` on each workspace so a large write fails with `Disk quota exceeded`, and a command's output held for its redirect with `line: memory exhausted`, before the isolate runs out.
+- A Worker's isolate has 128 MB of memory and no disk, shared by every workspace it runs, whether the server API holds them or each has its own Durable Object. Set `max_memory` on each workspace so a large write fails with `Disk quota exceeded`, and a command's output held for its redirect with `line: memory exhausted`, before the isolate runs out.
 - The server API's workspaces live in the isolate's memory. A request routed to another isolate does not see them, and they are gone when the isolate is evicted. `store.type` must be `ram`. A workspace built in code keeps its files and sessions in SQL, as [above](#keep-a-workspaces-files).
 - Network rules judge each request by host name: the isolate never sees the address a name reaches, so a `denied_domains` entry naming an address or a range is refused, and jwt mode's block on cloud metadata addresses covers only a request made to the address itself.
 - SSH, FUSE, policy and script files read by path, and runtimes or CLIs loaded by a `source:Class` reference are the Node server's alone. Codex's exec-server runs here over its WebSocket.

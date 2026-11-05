@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type Clock, ManualClock, SystemClock } from './clock.ts'
+import { MAX_NAME_LENGTH } from './constants.ts'
 
 const MAX_SEED = Number.MAX_SAFE_INTEGER
 const WORD_BITS = 32
@@ -31,10 +32,6 @@ const SPLITMIX_GAMMA = 0x9e3779b97f4a7c15n
 const SPLITMIX_MUL1 = 0xbf58476d1ce4e5b9n
 const SPLITMIX_MUL2 = 0x94d049bb133111ebn
 const UINT64_MASK = (1n << 64n) - 1n
-
-// The longest session id, profile name or workspace id a caller may give:
-// each is a store key and a URL segment, and room for a UUID with a prefix.
-export const MAX_NAME_LENGTH = 128
 
 /**
  * The millisecond and counter of the next id after `lastMs`. Two ids minted in

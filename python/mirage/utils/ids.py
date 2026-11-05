@@ -19,6 +19,7 @@ from collections.abc import Callable
 from typing import Protocol
 
 from mirage.utils.clock import Clock, ManualClock, SystemClock
+from mirage.utils.constants import MAX_NAME_LENGTH
 
 TIMESTAMP_BITS = 48
 TIMESTAMP_MASK = (1 << TIMESTAMP_BITS) - 1
@@ -42,10 +43,6 @@ SPLITMIX_GAMMA = 0x9E3779B97F4A7C15
 SPLITMIX_MUL1 = 0xBF58476D1CE4E5B9
 SPLITMIX_MUL2 = 0x94D049BB133111EB
 UINT64_MASK = (1 << 64) - 1
-
-# The longest session id, profile name or workspace id a caller may give:
-# each is a store key and a URL segment, and room for a UUID with a prefix.
-MAX_NAME_LENGTH = 128
 
 
 def _stamp(

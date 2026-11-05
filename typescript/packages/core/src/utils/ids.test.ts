@@ -18,10 +18,10 @@ import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { ManualClock, SystemClock } from './clock.ts'
+import { MAX_NAME_LENGTH } from './constants.ts'
 import {
   checkName,
   type IdSource,
-  MAX_NAME_LENGTH,
   SeededIdSource,
   SystemIdSource,
   newSessionId,

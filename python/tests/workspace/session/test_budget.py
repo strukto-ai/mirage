@@ -79,6 +79,16 @@ async def test_fresh_names_count_with_no_value():
 
 
 @pytest.mark.asyncio
+async def test_arguments_a_call_or_source_passes_count():
+    for line in (
+        'FUNCNEST=30; f() { f "$@" "$@"; }; f aaaaaaaa',
+        'echo \'source /s "$@" "$@"\' > /s; source /s aaaaaaaa',
+    ):
+        _, err, code = await run(line)
+        assert code == 2 and "past max_env of 200 bytes" in err, line
+
+
+@pytest.mark.asyncio
 async def test_a_function_s_own_parameters_count():
     out, _, code = await run(
         "(f() { set -- a; while :; do set -- $1$1; done; }; f); echo rc=$?"

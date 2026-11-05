@@ -36,12 +36,14 @@ import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store
 import type {
   ExecuteOptions,
   ExecuteResult,
+  WorkspaceOptions,
 } from '@struktoai/mirage-core/workspace/workspace/types'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
 import { Workspace as CoreWorkspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { ServerHost } from '@struktoai/mirage-server/routes'
 import './monty.ts'
 import './quickjs.ts'
+import { EDGE_RUNTIMES } from './constants.ts'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 
 export class Workspace extends CoreWorkspace {
@@ -51,9 +53,12 @@ export class Workspace extends CoreWorkspace {
     return build === null ? null : buildVfs(build.name, build.config)
   }
 
-  constructor(...args: ConstructorParameters<typeof CoreWorkspace>) {
-    refuseUnseenAddresses(args[1]?.network)
-    super(...args)
+  constructor(
+    mounts: ConstructorParameters<typeof CoreWorkspace>[0],
+    options: WorkspaceOptions = {},
+  ) {
+    refuseUnseenAddresses(options.network)
+    super(mounts, { ...options, runtimes: options.runtimes ?? [...EDGE_RUNTIMES] })
     this.registry.setNetworkWatch(watchNetwork)
     if (this.registry.network !== null) watchNetwork()
     watch()
