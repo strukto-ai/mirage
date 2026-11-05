@@ -906,6 +906,26 @@ describe('SandboxMounts', () => {
     await ws.close()
   })
 
+  // A cover over a served prefix whose server ended is left alone too:
+  // serving again would mount the host's sshfs over the sandbox's mount.
+  it('leaves a cover over an ended server alone', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    const ws = workspace(sandbox)
+    const agent = await ws.session('agent', { profile: 'agent' })
+    expect((await agent.shell('python3 job.py')).exitCode).toBe(0)
+    sandbox.ends.get('/data')?.()
+    sandbox.table.set('/data', ['tmpfs', 'tmpfs'])
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const result = await agent.shell('python3 covered.py')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+      1,
+      'fake: another mount covers /data in this sandbox; the line did not run\n',
+    ])
+    expect(sandbox.table.get('/data')).toEqual(['tmpfs', 'tmpfs'])
+    expect(sandbox.served()).toEqual(['/data', '/my notes'])
+    await ws.close()
+  })
+
   // A covered prefix the workspace no longer mounts is dropped, not refused.
   it('does not refuse a covered prefix the workspace dropped', async () => {
     const sandbox = new FakeSandbox('ssh')
