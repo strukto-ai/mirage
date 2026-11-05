@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { FileStat, FileType } from '../../types.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { LookupStatus } from './config.ts'
@@ -167,5 +167,46 @@ describe('RAMIndexCacheStore', () => {
     expect((await src.listDir('/m/a')).status).toBe(LookupStatus.EXPIRED)
     const scratch = new ListingCheckStore({ hints: src })
     expect(await scratch.hint('/m/a/c.txt')).not.toBeNull()
+  })
+
+  // Once an invalidation has buried a folder's children, the next one buries
+  // only what changed since, and a re-list still finds every child gone that
+  // burying them all would have remembered, in the folder's order.
+  it('an invalidation after a bury remembers what changed', async () => {
+    const store = new RAMIndexCacheStore({ ttl: 60 })
+    await store.setDir('/d', [
+      ['a', mkEntry('a', 'a')],
+      ['b', mkEntry('b', 'b')],
+    ])
+    await store.invalidateEntry('/d/a')
+    await store.addEntry('/d/z', mkEntry('z', 'z'))
+    await store.addEntry('/d/m', mkEntry('m', 'm'))
+    await store.put('/d/b', new FileStat({ name: 'b', type: FileType.DIRECTORY }))
+    await store.invalidateEntry('/d/x')
+    await store.invalidatePrefix('/d')
+    expect(await store.setDir('/d', [])).toEqual([
+      { path: '/d/a', folder: false },
+      { path: '/d/b', folder: true },
+      { path: '/d/m', folder: false },
+      { path: '/d/z', folder: false },
+    ])
+  })
+
+  it('writes into a large folder bury only what they change', async () => {
+    const store = new RAMIndexCacheStore({ ttl: 60 })
+    await store.setDir(
+      '/d',
+      Array.from({ length: 200 }, (_, i): [string, FileStat] => [
+        `f${String(i)}`,
+        mkEntry(String(i), `f${String(i)}`),
+      ]),
+    )
+    await store.invalidateEntry('/d/f0')
+    const bury = vi.spyOn(
+      store as unknown as { bury: (folder: string, paths: readonly string[]) => void },
+      'bury',
+    )
+    for (let i = 1; i < 100; i++) await store.invalidateEntry(`/d/f${String(i)}`)
+    expect(Math.max(...bury.mock.calls.map(([, paths]) => paths.length))).toBeLessThanOrEqual(1)
   })
 })

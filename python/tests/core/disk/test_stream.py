@@ -12,9 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import builtins
+
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.core.disk import stream
 from mirage.core.disk.stream import read_stream
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -62,3 +66,53 @@ async def test_read_stream_under_a_plain_file_is_not_a_directory(tmp_path):
         [c async for c in read_stream(DiskAccessor(tmp_path), spec)]
     assert exc.value.filename == "/a.txt/x"
     assert str(tmp_path) not in str(exc.value)
+
+
+def _spec(name: str) -> PathSpec:
+    return PathSpec(vfs_path=name, virtual=f"/{name}", directory=f"/{name}")
+
+
+@pytest.mark.asyncio
+async def test_a_small_file_reads_in_one_trip_off_the_loop(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "a.txt").write_bytes(b"small")
+    trips = []
+    real = asyncio.to_thread
+
+    async def counted(fn, *args, **kwargs):
+        trips.append(fn)
+        return await real(fn, *args, **kwargs)
+
+    monkeypatch.setattr(stream.asyncio, "to_thread", counted)
+    chunks = [
+        chunk
+        async for chunk in read_stream(DiskAccessor(tmp_path), _spec("a.txt"))
+    ]
+    assert chunks == [b"small"]
+    assert len(trips) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_file_past_one_chunk_streams_and_closes_when_left(
+    tmp_path, monkeypatch
+):
+    (tmp_path / "a.txt").write_bytes(b"0123456789")
+    accessor = DiskAccessor(tmp_path)
+    assert [
+        chunk
+        async for chunk in read_stream(accessor, _spec("a.txt"), chunk_size=4)
+    ] == [b"0123", b"4567", b"89"]
+    opened = []
+
+    def recording(*args, **kwargs):
+        handle = builtins.open(*args, **kwargs)
+        opened.append(handle)
+        return handle
+
+    monkeypatch.setattr(stream, "open", recording, raising=False)
+    chunks = read_stream(accessor, _spec("a.txt"), chunk_size=4)
+    assert await anext(chunks) == b"0123"
+    await chunks.aclose()
+    assert len(opened) == 1
+    assert opened[0].closed

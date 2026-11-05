@@ -98,13 +98,24 @@ async function exactName(parent: string, part: string, info: Stats): Promise<boo
   return (await readdir(parent)).includes(part)
 }
 
+/**
+ * Prove a parent readable as listing it would: opening it read-only is the
+ * check opendir makes, without reading a batch of its entries. Windows
+ * cannot open a directory as a file, so there its first entry is read.
+ * Mirrors Python's `_open_parent`.
+ */
 async function openParent(parent: string): Promise<void> {
-  const listing = await opendir(parent, { bufferSize: 1 })
-  try {
-    await listing.read()
-  } finally {
-    await listing.close()
+  if (process.platform === 'win32') {
+    const listing = await opendir(parent, { bufferSize: 1 })
+    try {
+      await listing.read()
+    } finally {
+      await listing.close()
+    }
+    return
   }
+  const handle = await open(parent, constants.O_RDONLY | constants.O_DIRECTORY)
+  await handle.close()
 }
 
 /**

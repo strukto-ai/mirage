@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from mirage.cache.index import RAMIndexCacheStore
-from mirage.cache.index.config import LookupStatus
+from mirage.cache.index.config import Evicted, LookupStatus
 from mirage.cache.index.ram import ListingCheckStore
 from mirage.types import FileStat, FileType
 from mirage.utils.clock import ManualClock
@@ -208,3 +208,49 @@ async def test_a_check_store_ages_on_its_hints_clock():
     await scratch.set_dir("/d", [])
     clock.advance(scratch.ttl)
     assert (await scratch.list_dir("/d")).status == LookupStatus.EXPIRED
+
+
+# Once an invalidation has buried a folder's children, the next one buries
+# only what changed since, and a re-list still finds every child gone that
+# burying them all would have remembered, in the folder's order.
+@pytest.mark.asyncio
+async def test_an_invalidation_after_a_bury_remembers_what_changed(store):
+    def stat(name: str, kind: FileType = FileType.FILE) -> FileStat:
+        return FileStat(name=name, type=kind)
+
+    await store.set_dir("/d", [("a", stat("a")), ("b", stat("b"))])
+    await store.invalidate_entry("/d/a")
+    await store.add_entry("/d/z", stat("z"))
+    await store.add_entry("/d/m", stat("m"))
+    await store.put("/d/b", stat("b", FileType.DIRECTORY))
+    await store.invalidate_entry("/d/x")
+    await store.invalidate_prefix("/d")
+    assert await store.set_dir("/d", []) == [
+        Evicted("/d/a", folder=False),
+        Evicted("/d/b", folder=True),
+        Evicted("/d/m", folder=False),
+        Evicted("/d/z", folder=False),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_writes_into_a_large_folder_bury_only_what_they_change(
+    store, monkeypatch
+):
+    rows = [
+        (f"f{i}", FileStat(name=f"f{i}", type=FileType.FILE))
+        for i in range(200)
+    ]
+    await store.set_dir("/d", rows)
+    await store.invalidate_entry("/d/f0")
+    sizes = []
+    bury = store._bury
+
+    def counted(folder, paths):
+        sizes.append(len(paths))
+        bury(folder, paths)
+
+    monkeypatch.setattr(store, "_bury", counted)
+    for i in range(1, 100):
+        await store.invalidate_entry(f"/d/f{i}")
+    assert max(sizes) <= 1

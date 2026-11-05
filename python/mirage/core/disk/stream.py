@@ -12,13 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 from collections.abc import AsyncIterator
-
-import aiofiles
+from typing import BinaryIO
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.errors import disk_errors
-from mirage.core.disk.utils import resolve_inside
+from mirage.core.disk.utils import resolve_inside_sync
 from mirage.observe.context import record_stream
 from mirage.types import PathSpec
 
@@ -31,7 +31,9 @@ async def read_stream(
     """A file's bytes as they are read. A short read is the file's end,
     as the kernel answers it, so a reader of a file its own pipeline
     appends to (``awk 1 f | tee -a f``) stops where the file ended when
-    it read.
+    it read. The path check, the open and the first read share one
+    worker call, which closes the file when that read is its end: a
+    small file costs one trip off the event loop, not four.
 
     Args:
         accessor (DiskAccessor): the disk the mount serves.
@@ -39,18 +41,36 @@ async def read_stream(
         chunk_size (int): the most bytes one read asks for.
     """
     virtual = path_spec.virtual
-    root = accessor.root
     rec = record_stream("read", virtual, "disk")
-    p = await resolve_inside(root, path_spec)
-    with disk_errors(virtual):
-        async with aiofiles.open(p, "rb") as f:
-            while True:
-                chunk = await f.read(chunk_size)
-                if chunk:
-                    if rec is not None:
-                        rec.bytes += len(chunk)
-                    yield chunk
-                if len(chunk) < chunk_size:
-                    break
+
+    def first() -> tuple[BinaryIO | None, bytes]:
+        host = resolve_inside_sync(accessor.root, path_spec)
+        with disk_errors(virtual):
+            f = open(host, "rb")
+            try:
+                chunk = f.read(chunk_size)
+            except BaseException:
+                f.close()
+                raise
+            if len(chunk) == chunk_size:
+                return f, chunk
+            f.close()
+            return None, chunk
+
+    f, chunk = await asyncio.to_thread(first)
+    try:
+        while True:
+            if chunk:
+                if rec is not None:
+                    rec.bytes += len(chunk)
+                yield chunk
+            if f is None or len(chunk) < chunk_size:
+                break
+            with disk_errors(virtual):
+                chunk = await asyncio.to_thread(f.read, chunk_size)
+    finally:
+        if f is not None:
+            with disk_errors(virtual):
+                await asyncio.to_thread(f.close)
     if rec is not None:
         rec.complete = True
