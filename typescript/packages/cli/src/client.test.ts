@@ -56,6 +56,7 @@ describe('DaemonClient spawn config validation', () => {
       authToken: '',
       idleGraceSeconds: 30,
     })
+    vi.spyOn(client, 'isReachable').mockResolvedValue(false)
     await expect(client.ensureRunning({ timeoutMs: 500 })).rejects.toThrow(DaemonUnreachable)
     expect(existsSync(join(home, 'auth_token'))).toBe(false)
     expect(existsSync(join(home, 'daemon.log'))).toBe(false)

@@ -139,6 +139,9 @@ def test_a_remote_url_is_never_spawned(tmp_path, monkeypatch):
         "mirage.cli.client.subprocess.Popen",
         lambda *args, **kwargs: spawned.append(kwargs),
     )
+    monkeypatch.setattr(
+        DaemonClient, "is_reachable", lambda self, timeout=0.5: False
+    )
     with DaemonClient(DaemonSettings(url="https://mirage.invalid")) as client:
         with pytest.raises(DaemonUnreachable, match="mirage.invalid"):
             client.ensure_running()
