@@ -1069,99 +1069,6 @@ pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
     }))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::{Value, json};
-
-    fn run(text: &str, mode: &str, dst: bool) -> (Value, usize) {
-        let now = days(2026, 8, 16) * DAY + 13 * 3600 + 45 * 60 + 30;
-        let config =
-            json!({"text":text,"mode":mode,"now":now as i64,"nanos":123456789,"local":false});
-        let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
-        let mut out = Vec::new();
-        let mut turns = 0;
-        let spring = (days(2026, 3, 29) * DAY + 3600) as i64;
-        let fall = (days(2026, 10, 25) * DAY + 3600) as i64;
-        loop {
-            while stream.busy() {
-                stream.drain(&mut out).unwrap();
-                turns += 1;
-                assert!(turns < 10000);
-            }
-            let Some(header) = stream.request(&mut Vec::new()) else {
-                break;
-            };
-            let request: Value = serde_json::from_slice(&header).unwrap();
-            assert_eq!(request["op"], "date");
-            let data = if request.get("year").is_some() {
-                json!([])
-            } else {
-                let instant = request["instant"].as_i64().unwrap();
-                let summer = dst && (spring..fall).contains(&instant);
-                json!({"offset": if dst {if summer {7200} else {3600}} else {0}, "name":if dst {if summer {"CEST"} else {"CET"}} else {"UTC"}})
-            };
-            stream
-                .respond(b"{}", &serde_json::to_vec(&data).unwrap(), &mut out)
-                .unwrap();
-        }
-        (serde_json::from_slice(&out).unwrap(), turns)
-    }
-
-    #[test]
-    fn epoch_fractions_calendar_shifts_and_posix_operands_keep_exact_values() {
-        assert_eq!(
-            run("@-0.0000000001", "expr", false).0,
-            json!({"epoch":-1,"nanos":999999999,"wall":null})
-        );
-        let exact = run(
-            "2026-01-15 12:00:01 285426750 years -9007198249190400 seconds",
-            "expr",
-            false,
-        )
-        .0;
-        assert_eq!(exact, json!({"epoch":1768478401i64,"nanos":0,"wall":null}));
-        assert_eq!(
-            run("081613452026.30", "posix", false).0["epoch"],
-            (days(2026, 8, 16) * DAY + 13 * 3600 + 45 * 60 + 30) as i64
-        );
-        assert_eq!(run("2026-02-30", "expr", false).0, Value::Null);
-        assert_eq!(run("\u{ff}", "expr", false).0, Value::Null);
-    }
-
-    #[test]
-    fn time_zone_facts_refuse_gaps_and_pick_the_current_side_of_a_fold() {
-        assert_eq!(run("2026-03-29 02:30", "expr", true).0, Value::Null);
-        assert_eq!(
-            run("2026-10-25 02:30", "expr", true).0["epoch"],
-            (days(2026, 10, 25) * DAY + 30 * 60) as i64
-        );
-        assert_eq!(
-            run("102502302026", "posix", true).0["epoch"],
-            (days(2026, 10, 25) * DAY + 3600 + 30 * 60) as i64
-        );
-    }
-
-    #[test]
-    fn long_lexical_runs_and_relative_item_lists_resume_between_polls() {
-        let text = "1 day ".repeat(20000);
-        let (result, turns) = run(&text, "expr", false);
-        assert_eq!(
-            result["epoch"],
-            (days(2026, 8, 16) * DAY + 13 * 3600 + 45 * 60 + 30 + 20000 * DAY) as i64
-        );
-        assert_eq!(result["nanos"], 123456789);
-        assert!(turns > 20);
-        let (result, turns) = run(
-            &format!("({})2026-01-15", "x".repeat(1 << 18)),
-            "expr",
-            false,
-        );
-        assert_eq!(result["epoch"], 1768435200i64);
-        assert!(turns > 20);
-    }
-}
-
 const MONTHS: &[&str] = &[
     "JANUARY",
     "FEBRUARY",
@@ -1334,4 +1241,97 @@ fn meaning(word: &str) -> Option<(Kind, i128)> {
         ));
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    fn run(text: &str, mode: &str, dst: bool) -> (Value, usize) {
+        let now = days(2026, 8, 16) * DAY + 13 * 3600 + 45 * 60 + 30;
+        let config =
+            json!({"text":text,"mode":mode,"now":now as i64,"nanos":123456789,"local":false});
+        let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
+        let mut out = Vec::new();
+        let mut turns = 0;
+        let spring = (days(2026, 3, 29) * DAY + 3600) as i64;
+        let fall = (days(2026, 10, 25) * DAY + 3600) as i64;
+        loop {
+            while stream.busy() {
+                stream.drain(&mut out).unwrap();
+                turns += 1;
+                assert!(turns < 10000);
+            }
+            let Some(header) = stream.request(&mut Vec::new()) else {
+                break;
+            };
+            let request: Value = serde_json::from_slice(&header).unwrap();
+            assert_eq!(request["op"], "date");
+            let data = if request.get("year").is_some() {
+                json!([])
+            } else {
+                let instant = request["instant"].as_i64().unwrap();
+                let summer = dst && (spring..fall).contains(&instant);
+                json!({"offset": if dst {if summer {7200} else {3600}} else {0}, "name":if dst {if summer {"CEST"} else {"CET"}} else {"UTC"}})
+            };
+            stream
+                .respond(b"{}", &serde_json::to_vec(&data).unwrap(), &mut out)
+                .unwrap();
+        }
+        (serde_json::from_slice(&out).unwrap(), turns)
+    }
+
+    #[test]
+    fn epoch_fractions_calendar_shifts_and_posix_operands_keep_exact_values() {
+        assert_eq!(
+            run("@-0.0000000001", "expr", false).0,
+            json!({"epoch":-1,"nanos":999999999,"wall":null})
+        );
+        let exact = run(
+            "2026-01-15 12:00:01 285426750 years -9007198249190400 seconds",
+            "expr",
+            false,
+        )
+        .0;
+        assert_eq!(exact, json!({"epoch":1768478401i64,"nanos":0,"wall":null}));
+        assert_eq!(
+            run("081613452026.30", "posix", false).0["epoch"],
+            (days(2026, 8, 16) * DAY + 13 * 3600 + 45 * 60 + 30) as i64
+        );
+        assert_eq!(run("2026-02-30", "expr", false).0, Value::Null);
+        assert_eq!(run("\u{ff}", "expr", false).0, Value::Null);
+    }
+
+    #[test]
+    fn time_zone_facts_refuse_gaps_and_pick_the_current_side_of_a_fold() {
+        assert_eq!(run("2026-03-29 02:30", "expr", true).0, Value::Null);
+        assert_eq!(
+            run("2026-10-25 02:30", "expr", true).0["epoch"],
+            (days(2026, 10, 25) * DAY + 30 * 60) as i64
+        );
+        assert_eq!(
+            run("102502302026", "posix", true).0["epoch"],
+            (days(2026, 10, 25) * DAY + 3600 + 30 * 60) as i64
+        );
+    }
+
+    #[test]
+    fn long_lexical_runs_and_relative_item_lists_resume_between_polls() {
+        let text = "1 day ".repeat(20000);
+        let (result, turns) = run(&text, "expr", false);
+        assert_eq!(
+            result["epoch"],
+            (days(2026, 8, 16) * DAY + 13 * 3600 + 45 * 60 + 30 + 20000 * DAY) as i64
+        );
+        assert_eq!(result["nanos"], 123456789);
+        assert!(turns > 20);
+        let (result, turns) = run(
+            &format!("({})2026-01-15", "x".repeat(1 << 18)),
+            "expr",
+            false,
+        );
+        assert_eq!(result["epoch"], 1768435200i64);
+        assert!(turns > 20);
+    }
 }
