@@ -247,6 +247,10 @@ export class SandboxMounts {
     private readonly openPipe: (command: string) => Promise<SandboxPipe>,
   ) {}
 
+  get fileEffectsDispatched(): boolean {
+    return this.mountType === 'ssh'
+  }
+
   /**
    * Bring the mounts in step, then refuse a line that may not run: one the
    * session's restrictions reach past the dispatcher is refused as a policy

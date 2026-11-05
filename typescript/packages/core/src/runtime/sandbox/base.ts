@@ -104,7 +104,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
 
   override get fileEffectsDispatched(): boolean {
     return (
-      this.config.mountType === 'ssh' &&
+      this.mounts?.fileEffectsDispatched === true &&
       this.binding?.mountPrefixes != null &&
       !this.binding.mountPrefixes().includes('/')
     )

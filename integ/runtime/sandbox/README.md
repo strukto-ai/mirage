@@ -19,7 +19,7 @@ sshfs still running as a restart between check and run leaves it, exits
 | `timeout.json`  | a mount limit's timeout ends the line with 124                                   | every box                                        |
 | `captures.json` | only captured commands go to the box; the rest stay in mirage                    | every box                                        |
 | `kernel.json`   | the box runs its own Linux kernel                                                | smolvm, microsandbox, apple_container            |
-| `mounts.json`   | `mount_type` serves the session's view into the box; a binary there runs in it   | docker, e2b, microsandbox                        |
+| `mounts.json`   | `mount_type` serves the session's view into the box                              | docker, e2b, microsandbox                        |
 
 The boxes are docker, ssh, e2b, smolvm, microsandbox and apple_container. CI runs docker
 and ssh in `integ-runtime` against containers it starts, and e2b in

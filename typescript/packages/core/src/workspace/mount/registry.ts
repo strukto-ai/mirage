@@ -744,17 +744,6 @@ export class MountRegistry {
     return m
   }
 
-  /**
-   * Whether `path` is on no mount, or on the mount at `/` or `/dev`. Mirrors
-   * Python's `unserved`.
-   *
-   * @param path an absolute virtual path.
-   */
-  unserved(path: string): boolean {
-    const mount = this.tryMountFor(path)
-    return mount === null || mount.prefix === '/' || mount.prefix === DEV_PREFIX
-  }
-
   /** The mount that handles this path, or null when none does. */
   tryMountFor(path: string): MountEntry | null {
     const owner = ownerPrefix(
@@ -830,10 +819,9 @@ export class MountRegistry {
    * Whether code may be loaded from this path: the per-script form of
    * `isExecAllowed`, read by an interpreter running a file operand
    * (`python3 path.py`, `js app.js`, or a `./script` whose shebang names
-   * one), or a binary run in a sandbox (`./a.out`). Shell scripts (`bash
-   * script.sh`, `source`, a `./script` with no shebang or an sh one) never
-   * ask: they run in the shell, which checks each of their commands like a
-   * typed one.
+   * one). Shell scripts (`bash script.sh`, `source`, a `./script` with no
+   * shebang or an sh one) never ask: they run in the shell, which checks
+   * each of their commands like a typed one.
    */
   execAllowedAt = (virtual: string, access?: SessionAccess): boolean => {
     const m = this.tryMountFor(virtual)

@@ -118,7 +118,8 @@ class RemoteSandbox(
     @property
     def file_effects_dispatched(self) -> bool:
         return (
-            self.config.mount_type == "ssh"
+            self._mounts is not None
+            and self._mounts.file_effects_dispatched
             and self._binding is not None
             and self._binding.mount_prefixes is not None
             and "/" not in self._binding.mount_prefixes()

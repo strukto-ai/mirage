@@ -266,48 +266,6 @@
           }
         }
       ]
-    },
-    {
-      "id": "mount_type_ssh_runs_a_binary_copied_into_a_workspace_folder_in_the_box",
-      "sdk_only": "The case serves /build into the one shared docker box over sshfs; the CLI lanes of both hosts run beside the SDK drivers on that box, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
-      "runtimes": [
-        "docker",
-        "e2b",
-        "microsandbox"
-      ],
-      "requires": [
-        "env:MIRAGE_INTEG_BOX_MOUNTS"
-      ],
-      "world": {
-        "mounts": {
-          "/build": {
-            "vfs": "ram"
-          }
-        }
-      },
-      "entry": {
-        "captures": [
-          "@external"
-        ],
-        "config": {
-          "mount_type": "ssh"
-        }
-      },
-      "steps": [
-        {
-          "command": "cd /build && install -m 755 /bin/true t",
-          "expect": {
-            "exit": 0
-          }
-        },
-        {
-          "command": "./t; echo $?",
-          "expect": {
-            "exit": 0,
-            "stdout": "0\n"
-          }
-        }
-      ]
     }
   ]
 }

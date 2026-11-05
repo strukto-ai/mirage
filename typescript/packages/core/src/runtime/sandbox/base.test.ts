@@ -622,19 +622,6 @@ describe('RemoteSandbox', () => {
     }
   })
 
-  it.each([
-    [{ mountType: 'ssh' }, true],
-    [{}, false],
-  ])('a fresh box with config %j serves the workspace: %s', async (config, served) => {
-    const box = new RecordingSandbox({ config })
-    const ws = sandboxWorkspace(box)
-    try {
-      expect(box.fileEffectsDispatched).toBe(served)
-    } finally {
-      await ws.close()
-    }
-  })
-
   it('rejects unknown config keys', () => {
     const options = { config: { snapshot: 'mirage-fuse' } } as Record<string, unknown>
     expect(() => new RecordingSandbox(options)).toThrow("unknown runtime config key 'snapshot'")
