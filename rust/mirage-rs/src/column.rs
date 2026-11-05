@@ -131,35 +131,23 @@ impl Cells {
         self.starts.clear();
     }
 
-    async fn next_literal(
-        &mut self,
-        text: &[u8],
-        separator: u8,
-        meter: &mut Meter,
-    ) -> Option<Cell> {
+    async fn next_literal(&mut self, text: &str, separator: u8, meter: &mut Meter) -> Option<Cell> {
         while self.at < self.end {
-            let stop = self.end.min(self.at.saturating_add(meter.work));
-            let delimiter = memchr::memchr(separator, &text[self.at..stop]).map(|at| self.at + at);
+            let mut stop = self.end.min(self.at.saturating_add(meter.work));
+            while !text.is_char_boundary(stop) {
+                stop += 1;
+            }
+            let delimiter =
+                memchr::memchr(separator, &text.as_bytes()[self.at..stop]).map(|at| self.at + at);
             let end = delimiter.unwrap_or(stop);
-            while self.at < end {
-                let valid = match std::str::from_utf8(&text[self.at..end]) {
-                    Ok(valid) => valid,
-                    Err(error) => {
-                        std::str::from_utf8(&text[self.at..self.at + error.valid_up_to()]).unwrap()
-                    }
-                };
-                let used = if valid.is_empty() {
-                    let (c, used) = next_lossy(text, self.at, self.end).unwrap();
-                    self.width += char_width(u32::from(c));
-                    used
-                } else {
-                    self.width += valid.chars().map(|c| char_width(u32::from(c))).sum::<u64>();
-                    valid.len()
-                };
-                self.at += used;
-                if meter.charge(used) {
-                    meter.pause().await;
-                }
+            self.width += text[self.at..end]
+                .chars()
+                .map(|c| char_width(u32::from(c)))
+                .sum::<u64>();
+            let used = end - self.at;
+            self.at = end;
+            if meter.charge(used) {
+                meter.pause().await;
             }
             if let Some(end) = delimiter {
                 let cell = Cell {
@@ -186,7 +174,7 @@ impl Cells {
 
     async fn next(
         &mut self,
-        text: &[u8],
+        text: &str,
         separator: Option<&Separator>,
         meter: &mut Meter,
     ) -> Option<Cell> {
@@ -200,7 +188,7 @@ impl Cells {
                 .next_literal(text, separator.chars[0] as u8, meter)
                 .await;
         }
-        while let Some((c, used)) = next_lossy(text, self.at, self.end) {
+        while let Some((c, used)) = next_lossy(text.as_bytes(), self.at, self.end) {
             let start = self.at;
             self.at += used;
             if meter.charge(used) {
@@ -298,27 +286,38 @@ impl Writer {
             }
         }
     }
-    async fn text(&mut self, bytes: &[u8], cell: Cell, meter: &mut Meter) {
+    async fn text(&mut self, text: &str, cell: Cell, meter: &mut Meter) {
         let mut at = cell.start;
         while at < cell.end {
             let end = cell.end.min(at.saturating_add(meter.work));
-            let valid = match std::str::from_utf8(&bytes[at..end]) {
-                Ok(_) => end - at,
-                Err(error) => error.valid_up_to(),
-            };
-            if valid > 0 {
-                self.raw(&bytes[at..at + valid]).await;
-                at += valid;
-                meter.spend(valid).await;
-            } else {
-                let (c, used) = next_lossy(bytes, at, cell.end).unwrap();
-                let mut unit = [0; 4];
-                self.raw(c.encode_utf8(&mut unit).as_bytes()).await;
-                at += used;
-                meter.spend(used).await;
-            }
+            self.raw(&text.as_bytes()[at..end]).await;
+            meter.spend(end - at).await;
+            at = end;
         }
     }
+}
+
+async fn decode(bytes: Vec<u8>, meter: &mut Meter) -> String {
+    let mut text = String::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        let end = bytes.len().min(at.saturating_add(meter.work));
+        let valid = match std::str::from_utf8(&bytes[at..end]) {
+            Ok(valid) => valid,
+            Err(error) => std::str::from_utf8(&bytes[at..at + error.valid_up_to()]).unwrap(),
+        };
+        let used = if valid.is_empty() {
+            let (c, used) = next_lossy(&bytes, at, bytes.len()).unwrap();
+            text.push(c);
+            used
+        } else {
+            text.push_str(valid);
+            valid.len()
+        };
+        at += used;
+        meter.spend(used).await;
+    }
+    text
 }
 
 async fn run(config: Config, width: u64, text: Vec<u8>, host: Host) -> i32 {
@@ -326,13 +325,15 @@ async fn run(config: Config, width: u64, text: Vec<u8>, host: Host) -> i32 {
         host: host.clone(),
         work: WORK,
     };
+    let text = decode(text, &mut meter).await;
     let mut entries = Vec::new();
     let (mut start, mut at, mut columns, mut nonblank) = (0, 0, 0, false);
     let mut widest = 0;
     while at < text.len() {
         if config.table && nonblank {
             let end = text.len().min(at.saturating_add(meter.work));
-            let delimiter = memchr::memchr(b'\n', &text[at..end]).map(|offset| at + offset);
+            let delimiter =
+                memchr::memchr(b'\n', &text.as_bytes()[at..end]).map(|offset| at + offset);
             let stop = delimiter.map_or(end, |offset| offset + 1);
             if let Some(offset) = delimiter {
                 entries.push(Cell {
@@ -350,7 +351,7 @@ async fn run(config: Config, width: u64, text: Vec<u8>, host: Host) -> i32 {
             }
             continue;
         }
-        let (c, used) = next_lossy(&text, at, text.len()).unwrap();
+        let (c, used) = next_lossy(text.as_bytes(), at, text.len()).unwrap();
         if c == '\n' {
             if nonblank {
                 entries.push(Cell {
