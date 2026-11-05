@@ -199,15 +199,21 @@ def test_unproven_native_paths_fall_back_and_refuse_aliases(
 
 
 def test_native_proof_checks_parent_listing_permission(tree, monkeypatch):
-    original = os.scandir
+    original_open = os.open
+    original_listdir = os.listdir
 
-    def denied(path):
+    def opened(path, *args, **kwargs):
         if str(path) == str(tree):
             raise PermissionError(errno.EACCES, "denied")
-        return original(path)
+        return original_open(path, *args, **kwargs)
 
-    monkeypatch.setattr("mirage.core.disk.utils.os.scandir", denied)
-    monkeypatch.setattr("mirage.core.disk.utils.os.listdir", denied)
+    def listing(path):
+        if str(path) == str(tree):
+            raise PermissionError(errno.EACCES, "denied")
+        return original_listdir(path)
+
+    monkeypatch.setattr("mirage.core.disk.utils.os.open", opened)
+    monkeypatch.setattr("mirage.core.disk.utils.os.listdir", listing)
     with pytest.raises(PermissionError) as caught:
         resolve_inside_sync(tree, PathSpec.from_str_path("/lib/a.txt"))
     assert caught.value.filename == "/lib/a.txt"
@@ -246,7 +252,7 @@ def test_native_proof_requires_convergence_and_same_nonlink_entry(
             raise PermissionError(errno.EACCES, "denied")
         return original(path)
 
-    def denied(path):
+    def denied(path, *args, **kwargs):
         raise PermissionError(errno.EACCES, "denied")
 
     def canonical(path):
@@ -265,7 +271,7 @@ def test_native_proof_requires_convergence_and_same_nonlink_entry(
     monkeypatch.setattr(disk_utils.os, "lstat", lambda path: alias)
     monkeypatch.setattr(disk_utils.os, "listdir", listing)
     if proof == "permission":
-        monkeypatch.setattr(disk_utils.os, "scandir", denied)
+        monkeypatch.setattr(disk_utils.os, "open", denied)
         with pytest.raises(PermissionError):
             disk_utils.exact_name(str(tree), "file.txt", info)
     else:
@@ -324,15 +330,34 @@ def test_a_name_past_ascii_still_lists_its_parent(tree, monkeypatch):
 
 def test_a_probed_name_still_needs_a_readable_parent(tree, monkeypatch):
     (tree / "lib" / "7").write_text("x")
-    original = os.scandir
+    original = os.open
 
-    def denied(path):
+    def denied(path, *args, **kwargs):
         if str(path) == str(tree / "lib"):
             raise PermissionError(errno.EACCES, "denied")
-        return original(path)
+        return original(path, *args, **kwargs)
 
     monkeypatch.setattr(disk_utils, "sys", SimpleNamespace(platform="linux"))
-    monkeypatch.setattr(disk_utils.os, "scandir", denied)
+    monkeypatch.setattr(disk_utils.os, "open", denied)
     with pytest.raises(PermissionError) as caught:
         resolve_inside_sync(tree, PathSpec.from_str_path("/lib/7"))
     assert caught.value.filename == "/lib/7"
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_a_proven_parent_is_opened_not_listed(tree, monkeypatch, platform):
+    for i in range(30):
+        (tree / "lib" / str(i)).write_text("x")
+    scans = []
+    original = os.scandir
+
+    def scanning(path):
+        scans.append(path)
+        return original(path)
+
+    monkeypatch.setattr(disk_utils, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(disk_utils.os, "scandir", scanning)
+    assert resolve_inside_sync(tree, PathSpec.from_str_path("/lib/7")) == (
+        tree / "lib" / "7"
+    )
+    assert scans == []
