@@ -102,6 +102,14 @@ enum Output {
     Record(Source, usize),
 }
 
+fn equal_key(left: &[u8], right: &[u8], ignore_case: bool) -> bool {
+    if ignore_case {
+        left.eq_ignore_ascii_case(right)
+    } else {
+        left == right
+    }
+}
+
 impl Uniq {
     fn record(&mut self, source: Source, count: u64) {
         if self.config.count {
@@ -206,12 +214,42 @@ impl Uniq {
                         }
                         self.phase = Phase::Done;
                     }
+                    Take::Record((line, _)) if self.keys.skip_fields == 0 => {
+                        let start = self.keys.skip_chars.min(line.len());
+                        let end = start
+                            .saturating_add(self.keys.check_chars.unwrap_or(usize::MAX))
+                            .min(line.len());
+                        self.current_key = (start, end);
+                        let key = &line[start..end];
+                        let before = self
+                            .first
+                            .as_deref()
+                            .map(|first| &first[self.first_key.0..self.first_key.1]);
+                        if let Some(before) = before.filter(|before| before.len() == key.len()) {
+                            if key.len() > work {
+                                self.phase = Phase::Compare(0);
+                            } else {
+                                work -= key.len();
+                                if equal_key(key, before, self.config.ignore_case) {
+                                    self.plan();
+                                    if self.output.is_empty() {
+                                        self.records.advance();
+                                        self.phase = Phase::Read;
+                                    }
+                                } else {
+                                    self.phase = Phase::Close;
+                                }
+                            }
+                        } else {
+                            self.phase = Phase::Close;
+                        }
+                    }
                     Take::Record(_) => {
                         self.phase = Phase::Key {
                             at: 0,
                             field: 0,
                             blanks: true,
-                        }
+                        };
                     }
                 },
                 Phase::Key {
@@ -260,11 +298,7 @@ impl Uniq {
                     let before =
                         &self.first.as_deref().unwrap()[self.first_key.0..self.first_key.1];
                     let end = key.len().min(at.saturating_add(work));
-                    let same = if self.config.ignore_case {
-                        key[at..end].eq_ignore_ascii_case(&before[at..end])
-                    } else {
-                        key[at..end] == before[at..end]
-                    };
+                    let same = equal_key(&key[at..end], &before[at..end], self.config.ignore_case);
                     work -= end - at;
                     self.phase = if !same {
                         Phase::Close

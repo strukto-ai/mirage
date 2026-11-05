@@ -70,7 +70,6 @@ const WORK: usize = 16384;
 enum Phase {
     Pull,
     Order(usize, usize),
-    Prepare(usize),
     Copy(usize, usize),
     Compare(usize),
     Advance(usize),
@@ -104,6 +103,22 @@ fn compare(left: &[u8], right: &[u8], at: usize, work: &mut usize) -> Comparison
     } else {
         Comparison::More(end)
     }
+}
+
+fn copy_line(held: &mut Option<Vec<u8>>, line: &[u8], at: usize, work: &mut usize) -> usize {
+    let held = held.get_or_insert_with(Vec::new);
+    if at == 0 {
+        if held.capacity() < line.len() || held.capacity() > line.len().max(WORK).saturating_mul(2)
+        {
+            *held = Vec::with_capacity(line.len());
+        } else {
+            held.clear();
+        }
+    }
+    let end = line.len().min(at.saturating_add(*work));
+    held.extend_from_slice(&line[at..end]);
+    *work -= end - at;
+    end
 }
 
 impl Comm {
@@ -177,17 +192,23 @@ impl Comm {
                                 self.pulls.pop_front();
                                 self.lines[side] = None;
                             }
-                            Take::Record(_) => {
+                            Take::Record((line, _)) => {
                                 let check = self.config.check_order;
-                                self.phase = if check != Some(false)
+                                if check != Some(false)
                                     && (check == Some(true) || self.unpairable)
                                     && !self.warned[side]
                                     && self.lines[side].is_some()
                                 {
-                                    Phase::Order(side, 0)
+                                    self.phase = Phase::Order(side, 0);
                                 } else {
-                                    Phase::Prepare(side)
-                                };
+                                    let end = copy_line(&mut self.lines[side], line, 0, &mut work);
+                                    if end == line.len() {
+                                        self.inputs[source].advance();
+                                        self.pulls.pop_front();
+                                    } else {
+                                        self.phase = Phase::Copy(side, end);
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -215,26 +236,10 @@ impl Comm {
                             self.phase = if self.done {
                                 Phase::Done
                             } else {
-                                Phase::Prepare(side)
+                                Phase::Copy(side, 0)
                             };
                         }
                     }
-                }
-                Phase::Prepare(side) => {
-                    let source = self.source(side);
-                    let Take::Record((line, _)) = self.inputs[source].peek_span(self.terminator)
-                    else {
-                        unreachable!()
-                    };
-                    let held = self.lines[side].get_or_insert_with(Vec::new);
-                    if held.capacity() < line.len()
-                        || held.capacity() > line.len().max(WORK).saturating_mul(2)
-                    {
-                        *held = Vec::with_capacity(line.len());
-                    } else {
-                        held.clear();
-                    }
-                    self.phase = Phase::Copy(side, 0);
                 }
                 Phase::Copy(side, at) => {
                     let source = self.source(side);
@@ -242,12 +247,7 @@ impl Comm {
                     else {
                         unreachable!()
                     };
-                    let end = line.len().min(at.saturating_add(work));
-                    self.lines[side]
-                        .as_mut()
-                        .unwrap()
-                        .extend_from_slice(&line[at..end]);
-                    work -= end - at;
+                    let end = copy_line(&mut self.lines[side], line, at, &mut work);
                     if end == line.len() {
                         self.inputs[source].advance();
                         self.pulls.pop_front();
