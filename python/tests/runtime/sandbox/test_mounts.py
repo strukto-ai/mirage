@@ -867,6 +867,29 @@ async def test_fuse_guards_a_mount_the_sandbox_lays_after_the_first_line():
     await ws.close()
 
 
+# A cover over a served prefix whose server ended is left alone too: serving
+# again would mount the host's sshfs over the sandbox's mount.
+@pytest.mark.asyncio
+async def test_a_cover_over_an_ended_server_is_left_alone():
+    sandbox = FakeSandbox("ssh")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    sandbox.requests["/data"].feed_eof()
+    sandbox.table["/data"] = ("tmpfs", "tmpfs")
+    for _ in range(5):
+        await asyncio.sleep(0)
+    result = await agent.shell("python3 covered.py")
+    assert (result.exit_code, await result.stderr_str()) == (
+        1,
+        "fake: another mount covers /data in this sandbox; the line did "
+        "not run\n",
+    )
+    assert sandbox.table["/data"] == ("tmpfs", "tmpfs")
+    assert served(sandbox) == ["/data", "/my notes"]
+    await ws.close()
+
+
 # A covered prefix the workspace no longer mounts is dropped, not refused.
 @pytest.mark.asyncio
 async def test_a_covered_prefix_the_workspace_dropped_is_not_refused():
