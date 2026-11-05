@@ -14,11 +14,9 @@
 
 import asyncio
 import dataclasses
-import errno
 import logging
-import posixpath
 from collections.abc import Awaitable, Callable, Sequence
-from typing import Any, Literal
+from typing import Any
 
 from mirage.policy.decisions import op_question
 from mirage.policy.policies import agreed, settled
@@ -34,42 +32,23 @@ from mirage.policy.types import (
     RouteContext,
 )
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
+from mirage.runtime.constants import WHOLE_LINE
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import (
     bind_commands,
     catch_all,
     runtime_bindings_for,
-    serves_workspace,
     whole_line_runtime,
 )
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
-from mirage.shell.helpers import starts_a_job
-from mirage.shell.parse.env import parameter_reads
-from mirage.shell.parse.names import (
-    assignment_values,
-    command_words,
-    inherited_reads,
-)
+from mirage.shell.parse.names import command_words
 from mirage.shell.types import TSNodeLike
-from mirage.shell.variable import VarAttr
-from mirage.types import PathSpec
 from mirage.utils.abort import MirageAbortError
 from mirage.view.types import FileView, SessionView
-from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
-from mirage.workspace.executor.command.routing import (
-    followed,
-    interpreter_script,
-    invocation_routing,
-)
-from mirage.workspace.lookup.constants import (
-    FRESH_SHELL_NAMES,
-    INTERPRETER_NAMES,
-    WORKSPACE_JOB_WORDS,
-)
-from mirage.workspace.lookup.lookup import lookup, may_run_program
-from mirage.workspace.lookup.types import Consumer
+from mirage.workspace.executor.command.routing import invocation_routing
+from mirage.workspace.lookup.constants import INTERPRETER_NAMES
+from mirage.workspace.lookup.lookup import may_run_program
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.explain import Judged, Walked
@@ -84,19 +63,18 @@ class Router:
 
     The order is: an inherited decision, then the ``execute()`` runtime
     argument, then the placement stage (``pre_execute``: the configured
-    route policy as a built-in, then the coded policies), then the
-    sandbox default (``_defaulted``: a line needing a sandbox's own files
-    whole on it), then each command's first capturer, an interpreter a
-    sandbox took kept off it where one invocation cannot run there
-    (``RouteDecision.unserved``). It reads the runtime entries and the
-    registry's static bindings but owns no mutable workspace state, so
-    the volatile parts (the current agent, the line's admission) arrive
-    per call and a new step is added here rather than in the workspace.
+    route policy as a built-in, then the coded policies), then each
+    command's first capturer, an interpreter a sandbox took kept off it
+    where one invocation cannot run there (``RouteDecision.unserved``).
+    It reads the runtime entries and the registry's static bindings but
+    owns no mutable workspace state, so the volatile parts (the current
+    agent, the line's admission) arrive per call and a new step is added
+    here rather than in the workspace.
 
     Args:
         registry (MountRegistry): carries the resolved static bindings.
         runtimes (Runtimes): the ordered runtime entries.
-        namespace (Namespace): the links a path the line names follows.
+        namespace (Namespace): the links an interpreter's script follows.
     """
 
     def __init__(
@@ -124,9 +102,8 @@ class Router:
     ) -> RouteDecision[RuntimeIdentity] | Deny | Pending:
         """Resolve the routing decision for one typed line.
 
-        Returns the sandbox default's decision or refusal when nothing
-        else decides (``_defaulted``), the static bindings when that
-        default does not apply either, the stage's Deny when
+        Returns the static bindings as the decision when nothing decides
+        (no runtime argument, nothing to consult), the stage's Deny when
         a policy refuses the line, and the ledger's answer to its Ask
         when the host refuses the line or has not answered yet. A nested
         eval passes its typed line's decision as ``inherited`` and keeps
@@ -157,8 +134,9 @@ class Router:
                 like a command's: kept for the retry of a line still
                 waiting on another question, spent when the line ends.
             cancel (asyncio.Event | None): the run's kill channel.
-            ast (TSNodeLike | None): the parsed line, which the sandbox
-                default reads; None leaves the default out.
+            ast (TSNodeLike | None): the parsed line, whose command heads
+                say whether it may run an interpreter (``_learn_programs``);
+                None for none.
             deadline (float | None): the loop time the line's budget ends,
                 which bounds asking a box for its interpreters; None for
                 no bound.
@@ -175,10 +153,6 @@ class Router:
         policies = self._registry.policies
         placing = await policies.wants_for("pre_execute", session.session_id)
         placed = None if runtime is None else self._placed(entries, runtime)
-        if not placing and placed is None and self._sandbox() is not None:
-            if held is not None and await held():
-                return self._unplaced(entries)
-            return await self._defaulted(entries, session, ast, judged)
         if not placing or (held is not None and await held()):
             return placed if placed is not None else self._unplaced(entries)
         ctx = self.context(command, session, await judged())
@@ -200,7 +174,7 @@ class Router:
             return placed
         if route is not None:
             return self._routed(entries, route.runtime)
-        return await self._defaulted(entries, session, ast, judged)
+        return self._unplaced(entries)
 
     async def _learn_programs(
         self, command: str, ast: TSNodeLike | None, deadline: float | None
@@ -241,7 +215,6 @@ class Router:
         command: str,
         session: SessionState,
         judged: Callable[[], Awaitable[Sequence[tuple[Walked, list[Judged]]]]],
-        ast: TSNodeLike | None = None,
     ) -> tuple[
         tuple[Deny | Ask | Route, ...],
         RouteDecision[RuntimeIdentity] | Deny | Pending,
@@ -256,8 +229,6 @@ class Router:
             judged (Callable[[], Awaitable[Sequence[tuple[Walked,
                 list[Judged]]]]]): the line pass's reading of the line,
                 as ``decide`` takes it.
-            ast (TSNodeLike | None): the parsed line, which the sandbox
-                default reads; None leaves the default out.
 
         Raises:
             RouteError: an unknown runtime name or a failing policy.
@@ -266,7 +237,7 @@ class Router:
         policies = self._registry.policies
         placing = await policies.wants_for("pre_execute", session.session_id)
         if not placing:
-            return (), await self._defaulted(entries, session, ast, judged)
+            return (), self._unplaced(entries)
         ctx = self.context(command, session, await judged())
         answers = await policies.answers("pre_execute", ctx)
         winner = settled(answers)
@@ -279,204 +250,7 @@ class Router:
             return answers, winner
         if isinstance(winner, Route):
             return answers, self._routed(entries, winner.runtime)
-        return answers, await self._defaulted(entries, session, ast, judged)
-
-    def _sandbox(self) -> Runtime[Any] | None:
-        """The sandbox the default sends a line to whole: the runtime
-        ``@external`` binds, when it serves the workspace
-        (``serves_workspace``), no ``route_policy`` decides placement and
-        no runtime takes every line (``@line``). None otherwise, and then
-        lines place as they always have."""
-        bindings = self._registry.runtime_bindings
-        if (
-            self._registry.policies.has_placement
-            or whole_line_runtime(bindings) is not None
-        ):
-            return None
-        box = bindings.get(EXTERNAL_COMMANDS)
-        return (
-            box if isinstance(box, Runtime) and serves_workspace(box) else None
-        )
-
-    async def _defaulted(
-        self,
-        entries: list[Runtime[Any]],
-        session: SessionState,
-        ast: TSNodeLike | None,
-        judged: Callable[[], Awaitable[Sequence[tuple[Walked, list[Judged]]]]],
-    ) -> RouteDecision[RuntimeIdentity] | Deny:
-        """The decision for a line nothing else placed: whole on the
-        sandbox when it needs the sandbox's own files (``_whole``), else
-        each command on its first capturer (``_unplaced``).
-
-        Args:
-            entries (list[Runtime]): the workspace's ordered runtimes.
-            session (SessionState): the effective session.
-            ast (TSNodeLike | None): the parsed line; None for none.
-            judged (Callable[[], Awaitable[Sequence[tuple[Walked,
-                list[Judged]]]]]): the line pass's reading of the line.
-        """
-        box = self._sandbox()
-        if ast is None or box is None:
-            return self._unplaced(entries)
-        whole = await self._whole(entries, box, session, ast, await judged())
-        return self._unplaced(entries) if whole is None else whole
-
-    async def _whole(
-        self,
-        entries: list[Runtime[Any]],
-        box: Runtime[Any],
-        session: SessionState,
-        ast: TSNodeLike,
-        items: Sequence[tuple[Walked, list[Judged]]],
-    ) -> RouteDecision[RuntimeIdentity] | Deny | None:
-        """The line whole on the sandbox, when it runs a program there
-        and Mirage would resolve one of its paths to the sandbox's own
-        files; a refusal when running it whole would change what it
-        means; None to place it as usual.
-
-        The paths are the ones Mirage itself resolves: a Mirage
-        command's operands (the program a wrapper runs, not the
-        wrapper's), a redirect target, a ``cd`` target. A program's own
-        words resolve in the sandbox either way.
-
-        Args:
-            entries (list[Runtime]): the workspace's ordered runtimes.
-            box (Runtime): the sandbox (``_sandbox``).
-            session (SessionState): the effective session.
-            ast (TSNodeLike): the parsed line.
-            items (Sequence[tuple[Walked, list[Judged]]]): the line
-                pass's reading of the line.
-        """
-        bindings = self._registry.runtime_bindings
-        program = False
-        mirage: list[str] = []
-        unexecutable: list[str] = []
-        paths: list[tuple[str, SessionState]] = []
-        for walked, explained in items:
-            named = [
-                (one.ctx, one.session or walked.session)
-                for one in explained
-                if one.ctx is not None
-            ]
-            consumer = None
-            for ctx, stand in named:
-                name = ctx.command
-                consumer = lookup(name, stand, self._registry)
-                if (
-                    name in INTERPRETER_NAMES
-                    and consumer not in _WORKSPACE_ONLY
-                ):
-                    refused = self._exec_refused(ctx, stand)
-                    if refused is not None:
-                        unexecutable.append(refused)
-                if consumer is Consumer.EXTERNAL:
-                    runs = bindings.get(name, bindings.get(EXTERNAL_COMMANDS))
-                    program = program or runs is box
-                    if "/" in name:
-                        target = posixpath.normpath(
-                            posixpath.join(stand.cwd, name)
-                        )
-                        if not self._registry.exec_allowed_at(target):
-                            unexecutable.append(
-                                f"{target} is not in EXEC mode"
-                            )
-                elif consumer in _WORKSPACE_ONLY or (
-                    consumer is Consumer.SESSION
-                    and name in WORKSPACE_JOB_WORDS
-                ):
-                    mirage.append(name)
-            if not named:
-                continue
-            ctx, stand = named[-1]
-            if consumer is Consumer.EXTERNAL:
-                paths.extend(
-                    (
-                        posixpath.normpath(
-                            posixpath.join(stand.cwd, word.text)
-                        ),
-                        stand,
-                    )
-                    for word in walked.redirects
-                    if word.text
-                )
-            else:
-                paths.extend((path.virtual, stand) for path in ctx.paths)
-        if not program:
-            return None
-        outside: list[str] = []
-        held: list[str] = []
-        for path, stand in paths:
-            place = await self._place(followed(path, self._namespace, stand))
-            if place == "sandbox":
-                outside.append(path)
-            elif place == "held":
-                held.append(path)
-        if not outside:
-            return None
-        reason = _whole_refusal(
-            session, ast, mirage, held, unexecutable, outside[0]
-        )
-        if reason is not None:
-            return Deny(
-                reason=reason,
-                policy="sandbox",
-                error=PermissionError(errno.EPERM, reason),
-            )
-        return RouteDecision(
-            bindings={**bindings, WHOLE_LINE: box},
-            fallback=catch_all(entries),
-        )
-
-    async def _place(
-        self, path: str
-    ) -> Literal["workspace", "held", "sandbox"]:
-        """Whose a path Mirage resolves is: the sandbox's own when it is
-        on no mount or on the workspace's scratch root where Mirage holds
-        nothing at it; Mirage's alone (``HELD``) where Mirage holds a
-        file there; the workspace's otherwise. ``/`` and a directory
-        holding mounts are the workspace's.
-
-        Args:
-            path (str): an absolute virtual path, its links followed.
-        """
-        if path == "/" or any(
-            m.prefix.startswith(path.rstrip("/") + "/")
-            for m in self._registry.mounts()
-        ):
-            return "workspace"
-        mount = self._registry.try_mount_for(path)
-        if mount is None:
-            return "sandbox"
-        if not self._registry.is_anchor(mount):
-            return "workspace"
-        vfs, key, _ = self._registry.resolve(path)
-        if await vfs.exists(PathSpec.from_str_path(key)):
-            return "held"
-        return "sandbox"
-
-    def _exec_refused(
-        self, ctx: CommandContext, session: SessionState
-    ) -> str | None:
-        """Why the mounts' exec rule refuses the program an interpreter
-        command runs, None when it may run: its script's mount is not in
-        EXEC mode, or for inline code (``-c``, ``-m``, ``-e``, stdin) no
-        mount is, as ``exec_refusal`` judges it on Monty.
-
-        Args:
-            ctx (CommandContext): the interpreter command.
-            session (SessionState): the session whose links its script
-                follows, as Monty follows them.
-        """
-        script = interpreter_script(ctx.command, ctx.argv, ctx.cwd)
-        if script is not None:
-            path = followed(script.virtual, self._namespace, session)
-            if self._registry.exec_allowed_at(path):
-                return None
-            return f"{path} is not in EXEC mode"
-        if self._registry.is_exec_allowed():
-            return None
-        return "no mount is in EXEC mode"
+        return answers, self._unplaced(entries)
 
     def _routed(
         self, entries: list[Runtime[Any]], name: str
@@ -635,12 +409,6 @@ class Router:
         )
 
 
-# What only Mirage runs: a sandbox running the line would not find it.
-_WORKSPACE_ONLY = frozenset(
-    {Consumer.CLI, Consumer.FUNCTION, Consumer.NAMESPACE}
-)
-
-
 def _captured(entries: list[Runtime[Any]]) -> dict[str, Runtime[Any]]:
     """Each command on the first entry whose own captures name it, none
     an entry only learned it can run (``Runtime.learned``).
@@ -664,84 +432,3 @@ def _learned(runtime: RuntimeIdentity | None, name: str) -> bool:
         name (str): the command name.
     """
     return isinstance(runtime, Runtime) and runtime.learned(name)
-
-
-def _whole_refusal(
-    session: SessionState,
-    ast: TSNodeLike,
-    mirage: Sequence[str],
-    held: Sequence[str],
-    unexecutable: Sequence[str],
-    path: str,
-) -> str | None:
-    """Why a line that needs the sandbox's own files may not run there
-    whole, None when it may: it runs something only Mirage has, names a
-    file only Mirage holds, uses an alias, starts a job, reads a value
-    only Mirage holds, or assigns a variable Mirage keeps readonly.
-
-    Args:
-        session (SessionState): the effective session.
-        ast (TSNodeLike): the parsed line.
-        mirage (Sequence[str]): the line's commands only Mirage runs.
-        held (Sequence[str]): the line's paths only Mirage holds, files
-            on its scratch root (``Router._place``).
-        unexecutable (Sequence[str]): why the mounts' exec rule refuses
-            an interpreter the sandbox took (``Router._exec_refused``).
-        path (str): a path of the line that is the sandbox's own.
-    """
-    if mirage:
-        names = ", ".join(dict.fromkeys(mirage))
-        return (
-            f"{names} runs in Mirage, but {path} is on the sandbox; "
-            "run them on separate lines"
-        )
-    if held:
-        return (
-            f"{held[0]} is in Mirage, but {path} is on the sandbox; "
-            "run them on separate lines"
-        )
-    if unexecutable:
-        return (
-            f"{unexecutable[0]}, and the line runs in the sandbox for {path}"
-        )
-    aliases = command_words(ast) & expanding_aliases(session)
-    if aliases:
-        return (
-            f"{sorted(aliases)[0]} is an alias, which the sandbox does not "
-            f"have, and {path} is on the sandbox"
-        )
-    if starts_a_job(ast):
-        return (
-            f"a line using the sandbox's {path} cannot run with & yet; "
-            "drop the & or work in a workspace folder"
-        )
-    params = parameter_reads(ast)
-    if params:
-        return (
-            f"{sorted(params)[0]} would read Mirage's value, but the line "
-            f"runs in the sandbox for {path}"
-        )
-    unexported = sorted(
-        name
-        for name in inherited_reads(ast)
-        if name in session.vars
-        and VarAttr.EXPORT not in session.vars[name].attrs
-        and name not in FRESH_SHELL_NAMES
-    )
-    if unexported:
-        return (
-            f"{unexported[0]} is not exported, but the line runs in the "
-            f"sandbox for {path}"
-        )
-    readonly = sorted(
-        name
-        for name, _, _ in assignment_values(ast)
-        if name in session.vars
-        and VarAttr.READONLY in session.vars[name].attrs
-    )
-    if readonly:
-        return (
-            f"{readonly[0]} is readonly in Mirage, but the line runs in the "
-            f"sandbox for {path}"
-        )
-    return None

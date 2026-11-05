@@ -24,7 +24,6 @@ from mirage.shell.parse.names import (
     command_invocations,
     literal_text,
     walk_named_outside_defs,
-    walk_tree,
 )
 from mirage.shell.types import TSNodeLike
 
@@ -347,36 +346,4 @@ def implicit_reads(node: TSNodeLike) -> frozenset[str]:
             out |= reads
         if head == "cd":
             out |= _cd_reads(args)
-    return frozenset(out)
-
-
-def parameter_reads(node: TSNodeLike) -> frozenset[str]:
-    """The parameters a line reads that a fresh shell answers with its
-    own value, as typed (``$1``, ``$?``): positional and special
-    parameters anywhere, and the last status (``$?``, ``PIPESTATUS``)
-    inside the line's first pipeline, which bash answers with the status
-    from before the line. After the first ``;``, ``&&``, ``||`` or
-    newline the status is the line's own.
-
-    Args:
-        node (TSNodeLike): root node from parse().
-    """
-    first = node.children[0] if node.children else None
-    while first is not None and first.type == "list" and first.children:
-        first = first.children[0]
-    end = first.end_byte if first is not None else 0
-    out: set[str] = set()
-    for one in walk_tree(node):
-        text = decode_text(one.text) if one.text else ""
-        if one.type == "special_variable_name":
-            if text != "?" or one.start_byte < end:
-                out.add(f"${text}")
-        elif one.type == "variable_name" and text.isdigit():
-            out.add(f"${text}")
-        elif (
-            one.type == "variable_name"
-            and text == "PIPESTATUS"
-            and one.start_byte < end
-        ):
-            out.add(text)
     return frozenset(out)

@@ -42,7 +42,6 @@ from mirage.shell.helpers import (
     quoted_parts,
     source_parts,
     split_env_prefix,
-    starts_a_job,
 )
 from mirage.shell.parse import parse
 from mirage.shell.parse.parse import parse_program
@@ -1062,17 +1061,3 @@ def test_function_source_copies_only_its_own_source(line, expected):
         assert get_function_source(node) == expected
     finally:
         program.release()
-
-
-@pytest.mark.parametrize(
-    "line, job",
-    [
-        ("a &", True),
-        ("( a & )", True),
-        ("f() { a & }", True),
-        ("a && b", False),
-        ("a &> /tmp/o", False),
-    ],
-)
-def test_starts_a_job_finds_an_ampersand_at_any_depth(line, job):
-    assert starts_a_job(parse(line)) is job

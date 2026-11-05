@@ -37,7 +37,6 @@ import {
   getText,
   getWhileParts,
   isBackgrounded,
-  startsAJob,
   literalWord,
   quotedParts,
   sourceParts,
@@ -654,17 +653,5 @@ describe('aliasRewrite', () => {
 
   it('reads a word of digits after a value ending in a blank', () => {
     expect(rewrite('a 1 b', { a: 'echo ', 1: 'one' })?.[0]).toBe('echo  one b')
-  })
-})
-
-describe('startsAJob', () => {
-  it.each<[string, boolean]>([
-    ['a &', true],
-    ['( a & )', true],
-    ['f() { a & }', true],
-    ['a && b', false],
-    ['a &> /tmp/o', false],
-  ])('finds an ampersand at any depth in %j', (line, job) => {
-    expect(startsAJob(parse(line) as unknown as TSNodeLike)).toBe(job)
   })
 })

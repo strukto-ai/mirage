@@ -15,9 +15,7 @@ must see the mounts. `docker`, `e2b`, `ssh`, `smolvm`, `microsandbox`, and `appl
 serves them from the workspace, `fuse` from a Mirage inside the sandbox, and
 `both` mixes the two. Daytona uses a Mirage inside.
 
-With `mount_type: ssh`, the sandbox also runs the interpreters it has and,
-with no `route_policy`, every line that needs its own files, such as
-`cd /opt/app && make`; see
+With `mount_type: ssh`, the sandbox also runs the interpreters it has; see
 [Route Runtime](/home/policy/route-runtime#with-a-sandbox).
 
 | Runtime | Runs programs in | Workspace files through |
@@ -57,8 +55,8 @@ permissions and confinement.
 
 Every sandbox needs a POSIX shell at `/bin/sh`, which starts each command,
 and `grep`, which finds what a run cut short left running. With
-`mount_type: ssh` it also needs `sshfs` and FUSE, which mount the workspace,
-and `bash`, which runs a line that needs the sandbox's own files. With
+`mount_type: ssh` it also needs `sshfs` and FUSE, which mount the
+workspace. With
 [libfaketime](https://github.com/wolfcw/libfaketime) in the image, programs
 see the workspace's [`system_time`](/home/configuration#system-time);
 without it they see the sandbox's clock.

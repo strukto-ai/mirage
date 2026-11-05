@@ -18,7 +18,6 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  bashLineArgv,
   EXEC_ID,
   MOUNT_GUARD,
   mountField,
@@ -122,49 +121,6 @@ describe('programsProbe', () => {
     expect(programsProbe()).toBe(
       'for p in js node python python3; do command -v "$p" >/dev/null 2>&1 && echo "$p"; done; true',
     )
-  })
-})
-
-describe('bashLineArgv', () => {
-  it('passes the line and the name as positional words, as Python does', () => {
-    expect(bashLineArgv('box', 'x')).toEqual([
-      '/bin/sh',
-      '-c',
-      'command -v bash >/dev/null 2>&1 || { echo "mirage: $2 has no bash; a line using the sandbox\'s own files needs bash" >&2; exit 127; }; set -- "$@" -c "$1"; shift 2; exec bash "$@"',
-      'sh',
-      'x',
-      'box',
-    ])
-  })
-
-  it('runs the line in bash and names a missing bash', () => {
-    const [program = '', ...args] = bashLineArgv('box', '[[ a == a ]] && echo "$0" ok')
-    const ran = spawnSync(program, args, { encoding: 'utf8' })
-    expect(ran.stdout).toBe('bash ok\n')
-    const [shell = '', ...rest] = bashLineArgv('box', 'true')
-    const missing = spawnSync(shell, rest, { encoding: 'utf8', env: { PATH: '/nonexistent' } })
-    expect(missing.status).toBe(127)
-    expect(missing.stderr).toBe(
-      "mirage: box has no bash; a line using the sandbox's own files needs bash\n",
-    )
-  })
-
-  it('leaves the environment as it was', () => {
-    const [program = '', ...args] = bashLineArgv('box', `echo "$l $1"; sh -c 'echo "$l"'`)
-    const ran = spawnSync(program, args, {
-      encoding: 'utf8',
-      env: { ...process.env, l: 'original' },
-    })
-    expect(ran.stdout).toBe('original \noriginal\n')
-  })
-
-  it('starts bash with the options it is given', () => {
-    const [program = '', ...args] = bashLineArgv(
-      'box',
-      'case $- in *C*) echo C;; esac; shopt -q nullglob && echo on',
-      ['-o', 'noclobber', '-O', 'nullglob'],
-    )
-    expect(spawnSync(program, args, { encoding: 'utf8' }).stdout).toBe('C\non\n')
   })
 })
 

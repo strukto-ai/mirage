@@ -495,16 +495,6 @@ def get_cfor_parts(
     return exprs, body
 
 
-def starts_a_job(node: TSNodeLike) -> bool:
-    """Whether a parsed line sends anything to the background, at any
-    depth (``a &``, ``( a & )``, ``f() { a & }``).
-
-    Args:
-        node (TSNodeLike): root node from parse().
-    """
-    return node.type == "&" or any(starts_a_job(c) for c in node.children)
-
-
 def is_backgrounded(node: TSNodeLike) -> bool:
     """Whether a statement's terminator is ``&``.
 

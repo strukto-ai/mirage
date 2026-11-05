@@ -15,7 +15,6 @@ import { describe, expect, it } from 'vitest'
 import { envReads, implicitReads, opaqueReads } from './index.ts'
 import type { TSNodeLike } from '../types.ts'
 import { parse } from './parse.ts'
-import { parameterReads } from './env.ts'
 
 describe('envReads', () => {
   it.each<[string, boolean, string[], string[]]>([
@@ -153,20 +152,5 @@ describe('implicitReads', () => {
   ])('%s reads %j', (command, names) => {
     const root = parse(command) as unknown as TSNodeLike
     expect(implicitReads(root)).toEqual(new Set(names))
-  })
-})
-
-describe('parameterReads', () => {
-  it.each<[string, string[]]>([
-    ['echo $1 ${10} $# $@ $* $$ $! $- $_', ['$1', '$10', '$#', '$@', '$*', '$$', '$!', '$-', '$_']],
-    ['echo $? | cat', ['$?']],
-    ['true | echo $?', ['$?']],
-    ['cat <<EOF\n$?\nEOF', ['$?']],
-    ['a && b; echo $?', []],
-    ['a; echo $PIPESTATUS', []],
-    ['echo $PIPESTATUS', ['PIPESTATUS']],
-    ["echo $X '$1'", []],
-  ])('names what a fresh shell answers itself in %j', (line, reads) => {
-    expect(parameterReads(parse(line) as unknown as TSNodeLike)).toEqual(new Set(reads))
   })
 })

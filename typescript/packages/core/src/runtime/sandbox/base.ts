@@ -41,7 +41,6 @@ import {
   FAKETIME_PROBE_SECONDS,
   faketimeEnv,
   faketimeProbe,
-  bashLineArgv,
   PROGRAMS_PROBE_SECONDS,
   PROGRAMS_RETRY_SECONDS,
   programsProbe,
@@ -148,9 +147,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
    * @param _paths unused; the line names its paths.
    * @param _texts unused.
    * @param ctx the line in `flags.c`, the bytes piped into it, the session
-   *   environment and working directory, the signal that stops it;
-   *   `flags.bash` runs the line in the sandbox's bash (`bashLineArgv`),
-   *   started with `flags.bash_options`.
+   *   environment and working directory, the signal that stops it.
    * @param output receives stdout as it arrives.
    * @param errors receives stderr as it arrives.
    */
@@ -163,18 +160,12 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     errors?: OutputFn,
   ): Promise<RunResult> {
     const line = ctx.flags.c
-    const text = typeof line === 'string' ? line : ''
-    if (ctx.flags.bash === true) {
-      const options = ctx.flags.bash_options
-      return this.runArgv(
-        bashLineArgv(this.name, text, Array.isArray(options) ? options.map(String) : []),
-        ctx,
-        output ?? null,
-        errors ?? null,
-        text,
-      )
-    }
-    return this.runArgv(['/bin/sh', '-c', text], ctx, output ?? null, errors ?? null)
+    return this.runArgv(
+      ['/bin/sh', '-c', typeof line === 'string' ? line : ''],
+      ctx,
+      output ?? null,
+      errors ?? null,
+    )
   }
 
   runProcess(
@@ -199,15 +190,12 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
    * @param ctx the run's stdin, environment, cwd and signal.
    * @param output receives stdout as it arrives.
    * @param errors receives stderr as it arrives.
-   * @param shown what the run record names, null for the argv itself (a
-   *   wrapped line names the line).
    */
   private async runArgv(
     argv: readonly string[],
     ctx: Context,
     output: OutputFn | null,
     errors: OutputFn | null,
-    shown: string | null = null,
   ): Promise<RunResult> {
     // Served here rather than in the constructor, which runs before a
     // subclass names itself.
@@ -222,11 +210,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     ctx.signal?.throwIfAborted()
     const execId = crypto.randomUUID().replaceAll('-', '')
     const runner = currentCaller().process
-    runner?.addRun(`box:${execId}`, {
-      runtime: this.name,
-      tag: execId,
-      command: shown ?? shellJoin(argv),
-    })
+    runner?.addRun(`box:${execId}`, { runtime: this.name, tag: execId, command: shellJoin(argv) })
     try {
       const done = await this.execArgv(
         run,

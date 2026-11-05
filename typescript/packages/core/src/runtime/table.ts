@@ -246,8 +246,8 @@ export function wholeLineRuntime(
  * Whether a runtime is a sandbox that sees every workspace path at the same
  * prefix, each read and write through the workspace's gate: a remote line
  * executor serving the mounts over SFTP with no mount at `/`
- * (`fileEffectsDispatched`). Only such a box takes a line whole, or the
- * interpreters it holds, by default. Mirrors Python's `serves_workspace`.
+ * (`fileEffectsDispatched`). Only such a box is handed a binary a line runs
+ * by path. Mirrors Python's `serves_workspace`.
  *
  * @param entry the runtime, null or undefined for none.
  */

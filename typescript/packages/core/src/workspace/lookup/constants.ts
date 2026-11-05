@@ -469,14 +469,6 @@ export const INLINE_FLAGS: ReadonlySet<string> = new Set([
   '--print',
 ])
 
-// Shell words that act on Mirage's own job table, so a sandbox running the
-// line would answer them about jobs it never started.
-export const WORKSPACE_JOB_WORDS: ReadonlySet<string> = new Set([...JOB_BUILTINS, 'bg'])
-
-// Variables a fresh shell sets for itself, which Mirage seeds unexported: a
-// line the sandbox runs whole reads the sandbox's own.
-export const FRESH_SHELL_NAMES: ReadonlySet<string> = new Set(['PATH', 'IFS', 'OPTIND', 'OPTERR'])
-
 export const SHELL_NAMES: ReadonlySet<string> = new Set([
   ...Object.values(ShellBuiltin),
   ...UNSUPPORTED_BUILTINS,

@@ -61,9 +61,7 @@ To choose a runtime for each command line, see [Route Runtime](/home/policy/rout
 | Sandboxes | `@external` |
 
 - Mirage's own commands (`cat`, `grep`, `sha1sum`), pipes and redirects stay
-  in Mirage. `cd`, `export` and `echo` stay even when named. A sandbox serving
-  the workspace (`mount_type: ssh`) runs a line whole when the line needs the
-  sandbox's own files ([Route Runtime](/home/policy/route-runtime#with-a-sandbox)).
+  in Mirage. `cd`, `export` and `echo` stay even when named.
 - On a sandbox serving the workspace, `@external` also takes `python3`,
   `python`, `node` and `js` when the sandbox has them; Mirage asks it once.
   Elsewhere `@external` leaves them to the Python or JavaScript runtime in the

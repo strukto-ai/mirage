@@ -241,8 +241,8 @@ def serves_workspace(entry: RuntimeIdentity | None) -> bool:
     """Whether a runtime is a sandbox that sees every workspace path at
     the same prefix, each read and write through the workspace's gate:
     a remote line executor serving the mounts over SFTP with no mount at
-    ``/`` (``file_effects_dispatched``). Only such a box takes a line
-    whole, or the interpreters it holds, by default.
+    ``/`` (``file_effects_dispatched``). Only such a box is handed a
+    binary a line runs by path.
 
     Args:
         entry (RuntimeIdentity | None): the runtime, None for none.

@@ -28,16 +28,14 @@ import {
 } from '../../policy/index.ts'
 import type { RouteContext } from '../../policy/types.ts'
 import type { Runtime } from '../../runtime/base.ts'
-import { WHOLE_LINE } from '../../runtime/constants.ts'
 import type { LineExecutorMixin } from '../../runtime/mixin.ts'
 import type { OutputFn, RunResult } from '../../runtime/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
-import { SET_OPTION_DEFAULTS, SHOPT_DEFAULTS, TIMEOUT_STATUS } from '../../shell/constants.ts'
+import { TIMEOUT_STATUS } from '../../shell/constants.ts'
 import { Limit, PathSpec } from '../../types.ts'
 import { makeAbortError } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
-import { compareCodePoints } from '../../utils/sort.ts'
 import { pump } from '../executor/jobs.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { SessionState } from '../session/session.ts'
@@ -90,11 +88,7 @@ export async function runWholeLine(
     session.commandLimits,
   )
   const ctx: Context = {
-    flags: {
-      c: command,
-      bash: !runtime.captures.includes(WHOLE_LINE),
-      bash_options: bashOptions(session),
-    },
+    flags: { c: command },
     stdin,
     env: envSnapshot(session),
     cwd: PathSpec.fromStrPath(session.cwd),
@@ -197,25 +191,4 @@ export async function runWholeLine(
     exitCode: cappedCode,
     refusal: null,
   }
-}
-
-/**
- * The bash arguments that start a whole line with the session's shell
- * options: `-o`/`+o` for each `set -o` option and `-O`/`+O` for each `shopt`
- * one set away from bash's default. Mirrors Python's `_bash_options`.
- *
- * @param session the session the line runs in.
- */
-function bashOptions(session: SessionState): string[] {
-  const out: string[] = []
-  for (const [table, flag, defaults] of [
-    [session.shellOptions, 'o', SET_OPTION_DEFAULTS],
-    [session.shopts, 'O', SHOPT_DEFAULTS],
-  ] as const) {
-    for (const name of Object.keys(table).sort(compareCodePoints)) {
-      const on = table[name] === true
-      if (on !== (defaults.get(name) ?? false)) out.push(`${on ? '-' : '+'}${flag}`, name)
-    }
-  }
-  return out
 }

@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 
 from mirage.shell.bytes import decode_text
 from mirage.shell.parse import constants
@@ -357,34 +357,3 @@ def assignment_values(
         reads = referenced_names(n) if literal is None else frozenset()
         out.append((decode_text(text), literal, reads))
     return tuple(out)
-
-
-def inherited_reads(node: TSNodeLike) -> frozenset[str]:
-    """Every variable name a parsed program may read with the value it
-    started with: each name it reads (``referenced_names``) unless a
-    statement of its own top level assigned it first, bare (``X=1``) or
-    declared (``export X=1``). An assignment anywhere else (a prefix, a
-    branch, after ``&&``) may not run before the read.
-
-    Args:
-        node (TSNodeLike): root node from parse().
-    """
-    out: set[str] = set()
-    assigned: set[str] = set()
-    for statement in node.named_children:
-        out |= referenced_names(statement) - assigned
-        if statement.type == "variable_assignment":
-            ones: Sequence[TSNodeLike] = (statement,)
-        elif statement.type in constants.ASSIGNING_STATEMENTS:
-            ones = statement.named_children
-        else:
-            continue
-        for one in ones:
-            target = (
-                one.child_by_field_name("name")
-                if one.type == "variable_assignment"
-                else None
-            )
-            if target is not None and target.text:
-                assigned.add(decode_text(target.text))
-    return frozenset(out)

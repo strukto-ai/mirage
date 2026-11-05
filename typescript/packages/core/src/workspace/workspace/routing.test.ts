@@ -44,8 +44,6 @@ class Box extends RemoteSandbox {
   readonly name: string = 'box'
   probes = 0
   readonly lines: string[] = []
-  readonly whole: string[] = []
-  readonly argvs: string[][] = []
 
   constructor(
     readonly holds = 'python3\n',
@@ -68,11 +66,6 @@ class Box extends RemoteSandbox {
   }
 
   protected execArgv(argv: readonly string[]): Promise<RunResult> {
-    this.argvs.push([...argv])
-    if (argv[0] === '/bin/sh' && argv[1] === '-c') {
-      this.whole.push(argv[4] ?? argv[2] ?? '')
-      return Promise.resolve({ stdout: ENC.encode('box\n'), stderr: null, exitCode: 0 })
-    }
     return this.execLine(shellJoin(argv))
   }
 
@@ -157,202 +150,20 @@ describe('Router interpreters', () => {
   })
 })
 
-describe('Router whole lines', () => {
-  it.each<[string, string[], string[]]>([
-    ['cd /opt/app && make', ['cd /opt/app && make'], []],
-    ['cat /tmp/a | gcc -', ['cat /tmp/a | gcc -'], []],
-    ['gcc - > /tmp/out', ['gcc - > /tmp/out'], []],
-    ['gcc /opt/x.c -o /opt/x', [], ['gcc /opt/x.c -o /opt/x']],
-    ['cd /ram && make', [], ['make']],
-    ['cd / && make', [], ['make']],
-    ['env cat /tmp/a | gcc -', ['env cat /tmp/a | gcc -'], []],
-    ['timeout 5 gcc /opt/x.c', [], ['gcc /opt/x.c']],
-  ])('sends %s whole only when Mirage would resolve a box path', async (line, whole, split) => {
+describe('Router split lines', () => {
+  it.each<[string, string[]]>([
+    ['cd /opt/app && make', []],
+    ['cat /tmp/a | gcc -', ['gcc -']],
+    ['gcc /opt/x.c -o /opt/x', ['gcc /opt/x.c -o /opt/x']],
+    ['cd /ram && make', ['make']],
+  ])('runs each command of %s on its capturer beside a sandbox', async (line, split) => {
     const box = new Box('')
     const ws = workspace(box)
     try {
       await ws.shell(line)
-      expect(box.whole).toEqual(whole)
       expect(box.lines).toEqual(split)
     } finally {
       await ws.close()
-    }
-  })
-
-  it("leaves Mirage's cwd where it was after a whole line", async () => {
-    const box = new Box('')
-    const ws = workspace(box)
-    try {
-      await ws.shell('cd /ram')
-      await ws.shell('cd /opt/app && make')
-      expect(await out(ws, 'pwd')).toBe('/ram\n')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('keeps a line of only Mirage commands in Mirage', async () => {
-    const box = new Box('')
-    const ws = workspace(box)
-    try {
-      const [code, , err] = await run(ws, 'cat /etc/os-release')
-      expect(code).toBe(1)
-      expect(err).toContain('No such file or directory')
-      expect(box.whole).toEqual([])
-      expect(box.lines).toEqual([])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it("treats a file Mirage wrote on its own root as Mirage's", async () => {
-    const box = new Box('')
-    const ws = workspace(box)
-    try {
-      await ws.shell('echo hi > /notes.txt')
-      await ws.shell('cat /notes.txt | gcc -')
-      expect(box.whole).toEqual([])
-      await ws.shell('cat /absent.txt | gcc -')
-      expect(box.whole).toEqual(['cat /absent.txt | gcc -'])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it.each<[string, string, string]>([
-    [
-      'f() { :; }',
-      'cd /opt && f; make',
-      'cd: f runs in Mirage, but /opt is on the sandbox; run them on separate lines\n',
-    ],
-    [
-      'shopt -s expand_aliases; alias ll=ls',
-      'cd /opt && ll; make',
-      'cd: ll is an alias, which the sandbox does not have, and /opt is on the sandbox\n',
-    ],
-    [
-      'D=1',
-      'cd /opt && echo $D; make',
-      'cd: D is not exported, but the line runs in the sandbox for /opt\n',
-    ],
-    [
-      'readonly X=old',
-      'X=new; cd /opt && make',
-      'X=new;: X is readonly in Mirage, but the line runs in the sandbox for /opt\n',
-    ],
-    [
-      'D=old',
-      'D=$D; cd /opt && echo "$D"; make',
-      'D=$D;: D is not exported, but the line runs in the sandbox for /opt\n',
-    ],
-    [
-      'true',
-      'cd /opt && echo $1; make',
-      "cd: $1 would read Mirage's value, but the line runs in the sandbox for /opt\n",
-    ],
-    [
-      'true',
-      'cd /opt && echo $@; make',
-      "cd: $@ would read Mirage's value, but the line runs in the sandbox for /opt\n",
-    ],
-    [
-      'true',
-      'cd /opt && echo $#; make',
-      "cd: $# would read Mirage's value, but the line runs in the sandbox for /opt\n",
-    ],
-    [
-      'true',
-      'echo $? > /tmp/s; make',
-      "echo: $? would read Mirage's value, but the line runs in the sandbox for /tmp/s\n",
-    ],
-    [
-      'true',
-      'echo $PIPESTATUS > /tmp/s; make',
-      "echo: PIPESTATUS would read Mirage's value, but the line runs in the sandbox for /tmp/s\n",
-    ],
-    [
-      'true',
-      'cd /opt && make &',
-      "cd: a line using the sandbox's /opt cannot run with & yet; drop the & or work in a workspace folder\n",
-    ],
-    [
-      'true',
-      'cd /opt && make; wait %1',
-      'cd: wait runs in Mirage, but /opt is on the sandbox; run them on separate lines\n',
-    ],
-  ])('refuses a whole line that would change meaning: %s; %s', async (setup, line, said) => {
-    const box = new Box('')
-    const ws = workspace(box)
-    try {
-      await ws.shell(setup)
-      expect(await run(ws, line)).toEqual([1, '', said])
-      expect(box.whole).toEqual([])
-      expect(box.lines).toEqual([])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it.each<[string, string]>([
-    ['export E=1', 'cd /opt && echo $E; make'],
-    ['true', 'cd /opt && false; echo $?; make'],
-    ['true', 'X=1; cd /opt && echo $X; make'],
-    ['true', 'cd /opt && PATH=$PATH:/opt/bin make'],
-    ['true', 'cd /opt && echo $PATH $IFS; make'],
-    ['export Z', 'cd /opt && echo $Z; make'],
-    ['D=old', 'D=new; cd /opt && echo $D; make'],
-    ['D=old', 'export D=new; cd /opt && echo $D; make'],
-  ])('lets a whole line read what the box also has: %s; %s', async (setup, line) => {
-    const box = new Box('')
-    const ws = workspace(box)
-    try {
-      await ws.shell(setup)
-      await ws.shell(line)
-      expect(box.whole).toEqual([line])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('turns the default off under a route policy', async () => {
-    const box = new Box('')
-    const ws = workspace(box, { routePolicy: () => null })
-    try {
-      const [code] = await run(ws, 'cd /opt/app && make')
-      expect(code).toBe(1)
-      expect(box.whole).toEqual([])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('sends no whole lines to a box that does not serve the workspace', async () => {
-    const box = new Box('', false)
-    const ws = workspace(box)
-    try {
-      await ws.shell('cd /opt/app && make')
-      expect(box.whole).toEqual([])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('runs a whole line in bash, and a line capture keeps sh', async () => {
-    const box = new Box('')
-    const ws = workspace(box)
-    const lined = new Box('', true, ['@line'])
-    const byLine = workspace(lined)
-    try {
-      await ws.shell('cd /opt/app && make')
-      const argv = box.argvs.at(-1) ?? []
-      expect(argv.slice(0, 2)).toEqual(['/bin/sh', '-c'])
-      expect(argv[2]).toContain('set -- "$@" -c "$1"; shift 2; exec bash "$@"')
-      expect(argv.slice(3)).toEqual(['sh', 'cd /opt/app && make', 'box'])
-      await byLine.shell('cd /opt/app && make')
-      expect(lined.argvs.at(-1)).toEqual(['/bin/sh', '-c', 'cd /opt/app && make'])
-    } finally {
-      await ws.close()
-      await byLine.close()
     }
   })
 })
@@ -405,17 +216,13 @@ function runtimes(node: ShellNode | CommandExplanation): string[] {
 }
 
 describe('Router explain', () => {
-  it('names the sandbox for every command of a whole line', async () => {
-    const box = new Box('')
-    const ws = workspace(box)
+  it('names the line runtime for every command it takes', async () => {
     const lined = new Box('', true, ['@line'])
-    const byLine = workspace(lined)
+    const ws = workspace(lined)
     try {
-      expect(runtimes((await ws.explain('cd /opt/app && make')).node)).toEqual(['box', 'box'])
-      expect(runtimes((await byLine.explain('cd /ram && make')).node)).toEqual(['box', 'box'])
+      expect(runtimes((await ws.explain('cd /ram && make')).node)).toEqual(['box', 'box'])
     } finally {
       await ws.close()
-      await byLine.close()
     }
   })
 })
@@ -454,26 +261,6 @@ describe('Router exec rule', () => {
       await ws.shell('cd /ram')
       expect(await run(ws, line)).toEqual([126, '', said])
       expect(box.lines).toEqual([])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('refuses a whole line running a script without exec', async () => {
-    const box = new Box()
-    const ws = new Workspace(
-      { '/ram': new RAMVFS(), '/run': new Mount(new RAMVFS(), { mode: MountMode.EXEC }) },
-      { mode: MountMode.WRITE, runtimes: [box, new Monty(), 'workspace'] },
-    )
-    try {
-      await ws.vfs.write('/ram/x.py', 'print(1)')
-      await ws.shell('cd /ram')
-      expect(await run(ws, 'python3 x.py > /tmp/o')).toEqual([
-        1,
-        '',
-        'python3: /ram/x.py is not in EXEC mode, and the line runs in the sandbox for /tmp/o\n',
-      ])
-      expect(box.whole).toEqual([])
     } finally {
       await ws.close()
     }
@@ -533,80 +320,15 @@ describe('Router nested exec rule', () => {
       }
     },
   )
-
-  it('refuses a whole line running a path without exec', async () => {
-    const box = new Box('')
-    const ws = new Workspace(
-      { '/ram': new RAMVFS() },
-      { mode: MountMode.WRITE, runtimes: [box, new Monty(), 'workspace'] },
-    )
-    try {
-      await ws.vfs.write('/ram/bin', BINARY)
-      await ws.shell('cd /ram')
-      expect(await run(ws, './bin > /tmp/o')).toEqual([
-        1,
-        '',
-        './bin: /ram/bin is not in EXEC mode, and the line runs in the sandbox for /tmp/o\n',
-      ])
-      expect(box.whole).toEqual([])
-    } finally {
-      await ws.close()
-    }
-  })
 })
 
 describe('Router pins', () => {
-  it("treats a folder holding mounts as the workspace's", async () => {
-    const box = new Box('')
-    const ws = new Workspace(
-      { '/data/a': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [box, new Monty(), 'workspace'] },
-    )
-    try {
-      await ws.shell('cd /data && make')
-      expect(box.whole).toEqual([])
-      expect(box.lines).toEqual(['make'])
-    } finally {
-      await ws.close()
-    }
-  })
-
   it('asks no box for a runtime argument', async () => {
     const box = new Box()
     const ws = workspace(box)
     try {
       await ws.shell('python3 -c x', { runtime: 'monty' })
       expect(box.probes).toBe(0)
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('keeps every line on an @line capture beside a sandbox', async () => {
-    class LinedBox extends Box {
-      override readonly name: string = 'lined'
-    }
-    const box = new Box('')
-    const lined = new LinedBox('', true, ['@line'])
-    const ws = new Workspace(
-      { '/ram': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [box, lined, new Monty(), 'workspace'] },
-    )
-    try {
-      await ws.shell('cd /opt/app && make')
-      expect(box.argvs).toEqual([])
-      expect(lined.argvs).toEqual([['/bin/sh', '-c', 'cd /opt/app && make']])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('refuses no line for an unset variable', async () => {
-    const box = new Box('')
-    const ws = workspace(box)
-    try {
-      await ws.shell('cd /opt && echo $NOPE; make')
-      expect(box.whole).toEqual(['cd /opt && echo $NOPE; make'])
     } finally {
       await ws.close()
     }
@@ -664,59 +386,6 @@ class Box2 extends Box {
 }
 
 describe('Router review fixes', () => {
-  it('keeps the exec rule for an interpreter bound elsewhere in a whole line', async () => {
-    const box = new Box()
-    const ws = new Workspace(
-      { '/data': new RAMVFS() },
-      { mode: MountMode.WRITE, runtimes: [new Monty(), box, 'workspace'] },
-    )
-    try {
-      await ws.vfs.write('/data/x.py', ENC.encode('print(1)'))
-      expect(await run(ws, 'python3 /data/x.py > /tmp/log; make')).toEqual([
-        1,
-        '',
-        'python3: /data/x.py is not in EXEC mode, and the line runs in the sandbox for /tmp/log\n',
-      ])
-      expect(box.whole).toEqual([])
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it('refuses a whole line naming a file Mirage holds on its root', async () => {
-    const box = new Box('')
-    const ws = workspace(box)
-    try {
-      await ws.shell('echo old > /notes.txt')
-      await ws.shell('cd /ram')
-      expect(await run(ws, 'nproc > /tmp/count; echo new > /notes.txt')).toEqual([
-        1,
-        '',
-        'nproc: /notes.txt is in Mirage, but /tmp/count is on the sandbox; run them on separate lines\n',
-      ])
-      expect(box.whole).toEqual([])
-      expect(await out(ws, 'cat /notes.txt')).toBe('old\n')
-    } finally {
-      await ws.close()
-    }
-  })
-
-  it.each<[string, string[]]>([
-    ['nproc > /out', ['nproc']],
-    ['cat /out | gcc -', ['gcc -']],
-  ])('follows a link Mirage holds on its root: %s', async (line, split) => {
-    const box = new Box('')
-    const ws = workspace(box)
-    try {
-      await ws.shell('echo hi > /ram/result; ln -s /ram/result /out')
-      await ws.shell(line)
-      expect(box.whole).toEqual([])
-      expect(box.lines).toEqual(split)
-    } finally {
-      await ws.close()
-    }
-  })
-
   it.each(['/hello.py', 'env python3 /hello.py', "sh -c 'python3 /hello.py'"])(
     "keeps an interpreter reached on Mirage's own root on its runtime: %s",
     async (line) => {
@@ -794,24 +463,6 @@ describe('Router review fixes', () => {
       await ws.close()
     }
   })
-
-  it.each<[string, string[]]>([
-    ['set -C', ['-o', 'noclobber']],
-    ['set -euo pipefail', ['-o', 'errexit', '-o', 'nounset', '-o', 'pipefail']],
-    ['set +B', ['+o', 'braceexpand']],
-    ['shopt -s nullglob', ['-O', 'nullglob']],
-    ['set -C; set +C', []],
-  ])('carries the session shell options into a whole line: %s', async (setup, options) => {
-    const box = new Box('')
-    const ws = workspace(box)
-    try {
-      await ws.shell(setup)
-      await ws.shell('cd /opt/app && make')
-      expect(box.argvs.at(-1)?.slice(3)).toEqual(['sh', 'cd /opt/app && make', 'box', ...options])
-    } finally {
-      await ws.close()
-    }
-  })
 })
 
 describe('Router linked scripts', () => {
@@ -837,29 +488,8 @@ describe('Router linked scripts', () => {
   )
 })
 
-describe('Router whole-line exec rule', () => {
-  it("judges the interpreter's script, not a redirect", async () => {
-    const box = new Box()
-    const ws = new Workspace(
-      { '/ram': new RAMVFS(), '/run': new Mount(new RAMVFS(), { mode: MountMode.EXEC }) },
-      { mode: MountMode.WRITE, runtimes: [box, new Monty(), 'workspace'] },
-    )
-    try {
-      await ws.shell('cd /ram')
-      const line = 'python3 - > /tmp/out; make'
-      expect((await run(ws, line))[0]).toBe(0)
-      expect(box.whole).toEqual([line])
-    } finally {
-      await ws.close()
-    }
-  })
-})
-
 describe('Router linked script exec rule', () => {
-  it.each<[string, number]>([
-    ['python3 /x/link.py', 126],
-    ['python3 /x/link.py > /tmp/o; make', 1],
-  ])("judges the script's link target: %s", async (line, code) => {
+  it("judges the script's link target", async () => {
     const box = new Box()
     const ws = new Workspace(
       {
@@ -873,9 +503,9 @@ describe('Router linked script exec rule', () => {
       await ws.shell('cd /x && python3 -c 1')
       await ws.shell('ln -s /w/app.py /x/link.py')
       box.lines.length = 0
-      const [got, , err] = await run(ws, line)
-      expect([got, err.includes('/w/app.py')]).toEqual([code, true])
-      expect([box.lines, box.whole]).toEqual([[], []])
+      const [code, , err] = await run(ws, 'python3 /x/link.py')
+      expect([code, err.includes('/w/app.py')]).toEqual([126, true])
+      expect(box.lines).toEqual([])
     } finally {
       await ws.close()
     }

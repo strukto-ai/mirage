@@ -33,7 +33,6 @@ from mirage.runtime.sandbox.constants import (
     PROGRAMS_RETRY_SECONDS,
     REAP_ABSENT,
     REAP_WAIT_SECONDS,
-    bash_line_argv,
     faketime_env,
     faketime_probe,
     programs_probe,
@@ -169,24 +168,8 @@ class RemoteSandbox(
             errors (OutputFn | None): receives stderr as it arrives.
         """
         line = ctx.flags.get("c")
-        text = line if isinstance(line, str) else ""
-        if ctx.flags.get("bash") is True:
-            options = ctx.flags.get("bash_options")
-            return await self._run_argv(
-                bash_line_argv(
-                    self.name,
-                    text,
-                    tuple(str(option) for option in options)
-                    if isinstance(options, list)
-                    else (),
-                ),
-                ctx,
-                output,
-                errors,
-                text,
-            )
         return await self._run_argv(
-            ("/bin/sh", "-c", text),
+            ("/bin/sh", "-c", line if isinstance(line, str) else ""),
             ctx,
             output,
             errors,
@@ -213,7 +196,6 @@ class RemoteSandbox(
         ctx: Context,
         output: OutputFn | None,
         errors: OutputFn | None,
-        shown: str | None = None,
     ) -> RunResult:
         """Connect once, bring the served mounts in step, then run.
 
@@ -222,8 +204,6 @@ class RemoteSandbox(
             ctx (Context): the run's stdin, environment and cwd.
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
-            shown (str | None): what the run record names, None for the
-                argv itself (a wrapped line names the line).
         """
         await self._ensure_connected()
         run = argv
@@ -242,9 +222,7 @@ class RemoteSandbox(
                 {
                     "runtime": self.name,
                     "tag": exec_id,
-                    "command": shown
-                    if shown is not None
-                    else shell_join(argv),
+                    "command": shell_join(argv),
                 },
             )
         try:

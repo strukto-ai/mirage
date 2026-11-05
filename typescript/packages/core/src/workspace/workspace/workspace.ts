@@ -1391,19 +1391,15 @@ export class Workspace {
           wholeLine,
         )
       }
-      const [answers, placed] = await this.router.placement(
-        line,
-        session,
-        () =>
-          lineJudgments(
-            root,
-            session,
-            this.registry,
-            this.namespace,
-            { claimed: [], parent: null, origin: null },
-            reparse,
-          ),
-        root,
+      const [answers, placed] = await this.router.placement(line, session, () =>
+        lineJudgments(
+          root,
+          session,
+          this.registry,
+          this.namespace,
+          { claimed: [], parent: null, origin: null },
+          reparse,
+        ),
       )
       // The run reads a line its placed runtime takes whole as typed, and
       // that reading is its only gate (`admitLine`).

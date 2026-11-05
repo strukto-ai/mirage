@@ -36,11 +36,9 @@ from mirage.policy import (
 from mirage.policy.builtin.output_cap import LINE_NAME
 from mirage.policy.types import RouteContext
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import WHOLE_LINE
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import OutputFn, RunResult
 from mirage.shell.console import Channel, JobConsole
-from mirage.shell.constants import SET_OPTION_DEFAULTS, SHOPT_DEFAULTS
 from mirage.types import Limit, PathSpec, Producer
 from mirage.workspace.executor.jobs import pump
 from mirage.workspace.mount import MountRegistry
@@ -102,11 +100,7 @@ async def run_whole_line(
         profile_limits=session.command_limits,
     )
     ctx = Context(
-        flags={
-            "c": command,
-            "bash": WHOLE_LINE not in runtime.captures,
-            "bash_options": _bash_options(session),
-        },
+        flags={"c": command},
         stdin=stdin,
         env=env_snapshot(session),
         cwd=PathSpec.from_str_path(session.cwd),
@@ -175,22 +169,3 @@ async def run_whole_line(
         Limit.aggr([guard if session.terminal_output else None, bound]),
     )
     return IOResult(exit_code=exit_code, stdout=capped, stderr=capped_err)
-
-
-def _bash_options(session: SessionState) -> list[str]:
-    """The bash arguments that start a whole line with the session's
-    shell options: ``-o``/``+o`` for each ``set -o`` option and
-    ``-O``/``+O`` for each ``shopt`` one set away from bash's default.
-
-    Args:
-        session (SessionState): the session the line runs in.
-    """
-    out: list[str] = []
-    for table, flag, defaults in (
-        (session.shell_options, "o", SET_OPTION_DEFAULTS),
-        (session.shopts, "O", SHOPT_DEFAULTS),
-    ):
-        for name, on in sorted(table.items()):
-            if on != defaults.get(name, False):
-                out += [("-" if on else "+") + flag, name]
-    return out

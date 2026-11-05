@@ -409,16 +409,6 @@ export function getCforParts(node: TSNodeLike): [TSNodeLike[][], TSNodeLike[]] {
 }
 
 /**
- * Whether a parsed line sends anything to the background, at any depth
- * (`a &`, `( a & )`, `f() { a & }`). Mirrors Python's `starts_a_job`.
- *
- * @param node root node from parse().
- */
-export function startsAJob(node: TSNodeLike): boolean {
-  return node.type === '&' || node.children.some(startsAJob)
-}
-
-/**
  * Whether a statement's terminator is `&`.
  *
  * The parser puts the `&` beside the statement it ends, inside whatever

@@ -717,14 +717,6 @@ export class Policies {
   }
 
   /**
-   * Whether the workspace configured a `routePolicy`, which then decides
-   * every line's placement on its own.
-   */
-  get hasPlacement(): boolean {
-    return this.placement !== null
-  }
-
-  /**
    * Install the built-in placement, the workspace's `routePolicy`
    * compiled as a policy, which answers `preExecute` ahead of every
    * registered one. It sits outside the fail-closed fold: a misconfigured

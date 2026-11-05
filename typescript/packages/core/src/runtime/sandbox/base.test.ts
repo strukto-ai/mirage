@@ -780,8 +780,8 @@ describe('RemoteSandbox interpreters', () => {
     expect(box.offeredCaptures).toEqual(['gcc'])
   })
 
-  // A box takes lines whole (servesWorkspace) before it ran any: the first
-  // line that needs it is the one the Router places.
+  // A box is handed a binary (servesWorkspace) before it ran any: the line
+  // that runs the binary may be its first.
   it('dispatches its file effects over ssh before its first run', async () => {
     const box = new RecordingSandbox({ config: { mountType: 'ssh' } })
     const ws = sandboxWorkspace(box)
