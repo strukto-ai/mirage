@@ -13,10 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-import aiofiles.os
+import asyncio
+import os
 
 from mirage.accessor.disk import DiskAccessor
-from mirage.core.disk.utils import resolve_inside
+from mirage.core.disk.utils import resolve_inside_sync
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
@@ -25,22 +26,29 @@ async def rename(
     accessor: DiskAccessor, src_spec: PathSpec, dst_spec: PathSpec
 ) -> None:
     root = accessor.root
-    src = await resolve_inside(root, src_spec)
-    dst = await resolve_inside(root, dst_spec)
-    # Named as the object stores name it: a moved directory took its
-    # subtree, which only "rename_prefix" retracts. Asked before the move,
-    # so nothing awaits between the move and its records.
-    op = "rename_prefix" if await aiofiles.os.path.isdir(src) else "rename"
+    folder = False
+
+    def move() -> None:
+        nonlocal folder
+        src = resolve_inside_sync(root, src_spec)
+        dst = resolve_inside_sync(root, dst_spec)
+        # Named as the object stores name it: a moved directory took its
+        # subtree, which only "rename_prefix" retracts. Asked before the
+        # move, so nothing awaits between the move and its records.
+        folder = os.path.isdir(src)
+        os.rename(src, dst)
+
     timer = start_op()
     done = True
     try:
-        await aiofiles.os.rename(src, dst)
-    except OSError:
+        await asyncio.to_thread(move)
+    except Exception:
         done = False
         raise
     finally:
         # A refused rename(2) moved nothing; a cancelled wait may not have
         # stopped the worker's.
         if done:
+            op = "rename_prefix" if folder else "rename"
             record(op, src_spec.virtual, "disk", 0, timer)
             record(op, dst_spec.virtual, "disk", 0, timer)

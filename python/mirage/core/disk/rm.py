@@ -13,10 +13,8 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import os
 import shutil
-
-import aiofiles.os
-from aiofiles.os import path as aio_path
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.utils import resolve_inside
@@ -27,11 +25,15 @@ from mirage.types import PathSpec
 async def rm_r(accessor: DiskAccessor, path_spec: PathSpec) -> None:
     p = await resolve_inside(accessor.root, path_spec)
     timer = start_op()
+
+    def remove() -> None:
+        if os.path.isdir(p):
+            shutil.rmtree(p)
+        elif os.path.exists(p):
+            os.remove(p)
+
     try:
-        if await aio_path.isdir(p):
-            await asyncio.to_thread(shutil.rmtree, p)
-        elif await aio_path.exists(p):
-            await aiofiles.os.remove(p)
+        await asyncio.to_thread(remove)
     finally:
         # Also when the walk raised: rmtree that fails part-way has
         # already removed entries, as on the object stores.

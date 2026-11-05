@@ -119,6 +119,34 @@ async def test_a_lookup_of_one_child_narrows_the_listing(memo, partial):
 
 
 @pytest.mark.asyncio
+async def test_a_first_lookup_of_one_child_reads_that_child_alone(memo, clock):
+    folder = Folder()
+    narrowed: list[str] = []
+
+    def narrow(child: str):
+        async def read() -> tuple[ListResult, float | None]:
+            narrowed.append(child)
+            return ListResult(entries=[child]), WALL + 60
+
+        return read
+
+    async def keys(child: str) -> list[str] | None:
+        return (await memo.read("/d", folder, child, narrow(child))).entries
+
+    assert await keys("/d/a") == ["/d/a"]
+    async with command_scope():
+        assert await keys("/d/a") == ["/d/a"]
+        assert held(memo) == set()
+        assert await keys("/d/z") == []
+        assert await keys("/d/b") == ["/d/b"]
+        assert held(memo) == {"/d"}
+        await clock.sleep(LISTING_TRUST_WINDOW)
+        assert await keys("/d/b") == ["/d/b"]
+    assert narrowed == ["/d/a", "/d/a", "/d/b"]
+    assert folder.reads == 1
+
+
+@pytest.mark.asyncio
 async def test_each_command_reads_its_own_listing(memo):
     folder = Folder()
     for _ in range(2):

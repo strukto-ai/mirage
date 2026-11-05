@@ -33,6 +33,24 @@ async def _unavailable_seed_flush():
     raise RuntimeError("unavailable")
 
 
+async def _listing(client, prefix, path):
+    base = f"{prefix}mirage:idx:"
+    fields = await client.hgetall(f"{base}directory:{path}")
+    if not fields:
+        return None
+    entries = await client.zrange(f"{base}listed:{path}", 1, -1)
+    folders = await client.smembers(f"{base}folders:{path}")
+    return {
+        "entries": entries,
+        "folders": [int(entry in folders) for entry in entries],
+        "expires_at": float(fields["expires_at"]),
+        "generation": fields["generation"],
+        "partial": fields["partial"] == "1",
+        "version": fields.get("version"),
+        "window": fields["window"] == "1",
+    }
+
+
 @pytest_asyncio.fixture(params=["fake", "redis"])
 async def rolling_client(request):
     url = os.environ.get("REDIS_URL")
@@ -62,13 +80,7 @@ def client():
             [b"test:mirage:idx:entry:/folder/a.txt"],
         )
     )
-    value.mget = AsyncMock(
-        return_value=[
-            b'{"entries":["/folder/a.txt"],"folders":[0],"expires_at":4102444800,"generation":"g:d"}',
-            b"g",
-            b"d",
-        ]
-    )
+    value.mget = AsyncMock(return_value=[])
     value.set = AsyncMock()
     value.delete = AsyncMock()
     value.get = AsyncMock(
@@ -82,13 +94,28 @@ def client():
 
 @pytest.mark.asyncio
 async def test_list_dir_decodes_injected_client_values(client):
+    client.eval = AsyncMock(
+        return_value=[
+            "g:d",
+            "4102444800",
+            "0",
+            None,
+            "0",
+            b"g",
+            b"d",
+            [b"/folder/a.txt"],
+        ]
+    )
     store = RedisIndexCacheStore(client=client, key_prefix="")
     result = await store.list_dir("/folder")
     assert result.entries == ["/folder/a.txt"]
-    client.mget.assert_awaited_once_with(
-        "mirage:idx:directory:/folder",
+    client.eval.assert_awaited_once_with(
+        redis_index._READ_LISTING,
+        2,
         "mirage:idx:generation",
         "mirage:idx:generation:/folder",
+        "mirage:idx:directory:",
+        "/folder",
     )
 
 
@@ -323,12 +350,12 @@ async def test_evicted_directory_token_cannot_revive_restored_listing(
     try:
         await store.set_dir("/repo", [])
         payload_key = f"{prefix}mirage:idx:directory:/repo"
-        original = await client.get(payload_key)
+        original = await client.hgetall(payload_key)
         await client.delete(f"{prefix}mirage:idx:generation:/repo")
         assert (await store.list_dir("/repo")).status == LookupStatus.EXPIRED
         await store.set_dir("/repo", [])
         assert (await store.list_dir("/repo")).entries == []
-        await client.set(payload_key, original)
+        await client.hset(payload_key, mapping=original)
         assert (await store.list_dir("/repo")).status == LookupStatus.EXPIRED
     finally:
         await store.close()
@@ -354,7 +381,7 @@ async def test_seed_directory_tokens_use_bounded_round_trips(
         )
         assert (await store.list_dir("/repo/0")).entries == []
         assert get.call_count == 1
-        assert mget.call_count == 2
+        assert mget.call_count == 1
         assert pipeline.call_count == 2
     finally:
         await store.close()
@@ -468,7 +495,7 @@ async def test_repeated_seeds_preserve_final_snapshot_without_reviving_races(
             listing = await store.list_dir("/dir")
         assert intercepted
         assert await store.get_many(list(rows)) == rows
-        raw = json.loads(await client.get(prefix + CHILDREN_PREFIX + "/dir"))
+        raw = await _listing(client, prefix, "/dir")
         assert raw["entries"] == ["/dir/c"]
         assert raw["version"] == "dir-3"
         assert raw["expires_at"] == (deadline + timedelta(hours=4)).timestamp()
@@ -772,8 +799,8 @@ async def test_subtree_eviction_recovers_an_evicted_path_registry(
     await store.put("/unrelated", child)
     await store.set_dir("/d", [])
     assert (await store.get("/d/sub/unlisted/deep")).entry is None
-    assert (
-        await client.get(prefix + "mirage:idx:tombstone:/d/sub/buried") is None
+    assert not await client.exists(
+        prefix + "mirage:idx:tombstone:/d/sub/buried"
     )
     assert (await store.get("/unrelated")).entry is not None
 
@@ -798,7 +825,7 @@ async def test_path_registry_prunes_removed_rows_but_preserves_tombstones(
     await store.invalidate_dir("/d")
     await store.invalidate_prefix("/d")
     assert await client.zrange(registry, 0, -1) == ["", "/d"]
-    assert await client.get(prefix + "mirage:idx:tombstone:/d") is not None
+    assert await client.exists(prefix + "mirage:idx:tombstone:/d")
     await store.clear()
     assert await client.zrange(registry, 0, -1) == [""]
 
@@ -955,11 +982,8 @@ async def test_a_row_without_a_version_key_reads_as_unversioned(
 ):
     client, prefix = rolling_client
     store = RedisIndexCacheStore(client=client, key_prefix=prefix)
-    await store.set_dir("/d", [_row("a")])
-    key = f"{prefix}{CHILDREN_PREFIX}/d"
-    row = json.loads(await client.get(key))
-    row.pop("version", None)
-    await client.set(key, json.dumps(row))
+    await store.set_dir("/d", [_row("a")], version="v1")
+    await client.hdel(f"{prefix}{CHILDREN_PREFIX}/d", "version")
     listing = await store.list_dir("/d")
     assert listing.entries == ["/d/a"]
     assert listing.version is None
@@ -1150,8 +1174,7 @@ async def test_redis_conditional_replacement_is_atomic(
         key, json.dumps(dict(reversed(list(sparse.items()))), indent=2)
     )
     raw = await client.get(key)
-    listing_key = store._children_key("/dir")
-    listing_raw = await client.get(listing_key)
+    listing_raw = await _listing(client, prefix, "/dir")
     latest = replace(old, size=9)
     evaluate = client.eval
     calls = 0
@@ -1179,7 +1202,7 @@ async def test_redis_conditional_replacement_is_atomic(
         assert current.fingerprint == "confirmed"
     else:
         assert current == (latest if peer == "replace" else None)
-    assert await client.get(listing_key) == listing_raw
+    assert await _listing(client, prefix, "/dir") == listing_raw
 
 
 def test_a_store_built_without_a_prefix_shares_the_config_default():
@@ -1218,8 +1241,8 @@ async def test_narrow_invalidation_preserves_exact_deadline(rolling_client):
         "/repo", [("a", FileStat(name="a", type=FileType.FILE))], deadline
     )
     await store.invalidate_entry("/repo/a")
-    raw = await client.get(prefix + "mirage:idx:directory:/repo")
-    assert json.loads(raw)["expires_at"] == deadline.timestamp()
+    raw = await _listing(client, prefix, "/repo")
+    assert raw["expires_at"] == deadline.timestamp()
 
 
 @pytest.mark.asyncio
@@ -1232,9 +1255,9 @@ async def test_learning_a_child_directory_preserves_parent_freshness_fields(
     await store.set_dir(
         "/dir", [_row("sub")], deadline, window=True, version="v1"
     )
-    before = json.loads(await client.get(prefix + CHILDREN_PREFIX + "/dir"))
+    before = await _listing(client, prefix, "/dir")
     await store.set_dir("/dir/sub", [])
-    after = json.loads(await client.get(prefix + CHILDREN_PREFIX + "/dir"))
+    after = await _listing(client, prefix, "/dir")
     assert after == {**before, "folders": [1]}
     assert after["expires_at"] == deadline.timestamp()
 
@@ -1306,8 +1329,8 @@ async def test_split_seed_membership_retains_directory_flags(
         await store.get("/dir/sub")
     store.seed({}, {"/dir": ["/dir/sub"]}, deadline)
     await store.list_dir("/dir")
-    raw = await client.get(prefix + "mirage:idx:directory:/dir")
-    assert json.loads(raw)["folders"] == [1]
+    raw = await _listing(client, prefix, "/dir")
+    assert raw["folders"] == [1]
 
 
 @pytest.mark.asyncio
@@ -1415,7 +1438,6 @@ async def test_delayed_authoritative_add_preserves_a_newer_publication(
         await writer.set_dir("/dir/a", [])
     pipeline = client.pipeline
     inserted = False
-    listing_key = prefix + CHILDREN_PREFIX + "/dir"
     generation_key = prefix + "mirage:idx:generation:/dir"
     expected_listing = None
     expected_generation = None
@@ -1458,7 +1480,7 @@ async def test_delayed_authoritative_add_preserves_a_newer_publication(
                     )
                 expected_generation = await client.get(generation_key)
                 assert (await peer.get(f"/dir/{peer_name}")).entry == new
-                expected_listing = await client.get(listing_key)
+                expected_listing = await _listing(client, prefix, "/dir")
             return await execute(*args, **kwargs)
 
         pipe.execute = execute_after_peer
@@ -1482,10 +1504,9 @@ async def test_delayed_authoritative_add_preserves_a_newer_publication(
             LookupStatus.EXPIRED,
             LookupStatus.NOT_FOUND,
         }
-    assert (
-        json.loads(await client.get(listing_key))["expires_at"]
-        == json.loads(expected_listing)["expires_at"]
-    )
+    assert (await _listing(client, prefix, "/dir"))[
+        "expires_at"
+    ] == expected_listing["expires_at"]
     assert await client.get(generation_key) != expected_generation
 
 
@@ -1504,8 +1525,7 @@ async def test_authoritative_add_preserves_exact_live_deadline(rolling_client):
     await store.add_entry(
         "/dir/a", FileStat(name="a", type=FileType.FILE, size=11)
     )
-    raw = await client.get(prefix + "mirage:idx:directory:/dir")
-    listing = json.loads(raw)
+    listing = await _listing(client, prefix, "/dir")
     assert listing["expires_at"] == deadline.timestamp()
     assert listing["version"] == "v1"
     assert listing["window"] is True

@@ -67,7 +67,9 @@ function answer(listing: ListResult, child: string | undefined, kept: Read | nul
  * A read is served again only to the command that made it, only while no
  * listing write to the key prefix has finished since the read began, for
  * under LISTING_TRUST_WINDOW seconds, and never past the listing's own
- * expiry. Row reads batch at most ROW_READ_BATCH siblings and share this
+ * expiry. A command's first lookup of one child in a folder reads only that
+ * child and keeps nothing; a later one reads and keeps the whole listing.
+ * Row reads batch at most ROW_READ_BATCH siblings and share this
  * lifetime, a row the batch did not find is left to a lookup of its own,
  * and a row-only write drops that row alone. Each fill drops the oldest
  * reads no command can be served any more, so a read stays held for about
@@ -77,6 +79,8 @@ function answer(listing: ListResult, child: string | undefined, kept: Read | nul
  */
 export class ListingMemo {
   private readonly reads = new Map<string, Read>()
+  // The folders each command looked a child up in, and when.
+  private readonly looked = new Map<string, number>()
   private closed = false
   private readonly reference = new WeakRef(this)
 
@@ -149,17 +153,23 @@ export class ListingMemo {
    * @param fetch reads the listing from Redis and answers it with its
    *   expiry, or with null when there is no live listing to keep.
    * @param child the one key a lookup asks about, to narrow the entries to.
+   * @param narrow reads the listing narrowed to `child` alone.
    */
   async read(
     folder: string,
     fetch: () => Promise<[ListResult, number | null]>,
     child?: string,
+    narrow?: () => Promise<[ListResult, number | null]>,
   ): Promise<ListResult> {
     const stamp = soleCommandStarted()
-    if (stamp === null) return answer((await fetch())[0], child, null)
+    if (stamp === null) {
+      if (narrow !== undefined) return (await narrow())[0]
+      return answer((await fetch())[0], child, null)
+    }
     const key = `${String(stamp)}:${folder}`
     const kept = this.reads.get(key)
     if (kept !== undefined && this.live(kept)) return answer(kept.listing, child, kept)
+    if (narrow !== undefined && this.firstLookup(key)) return (await narrow())[0]
     const writes = this.written()
     const readAt = performance.now()
     const [listing, expiresAt] = await fetch()
@@ -182,6 +192,17 @@ export class ListingMemo {
     this.reads.delete(key)
     this.reads.set(key, read)
     return answer(listing, child, read)
+  }
+
+  private firstLookup(key: string): boolean {
+    const now = performance.now()
+    for (const [held, at] of this.looked) {
+      if (now - at < LISTING_TRUST_WINDOW * 1000) break
+      this.looked.delete(held)
+    }
+    if (this.looked.has(key)) return false
+    this.looked.set(key, now)
+    return true
   }
 
   /** Batch a listed row with its siblings within the listing's lifetime. */
@@ -261,6 +282,7 @@ export class ListingMemo {
    */
   close(): void {
     this.reads.clear()
+    this.looked.clear()
     if (this.closed) return
     this.closed = true
     const holders = HOLDERS_BY_PREFIX.get(this.keyPrefix)
