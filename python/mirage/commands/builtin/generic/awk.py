@@ -15,7 +15,12 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
 from mirage.errors.fs import fs_strerror
 from mirage.io.types import ByteSource, IOResult, materialize
-from mirage.rs.stream import OpenStream, open_stream, serve_requests
+from mirage.rs.stream import (
+    OpenStream,
+    close_stream,
+    open_stream,
+    serve_requests,
+)
 from mirage.runtime.types import DispatchFn, ShellFn
 from mirage.shell.bytes import byte_view, decode_text
 from mirage.types import PathSpec, ReadStreamFn
@@ -105,8 +110,13 @@ async def _awk_stream(
                 yield chunk
         io.exit_code = stream.status()
     finally:
-        io.stderr = await host.errors.output()
-        await host.close()
+        try:
+            io.stderr = await host.errors.output()
+        finally:
+            try:
+                await host.close()
+            finally:
+                await close_stream(stream)
 
 
 async def awk_generic(

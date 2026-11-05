@@ -1,9 +1,13 @@
+import asyncio
 import json
+from contextlib import aclosing
 from pathlib import Path
 
 import pytest
 
 from mirage import Workspace
+from mirage.commands.builtin.utils.stream_host import StreamHost
+from mirage.rs.stream import OpenStream
 from mirage.vfs.ram import RAMVFS
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -136,4 +140,67 @@ async def test_awk_keeps_argv_across_mounts(command, code, out, err):
             (result.stderr or b"").decode(),
         ) == (code, out, err)
     finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_cancel_retires_awk_values_and_closes_its_input(monkeypatch):
+    ws = Workspace({"/data": RAMVFS()}, mode="exec")
+    await ws.shell("printf 'one\ntwo\n' > /data/in")
+    original_drain = OpenStream.drain
+    original_cancel = OpenStream.cancel
+    original_input = StreamHost.open_input
+    retiring = set()
+    retirement_calls = 0
+    sources = 0
+    opened = 0
+    timer = None
+
+    def drain(stream):
+        nonlocal retirement_calls, timer
+        out = original_drain(stream)
+        if stream in retiring:
+            retirement_calls += 1
+        elif out == b"ready\n" and timer is None:
+            timer = asyncio.get_running_loop().call_later(0, task.cancel)
+        return out
+
+    def cancel(stream):
+        retiring.add(stream)
+        return original_cancel(stream)
+
+    async def source(host, *args, **kwargs):
+        nonlocal sources, opened
+        sources += 1
+        opened += 1
+        try:
+            async with aclosing(
+                original_input(host, *args, **kwargs)
+            ) as input_:
+                async for part in input_:
+                    yield part
+        finally:
+            sources -= 1
+
+    monkeypatch.setattr(OpenStream, "drain", drain)
+    monkeypatch.setattr(OpenStream, "cancel", cancel)
+    monkeypatch.setattr(StreamHost, "open_input", source)
+    task = asyncio.create_task(
+        ws.shell(
+            "awk '{for(i=0;i<100000;i++)a[i]=i; print \"ready\"; while(1){}}' /data/in"
+        )
+    )
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 5)
+        assert timer is not None
+        assert opened > 0 and sources == 0
+        assert retirement_calls > 1
+        assert all(not stream.busy() for stream in retiring)
+        result = await ws.shell("printf recovered")
+        assert result.stdout == b"recovered"
+    finally:
+        if timer is not None:
+            timer.cancel()
+        task.cancel()
         await ws.close()

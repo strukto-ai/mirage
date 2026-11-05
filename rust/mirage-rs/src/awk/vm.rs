@@ -330,9 +330,16 @@ enum Pending {
     },
 }
 
+struct Retirement {
+    globals: std::collections::hash_map::IntoIter<Vec<u8>, u32>,
+    array: Option<Retired<Value>>,
+    io: super::io::Retirement,
+}
+
 pub(super) struct Machine {
     code: Code,
     pending: Option<Pending>,
+    retirement: Option<Retirement>,
     pc: usize,
     stage: u8,
     stack: Vec<Value>,
@@ -373,6 +380,7 @@ impl Machine {
             ranges: vec![false; code.ranges],
             code,
             pending: None,
+            retirement: None,
             pc: 0,
             stage: 0,
             stack: Vec::new(),
@@ -422,6 +430,61 @@ impl Machine {
             machine.globals[FS as usize].scalar = Some(string(fs));
         }
         machine
+    }
+
+    pub(super) fn retire(&mut self, budget: usize) -> bool {
+        let mut work = budget as u64;
+        let retirement = self.retirement.get_or_insert_with(|| Retirement {
+            globals: std::mem::take(&mut self.code.globals).into_iter(),
+            array: None,
+            io: self.io.retire(),
+        });
+        if let Some(pending) = &mut self.pending {
+            let done = match pending {
+                Pending::Format(task) => task.formatter.retire(&mut work),
+                Pending::Print { print, .. } => print.retire(&mut work),
+                Pending::Output(task) => task.output.retire(&mut work),
+                Pending::Split(split) => split.retired.step(&mut work),
+                _ => true,
+            };
+            if !done {
+                return false;
+            }
+            self.pending = None;
+        }
+        while work > 0 {
+            work = work.saturating_sub(16);
+            if self.stack.pop().is_some()
+                || self.locals.pop().is_some()
+                || self.globals.pop().is_some()
+                || self.record.fields.pop().is_some()
+                || self.code.strings.pop().is_some()
+                || self.code.functions.pop().is_some()
+                || retirement.globals.next().is_some()
+                || self.frames.pop().is_some()
+                || self.io.requests.pop_front().is_some()
+            {
+                continue;
+            }
+            if let Some(iter) = self.iters.last_mut() {
+                if iter.keys.pop().is_none() {
+                    self.iters.pop();
+                }
+                continue;
+            }
+            if let Some(array) = &mut retirement.array {
+                if !array.step(&mut work) {
+                    return false;
+                }
+                retirement.array = None;
+            }
+            if let Some(mut array) = self.arrays.items.pop() {
+                retirement.array = Some(array.retire());
+                continue;
+            }
+            return retirement.io.step(&mut work);
+        }
+        false
     }
 
     /// Run up to `budget` steps, stopping early to wait on the host, once

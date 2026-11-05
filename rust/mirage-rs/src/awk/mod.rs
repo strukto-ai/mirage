@@ -48,6 +48,10 @@ struct Config {
 
 enum Awk {
     Running(Box<Machine>),
+    Retiring {
+        machine: Option<Box<Machine>>,
+        status: i32,
+    },
     /// A program awk refused to run: the message, then nothing.
     Refused(Vec<u8>),
 }
@@ -104,22 +108,52 @@ impl Stream for Awk {
             Awk::Running(machine) => {
                 machine.io.idle() && (!machine.done || machine.io.fatal.is_some())
             }
+            Awk::Retiring { machine, .. } => machine.is_some(),
             Awk::Refused(_) => false,
         }
     }
 
     fn drain(&mut self, out: &mut Vec<u8>) -> Result<(), StreamError> {
-        if let Awk::Running(machine) = self {
-            machine.run(STEPS);
-            out.append(&mut machine.io.out);
+        match self {
+            Awk::Running(machine) => {
+                machine.run(STEPS);
+                out.append(&mut machine.io.out);
+            }
+            Awk::Retiring { machine, .. } => {
+                if machine
+                    .as_mut()
+                    .is_some_and(|machine| machine.retire(STEPS))
+                {
+                    *machine = None;
+                }
+            }
+            Awk::Refused(_) => {}
         }
         Ok(())
+    }
+
+    fn cancel(&mut self) -> bool {
+        let status = self.status();
+        let previous = std::mem::replace(
+            self,
+            Awk::Retiring {
+                machine: None,
+                status,
+            },
+        );
+        let machine = match previous {
+            Awk::Running(machine) => Some(machine),
+            Awk::Retiring { machine, .. } => machine,
+            Awk::Refused(_) => None,
+        };
+        *self = Awk::Retiring { machine, status };
+        true
     }
 
     fn request(&mut self, data: &mut Vec<u8>) -> Option<Vec<u8>> {
         match self {
             Awk::Running(machine) => machine.io.take_request(data),
-            Awk::Refused(_) => None,
+            Awk::Retiring { .. } | Awk::Refused(_) => None,
         }
     }
 
@@ -131,13 +165,16 @@ impl Stream for Awk {
     ) -> Result<(), StreamError> {
         match self {
             Awk::Running(machine) => machine.io.answer(reply, data).map_err(StreamError::new),
-            Awk::Refused(_) => Err(StreamError::new("no request is waiting")),
+            Awk::Retiring { .. } | Awk::Refused(_) => {
+                Err(StreamError::new("no request is waiting"))
+            }
         }
     }
 
     fn status(&self) -> i32 {
         match self {
             Awk::Running(machine) => machine.status,
+            Awk::Retiring { status, .. } => *status,
             Awk::Refused(_) => 2,
         }
     }
@@ -145,6 +182,7 @@ impl Stream for Awk {
     fn take_stderr(&mut self, err: &mut Vec<u8>) {
         match self {
             Awk::Running(machine) => err.append(&mut machine.io.err),
+            Awk::Retiring { .. } => {}
             Awk::Refused(message) => err.append(message),
         }
     }

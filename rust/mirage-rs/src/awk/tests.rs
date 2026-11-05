@@ -631,3 +631,35 @@ fn field_views_keep_their_value_after_record_and_array_changes() {
         "3 1\n0\nab cd\n"
     );
 }
+
+#[test]
+fn cancellation_retires_arrays_and_pending_formats_without_more_effects() {
+    for config in [
+        json!({"program": r#"BEGIN { for (i=0;i<100000;i++) a[i]=i; print "ready"; while(1){} }"#}),
+        json!({"program": r#"BEGIN { print "ready"; s=sprintf(fmt); print "after" }"#, "assignments": [format!("fmt={}", "%z".repeat(100000))]}),
+    ] {
+        let mut stream = super::open(config.to_string().as_bytes()).unwrap();
+        let mut out = Vec::new();
+        while out.is_empty() {
+            assert!(stream.busy());
+            stream.drain(&mut out).unwrap();
+        }
+        assert_eq!(out, b"ready\n");
+        assert!(stream.cancel());
+        let mut turns = 0;
+        out.clear();
+        while stream.busy() {
+            stream.drain(&mut out).unwrap();
+            assert!(out.is_empty());
+            assert!(stream.request(&mut out).is_none());
+            assert!(stream.cancel());
+            turns += 1;
+            assert!(turns < 1000);
+        }
+        assert!(turns > 1);
+        assert!(stream.cancel());
+        assert!(!stream.busy());
+        stream.finish(&mut out).unwrap();
+        assert!(out.is_empty());
+    }
+}

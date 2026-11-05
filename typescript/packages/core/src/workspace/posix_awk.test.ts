@@ -2,7 +2,9 @@ import { Workspace } from './workspace/workspace.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { MountMode } from '../types.ts'
 import { readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { OpenStream } from '../rs/stream.ts'
+import { StreamHost } from '../commands/builtin/utils/stream_host.ts'
 import { makeIntegrationWS, runResult } from '../../tests/workspace/fixtures/integration_fixture.ts'
 
 interface Case {
@@ -121,3 +123,69 @@ it.each(CROSS_MOUNT)('keeps ARGV across mounts in %j', async (command, code, out
     await ws.close()
   }
 })
+
+it('cancellation retires awk values and closes its input', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
+  await ws.shell("printf 'one\ntwo\n' > /data/in")
+  const controller = new AbortController()
+  const originalDrain = Object.getOwnPropertyDescriptor(OpenStream.prototype, 'drain')
+    ?.value as OpenStream['drain']
+  const originalCancel = Object.getOwnPropertyDescriptor(OpenStream.prototype, 'cancel')
+    ?.value as OpenStream['cancel']
+  const originalInput = Object.getOwnPropertyDescriptor(StreamHost.prototype, 'openInput')
+    ?.value as StreamHost['openInput']
+  const drain = vi.spyOn(OpenStream.prototype, 'drain')
+  const cancel = vi.spyOn(OpenStream.prototype, 'cancel')
+  const input = vi.spyOn(StreamHost.prototype, 'openInput')
+  const retiring = new Set<OpenStream>()
+  let retirementCalls = 0
+  let sources = 0
+  let opened = 0
+  let timer: ReturnType<typeof setTimeout> | undefined
+  drain.mockImplementation(function (this: OpenStream) {
+    const out = originalDrain.call(this)
+    if (retiring.has(this)) retirementCalls += 1
+    else if (new TextDecoder().decode(out) === 'ready\n' && timer === undefined) {
+      timer = setTimeout(() => {
+        controller.abort()
+      }, 0)
+    }
+    return out
+  })
+  cancel.mockImplementation(function (this: OpenStream) {
+    retiring.add(this)
+    return originalCancel.call(this)
+  })
+  input.mockImplementation(async function* (
+    this: StreamHost,
+    ...args: Parameters<StreamHost['openInput']>
+  ) {
+    sources += 1
+    opened += 1
+    try {
+      yield* originalInput.apply(this, args)
+    } finally {
+      sources -= 1
+    }
+  })
+  try {
+    await expect(
+      ws.shell(`awk '{for(i=0;i<100000;i++)a[i]=i; print "ready"; while(1){}}' /data/in`, {
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({ name: 'AbortError' })
+    expect(timer).toBeDefined()
+    expect(opened).toBeGreaterThan(0)
+    expect(sources).toBe(0)
+    expect(retirementCalls).toBeGreaterThan(1)
+    expect([...retiring].every((stream) => !stream.live)).toBe(true)
+    expect(new TextDecoder().decode((await ws.shell('printf recovered')).stdout)).toBe('recovered')
+  } finally {
+    clearTimeout(timer)
+    controller.abort()
+    drain.mockRestore()
+    cancel.mockRestore()
+    input.mockRestore()
+    await ws.close()
+  }
+}, 10000)

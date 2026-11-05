@@ -332,6 +332,22 @@ pub(super) struct Io {
     pub(super) salvaging: bool,
 }
 
+pub(super) struct Retirement {
+    files_in: Retired<Reader>,
+    pipes_in: Retired<(Reader, f64)>,
+    files_out: Retired<OutFile>,
+    pipes_out: Retired<OutPipe>,
+}
+
+impl Retirement {
+    pub(super) fn step(&mut self, work: &mut u64) -> bool {
+        self.files_in.step(work)
+            && self.pipes_in.step(work)
+            && self.files_out.step(work)
+            && self.pipes_out.step(work)
+    }
+}
+
 pub(super) const STDOUT_NAMES: [&[u8]; 2] = [b"/dev/stdout", b"-"];
 pub(super) const STDERR_NAME: &[u8] = b"/dev/stderr";
 
@@ -347,6 +363,15 @@ fn output_error(path: &[u8], detail: &[u8]) -> Vec<u8> {
 }
 
 impl Io {
+    pub(super) fn retire(&mut self) -> Retirement {
+        Retirement {
+            files_in: self.files_in.retire(),
+            pipes_in: self.pipes_in.retire(),
+            files_out: self.files_out.retire(),
+            pipes_out: self.pipes_out.retire(),
+        }
+    }
+
     pub(super) fn idle(&self) -> bool {
         self.requests.is_empty() && self.in_flight.is_none()
     }

@@ -87,6 +87,17 @@ impl Output {
         self.padded(rendered.prefix.into(), body, spec, rendered.allow_zero)
     }
 
+    pub(super) fn retire(&mut self, work: &mut u64) -> bool {
+        while *work > 0 {
+            if self.pieces.pop_front().is_none() {
+                self.len = 0;
+                return true;
+            }
+            *work = work.saturating_sub(16);
+        }
+        false
+    }
+
     pub(super) fn copy(&mut self, out: &mut Vec<u8>, work: &mut u64) -> bool {
         while *work > 0 {
             let Some(piece) = self.pieces.front_mut() else {
@@ -164,6 +175,24 @@ impl Formatter {
             output: Output::default(),
             error: None,
         }
+    }
+
+    pub(super) fn retire(&mut self, work: &mut u64) -> bool {
+        if !self.output.retire(work) {
+            return false;
+        }
+        if let Some((output, _)) = &mut self.error {
+            if !output.retire(work) {
+                return false;
+            }
+        }
+        while *work > 0 {
+            if self.args.next().is_none() {
+                return true;
+            }
+            *work = work.saturating_sub(16);
+        }
+        false
     }
 
     fn take(&mut self) -> Option<Value> {
@@ -389,6 +418,19 @@ pub(super) struct Print {
 }
 
 impl Print {
+    pub(super) fn retire(&mut self, work: &mut u64) -> bool {
+        if !self.output.retire(work) {
+            return false;
+        }
+        while *work > 0 {
+            if self.args.next().is_none() {
+                return true;
+            }
+            *work = work.saturating_sub(16);
+        }
+        false
+    }
+
     pub(super) fn new(args: Vec<Value>, ofmt: Text, ofs: Text, ors: Text) -> Self {
         Self {
             args: args.into_iter(),
