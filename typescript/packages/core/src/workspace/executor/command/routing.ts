@@ -461,7 +461,8 @@ export function interpreterScript(
  * The decision one invocation runs under: its line's, except that an
  * interpreter the decision keeps off a sandbox (`unserved`) runs on that
  * runtime when the invocation stands on, or runs a script on, a path no
- * sandbox is served (`MountRegistry.unserved`), the script's links followed.
+ * sandbox is served (`MountRegistry.unserved`): the script as typed, which is
+ * what a sandbox would open, or its link target.
  * Judged per invocation, however the line reached it (a nested line, a
  * shebang). Mirrors Python's `invocation_routing`.
  *
@@ -484,7 +485,7 @@ export function invocationRouting<R extends RuntimeIdentity>(
   if (routing === undefined || unserved === undefined || !Object.hasOwn(unserved, name))
     return routing
   const script = interpreterScript(name, words, cwd)
-  const spots = script === null ? [cwd] : [cwd, followed(script.virtual, links)]
+  const spots = script === null ? [cwd] : [cwd, script.virtual, followed(script.virtual, links)]
   if (!spots.some((spot) => registry.unserved(spot))) return routing
   return {
     ...routing,

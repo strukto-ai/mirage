@@ -589,9 +589,10 @@ def invocation_routing(
     """The decision one invocation runs under: its line's, except that an
     interpreter the decision keeps off a sandbox (``unserved``) runs on
     that runtime when the invocation stands on, or runs a script on, a
-    path no sandbox is served (``MountRegistry.unserved``), the script's
-    links followed. Judged per invocation, however the line reached it (a
-    nested line, a shebang).
+    path no sandbox is served (``MountRegistry.unserved``): the script as
+    typed, which is what a sandbox would open, or its link target. Judged
+    per invocation, however the line reached it (a nested line, a
+    shebang).
 
     Args:
         name (str): the command name.
@@ -609,7 +610,10 @@ def invocation_routing(
     script = interpreter_script(name, words, cwd)
     spots = [cwd]
     if script is not None:
-        spots.append(_followed(script.virtual, namespace, session))
+        spots += [
+            script.virtual,
+            _followed(script.virtual, namespace, session),
+        ]
     if not any(registry.unserved(spot) for spot in spots):
         return routing
     return dataclasses.replace(
