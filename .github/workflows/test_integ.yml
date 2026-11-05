@@ -85,6 +85,7 @@ jobs:
             # their host adapters, use these whole-host filters too.
             # Rust file detection and MIME formatting use these filters too.
             # Rust select and rs/select cover head/tail boundaries and windows.
+            # Rust find_printf and builtin/executor adapters cover find formatting.
             # LanceDB's shared core/lancedb/types modules select the embedded
             # LanceDB corpus through these same whole-host filters.
             # The io/writer, spool, archive/codec and streamed upload modules

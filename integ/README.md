@@ -95,6 +95,9 @@ tests cover their output and source lifetime.
 The shared Rust `select` stream and `rs/select` adapters use these filters
 for head and tail. The hosts retain range reads, unread stdin, pushdowns
 and follow polling; the stream owns record boundaries and retained windows.
+Find's `-printf` formatter reuses the shared `strftime` calendar fields;
+its host adapters supply only path, stat, link-target and identity facts.
+The existing Rust, builtin and executor filters cover this path.
 
 Streaming writes are covered by the shared lifecycle corpus and mirrored
 writer, dispatcher, disk and S3 tests. They pin named outputs, duplicate
