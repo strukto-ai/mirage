@@ -891,6 +891,11 @@ async def run_prepared_line(
                 claimant_for(ast, line_handed),
                 cancel,
                 ast,
+                deadline=(
+                    budget_start + context.frame.line_timeout
+                    if top_level and context.frame.line_timeout
+                    else None
+                ),
             )
             if isinstance(placed, (Deny, Pending)):
                 # A question on the line as a whole holds it for its

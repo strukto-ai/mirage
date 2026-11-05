@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import shlex
 
 import pytest
@@ -24,6 +25,7 @@ from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.sandbox import RemoteSandbox
 from mirage.runtime.sandbox.constants import programs_probe
 from mirage.runtime.types import Program, RunResult
+from mirage.types import Limit
 
 
 class Monty(PythonRuntime):
@@ -950,5 +952,32 @@ async def test_a_binary_linked_from_mirages_own_root_answers_126():
         code, _, _ = await run(ws, "/entry a")
         assert code == 126
         assert box.lines == []
+    finally:
+        await ws.close()
+
+
+class SlowProbeBox(Box):
+    """A box that answers the interpreter probe after ``delay`` seconds."""
+
+    def __init__(self, delay: float) -> None:
+        super().__init__()
+        self.delay = delay
+
+    async def exec_line(self, line, stdin, env, cwd) -> RunResult:
+        if line == programs_probe():
+            await asyncio.sleep(self.delay)
+        return await super().exec_line(line, stdin, env, cwd)
+
+
+@pytest.mark.asyncio
+async def test_the_interpreter_probe_waits_no_longer_than_the_lines_budget():
+    box = SlowProbeBox(1.5)
+    ws = workspace(box, command_limits={"@line": Limit(timeout_seconds=0.2)})
+    try:
+        await ws.shell("cd /ram")
+        loop = asyncio.get_running_loop()
+        began = loop.time()
+        code, _, _ = await run(ws, "python3 -c x")
+        assert (code, loop.time() - began < 1) == (124, True)
     finally:
         await ws.close()

@@ -55,7 +55,7 @@ import type { SessionState } from '../session/session.ts'
 import type { ExecuteOptions } from './types.ts'
 import type { Runtimes } from './runtimes.ts'
 import { lookup, mayRunProgram } from '../lookup/lookup.ts'
-import { makeAbortError } from '../../utils/abort.ts'
+import { abortable, atDeadline, makeAbortError } from '../../utils/abort.ts'
 
 /**
  * The policy ladder for one typed line: runtime argument, the placement
@@ -95,6 +95,9 @@ declare module '../frame.ts' {
   }
 }
 
+// Where the router's debug lines go: unset by default, so it logs nothing.
+export const logger: { debug?: (message: string) => void } = {}
+
 export class Router {
   private readonly registry: MountRegistry
   private readonly runtimes: Runtimes
@@ -120,9 +123,10 @@ export class Router {
     claimant: Claimant | null = null,
     signal?: AbortSignal,
     ast?: TSNodeLike,
+    deadline?: number,
   ): Promise<RouteDecision<Runtime> | Deny | Pending> {
     if (options.routingDecision !== undefined) return options.routingDecision
-    if (options.runtime === undefined) await this.learnPrograms(command, ast)
+    if (options.runtime === undefined) await this.learnPrograms(command, ast, deadline)
     const policies = this.registry.policies
     const placing = await policies.wantsFor('preExecute', session.sessionId)
     const placed = options.runtime === undefined ? null : this.placed(options.runtime)
@@ -151,19 +155,46 @@ export class Router {
    * A typed line decides its own placement after this, so it already runs
    * where the answer puts its interpreters. The ask is the probe alone:
    * nothing of the line reaches the box, so it comes before the line's
-   * admission. `explain` never asks. Mirrors Python's
-   * `Router._learn_programs`.
+   * admission. `explain` never asks. The wait stops at the line's deadline,
+   * which then stops the line; the ask goes on and binds what it learns when
+   * it ends. Mirrors Python's `Router._learn_programs`.
    *
    * @param command the raw command line.
    * @param ast the parsed line, whose command heads say whether it runs a
    *   path; undefined for none.
+   * @param deadline the `performance.now()` time the line's budget ends;
+   *   undefined for no bound.
    */
-  private async learnPrograms(command: string, ast: TSNodeLike | undefined): Promise<void> {
+  private async learnPrograms(
+    command: string,
+    ast: TSNodeLike | undefined,
+    deadline: number | undefined,
+  ): Promise<void> {
     const pending = this.runtimes.entries.filter((entry) => entry.programsPending)
     if (pending.length === 0) return
     const heads = ast === undefined ? new Set<string>() : commandWords(ast)
     if (!mayRunProgram(command, heads)) return
-    for (const entry of pending) await entry.probePrograms()
+    const asking = (async (): Promise<void> => {
+      for (const entry of pending) await entry.probePrograms()
+    })()
+    if (deadline !== undefined) {
+      const expiry = new AbortController()
+      const disarm = atDeadline((deadline - performance.now()) / 1000, () => {
+        expiry.abort()
+      })
+      try {
+        await abortable(asking, expiry.signal)
+      } catch (caught) {
+        if (!expiry.signal.aborted) throw caught
+        logger.debug?.(`interpreter probe outlasted the line's budget: ${String(caught)}`)
+        void asking.then(() => {
+          this.runtimes.rebind()
+        })
+        return
+      } finally {
+        disarm()
+      }
+    } else await asking
     this.runtimes.rebind()
   }
 

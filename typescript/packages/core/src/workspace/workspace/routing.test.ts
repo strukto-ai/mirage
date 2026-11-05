@@ -20,7 +20,7 @@ import { programsProbe } from '../../runtime/sandbox/constants.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { shellJoin } from '../../shell/join.ts'
 import type { Action, Policy } from '../../policy/index.ts'
-import { MountMode } from '../../types.ts'
+import { Limit, MountMode } from '../../types.ts'
 import { Mount } from '../mount/spec.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { WorkspaceOptions } from './types.ts'
@@ -892,6 +892,33 @@ describe('Router linked binaries', () => {
       await ws.shell('cd /ram')
       expect((await run(ws, '/entry a'))[0]).toBe(126)
       expect(box.lines).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+// A box that answers the interpreter probe after `delay` milliseconds.
+class SlowProbeBox extends Box {
+  constructor(readonly delay: number) {
+    super()
+  }
+
+  override async execLine(line: string): Promise<RunResult> {
+    if (line === programsProbe()) await new Promise((resolve) => setTimeout(resolve, this.delay))
+    return super.execLine(line)
+  }
+}
+
+describe('Router probe budget', () => {
+  it("waits for the interpreter probe no longer than the line's budget", async () => {
+    const box = new SlowProbeBox(1500)
+    const ws = workspace(box, { commandLimits: { '@line': new Limit({ timeoutSeconds: 0.2 }) } })
+    try {
+      await ws.shell('cd /ram')
+      const began = performance.now()
+      const [code] = await run(ws, 'python3 -c x')
+      expect([code, performance.now() - began < 1000]).toEqual([124, true])
     } finally {
       await ws.close()
     }

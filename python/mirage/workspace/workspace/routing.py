@@ -15,6 +15,7 @@
 import asyncio
 import dataclasses
 import errno
+import logging
 import posixpath
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Literal
@@ -75,6 +76,8 @@ from mirage.workspace.node.explain import Judged, Walked
 from mirage.workspace.session import SessionState
 from mirage.workspace.workspace.runtimes import Runtimes
 
+logger = logging.getLogger(__name__)
+
 
 class Router:
     """Decides which runtime a typed line routes to.
@@ -117,6 +120,7 @@ class Router:
         claimant: Claimant | None = None,
         cancel: asyncio.Event | None = None,
         ast: TSNodeLike | None = None,
+        deadline: float | None = None,
     ) -> RouteDecision[RuntimeIdentity] | Deny | Pending:
         """Resolve the routing decision for one typed line.
 
@@ -155,6 +159,9 @@ class Router:
             cancel (asyncio.Event | None): the run's kill channel.
             ast (TSNodeLike | None): the parsed line, which the sandbox
                 default reads; None leaves the default out.
+            deadline (float | None): the loop time the line's budget ends,
+                which bounds asking a box for its interpreters; None for
+                no bound.
 
         Raises:
             RouteError: an unknown runtime name or a failing policy.
@@ -163,7 +170,7 @@ class Router:
         if inherited is not None:
             return inherited
         if runtime is None:
-            await self._learn_programs(command, ast)
+            await self._learn_programs(command, ast, deadline)
         entries = self._runtimes.entries
         policies = self._registry.policies
         placing = await policies.wants_for("pre_execute", session.session_id)
@@ -196,7 +203,7 @@ class Router:
         return await self._defaulted(entries, session, ast, judged)
 
     async def _learn_programs(
-        self, command: str, ast: TSNodeLike | None
+        self, command: str, ast: TSNodeLike | None, deadline: float | None
     ) -> None:
         """Ask each box that has not said which interpreters it holds, the
         first time a line may run one, and bind what it holds.
@@ -204,12 +211,16 @@ class Router:
         A typed line decides its own placement after this, so it already
         runs where the answer puts its interpreters. The ask is the probe
         alone: nothing of the line reaches the box, so it comes before the
-        line's admission. ``explain`` never asks.
+        line's admission. ``explain`` never asks. The ask stops at the
+        line's deadline, which then stops the line, and a box it stopped
+        is asked again by the next line.
 
         Args:
             command (str): the raw command line.
             ast (TSNodeLike | None): the parsed line, whose command
                 heads say whether it runs a path; None for none.
+            deadline (float | None): the loop time the line's budget
+                ends; None for no bound.
         """
         pending = [e for e in self._runtimes.entries if e.programs_pending]
         if not pending:
@@ -217,8 +228,12 @@ class Router:
         heads = command_words(ast) if ast is not None else frozenset()
         if not may_run_program(command, heads):
             return
-        for entry in pending:
-            await entry.probe_programs()
+        try:
+            async with asyncio.timeout_at(deadline):
+                for entry in pending:
+                    await entry.probe_programs()
+        except TimeoutError:
+            logger.debug("interpreter probe outlasted the line's budget")
         self._runtimes.rebind()
 
     async def placement(
