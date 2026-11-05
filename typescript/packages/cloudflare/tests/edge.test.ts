@@ -136,6 +136,15 @@ describe('mirage in workerd', () => {
     expect(piped?.stdout).toBe('A\nB\n')
   })
 
+  it('holds node to 64 MiB, so a runaway heap fails in the script, not the isolate', async () => {
+    const [heap, next] = await run([
+      `node -e "const a = []; try { for (;;) a.push(new Array(1e5).fill(a.length)) } catch (e) { console.log(e.message, a.length > 10) }"`,
+      'node -e "console.log(1 + 1)"',
+    ])
+    expect(heap).toEqual({ exit: 0, stdout: 'out of memory true\n', stderr: '' })
+    expect(next?.stdout).toBe('2\n')
+  })
+
   it("waits out node's timers, and ends one at its line's deadline as it next calls out", async () => {
     const [timer, ticking, next] = await run(
       [
