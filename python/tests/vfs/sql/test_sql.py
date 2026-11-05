@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import errno
+import sqlite3
 from collections.abc import AsyncIterator, Sequence
 
 import pytest
@@ -60,9 +61,22 @@ def racing(vfs: SqlVFS, sql: list[str]) -> None:
     driver.batch = landing  # type: ignore[method-assign]
 
 
-@pytest_asyncio.fixture
-async def vfs() -> AsyncIterator[SqlVFS]:
-    v = SqlVFS()
+# D1 and Durable Objects run SQLite with these limits lowered to 100.
+WORKERD_LIMITS = (
+    sqlite3.SQLITE_LIMIT_COLUMN,
+    sqlite3.SQLITE_LIMIT_EXPR_DEPTH,
+    sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER,
+)
+
+
+@pytest_asyncio.fixture(params=["sqlite", "workerd_limits"])
+async def vfs(request: pytest.FixtureRequest) -> AsyncIterator[SqlVFS]:
+    driver = SqliteDriver()
+    if request.param == "workerd_limits":
+        db = driver._open()
+        for limit in WORKERD_LIMITS:
+            db.setlimit(limit, 100)
+    v = SqlVFS(driver=driver)
     yield v
     await v.close()
 
@@ -147,6 +161,27 @@ async def test_a_path_deeper_than_one_query_joins_still_walks(vfs: SqlVFS):
     assert await whole(vfs, f"{deep}/f") == b"deep"
     assert (await vfs.stat(at(deep))).type == FileType.DIRECTORY
     assert not await vfs.exists(at(f"{deep}/nope/f"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("depth", [19, 20, 31, 32, 96])
+async def test_it_makes_writes_reads_moves_copies_and_removes_deep(
+    vfs: SqlVFS, depth: int
+):
+    d = "/" + "/".join(f"d{i}" for i in range(depth - 1))
+    await vfs.mkdir(at(f"{d}/g"), parents=True)
+    await vfs.write(at(f"{d}/f"), b"deep")
+    assert await whole(vfs, f"{d}/f") == b"deep"
+    assert (await vfs.stat(at(f"{d}/g"))).type == FileType.DIRECTORY
+    await vfs.rename(at(f"{d}/f"), at(f"{d}/h"))
+    assert await whole(vfs, f"{d}/h") == b"deep"
+    await vfs.copy(at(f"{d}/h"), at(f"{d}/c"))
+    assert await whole(vfs, f"{d}/c") == b"deep"
+    await vfs.unlink(at(f"{d}/h"))
+    assert not await vfs.exists(at(f"{d}/h"))
+    assert [e.name for e in await vfs.readdir(at(d))] == ["c", "g"]
+    await vfs.rm_r(at("/d0"))
+    assert await vfs.readdir(at("/")) == []
 
 
 @pytest.mark.asyncio

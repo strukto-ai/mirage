@@ -18,7 +18,7 @@ import type { FsError } from '../../errors/types.ts'
 import type { PathSpec } from '../../types.ts'
 import { norm } from '../../utils/path.ts'
 import { stripSlash } from '../../utils/slash.ts'
-import { INODE_COLUMNS, ROOT_INO } from './constants.ts'
+import { INODE_COLUMNS, MAX_COLUMNS, MAX_PARAMS, ROOT_INO } from './constants.ts'
 import { byIno, inodeOf, isDir, type Inode, type InoRef } from './inode.ts'
 
 /**
@@ -40,10 +40,19 @@ export function namesOf(p: string): string[] {
   return bare === '' ? [] : bare.split('/')
 }
 
-// SQLite joins at most 64 tables, so one query walks at most this many names
-// (two tables each, past the inode it starts from), and a deeper path walks
-// on from where the last query stopped.
-const NAMES_PER_QUERY = 31
+// SQLite joins at most this many tables in one query.
+const MAX_JOIN_TABLES = 64
+
+// One query walks as many names as its limits allow: every inode column for
+// the start and each name within `MAX_COLUMNS`, two tables a name past the
+// start within `MAX_JOIN_TABLES`, one parameter a name within `MAX_PARAMS`.
+// The columns bind first, at 19 names. A deeper path walks on from where the
+// last query stopped.
+const NAMES_PER_QUERY = Math.min(
+  Math.floor(MAX_COLUMNS / INODE_COLUMNS.length) - 1,
+  Math.floor((MAX_JOIN_TABLES - 1) / 2),
+  MAX_PARAMS,
+)
 
 // The inode `from` and the inode each of `names` reaches below it in turn,
 // null from the first miss, in one query: each level joins the entry under

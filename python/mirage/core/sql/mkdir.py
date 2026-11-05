@@ -34,9 +34,12 @@ from mirage.utils.key_prefix import mounted_path
 from mirage.vfs.sql.types import SqlStatement
 
 # A new directory's entry names its parent by the entry above it, a
-# subquery a level, which SQLite bounds; ``mkdir -p`` lands this many
-# levels a batch.
-_LEVELS_PER_BATCH = 16
+# subquery a level, so the deepest statement grows faster than one level
+# a level: SQLite counts a batch's deepest entry, and the lookup of the
+# last directory it made, at most 83 deep for six levels and past 100
+# for seven, where D1 and Durable Objects stop. ``mkdir -p`` lands this
+# many levels a batch.
+_LEVELS_PER_BATCH = 6
 
 
 async def mkdir(
@@ -81,11 +84,14 @@ async def mkdir(
         if levels == _LEVELS_PER_BATCH:
             await accessor.batch(statements)
             statements = []
-            above = "/" + "/".join(w.names[:i])
-            made = target(await walk(accessor, above))
-            if made is None:
-                raise enoent(mounted_path(path, above))
-            parent = by_ino(made.ino)
+            made = await accessor.query(
+                f"SELECT ino FROM fs_inode WHERE ino = {parent.sql}",
+                parent.params,
+            )
+            ino = made[0]["ino"] if made else None
+            if ino is None:
+                raise enoent(mounted_path(path, "/" + "/".join(w.names[:i])))
+            parent = by_ino(int(ino))
             levels = 0
         statements += make_node(accessor, parent, name, DIR, 0, now)
         parent = by_entry(parent, name)

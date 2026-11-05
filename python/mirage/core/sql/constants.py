@@ -32,6 +32,10 @@ FILE = S_IFREG
 # at 100.
 MAX_PARAMS = 100
 
+# The most columns one query answers: D1 and Durable Objects stop at
+# 100.
+MAX_COLUMNS = 100
+
 # The bytes a streamed write gathers before it lands them.
 FLUSH_BYTES = 1024 * 1024
 
