@@ -890,3 +890,20 @@ async def test_a_script_linked_to_or_from_mirages_own_root_stays_on_its_runtime(
         assert box.lines == []
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_whole_line_judges_the_interpreters_script_not_a_redirect():
+    box = Box()
+    ws = Workspace(
+        {"/ram": RAMVFS(), "/run": (RAMVFS(), MountMode.EXEC)},
+        mode=MountMode.WRITE,
+        runtimes=[box, Monty(), "workspace"],
+    )
+    try:
+        await ws.shell("cd /ram")
+        line = "python3 - > /tmp/out; make"
+        assert (await run(ws, line))[0] == 0
+        assert box.whole == [line]
+    finally:
+        await ws.close()

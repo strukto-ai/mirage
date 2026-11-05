@@ -20,7 +20,6 @@ import posixpath
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any, Literal
 
-from mirage.commands.spec.types import WordKind
 from mirage.policy.decisions import op_question
 from mirage.policy.policies import agreed, settled
 from mirage.policy.types import (
@@ -56,10 +55,12 @@ from mirage.utils.abort import MirageAbortError
 from mirage.utils.path import CycleError
 from mirage.view.types import FileView, SessionView
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
-from mirage.workspace.executor.command.routing import invocation_routing
+from mirage.workspace.executor.command.routing import (
+    interpreter_script,
+    invocation_routing,
+)
 from mirage.workspace.lookup.constants import (
     FRESH_SHELL_NAMES,
-    INLINE_FLAGS,
     INTERPRETER_NAMES,
     WORKSPACE_JOB_WORDS,
 )
@@ -463,13 +464,9 @@ class Router:
         Args:
             ctx (CommandContext): the interpreter command.
         """
-        inline = any(
-            word.kind is WordKind.OPTION and word.text in INLINE_FLAGS
-            for word in ctx.words
-        )
-        script = any(word.kind is WordKind.OPERAND for word in ctx.words)
-        if not inline and script and ctx.paths:
-            path = ctx.paths[0].virtual
+        script = interpreter_script(ctx.command, ctx.argv, ctx.cwd)
+        if script is not None:
+            path = script.virtual
             if self._registry.exec_allowed_at(path):
                 return None
             return f"{path} is not in EXEC mode"

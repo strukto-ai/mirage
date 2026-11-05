@@ -35,7 +35,6 @@ import {
   wholeLineRuntime,
 } from '../../runtime/table.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
-import { WordKind } from '../../commands/spec/types.ts'
 import { fsError } from '../../errors/fs.ts'
 import { startsAJob } from '../../shell/helpers.ts'
 import { parameterReads } from '../../shell/parse/env.ts'
@@ -46,14 +45,9 @@ import { CycleError, resolvePath } from '../../utils/path.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import { expandingAliases } from '../executor/builtins/alias/alias.ts'
-import {
-  FRESH_SHELL_NAMES,
-  INLINE_FLAGS,
-  INTERPRETER_NAMES,
-  WORKSPACE_JOB_WORDS,
-} from '../lookup/constants.ts'
+import { FRESH_SHELL_NAMES, INTERPRETER_NAMES, WORKSPACE_JOB_WORDS } from '../lookup/constants.ts'
 import { Consumer } from '../lookup/types.ts'
-import { invocationRouting } from '../executor/command/routing.ts'
+import { interpreterScript, invocationRouting } from '../executor/command/routing.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Judged, Walked } from '../node/explain.ts'
@@ -369,15 +363,10 @@ export class Router {
    * @param ctx the interpreter command.
    */
   private execRefused(ctx: CommandContext): string | null {
-    const words = ctx.words ?? []
-    const inline = words.some(
-      (word) => word.kind === WordKind.OPTION && INLINE_FLAGS.has(word.text),
-    )
-    const script = words.some((word) => word.kind === WordKind.OPERAND)
-    const first = ctx.paths[0]
-    if (!inline && script && first !== undefined) {
-      if (this.registry.execAllowedAt(first.virtual)) return null
-      return `${first.virtual} is not in EXEC mode`
+    const script = interpreterScript(ctx.command, ctx.argv, ctx.cwd)
+    if (script !== null) {
+      if (this.registry.execAllowedAt(script.virtual)) return null
+      return `${script.virtual} is not in EXEC mode`
     }
     if (this.registry.isExecAllowed()) return null
     return 'no mount is in EXEC mode'

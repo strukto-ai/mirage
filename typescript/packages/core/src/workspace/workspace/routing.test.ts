@@ -831,3 +831,21 @@ describe('Router linked scripts', () => {
     },
   )
 })
+
+describe('Router whole-line exec rule', () => {
+  it("judges the interpreter's script, not a redirect", async () => {
+    const box = new Box()
+    const ws = new Workspace(
+      { '/ram': new RAMVFS(), '/run': new Mount(new RAMVFS(), { mode: MountMode.EXEC }) },
+      { mode: MountMode.WRITE, runtimes: [box, new Monty(), 'workspace'] },
+    )
+    try {
+      await ws.shell('cd /ram')
+      const line = 'python3 - > /tmp/out; make'
+      expect((await run(ws, line))[0]).toBe(0)
+      expect(box.whole).toEqual([line])
+    } finally {
+      await ws.close()
+    }
+  })
+})
