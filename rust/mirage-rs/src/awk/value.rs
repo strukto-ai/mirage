@@ -1,24 +1,56 @@
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::cmp::Ordering;
+use std::ops::Deref;
+use std::sync::Arc;
 
 use crate::printf::number::{Rendered, render_float, render_integer};
+
+#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+pub(super) struct Text(Arc<Vec<u8>>);
+
+impl From<Vec<u8>> for Text {
+    fn from(bytes: Vec<u8>) -> Self {
+        Self(Arc::new(bytes))
+    }
+}
+impl Deref for Text {
+    type Target = [u8];
+    fn deref(&self) -> &[u8] {
+        self.0.as_slice()
+    }
+}
+impl Borrow<[u8]> for Text {
+    fn borrow(&self) -> &[u8] {
+        self
+    }
+}
+impl Text {
+    pub(super) fn as_slice(&self) -> &[u8] {
+        self
+    }
+}
+
+pub(super) fn string(raw: impl Into<Text>) -> Value {
+    Value::Str(raw.into())
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Value {
     Uninit,
     Num(f64),
-    Str(Vec<u8>),
+    Str(Text),
     /// Text from the input (a field, a getline record, split's pieces,
     /// ARGV, ENVIRON, an assignment): a number when it looks like one.
     /// Never empty.
-    Strnum(Vec<u8>),
+    Strnum(Text),
     /// An array passed to a function, only ever a call's argument.
     Array(usize),
 }
 
 /// Input-derived text: an absent or empty field is a plain string, so
 /// `$9 == 0` is false where `x == 0` is true for an unset `x`.
-pub(super) fn strnum(raw: Vec<u8>) -> Value {
+pub(super) fn strnum(raw: impl Into<Text>) -> Value {
+    let raw = raw.into();
     if raw.is_empty() {
         Value::Str(raw)
     } else {
@@ -121,10 +153,10 @@ impl Value {
         }
     }
 
-    pub(super) fn into_text(self, convfmt: &[u8]) -> Vec<u8> {
+    pub(super) fn into_text(self, convfmt: &[u8]) -> Text {
         match self {
             Value::Str(s) | Value::Strnum(s) => s,
-            other => other.text(convfmt).into_owned(),
+            other => other.text(convfmt).into_owned().into(),
         }
     }
 

@@ -4,7 +4,7 @@ use crate::regex::Step;
 use crate::regex::parse::Dialect;
 use crate::regex::posix::{Options, Posix};
 
-use super::value::MAX_LEN;
+use super::value::{MAX_LEN, Text};
 
 /// Read one string escape whose backslash ends at `pos`, appending what it
 /// spells; returns where the escape ends. An escape awk does not know
@@ -439,17 +439,170 @@ fn paragraph(
 /// An awk substring: positions count from 1 and truncate toward zero; a
 /// start below 1 is clamped to 1 with the whole length still taken, as
 /// gawk and onetrueawk do (`substr("hello", -1, 3)` is "hel").
-pub(super) fn substr(subject: &[u8], start: f64, length: Option<f64>) -> &[u8] {
-    let begin = usize::try_from(super::value::to_int(start).max(1) - 1).unwrap_or(usize::MAX);
-    let rest = subject.get(begin..).unwrap_or_default();
-    match length {
-        None => rest,
-        Some(length) => {
-            let span = super::value::to_int(length);
-            if span <= 0 {
-                return &[];
+pub(super) fn substr(size: usize, start: f64, length: Option<f64>) -> (usize, usize) {
+    let begin = usize::try_from(super::value::to_int(start).max(1) - 1)
+        .unwrap_or(usize::MAX)
+        .min(size);
+    let count = length.map_or(size - begin, |length| {
+        usize::try_from(super::value::to_int(length).max(0))
+            .unwrap_or(usize::MAX)
+            .min(size - begin)
+    });
+    (begin, begin + count)
+}
+
+pub(super) struct IndexSearch {
+    haystack: Text,
+    needle: Text,
+    prefix: Vec<u32>,
+    building: usize,
+    matched: usize,
+    at: usize,
+}
+
+impl IndexSearch {
+    pub(super) fn new(haystack: Text, needle: Text) -> Self {
+        Self {
+            haystack,
+            needle,
+            prefix: vec![0],
+            building: 1,
+            matched: 0,
+            at: 0,
+        }
+    }
+
+    pub(super) fn step(&mut self, work: &mut u64) -> Step<usize> {
+        if self.needle.is_empty() {
+            return Step::Done(1);
+        }
+        while self.building < self.needle.len() {
+            if *work == 0 {
+                return Step::Paused;
             }
-            &rest[..rest.len().min(usize::try_from(span).unwrap_or(usize::MAX))]
+            *work -= 1;
+            if self.needle[self.building] == self.needle[self.matched] {
+                self.matched += 1;
+                self.prefix.push(self.matched as u32);
+                self.building += 1;
+            } else if self.matched > 0 {
+                self.matched = self.prefix[self.matched - 1] as usize;
+            } else {
+                self.prefix.push(0);
+                self.building += 1;
+            }
+            if self.building == self.needle.len() {
+                self.matched = 0;
+            }
+        }
+        while self.at < self.haystack.len() {
+            if *work == 0 {
+                return Step::Paused;
+            }
+            *work -= 1;
+            if self.haystack[self.at] == self.needle[self.matched] {
+                self.at += 1;
+                self.matched += 1;
+                if self.matched == self.needle.len() {
+                    return Step::Done(self.at - self.needle.len() + 1);
+                }
+            } else if self.matched > 0 {
+                self.matched = self.prefix[self.matched - 1] as usize;
+            } else {
+                self.at += 1;
+            }
+        }
+        Step::Done(0)
+    }
+}
+
+pub(super) enum StringWork {
+    Case {
+        subject: Text,
+        upper: bool,
+        at: usize,
+        out: Vec<u8>,
+    },
+    Copy {
+        subject: Text,
+        at: usize,
+        end: usize,
+        out: Vec<u8>,
+    },
+    Join {
+        left: Text,
+        right: Text,
+        at: usize,
+        out: Vec<u8>,
+    },
+}
+
+impl StringWork {
+    pub(super) fn step(&mut self, work: &mut u64) -> Step<Vec<u8>> {
+        match self {
+            Self::Case {
+                subject,
+                upper,
+                at,
+                out,
+            } => {
+                let end = subject
+                    .len()
+                    .min(at.saturating_add(usize::try_from(*work).unwrap_or(usize::MAX)));
+                out.extend_from_slice(&subject[*at..end]);
+                if *upper {
+                    out[*at..end].make_ascii_uppercase();
+                } else {
+                    out[*at..end].make_ascii_lowercase();
+                }
+                *work -= (end - *at) as u64;
+                *at = end;
+                if end == subject.len() {
+                    Step::Done(std::mem::take(out))
+                } else {
+                    Step::Paused
+                }
+            }
+            Self::Copy {
+                subject,
+                at,
+                end,
+                out,
+            } => {
+                let stop =
+                    (*end).min(at.saturating_add(usize::try_from(*work).unwrap_or(usize::MAX)));
+                out.extend_from_slice(&subject[*at..stop]);
+                *work -= (stop - *at) as u64;
+                *at = stop;
+                if *at == *end {
+                    Step::Done(std::mem::take(out))
+                } else {
+                    Step::Paused
+                }
+            }
+            Self::Join {
+                left,
+                right,
+                at,
+                out,
+            } => {
+                while *at < left.len() + right.len() {
+                    if *work == 0 {
+                        return Step::Paused;
+                    }
+                    let (piece, from) = if *at < left.len() {
+                        (&left[..], *at)
+                    } else {
+                        (&right[..], *at - left.len())
+                    };
+                    let count =
+                        (piece.len() - from).min(usize::try_from(*work).unwrap_or(usize::MAX));
+                    out.extend_from_slice(&piece[from..from + count]);
+                    *work -= count as u64;
+                    *at += count;
+                }
+                Step::Done(std::mem::take(out))
+            }
         }
     }
 }
@@ -482,8 +635,8 @@ enum SubPhase {
 }
 
 pub(super) struct Substitution {
-    subject: Vec<u8>,
-    template: Vec<u8>,
+    subject: Text,
+    template: Text,
     out: Vec<u8>,
     phase: SubPhase,
     global: bool,
@@ -510,7 +663,7 @@ fn copy_piece(
 }
 
 impl Substitution {
-    pub(super) fn new(subject: Vec<u8>, template: Vec<u8>, global: bool) -> Self {
+    pub(super) fn new(subject: Text, template: Text, global: bool) -> Self {
         Self {
             out: Vec::with_capacity(subject.len()),
             subject,

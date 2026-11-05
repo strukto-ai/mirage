@@ -9,8 +9,10 @@ use super::io::{
     Io, LIMIT, Next, Ordered, OutFile, OutPipe, Reader, Retired, STDERR_NAME, STDOUT_NAMES,
 };
 use super::parser::{Cmp, GetlineKind, RedirKind};
-use super::text::{Regexes, SplitScan, Substitution, split_assignment, substr};
-use super::value::{MAX_LEN, Value, compare, format_num, strnum, to_int};
+use super::text::{
+    IndexSearch, Regexes, SplitScan, StringWork, Substitution, split_assignment, substr,
+};
+use super::value::{MAX_LEN, Text, Value, compare, format_num, string, strnum, to_int};
 use crate::regex::Step as SearchStep;
 use crate::request::{Opening, Request, WriteMode};
 
@@ -39,7 +41,7 @@ struct Frame {
 }
 
 struct Iter {
-    keys: Vec<Vec<u8>>,
+    keys: Vec<Text>,
     at: usize,
 }
 
@@ -48,6 +50,16 @@ enum Phase {
     Begin,
     Main,
     End,
+}
+
+#[derive(Default)]
+struct RecordJoin {
+    planned: usize,
+    length: usize,
+    body: Option<Vec<u8>>,
+    field: usize,
+    separator: bool,
+    offset: usize,
 }
 
 /// The current record: `$0` as read or rebuilt, and its fields, split
@@ -63,6 +75,7 @@ struct Record {
     scan: SplitScan,
     owning: Option<usize>,
     stale: bool,
+    joining: Option<RecordJoin>,
     fs: Vec<u8>,
     paragraph: bool,
 }
@@ -79,6 +92,7 @@ impl Record {
         self.owning = None;
         self.owned = false;
         self.stale = false;
+        self.joining = None;
     }
 
     fn prepare_split(&mut self, regexes: &mut Regexes, work: &mut u64) -> Result<bool, Vec<u8>> {
@@ -169,19 +183,63 @@ impl Record {
         Ok(true)
     }
 
-    fn text(&mut self, ofs: &[u8]) -> Result<&[u8], Vec<u8>> {
-        if self.stale {
-            let len = self.fields.iter().map(Vec::len).sum::<usize>()
-                + ofs
-                    .len()
-                    .saturating_mul(self.fields.len().saturating_sub(1));
-            if len > MAX_LEN {
-                return Err(no_memory());
-            }
-            self.text = self.fields.join(ofs);
-            self.stale = false;
+    fn prepare_text(&mut self, ofs: &[u8], work: &mut u64) -> Result<bool, Vec<u8>> {
+        if !self.stale {
+            return Ok(true);
         }
-        Ok(&self.text)
+        let join = self.joining.get_or_insert_with(RecordJoin::default);
+        if join.body.is_none() {
+            while join.planned < self.fields.len() {
+                if *work == 0 {
+                    return Ok(false);
+                }
+                let len = self.fields[join.planned].len();
+                join.length = join.length.saturating_add(len);
+                if join.planned > 0 {
+                    join.length = join.length.saturating_add(ofs.len());
+                }
+                if join.length > MAX_LEN {
+                    return Err(no_memory());
+                }
+                join.planned += 1;
+                *work = work.saturating_sub(8);
+            }
+            join.body = Some(Vec::with_capacity(join.length));
+        }
+        let body = join.body.as_mut().unwrap();
+        while join.field < self.fields.len() {
+            if *work == 0 {
+                return Ok(false);
+            }
+            let piece = if join.separator {
+                ofs
+            } else {
+                &self.fields[join.field]
+            };
+            let count =
+                (piece.len() - join.offset).min(usize::try_from(*work).unwrap_or(usize::MAX));
+            body.extend_from_slice(&piece[join.offset..join.offset + count]);
+            join.offset += count;
+            *work -= count as u64;
+            if join.offset == piece.len() {
+                join.offset = 0;
+                if join.separator {
+                    join.separator = false;
+                } else {
+                    join.field += 1;
+                    join.separator = join.field < self.fields.len();
+                }
+                *work = work.saturating_sub(1);
+            }
+        }
+        self.text = self.joining.take().unwrap().body.unwrap();
+        self.stale = false;
+        Ok(true)
+    }
+
+    fn text(&self) -> &[u8] {
+        debug_assert!(!self.stale);
+        &self.text
     }
 }
 
@@ -229,8 +287,8 @@ enum WriteTarget {
 }
 
 struct FieldSplit {
-    subject: Vec<u8>,
-    separator: Vec<u8>,
+    subject: Text,
+    separator: Text,
     scan: SplitScan,
     array: usize,
     retired: Retired<Value>,
@@ -241,13 +299,15 @@ struct FieldSplit {
 enum SubTarget {
     Var(Var),
     Field(i128),
-    Element(usize, Vec<u8>),
+    Element(usize, Text),
     Invalid,
 }
 
 enum Pending {
+    Index(IndexSearch),
+    String(StringWork),
     Sub {
-        pattern: Vec<u8>,
+        pattern: Text,
         substitution: Substitution,
         target: SubTarget,
     },
@@ -255,8 +315,8 @@ enum Pending {
     Write(WriteTarget),
     MatchRecord(usize),
     Match {
-        pattern: Vec<u8>,
-        subject: Vec<u8>,
+        pattern: Text,
+        subject: Text,
         target: MatchTarget,
     },
 }
@@ -331,7 +391,7 @@ impl Machine {
             b" ", b" ", b"\n", b"\n", b"\x1c", b"%.6g", b"%.6g", b"", b"0", b"-1",
         ];
         for (index, value) in defaults.iter().enumerate() {
-            machine.globals[index].scalar = Some(Value::Str(value.to_vec()));
+            machine.globals[index].scalar = Some(string(value.to_vec()));
         }
         for (name, value) in setup.assignments {
             if let Some(&index) = machine.code.globals.get(&name) {
@@ -339,7 +399,7 @@ impl Machine {
             }
         }
         let argv = machine.array(Arr::Global(ARGV));
-        machine.arrays.items[argv].insert(b"0".to_vec(), Value::Str(b"awk".to_vec()));
+        machine.arrays.items[argv].insert(b"0".to_vec(), string(b"awk".to_vec()));
         for (position, operand) in setup.operands.iter().enumerate() {
             let key = (position + 1).to_string().into_bytes();
             machine.arrays.items[argv].insert(key, strnum(operand.clone()));
@@ -350,7 +410,7 @@ impl Machine {
             machine.arrays.items[environ].insert(name, strnum(value));
         }
         if let Some(fs) = setup.fs {
-            machine.globals[FS as usize].scalar = Some(Value::Str(fs));
+            machine.globals[FS as usize].scalar = Some(string(fs));
         }
         machine
     }
@@ -404,8 +464,19 @@ impl Machine {
                 .is_some_and(|value| to_int(value.num()) > 0),
             _ => false,
         };
-        if split {
-            self.record.prepare_split(&mut self.regexes, work)
+        if split && !self.record.prepare_split(&mut self.regexes, work)? {
+            return Ok(false);
+        }
+        let text = match self.code.ops[self.pc] {
+            Op::MatchRecord(_) | Op::LengthRecord => true,
+            Op::LoadField | Op::IncDecField(..) | Op::SubField(_) => self
+                .stack
+                .last()
+                .is_some_and(|value| to_int(value.num()) == 0),
+            _ => false,
+        };
+        if text {
+            self.record.prepare_text(&special(&self.globals, OFS), work)
         } else {
             Ok(true)
         }
@@ -414,6 +485,14 @@ impl Machine {
     fn resume(&mut self, work: &mut u64) -> Step {
         let pending = self.pending.take().unwrap();
         match pending {
+            Pending::Index(mut search) => match search.step(work) {
+                SearchStep::Paused => self.pending = Some(Pending::Index(search)),
+                SearchStep::Done(index) => self.stack.push(Value::Num(index as f64)),
+            },
+            Pending::String(mut text) => match text.step(work) {
+                SearchStep::Paused => self.pending = Some(Pending::String(text)),
+                SearchStep::Done(text) => self.stack.push(string(text)),
+            },
             Pending::Sub {
                 pattern,
                 mut substitution,
@@ -434,10 +513,10 @@ impl Machine {
                         self.stack.push(Value::Num(count as f64));
                         if count > 0 {
                             match target {
-                                SubTarget::Var(var) => self.store(var, Value::Str(result))?,
+                                SubTarget::Var(var) => self.store(var, string(result))?,
                                 SubTarget::Field(index) => self.set_field(index, result)?,
                                 SubTarget::Element(id, key) => {
-                                    self.arrays.items[id].insert(key, Value::Str(result))
+                                    self.arrays.items[id].insert(key, string(result))
                                 }
                                 SubTarget::Invalid => {
                                     return Err(b"awk: assignment to a non-lvalue".to_vec());
@@ -591,17 +670,17 @@ impl Machine {
         self.stack.pop().unwrap_or(Value::Uninit)
     }
 
-    fn pop_text(&mut self) -> Vec<u8> {
+    fn pop_text(&mut self) -> Text {
         let value = self.pop();
         value.into_text(&self.convfmt())
     }
 
-    fn top_text(&self) -> Vec<u8> {
-        let fmt = self.convfmt();
+    fn top_text(&self) -> Text {
         self.stack
             .last()
-            .map(|value| value.text(&fmt).into_owned())
-            .unwrap_or_default()
+            .cloned()
+            .unwrap_or(Value::Uninit)
+            .into_text(&self.convfmt())
     }
 
     fn slot(&mut self, var: Var) -> Option<&mut Slot> {
@@ -676,8 +755,7 @@ impl Machine {
 
     fn get_field(&mut self, index: i128) -> Result<Value, Vec<u8>> {
         if index == 0 {
-            let ofs = special(&self.globals, OFS);
-            return Ok(strnum(self.record.text(&ofs)?.to_vec()));
+            return Ok(strnum(self.record.text().to_vec()));
         }
         if index < 0 {
             return Err(format!("awk: trying to access field {index}").into_bytes());
@@ -685,7 +763,7 @@ impl Machine {
         let nf = self.record.nf();
         let index = usize::try_from(index).unwrap_or(usize::MAX);
         Ok(if index > nf {
-            Value::Str(Vec::new())
+            string(Vec::new())
         } else {
             strnum(self.record.field(index).to_vec())
         })
@@ -708,8 +786,7 @@ impl Machine {
     }
 
     fn record_text(&mut self) -> Result<&[u8], Vec<u8>> {
-        let ofs = special(&self.globals, OFS);
-        self.record.text(&ofs)
+        Ok(self.record.text())
     }
 
     /// Unwind every call and loop, as `next` and `exit` do.
@@ -732,7 +809,7 @@ impl Machine {
             Op::Num(value) => self.stack.push(Value::Num(value)),
             Op::Str(at) => {
                 let text = self.code.strings[at as usize].clone();
-                self.stack.push(Value::Str(text));
+                self.stack.push(string(text));
             }
             Op::Uninit => self.stack.push(Value::Uninit),
             Op::MatchRecord(at) => {
@@ -793,9 +870,9 @@ impl Machine {
                     if len > MAX_LEN {
                         return Err(no_memory());
                     }
-                    texts.join(sep.as_ref())
+                    texts.join(sep.as_ref()).into()
                 };
-                self.stack.push(Value::Str(key));
+                self.stack.push(string(key));
             }
             Op::LoadElem(arr) => {
                 let key = self.pop_text();
@@ -868,18 +945,18 @@ impl Machine {
                 self.stack.push(num(value));
             }
             Op::Concat => {
-                let right = self.pop();
-                let left = self.pop();
-                let fmt = self.convfmt();
-                let mut text = left.into_text(&fmt);
-                let right = right.text(&fmt);
-                if text.len() + right.len() > MAX_LEN {
+                let right = self.pop_text();
+                let left = self.pop_text();
+                let len = left.len().saturating_add(right.len());
+                if len > MAX_LEN {
                     return Err(no_memory());
                 }
-                text.extend_from_slice(&right);
-                drop(right);
-                drop(fmt);
-                self.stack.push(Value::Str(text));
+                self.pending = Some(Pending::String(StringWork::Join {
+                    left,
+                    right,
+                    at: 0,
+                    out: Vec::with_capacity(len),
+                }));
             }
             Op::Compare(cmp) => {
                 let right = self.pop();
@@ -930,9 +1007,9 @@ impl Machine {
                 self.stack.push(value);
                 self.pc = frame.ret;
             }
-            Op::Fatal(at) => return Err(self.code.strings[at as usize].clone()),
+            Op::Fatal(at) => return Err(self.code.strings[at as usize].to_vec()),
             Op::Print(formatted, count, redirect) => {
-                return self.print(formatted, count as usize, redirect);
+                return self.print(formatted, count as usize, redirect, work);
             }
             Op::Getline(kind, target) => return self.getline(kind, target, work),
             Op::ForIn(arr) => {
@@ -1037,24 +1114,29 @@ impl Machine {
             Op::Index => {
                 let needle = self.pop_text();
                 let haystack = self.pop_text();
-                let at = memchr::memmem::find(&haystack, &needle).map_or(0, |at| at + 1);
-                self.stack.push(Value::Num(at as f64));
+                self.pending = Some(Pending::Index(IndexSearch::new(haystack, needle)));
             }
             Op::Substr(has_length) => {
                 let length = has_length.then(|| self.pop().num());
                 let start = self.pop().num();
                 let subject = self.pop_text();
-                let part = substr(&subject, start, length).to_vec();
-                self.stack.push(Value::Str(part));
+                let (at, end) = substr(subject.len(), start, length);
+                let out = Vec::with_capacity(end - at);
+                self.pending = Some(Pending::String(StringWork::Copy {
+                    subject,
+                    at,
+                    end,
+                    out,
+                }));
             }
             Op::Case(upper) => {
-                let mut text = self.pop_text();
-                if upper {
-                    text.make_ascii_uppercase();
-                } else {
-                    text.make_ascii_lowercase();
-                }
-                self.stack.push(Value::Str(text));
+                let subject = self.pop_text();
+                self.pending = Some(Pending::String(StringWork::Case {
+                    out: Vec::with_capacity(subject.len()),
+                    subject,
+                    upper,
+                    at: 0,
+                }));
             }
             Op::Sprintf(count) => {
                 let args = self.stack.split_off(self.stack.len() - count as usize);
@@ -1062,7 +1144,7 @@ impl Machine {
                 let format = args[0].text(&fmt);
                 let text = sprintf(&format, &args[1..], &fmt)?;
                 drop(fmt);
-                self.stack.push(Value::Str(text));
+                self.stack.push(string(text));
             }
             Op::Length => {
                 let len = self.pop_text().len();
@@ -1118,7 +1200,11 @@ impl Machine {
                 let separator = if has_separator {
                     self.pop_text()
                 } else {
-                    special(&self.globals, FS).into_owned()
+                    self.globals[FS as usize]
+                        .scalar
+                        .clone()
+                        .unwrap_or(Value::Uninit)
+                        .into_text(b"%.6g")
                 };
                 let subject = self.pop_text();
                 let id = self.array(arr);
@@ -1162,7 +1248,7 @@ impl Machine {
         Ok(())
     }
 
-    fn substitute(&mut self, subject: Vec<u8>, global: bool, target: SubTarget) -> Step {
+    fn substitute(&mut self, subject: Text, global: bool, target: SubTarget) -> Step {
         let template = self.pop_text();
         let pattern = self.pop_text();
         self.regexes.get(&pattern)?;
@@ -1249,7 +1335,7 @@ impl Machine {
     }
 
     fn start_file(&mut self, name: Vec<u8>) {
-        self.globals[FILENAME as usize].scalar = Some(Value::Str(name.clone()));
+        self.globals[FILENAME as usize].scalar = Some(string(name.clone()));
         self.main_name = name;
         self.fnr = 0.0;
     }
@@ -1412,7 +1498,7 @@ impl Machine {
                 let rs = special(&self.globals, RS).into_owned();
                 if !self.io.files_in.contains(&name) {
                     let fd = self.io.fd();
-                    let reader = Reader::new(fd, Some((name.clone(), Opening::Name)));
+                    let reader = Reader::new(fd, Some((name.to_vec(), Opening::Name)));
                     self.io.files_in.insert(name.clone(), reader);
                 }
                 let reader = self.io.files_in.get_mut(&name).expect("just opened");
@@ -1454,7 +1540,7 @@ impl Machine {
                         .pipes_in
                         .insert(command.clone(), (Reader::new(fd, None), 0.0));
                     self.io.run(Request::Run {
-                        command,
+                        command: command.to_vec(),
                         stdin: None,
                         stdout: Some(fd),
                     });
@@ -1521,7 +1607,13 @@ impl Machine {
     /// opened, and what is printed to it waits until a flush, a close or
     /// the end of a record, so reading it back before closing it reads
     /// what was flushed.
-    fn print(&mut self, formatted: bool, count: usize, redirect: Option<RedirKind>) -> Step {
+    fn print(
+        &mut self,
+        formatted: bool,
+        count: usize,
+        redirect: Option<RedirKind>,
+        work: &mut u64,
+    ) -> Step {
         let name = redirect.map(|_| self.top_text());
         if self.stage == 0 {
             if let (Some(kind), Some(name)) = (redirect, &name) {
@@ -1541,13 +1633,13 @@ impl Machine {
                         }
                     }
                 } else if !STDOUT_NAMES.contains(&name.as_slice())
-                    && name != STDERR_NAME
+                    && name.as_slice() != STDERR_NAME
                     && !self.io.files_out.contains(name)
                 {
                     self.io.files_out.insert(name.clone(), OutFile::default());
                     if kind == RedirKind::File {
                         self.io.push(Request::Write {
-                            path: name.clone(),
+                            path: name.to_vec(),
                             mode: WriteMode::Truncate,
                             data: Vec::new(),
                         });
@@ -1555,6 +1647,14 @@ impl Machine {
                     }
                 }
             }
+        }
+        if !formatted
+            && count == 0
+            && !self
+                .record
+                .prepare_text(&special(&self.globals, OFS), work)?
+        {
+            return self.wait(1);
         }
         self.stage = 0;
         let base = self.stack.len() - count - usize::from(redirect.is_some());
@@ -1573,7 +1673,7 @@ impl Machine {
             }
         } else if STDOUT_NAMES.contains(&name.as_slice()) {
             self.io.stdout(&body);
-        } else if name == STDERR_NAME {
+        } else if name.as_slice() == STDERR_NAME {
             self.io.err.extend_from_slice(&body);
         } else if let Some(file) = self.io.files_out.get_mut(&name) {
             file.buf.extend_from_slice(&body);
@@ -1585,7 +1685,7 @@ impl Machine {
     }
 
     /// Run an output pipe's command on everything printed to it.
-    fn close_pipe(&mut self, command: Vec<u8>, pipe: OutPipe) {
+    fn close_pipe(&mut self, command: Text, pipe: OutPipe) {
         if !pipe.buf.is_empty() {
             self.io.push(Request::Spool {
                 fd: pipe.fd,
@@ -1594,7 +1694,7 @@ impl Machine {
         }
         self.io.send_files();
         self.io.run(Request::Run {
-            command,
+            command: command.to_vec(),
             stdin: Some(pipe.fd),
             stdout: None,
         });
@@ -1624,7 +1724,7 @@ impl Machine {
                 self.io.send_file(&name);
                 self.io.files_out.remove(&name);
                 self.io.push(Request::Flush {
-                    path: Some(name.clone()),
+                    path: Some(name.to_vec()),
                 });
                 status = 0.0;
             }
@@ -1652,7 +1752,7 @@ impl Machine {
             let name = if has_name {
                 self.top_text()
             } else {
-                Vec::new()
+                Text::default()
             };
             let mut status = 0.0;
             if name.is_empty() {
@@ -1664,7 +1764,9 @@ impl Machine {
                 self.io.release();
             } else if self.io.files_out.contains(&name) {
                 self.io.send_file(&name);
-                self.io.push(Request::Flush { path: Some(name) });
+                self.io.push(Request::Flush {
+                    path: Some(name.to_vec()),
+                });
             } else if !self.io.pipes_out.contains(&name) {
                 status = -1.0;
             }
@@ -1687,7 +1789,7 @@ impl Machine {
             let command = self.top_text();
             self.io.before_command();
             self.io.run(Request::Run {
-                command,
+                command: command.to_vec(),
                 stdin: None,
                 stdout: None,
             });
