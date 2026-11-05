@@ -26,7 +26,7 @@ import type { WasmView } from './view.ts'
 
 // JavaScript Promise Integration, which the DOM and ES libs do not type yet.
 interface Jspi {
-  Suspending: new (call: (...args: never[]) => unknown) => object
+  Suspending: new (call: (...args: never[]) => unknown) => unknown
   promising: (exported: unknown) => (...args: unknown[]) => Promise<unknown>
 }
 
