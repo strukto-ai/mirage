@@ -372,9 +372,13 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     await this.programsAsking
   }
 
-  /** The one ask `probePrograms` shares; it never throws. */
+  /**
+   * The one ask `probePrograms` shares; it never throws. The ask is work its
+   * removal waits for (`admit`), and a removed box asks nothing.
+   */
   private async askPrograms(): Promise<void> {
-    if (!this.programsPending) return
+    if (this.retired || !this.programsPending) return
+    const release = this.admit()
     let found: RunResult | null
     try {
       await this.ensureConnected()
@@ -386,6 +390,8 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     } catch (error) {
       logger.debug?.(`${this.name}: interpreter probe failed: ${String(error)}`)
       found = null
+    } finally {
+      release()
     }
     if (found !== null && found.exitCode !== 0) {
       const said = found.stderr === null ? '' : new TextDecoder().decode(found.stderr)

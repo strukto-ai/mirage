@@ -401,11 +401,13 @@ class RemoteSandbox(
         """Ask the box once which interpreters it holds, so its
         ``@external`` takes those (``offered_captures``) and the language
         runtimes keep the rest. Concurrent first lines share one ask; a
-        failed ask offers none until ``PROGRAMS_RETRY_SECONDS`` pass.
-        Mirrors TypeScript's ``SandboxRuntime.probePrograms``."""
+        failed ask offers none until ``PROGRAMS_RETRY_SECONDS`` pass. The
+        ask is work its removal waits for (``admit``), and a removed box
+        asks nothing. Mirrors TypeScript's ``SandboxRuntime.probePrograms``."""
         async with self._programs_lock:
-            if not self.programs_pending:
+            if self._retired or not self.programs_pending:
                 return
+            release = self.admit()
             try:
                 await self._ensure_connected()
                 async with asyncio.timeout(PROGRAMS_PROBE_SECONDS):
@@ -417,6 +419,8 @@ class RemoteSandbox(
                     "%s: interpreter probe failed", self.name, exc_info=True
                 )
                 found = None
+            finally:
+                release()
             if found is not None and found.exit_code != 0:
                 logger.debug(
                     "%s: interpreter probe exited %d: %r",

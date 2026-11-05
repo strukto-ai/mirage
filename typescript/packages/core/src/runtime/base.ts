@@ -74,7 +74,7 @@ export abstract class Runtime<E = unknown> {
   config: RuntimeConfig
   protected binding: WorkspaceBinding | null = null
   private readonly activity = new Activity()
-  private retired = false
+  protected retired = false
   private opening: Promise<E> | null = null
   private closing: Promise<void> | null = null
 

@@ -615,3 +615,39 @@ async def test_an_ssh_box_serves_the_workspace_before_its_first_run():
     finally:
         await ws.close()
         await root.close()
+
+
+class HeldProbeBox(ProgramsBox):
+    """A box whose programs probe waits until ``answer`` is set."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.answer = asyncio.Event()
+
+    async def exec_line(self, line, stdin, env, cwd) -> RunResult:
+        if line == programs_probe():
+            await self.answer.wait()
+        return await super().exec_line(line, stdin, env, cwd)
+
+
+@pytest.mark.asyncio
+async def test_retiring_a_box_waits_for_its_programs_probe():
+    box = HeldProbeBox()
+    probe = asyncio.create_task(box.probe_programs())
+    await asyncio.sleep(0.01)
+    retire = asyncio.create_task(box.retire())
+    await asyncio.sleep(0.01)
+    assert not retire.done()
+    box.answer.set()
+    await probe
+    await retire
+    assert box.offered_captures == ("@external", "node", "python3")
+
+
+@pytest.mark.asyncio
+async def test_a_retired_box_asks_nothing():
+    box = ProgramsBox()
+    await box.retire()
+    await box.probe_programs()
+    assert box.probes == 0
+    assert box.connected == 0
