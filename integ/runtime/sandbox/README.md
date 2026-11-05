@@ -4,8 +4,11 @@ The whole-line entry point every sandbox shares: mirage hands the line, its
 stdin, env and cwd to a box the user runs and reads back stdout, stderr and
 the exit code. What the line touches lives on the box, not on a mount,
 unless the runtime's `mount_type` serves the mounts into it: `mounts.json`
-checks hides, a read-only mount and a host change through it, and that
-`both` refuses a line while a rule covers the box's own mount.
+checks hides, a read-only mount and a host change through it, that `both`
+refuses a line while a rule covers the box's own mount, and that a line
+over a served mount the box lost since the mounts were last read, its
+sshfs still running as a restart between check and run leaves it, exits
+126 without running and the next line serves it again.
 
 | File            | Pins                                                                             | Runs on                                          |
 | --------------- | -------------------------------------------------------------------------------- | ------------------------------------------------ |
