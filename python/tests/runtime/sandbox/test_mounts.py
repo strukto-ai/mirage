@@ -908,6 +908,25 @@ async def test_a_prefix_served_over_a_mount_of_the_sandboxs_is_served_again():
     await ws.close()
 
 
+# While its server still runs, a mount laid over a prefix is a cover even
+# when it looks like the one the prefix was served over.
+@pytest.mark.asyncio
+async def test_a_cover_like_the_mount_under_a_live_server_is_left_alone():
+    sandbox = FakeSandbox("ssh")
+    sandbox.table["/data"] = ("tmpfs", "tmpfs")
+    ws = workspace(sandbox)
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    sandbox.table["/data"] = ("tmpfs", "tmpfs")
+    first = await agent.shell("python3 covered.py")
+    assert (first.exit_code, await first.stderr_str()) == (126, lost("/data"))
+    second = await agent.shell("python3 covered.py")
+    assert second.exit_code == 1
+    assert sandbox.stopped == []
+    assert served(sandbox) == ["/data", "/my notes"]
+    await ws.close()
+
+
 # A covered prefix the workspace no longer mounts is dropped, not refused.
 @pytest.mark.asyncio
 async def test_a_covered_prefix_the_workspace_dropped_is_not_refused():
