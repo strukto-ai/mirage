@@ -38,7 +38,9 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     to whether it was a folder. Once an invalidation has buried every
     child of a folder, the folder is in ``_fresh`` with the children added
     or turned folder since, so the next invalidation buries only those,
-    as burying every child again would have changed nothing else: a
+    as burying every child again would have changed nothing else. A child
+    an invalidation removes waits in ``_dropped`` until its folder's list
+    is next read (``_listed``), and membership is the folder's flags: a
     write into a large folder costs what it changes, not its size.
 
     Args:
@@ -58,7 +60,8 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._partial: set[str] = set()
         self._windows: set[str] = set()
         self._tombstones: dict[str, dict[str, bool]] = {}
-        self._fresh: dict[str, list[str]] = {}
+        self._fresh: dict[str, dict[str, None]] = {}
+        self._dropped: dict[str, set[str]] = {}
         self._versions: dict[str, str] = {}
 
     def seed(
@@ -78,6 +81,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         )
         for path in children:
             self._fresh.pop(path, None)
+            self._dropped.pop(path, None)
         self._expiry.update({path: expires_at for path in children})
         self._partial.difference_update(children)
         self._windows.difference_update(children)
@@ -130,7 +134,8 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         folder = vfs_path.rsplit("/", 1)[0] or "/"
         async with self._lock_for(folder):
             now = datetime.fromtimestamp(self.clock.now(), timezone.utc)
-            children = self._children.get(folder, [])
+            listed = self._listed(folder)
+            children = [] if listed is None else listed
             exp = self._expiry.get(folder)
             was_folder = self._is_folder(vfs_path) or self._folder_flags.get(
                 folder, {}
@@ -148,6 +153,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                 lifetime = now + timedelta(seconds=self._ttl)
                 self._children[folder] = [vfs_path]
                 self._fresh.pop(folder, None)
+                self._dropped.pop(folder, None)
                 self._touch(folder)
                 self._folder_flags[folder] = {}
                 self._expiry[folder] = (
@@ -158,10 +164,10 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                 self._partial.add(folder)
                 self._windows.discard(folder)
                 self._versions.pop(folder, None)
-            elif vfs_path not in children:
+            elif vfs_path not in self._folder_flags.get(folder, {}):
                 bisect.insort(children, vfs_path)
                 if folder in self._fresh:
-                    self._fresh[folder].append(vfs_path)
+                    self._fresh[folder][vfs_path] = None
             self._folder_flags.setdefault(folder, {})[vfs_path] = (
                 entry.type is FileType.DIRECTORY
             )
@@ -189,7 +195,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         if datetime.fromtimestamp(self.clock.now(), timezone.utc) >= exp:
             return ListResult(status=LookupStatus.EXPIRED)
         if child is None:
-            children = self._children.get(vfs_path) or []
+            children = self._listed(vfs_path) or []
         else:
             # A folder's flags name exactly the children its listing holds.
             named = child in self._folder_flags.get(vfs_path, {})
@@ -261,7 +267,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                 self._bury(
                     vfs_path,
                     (
-                        *self._children.get(vfs_path, []),
+                        *(self._listed(vfs_path) or []),
                         *(
                             key
                             for key in rows
@@ -270,7 +276,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                     ),
                 )
             buried = {} if partial else self._tombstones.pop(vfs_path, {})
-            candidates = dict.fromkeys(self._children.get(vfs_path, []))
+            candidates = dict.fromkeys(self._listed(vfs_path) or [])
             current_folders = self._folder_flags.get(vfs_path, {})
             candidates.update(dict.fromkeys(buried))
             candidates.update(dict.fromkeys(rows))
@@ -303,6 +309,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             self._entries.update(rows)
             self._children[vfs_path] = child_keys
             self._fresh.pop(vfs_path, None)
+            self._dropped.pop(vfs_path, None)
             self._folder_flags[vfs_path] = {
                 key: row.type is FileType.DIRECTORY
                 for key, row in rows.items()
@@ -369,27 +376,39 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         if fresh is not None and vfs_path in self._folder_flags.get(
             parent, {}
         ):
-            fresh.append(vfs_path)
+            fresh[vfs_path] = None
 
-    def _since(self, folder: str, fresh: list[str]) -> list[str]:
-        """The children ``fresh`` names, once each and in the folder's
-        order, the order burying every child would bury them in.
+    def _since(self, folder: str, fresh: dict[str, None]) -> list[str]:
+        """The children ``fresh`` names, in the folder's order, the order
+        burying every child would bury them in.
 
         Args:
             folder (str): the folder.
-            fresh (list[str]): what changed since its last full bury.
+            fresh (dict[str, None]): what changed since its last full bury.
         """
-        named = list(dict.fromkeys(fresh))
-        if len(named) < 2:
-            return named
+        if len(fresh) < 2:
+            return list(fresh)
         place = {
-            child: at
-            for at, child in enumerate(self._children.get(folder, []))
+            child: at for at, child in enumerate(self._listed(folder) or [])
         }
         return sorted(
-            (child for child in named if child in place),
+            (child for child in fresh if child in place),
             key=place.__getitem__,
         )
+
+    def _listed(self, folder: str) -> list[str] | None:
+        """A folder's children, without the ones invalidations removed
+        since the list was last read.
+
+        Args:
+            folder (str): the folder.
+        """
+        children = self._children.get(folder)
+        dropped = self._dropped.pop(folder, None)
+        if children is not None and dropped:
+            children = [child for child in children if child not in dropped]
+            self._children[folder] = children
+        return children
 
     def _remember_directory(self, vfs_path: str) -> None:
         vfs_path = vfs_path.rstrip("/")
@@ -457,19 +476,17 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             fresh = self._fresh.get(folder)
             self._bury(
                 folder,
-                self._children.get(folder, [])
+                (self._listed(folder) or [])
                 if fresh is None
                 else self._since(folder, fresh),
             )
             if vfs_path in self._children or self._is_folder(vfs_path):
                 self._bury(folder, (vfs_path,))
             self._entries.pop(vfs_path, None)
-            children = self._children.get(folder)
-            if children is not None:
-                self._fresh[folder] = []
-                if vfs_path in children:
-                    at = children.index(vfs_path)
-                    self._children[folder] = children[:at] + children[at + 1 :]
+            if folder in self._children:
+                self._fresh[folder] = {}
+                if vfs_path in self._folder_flags.get(folder, {}):
+                    self._dropped.setdefault(folder, set()).add(vfs_path)
                 self._partial.add(folder)
                 self._windows.discard(folder)
                 self._versions.pop(folder, None)
@@ -477,12 +494,14 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
 
     async def invalidate_dir(self, vfs_path: str) -> None:
         async with self._lock_for(vfs_path):
-            self._bury(vfs_path, tuple(self._children.get(vfs_path, [])))
-            for child in self._children.get(vfs_path, []):
+            listed = self._listed(vfs_path) or []
+            self._bury(vfs_path, listed)
+            for child in listed:
                 self._entries.pop(child, None)
             self._expiry.pop(vfs_path, None)
             self._children.pop(vfs_path, None)
             self._fresh.pop(vfs_path, None)
+            self._dropped.pop(vfs_path, None)
             self._folder_flags.pop(vfs_path, None)
             self._partial.discard(vfs_path)
             self._windows.discard(vfs_path)
@@ -497,11 +516,11 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
     ) -> None:
         self._observation += 1
         if remember:
-            for folder, children in self._children.items():
+            for folder in list(self._children):
                 if under_path(folder, vfs_path) and not any(
                     under_path(folder, prefix) for prefix in excluded
                 ):
-                    self._bury(folder, tuple(children))
+                    self._bury(folder, self._listed(folder) or [])
         # Forgetting what is cached is not evidence that anything went away,
         # so an existing tombstone survives for the next complete listing.
         self._drop_prefix(vfs_path, keep_tombstones=True, excluded=excluded)
@@ -543,6 +562,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         ]:
             self._children.pop(dir_key, None)
             self._fresh.pop(dir_key, None)
+            self._dropped.pop(dir_key, None)
             self._folder_flags.pop(dir_key, None)
         for exp_key in [
             k
@@ -573,6 +593,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._windows.clear()
         self._tombstones.clear()
         self._fresh.clear()
+        self._dropped.clear()
         self._versions.clear()
         self._clear_locks()
 

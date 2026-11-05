@@ -206,7 +206,26 @@ describe('RAMIndexCacheStore', () => {
       store as unknown as { bury: (folder: string, paths: readonly string[]) => void },
       'bury',
     )
+    const children = (store as unknown as { children: Map<string, string[]> }).children
+    const listed = children.get('/d')
     for (let i = 1; i < 100; i++) await store.invalidateEntry(`/d/f${String(i)}`)
     expect(Math.max(...bury.mock.calls.map(([, paths]) => paths.length))).toBeLessThanOrEqual(1)
+    expect(children.get('/d')).toBe(listed)
+    expect((await store.listDir('/d')).partialEntries).toEqual(
+      Array.from({ length: 100 }, (_, i) => `/d/f${String(i + 100)}`),
+    )
+  })
+
+  it('a folder refreshed again is queued once', async () => {
+    const store = new RAMIndexCacheStore({ ttl: 60 })
+    const sub = new FileStat({ name: 'sub', type: FileType.DIRECTORY })
+    await store.setDir('/d', [
+      ['a', mkEntry('a', 'a')],
+      ['sub', sub],
+    ])
+    await store.invalidateEntry('/d/a')
+    for (let i = 0; i < 50; i++) await store.put('/d/sub', sub)
+    const fresh = (store as unknown as { fresh: Map<string, Set<string>> }).fresh
+    expect([...(fresh.get('/d') ?? [])]).toEqual(['/d/sub'])
   })
 })

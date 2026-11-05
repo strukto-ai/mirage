@@ -33,8 +33,10 @@ import { IndexCacheStore } from './store.ts'
  * whether it was a folder. Once an invalidation has buried every child of a
  * folder, the folder is in `fresh` with the children added or turned folder
  * since, so the next invalidation buries only those, as burying every child
- * again would have changed nothing else: a write into a large folder costs
- * what it changes, not its size.
+ * again would have changed nothing else. A child an invalidation removes
+ * waits in `dropped` until its folder's list is next read (`listed`), and
+ * membership is the folder's flags: a write into a large folder costs what
+ * it changes, not its size.
  */
 export class RAMIndexCacheStore extends IndexCacheStore {
   readonly ttl: number
@@ -45,7 +47,8 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   private readonly partial = new Set<string>()
   private readonly windowed = new Set<string>()
   private readonly tombstones = new Map<string, Map<string, boolean>>()
-  private readonly fresh = new Map<string, string[]>()
+  private readonly fresh = new Map<string, Set<string>>()
+  private readonly dropped = new Map<string, Set<string>>()
   private readonly versions = new Map<string, string>()
   private observation = 0
   private readonly lock = new KeyLock()
@@ -68,6 +71,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     for (const [path, keys] of children) {
       this.children.set(path, [...keys])
       this.fresh.delete(path)
+      this.dropped.delete(path)
       this.expiry.set(path, expiresAt.getTime())
       this.partial.delete(path)
       this.windowed.delete(path)
@@ -122,7 +126,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     const folder = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
     return this.lock.withLock(folder, () => {
       const now = this.clock.now() * 1000
-      const children = this.children.get(folder) ?? []
+      const children = this.listed(folder) ?? []
       const exp = this.expiry.get(folder)
       const wasFolder =
         this.entryMap.get(vfsPath)?.type === FileType.DIRECTORY ||
@@ -140,6 +144,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
         const lifetime = now + this.ttl * 1000
         this.children.set(folder, [vfsPath])
         this.fresh.delete(folder)
+        this.dropped.delete(folder)
         this.touch(folder)
         this.folderFlags.set(folder, new Map())
         this.expiry.set(
@@ -149,10 +154,10 @@ export class RAMIndexCacheStore extends IndexCacheStore {
         this.partial.add(folder)
         this.windowed.delete(folder)
         this.versions.delete(folder)
-      } else if (!children.includes(vfsPath)) {
+      } else if (this.folderFlags.get(folder)?.has(vfsPath) !== true) {
         const at = children.findIndex((child) => compareCodePoints(child, vfsPath) > 0)
         children.splice(at === -1 ? children.length : at, 0, vfsPath)
-        this.fresh.get(folder)?.push(vfsPath)
+        this.fresh.get(folder)?.add(vfsPath)
       }
       this.folderFlags.get(folder)?.set(vfsPath, entry.type === FileType.DIRECTORY)
       if (entry.type === FileType.DIRECTORY) this.touch(vfsPath)
@@ -181,7 +186,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     // A folder's flags name exactly the children its listing holds.
     const children =
       child === undefined
-        ? (this.children.get(vfsPath) ?? [])
+        ? (this.listed(vfsPath) ?? [])
         : this.folderFlags.get(vfsPath)?.has(child) === true
           ? [child]
           : []
@@ -235,7 +240,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       const childKeys = [...rows.keys()]
       if (partial)
         this.bury(vfsPath, [
-          ...(this.children.get(vfsPath) ?? []),
+          ...(this.listed(vfsPath) ?? []),
           ...[...rows.keys()].filter(
             (key) => this.children.has(key) || this.entryMap.get(key)?.type === FileType.DIRECTORY,
           ),
@@ -243,7 +248,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       const buried = (partial ? null : this.tombstones.get(vfsPath)) ?? new Map<string, boolean>()
       if (!partial) this.tombstones.delete(vfsPath)
       const candidates = new Set([
-        ...(this.children.get(vfsPath) ?? []),
+        ...(this.listed(vfsPath) ?? []),
         ...buried.keys(),
         ...rows.keys(),
       ])
@@ -271,6 +276,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       for (const [path, row] of rows) this.entryMap.set(path, row)
       this.children.set(vfsPath, childKeys)
       this.fresh.delete(vfsPath)
+      this.dropped.delete(vfsPath)
       this.folderFlags.set(
         vfsPath,
         new Map([...rows].map(([key, row]) => [key, row.type === FileType.DIRECTORY])),
@@ -317,17 +323,29 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   /** Queue a child that may have turned folder for the next invalidation of its parent to bury, as burying every child would. */
   private touch(vfsPath: string): void {
     const parent = vfsPath.slice(0, vfsPath.lastIndexOf('/')) || '/'
-    if (this.folderFlags.get(parent)?.has(vfsPath) === true) this.fresh.get(parent)?.push(vfsPath)
+    if (this.folderFlags.get(parent)?.has(vfsPath) === true) this.fresh.get(parent)?.add(vfsPath)
   }
 
-  /** The children `fresh` names, once each and in the folder's order, the order burying every child would bury them in. */
-  private since(folder: string, fresh: readonly string[]): string[] {
-    const named = [...new Set(fresh)]
+  /** The children `fresh` names, in the folder's order, the order burying every child would bury them in. */
+  private since(folder: string, fresh: ReadonlySet<string>): string[] {
+    const named = [...fresh]
     if (named.length < 2) return named
-    const place = new Map((this.children.get(folder) ?? []).map((child, at) => [child, at]))
+    const place = new Map((this.listed(folder) ?? []).map((child, at) => [child, at]))
     return named
       .filter((child) => place.has(child))
       .sort((a, b) => (place.get(a) ?? 0) - (place.get(b) ?? 0))
+  }
+
+  /** A folder's children, without the ones invalidations removed since the list was last read. */
+  private listed(folder: string): string[] | undefined {
+    const children = this.children.get(folder)
+    const dropped = this.dropped.get(folder)
+    if (dropped === undefined) return children
+    this.dropped.delete(folder)
+    if (children === undefined) return children
+    const kept = children.filter((child) => !dropped.has(child))
+    this.children.set(folder, kept)
+    return kept
   }
 
   private rememberDirectory(vfsPath: string): void {
@@ -395,17 +413,18 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       const fresh = this.fresh.get(folder)
       this.bury(
         folder,
-        fresh === undefined ? (this.children.get(folder) ?? []) : this.since(folder, fresh),
+        fresh === undefined ? (this.listed(folder) ?? []) : this.since(folder, fresh),
       )
       if (this.children.has(vfsPath) || this.entryMap.get(vfsPath)?.type === FileType.DIRECTORY)
         this.bury(folder, [vfsPath])
       this.entryMap.delete(vfsPath)
-      const children = this.children.get(folder)
-      if (children !== undefined) {
-        this.fresh.set(folder, [])
-        const at = children.indexOf(vfsPath)
-        if (at !== -1)
-          this.children.set(folder, children.slice(0, at).concat(children.slice(at + 1)))
+      if (this.children.has(folder)) {
+        this.fresh.set(folder, new Set())
+        if (this.folderFlags.get(folder)?.has(vfsPath) === true) {
+          const dropped = this.dropped.get(folder)
+          if (dropped === undefined) this.dropped.set(folder, new Set([vfsPath]))
+          else dropped.add(vfsPath)
+        }
         this.partial.add(folder)
         this.windowed.delete(folder)
         this.versions.delete(folder)
@@ -417,11 +436,13 @@ export class RAMIndexCacheStore extends IndexCacheStore {
 
   invalidateDir(vfsPath: string): Promise<void> {
     return this.lock.withLock(vfsPath, () => {
-      this.bury(vfsPath, this.children.get(vfsPath) ?? [])
-      for (const child of this.children.get(vfsPath) ?? []) this.entryMap.delete(child)
+      const listed = this.listed(vfsPath) ?? []
+      this.bury(vfsPath, listed)
+      for (const child of listed) this.entryMap.delete(child)
       this.expiry.delete(vfsPath)
       this.children.delete(vfsPath)
       this.fresh.delete(vfsPath)
+      this.dropped.delete(vfsPath)
       this.folderFlags.delete(vfsPath)
       this.partial.delete(vfsPath)
       this.windowed.delete(vfsPath)
@@ -439,9 +460,9 @@ export class RAMIndexCacheStore extends IndexCacheStore {
   ): Promise<void> {
     this.observation += 1
     if (remember) {
-      for (const [folder, children] of this.children) {
+      for (const folder of [...this.children.keys()]) {
         if (underPath(folder, vfsPath) && !excluded.some((prefix) => underPath(folder, prefix))) {
-          this.bury(folder, children)
+          this.bury(folder, this.listed(folder) ?? [])
         }
       }
     }
@@ -475,6 +496,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
       if (underPath(key, vfsPath) && !excluded.some((prefix) => underPath(key, prefix))) {
         this.children.delete(key)
         this.fresh.delete(key)
+        this.dropped.delete(key)
         this.folderFlags.delete(key)
       }
     }
@@ -505,6 +527,7 @@ export class RAMIndexCacheStore extends IndexCacheStore {
     this.windowed.clear()
     this.tombstones.clear()
     this.fresh.clear()
+    this.dropped.clear()
     this.versions.clear()
     this.lock.clear()
     return Promise.resolve()

@@ -251,6 +251,23 @@ async def test_writes_into_a_large_folder_bury_only_what_they_change(
         bury(folder, paths)
 
     monkeypatch.setattr(store, "_bury", counted)
+    listed = store._children["/d"]
     for i in range(1, 100):
         await store.invalidate_entry(f"/d/f{i}")
     assert max(sizes) <= 1
+    assert store._children["/d"] is listed
+    assert (await store.list_dir("/d")).partial_entries == [
+        f"/d/f{i}" for i in range(100, 200)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_folder_refreshed_again_is_queued_once(store):
+    sub = FileStat(name="sub", type=FileType.DIRECTORY)
+    await store.set_dir(
+        "/d", [("a", FileStat(name="a", type=FileType.FILE)), ("sub", sub)]
+    )
+    await store.invalidate_entry("/d/a")
+    for _ in range(50):
+        await store.put("/d/sub", sub)
+    assert store._fresh["/d"] == {"/d/sub": None}
