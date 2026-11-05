@@ -49,6 +49,18 @@ describe('row JSON', () => {
   it('refuses a row missing its type', () => {
     expect(() => parseRow('{"name":"c"}')).toThrow()
   })
+
+  it.each([
+    '{"name":null,"type":"file"}',
+    '{"name":"a","type":"file","size":[]}',
+    '{"name":"a","type":"file","size":true}',
+    '{"name":"a","type":"file","modified":5}',
+    '{"name":"a","type":"file","extra":null}',
+    '{"name":"a","type":"file","uid":[]}',
+    '{"name":"a","type":"bogus"}',
+  ])('refuses a row with a field of the wrong type: %s', (raw) => {
+    expect(() => parseRow(raw)).toThrow()
+  })
 })
 
 describe('IndexDirectory JSON', () => {

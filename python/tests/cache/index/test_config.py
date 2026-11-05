@@ -56,6 +56,23 @@ def test_a_row_missing_its_type_is_refused():
         parse_row('{"name":"c"}')
 
 
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"name":null,"type":"file"}',
+        '{"name":"a","type":"file","size":[]}',
+        '{"name":"a","type":"file","size":true}',
+        '{"name":"a","type":"file","modified":5}',
+        '{"name":"a","type":"file","extra":null}',
+        '{"name":"a","type":"file","uid":[]}',
+        '{"name":"a","type":"bogus"}',
+    ],
+)
+def test_a_row_with_a_field_of_the_wrong_type_is_refused(raw):
+    with pytest.raises(ValueError):
+        parse_row(raw)
+
+
 def test_lookup_result_not_found():
     result = LookupResult(status=LookupStatus.NOT_FOUND)
     assert result.entry is None

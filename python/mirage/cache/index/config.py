@@ -48,15 +48,16 @@ def row_json(entry: FileStat) -> str:
 
 def parse_row(raw: str | bytes) -> FileStat:
     """A stat row read back from its wire form: a field it lacks takes
-    its default and one this host does not know is dropped, as
-    TypeScript's ``FileStatWireSchema`` parses it.
+    its default, one this host does not know is dropped, and one of the
+    wrong type refuses the row, as TypeScript's ``FileStatWireSchema``
+    parses it.
 
     Args:
         raw (str | bytes): the stored JSON.
 
     Raises:
-        ValueError: the JSON is not a row: no name or type, or a type or
-            content this host does not know.
+        ValueError: the JSON is not a row: no name or type, a field of
+            the wrong type, or a type or content this host does not know.
     """
     data = json.loads(raw)
     if not isinstance(data, dict) or not {"name", "type"} <= data.keys():
@@ -66,6 +67,19 @@ def parse_row(raw: str | bytes) -> FileStat:
         for name in FileStat.__dataclass_fields__
         if name in data
     }
+    for name, value in known.items():
+        if value is None and name not in ("name", "type", "extra"):
+            continue
+        if name in ("size", "mode", "dev"):
+            fits = type(value) is int
+        elif name in ("uid", "gid"):
+            fits = type(value) in (int, str)
+        elif name == "extra":
+            fits = type(value) is dict
+        else:
+            fits = isinstance(value, str)
+        if not fits:
+            raise ValueError(f"an index row's {name} cannot be {value!r}")
     content = known.get("content")
     known["type"] = FileType(data["type"])
     known["content"] = None if content is None else ContentType(content)
