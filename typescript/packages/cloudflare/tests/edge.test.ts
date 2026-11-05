@@ -198,9 +198,19 @@ describe('mirage in workerd', () => {
   })
 
   it('refuses a write past max_memory', async () => {
+    const [, copy, after] = await run(
+      ['seq 1 700000 > /tmp/a', 'cp /tmp/a /tmp/b', 'echo ok'],
+      '8MB',
+    )
+    expect(copy?.exit).toBe(1)
+    expect(copy?.stderr).toContain('Disk quota exceeded')
+    expect(after?.stdout).toBe('ok\n')
+  })
+
+  it('stops output held for its redirect at max_memory', async () => {
     const [fill, after] = await run(['seq 1 10000000 > /tmp/big', 'echo ok'], '8MB')
     expect(fill?.exit).toBe(1)
-    expect(fill?.stderr).toContain('Disk quota exceeded')
+    expect(fill?.stderr).toBe('line: memory exhausted\n')
     expect(after?.stdout).toBe('ok\n')
   })
 
