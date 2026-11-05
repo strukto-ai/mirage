@@ -10,9 +10,10 @@ from mirage.workspace.session.constants import MAX_ENV
 
 def test_entries_count_their_utf8_bytes():
     assert entry_bytes("a", "é") == 3
-    assert args_bytes(["ab", "c"]) == 3
-    assert entry_bytes("a", ["xy", None, "z"]) == 4
-    assert entry_bytes("m", {"k": "vv"}) == 4
+    assert args_bytes(["ab", "c"]) == 5
+    assert args_bytes([""]) == 1
+    assert entry_bytes("a", ["xy", None, "z"]) == 6
+    assert entry_bytes("m", {"k": "vv"}) == 5
 
 
 async def run(
@@ -82,7 +83,9 @@ async def test_fresh_names_count_with_no_value():
 async def test_arguments_a_call_or_source_passes_count():
     for line in (
         'FUNCNEST=30; f() { f "$@" "$@"; }; f aaaaaaaa',
+        'FUNCNEST=30; f() { f "$@" "$@"; }; f \'\'',
         'echo \'source /s "$@" "$@"\' > /s; source /s aaaaaaaa',
+        "set -- aaaaaaaa; echo 'source /s' > /s; source /s",
     ):
         _, err, code = await run(line)
         assert code == 2 and "past max_env of 200 bytes" in err, line

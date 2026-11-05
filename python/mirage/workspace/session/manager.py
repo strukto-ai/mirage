@@ -32,7 +32,7 @@ from mirage.workspace.record.types import (
     RecordFields,
     generation_of,
 )
-from mirage.workspace.session.budget import check_env_fits
+from mirage.workspace.session.budget import check_env_fits, entry_bytes
 from mirage.workspace.session.resolve import apply_profile, narrow
 from mirage.workspace.session.session import (
     SessionState,
@@ -71,6 +71,22 @@ def _merge_seed_vars(
     for name, var in seed_vars.items():
         if name not in session.vars:
             session.vars[name] = var
+
+
+def _seed_bytes(
+    session: SessionState, seed_vars: Mapping[str, ShellVar]
+) -> int:
+    """The bytes :func:`_merge_seed_vars` adds to a stored record.
+
+    Args:
+        session (SessionState): a session hydrated from the store.
+        seed_vars (Mapping[str, ShellVar]): the workspace's template.
+    """
+    return sum(
+        entry_bytes(name, var.value)
+        for name, var in seed_vars.items()
+        if name not in session.vars
+    )
 
 
 class SessionManager(SessionOwner):
@@ -343,14 +359,20 @@ class SessionManager(SessionOwner):
         async with self._load_lock:
             if self._loaded:
                 return
-            # A record past max_env refuses the load before any session
-            # changes, as a snapshot past it does.
+            # A record past max_env, with the env entries the merge adds,
+            # refuses the load before any session changes, as a snapshot
+            # past it does. A record a local session replaced is skipped.
             records = {
                 sid: SessionState.from_dict(fields)
                 for sid, fields in (await self._store.load()).items()
+                if sid == self._default_id or sid not in self._sessions
             }
             for record in records.values():
-                check_env_fits(record, self.max_env)
+                check_env_fits(
+                    record,
+                    self.max_env,
+                    _seed_bytes(record, self._seed_vars),
+                )
             for sid, stored in records.items():
                 if sid == self._default_id:
                     default = self._sessions[self._default_id]
@@ -390,8 +412,6 @@ class SessionManager(SessionOwner):
                     self._has_managed = self._has_managed or _holds_managed(
                         default
                     )
-                    continue
-                if sid in self._sessions:
                     continue
                 stored.ids = self._ids
                 self._sessions[sid] = stored

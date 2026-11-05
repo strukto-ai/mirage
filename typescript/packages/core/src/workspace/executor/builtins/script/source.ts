@@ -68,8 +68,9 @@ export async function handleSource(
   }
   const cs = callStack ?? new CallStack(session.shellNesting)
   cs.admit(name)
-  checkEnv(session, 0, argsBytes(args), framesBytes(cs))
-  cs.push(args.length > 0 ? args : [...positionalParams(session, cs)], 'source', true)
+  const params = args.length > 0 ? args : [...positionalParams(session, cs)]
+  checkEnv(session, 0, argsBytes(params), framesBytes(cs))
+  cs.push(params, 'source', true)
   const outerNames = session.functionNames
   if (outerNames !== null) session.functionNames = cs.functionNames()
   let io: IOResult

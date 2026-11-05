@@ -103,8 +103,9 @@ async def handle_source(
         else CallStack(session.shell_nesting)
     )
     cs.admit(name)
-    check_env(session, 0, args_bytes(args or []), frames_bytes(cs))
-    cs.push(args or list(positional_params(session, cs)), "source", True)
+    params = args or list(positional_params(session, cs))
+    check_env(session, 0, args_bytes(params), frames_bytes(cs))
+    cs.push(params, "source", True)
     outer_names = session.function_names
     if outer_names is not None:
         session.function_names = cs.function_names()

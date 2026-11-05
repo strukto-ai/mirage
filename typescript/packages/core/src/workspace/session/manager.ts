@@ -20,7 +20,7 @@ import type { CompiledProfile } from '../../policy/profile.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
 import { applyProfile, narrow } from './resolve.ts'
-import { checkEnvFits } from './budget.ts'
+import { checkEnvFits, entryBytes } from './budget.ts'
 import { CAS_MAX_RETRIES, generationOf, type RecordFields } from '../record/types.ts'
 import type { AdmissionRules, Decision, ProfileScripts } from '../../policy/types.ts'
 import type { EnvEntries } from '../../secrets/config.ts'
@@ -52,6 +52,15 @@ function mergeSeedVars(session: SessionState, seedVars: Record<string, ShellVar>
   for (const [name, seeded] of Object.entries(seedVars)) {
     if (!(name in session.vars)) session.vars[name] = seeded
   }
+}
+
+/** The bytes `mergeSeedVars` adds to a stored record. Mirrors Python's `_seed_bytes`. */
+function seedBytes(session: SessionState, seedVars: Record<string, ShellVar>): number {
+  let held = 0
+  for (const [name, seeded] of Object.entries(seedVars)) {
+    if (!(name in session.vars)) held += entryBytes(name, seeded.value)
+  }
+  return held
 }
 
 /**
@@ -305,12 +314,15 @@ export class SessionManager extends SessionOwner {
   }
 
   private async hydrate(): Promise<void> {
-    // A record past max_env refuses the load before any session changes, as a
-    // snapshot past it does.
-    const records = [...(await this.sessionStore.load())].map(
-      ([sid, fields]) => [sid, SessionState.fromDict(fields as StoredSession)] as const,
-    )
-    for (const [, record] of records) checkEnvFits(record, this.maxEnv)
+    // A record past max_env, with the env entries the merge adds, refuses the
+    // load before any session changes, as a snapshot past it does. A record a
+    // local session replaced is skipped.
+    const records = [...(await this.sessionStore.load())]
+      .filter(([sid]) => sid === this.defaultId || !this.sessions.has(sid))
+      .map(([sid, fields]) => [sid, SessionState.fromDict(fields as StoredSession)] as const)
+    for (const [, record] of records) {
+      checkEnvFits(record, this.maxEnv, seedBytes(record, this.seedVarsInternal))
+    }
     for (const [sid, stored] of records) {
       if (sid === this.defaultId) {
         const dflt = this.defaultSession()
@@ -349,7 +361,6 @@ export class SessionManager extends SessionOwner {
         this.hasManaged = this.hasManaged || holdsManaged(dflt)
         continue
       }
-      if (this.sessions.has(sid)) continue
       stored.ids = this.ids
       this.sessions.set(sid, stored)
       this.persisted.set(sid, JSON.stringify(stored.toDict()))
