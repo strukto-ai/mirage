@@ -932,3 +932,18 @@ async def test_an_interpreter_the_box_took_judges_the_scripts_link_target(
         assert box.lines == [] and box.whole == []
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_binary_linked_from_mirages_own_root_answers_126():
+    box = Box(holds="")
+    ws = workspace(box)
+    try:
+        await ws.vfs.write("/ram/t", BINARY)
+        await ws.shell("ln -s /ram/t /entry")
+        await ws.shell("cd /ram")
+        code, _, _ = await run(ws, "/entry a")
+        assert code == 126
+        assert box.lines == []
+    finally:
+        await ws.close()

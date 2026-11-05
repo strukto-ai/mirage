@@ -140,6 +140,7 @@ export async function handleExecPath(
     if (
       routing !== undefined &&
       servesWorkspace(runs) &&
+      !registry.unserved(resolvePath(path, session.cwd)) &&
       !registry.unserved(target) &&
       registry.execAllowedAt(target)
     )

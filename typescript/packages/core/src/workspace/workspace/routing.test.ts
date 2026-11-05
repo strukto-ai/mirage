@@ -876,3 +876,19 @@ describe('Router linked script exec rule', () => {
     }
   })
 })
+
+describe('Router linked binaries', () => {
+  it("answers 126 for a binary linked from Mirage's own root", async () => {
+    const box = new Box('')
+    const ws = workspace(box)
+    try {
+      await ws.vfs.write('/ram/t', BINARY)
+      await ws.shell('ln -s /ram/t /entry')
+      await ws.shell('cd /ram')
+      expect((await run(ws, '/entry a'))[0]).toBe(126)
+      expect(box.lines).toEqual([])
+    } finally {
+      await ws.close()
+    }
+  })
+})
