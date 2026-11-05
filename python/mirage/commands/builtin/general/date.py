@@ -31,7 +31,7 @@ from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import encode_text
 from mirage.types import PathSpec
 from mirage.utils.clock import system_date
-from mirage.utils.dates import parse_date_expr, parse_posix_time
+from mirage.utils.dates import parse_date_expr_async, parse_posix_time_async
 from mirage.utils.timezone import zone_from_env
 
 # GNU date's output formats, each chosen by one option: -I takes one
@@ -159,7 +159,7 @@ async def date(
         raise lacks_plus_error(setting)
     zone = timezone.utc if u else zone_from_env(ctx.env)
     if setting is not None:
-        placed = parse_posix_time(setting, tz=zone)
+        placed = await parse_posix_time_async(setting, tz=zone)
         if placed is None:
             return invalid_date(setting)
         dt = placed
@@ -171,7 +171,7 @@ async def date(
         now = system_date(zone)
         dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
     elif d is not None:
-        parsed_d = parse_date_expr(d, tz=zone)
+        parsed_d = await parse_date_expr_async(d, tz=zone)
         if parsed_d is None:
             # GNU's refusal, exit 1: a wrong answer with exit 0 poisons
             # whatever consumed it (the NaN-timestamp corpus failure).

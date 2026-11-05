@@ -2,12 +2,14 @@ mod awk;
 mod base64;
 mod bc;
 mod block_size;
+mod calendar;
 mod cat;
 mod cmp;
 mod column;
 mod comm;
 mod compress;
 mod cut;
+mod date;
 mod diff;
 mod digest;
 mod document;
@@ -426,6 +428,7 @@ pub fn open(kind: &str, config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
         "scan" => scan::open(config),
         "quote" => quote::open(config),
         "width" => width::open(config),
+        "date" => date::open(config),
         "expr" => expr::open(config),
         "find_printf" => find_printf::open(config),
         "strftime" => strftime::open(config),

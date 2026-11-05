@@ -95,6 +95,38 @@
         "stdout": "",
         "stderr": "date: invalid date '2026-10-06 09:32 CET'\ndate: invalid date '6 Oct 10:00'\ndate: invalid date '2026-10-06 13pm'\ndate: invalid date 'yesterday ago'\n"
       }
+    },
+    {
+      "id": "date_d_exact_cancelled_calendar_shift",
+      "seq": 110000022,
+      "targets": [
+        "ram",
+        "disk",
+        "redis",
+        "opfs",
+        "s3",
+        "gridfs",
+        "s3-prefix",
+        "gridfs-prefix",
+        "hf",
+        "hf-prefix",
+        "dropbox",
+        "dropbox-root",
+        "onedrive",
+        "sharepoint",
+        "ssh",
+        "nextcloud",
+        "tidb-filesystem",
+        "gdrive",
+        "gdrive-folder",
+        "box"
+      ],
+      "command": "date -u -d '2026-01-15 12:00:01 285426750 years -9007198249190400 seconds' +%s",
+      "expect": {
+        "exit": 0,
+        "stdout": "1768478401\n",
+        "stderr": ""
+      }
     }
   ]
 }
