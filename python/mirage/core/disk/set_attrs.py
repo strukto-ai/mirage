@@ -15,15 +15,11 @@
 import os
 from datetime import datetime
 
-import aiofiles.os
-
 from mirage.accessor.disk import DiskAccessor
+from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.errors import disk_errors
-from mirage.core.disk.utils import resolve_inside
+from mirage.core.disk.utils import resolve_inside_sync
 from mirage.types import PathSpec
-
-aio_chmod = aiofiles.os.wrap(os.chmod)
-aio_utime = aiofiles.os.wrap(os.utime)
 
 
 async def set_attrs(
@@ -58,32 +54,41 @@ async def set_attrs(
     Returns:
         dict[str, int | str]: requested fields the inode does not hold.
     """
-    p = await resolve_inside(accessor.root, path)
-    with disk_errors(path.virtual):
-        await aiofiles.os.stat(p)
-    residual: dict[str, int | str] = {}
-    if mode is not None:
-        keep = 0o700 if await aiofiles.os.path.isdir(p) else 0o600
-        await aio_chmod(p, mode | keep)
-        if accessor.usage is not None:
+    chmodded = False
+
+    def apply() -> dict[str, int | str]:
+        nonlocal chmodded
+        p = resolve_inside_sync(accessor.root, path)
+        with disk_errors(path.virtual):
+            os.stat(p)
+        residual: dict[str, int | str] = {}
+        if mode is not None:
+            keep = 0o700 if os.path.isdir(p) else 0o600
+            os.chmod(p, mode | keep)
+            chmodded = True
+            if mode | keep != mode:
+                residual["mode"] = mode
+        if uid is not None:
+            residual["uid"] = uid
+        if gid is not None:
+            residual["gid"] = gid
+        if atime is not None or mtime is not None:
+            st = os.stat(p)
+            new_atime = (
+                datetime.fromisoformat(atime).timestamp()
+                if atime is not None
+                else st.st_atime
+            )
+            new_mtime = (
+                datetime.fromisoformat(mtime).timestamp()
+                if mtime is not None
+                else st.st_mtime
+            )
+            os.utime(p, (new_atime, new_mtime))
+        return residual
+
+    try:
+        return await run_blocking(apply)
+    finally:
+        if chmodded and accessor.usage is not None:
             accessor.usage.stale()
-        if mode | keep != mode:
-            residual["mode"] = mode
-    if uid is not None:
-        residual["uid"] = uid
-    if gid is not None:
-        residual["gid"] = gid
-    if atime is not None or mtime is not None:
-        st = await aiofiles.os.stat(p)
-        new_atime = (
-            datetime.fromisoformat(atime).timestamp()
-            if atime is not None
-            else st.st_atime
-        )
-        new_mtime = (
-            datetime.fromisoformat(mtime).timestamp()
-            if mtime is not None
-            else st.st_mtime
-        )
-        await aio_utime(p, (new_atime, new_mtime))
-    return residual

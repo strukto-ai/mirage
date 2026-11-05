@@ -13,12 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 // One payload layout, shared by both languages and never versioned: a row
-// is the JSON IndexEntry / IndexDirectory writes, and a row that does not
-// parse is an error, not a miss. Earlier layouts are not read; flush the key
-// prefix when upgrading workers that share an index.
+// is the JSON a FileStat writes, a listing the hash and sets the index
+// scripts keep under its path, and a row that does not parse is an error,
+// not a miss. Earlier layouts are not read; flush the key prefix when
+// upgrading workers that share an index.
 export const ENTRY_PREFIX = 'mirage:idx:entry:'
 export const CHILDREN_PREFIX = 'mirage:idx:directory:'
 export const TOMBSTONE_PREFIX = 'mirage:idx:tombstone:'
+export const LISTED_PREFIX = 'mirage:idx:listed:'
+export const FOLDERS_PREFIX = 'mirage:idx:folders:'
+export const FRESH_PREFIX = 'mirage:idx:fresh:'
 
 export const PATHS_KEY = 'mirage:idx:paths'
 

@@ -15,10 +15,9 @@
 import os
 from functools import partial
 
-import aiofiles
-
 from mirage.accessor.disk import DiskAccessor
-from mirage.core.disk.utils import open_flags, resolve_inside
+from mirage.concurrency.limiter import run_blocking
+from mirage.core.disk.utils import open_flags, resolve_inside_sync
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
@@ -30,13 +29,15 @@ async def truncate(
     no_create: bool = False,
 ) -> None:
     timer = start_op()
-    p = await resolve_inside(accessor.root, path_spec)
     flags = os.O_WRONLY | (0 if no_create else os.O_CREAT)
+
+    def cut() -> None:
+        p = resolve_inside_sync(accessor.root, path_spec)
+        with open(p, "wb", opener=partial(open_flags, flags)) as f:
+            f.truncate(length)
+
     try:
-        async with aiofiles.open(
-            p, "wb", opener=partial(open_flags, flags)
-        ) as f:
-            await f.truncate(length)
+        await run_blocking(cut)
     except FileNotFoundError:
         if no_create:
             return

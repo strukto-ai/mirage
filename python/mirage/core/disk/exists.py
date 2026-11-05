@@ -12,19 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiofiles.os
+import asyncio
+import os
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.errors import disk_errors
-from mirage.core.disk.utils import resolve_inside
+from mirage.core.disk.utils import resolve_inside_sync
 from mirage.types import PathSpec
 
 
 async def exists(accessor: DiskAccessor, path_spec: PathSpec) -> bool:
-    try:
-        p = await resolve_inside(accessor.root, path_spec)
-        with disk_errors(path_spec.virtual):
-            await aiofiles.os.stat(p)
-    except (FileNotFoundError, NotADirectoryError):
-        return False
-    return True
+    def present() -> bool:
+        try:
+            p = resolve_inside_sync(accessor.root, path_spec)
+            with disk_errors(path_spec.virtual):
+                os.stat(p)
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+        return True
+
+    return await asyncio.to_thread(present)

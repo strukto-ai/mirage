@@ -545,11 +545,15 @@ class Workspace:
         # included), else the session the id names, the default for none;
         # nothing for an id this workspace holds no session for. Its
         # caller is a copy of that session's id and working directory,
-        # so nothing a method does to it reaches the session.
+        # so nothing a method does to it reaches the session. The view
+        # holds no state of its own, so the last session's is kept.
+        kept: tuple[SessionState, Policies, SessionView] | None = None
+
         def views(
             session_id: str,
             session: SessionState | None = None,
         ) -> tuple[SessionView, Files, PolicyCaller] | None:
+            nonlocal kept
             if session is None:
                 session = get_current_session_unless_foreign(self._session_mgr)
             if session is None or session_id not in ("", session.session_id):
@@ -561,8 +565,18 @@ class Workspace:
                 )
             if session is None:
                 return None
+            if (
+                kept is None
+                or kept[0] is not session
+                or kept[1] is not self.policies
+            ):
+                kept = (
+                    session,
+                    self.policies,
+                    session_view(session, self.policies),
+                )
             return (
-                session_view(session, self.policies),
+                kept[2],
                 self.vfs._for_session(session.session_id),
                 policy_caller(session, self.policies.account),
             )

@@ -122,7 +122,7 @@ import { BinViewVFS } from '../../vfs/bin/bin.ts'
 import { HISTORY_PREFIX, HistoryViewVFS } from '../../vfs/history/history.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import type { S3Config } from '../../vfs/s3/config.ts'
-import type { OpKwargs } from '../../view/types.ts'
+import type { OpKwargs, SessionView } from '../../view/types.ts'
 import { newStatusWriter, runWithLineAbort } from '../abort.ts'
 import type { CLIInstall } from '../cli/types.ts'
 import { Dispatcher } from '../dispatcher/index.ts'
@@ -470,7 +470,9 @@ export class Workspace {
     // session the id names, the default for none; nothing for an id this
     // workspace holds no session for. Its caller is a copy of that session's
     // id and working directory, so nothing a method does to it reaches the
-    // session.
+    // session. The view holds no state of its own, so the last session's is
+    // kept.
+    let kept: { session: SessionState; policies: Policies; view: SessionView } | null = null
     this.registry.policies.views = (sessionId, given) => {
       let session =
         given ??
@@ -480,7 +482,13 @@ export class Workspace {
         session = this.sessionManager.has(wanted) ? this.sessionManager.get(wanted) : null
       }
       if (session === null) return null
-      const view = sessionView(session, this.policies)
+      if (kept?.session !== session || kept.policies !== this.policies)
+        kept = {
+          session,
+          policies: this.policies,
+          view: Object.freeze(sessionView(session, this.policies)),
+        }
+      const view = kept.view
       // A method decides: its files say so on each op's own caller, so its
       // reads run and its writes are refused wherever it runs.
       const vfs = withCaller(this.vfs.forSession(session.sessionId), {

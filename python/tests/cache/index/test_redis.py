@@ -22,8 +22,8 @@ import pytest
 import pytest_asyncio
 
 from mirage.cache.index import LookupStatus
-from mirage.cache.index.config import IndexDirectory, row_json
-from mirage.cache.index.redis import RedisIndexCacheStore
+from mirage.cache.index.config import row_json
+from mirage.cache.index.redis import _READ_LISTING, RedisIndexCacheStore
 from mirage.cache.index.scope import command_scope
 from mirage.cache.index.store import IndexCacheStore
 from mirage.types import FileStat, FileType
@@ -112,15 +112,22 @@ LISTED = [("a", _row("a")), ("b", _row("b"))]
 
 
 @pytest.fixture
-def mgets(store, monkeypatch):
+def reads(store, monkeypatch):
     sent: list[tuple[str, ...]] = []
     mget = store._client.mget
+    run = store._client.eval
 
     async def counted(*keys):
         sent.append(keys)
         return await mget(*keys)
 
+    async def listed(script, count, *args):
+        if script == _READ_LISTING:
+            sent.append(args)
+        return await run(script, count, *args)
+
     monkeypatch.setattr(store._client, "mget", counted)
+    monkeypatch.setattr(store._client, "eval", listed)
     return sent
 
 
@@ -204,15 +211,15 @@ async def test_a_listing_write_is_seen_by_the_same_command(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", sorted(NOT_COUNTING))
-async def test_a_row_write_keeps_the_listing_read(store, mgets, method):
+async def test_a_row_write_keeps_the_listing_read(store, reads, method):
     await store.set_dir("/d", LISTED)
-    mgets.clear()
+    reads.clear()
     async with command_scope():
         before = await store.list_dir("/d")
         await NOT_COUNTING[method](store)
         after = await store.list_dir("/d")
     assert after == before
-    assert len(mgets) == 1
+    assert len(reads) == 1
     assert (await store.get("/d/a")).entry.fingerprint == "new"
 
 
@@ -228,13 +235,13 @@ def test_every_store_method_is_classified():
 
 @pytest.mark.asyncio
 async def test_a_write_on_another_keyspace_keeps_the_listing_read(
-    store, mgets, redis_prefix
+    store, reads, redis_prefix
 ):
     other = RedisIndexCacheStore(
         ttl=60, url=REDIS_URL, key_prefix=f"{redis_prefix}other:"
     )
     await store.set_dir("/d", LISTED)
-    mgets.clear()
+    reads.clear()
     try:
         async with command_scope():
             await store.list_dir("/d")
@@ -243,7 +250,7 @@ async def test_a_write_on_another_keyspace_keeps_the_listing_read(
     finally:
         await other.clear()
         await other.close()
-    assert len(mgets) == 1
+    assert len(reads) == 1
 
 
 @pytest.mark.asyncio
@@ -297,8 +304,9 @@ async def test_a_read_during_an_unfinished_write_is_not_kept(
     release = asyncio.Event()
 
     async def held(*args):
-        entered.set()
-        await release.wait()
+        if args[0] != _READ_LISTING:
+            entered.set()
+            await release.wait()
         return await evaluate(*args)
 
     monkeypatch.setattr(store._client, "eval", held)
@@ -313,10 +321,10 @@ async def test_a_read_during_an_unfinished_write_is_not_kept(
 
 
 @pytest.mark.asyncio
-async def test_a_missing_or_expired_listing_is_read_each_time(store, mgets):
+async def test_a_missing_or_expired_listing_is_read_each_time(store, reads):
     await store.set_dir("/d", LISTED)
     await store.invalidate()
-    mgets.clear()
+    reads.clear()
     async with command_scope():
         for folder, status in (
             ("/missing", LookupStatus.NOT_FOUND),
@@ -324,30 +332,44 @@ async def test_a_missing_or_expired_listing_is_read_each_time(store, mgets):
         ):
             for _ in range(2):
                 assert (await store.list_dir(folder)).status is status
-    assert len(mgets) == 4
+    assert len(reads) == 4
+
+
+@pytest.mark.asyncio
+async def test_a_lookup_of_one_child_reads_that_child_alone(store, reads):
+    await store.set_dir("/d", LISTED)
+    await store.invalidate_entry("/d/b")
+    reads.clear()
+    assert (await store.list_dir("/d", "/d/a")).partial_entries == ["/d/a"]
+    async with command_scope():
+        assert (await store.list_dir("/d", "/d/b")).partial_entries == []
+        assert (await store.get("/d/a")).entry.fingerprint == "a"
+        assert (await store.list_dir("/d", "/d/a")).partial_entries == ["/d/a"]
+        assert (await store.list_dir("/d", "/d/z")).partial_entries == []
+    assert [sent[-1] for sent in reads] == ["/d/a", "/d/b", "/d"]
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method", sorted(NOT_COUNTING))
 @pytest.mark.parametrize("writer", ["self", "peer"])
 async def test_row_batches_see_row_writes_without_reloading_membership(
-    store, peer, mgets, method, writer
+    store, peer, reads, method, writer
 ):
     await store.set_dir("/d", LISTED)
-    mgets.clear()
+    reads.clear()
     async with command_scope():
         await store.list_dir("/d")
         assert (await store.get("/d/a")).entry.fingerprint != "new"
         await NOT_COUNTING[method](store if writer == "self" else peer)
         assert (await store.get("/d/a")).entry.fingerprint == "new"
         await store.get("/d/b")
-    assert len(mgets) == 3
+    assert len(reads) == 3
 
 
 @pytest.mark.asyncio
-async def test_a_row_write_leaves_its_siblings_batched(store, mgets):
+async def test_a_row_write_leaves_its_siblings_batched(store, reads):
     await store.set_dir("/d", LISTED)
-    mgets.clear()
+    reads.clear()
     async with command_scope():
         await store.list_dir("/d")
         for name in ("a", "b"):
@@ -358,12 +380,12 @@ async def test_a_row_write_leaves_its_siblings_batched(store, mgets):
                 row_json(row),
                 replace(row, fingerprint="new"),
             )
-    assert len(mgets) == 2
+    assert len(reads) == 2
 
 
 @pytest.mark.asyncio
 async def test_a_new_command_reads_rows_changed_outside_the_process(
-    store, mgets
+    store, reads
 ):
     await store.set_dir("/d", LISTED)
     async with command_scope():
@@ -381,31 +403,31 @@ async def test_a_new_command_reads_rows_changed_outside_the_process(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("kind", ["complete", "partial", "window"])
 async def test_a_known_point_observation_keeps_the_listing_memo(
-    store, mgets, kind
+    store, reads, kind
 ):
     if kind == "partial":
         await store.set_partial_dir("/d", LISTED)
     else:
         await store.set_dir("/d", LISTED, window=kind == "window")
-    mgets.clear()
+    reads.clear()
     async with command_scope():
         before = await store.list_dir("/d")
         assert await store.invalidate_missing(["/d/a"]) is False
         assert await store.list_dir("/d") == before
-    assert len(mgets) == 1
+    assert len(reads) == 1
 
 
 @pytest.mark.asyncio
 async def test_an_unknown_point_observation_keeps_the_listing_memo(
-    store, mgets
+    store, reads
 ):
     await store.set_dir("/d", LISTED)
-    mgets.clear()
+    reads.clear()
     async with command_scope():
         before = await store.list_dir("/d")
         assert await store.invalidate_missing(["/e/new"]) is False
         assert await store.list_dir("/d") == before
-    assert len(mgets) == 1
+    assert len(reads) == 1
 
 
 @pytest.mark.asyncio
@@ -432,12 +454,9 @@ async def test_peer_observation_drops_a_contradicted_memo_after_eviction(
     async with command_scope():
         assert (await store.list_dir("/d")).entries == ["/d/a", "/d/b"]
         if known:
-            listing = IndexDirectory.model_validate_json(
-                await store._client.get(key)
+            await store._client.zadd(
+                f"{store._key_prefix}mirage:idx:listed:/d", {"/d/new": 3}
             )
-            listing.entries.append("/d/new")
-            listing.folders.append(0)
-            await store._client.set(key, listing.model_dump_json())
             assert "/d/new" in (await peer.list_dir("/d")).entries
         await store._client.delete(key)
         ticket = await store.refill_token()
@@ -448,15 +467,15 @@ async def test_peer_observation_drops_a_contradicted_memo_after_eviction(
 
 @pytest.mark.asyncio
 async def test_peer_unknown_observation_keeps_an_unrelated_memo(
-    store, peer, mgets
+    store, peer, reads
 ):
     await store.set_dir("/d", LISTED)
-    mgets.clear()
+    reads.clear()
     async with command_scope():
         before = await store.list_dir("/d")
         assert await peer.invalidate_missing(["/e/new"]) is False
         assert await store.list_dir("/d") == before
-    assert len(mgets) == 1
+    assert len(reads) == 1
 
 
 @pytest.mark.asyncio

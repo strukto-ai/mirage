@@ -1,5 +1,5 @@
 {
- "baseline": 1672,
+ "baseline": 1670,
  "modules": {
   "server/app": {
    "python_only": {
@@ -382,6 +382,10 @@
   "core/disk/utils": {
    "python_only": {
     "_libc": "Python reaches the native realpath on macOS through ctypes, loading libc once; Node's fs.realpath calls the native realpath itself."
+   },
+   "typescript_only": {
+    "probeName": "Python's path check runs whole on one worker thread; node:fs answers each lstat, open and realpath on its own trip, so TypeScript starts a name's probes together to wait once per name.",
+    "settles": "TypeScript starts a name's probes before it knows it will await them, so a failure nothing awaits needs a logging handler; Python's walk runs each probe in turn on one worker thread."
    }
   },
   "core/disk/readdir": {

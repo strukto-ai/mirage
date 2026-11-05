@@ -13,12 +13,16 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 # One payload layout, shared by both languages and never versioned: a row
-# is the JSON FileStat / IndexDirectory writes, and a row that does not
-# parse is an error, not a miss. Earlier layouts are not read; flush the key
-# prefix when upgrading workers that share an index.
+# is the JSON a FileStat writes, a listing the hash and sets the index
+# scripts keep under its path, and a row that does not parse is an error,
+# not a miss. Earlier layouts are not read; flush the key prefix when
+# upgrading workers that share an index.
 ENTRY_PREFIX = "mirage:idx:entry:"
 CHILDREN_PREFIX = "mirage:idx:directory:"
 TOMBSTONE_PREFIX = "mirage:idx:tombstone:"
+LISTED_PREFIX = "mirage:idx:listed:"
+FOLDERS_PREFIX = "mirage:idx:folders:"
+FRESH_PREFIX = "mirage:idx:fresh:"
 
 PATHS_KEY = "mirage:idx:paths"
 

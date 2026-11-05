@@ -45,7 +45,10 @@ from mirage.cache.index.constants import (
     CHILDREN_PREFIX,
     DEFAULT_KEY_PREFIX,
     ENTRY_PREFIX,
+    FOLDERS_PREFIX,
+    FRESH_PREFIX,
     GENERATION_KEY,
+    LISTED_PREFIX,
     PATHS_KEY,
     REGISTRY_PAGE,
     TOMBSTONE_PREFIX,
@@ -102,8 +105,35 @@ local function path_range(root)
 end
 """
 
-_PATH_REGISTRY = (
+_LISTING_KEYS = (
     _PATH_RANGE
+    + """
+-- A listing is four keys under its folder's path: a hash of its fields, its
+-- children scored in listing order, the children that are folders, and the
+-- children added or turned folder since the listing was last buried.
+local function listing_keys(prefix, path)
+  local base = string.sub(prefix, 1, -11)
+  return prefix .. path, base .. 'listed:' .. path,
+    base .. 'folders:' .. path, base .. 'fresh:' .. path
+end
+-- Each part also holds an empty-string sentinel, so a listing Redis evicted
+-- only some keys of reads as gone, never as one that lost children.
+local function intact(prefix, path)
+  local meta, listed, folders, fresh = listing_keys(prefix, path)
+  if redis.call('EXISTS', meta) == 0 then return false end
+  if redis.call('ZSCORE', listed, '')
+      and redis.call('SISMEMBER', folders, '') == 1
+      and redis.call('SISMEMBER', fresh, '') == 1 then
+    return true
+  end
+  redis.call('DEL', meta, listed, folders, fresh)
+  return false
+end
+"""
+)
+
+_PATH_REGISTRY = (
+    _LISTING_KEYS
     + """
 local function track(registry, prefixes, paths)
   for _, path in ipairs(paths) do redis.call('ZADD', registry, 0, path) end
@@ -112,6 +142,8 @@ local function prune(registry, prefixes, path)
   for _, prefix in ipairs(prefixes) do
     if redis.call('EXISTS', prefix .. path) == 1 then return end
   end
+  local _, listed, folders, fresh = listing_keys(prefixes[2], path)
+  if redis.call('EXISTS', listed, folders, fresh) > 0 then return end
   redis.call('ZREM', registry, path)
 end
 local function subtree(registry, root)
@@ -130,32 +162,140 @@ end
 _LISTING_HISTORY = (
     _PATH_REGISTRY
     + """
-local function bury(key, listing)
-  local raw = redis.call('GET', key)
-  local saved = raw and cjson.decode(raw) or {entries = {}, folders = {}}
-  local positions = {}
-  for i, path in ipairs(saved.entries) do positions[path] = i end
-  for i, path in ipairs(listing.entries) do
-    local position = positions[path]
-    if not position then
-      saved.entries[#saved.entries + 1] = path
-      position = #saved.entries
-      positions[path] = position
-    end
-    saved.folders[position] =
-      (saved.folders[position] == 1 or listing.folders[i] == 1) and 1 or 0
-  end
-  if #saved.entries > 0 then redis.call('SET', key, cjson.encode(saved)) end
+local function drop_listing(prefix, path)
+  redis.call('DEL', listing_keys(prefix, path))
 end
-local function encode_listing(listing, predecessor)
-  local encoded = string.gsub(string.gsub(cjson.encode(listing),
-    '"entries":{}', '"entries":[]'), '"folders":{}', '"folders":[]')
-  local deadline = string.match(predecessor, '"expires_at"%s*:%s*([%d%.eE%+%-]+)')
-  return (string.gsub(encoded, '"expires_at":[%d%.eE%+%-]+',
-    '"expires_at":' .. deadline))
+-- A tombstone scores each child twice its arrival, plus one for a folder,
+-- so it keeps the order children were buried in and a folder bit that only
+-- ever sets.
+local function bury(tomb, path, folder)
+  local score = redis.call('ZSCORE', tomb, path)
+  if not score then
+    redis.call('ZADD', tomb, 2 * redis.call('ZCARD', tomb) + folder, path)
+  elseif folder == 1 and tonumber(score) % 2 == 0 then
+    redis.call('ZADD', tomb, tonumber(score) + 1, path)
+  end
+end
+-- Bury a listing's children: all of them the first time, then only those
+-- added or turned folder since, in listing order. The first burial leaves a
+-- sentinel in the tombstone, so one Redis evicted since is buried again
+-- whole.
+local function bury_listing(prefix, tomb, path)
+  if not intact(prefix, path) then return end
+  local meta, listed, folders, fresh = listing_keys(prefix, path)
+  local children = {}
+  if redis.call('HGET', meta, 'buried') == '1'
+      and redis.call('ZSCORE', tomb, '') then
+    local place = {}
+    for _, child in ipairs(redis.call('SMEMBERS', fresh)) do
+      local at = child ~= '' and redis.call('ZSCORE', listed, child)
+      if at then
+        place[child] = tonumber(at)
+        children[#children + 1] = child
+      end
+    end
+    table.sort(children, function(a, b) return place[a] < place[b] end)
+  else
+    children = redis.call('ZRANGE', listed, 1, -1)
+  end
+  redis.call('DEL', fresh)
+  redis.call('SADD', fresh, '')
+  for _, child in ipairs(children) do
+    bury(tomb, child, redis.call('SISMEMBER', folders, child))
+  end
+  if #children > 0 and redis.call('HGET', meta, 'buried') ~= '1' then
+    redis.call('HSET', meta, 'buried', '1')
+    redis.call('ZADD', tomb, '-inf', '')
+  elseif #children > 0 and not redis.call('ZSCORE', tomb, '') then
+    redis.call('ZADD', tomb, '-inf', '')
+  end
+end
+local function number_children(listed, folders, children, flags)
+  for offset = 1, #children, 128 do
+    local scored, marked = {}, {}
+    for i = offset, math.min(offset + 127, #children) do
+      scored[#scored + 1] = i
+      scored[#scored + 1] = children[i]
+      if flags and flags[i] == 1 then marked[#marked + 1] = children[i] end
+    end
+    redis.call('ZADD', listed, unpack(scored))
+    if #marked > 0 then redis.call('SADD', folders, unpack(marked)) end
+  end
+end
+-- Place a new child before the first one past it in listing order, as a
+-- sorted listing keeps it: found by halving when the listing was written
+-- sorted, else by walking it. The child takes a score between its
+-- neighbours'; scores too close to split are renumbered first.
+local function insert_child(listed, path, sorted)
+  local last = redis.call('ZCARD', listed) - 1
+  local low, high = 1, last + 1
+  while sorted and low < high do
+    local middle = math.floor((low + high) / 2)
+    if redis.call('ZRANGE', listed, middle, middle)[1] > path then
+      high = middle
+    else
+      low = middle + 1
+    end
+  end
+  if not sorted then
+    low = last + 1
+    local offset = 1
+    while offset <= last and low == last + 1 do
+      for at, child in ipairs(redis.call('ZRANGE', listed, offset, offset + 255)) do
+        if child > path then
+          low = offset + at - 1
+          break
+        end
+      end
+      offset = offset + 256
+    end
+  end
+  local score
+  if last == 0 then
+    score = 1
+  elseif low == 1 then
+    score = tonumber(redis.call('ZRANGE', listed, 1, 1, 'WITHSCORES')[2]) - 1
+  elseif low == last + 1 then
+    score = tonumber(redis.call('ZRANGE', listed, -1, -1, 'WITHSCORES')[2]) + 1
+  else
+    local around = redis.call('ZRANGE', listed, low - 1, low, 'WITHSCORES')
+    local before, after = tonumber(around[2]), tonumber(around[4])
+    score = (before + after) / 2
+    if score <= before or score >= after then
+      number_children(listed, nil, redis.call('ZRANGE', listed, 1, -1))
+      score = low - 0.5
+    end
+  end
+  redis.call('ZADD', listed, score, path)
+end
+local function write_listing(prefix, path, listing, raw)
+  local meta, listed, folders, fresh = listing_keys(prefix, path)
+  redis.call('DEL', meta, listed, folders, fresh)
+  redis.call('ZADD', listed, '-inf', '')
+  redis.call('SADD', folders, '')
+  redis.call('SADD', fresh, '')
+  local sorted = '1'
+  for i = 2, #listing.entries do
+    if listing.entries[i - 1] > listing.entries[i] then
+      sorted = '0'
+      break
+    end
+  end
+  local fields = {
+    'expires_at', string.match(raw, '"expires_at"%s*:%s*([%d%.eE%+%-]+)'),
+    'generation', listing.generation,
+    'partial', listing.partial and '1' or '0',
+    'window', listing.window and '1' or '0',
+    'sorted', sorted}
+  if type(listing.version) == 'string' then
+    fields[#fields + 1] = 'version'
+    fields[#fields + 1] = listing.version
+  end
+  redis.call('HSET', meta, unpack(fields))
+  number_children(listed, folders, listing.entries, listing.folders)
 end
 local function publish_listing(
-  key, listing, raw, global_key, directory_key, replacement)
+  prefix, path, listing, raw, global_key, directory_key, replacement)
   if replacement ~= '' then
     local current = redis.call('GET', global_key)
     local directory = redis.call('GET', directory_key)
@@ -164,27 +304,25 @@ local function publish_listing(
     end
     redis.call('SET', directory_key, replacement)
   end
-  redis.call('SET', key, encode_listing(listing, raw))
+  write_listing(prefix, path, listing, raw)
 end
-local function remember_directory(children_prefix, tombstone_prefix, path)
+local function unsettle(meta)
+  redis.call('HSET', meta, 'partial', '1', 'window', '0')
+  redis.call('HDEL', meta, 'version')
+end
+local function remember_directory(prefix, tombstone_prefix, path)
   path = string.gsub(path, '/+$', '')
   if path == '' then return end
   local parent = string.match(path, '^(.*)/[^/]+$')
   if parent == '' then parent = '/' end
-  for i, prefix in ipairs({children_prefix, tombstone_prefix}) do
-    local key = prefix .. parent
-    local raw = redis.call('GET', key)
-    if raw then
-      local listing = cjson.decode(raw)
-      for position, child in ipairs(listing.entries) do
-        if child == path and listing.folders[position] ~= 1 then
-          listing.folders[position] = 1
-          redis.call('SET', key, i == 1 and encode_listing(listing, raw)
-            or cjson.encode(listing))
-          break
-        end
-      end
-    end
+  local _, listed, folders = listing_keys(prefix, parent)
+  if intact(prefix, parent) and redis.call('ZSCORE', listed, path) then
+    redis.call('SADD', folders, path)
+  end
+  local tomb = tombstone_prefix .. parent
+  local score = redis.call('ZSCORE', tomb, path)
+  if score and tonumber(score) % 2 == 0 then
+    redis.call('ZADD', tomb, tonumber(score) + 1, path)
   end
 end
 """
@@ -197,19 +335,16 @@ local listing = cjson.decode(ARGV[1])
 for offset = 1, #listing.entries, 128 do
   local keys = {}
   local last = math.min(offset + 127, #listing.entries)
+  for i = offset, last do keys[#keys + 1] = ARGV[5] .. listing.entries[i] end
+  local rows = redis.call('MGET', unpack(keys))
   for i = offset, last do
-    keys[#keys + 1] = ARGV[5] .. listing.entries[i]
-    keys[#keys + 1] = ARGV[2] .. listing.entries[i]
-  end
-  local saved = redis.call('MGET', unpack(keys))
-  for i = offset, last do
-    local position = (i - offset) * 2 + 1
-    local row = saved[position]
-    listing.folders[i] = (listing.folders[i] == 1 or saved[position + 1] ~= false
+    local row = rows[i - offset + 1]
+    listing.folders[i] = (listing.folders[i] == 1
+      or redis.call('EXISTS', ARGV[2] .. listing.entries[i]) == 1
       or (row ~= false and is_dir(cjson.decode(row)))) and 1 or 0
   end
 end
-publish_listing(KEYS[1], listing, ARGV[1], KEYS[2], KEYS[3], ARGV[6])
+publish_listing(ARGV[2], ARGV[4], listing, ARGV[1], KEYS[2], KEYS[3], ARGV[6])
 remember_directory(ARGV[2], ARGV[3], ARGV[4])
 return 1
 """
@@ -221,7 +356,7 @@ _PUT_ENTRY = (
 local old = redis.call('GET', KEYS[1])
 if old and cjson.decode(old).type == 'directory'
     and cjson.decode(ARGV[2]).type ~= 'directory' then
-  bury(KEYS[2], {entries = {ARGV[1]}, folders = {1}})
+  bury(KEYS[2], ARGV[1], 1)
   redis.call('ZADD', KEYS[3], 0, ARGV[3])
 end
 redis.call('SET', KEYS[1], ARGV[2])
@@ -232,75 +367,63 @@ return 1
 _ADD_ENTRY = (
     _LISTING_HISTORY
     + """
-local raw = redis.call('GET', KEYS[1])
+local path = string.sub(KEYS[1], #ARGV[7] + 1)
+local meta, listed, folders, fresh_children = listing_keys(ARGV[7], path)
 local current = redis.call('GET', KEYS[2])
 local directory = redis.call('GET', KEYS[3])
+intact(ARGV[7], path)
+local fields = redis.call('HMGET', meta,
+  'generation', 'expires_at', 'buried', 'sorted')
+local live = fields[1] and current and directory
+  and fields[1] == current .. ':' .. directory
+  and tonumber(ARGV[5]) < tonumber(fields[2])
 local fresh = cjson.decode(ARGV[4])
 if not current or not directory or fresh.generation ~= current .. ':' .. directory then
   redis.call('SET', KEYS[5], ARGV[6])
-  if raw and current and directory then
-    local listing = cjson.decode(raw)
-    if listing.generation == current .. ':' .. directory
-        and tonumber(ARGV[5]) < listing.expires_at then
-      for i, path in ipairs(listing.entries) do
-        if path == ARGV[3] then
-          bury(KEYS[4], {entries = {path}, folders = {listing.folders[i]}})
-          table.remove(listing.entries, i)
-          table.remove(listing.folders, i)
-          break
-        end
-      end
-      listing.partial = true
-      listing.version = cjson.null
-      listing.window = false
-      listing.generation = current .. ':' .. ARGV[6]
-      redis.call('SET', KEYS[3], ARGV[6])
-      redis.call('SET', KEYS[1], encode_listing(listing, raw))
+  if live then
+    if redis.call('ZSCORE', listed, ARGV[3]) then
+      bury(KEYS[4], ARGV[3], redis.call('SISMEMBER', folders, ARGV[3]))
+      redis.call('ZREM', listed, ARGV[3])
+      redis.call('SREM', folders, ARGV[3])
     end
+    unsettle(meta)
+    redis.call('HSET', meta, 'generation', current .. ':' .. ARGV[6])
+    redis.call('SET', KEYS[3], ARGV[6])
   end
   return 0
 end
 local old = redis.call('GET', ARGV[1])
 redis.call('SET', KEYS[3], ARGV[6])
 local folder = cjson.decode(ARGV[2]).type == 'directory' and 1 or 0
-if old and cjson.decode(old).type == 'directory' and folder == 0 then
-  bury(KEYS[4], {entries = {ARGV[3]}, folders = {1}})
-end
+local turned = old and cjson.decode(old).type == 'directory' and folder == 0
+if turned then bury(KEYS[4], ARGV[3], 1) end
 redis.call('SET', ARGV[1], ARGV[2])
-if raw then
-  local listing = cjson.decode(raw)
-  if current and directory and listing.generation == current .. ':' .. directory
-      and tonumber(ARGV[5]) < listing.expires_at then
-    listing.generation = current .. ':' .. ARGV[6]
-    if old and cjson.decode(old).type == 'directory' and folder == 0 then
-      listing.partial = true
-      listing.version = cjson.null
-      listing.window = false
-    end
-    local position = #listing.entries + 1
-    for i, path in ipairs(listing.entries) do
-      if path == ARGV[3] then
-        if listing.folders[i] == 1 and folder == 0 then
-          bury(KEYS[4], {entries = {ARGV[3]}, folders = {1}})
-          listing.partial = true
-          listing.version = cjson.null
-          listing.window = false
-        end
-        listing.folders[i] = folder
-        redis.call('SET', KEYS[1], encode_listing(listing, raw))
-        return 0
+if fields[1] then
+  if live then
+    redis.call('HSET', meta, 'generation', current .. ':' .. ARGV[6])
+    if turned then unsettle(meta) end
+    local buried = fields[3] == '1'
+    if redis.call('ZSCORE', listed, ARGV[3]) then
+      local was = redis.call('SISMEMBER', folders, ARGV[3])
+      if was == 1 and folder == 0 then
+        bury(KEYS[4], ARGV[3], 1)
+        unsettle(meta)
+        redis.call('SREM', folders, ARGV[3])
+      elseif was == 0 and folder == 1 then
+        redis.call('SADD', folders, ARGV[3])
+        if buried then redis.call('SADD', fresh_children, ARGV[3]) end
       end
-      if path > ARGV[3] then position = i break end
+      return 0
     end
-    table.insert(listing.entries, position, ARGV[3])
-    table.insert(listing.folders, position, folder)
-    redis.call('SET', KEYS[1], encode_listing(listing, raw))
+    insert_child(listed, ARGV[3], fields[4] == '1')
+    if folder == 1 then redis.call('SADD', folders, ARGV[3]) end
+    if buried then redis.call('SADD', fresh_children, ARGV[3]) end
     return 1
   end
-  bury(KEYS[4], listing)
+  bury_listing(ARGV[7], KEYS[4], path)
 end
 fresh.generation = current .. ':' .. ARGV[6]
-redis.call('SET', KEYS[1], encode_listing(fresh, ARGV[4]))
+write_listing(ARGV[7], path, fresh, ARGV[4])
 return 1
 """
 )
@@ -364,11 +487,14 @@ for _, path in ipairs(paths) do
     end
   end
   if not protected then
-    if ARGV[10] == '1' then
-      local raw = redis.call('GET', ARGV[2] .. path)
-      if raw then bury(ARGV[3] .. path, cjson.decode(raw)) end
+    if ARGV[10] == '1' then bury_listing(ARGV[2], ARGV[3] .. path, path) end
+    for _, prefix in ipairs(removed) do
+      if prefix == ARGV[2] then
+        drop_listing(prefix, path)
+      else
+        redis.call('DEL', prefix .. path)
+      end
     end
-    for _, prefix in ipairs(removed) do redis.call('DEL', prefix .. path) end
     prune(KEYS[1], prefixes, path)
   end
 end
@@ -401,32 +527,25 @@ _DELETE_ENTRY = (
     _LISTING_HISTORY
     + """
 local prefixes = {ARGV[1], ARGV[2], ARGV[3], ARGV[4]}
-track(KEYS[1], prefixes, {string.sub(KEYS[2], #ARGV[2] + 1)})
-local raw = redis.call('GET', KEYS[2])
+local path = string.sub(KEYS[2], #ARGV[2] + 1)
+track(KEYS[1], prefixes, {path})
 local current = redis.call('GET', KEYS[4])
 local directory = redis.call('GET', KEYS[5])
 local old = redis.call('GET', KEYS[6])
 if (old and is_dir(cjson.decode(old)))
   or redis.call('EXISTS', ARGV[2] .. ARGV[5]) == 1 then
-  bury(KEYS[3], {entries = {ARGV[5]}, folders = {1}})
+  bury(KEYS[3], ARGV[5], 1)
 end
-if raw then
-  local listing = cjson.decode(raw)
-  bury(KEYS[3], listing)
-  for i, path in ipairs(listing.entries) do
-    if path == ARGV[5] then
-      table.remove(listing.entries, i)
-      table.remove(listing.folders, i)
-      break
-    end
+local meta, listed, folders = listing_keys(ARGV[2], path)
+if intact(ARGV[2], path) then
+  local generation = redis.call('HGET', meta, 'generation')
+  bury_listing(ARGV[2], KEYS[3], path)
+  redis.call('ZREM', listed, ARGV[5])
+  redis.call('SREM', folders, ARGV[5])
+  if current and directory and generation == current .. ':' .. directory then
+    redis.call('HSET', meta, 'generation', current .. ':' .. ARGV[6])
   end
-  if current and directory and listing.generation == current .. ':' .. directory then
-    listing.generation = current .. ':' .. ARGV[6]
-  end
-  listing.partial = true
-  listing.version = cjson.null
-  listing.window = false
-  redis.call('SET', KEYS[2], encode_listing(listing, raw))
+  unsettle(meta)
 end
 redis.call('SET', KEYS[5], ARGV[6])
 redis.call('DEL', KEYS[6])
@@ -444,8 +563,7 @@ local next = cjson.decode(ARGV[1])
 local path = string.sub(KEYS[1], #ARGV[3] + 1)
 track(KEYS[3], {ARGV[2], ARGV[3], ARGV[4], ARGV[5]}, {path})
 if next.partial then
-  local old = redis.call('GET', KEYS[1])
-  if old then bury(KEYS[2], cjson.decode(old)) end
+  bury_listing(ARGV[3], KEYS[2], path)
 else
   redis.call('DEL', KEYS[2])
 end
@@ -454,13 +572,13 @@ for i = 9, #ARGV, 2 do
     local old = redis.call('GET', ARGV[2] .. ARGV[i])
     if (old and is_dir(cjson.decode(old)))
       or redis.call('EXISTS', ARGV[3] .. ARGV[i]) == 1 then
-      bury(KEYS[2], {entries = {ARGV[i]}, folders = {1}})
+      bury(KEYS[2], ARGV[i], 1)
     end
   end
   redis.call('SET', ARGV[2] .. ARGV[i], ARGV[i + 1])
   redis.call('ZADD', KEYS[3], 0, ARGV[i])
 end
-publish_listing(KEYS[1], next, ARGV[1], KEYS[4], KEYS[5], ARGV[7])
+publish_listing(ARGV[3], path, next, ARGV[1], KEYS[4], KEYS[5], ARGV[7])
 remember_directory(ARGV[3], ARGV[4], path)
 return 1
 """
@@ -475,15 +593,17 @@ end
 if not redis.call('ZSCORE', KEYS[3], '') then
   error('MIRAGE_INDEX_REGISTRY_MISSING')
 end
-track(KEYS[3], {ARGV[2], ARGV[3], ARGV[4], ARGV[5]},
-  {string.sub(KEYS[1], #ARGV[3] + 1)})
-local old = redis.call('GET', KEYS[1])
-local tomb = redis.call('GET', KEYS[2])
+local prefixes = {ARGV[2], ARGV[3], ARGV[4], ARGV[5]}
+local path = string.sub(KEYS[1], #ARGV[3] + 1)
+track(KEYS[3], prefixes, {path})
+local _, listed, folders = listing_keys(ARGV[3], path)
+local listing = intact(ARGV[3], path) and redis.call('ZRANGE', listed, 1, -1) or {}
+local tomb = redis.call('ZRANGE', KEYS[2], 0, -1, 'WITHSCORES')
 redis.call('DEL', KEYS[2])
 local excluded = cjson.decode(ARGV[6])
-local function protected(path)
+local function protected(child)
   for _, prefix in ipairs(excluded) do
-    if path == prefix or string.sub(path, 1, #prefix + 1) == prefix .. '/' then
+    if child == prefix or string.sub(child, 1, #prefix + 1) == prefix .. '/' then
       return true
     end
   end
@@ -493,136 +613,128 @@ local named = {}
 for i = 9, #ARGV, 2 do
   named[ARGV[i]] = is_dir(cjson.decode(ARGV[i + 1]))
 end
-local seen, gone, folders = {}, {}, {}
-local function drop(path, buried)
-  if seen[path] or protected(path) then
+local seen, gone, flags = {}, {}, {}
+local function drop(child, buried)
+  if seen[child] or protected(child) then
     return
   end
-  local row = redis.call('GET', ARGV[2] .. path)
-  local folder = buried or redis.call('EXISTS', ARGV[3] .. path) == 1
+  local row = redis.call('GET', ARGV[2] .. child)
+  local folder = buried or redis.call('EXISTS', ARGV[3] .. child) == 1
     or (row ~= false and is_dir(cjson.decode(row)))
-  if named[path] ~= nil and not (folder and not named[path]) then
+  if named[child] ~= nil and not (folder and not named[child]) then
     return
   end
-  seen[path] = true
-  redis.call('DEL', ARGV[2] .. path)
-  prune(KEYS[3], {ARGV[2], ARGV[3], ARGV[4], ARGV[5]}, path)
-  gone[#gone + 1] = path
-  folders[#folders + 1] = folder and 1 or 0
+  seen[child] = true
+  redis.call('DEL', ARGV[2] .. child)
+  prune(KEYS[3], prefixes, child)
+  gone[#gone + 1] = child
+  flags[#flags + 1] = folder and 1 or 0
 end
 local buried = {}
-local saved = tomb and cjson.decode(tomb) or false
-if saved then
-  for i, path in ipairs(saved.entries) do
-    buried[path] = saved.folders[i] == 1
+for i = 1, #tomb, 2 do
+  if tomb[i] ~= '' then
+    buried[tomb[i]] = tonumber(tomb[i + 1]) % 2 == 1
   end
 end
-if old then
-  local listing = cjson.decode(old)
-  for i, path in ipairs(listing.entries) do
-    drop(path, buried[path] == true or listing.folders[i] == 1)
-  end
+for _, child in ipairs(listing) do
+  drop(child, buried[child] == true
+    or redis.call('SISMEMBER', folders, child) == 1)
 end
-if saved then
-  for _, path in ipairs(saved.entries) do drop(path, buried[path]) end
+for i = 1, #tomb, 2 do
+  if tomb[i] ~= '' then drop(tomb[i], buried[tomb[i]]) end
 end
 for i = 9, #ARGV, 2 do drop(ARGV[i], false) end
 local roots = {}
-for i, path in ipairs(gone) do
-  if folders[i] == 1 then roots[#roots + 1] = path end
+for i, child in ipairs(gone) do
+  if flags[i] == 1 then roots[#roots + 1] = child end
 end
-local function remove(path)
-  if protected(path) then return end
-  for _, prefix in ipairs({ARGV[2], ARGV[3], ARGV[4], ARGV[5]}) do
-    redis.call('DEL', prefix .. path)
+local function remove(child)
+  if protected(child) then return end
+  for _, prefix in ipairs(prefixes) do
+    redis.call('DEL', prefix .. child)
   end
-  redis.call('ZREM', KEYS[3], path)
+  drop_listing(ARGV[3], child)
+  redis.call('ZREM', KEYS[3], child)
 end
 for _, root in ipairs(roots) do
-  for _, path in ipairs(subtree(KEYS[3], root)) do remove(path) end
+  for _, child in ipairs(subtree(KEYS[3], root)) do remove(child) end
 end
 for i = 9, #ARGV, 2 do
   redis.call('SET', ARGV[2] .. ARGV[i], ARGV[i + 1])
   redis.call('ZADD', KEYS[3], 0, ARGV[i])
 end
-publish_listing(KEYS[1], cjson.decode(ARGV[1]), ARGV[1], KEYS[4], KEYS[5], ARGV[7])
-remember_directory(ARGV[3], ARGV[4], string.sub(KEYS[1], #ARGV[3] + 1))
-return {gone, folders}
+publish_listing(
+  ARGV[3], path, cjson.decode(ARGV[1]), ARGV[1], KEYS[4], KEYS[5], ARGV[7])
+remember_directory(ARGV[3], ARGV[4], path)
+return {gone, flags}
 """
 )
 
 _BURY_LISTING = (
-    _PATH_REGISTRY
+    _LISTING_HISTORY
     + """
-track(KEYS[4], {ARGV[1], ARGV[2], ARGV[3], ARGV[4]},
-  {string.sub(KEYS[1], #ARGV[2] + 1)})
-local raw = redis.call('GET', KEYS[1])
-if raw then
-  local listing = cjson.decode(raw)
-  local entries, folders, positions = {}, {}, {}
-  local saved = redis.call('GET', KEYS[2])
-  if saved then
-      local tomb = cjson.decode(saved)
-      for i, path in ipairs(tomb.entries) do
-        entries[#entries + 1] = path
-        folders[#folders + 1] = tomb.folders[i]
-        positions[path] = #entries
-      end
-  end
-  for i, path in ipairs(listing.entries) do
-    local row = redis.call('GET', ARGV[1] .. path)
-    local folder = listing.folders[i] == 1
-      or redis.call('EXISTS', ARGV[2] .. path) == 1
-      or (row ~= false and is_dir(cjson.decode(row)))
-    local position = positions[path]
-    if not position then
-      entries[#entries + 1] = path
-      position = #entries
-      positions[path] = position
-    end
-    folders[position] = (folder or folders[position] == 1) and 1 or 0
-    redis.call('DEL', ARGV[1] .. path)
-    prune(KEYS[4], {ARGV[1], ARGV[2], ARGV[3], ARGV[4]}, path)
-  end
-  redis.call('SET', KEYS[2],
-    cjson.encode({entries = entries, folders = folders}))
+local prefixes = {ARGV[1], ARGV[2], ARGV[3], ARGV[4]}
+local path = string.sub(KEYS[1], #ARGV[2] + 1)
+track(KEYS[4], prefixes, {path})
+local _, listed, folders = listing_keys(ARGV[2], path)
+local children = intact(ARGV[2], path) and redis.call('ZRANGE', listed, 1, -1) or {}
+for _, child in ipairs(children) do
+  local row = redis.call('GET', ARGV[1] .. child)
+  local folder = redis.call('SISMEMBER', folders, child) == 1
+    or redis.call('EXISTS', ARGV[2] .. child) == 1
+    or (row ~= false and is_dir(cjson.decode(row)))
+  bury(KEYS[2], child, folder and 1 or 0)
+  redis.call('DEL', ARGV[1] .. child)
+  prune(KEYS[4], prefixes, child)
 end
-redis.call('DEL', KEYS[1])
+drop_listing(ARGV[2], path)
 redis.call('DEL', KEYS[3])
-prune(KEYS[4], {ARGV[1], ARGV[2], ARGV[3], ARGV[4]},
-  string.sub(KEYS[1], #ARGV[2] + 1))
+prune(KEYS[4], prefixes, path)
 """
 )
 
+_READ_LISTING = (
+    _LISTING_KEYS
+    + """
+if not intact(ARGV[1], ARGV[2]) then return {} end
+local meta, listed = listing_keys(ARGV[1], ARGV[2])
+local fields = redis.call('HMGET', meta,
+  'generation', 'expires_at', 'partial', 'version', 'window')
+local children
+if ARGV[3] then
+  children = redis.call('ZSCORE', listed, ARGV[3]) and {ARGV[3]} or {}
+else
+  children = redis.call('ZRANGE', listed, 1, -1)
+end
+return {fields[1], fields[2], fields[3], fields[4], fields[5],
+  redis.call('GET', KEYS[1]), redis.call('GET', KEYS[2]), children}
+"""
+)
 
-_INVALIDATE_MISSING = """
+_INVALIDATE_MISSING = (
+    _LISTING_KEYS
+    + """
 local changed, unknown = false, false
 local current = redis.call('GET', KEYS[3])
 for i = 3, #ARGV do
   local path = ARGV[i]
   local folder = string.match(path, '^(.*)/[^/]+$')
   if folder == '' then folder = '/' end
-  local key = KEYS[1] .. folder
-  local raw = redis.call('GET', key)
-  if raw then
-    local listing = cjson.decode(raw)
+  local meta, listed = listing_keys(KEYS[1], folder)
+  if intact(KEYS[1], folder) then
+    local fields = redis.call('HMGET', meta,
+      'generation', 'expires_at', 'partial', 'window')
     local directory = redis.call('GET', KEYS[4] .. folder)
-    local found = false
-    for _, child in ipairs(listing.entries) do
-      if child == path then found = true; break end
-    end
+    local found = redis.call('ZSCORE', listed, path)
     if not current or not directory
-        or listing.generation ~= current .. ':' .. directory
-        or listing.expires_at <= tonumber(ARGV[1]) then
+        or fields[1] ~= current .. ':' .. directory
+        or tonumber(fields[2]) <= tonumber(ARGV[1]) then
       unknown = true
-    elseif listing.partial or listing.window then
+    elseif fields[3] == '1' or fields[4] == '1' then
       if not found then unknown = true end
     elseif not found then
-      listing.expires_at = 0
-      listing.version = cjson.null
-      local encoded = string.gsub(string.gsub(cjson.encode(listing),
-        '"entries":{}', '"entries":[]'), '"folders":{}', '"folders":[]')
-      redis.call('SET', key, encoded)
+      redis.call('HSET', meta, 'expires_at', '0')
+      redis.call('HDEL', meta, 'version')
       changed = true
     end
   else unknown = true end
@@ -630,13 +742,14 @@ end
 if changed or unknown then redis.call('SET', KEYS[2], ARGV[2]) end
 return changed and 1 or 0
 """
+)
 
 
 class RedisIndexCacheStore(IndexCacheStore):
     """Redis-backed index cache for remote VFS metadata.
 
-    Stores index rows as JSON strings and directory children as
-    JSON records holding children and expiry, including empty listings.
+    Stores index rows as JSON strings and each listing, empty ones
+    included, as keyed structures a write changes one child of.
     Like RAM, stale records remain until explicitly cleared or invalidated by
     path, so expiry is distinguishable from absence. Redis eviction may still
     remove records; size limits belong to the server, not this store.
@@ -649,7 +762,11 @@ class RedisIndexCacheStore(IndexCacheStore):
     values (e.g. "gdrive:", "s3:"). The full key layout is::
 
         {key_prefix}mirage:idx:entry:{vfs_path} -> row JSON
-        {key_prefix}mirage:idx:directory:{vfs_path} -> IndexDirectory JSON
+        {key_prefix}mirage:idx:directory:{vfs_path} -> listing fields hash
+        {key_prefix}mirage:idx:listed:{vfs_path} -> children, scored in order
+        {key_prefix}mirage:idx:folders:{vfs_path} -> children that are folders
+        {key_prefix}mirage:idx:fresh:{vfs_path} -> children since the last bury
+        {key_prefix}mirage:idx:tombstone:{vfs_path} -> buried children, scored
 
     Args:
         ttl (float): Default time-to-live in seconds for directory listings.
@@ -722,6 +839,9 @@ class RedisIndexCacheStore(IndexCacheStore):
             self._children_prefix,
             self._tombstone_prefix,
             self._directory_generation_prefix,
+            f"{self._key_prefix}{LISTED_PREFIX}",
+            f"{self._key_prefix}{FOLDERS_PREFIX}",
+            f"{self._key_prefix}{FRESH_PREFIX}",
         )
         for _ in range(3):
             candidate = str(int(self._ids.uuid7().replace("-", "")[-12:], 16))
@@ -1057,6 +1177,7 @@ class RedisIndexCacheStore(IndexCacheStore):
             fresh.model_dump_json(),
             str(now.timestamp()),
             self._ids.uuid7(),
+            self._children_prefix,
         )
         await pipe.execute()
 
@@ -1091,50 +1212,70 @@ class RedisIndexCacheStore(IndexCacheStore):
         the listing has not reached its own expiry. A write by another
         process is therefore seen within that window, and by every new
         command at its first read. Outside a command every call reads
-        Redis.
+        Redis. A lookup of one child reads only that child, unless the
+        command looked one up in this folder before.
 
         Args:
             vfs_path (str): the listed folder's key.
             child (str | None): the key to narrow the entries to.
         """
         return await self._listings.read(
-            vfs_path, lambda: self._read_listing(vfs_path), child
+            vfs_path,
+            lambda: self._read_listing(vfs_path),
+            child,
+            None
+            if child is None
+            else lambda: self._read_listing(vfs_path, child),
         )
 
     async def _read_listing(
-        self, vfs_path: str
+        self, vfs_path: str, child: str | None = None
     ) -> tuple[ListResult, float | None]:
         await self._flush_seed()
-        key = self._children_key(vfs_path)
-        raw, current, directory = await self._client.mget(
-            key,
-            self._generation_key,
-            f"{self._directory_generation_prefix}{vfs_path}",
+        reply = await cast(
+            Awaitable[list[Any]],
+            self._client.eval(
+                _READ_LISTING,
+                2,
+                self._generation_key,
+                f"{self._directory_generation_prefix}{vfs_path}",
+                self._children_prefix,
+                vfs_path,
+                *(() if child is None else (child,)),
+            ),
         )
-        if raw is None:
+        if not reply:
             return ListResult(status=LookupStatus.NOT_FOUND), None
-        listing = IndexDirectory.model_validate_json(raw)
+        (
+            generation,
+            deadline,
+            partial,
+            version,
+            window,
+            current,
+            directory,
+            children,
+        ) = reply
+        expires_at = float(_text(deadline))
         if (
             current is None
             or directory is None
-            or listing.generation != f"{_text(current)}:{_text(directory)}"
-            or self.clock.now() >= listing.expires_at
+            or _text(generation) != f"{_text(current)}:{_text(directory)}"
+            or self.clock.now() >= expires_at
         ):
             return ListResult(status=LookupStatus.EXPIRED), None
-        if listing.partial:
+        entries = [_text(child) for child in children]
+        named = None if version is None else _text(version)
+        if _text(partial) == "1":
             return (
-                ListResult(
-                    partial_entries=listing.entries, version=listing.version
-                ),
-                listing.expires_at,
+                ListResult(partial_entries=entries, version=named),
+                expires_at,
             )
         return (
             ListResult(
-                entries=listing.entries,
-                version=listing.version,
-                window=listing.window,
+                entries=entries, version=named, window=_text(window) == "1"
             ),
-            listing.expires_at,
+            expires_at,
         )
 
     async def set_dir(

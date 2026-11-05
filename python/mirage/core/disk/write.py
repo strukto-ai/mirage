@@ -25,7 +25,7 @@ from mirage.accessor.disk import DiskAccessor
 from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.constants import STREAM_BATCH_BYTES, STREAM_FLUSH_SECONDS
 from mirage.core.disk.errors import disk_errors
-from mirage.core.disk.utils import resolve_inside
+from mirage.core.disk.utils import resolve_inside, resolve_inside_sync
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource
 from mirage.observe.context import record, start_op
@@ -55,13 +55,19 @@ async def write(
     """
     op = "append" if append else "write"
     timer = start_op()
-    p = await resolve_inside(accessor.root, path_spec)
     if isinstance(data, bytes) and not atomic:
-        with disk_errors(path_spec.virtual):
-            async with aiofiles.open(p, "ab" if append else "wb") as f:
-                await f.write(data)
+        whole = data
+
+        def put() -> None:
+            p = resolve_inside_sync(accessor.root, path_spec)
+            with disk_errors(path_spec.virtual):
+                with open(p, "ab" if append else "wb") as f:
+                    f.write(whole)
+
+        await run_blocking(put)
         record(op, path_spec.virtual, "disk", len(data), timer)
         return
+    p = await resolve_inside(accessor.root, path_spec)
     size = 0
     staged: list[str] = []
     mode = None

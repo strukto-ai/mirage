@@ -12,13 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import cast
-
-import aiofiles
+import asyncio
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.errors import disk_errors
-from mirage.core.disk.utils import resolve_inside
+from mirage.core.disk.utils import resolve_inside_sync
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
@@ -41,12 +39,14 @@ async def read(
     virtual = path_spec.virtual
     root = accessor.root
     timer = start_op()
-    p = await resolve_inside(root, path_spec)
-    with disk_errors(virtual):
-        async with aiofiles.open(p, "rb") as f:
-            await f.seek(offset)
-            data = cast(
-                bytes, await (f.read() if size is None else f.read(size))
-            )
+
+    def take() -> bytes:
+        p = resolve_inside_sync(root, path_spec)
+        with disk_errors(virtual):
+            with open(p, "rb") as f:
+                f.seek(offset)
+                return f.read() if size is None else f.read(size)
+
+    data = await asyncio.to_thread(take)
     record("read", virtual, "disk", len(data), timer)
     return data
