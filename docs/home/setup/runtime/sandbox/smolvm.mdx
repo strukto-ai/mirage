@@ -22,8 +22,10 @@ smolvm machine start --name mirage-box
 ## Usage
 
 `captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
-every program Mirage does not have itself. Name `python3` to run it in the
-machine too.
+every program Mirage does not have itself. With `mount_type: ssh`, it also
+runs the `python3`, `python`, `node` and `js` the machine has
+([Route Runtime](/home/policy/route-runtime#with-a-sandbox)); otherwise name
+`python3` to run it in the machine too.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">

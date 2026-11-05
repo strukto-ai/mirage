@@ -21,7 +21,9 @@ msb create my-registry/mirage-fuse:latest --name mirage-box
 ## Usage
 
 `captures` defaults to [`@external`](/home/setup/runtime/overview#captures).
-Add `python3` to run Python programs in the guest too.
+With `mount_type: ssh`, it also runs the `python3`, `python`, `node` and `js`
+the guest has ([Route Runtime](/home/policy/route-runtime#with-a-sandbox));
+otherwise add `python3` to run Python programs in the guest too.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">

@@ -35,6 +35,57 @@ def pre_execute(ctx):
 `python3 /jobs/train.py` runs in the container; `cat data.csv | python3
 -c ...` stays on monty.
 
+## With a sandbox
+
+With a sandbox that serves the workspace (`mount_type: ssh`) and no
+`route_policy` (and no runtime capturing `@line`), Mirage places each line
+itself:
+
+| The line | Where it runs |
+| --- | --- |
+| only Mirage's commands (`cat /etc/hosts`) | in Mirage, as always |
+| a program the sandbox runs, every path in the workspace (`cd /data && make`) | split: Mirage's commands in Mirage, programs in the sandbox at the same folder |
+| a program the sandbox runs and a path that is the sandbox's own (`cd /opt/app && make`, `cat /tmp/a \| gcc -`) | the whole line, in the sandbox's `bash` |
+
+A path is the sandbox's own when Mirage would resolve it (a Mirage
+command's operand, a redirect target, a `cd` target) and no mount holds it.
+`/` and a folder that holds mounts are the workspace's, and a file Mirage
+itself wrote outside the mounts, such as `/notes.txt`, stays Mirage's. A program's own arguments (`gcc /opt/x.c`) never count: the
+program runs in the sandbox either way.
+
+A whole line runs in a fresh `bash` with the session's working directory
+and exported variables:
+
+- `cd`, `export`, aliases and traps it sets stay in the sandbox, and it
+  reports one exit status.
+- Its `/tmp`, `/etc` and `~` are the sandbox's.
+- A `cd` to a variable and `pushd` are not read as the sandbox's paths, so
+  those lines split. `source` of a file outside the mounts sends the line
+  whole.
+
+Mirage refuses a whole line, and says why, when it would mean something
+else in the sandbox: it runs a command only Mirage has (an installed CLI,
+a shell function, `ln`, a job such as `kill %1`), an alias, `&`, a variable
+set without `export`, `$1` and the other special parameters, `$?` or
+`PIPESTATUS` in its first pipeline (before the first `;`, `&&` or `||`), or
+a script whose mount is not in `exec` mode. Run it as two lines.
+
+With or without a `route_policy`, the sandbox also runs `python3`, `python`,
+`node` and `js` when it has them and comes before Monty and QuickJS in
+`runtimes`; `add_runtime` places it there. Mirage asks it on the first line
+that may run one, and again a minute after a failed ask. An interpreter
+keeps the mounts' `exec` rule: a script or inline code the rule refuses
+stays on Monty or QuickJS, which refuse it as they do today. So does an
+interpreter run from Mirage's own `/`, a mount at `/`, or on a script there,
+since the sandbox cannot see those files; with no other runtime capturing
+it, it stays on the sandbox. Script CLIs run on Monty or QuickJS.
+
+A program built in a workspace folder (`./a.out`) runs in the sandbox when
+its mount allows `exec`.
+
+To keep per-command placement, configure a `route_policy` that returns
+`None`. A coded policy's `Route("workspace")` keeps one line in Mirage.
+
 ## Input and answers
 
 A runtime routing script is a [policy program](/home/policy/scripts) shared

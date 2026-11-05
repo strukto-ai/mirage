@@ -119,7 +119,10 @@ A line adds `exit_code` and `stderr`, what the agent would read, and
 `node`, the line as a tree of commands. Each command in the tree has its
 own `outcome`, `answers`, `exit_code`, `stderr`, `runtime` and `words`,
 the command line word by word as policies read it (see
-[Context](/home/policy/policies#context)).
+[Context](/home/policy/policies#context)). A line a runtime takes whole names that
+runtime as every command's `runtime`. Explain never asks a sandbox which
+interpreters it has: before a line has asked, it shows them on Monty or
+QuickJS.
 
 ### A line
 

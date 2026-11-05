@@ -24,7 +24,7 @@ A runtime runs the programs in a line. Mirage's own commands (`grep`, `cat`, pip
 
 ## Routing
 
-`runtimes` is an ordered list: the first runtime whose `captures` name a program runs it, and `workspace` takes the rest. Without the key, the list is `[monty, quickjs, workspace]` in both SDKs.
+`runtimes` is an ordered list: the first runtime whose `captures` name a program runs it, and `workspace` takes the rest. Without the key, the list is `[monty, quickjs, workspace]` in both SDKs. `add_runtime` (`addRuntime`) puts a sandbox ahead of the other runtimes, after any sandbox already listed; in YAML, list a sandbox first for it to run the interpreters it has.
 
 ```yaml
 runtimes:
@@ -61,10 +61,13 @@ To choose a runtime for each command line, see [Route Runtime](/home/policy/rout
 | Sandboxes | `@external` |
 
 - Mirage's own commands (`cat`, `grep`, `sha1sum`), pipes and redirects stay
-  in Mirage. `cd`, `export` and `echo` stay even when named.
-- `@external` does not take `python`, `python3`, `node` or `js`: Mirage has
-  those itself and gives them to the Python or JavaScript runtime in the list.
-  Name them to send them somewhere else.
+  in Mirage. `cd`, `export` and `echo` stay even when named. A sandbox serving
+  the workspace (`mount_type: ssh`) runs a line whole when the line needs the
+  sandbox's own files ([Route Runtime](/home/policy/route-runtime#with-a-sandbox)).
+- On a sandbox serving the workspace, `@external` also takes `python3`,
+  `python`, `node` and `js` when the sandbox has them; Mirage asks it once.
+  Elsewhere `@external` leaves them to the Python or JavaScript runtime in the
+  list. Name them to send them somewhere else.
 - A program no runtime takes exits 127, `command not found`.
 - A name only `@external` takes has no file, so `which`, `command -v` and
   `type` report it missing; running it still works.
