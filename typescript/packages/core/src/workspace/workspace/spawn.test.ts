@@ -330,3 +330,33 @@ it("records a spawned command's reads under its own execution", async () => {
     await ws.close()
   }
 })
+
+it('the workspace processes block caps each session under a profile', async () => {
+  const ws = new Workspace(
+    { '/data': new RAMVFS() },
+    { runtimes: [], processes: { max: 1 }, profiles: { batch: { processes: { max: 4 } } } },
+  )
+  try {
+    expect(ws.getSession(ws.defaultSessionId).processes.max).toBe(1)
+    expect(ws.createSession('plain').processes.max).toBe(1)
+    expect(ws.createSession('batch', { profile: 'batch' }).processes.max).toBe(4)
+    const child = ws.spawn({ argv: ['sleep', '30'] }, 'plain')
+    expect((await ws.shell('echo leaked', { sessionId: 'plain' })).exitCode).toBe(254)
+    child.terminate()
+    await child.wait()
+  } finally {
+    await ws.close()
+  }
+})
+
+it('a fork bomb meets the default cap', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() }, { runtimes: [] })
+  try {
+    const result = await ws.shell('b() { b | b; }; b')
+    expect(result.exitCode).toBe(254)
+    expect(result.stderrText).toContain('bash: fork: Resource temporarily unavailable')
+    expect(ws.processes.live()).toHaveLength(0)
+  } finally {
+    await ws.close()
+  }
+}, 30000)

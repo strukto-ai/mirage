@@ -97,6 +97,7 @@ async def test_the_line_deadline_lands_inside_a_long_expansion(line):
         mode=MountMode.WRITE,
         command_limits=_line(0.3),
         env={"x": "\n".join(str(i) for i in range(1, 2000001))},
+        max_env=None,
     )
     started = time.monotonic()
     r = await ws.shell(line)

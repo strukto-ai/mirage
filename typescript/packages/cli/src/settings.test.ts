@@ -419,6 +419,11 @@ describe('resolvedConfig', () => {
       expect(resolved.url).toEqual(['http://f:1', 'file'])
       expect(resolved.policy_file).toEqual(['/p.yaml', 'env MIRAGE_POLICY_FILE'])
       expect(resolved.idle_grace_seconds).toEqual(['30', 'default'])
+      expect(resolvedConfig({ ...env, MIRAGE_MAX_ENV: '64KB' }).max_env).toEqual([
+        '64KB',
+        'env MIRAGE_MAX_ENV',
+      ])
+      expect(resolved.max_processes).toEqual(['', 'default'])
     } finally {
       rmSync(home, { recursive: true, force: true })
     }

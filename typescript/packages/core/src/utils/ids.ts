@@ -32,6 +32,10 @@ const SPLITMIX_MUL1 = 0xbf58476d1ce4e5b9n
 const SPLITMIX_MUL2 = 0x94d049bb133111ebn
 const UINT64_MASK = (1n << 64n) - 1n
 
+// The longest session id, profile name or workspace id a caller may give:
+// each is a store key and a URL segment, and room for a UUID with a prefix.
+export const MAX_NAME_LENGTH = 128
+
 /**
  * The millisecond and counter of the next id after `lastMs`. Two ids minted in
  * the same millisecond are ordered by the counter. A millisecond whose counter
@@ -88,6 +92,27 @@ export function newWorkspaceId(): string {
 /** Mint a fresh session id (UUIDv7). */
 export function newSessionId(): string {
   return uuid7()
+}
+
+/**
+ * Refuse a session id, profile name or workspace id a caller gave that is
+ * empty, longer than MAX_NAME_LENGTH characters, or holds a control
+ * character. The message leaves the name out, since it may be any size.
+ *
+ * @param kind what the name names, as the error says it.
+ * @param name the name given.
+ */
+export function checkName(kind: string, name: string): void {
+  const chars = Array.from(name)
+  if (
+    chars.length === 0 ||
+    chars.length > MAX_NAME_LENGTH ||
+    chars.some((char) => char < ' ' || char === '\x7f')
+  ) {
+    throw new Error(
+      `invalid ${kind}: must be 1 to ${String(MAX_NAME_LENGTH)} characters with no control characters`,
+    )
+  }
 }
 
 /** Where a workspace's generated ids and random draws come from. */

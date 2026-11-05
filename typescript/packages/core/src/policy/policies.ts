@@ -701,6 +701,7 @@ export class Policies {
   private readonly mode: Policy = new MountModePolicy()
   private placement: Policy | null = null
   private wanted: ReadonlySet<PolicyMethod> = new Set()
+  private orders = new Map<string, readonly number[]>()
   decisions: Decisions = new Decisions()
   views:
     | ((
@@ -756,6 +757,7 @@ export class Policies {
   }
 
   private rescan(): void {
+    this.orders = new Map()
     const wanted = new Set<PolicyMethod>()
     const policies = this.placement === null ? this.policies : [...this.policies, this.placement]
     for (const method of Object.keys(VALIDITY) as PolicyMethod[]) {
@@ -783,6 +785,20 @@ export class Policies {
     return true
   }
 
+  /**
+   * Ask the policies at `method` and settle their answers in mirage-rs,
+   * which also decides who is asked and in what order. An evaluation of
+   * every policy in which each answered nothing leaves the order mirage-rs
+   * asked in under its key (the method and the flags), and the next
+   * evaluation with that key asks the policies in that order itself:
+   * when all of them answer nothing again it is settled without
+   * mirage-rs, else the answers already given are replayed to it, so no
+   * policy runs twice. A change to the policies forgets every order. The
+   * dry-run flag a deciding policy runs under is bound once for the whole
+   * evaluation. An evaluation `among` some policies always goes to
+   * mirage-rs. `passed` is filled as they answer with the policies that
+   * answered nothing or only a Limit, and those without the method.
+   */
   private async evaluate(
     method: PolicyMethod,
     ctx: MethodContext,
@@ -795,98 +811,130 @@ export class Policies {
   ): Promise<CompositionResult> {
     const snapshot = [...this.policies]
     const placement = this.placement
+    const orders = this.orders
     const policies = [...snapshot, ...(placement === null ? [] : [placement]), this.mode]
     if (policies.every((policy) => policy[method] === undefined)) {
       return { answers: [], action: null, route: null, limit: null }
     }
-    const composition = new Composition()
-    try {
-      const hook = method.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
-      const descriptors = policies.map((policy, slot) => {
-        const role =
-          slot < snapshot.length
-            ? policy instanceof PermissionsPolicy
-              ? 'permissions'
-              : 'registered'
-            : policy === this.mode
-              ? 'mount_mode'
-              : 'placement'
-        composition.names.set(slot, policy.constructor.name || 'policy')
-        if (passed !== null && policy[method] === undefined) passed.push(policy)
-        return { slot, role, hooks: among === null || among.includes(policy) ? [hook] : [] }
-      })
-      let seen = ctx
-      const signal = callerSignal()
-      composition.feed({
-        op: 'evaluate',
-        evaluation: composition.evaluation,
-        hook,
-        projection,
-        every,
-        placed,
-        rules_only: rulesOnly,
-        policies: descriptors,
-      })
-      composition.stream.finish()
-      let pending: unknown[] = []
-      let cursor = 0
-      for (let effect = composition.request(); effect !== null; effect = composition.request()) {
-        if (composition.respondEffect(effect, 'config' in seen ? undefined : seen)) continue
-        if (effect.op !== 'run_policy' && effect.op !== 'read_action')
-          throw new Error('invalid evaluation effect')
-        const policy = policies[effect.slot]
-        if (policy === undefined) throw new Error('invalid policy slot')
-        const name = policy.constructor.name || 'policy'
-        if (effect.op === 'run_policy') {
-          const fn = policy[method]
-          if (fn === undefined) {
-            composition.respond(effect, null, name, false)
-            continue
+    const key = `${method} ${String(placed)} ${String(rulesOnly)}`
+    if (passed !== null) passed.push(...policies.filter((policy) => policy[method] === undefined))
+    const ran = new Map<number, unknown[]>()
+    let seen = ctx
+    const signal = callerSignal()
+    const answer = async (slot: number): Promise<unknown[]> => {
+      const known = ran.get(slot)
+      if (known !== undefined) return known
+      const policy = policies[slot]
+      if (policy === undefined) throw new Error('invalid policy slot')
+      const fn = policy[method]
+      if (fn === undefined) return []
+      const name = policy.constructor.name || 'policy'
+      const handles =
+        !rulesOnly && this.views !== null && !('config' in seen) && seen.session === undefined
+          ? this.views(seen.sessionId ?? '', undefined)
+          : null
+      if (handles !== null) seen = { ...seen, ...handles }
+      let answered
+      try {
+        answered = await abortable(
+          Promise.resolve(
+            fn.call(
+              policy,
+              seen as CommandResultContext &
+                RouteContext &
+                VfsResultContext &
+                ExecuteResultContext &
+                SessionResultContext &
+                WorkspaceContext &
+                NetworkResultContext,
+            ),
+          ),
+          signal,
+        )
+      } catch (error) {
+        if (hasAborted(signal)) throw makeAbortError(signal)
+        if (policy === placement) throw error
+        const detail = error instanceof Error ? error.message : String(error)
+        console.error(`${method} policy ${name} raised: ${detail}`)
+        answered = { kind: 'deny', reason: `${name} failed`, policy: name, failed: true }
+      }
+      const items: unknown[] = Array.isArray(answered) ? answered : [answered]
+      ran.set(slot, items)
+      if (items.every((item) => item === null || item instanceof Limit)) passed?.push(policy)
+      return items
+    }
+    const settle = async (): Promise<CompositionResult> => {
+      const order = among === null ? orders.get(key) : undefined
+      if (order !== undefined) {
+        let quiet = true
+        for (const slot of order) {
+          if ((await answer(slot)).some((item) => item !== null)) {
+            quiet = false
+            break
           }
-          const handles =
-            !rulesOnly && this.views !== null && !('config' in seen) && seen.session === undefined
-              ? this.views(seen.sessionId ?? '', undefined)
-              : null
-          if (handles !== null) seen = { ...seen, ...handles }
-          const asked = seen
-          let answered
-          try {
-            const ask = async (): Promise<Awaited<ReturnType<typeof fn>>> =>
-              fn.call(
-                policy,
-                asked as CommandResultContext &
-                  RouteContext &
-                  VfsResultContext &
-                  ExecuteResultContext &
-                  SessionResultContext &
-                  WorkspaceContext &
-                  NetworkResultContext,
-              )
-            answered = await abortable(
-              asyncContextIsolatesTasks ? runExplaining(DryRun.DECIDING, ask) : ask(),
-              signal,
-            )
-          } catch (error) {
-            if (hasAborted(signal)) throw makeAbortError(signal)
-            if (policy === placement) throw error
-            const detail = error instanceof Error ? error.message : String(error)
-            console.error(`${method} policy ${name} raised: ${detail}`)
-            answered = { kind: 'deny', reason: `${name} failed`, policy: name, failed: true }
-          }
-          const items: unknown[] = Array.isArray(answered) ? answered : [answered]
-          if (items.every((item) => item === null || item instanceof Limit)) passed?.push(policy)
-          pending = Array.isArray(answered) ? answered : [answered]
-          cursor = 0
         }
         if (hasAborted(signal)) throw makeAbortError(signal)
-        const item = cursor < pending.length ? pending[cursor] : null
-        cursor += 1
-        composition.respond(effect, item, name, cursor < pending.length)
+        if (quiet) return { answers: [], action: null, route: null, limit: null }
       }
-      return composition.result(method)
-    } finally {
-      composition.close()
+      const composition = new Composition()
+      try {
+        const hook = method.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`)
+        const descriptors = policies.map((policy, slot) => {
+          const role =
+            slot < snapshot.length
+              ? policy instanceof PermissionsPolicy
+                ? 'permissions'
+                : 'registered'
+              : policy === this.mode
+                ? 'mount_mode'
+                : 'placement'
+          composition.names.set(slot, policy.constructor.name || 'policy')
+          return { slot, role, hooks: among === null || among.includes(policy) ? [hook] : [] }
+        })
+        composition.feed({
+          op: 'evaluate',
+          evaluation: composition.evaluation,
+          hook,
+          projection,
+          every,
+          placed,
+          rules_only: rulesOnly,
+          policies: descriptors,
+        })
+        composition.stream.finish()
+        const requested: number[] = []
+        let pending: unknown[] = []
+        let cursor = 0
+        for (let effect = composition.request(); effect !== null; effect = composition.request()) {
+          if (composition.respondEffect(effect, 'config' in seen ? undefined : seen)) continue
+          if (effect.op !== 'run_policy' && effect.op !== 'read_action')
+            throw new Error('invalid evaluation effect')
+          const policy = policies[effect.slot]
+          if (policy === undefined) throw new Error('invalid policy slot')
+          const name = policy.constructor.name || 'policy'
+          if (effect.op === 'run_policy') {
+            requested.push(effect.slot)
+            pending = await answer(effect.slot)
+            cursor = 0
+          }
+          if (hasAborted(signal)) throw makeAbortError(signal)
+          const item = cursor < pending.length ? pending[cursor] : null
+          cursor += 1
+          composition.respond(effect, item, name, cursor < pending.length)
+        }
+        const result = composition.result(method)
+        if (
+          among === null &&
+          requested.every((slot) => ran.get(slot)?.every((item) => item === null) ?? true)
+        ) {
+          orders.set(key, requested)
+        }
+        return result
+      } finally {
+        composition.close()
+      }
     }
+    return asyncContextIsolatesTasks ? runExplaining(DryRun.DECIDING, settle) : settle()
   }
 
   private async fire(

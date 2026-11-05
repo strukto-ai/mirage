@@ -8,7 +8,7 @@ from mirage.process.config import ProcessPermissions, ProcessScope
 from mirage.process.handle import ExecutionBind, ProcessHandle
 from mirage.process.types import ProcessInfo, ProcessRunner
 from mirage.process.view import ProcessView
-from mirage.types import PathSpec
+from mirage.types import PathSpec, under_ceiling
 from mirage.utils.clock import system_now
 from mirage.utils.ids import IdSource
 
@@ -48,6 +48,9 @@ class ProcessTable:
         self._generations: dict[str, int] = {}
         self._lock = RLock()
         self._stopped = False
+        # The host's ceiling on any session's limit, a lifted one
+        # included, whatever profile, snapshot or store set it.
+        self.ceiling: int | None = None
 
     def start(
         self,
@@ -70,8 +73,9 @@ class ProcessTable:
             run (ProcessRunner): asynchronous execution and cleanup.
             parent_pid (int | None): the runner this one is a child of.
             limit (int | None): the most runners the session may hold,
-                this one included; None for no cap. Stopping runners count
-                until they finish cleanup and leave the live registry.
+                this one included, held under ``ceiling``; None for no
+                cap. Stopping runners count until they finish cleanup and
+                leave the live registry.
             execution_id (str | None): external execution identity for
                 an admitted root; children receive a fresh identity.
             started (Callable[[ProcessInfo], None] | None): what the
@@ -91,6 +95,7 @@ class ProcessTable:
         with self._lock:
             if self._stopped:
                 raise RuntimeError("process table is stopped")
+            limit = under_ceiling(limit, self.ceiling)
             if (
                 limit is not None
                 and sum(

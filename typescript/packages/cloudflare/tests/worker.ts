@@ -44,7 +44,8 @@ interface SqlRun {
   readonly id: string
 }
 
-const app = createApp({ maxWorkspaces: 32 })
+// The corpus opens as many sessions a workspace as it does on the server.
+const app = createApp({ maxWorkspaces: 32, maxSessions: 16 })
 
 interface Run {
   readonly lines: readonly string[]

@@ -27,6 +27,12 @@ from mirage import MountMode, Workspace
 from mirage.io import IOResult
 from mirage.observe import OpRecord
 from mirage.observe import observer as observer_module
+from mirage.observe.constants import (
+    TRACE_CONTENT_ENV,
+    TRACE_CONTENT_MAX_BYTES,
+    TRACE_CONTENT_MAX_BYTES_ENV,
+    TRACE_MAX_SPANS_ENV,
+)
 from mirage.observe.disk_store import DiskObserverStore
 from mirage.observe.log_entry import EVENT_COMMAND, LogEntry
 from mirage.observe.observer import Observer
@@ -472,7 +478,7 @@ def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
             "mirage.exit_code": 1,
             "mirage.timestamp": start,
             "mirage.duration_ms": 1000,
-            "mirage.stdout": "x" * observer_module.TRACE_CONTENT_MAX_BYTES,
+            "mirage.stdout": "x" * TRACE_CONTENT_MAX_BYTES,
             "mirage.stderr": "cat: /d/b: No such file\n",
             "mirage.cwd": "/d",
         },
@@ -503,7 +509,7 @@ def test_a_finished_line_is_a_span_over_its_vfs_calls(monkeypatch):
 
 
 def test_span_output_is_cut_at_the_bytes_it_is_told_to(monkeypatch):
-    monkeypatch.setenv(observer_module.TRACE_CONTENT_MAX_BYTES_ENV, "5")
+    monkeypatch.setenv(TRACE_CONTENT_MAX_BYTES_ENV, "5")
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
@@ -520,12 +526,38 @@ def test_span_output_is_cut_at_the_bytes_it_is_told_to(monkeypatch):
     assert (line.attributes or {})["mirage.stdout"] == "éé"
 
 
+def test_a_line_sends_at_most_its_span_cap_and_counts_the_rest(monkeypatch):
+    monkeypatch.setenv(TRACE_MAX_SPANS_ENV, "2")
+    exporter = _exported(monkeypatch)
+    obs = Observer(store=RAMObserverStore(), clock=ManualClock(start=NEW_YEAR))
+    start = int(NEW_YEAR * 1000)
+    recs = [
+        OpRecord(
+            op="stat",
+            path=f"/d/{i}",
+            source="ram",
+            bytes=0,
+            timestamp=start,
+            duration_ms=0,
+        )
+        for i in range(5)
+    ]
+    asyncio.run(obs.log_command("find /d", "s1", cwd="/", line="L"))
+    asyncio.run(obs.log_result(IOResult(), recs, "s1", cwd="/", line="L"))
+    *calls, line = exporter.get_finished_spans()
+    assert [c.attributes["mirage.vfs.path"] for c in calls] == ["/d/0", "/d/1"]
+    assert (line.attributes or {})["mirage.vfs.dropped"] == 3
+    # The history still records every call.
+    vfs = [e for e in asyncio.run(obs.events()) if e["type"] == "vfs"]
+    assert len(vfs) == 5
+
+
 def test_span_output_that_is_not_utf8_stays_within_its_bytes(monkeypatch):
     exporter = _exported(monkeypatch)
     obs = Observer(store=RAMObserverStore(), clock=ManualClock(start=NEW_YEAR))
     asyncio.run(obs.log_command("cat blob", "s1", cwd="/", line="L"))
     # Each byte reads as U+FFFD, three bytes in UTF-8.
-    limit = observer_module.TRACE_CONTENT_MAX_BYTES
+    limit = TRACE_CONTENT_MAX_BYTES
     io = IOResult(stdout=b"\xff" * limit)
     asyncio.run(obs.log_result(io, [], "s1", cwd="/", line="L"))
     [line] = exporter.get_finished_spans()
@@ -555,7 +587,7 @@ async def test_a_span_keeps_the_cwd_a_line_was_given(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_span_takes_output_past_the_terminal_chunk(monkeypatch):
-    monkeypatch.setenv(observer_module.TRACE_CONTENT_MAX_BYTES_ENV, "20000")
+    monkeypatch.setenv(TRACE_CONTENT_MAX_BYTES_ENV, "20000")
     exporter = _exported(monkeypatch)
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     try:
@@ -571,7 +603,7 @@ async def test_a_span_takes_output_past_the_terminal_chunk(monkeypatch):
 
 
 def test_spans_leave_out_output_and_vfs_calls_when_told_to(monkeypatch):
-    monkeypatch.setenv(observer_module.TRACE_CONTENT_ENV, "false")
+    monkeypatch.setenv(TRACE_CONTENT_ENV, "false")
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))

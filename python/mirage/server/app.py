@@ -61,6 +61,7 @@ from mirage.server.rate_limit import (
 from mirage.server.registry import (
     OWNERS_PREFIX,
     WorkspaceRegistry,
+    resolve_ceilings,
     resolve_graceful_timeout,
     resolve_max_sessions,
     resolve_max_workspaces,
@@ -301,6 +302,10 @@ def build_app(
     forwarded_allow_ips: Sequence[str] | None = None,
     max_sessions: int | None = None,
     graceful_timeout: float | None = None,
+    max_memory: str | int | None = None,
+    max_processes: int | None = None,
+    max_line_seconds: float | None = None,
+    max_env: str | int | None = None,
 ) -> FastAPI:
     """Construct the Mirage server's FastAPI app.
 
@@ -371,13 +376,29 @@ def build_app(
         max_sessions (int | None): the most sessions each workspace
             holds; past it a new session answers 429. ``None`` (default)
             reads ``$MIRAGE_MAX_SESSIONS`` or the ``max_sessions`` config
-            key, else sets no cap.
+            key, else 16.
         graceful_timeout (float | None): how long a shutdown (SIGTERM,
             SIGINT, or the lifespan ending) lets running lines finish,
             holding new ones and refusing new workspaces, before it
             cancels the rest. ``None`` (default) reads
             ``$MIRAGE_GRACEFUL_TIMEOUT`` or the ``graceful_timeout`` config key,
             else 0, which drains nothing.
+        max_memory (str | int | None): the most a workspace's
+            ``max_memory`` reaches, a lifted one included, as a size.
+            ``None`` (default) reads ``$MIRAGE_MAX_MEMORY`` or the
+            ``max_memory`` config key, else sets no ceiling.
+        max_processes (int | None): the most a session's
+            ``processes.max`` reaches, a lifted one included. ``None``
+            (default) reads ``$MIRAGE_MAX_PROCESSES`` or the
+            ``max_processes`` config key, else sets no ceiling.
+        max_line_seconds (float | None): the most seconds a line runs,
+            whatever ``@line`` a config or profile sets. ``None``
+            (default) reads ``$MIRAGE_MAX_LINE_SECONDS`` or the
+            ``max_line_seconds`` config key, else sets no ceiling.
+        max_env (str | int | None): the most a workspace's ``max_env``
+            reaches, a lifted one included, as a size. ``None`` (default)
+            reads ``$MIRAGE_MAX_ENV`` or the ``max_env`` config key, else
+            sets no ceiling.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -415,6 +436,9 @@ def build_app(
         policies=policies,
         programs=resolve_policy_file(policy_file),
         max_sessions=resolve_max_sessions(max_sessions),
+        ceilings=resolve_ceilings(
+            max_memory, max_processes, max_line_seconds, max_env
+        ),
     )
     app.state.graceful_timeout = resolve_graceful_timeout(graceful_timeout)
     app.state.jobs = app.state.registry.jobs

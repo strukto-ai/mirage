@@ -1133,6 +1133,7 @@ describe('workspaces router', () => {
         maxSnapshotBytes: MAX_SNAPSHOT_BYTES,
         maxSnapshotEncodedBytes: 1024 * 1024 * 1024,
         policies: [],
+        ceilings: app.registry.ceilings,
       })
       load.mockRejectedValueOnce(Object.assign(new Error('gone'), { code: 'ENOENT' }))
       const missing = await app.inject({

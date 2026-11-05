@@ -70,7 +70,8 @@ from mirage.server.schemas import (
     WorkspaceDetail,
 )
 from mirage.server.summary import make_brief, make_detail
-from mirage.utils.ids import new_workspace_id
+from mirage.types import Ceilings
+from mirage.utils.ids import check_name, new_workspace_id
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.snapshot.utils import is_safe_blob_path
 from mirage.workspace.store import DiskWorkspaceStateStore
@@ -172,6 +173,7 @@ async def _construct(
     workspace_id: str,
     state_root: str,
     max_sessions: int | None,
+    ceilings: Ceilings,
 ) -> Workspace:
     """Build a workspace from its config, on the loop that awaits this:
     its secrets are read, its mounts and runtimes constructed and their
@@ -191,6 +193,8 @@ async def _construct(
         workspace_id (str): the id it is created under.
         state_root (str): where the default disk store keeps its state.
         max_sessions (int | None): the server's session cap.
+        ceilings (Ceilings): the server's ceilings, which hold the
+            config's limits.
 
     Raises:
         ValueError: the saved sessions are past the cap.
@@ -200,6 +204,7 @@ async def _construct(
         mcp_clis=await run_with_network(rule, build_mcp_clis(resolved))
     )
     kwargs["workspace_id"] = workspace_id
+    kwargs["ceilings"] = ceilings
     if "store" not in kwargs:
         kwargs["store"] = DiskWorkspaceStateStore(state_root)
         kwargs["owns_store"] = True
@@ -276,13 +281,20 @@ async def run_capture(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
-def _refuse_dot_id(workspace_id: str | None) -> None:
-    """Refuse an id that would name the state root, not a workspace.
+def _refuse_id(workspace_id: str | None) -> None:
+    """Refuse an id that would name the state root, not a workspace, or
+    that breaks the rule every name a caller gives keeps.
 
     Args:
         workspace_id (str | None): the id the request names, if any.
     """
-    if workspace_id is not None and workspace_id in DOT_IDS:
+    if workspace_id is None:
+        return
+    try:
+        check_name("workspace id", workspace_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if workspace_id in DOT_IDS:
         raise HTTPException(
             status_code=400, detail=f"invalid workspace id: {workspace_id!r}"
         )
@@ -365,7 +377,7 @@ async def create_workspace(
         if req.id is not None
         else req.config.workspace_id or new_workspace_id()
     )
-    _refuse_dot_id(wid)
+    _refuse_id(wid)
     async with registry.creating(wid, digest) as admitted:
         if not admitted:
             raise HTTPException(
@@ -395,6 +407,7 @@ async def create_workspace(
                         wid,
                         str(request.app.state.state_root),
                         registry.max_sessions,
+                        registry.ceilings,
                     )
                 )
             except (
@@ -649,7 +662,7 @@ async def clone_workspace(
 ) -> WorkspaceDetail:
     registry = request.app.state.registry
     src_entry = require_entry(request, workspace_id)
-    _refuse_dot_id(req.id)
+    _refuse_id(req.id)
     if req.id is not None and req.id in registry:
         raise HTTPException(
             status_code=409, detail=f"workspace id already exists: {req.id!r}"
@@ -718,7 +731,7 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
                 status_code=400,
                 detail="load needs a 'key' or an uploaded 'snapshot' part",
             )
-    _refuse_dot_id(req.id)
+    _refuse_id(req.id)
     if req.id is not None and req.id in registry:
         raise HTTPException(
             status_code=409, detail=f"workspace id already exists: {req.id!r}"
@@ -769,6 +782,7 @@ async def load_workspace(request: Request) -> WorkspaceDetail:
                         max_snapshot_bytes=MAX_SNAPSHOT_BYTES,
                         max_snapshot_encoded_bytes=MAX_SNAPSHOT_PART,
                         policies=policies,
+                        ceilings=registry.ceilings,
                     ),
                 )
             past = _past_session_cap(ws, registry.max_sessions, "the snapshot")

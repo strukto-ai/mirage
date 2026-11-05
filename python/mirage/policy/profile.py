@@ -738,7 +738,9 @@ def profile_to_dict(profile: SessionProfile) -> dict[str, Any]:
     if profile.command_limits is not None:
         doc["command_limits"] = command_limits_to_json(profile.command_limits)
     if profile.processes is not None:
-        doc["processes"] = profile.processes.model_dump(mode="json")
+        doc["processes"] = profile.processes.model_dump(
+            mode="json", exclude_unset=True
+        )
     if profile.mounts is not None:
         doc["mounts"] = {
             prefix: _mount_doc(entry)

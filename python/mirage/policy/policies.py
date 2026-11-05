@@ -25,6 +25,7 @@ from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.usage import operand_exit_code
 from mirage.context.session_context import (
     Caller,
+    CallerToken,
     current_caller,
     explaining,
     reset_explaining,
@@ -870,6 +871,7 @@ class Policies:
         self._policies: list[Policy] = list(policies or [])
         self._placement: Policy | None = None
         self._wanted: frozenset[str] = frozenset()
+        self._orders: dict[tuple[str, bool, bool], tuple[int, ...]] = {}
         self._rescan()
         self._mode = MountModePolicy()
         self.decisions = Decisions()
@@ -968,6 +970,7 @@ class Policies:
 
     def _rescan(self) -> None:
         wanted = set()
+        self._orders = {}
         policies = [*self._policies, *filter(None, [self._placement])]
         for method in VALIDITY:
             base = getattr(Policy, method)
@@ -989,8 +992,34 @@ class Policies:
         among: tuple[Policy, ...] | None = None,
         passed: list[Policy] | None = None,
     ) -> CompositionResult:
+        """Ask the policies at ``method`` and settle their answers in
+        mirage-rs, which also decides who is asked and in what order.
+
+        An evaluation of every policy in which each answered nothing
+        leaves the order mirage-rs asked in under its key (the method and
+        the flags), and the next evaluation with that key asks the
+        policies in that order itself: when all of them answer nothing
+        again it is settled without mirage-rs, else the answers already
+        given are replayed to it, so no policy runs twice. A change to
+        the policies forgets every order. The dry-run flag a deciding
+        policy runs under is bound once for the whole evaluation.
+
+        Args:
+            method (str): the method in python spelling.
+            ctx (MethodContext): the context the policies see.
+            every (bool): ask every policy, past a Deny.
+            placed (bool): the caller placed the line.
+            rules_only (bool): ask the profile's rules alone.
+            projection (str): ``fire`` or ``answers``.
+            among (tuple[Policy, ...] | None): ask only these; such an
+                evaluation always goes to mirage-rs.
+            passed (list[Policy] | None): filled, as they answer, with
+                the policies that answered nothing or only a Limit, and
+                those without the method.
+        """
         snapshot = tuple(self._policies)
         placement = self._placement
+        orders = self._orders
         policies = (
             *snapshot,
             *((placement,) if placement is not None else ()),
@@ -1001,8 +1030,64 @@ class Policies:
             for policy in policies
         ):
             return CompositionResult((), None, None, None)
-        composition = Composition()
+        key = (method, placed, rules_only)
+        if passed is not None:
+            passed.extend(
+                policy
+                for policy in policies
+                if getattr(type(policy), method) is getattr(Policy, method)
+            )
+        ran: dict[int, tuple[Any, ...]] = {}
+        token: CallerToken | None = None
+
+        async def answer(slot: int) -> tuple[Any, ...]:
+            nonlocal ctx, token
+            if slot in ran:
+                return ran[slot]
+            policy = policies[slot]
+            handles = (
+                self.views(ctx.session_id, None)
+                if not rules_only
+                and self.views is not None
+                and not isinstance(ctx, WorkspaceContext)
+                and ctx.session is None
+                else None
+            )
+            if handles is not None:
+                session, vfs, caller = handles
+                assert not isinstance(ctx, WorkspaceContext)
+                ctx = replace(ctx, session=session, vfs=vfs, caller=caller)
+            if token is None:
+                token = set_explaining(DryRun.DECIDING)
+            try:
+                answered = getattr(policy, method)(ctx)
+                if inspect.isawaitable(answered):
+                    answered = await answered
+            except Exception as exc:
+                if policy is placement:
+                    raise
+                name = type(policy).__name__
+                logger.error("%s policy %s raised: %s", method, name, exc)
+                answered = Deny(f"{name} failed", policy=name, failed=True)
+            ran[slot] = (
+                answered if isinstance(answered, tuple) else (answered,)
+            )
+            if passed is not None and all(
+                item is None or isinstance(item, Limit) for item in ran[slot]
+            ):
+                passed.append(policy)
+            return ran[slot]
+
+        composition: Composition | None = None
         try:
+            order = orders.get(key) if among is None else None
+            if order is not None:
+                for slot in order:
+                    if any(item is not None for item in await answer(slot)):
+                        break
+                else:
+                    return CompositionResult((), None, None, None)
+            composition = Composition()
             descriptors = []
             for slot, policy in enumerate(policies):
                 role = (
@@ -1019,8 +1104,6 @@ class Policies:
                 asked = getattr(type(policy), method) is not getattr(
                     Policy, method
                 )
-                if not asked and passed is not None:
-                    passed.append(policy)
                 if among is not None and all(p is not policy for p in among):
                     asked = False
                 descriptors.append(
@@ -1044,6 +1127,7 @@ class Policies:
                 }
             )
             composition.stream.finish()
+            requested: list[int] = []
             pending: tuple[Any, ...] = ()
             cursor = 0
             while effect := composition.request():
@@ -1055,59 +1139,26 @@ class Policies:
                 requested_slot = effect["slot"]
                 assert isinstance(requested_slot, int)
                 policy = policies[requested_slot]
-                name = type(policy).__name__
                 if effect["op"] == "run_policy":
-                    handles = (
-                        self.views(ctx.session_id, None)
-                        if not rules_only
-                        and self.views is not None
-                        and not isinstance(ctx, WorkspaceContext)
-                        and ctx.session is None
-                        else None
-                    )
-                    if handles is not None:
-                        session, vfs, caller = handles
-                        assert not isinstance(ctx, WorkspaceContext)
-                        ctx = replace(
-                            ctx, session=session, vfs=vfs, caller=caller
-                        )
-                    token = set_explaining(DryRun.DECIDING)
-                    try:
-                        answered = getattr(policy, method)(ctx)
-                        if inspect.isawaitable(answered):
-                            answered = await answered
-                    except Exception as exc:
-                        if policy is placement:
-                            raise
-                        logger.error(
-                            "%s policy %s raised: %s", method, name, exc
-                        )
-                        answered = Deny(
-                            f"{name} failed", policy=name, failed=True
-                        )
-                    finally:
-                        reset_explaining(token)
-                    if passed is not None and all(
-                        item is None or isinstance(item, Limit)
-                        for item in (
-                            answered
-                            if isinstance(answered, tuple)
-                            else (answered,)
-                        )
-                    ):
-                        passed.append(policy)
-                    pending = (
-                        answered
-                        if isinstance(answered, tuple)
-                        else (answered,)
-                    )
+                    requested.append(requested_slot)
+                    pending = await answer(requested_slot)
                     cursor = 0
                 item = pending[cursor] if cursor < len(pending) else None
                 cursor += 1
-                composition.respond(effect, item, name, cursor < len(pending))
-            return composition.result(method)
+                composition.respond(
+                    effect, item, type(policy).__name__, cursor < len(pending)
+                )
+            result = composition.result(method)
+            if among is None and all(
+                item is None for slot in requested for item in ran[slot]
+            ):
+                orders[key] = tuple(requested)
+            return result
         finally:
-            composition.close()
+            if token is not None:
+                reset_explaining(token)
+            if composition is not None:
+                composition.close()
 
     async def _fire(
         self,

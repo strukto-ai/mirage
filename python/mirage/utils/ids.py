@@ -43,6 +43,10 @@ SPLITMIX_MUL1 = 0xBF58476D1CE4E5B9
 SPLITMIX_MUL2 = 0x94D049BB133111EB
 UINT64_MASK = (1 << 64) - 1
 
+# The longest session id, profile name or workspace id a caller may give:
+# each is a store key and a URL segment, and room for a UUID with a prefix.
+MAX_NAME_LENGTH = 128
+
 
 def _stamp(
     last_ms: int, counter: int, now_ms: int, fresh: Callable[[], int]
@@ -136,6 +140,28 @@ def new_session_id() -> str:
         str: time-ordered, collision-resistant session id.
     """
     return uuid7()
+
+
+def check_name(kind: str, name: str) -> None:
+    """Refuse a session id, profile name or workspace id a caller gave
+    that is empty, longer than MAX_NAME_LENGTH characters, or holds a
+    control character.
+
+    Args:
+        kind (str): what the name names, as the error says it.
+        name (str): the name given.
+
+    Raises:
+        ValueError: the name breaks the rule; the message leaves the name
+            out, since it may be any size.
+    """
+    if not 0 < len(name) <= MAX_NAME_LENGTH or any(
+        ord(char) < 0x20 or ord(char) == 0x7F for char in name
+    ):
+        raise ValueError(
+            f"invalid {kind}: must be 1 to {MAX_NAME_LENGTH} characters"
+            " with no control characters"
+        )
 
 
 class IdSource(Protocol):

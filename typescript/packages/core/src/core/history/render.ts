@@ -14,18 +14,18 @@
 
 import { EVENT_COMMAND } from '../../observe/log_entry.ts'
 import type { JsonObject } from '../../types.ts'
-
-const HISTSIZE = 500
+import { HISTFILESIZE, HISTSIZE } from './constants.ts'
 
 /**
  * Render command events as a GNU bash histfile: one `#<epoch-seconds>`
  * timestamp comment line per entry followed by the command line.
- * Non-command events (ops, clear tombstones) are ignored.
+ * Non-command events (ops, clear tombstones) are ignored. Only the newest
+ * HISTFILESIZE commands are written.
  */
 export function renderBashHistory(events: JsonObject[]): string {
   const lines: string[] = []
-  for (const e of events) {
-    if (e.type !== EVENT_COMMAND) continue
+  const commands = events.filter((e) => e.type === EVENT_COMMAND)
+  for (const e of commands.slice(-HISTFILESIZE)) {
     const ts = typeof e.timestamp === 'number' ? e.timestamp : 0
     lines.push(`#${String(Math.floor(ts / 1000))}`)
     lines.push(typeof e.command === 'string' ? e.command : '')
