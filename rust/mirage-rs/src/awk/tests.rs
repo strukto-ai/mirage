@@ -866,3 +866,14 @@ fn malformed_large_format_retires_plans_and_emits_diagnostic_in_windows() {
     );
     assert!(turns > 50);
 }
+
+#[test]
+fn missing_fields_update_from_zero_and_keep_string_comparison_rules() {
+    assert_eq!(
+        run(
+            r#"BEGIN { print $1++; print NF,$1; print ++$3; print NF,$2,$3; NF=0; print --$2,$2,NF; print ($5==0),($5=="") }"#,
+            ""
+        ),
+        "0\n1 1\n1\n3  1\n-1 -1 2\n0 1\n"
+    );
+}

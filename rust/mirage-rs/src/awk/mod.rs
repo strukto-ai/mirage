@@ -107,8 +107,8 @@ impl Stream for Awk {
     fn busy(&self) -> bool {
         match self {
             Awk::Running(machine) => {
-                machine.io.idle()
-                    && (!machine.done || machine.io.fatal.is_some() || machine.io.reporting())
+                machine.io.reporting()
+                    || (machine.io.idle() && (!machine.done || machine.io.fatal.is_some()))
             }
             Awk::Retiring { machine, .. } => machine.is_some(),
             Awk::Refused(_) => false,
@@ -119,7 +119,9 @@ impl Stream for Awk {
         match self {
             Awk::Running(machine) => {
                 machine.run(STEPS);
-                out.append(&mut machine.io.out);
+                if !machine.reporting() {
+                    out.append(&mut machine.io.out);
+                }
             }
             Awk::Retiring { machine, .. } => {
                 if machine

@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::ops::Range;
 
 use super::buffer::Buffer;
 use super::compile::{
@@ -11,7 +12,7 @@ use super::io::{
 };
 use super::parser::{Cmp, GetlineKind, RedirKind};
 use super::text::{
-    IndexSearch, Regexes, SplitScan, StringWork, Substitution, split_assignment, substr,
+    IndexSearch, Regexes, SplitScan, StringWork, Substitution, View, split_assignment, substr,
 };
 use super::value::{
     MAX_LEN, NumberScan, Text, Value, compare_numbers, default_number, string, strnum, to_int,
@@ -70,8 +71,11 @@ struct RecordJoin {
 #[derive(Default)]
 struct Record {
     text: Text,
-    ranges: Buffer<Text>,
+    ranges: Buffer<Range<usize>>,
     fields: Buffer<Text>,
+    selected: Option<(usize, Text)>,
+    view: Option<View>,
+    empty: Text,
     owned: bool,
     split: bool,
     split_started: bool,
@@ -86,6 +90,8 @@ struct Record {
 impl Record {
     fn set(&mut self, text: Text, fs: Text, paragraph: bool) {
         self.text = text;
+        self.selected = None;
+        self.view = None;
         self.fs = fs;
         self.paragraph = paragraph;
         self.split = false;
@@ -121,7 +127,7 @@ impl Record {
             {
                 SearchStep::Paused => return Ok(false),
                 SearchStep::Done(Some(range)) => {
-                    self.ranges.values.push(self.text.slice(range.0..range.1));
+                    self.ranges.values.push(range.0..range.1);
                     *work = work.saturating_sub(8);
                 }
                 SearchStep::Done(None) => {
@@ -141,12 +147,36 @@ impl Record {
         }
     }
 
-    /// Field `index`, from 1, which must not pass NF.
+    fn prepare_field(&mut self, index: usize, work: &mut u64) -> bool {
+        if self.owned
+            || self
+                .selected
+                .as_ref()
+                .is_some_and(|(selected, _)| *selected == index)
+        {
+            return true;
+        }
+        let view = self
+            .view
+            .get_or_insert_with(|| View::new(self.text.clone(), self.ranges[index - 1].clone()));
+        match view.step(work) {
+            SearchStep::Paused => false,
+            SearchStep::Done(text) => {
+                self.selected = Some((index, text));
+                self.view = None;
+                true
+            }
+        }
+    }
+
+    /// Field `index`, from 1, after preparation.
     fn field(&self, index: usize) -> Text {
         if self.owned {
             self.fields[index - 1].clone()
         } else {
-            self.ranges[index - 1].clone()
+            let (selected, text) = self.selected.as_ref().expect("field prepared");
+            assert_eq!(*selected, index);
+            text.clone()
         }
     }
 
@@ -175,7 +205,23 @@ impl Record {
             if *work == 0 {
                 return Ok(false);
             }
-            self.fields.values.push(self.ranges[*index].clone());
+            let text = if let Some((selected, text)) = &self.selected
+                && *selected == *index + 1
+            {
+                text.clone()
+            } else {
+                let view = self.view.get_or_insert_with(|| {
+                    View::new(self.text.clone(), self.ranges[*index].clone())
+                });
+                match view.step(work) {
+                    SearchStep::Paused => return Ok(false),
+                    SearchStep::Done(text) => {
+                        self.view = None;
+                        text
+                    }
+                }
+            };
+            self.fields.values.push(text);
             *index += 1;
             *work = work.saturating_sub(16);
         }
@@ -294,6 +340,7 @@ struct FieldSplit {
     array: usize,
     retired: Retired<Value>,
     count: usize,
+    view: Option<View>,
 }
 
 enum SubTarget {
@@ -567,6 +614,15 @@ impl Machine {
         false
     }
 
+    pub(super) fn reporting(&self) -> bool {
+        self.io.reporting()
+            || match &self.pending {
+                Some(Pending::Format(task)) => task.formatter.failed(),
+                Some(Pending::Print { print, .. }) => print.failed(),
+                _ => false,
+            }
+    }
+
     /// Run up to `budget` steps, stopping early to wait on the host, once
     /// a window of output is ready, or at the end.
     pub(super) fn run(&mut self, budget: usize) {
@@ -678,6 +734,15 @@ impl Machine {
                 .prepare_text(&special(&self.globals, OFS), work)?
         {
             return Ok(false);
+        }
+        if matches!(op, Op::LoadField | Op::IncDecField(..) | Op::SubField(_)) {
+            let index = self.stack.last().map_or(0, |value| to_int(value.num()));
+            if index > 0
+                && index <= self.record.nf() as i128
+                && !self.record.prepare_field(index as usize, work)
+            {
+                return Ok(false);
+            }
         }
         let at = |offset| self.stack.len().checked_sub(offset + 1);
         let positions = match op {
@@ -908,6 +973,21 @@ impl Machine {
                     return Ok(());
                 }
                 loop {
+                    if let Some(view) = &mut split.view {
+                        match view.step(work) {
+                            SearchStep::Paused => {
+                                self.pending = Some(Pending::Split(split));
+                                return Ok(());
+                            }
+                            SearchStep::Done(text) => {
+                                split.count += 1;
+                                self.arrays.items[split.array]
+                                    .insert(split.count.to_string().into_bytes(), strnum(text));
+                                split.view = None;
+                                *work = work.saturating_sub(16);
+                            }
+                        }
+                    }
                     match split.scan.next(
                         &split.subject,
                         &split.separator,
@@ -924,12 +1004,7 @@ impl Machine {
                             break;
                         }
                         SearchStep::Done(Some((start, end))) => {
-                            split.count += 1;
-                            self.arrays.items[split.array].insert(
-                                split.count.to_string().into_bytes(),
-                                strnum(split.subject.slice(start..end)),
-                            );
-                            *work = work.saturating_sub(16);
+                            split.view = Some(View::new(split.subject.clone(), start..end));
                         }
                     }
                 }
@@ -1192,7 +1267,7 @@ impl Machine {
         let nf = self.record.nf();
         let index = usize::try_from(index).unwrap_or(usize::MAX);
         Ok(if index > nf {
-            string(Vec::new())
+            string(self.record.empty.clone())
         } else {
             strnum(self.record.field(index))
         })
@@ -1687,6 +1762,7 @@ impl Machine {
                     array: id,
                     retired,
                     count: 0,
+                    view: None,
                 })));
             }
             Op::Close => return self.close(),
@@ -2339,4 +2415,41 @@ fn arith(op: u8, lhs: f64, rhs: f64, assign: bool) -> Result<f64, Vec<u8>> {
         }
         _ => lhs.powf(rhs),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retained_field_keys_and_values_do_not_pin_original_records() {
+        let program = br#"BEGIN { split(source,a); saved=a[1]; delete a; $0=source; key=$1; table[key]=1; source=""; $0="next" }"#;
+        let mut input = b"id ".to_vec();
+        input.extend(std::iter::repeat_n(b'x', 2 * 1024 * 1024));
+        let code = super::super::compile::compile(&super::super::parser::parse(program).unwrap());
+        let mut machine = Machine::new(
+            code,
+            Setup {
+                operands: Vec::new(),
+                assignments: vec![(b"source".to_vec(), input)],
+                fs: None,
+                environ: Vec::new(),
+            },
+        );
+        while !machine.done {
+            machine.run(4096);
+        }
+        assert_eq!(machine.status, 0);
+        for name in [b"saved".as_slice(), b"key"] {
+            let index = machine.code.globals[name];
+            let value = machine.load(Var::Global(index)).unwrap().into_text();
+            assert_eq!(value.as_slice(), b"id");
+            assert_eq!(value.storage_len(), 2);
+        }
+        let index = machine.code.globals[b"table".as_slice()];
+        let id = machine.array(Arr::Global(index));
+        let key = machine.arrays.items[id].next_key(&mut 0).unwrap();
+        assert_eq!(key.as_slice(), b"id");
+        assert_eq!(key.storage_len(), 2);
+    }
 }

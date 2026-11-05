@@ -332,6 +332,10 @@ pub(super) struct Formatter {
 }
 
 impl Formatter {
+    pub(super) fn failed(&self) -> bool {
+        self.failure.is_some() || matches!(self.scan, Scan::Error)
+    }
+
     pub(super) fn new(format: Text, args: Vec<Value>, convfmt: Text) -> Self {
         Self {
             format,
@@ -645,6 +649,10 @@ pub(super) struct Print {
 }
 
 impl Print {
+    pub(super) fn failed(&self) -> bool {
+        self.failure.is_some()
+    }
+
     pub(super) fn retire(&mut self, work: &mut u64) -> bool {
         if !self.output.retire(work) {
             return false;

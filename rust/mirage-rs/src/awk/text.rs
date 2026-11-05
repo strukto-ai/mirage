@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 
 use crate::regex::Step;
 use crate::regex::parse::Dialect;
@@ -464,12 +465,15 @@ pub(super) struct IndexSearch {
 impl IndexSearch {
     pub(super) fn new(haystack: Text, needle: Text) -> Self {
         Self {
-            haystack,
             prefix: {
-                let mut prefix = Vec::with_capacity(needle.len().max(1));
-                prefix.push(0);
+                let mut prefix = Vec::new();
+                if needle.len() <= haystack.len() && !needle.is_empty() {
+                    prefix = Vec::with_capacity(needle.len());
+                    prefix.push(0);
+                }
                 prefix
             },
+            haystack,
             needle,
             building: 1,
             matched: 0,
@@ -480,6 +484,9 @@ impl IndexSearch {
     pub(super) fn step(&mut self, work: &mut u64) -> Step<usize> {
         if self.needle.is_empty() {
             return Step::Done(1);
+        }
+        if self.needle.len() > self.haystack.len() {
+            return Step::Done(0);
         }
         while self.building < self.needle.len() {
             if *work == 0 {
@@ -518,6 +525,42 @@ impl IndexSearch {
             }
         }
         Step::Done(0)
+    }
+}
+
+pub(super) enum View {
+    Shared(Text),
+    Copy(StringWork),
+}
+
+impl View {
+    pub(super) fn new(subject: Text, range: Range<usize>) -> Self {
+        if subject.storage_len() > range.len().saturating_mul(4) {
+            Self::Copy(StringWork::Copy {
+                out: Vec::with_capacity(range.len()),
+                subject,
+                at: range.start,
+                end: range.end,
+            })
+        } else {
+            Self::Shared(subject.slice(range))
+        }
+    }
+
+    pub(super) fn step(&mut self, work: &mut u64) -> Step<Text> {
+        if *work == 0 {
+            return Step::Paused;
+        }
+        match self {
+            Self::Shared(text) => {
+                *work -= 1;
+                Step::Done(text.clone())
+            }
+            Self::Copy(copy) => match copy.step(work) {
+                Step::Paused => Step::Paused,
+                Step::Done(bytes) => Step::Done(bytes.into()),
+            },
+        }
     }
 }
 
@@ -953,6 +996,37 @@ mod record_tests {
 #[cfg(test)]
 mod string_tests {
     use super::*;
+
+    #[test]
+    fn impossible_index_searches_do_not_allocate_a_prefix_table() {
+        let mut search = IndexSearch::new(Text::default(), vec![b'a'; 64 * 1024 * 1024].into());
+        assert_eq!(search.prefix.capacity(), 0);
+        assert!(matches!(search.step(&mut 1), Step::Done(0)));
+    }
+
+    #[test]
+    fn small_views_release_the_large_backing_record_after_bounded_copying() {
+        for budget in [1, 7, 20000] {
+            let subject: Text = vec![b'x'; 131073].into();
+            let mut view = View::new(subject, 17..8210);
+            let mut turns = 0;
+            let value = loop {
+                turns += 1;
+                let mut work = budget;
+                if let Step::Done(text) = view.step(&mut work) {
+                    break text;
+                }
+                assert_eq!(work, 0);
+                assert!(turns < 10000);
+            };
+            assert_eq!(value.len(), 8193);
+            assert_eq!(value.storage_len(), value.len());
+            assert!(value.iter().all(|byte| *byte == b'x'));
+            if budget < 8193 {
+                assert!(turns > 1);
+            }
+        }
+    }
 
     #[test]
     fn index_matches_slice_search_at_every_budget_boundary() {

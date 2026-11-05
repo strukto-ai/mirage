@@ -59,6 +59,10 @@ impl Text {
         }
     }
 
+    pub(super) fn storage_len(&self) -> usize {
+        self.bytes.len()
+    }
+
     pub(super) fn as_slice(&self) -> &[u8] {
         self
     }
