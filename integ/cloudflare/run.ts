@@ -79,13 +79,16 @@ type Config = Record<string, unknown>
 // holding it to the job's time limit.
 const ANSWER_MS = 600_000
 
+/** The edge worker left a request unanswered past its limit. */
+class NoAnswer extends Error {}
+
 /** A request of the edge worker's, failing once it has not answered in `ms`. */
 async function edgeFetch(url: string, init: RequestInit = {}, ms = ANSWER_MS): Promise<Response> {
   try {
     return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) })
   } catch (e) {
     if (e instanceof DOMException && e.name === 'TimeoutError') {
-      throw new Error(`${url}: the edge worker did not answer in ${String(ms / 1000)} s`)
+      throw new NoAnswer(`${url}: the edge worker did not answer in ${String(ms / 1000)} s`)
     }
     throw e
   }
@@ -868,6 +871,7 @@ async function main(): Promise<void> {
       try {
         await open()
       } catch (e) {
+        if (e instanceof NoAnswer) throw e
         failed++
         console.log(`FAIL ${target.id}: ${String(e)}`)
         continue
@@ -890,6 +894,11 @@ async function main(): Promise<void> {
             ran = true
             diffs = compare(bound, exitCode, out, err, elapsed, null, notes)
           } catch (e) {
+            // A line the worker never answered leaves it wedged, failing
+            // every line after it, so the run ends at that one.
+            if (e instanceof NoAnswer) {
+              throw new Error(`${target.id}/${bound.id}: ${bound.command}`, { cause: e })
+            }
             diffs = [String(e)]
             if (!(await alive())) {
               lost++
