@@ -72,23 +72,33 @@ const MCP_PORT = 5110
 
 type Config = Record<string, unknown>
 
-// How long the edge worker may take over one request: well past the
-// corpus's slowest line, a 300,000-pass shell loop that takes minutes on a
-// CI runner. A line that hangs it, or a worker that never built (wrangler
-// dev holds a request until one does), then fails the run rather than
-// holding it to the job's time limit.
-const ANSWER_MS = 600_000
+// How long the edge worker may take over one request: past the corpus's
+// slowest line, a 300,000-pass shell loop that takes over two minutes on a
+// CI runner, and short of the five minutes Node's fetch waits for headers,
+// as the shell route answers once its line ends. A line that hangs the
+// worker, or a worker that never built (wrangler dev holds a request until
+// one does), then fails the run rather than holding it to the job's limit.
+const ANSWER_MS = 280_000
 
 /** The edge worker left a request unanswered past its limit. */
 class NoAnswer extends Error {}
+
+/** A fetch our limit ended, or Node's own wait for headers or a body. */
+function timedOut(e: unknown): boolean {
+  if (e instanceof DOMException && e.name === 'TimeoutError') return true
+  const code = (e as { cause?: { code?: unknown } } | null)?.cause?.code
+  return code === 'UND_ERR_HEADERS_TIMEOUT' || code === 'UND_ERR_BODY_TIMEOUT'
+}
 
 /** A request of the edge worker's, failing once it has not answered in `ms`. */
 async function edgeFetch(url: string, init: RequestInit = {}, ms = ANSWER_MS): Promise<Response> {
   try {
     return await fetch(url, { ...init, signal: AbortSignal.timeout(ms) })
   } catch (e) {
-    if (e instanceof DOMException && e.name === 'TimeoutError') {
-      throw new NoAnswer(`${url}: the edge worker did not answer in ${String(ms / 1000)} s`)
+    if (timedOut(e)) {
+      throw new NoAnswer(`${url}: the edge worker did not answer in ${String(ms / 1000)} s`, {
+        cause: e,
+      })
     }
     throw e
   }
