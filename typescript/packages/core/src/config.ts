@@ -105,12 +105,27 @@ async function loadRuntimeClass(ref: string, host: ConfigHost): Promise<RuntimeC
 }
 
 /**
+ * The config mapping of one `runtimes:` entry, if it has one. A name, or
+ * an entry whose config is not a mapping, has none: it is left as given
+ * for `buildRuntimeEntries` to build or refuse. Mirrors `_runtime_config`
+ * in `mirage/config.py`.
+ */
+function runtimeConfig(entry: unknown): Record<string, unknown> | undefined {
+  if (!isPlainObject(entry)) return undefined
+  return isPlainObject(entry.config) ? entry.config : undefined
+}
+
+/**
  * Turn config runtime entries into workspace runtime entries: names, or
  * mappings carrying a name plus the uniform runtime options. A name is a
  * registered runtime or a `source:Class` reference to a `Runtime`
  * subclass.
  */
-async function buildRuntimeEntries(entries: unknown[], host: ConfigHost): Promise<RuntimeEntry[]> {
+async function buildRuntimeEntries(
+  entries: unknown[],
+  sources: Readonly<Record<string, ResolvedSource>> | undefined,
+  host: ConfigHost,
+): Promise<RuntimeEntry[]> {
   const out: RuntimeEntry[] = []
   for (const entry of entries) {
     if (typeof entry === 'string') {
@@ -123,6 +138,12 @@ async function buildRuntimeEntries(entries: unknown[], host: ConfigHost): Promis
     const { name, ...options } = entry
     if (typeof name !== 'string' || name === '') {
       throw new Error("runtime entry needs a non-empty 'name'")
+    }
+    // A runtime credential reads a pointer the way a mount's does: E2B's
+    // `api_key` reaches the runtime's config as the key, not the pointer.
+    const config = runtimeConfig(entry)
+    if (config !== undefined) {
+      options.config = await resolveConfigSecrets(config, sources, `runtimes.${name}.config`)
     }
     if (name.includes(':')) {
       // The key check `buildRuntime` runs for a name: the base
@@ -754,10 +775,11 @@ export async function configToWorkspaceArgs(
   // Built before the mounts, because a mount's config may point at one:
   // `resolveConfigSecrets` inside `buildVfs` fetches through these.
   const blocks = [...Object.values(cfg.mounts), ...Object.values(cfg.clis ?? {})]
-  const sources = await resolveSourcesFor(
-    cfg.secrets,
-    blocks.map((block) => block.config ?? {}),
-  )
+  const runtimes = (cfg.runtimes ?? []).map(runtimeConfig).filter((c) => c !== undefined)
+  const sources = await resolveSourcesFor(cfg.secrets, [
+    ...blocks.map((block) => block.config ?? {}),
+    ...runtimes,
+  ])
   for (const [prefix, block] of Object.entries(cfg.mounts)) {
     const r = await host.buildVfs(block.vfs, block.config ?? {}, sources)
     const m = coerceMountMode(block.mode, wsMode)
@@ -801,7 +823,7 @@ export async function configToWorkspaceArgs(
   }
   const runtimeEntries =
     cfg.runtimes !== undefined && cfg.runtimes !== null
-      ? await buildRuntimeEntries(cfg.runtimes, host)
+      ? await buildRuntimeEntries(cfg.runtimes, sources, host)
       : undefined
   return {
     mounts,

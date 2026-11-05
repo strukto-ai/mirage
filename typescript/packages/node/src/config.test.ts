@@ -14,6 +14,7 @@
 import { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide/runtime'
+import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -371,6 +372,58 @@ describe('configToWorkspaceArgs', () => {
       runtimes: [{ name: 'monty', config: { max_memory: 'lots' } }],
     })
     await expect(configToWorkspaceArgs(bad)).rejects.toThrow(/max_memory must be a size/)
+  })
+
+  const e2bConfig = (apiKey: unknown, extra: Record<string, unknown> = {}) =>
+    loadWorkspaceConfig({
+      mounts: { '/data': { vfs: 'ram' } },
+      runtimes: [{ name: 'e2b', config: { sandbox_id: 'sbx-1', api_key: apiKey } }, 'workspace'],
+      ...extra,
+    })
+
+  it('reads a pointer in a runtime credential', async () => {
+    vi.stubEnv('E2B_TEST_KEY', 'e2b_from_env')
+    try {
+      const args = await configToWorkspaceArgs(e2bConfig({ from: 'env', key: 'E2B_TEST_KEY' }))
+      const [e2b, workspace] = args.options.runtimes ?? []
+      expect(e2b).toBeInstanceOf(E2BRuntime)
+      expect((e2b as E2BRuntime).config).toMatchObject({
+        apiKey: 'e2b_from_env',
+        sandboxId: 'sbx-1',
+      })
+      expect((workspace as { name: string }).name).toBe('workspace')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('builds the source a runtime pointer names', async () => {
+    // Only the runtime names the instance, so it is built for it alone.
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-runtime-secret-'))
+    try {
+      writeFileSync(join(dir, '.env'), 'E2B_API_KEY=e2b_from_dotenv\n')
+      const args = await configToWorkspaceArgs(
+        e2bConfig(
+          { from: 'team', ref: join(dir, '.env'), key: 'E2B_API_KEY' },
+          { secrets: { team: { source: 'dotenv', config: { path: 'unused' } } } },
+        ),
+      )
+      const e2b = args.options.runtimes?.[0] as E2BRuntime
+      expect(e2b.config.apiKey).toBe('e2b_from_dotenv')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('names the runtime when its pointer misses the field', async () => {
+    vi.stubEnv('E2B_TEST_KEY', undefined)
+    try {
+      await expect(
+        configToWorkspaceArgs(e2bConfig({ from: 'env', key: 'E2B_TEST_KEY' })),
+      ).rejects.toThrow(/runtimes\.e2b\.config\.apiKey/)
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it.each([

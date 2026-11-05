@@ -1041,16 +1041,32 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
     )
 
 
+def _runtime_config(entry: str | dict[str, Any]) -> dict[str, Any] | None:
+    """The config mapping of one ``runtimes:`` entry, if it has one.
+
+    A name, or an entry whose config is not a mapping, has none: it is
+    left as given for :func:`build_runtime` to build or refuse.
+
+    Args:
+        entry (str | dict[str, Any]): the entry as the config holds it.
+    """
+    if isinstance(entry, str):
+        return None
+    config = entry.get("config")
+    return config if isinstance(config, dict) else None
+
+
 async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
-    """A config with every mount and CLI pointer replaced by its secret.
+    """A config with every mount, CLI and runtime pointer replaced by its secret.
 
     The async half of the YAML loader, and the reason
     :meth:`WorkspaceConfig.to_workspace_kwargs` can stay sync: a
-    `{from, ref, key}` in `mounts.*.config` or `clis.*.config` is
-    fetched here, so `build_vfs` receives the credential itself
-    and no VFS config, client or backend learns that this plane
-    exists. Mirrors the TypeScript `configToWorkspaceArgs`, which does
-    the same thing inline because it is async already.
+    `{from, ref, key}` in `mounts.*.config`, `clis.*.config` or a
+    `runtimes` entry's `config` is fetched here, so `build_vfs` and
+    `build_runtime` receive the credential itself and no VFS config,
+    runtime, client or backend learns that this plane exists. Mirrors
+    the TypeScript `configToWorkspaceArgs`, which does the same thing
+    inline because it is async already.
 
     A `secrets:` block is not required: `fetch_secret` builds an
     undeclared builtin source from ambient defaults, so
@@ -1067,8 +1083,10 @@ async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
         SecretsError: a source could not answer, or answered without
             the wanted field.
     """
+    runtimes = [_runtime_config(entry) for entry in config.runtimes or []]
     configs = [block.config for block in config.mounts.values()]
     configs += [block.config for block in (config.clis or {}).values()]
+    configs += [c for c in runtimes if c is not None]
     sources = await resolve_sources_for(config.secrets, configs)
     mounts = {
         prefix: block.model_copy(
@@ -1092,6 +1110,22 @@ async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
             )
             for name, block in config.clis.items()
         }
+    if config.runtimes is not None:
+        update["runtimes"] = [
+            entry
+            if isinstance(entry, str) or runtime_config is None
+            else {
+                **entry,
+                "config": await resolve_config_secrets(
+                    runtime_config,
+                    sources,
+                    f"runtimes.{entry.get('name')}.config",
+                ),
+            }
+            for entry, runtime_config in zip(
+                config.runtimes, runtimes, strict=True
+            )
+        ]
     return config.model_copy(update=update)
 
 

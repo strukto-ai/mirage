@@ -47,6 +47,7 @@ from mirage.policy.profile import (
 )
 from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import EnvVar, SecretRef
+from mirage.secrets.errors import SecretsError
 from mirage.shell.console.redis import RedisConsoleStore
 from mirage.shell.job_table import RAMJobStore
 from mirage.shell.job_table.redis import RedisJobStore
@@ -588,6 +589,65 @@ def test_a_runtime_takes_max_memory_as_a_size_or_bytes():
     )
     with pytest.raises(ValueError, match="max_memory must be a size"):
         cfg.to_workspace_kwargs()
+
+
+def e2b_config(api_key, **extra):
+    return load_config(
+        {
+            "mounts": {"/data": {"vfs": "ram"}},
+            "runtimes": [
+                {
+                    "name": "e2b",
+                    "config": {"sandbox_id": "sbx-1", "api_key": api_key},
+                },
+                "workspace",
+            ],
+            **extra,
+        },
+        env={},
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_credential_reads_a_pointer(monkeypatch):
+    monkeypatch.setenv("E2B_TEST_KEY", "e2b_from_env")
+    cfg = await resolve_secrets(
+        e2b_config({"from": "env", "key": "E2B_TEST_KEY"})
+    )
+    e2b, workspace = cfg.to_workspace_kwargs()["runtimes"]
+    assert e2b.config.api_key == "e2b_from_env"
+    assert e2b.config.sandbox_id == "sbx-1"
+    assert workspace == "workspace"
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_pointer_builds_the_source_it_names(tmp_path):
+    # Only the runtime names the instance, so it is built for it alone.
+    (tmp_path / ".env").write_text("E2B_API_KEY=e2b_from_dotenv\n")
+    secrets = {"team": {"source": "dotenv", "config": {"path": "unused"}}}
+    cfg = await resolve_secrets(
+        e2b_config(
+            {
+                "from": "team",
+                "ref": str(tmp_path / ".env"),
+                "key": "E2B_API_KEY",
+            },
+            secrets=secrets,
+        )
+    )
+    e2b = cfg.to_workspace_kwargs()["runtimes"][0]
+    assert e2b.config.api_key == "e2b_from_dotenv"
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_pointer_missing_its_field_names_the_runtime(
+    monkeypatch,
+):
+    monkeypatch.delenv("E2B_TEST_KEY", raising=False)
+    with pytest.raises(SecretsError, match=r"runtimes\.e2b\.config\.api_key"):
+        await resolve_secrets(
+            e2b_config({"from": "env", "key": "E2B_TEST_KEY"})
+        )
 
 
 @pytest.mark.asyncio
