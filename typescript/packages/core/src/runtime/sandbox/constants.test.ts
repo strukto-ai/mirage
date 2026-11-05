@@ -162,7 +162,7 @@ describe('MOUNT_GUARD', () => {
   })
 
   // The guard's own names never reach the program's environment.
-  it("hands the program its environment", () => {
+  it('hands the program its environment', () => {
     const words = ['t', 'f', 's', 'm', 'k', 'o']
     const done = spawnSync(
       '/bin/sh',

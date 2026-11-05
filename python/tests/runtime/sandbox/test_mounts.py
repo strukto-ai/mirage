@@ -859,7 +859,10 @@ async def test_fuse_guards_a_mount_the_sandbox_lays_after_the_first_line():
     assert (await agent.shell("python3 job.py")).exit_code == 0
     del sandbox.table["/data"]
     result = await agent.shell("python3 lost.py")
-    assert (result.exit_code, await result.stderr_str()) == (126, lost("/data"))
+    assert (result.exit_code, await result.stderr_str()) == (
+        126,
+        lost("/data"),
+    )
     assert "python3 lost.py" not in sandbox.commands
     await ws.close()
 
