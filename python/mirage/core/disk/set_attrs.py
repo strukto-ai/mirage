@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import os
 from datetime import datetime
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.errors import disk_errors
 from mirage.core.disk.utils import resolve_inside_sync
 from mirage.types import PathSpec
@@ -88,7 +88,7 @@ async def set_attrs(
         return residual
 
     try:
-        return await asyncio.to_thread(apply)
+        return await run_blocking(apply)
     finally:
         if chmodded and accessor.usage is not None:
             accessor.usage.stale()

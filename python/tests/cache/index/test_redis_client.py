@@ -342,6 +342,42 @@ async def test_scoped_invalidations_respect_literal_namespaces(
 
 
 @pytest.mark.asyncio
+async def test_an_evicted_tombstone_is_buried_again_from_the_listing(
+    rolling_client,
+):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    try:
+        await store.set_dir("/d", [_row("a"), _row("b")])
+        await store.invalidate_entry("/d/a")
+        await client.delete(f"{prefix}mirage:idx:tombstone:/d")
+        await store.invalidate_entry("/d/b")
+        gone = await store.set_dir("/d", [])
+        assert [evicted.path for evicted in gone] == ["/d/b"]
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
+async def test_clear_finds_listing_parts_the_registry_lost(rolling_client):
+    client, prefix = rolling_client
+    store = RedisIndexCacheStore(client=client, key_prefix=prefix)
+    try:
+        await store.set_dir("/d", [_row("a")])
+        await client.delete(
+            f"{prefix}mirage:idx:directory:/d",
+            f"{prefix}mirage:idx:generation:/d",
+            f"{prefix}mirage:idx:paths",
+        )
+        await store.clear()
+        for part in ("listed", "folders", "fresh"):
+            pattern = f"{prefix}mirage:idx:{part}:*"
+            assert [key async for key in client.scan_iter(pattern)] == []
+    finally:
+        await store.close()
+
+
+@pytest.mark.asyncio
 async def test_evicted_directory_token_cannot_revive_restored_listing(
     rolling_client,
 ):

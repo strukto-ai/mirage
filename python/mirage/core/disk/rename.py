@@ -13,10 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-import asyncio
 import os
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.utils import resolve_inside_sync
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -41,7 +41,7 @@ async def rename(
     timer = start_op()
     done = True
     try:
-        await asyncio.to_thread(move)
+        await run_blocking(move)
     except Exception:
         done = False
         raise

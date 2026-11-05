@@ -20,6 +20,9 @@
 export const ENTRY_PREFIX = 'mirage:idx:entry:'
 export const CHILDREN_PREFIX = 'mirage:idx:directory:'
 export const TOMBSTONE_PREFIX = 'mirage:idx:tombstone:'
+export const LISTED_PREFIX = 'mirage:idx:listed:'
+export const FOLDERS_PREFIX = 'mirage:idx:folders:'
+export const FRESH_PREFIX = 'mirage:idx:fresh:'
 
 export const PATHS_KEY = 'mirage:idx:paths'
 

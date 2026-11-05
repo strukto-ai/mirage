@@ -20,6 +20,9 @@
 ENTRY_PREFIX = "mirage:idx:entry:"
 CHILDREN_PREFIX = "mirage:idx:directory:"
 TOMBSTONE_PREFIX = "mirage:idx:tombstone:"
+LISTED_PREFIX = "mirage:idx:listed:"
+FOLDERS_PREFIX = "mirage:idx:folders:"
+FRESH_PREFIX = "mirage:idx:fresh:"
 
 PATHS_KEY = "mirage:idx:paths"
 

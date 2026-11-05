@@ -73,6 +73,24 @@ def entry(name="a"):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("listed", "placed"),
+    [
+        (["a", "z"], ["/d/a", "/d/m", "/d/z"]),
+        (["z", "a"], ["/d/m", "/d/z", "/d/a"]),
+        (["z", "y"], ["/d/m", "/d/z", "/d/y"]),
+        (["b", "a"], ["/d/b", "/d/a", "/d/m"]),
+    ],
+)
+async def test_a_new_child_goes_before_the_first_one_past_it(
+    store, listed, placed
+):
+    await store.set_dir("/d", [(name, entry(name)) for name in listed])
+    await store.add_entry("/d/m", entry("m"))
+    assert (await store.list_dir("/d")).entries == placed
+
+
+@pytest.mark.asyncio
 async def test_put_and_get(store):
     row = FileStat(
         name="Test File",

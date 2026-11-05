@@ -52,6 +52,32 @@ for (const backend of ['ram', 'redis']) {
         await store.close()
       })
 
+      it.each([
+        [
+          ['a', 'z'],
+          ['/d/a', '/d/m', '/d/z'],
+        ],
+        [
+          ['z', 'a'],
+          ['/d/m', '/d/z', '/d/a'],
+        ],
+        [
+          ['z', 'y'],
+          ['/d/m', '/d/z', '/d/y'],
+        ],
+        [
+          ['b', 'a'],
+          ['/d/b', '/d/a', '/d/m'],
+        ],
+      ])('places a new child in %j before the first one past it', async (listed, placed) => {
+        await store.setDir(
+          '/d',
+          listed.map((name): [string, FileStat] => [name, entry(name)]),
+        )
+        await store.addEntry('/d/m', entry('m'))
+        expect((await store.listDir('/d')).entries).toEqual(placed)
+      })
+
       it('expires only contradicted membership and retains metadata', async () => {
         await store.setDir('/dir', [['a', entry()]], null, { version: 'before' })
         await store.setDir('/other', [['a', entry()]])

@@ -34,7 +34,10 @@ import {
   CHILDREN_PREFIX,
   DEFAULT_KEY_PREFIX,
   ENTRY_PREFIX,
+  FOLDERS_PREFIX,
+  FRESH_PREFIX,
   GENERATION_KEY,
+  LISTED_PREFIX,
   PATHS_KEY,
   REGISTRY_PAGE,
   TOMBSTONE_PREFIX,
@@ -94,6 +97,8 @@ local function prune(registry, prefixes, path)
   for _, prefix in ipairs(prefixes) do
     if redis.call('EXISTS', prefix .. path) == 1 then return end
   end
+  local _, listed, folders, fresh = listing_keys(prefixes[2], path)
+  if redis.call('EXISTS', listed, folders, fresh) > 0 then return end
   redis.call('ZREM', registry, path)
 end
 local function subtree(registry, root)
@@ -126,12 +131,15 @@ local function bury(tomb, path, folder)
   end
 end
 -- Bury a listing's children: all of them the first time, then only those
--- added or turned folder since, in listing order.
+-- added or turned folder since, in listing order. The first burial leaves a
+-- sentinel in the tombstone, so one Redis evicted since is buried again
+-- whole.
 local function bury_listing(prefix, tomb, path)
   if not intact(prefix, path) then return end
   local meta, listed, folders, fresh = listing_keys(prefix, path)
   local children = {}
-  if redis.call('HGET', meta, 'buried') == '1' then
+  if redis.call('HGET', meta, 'buried') == '1'
+      and redis.call('ZSCORE', tomb, '') then
     local place = {}
     for _, child in ipairs(redis.call('SMEMBERS', fresh)) do
       local at = child ~= '' and redis.call('ZSCORE', listed, child)
@@ -143,12 +151,17 @@ local function bury_listing(prefix, tomb, path)
     table.sort(children, function(a, b) return place[a] < place[b] end)
   else
     children = redis.call('ZRANGE', listed, 1, -1)
-    redis.call('HSET', meta, 'buried', '1')
   end
   redis.call('DEL', fresh)
   redis.call('SADD', fresh, '')
   for _, child in ipairs(children) do
     bury(tomb, child, redis.call('SISMEMBER', folders, child))
+  end
+  if #children > 0 and redis.call('HGET', meta, 'buried') ~= '1' then
+    redis.call('HSET', meta, 'buried', '1')
+    redis.call('ZADD', tomb, '-inf', '')
+  elseif #children > 0 and not redis.call('ZSCORE', tomb, '') then
+    redis.call('ZADD', tomb, '-inf', '')
   end
 end
 local function number_children(listed, folders, children, flags)
@@ -163,17 +176,32 @@ local function number_children(listed, folders, children, flags)
     if #marked > 0 then redis.call('SADD', folders, unpack(marked)) end
   end
 end
--- Place a new child where a sorted listing keeps it, between its
--- neighbours' scores; scores too close to split are renumbered first.
-local function insert_child(listed, path)
+-- Place a new child before the first one past it in listing order, as a
+-- sorted listing keeps it: found by halving when the listing was written
+-- sorted, else by walking it. The child takes a score between its
+-- neighbours'; scores too close to split are renumbered first.
+local function insert_child(listed, path, sorted)
   local last = redis.call('ZCARD', listed) - 1
   local low, high = 1, last + 1
-  while low < high do
+  while sorted and low < high do
     local middle = math.floor((low + high) / 2)
     if redis.call('ZRANGE', listed, middle, middle)[1] > path then
       high = middle
     else
       low = middle + 1
+    end
+  end
+  if not sorted then
+    low = last + 1
+    local offset = 1
+    while offset <= last and low == last + 1 do
+      for at, child in ipairs(redis.call('ZRANGE', listed, offset, offset + 255)) do
+        if child > path then
+          low = offset + at - 1
+          break
+        end
+      end
+      offset = offset + 256
     end
   end
   local score
@@ -200,11 +228,19 @@ local function write_listing(prefix, path, listing, raw)
   redis.call('ZADD', listed, '-inf', '')
   redis.call('SADD', folders, '')
   redis.call('SADD', fresh, '')
+  local sorted = '1'
+  for i = 2, #listing.entries do
+    if listing.entries[i - 1] > listing.entries[i] then
+      sorted = '0'
+      break
+    end
+  end
   local fields = {
     'expires_at', string.match(raw, '"expires_at"%s*:%s*([%d%.eE%+%-]+)'),
     'generation', listing.generation,
     'partial', listing.partial and '1' or '0',
-    'window', listing.window and '1' or '0'}
+    'window', listing.window and '1' or '0',
+    'sorted', sorted}
   if type(listing.version) == 'string' then
     fields[#fields + 1] = 'version'
     fields[#fields + 1] = listing.version
@@ -287,7 +323,8 @@ local meta, listed, folders, fresh_children = listing_keys(ARGV[7], path)
 local current = redis.call('GET', KEYS[2])
 local directory = redis.call('GET', KEYS[3])
 intact(ARGV[7], path)
-local fields = redis.call('HMGET', meta, 'generation', 'expires_at', 'buried')
+local fields = redis.call('HMGET', meta,
+  'generation', 'expires_at', 'buried', 'sorted')
 local live = fields[1] and current and directory
   and fields[1] == current .. ':' .. directory
   and tonumber(ARGV[5]) < tonumber(fields[2])
@@ -329,7 +366,7 @@ if fields[1] then
       end
       return 0
     end
-    insert_child(listed, ARGV[3])
+    insert_child(listed, ARGV[3], fields[4] == '1')
     if folder == 1 then redis.call('SADD', folders, ARGV[3]) end
     if buried then redis.call('SADD', fresh_children, ARGV[3]) end
     return 1
@@ -540,13 +577,17 @@ local function drop(child, buried)
 end
 local buried = {}
 for i = 1, #tomb, 2 do
-  buried[tomb[i]] = tonumber(tomb[i + 1]) % 2 == 1
+  if tomb[i] ~= '' then
+    buried[tomb[i]] = tonumber(tomb[i + 1]) % 2 == 1
+  end
 end
 for _, child in ipairs(listing) do
   drop(child, buried[child] == true
     or redis.call('SISMEMBER', folders, child) == 1)
 end
-for i = 1, #tomb, 2 do drop(tomb[i], buried[tomb[i]]) end
+for i = 1, #tomb, 2 do
+  if tomb[i] ~= '' then drop(tomb[i], buried[tomb[i]]) end
+end
 for i = 9, #ARGV, 2 do drop(ARGV[i], false) end
 local roots = {}
 for i, child in ipairs(gone) do
@@ -787,6 +828,9 @@ export class RedisIndexCacheStore extends IndexCacheStore {
       this.childrenPrefix,
       this.tombstonePrefix,
       `${this.generationKey}:`,
+      `${this.keyPrefix}${LISTED_PREFIX}`,
+      `${this.keyPrefix}${FOLDERS_PREFIX}`,
+      `${this.keyPrefix}${FRESH_PREFIX}`,
     ]
     for (let attempt = 0; attempt < 3; attempt++) {
       const candidate = String(Number.parseInt(this.ids.uuid7().replaceAll('-', '').slice(-12), 16))

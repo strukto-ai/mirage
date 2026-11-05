@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import os
 import shutil
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.utils import resolve_inside
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -33,7 +33,7 @@ async def rm_r(accessor: DiskAccessor, path_spec: PathSpec) -> None:
             os.remove(p)
 
     try:
-        await asyncio.to_thread(remove)
+        await run_blocking(remove)
     finally:
         # Also when the walk raised: rmtree that fails part-way has
         # already removed entries, as on the object stores.

@@ -12,11 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import os
 from functools import partial
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.utils import open_flags, resolve_inside_sync
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
@@ -37,7 +37,7 @@ async def truncate(
             f.truncate(length)
 
     try:
-        await asyncio.to_thread(cut)
+        await run_blocking(cut)
     except FileNotFoundError:
         if no_create:
             return

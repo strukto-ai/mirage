@@ -64,7 +64,7 @@ async def write(
                 with open(p, "ab" if append else "wb") as f:
                     f.write(whole)
 
-        await asyncio.to_thread(put)
+        await run_blocking(put)
         record(op, path_spec.virtual, "disk", len(data), timer)
         return
     p = await resolve_inside(accessor.root, path_spec)

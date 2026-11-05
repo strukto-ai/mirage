@@ -812,6 +812,32 @@ ${script}`,
     }
   })
 
+  it('buries an evicted tombstone again from the listing', async () => {
+    await store.setDir('/d', [
+      ['a', entry('a', 'a')],
+      ['b', entry('b', 'b')],
+    ])
+    await store.invalidateEntry('/d/a')
+    const client = await redis()
+    await client.del(`${prefix}mirage:idx:tombstone:/d`)
+    await store.invalidateEntry('/d/b')
+    expect((await store.setDir('/d', [])).map((gone) => gone.path)).toEqual(['/d/b'])
+  })
+
+  it('clears listing parts the registry lost', async () => {
+    await store.setDir('/d', [['a', entry('a', 'a')]])
+    const client = await redis()
+    await client.del([
+      `${prefix}mirage:idx:directory:/d`,
+      `${prefix}mirage:idx:generation:/d`,
+      `${prefix}mirage:idx:paths`,
+    ])
+    await store.clear()
+    for (const part of ['listed', 'folders', 'fresh']) {
+      expect(await client.exists(`${prefix}mirage:idx:${part}:/d`)).toBe(0)
+    }
+  })
+
   it('narrow invalidation preserves the exact deadline', async () => {
     const deadline = new Date(Date.now() + 3600000)
     await store.setDir('/snapshot', [['a', entry('a', 'a')]], deadline)

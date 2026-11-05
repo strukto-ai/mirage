@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import os
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.dest import mkdir_component_error
 from mirage.core.disk.errors import disk_error, disk_errors
 from mirage.core.disk.utils import resolve_inside_sync
@@ -46,7 +46,7 @@ async def mkdir(
         # Not `disk_errors`: that restamps every OSError against the
         # operand, which would undo the component naming below.
         try:
-            await asyncio.to_thread(make)
+            await run_blocking(make)
         except NotADirectoryError as exc:
             if not resolved:
                 raise
@@ -69,7 +69,7 @@ async def mkdir(
     # An existing target is EEXIST, not success: only -p is idempotent.
     done = True
     try:
-        await asyncio.to_thread(make)
+        await run_blocking(make)
     except Exception:
         done = False
         raise

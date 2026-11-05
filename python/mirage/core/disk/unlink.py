@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 import os
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.errors import disk_errors
 from mirage.core.disk.utils import resolve_inside_sync
 from mirage.errors.fs import eisdir
@@ -39,7 +39,7 @@ async def unlink(accessor: DiskAccessor, path_spec: PathSpec) -> None:
     timer = start_op()
     done = True
     try:
-        await asyncio.to_thread(remove)
+        await run_blocking(remove)
     except Exception:
         done = False
         raise
