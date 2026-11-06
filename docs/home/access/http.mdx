@@ -504,8 +504,10 @@ Returns HTTP 204 No Content.
 entries: a type, its fields, and the fields its config schema
 marks secret, which are sealed. The routes and bodies are the hosted API's, so a
 client works against either. An entry answers only under its own kind's
-route, and a name is taken once across the three kinds. On a server that
-requires accounts these routes answer HTTP 501 Not Implemented.
+route, and a name is taken once across the three kinds, so a route's `{id}`
+takes an entry's ID or its name. On the local daemon an entry's ID is its name.
+On a server that requires accounts these routes answer HTTP 501 Not
+Implemented.
 
 A workspace config, or a template's, uses a saved field as
 `{from: strukto, ref: NAME, key: FIELD}` wherever a secret pointer may go,
@@ -564,14 +566,14 @@ templates use it.
 
 ### Get an entry
 
-<Badge color="blue">GET</Badge> `/v1/vfs/{name}`
+<Badge color="blue">GET</Badge> `/v1/vfs/{id}`
 
 Returns the entry with `sealed`: the names of its secret fields that hold a
 value, never the values.
 
 ### Update an entry
 
-<Badge color="orange">PUT</Badge> `/v1/vfs/{name}`
+<Badge color="orange">PUT</Badge> `/v1/vfs/{id}`
 
 <ParamField body="fields" type="object" required>The new plain fields, which replace the old ones. A secret field left out keeps its value; one given as `null` is removed.</ParamField>
 
@@ -579,7 +581,7 @@ Returns the entry. Its name and type stay as they are.
 
 ### Delete an entry
 
-<Badge color="red">DELETE</Badge> `/v1/vfs/{name}`
+<Badge color="red">DELETE</Badge> `/v1/vfs/{id}`
 
 Deletes the entry and wipes its secret values; there is no restore. Returns
 HTTP 204 No Content, or HTTP 409 Conflict naming the saved templates that use

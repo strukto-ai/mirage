@@ -33,6 +33,8 @@ const KINDS: readonly Kind[] = [
   { name: 'runtime', route: '/v1/runtimes', noun: 'runtime' },
 ]
 
+const ID_HELP = "The entry's ID, or its name: a name is unique, so it works as an ID."
+
 const NO_ARGV_SECRET = (key: string): string =>
   `a secret never comes from the command line: use --secret ${key} to be prompted ` +
   `(or to read stdin), or --secret ${key}=@FILE`
@@ -388,7 +390,7 @@ function registerKindCommands(program: Command, kind: Kind): void {
   group
     .command('get')
     .description('Show an entry; a sealed field shows by name only.')
-    .argument('<name>')
+    .argument('<id>', ID_HELP)
     .option('-o, --output <format>', 'yaml: a file create -f and update -f read.', outputOf)
     .action(async (name: string, opts: { output?: Output }) => {
       const c = makeClient()
@@ -431,7 +433,7 @@ function registerKindCommands(program: Command, kind: Kind): void {
       .description(
         'Change an entry. Plain fields not named keep their values, as do sealed ones; --unset removes either.',
       )
-      .argument('<name>', "The entry's name."),
+      .argument('<id>', ID_HELP),
   ).action(async (name: string, opts: EditOptions) => {
     const c = makeClient()
     await c.ensureRunning({ allowSpawn: false })
@@ -461,7 +463,7 @@ function registerKindCommands(program: Command, kind: Kind): void {
     .description(
       'Delete an entry and wipe its sealed values; there is no restore. Refused while a saved template uses it.',
     )
-    .argument('<name>')
+    .argument('<id>', ID_HELP)
     .action(async (name: string) => {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })

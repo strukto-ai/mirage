@@ -281,16 +281,18 @@ mirage policy get guard.py -o yaml
 server: a type, its settings and its credentials, saved once under a name. They
 are the [`/v1/vfs`, `/v1/clis` and
 `/v1/runtimes`](/home/access/http#saved-connections) routes, and work the same
-against the local daemon and the hosted API.
+against the local daemon and the hosted API. `ID` is an entry's ID or its
+name: a name is unique, so it works as an ID. On the local daemon an entry's
+ID is its name.
 
 | Command | Does |
 | --- | --- |
 | `mirage vfs types [TYPE]` | List the types, with their required and secret fields; with `TYPE`, its fields. |
 | `mirage vfs create NAME --type TYPE [--set K=V] [--secret K] [-f FILE]` | Save a new entry. |
 | `mirage vfs list [--type TYPE] [-q TEXT]` | List the entries, by name, with how many saved templates use each. |
-| `mirage vfs get NAME [-o yaml]` | Show an entry. A secret field shows as `(sealed)`, never its value. |
-| `mirage vfs update NAME [--set K=V] [--secret K] [--unset K] [-f FILE]` | Change an entry. Fields not named keep their values. |
-| `mirage vfs delete NAME` | Delete an entry and wipe its secrets. There is no restore. |
+| `mirage vfs get ID [-o yaml]` | Show an entry. A secret field shows as `(sealed)`, never its value. |
+| `mirage vfs update ID [--set K=V] [--secret K] [--unset K] [-f FILE]` | Change an entry. Fields not named keep their values. |
+| `mirage vfs delete ID` | Delete an entry and wipe its secrets. There is no restore. |
 
 `mirage cli` and `mirage runtime` take the same commands.
 
