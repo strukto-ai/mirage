@@ -18,7 +18,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 import httpx
@@ -188,6 +188,11 @@ def read_context(name: str) -> Context | None:
         raw = json.loads(path.read_text())
     except ValueError as e:
         raise ContextError(f"malformed {path}: {e}") from e
+    if not isinstance(raw, dict):
+        raise ContextError(f"malformed {path}: not a JSON object")
+    unknown = sorted(set(raw) - {f.name for f in fields(Context)})
+    if unknown:
+        raise ContextError(f"malformed {path}: unknown {', '.join(unknown)}")
     return Context(**raw)
 
 

@@ -335,10 +335,14 @@ def test_login_to_a_server_without_one_says_so(browser, tmp_path, monkeypatch):
     monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
     with FakeClerk(publishes=False).serving() as fake:
         monkeypatch.setenv("MIRAGE_DAEMON_URL", fake.url)
+        write_login(
+            Login(url=fake.url, access_token="old", logged_in_at=time.time()),
+            login_path("local"),
+        )
         done = CliRunner().invoke(app, ["login", fake.url])
     assert done.exit_code == 0
     assert "publishes no login" in done.output
-    assert read_login() is None
+    assert not login_path("local").exists()
 
 
 def test_switch_run_once_elsewhere_and_forget(home, monkeypatch):

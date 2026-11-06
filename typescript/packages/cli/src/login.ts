@@ -345,6 +345,7 @@ export function registerLoginCommands(program: Command): void {
         token !== undefined && token !== '' ? await tokenLogin(url, token) : await browserLogin(url)
       await saveContext(name, url, login)
       if (login === null) {
+        removeLogin(loginPath(name))
         process.stdout.write(noLogin(url) + '\n')
         return
       }

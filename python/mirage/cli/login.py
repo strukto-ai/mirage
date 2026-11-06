@@ -444,6 +444,7 @@ def login_cmd(
     login = token_login(target, token) if token else browser_login(target)
     save_context(context, target, login)
     if login is None:
+        remove_login(login_path(context))
         typer.echo(no_login(target))
         return
     write_login(login, login_path(context))
