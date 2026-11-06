@@ -166,7 +166,8 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   }
 
   /**
-   * Connect once, bring the served mounts in step, then run.
+   * Record the line with the served mounts, connect once, bring the mounts
+   * in step, then run.
    *
    * @param argv the program and its arguments.
    * @param ctx the run's stdin, environment, cwd and signal.
@@ -182,8 +183,10 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     // Served here rather than in the constructor, which runs before a
     // subclass names itself.
     if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
+    const unseen = this.mounts?.enter(this.binding, ctx.cwd.virtual) ?? null
+    if (unseen !== null) return unseen
     await this.ensureConnected(ctx.signal)
-    const refusal = (await this.mounts?.admit(this.binding, ctx.cwd.virtual, ctx.signal)) ?? null
+    const refusal = (await this.mounts?.admit(this.binding, ctx.signal)) ?? null
     if (refusal !== null) return refusal
     const run = this.mounts?.guarded(argv) ?? argv
     const given = { ...this.config.env, ...ctx.env }

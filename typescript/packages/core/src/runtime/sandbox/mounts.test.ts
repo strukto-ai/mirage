@@ -408,6 +408,21 @@ describe('SandboxMounts', () => {
     await ws.close()
   })
 
+  it('refuses a cwd the sandbox cannot see before connecting', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    sandbox.connect = () => Promise.reject(new Error('offline'))
+    const ws = workspace(sandbox)
+    expect((await ws.shell('mkdir -p /notes')).exitCode).toBe(0)
+    const result = await ws.shell('cd /notes && python3 job.py')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+      126,
+      'fake: the sandbox cannot see the working directory /notes; cd into a mount first\n',
+    ])
+    const mounts = (sandbox as unknown as { mounts: { lines: unknown[] } }).mounts
+    expect(mounts.lines).toHaveLength(0)
+    await ws.close()
+  })
+
   it('leaves a running branch admitted when another is refused for its cwd', async () => {
     const sandbox = new FakeSandbox('ssh')
     const ws = workspace(sandbox)

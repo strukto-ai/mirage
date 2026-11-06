@@ -342,6 +342,26 @@ async def test_ssh_refuses_a_line_from_a_cwd_it_cannot_see(cwd, ran):
 
 
 @pytest.mark.asyncio
+async def test_a_cwd_the_sandbox_cannot_see_is_refused_before_connecting():
+    sandbox = FakeSandbox("ssh")
+
+    async def offline() -> None:
+        raise ConnectionError("offline")
+
+    sandbox.connect = offline
+    ws = workspace(sandbox)
+    assert (await ws.shell("mkdir -p /notes")).exit_code == 0
+    result = await ws.shell("cd /notes && python3 job.py")
+    assert (result.exit_code, await result.stderr_str()) == (
+        126,
+        "fake: the sandbox cannot see the working directory /notes; "
+        "cd into a mount first\n",
+    )
+    assert sandbox._mounts._lines == []
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_branch_refused_for_its_cwd_leaves_a_running_branch_admitted():
     sandbox = FakeSandbox("ssh")
     ws = workspace(sandbox)

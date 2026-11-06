@@ -186,7 +186,8 @@ class RemoteSandbox(
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        """Connect once, bring the served mounts in step, then run.
+        """Record the line with the served mounts, connect once, bring
+        the mounts in step, then run.
 
         Args:
             argv (tuple[str, ...]): the program and its arguments.
@@ -194,10 +195,14 @@ class RemoteSandbox(
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
         """
+        if self._mounts is not None:
+            refusal = self._mounts.enter(self._binding, ctx.cwd.virtual)
+            if refusal is not None:
+                return refusal
         await self._ensure_connected()
         run = argv
         if self._mounts is not None:
-            refusal = await self._mounts.admit(self._binding, ctx.cwd.virtual)
+            refusal = await self._mounts.admit(self._binding)
             if refusal is not None:
                 return refusal
             run = self._mounts.guarded(argv)

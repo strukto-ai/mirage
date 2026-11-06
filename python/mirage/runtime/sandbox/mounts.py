@@ -263,39 +263,24 @@ class SandboxMounts:
         """SSH mode serves every workspace prefix through the host's gate."""
         return self._mount_type == "ssh"
 
-    async def admit(
+    def enter(
         self, binding: WorkspaceBinding | None, cwd: str
     ) -> RunResult | None:
-        """Bring the mounts in step, then refuse a line that may not run:
-        one the session's restrictions reach past the dispatcher is
-        refused as a policy refuses it (126), one from a cwd other than
-        ``/`` that ssh serves no mount for is refused before anything
-        reaches the sandbox (126), one the sandbox cannot serve because
-        another session or another sshfs holds it, or another mount
-        covers it, fails (1), and one over a mount of the sandbox's own
-        that is gone is refused (126).
+        """Record the line for ``sync`` to end, before the runtime
+        connects, then refuse one from a cwd other than ``/`` that ssh
+        serves no mount for (126), so it answers with no sandbox reached.
 
         Args:
             binding (WorkspaceBinding | None): the runtime's workspace.
             cwd (str): the line's working directory.
 
         Returns:
-            RunResult | None: the refused run, None when the line may run.
+            RunResult | None: the refused run, None when the line may go
+            on to ``admit``.
         """
-        if (
-            binding is None
-            or binding.files is None
-            or binding.get_session is None
-            or binding.mount_prefixes is None
-        ):
+        if binding is None or binding.mount_prefixes is None:
             raise RuntimeError(
                 f"{self._runtime}: mount_type needs the runtime in a workspace"
-            )
-        current = get_current_session()
-        if current is None:
-            raise RuntimeError(
-                f"{self._runtime}: mount_type serves a session's view, "
-                "and this line runs as none"
             )
         line = current_caller()
         held = Caller(stop=line.stop, write_held=line.write_held)
@@ -316,6 +301,40 @@ class SandboxMounts:
                     f"directory {seen}; cd into a mount first\n"
                 ).encode(),
                 exit_code=CANNOT_EXECUTE_STATUS,
+            )
+        return None
+
+    async def admit(
+        self, binding: WorkspaceBinding | None
+    ) -> RunResult | None:
+        """Bring the mounts in step, then refuse a line that may not run:
+        one the session's restrictions reach past the dispatcher is
+        refused as a policy refuses it (126), one the sandbox cannot
+        serve because another session or another sshfs holds it, or
+        another mount covers it, fails (1), and one over a mount of the
+        sandbox's own that is gone is refused (126). ``enter`` recorded
+        the line first.
+
+        Args:
+            binding (WorkspaceBinding | None): the runtime's workspace.
+
+        Returns:
+            RunResult | None: the refused run, None when the line may run.
+        """
+        if (
+            binding is None
+            or binding.files is None
+            or binding.get_session is None
+            or binding.mount_prefixes is None
+        ):
+            raise RuntimeError(
+                f"{self._runtime}: mount_type needs the runtime in a workspace"
+            )
+        current = get_current_session()
+        if current is None:
+            raise RuntimeError(
+                f"{self._runtime}: mount_type serves a session's view, "
+                "and this line runs as none"
             )
         rules = current.commands
         if rules is not None and any(
