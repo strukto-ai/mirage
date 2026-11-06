@@ -65,6 +65,7 @@ from mirage.policy.types import (
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.constants import SCRIPT_EVAL_TIMEOUT_SECONDS
 from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.python.monty.execution import compile_error
 from mirage.runtime.python.monty.runtime import MontyRuntime
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.script import script_engine
@@ -355,6 +356,31 @@ def program_source(source: str, method: str) -> str:
         "import json as _mirage_json, os as _mirage_os\n"
         f"print(_mirage_json.dumps({call}))\n"
     )
+
+
+async def check_program(source: str, method: str) -> None:
+    """Whether a policy program can answer at one method, found without
+    running it: it defines the method's function at its top level
+    (``program_source``), and monty parses and compiles it
+    (``compile_error``), so a typo is refused where the program is
+    written rather than as a deny on every line it judges. Mirrors the
+    TypeScript ``checkProgram``.
+
+    Args:
+        source (str): the program.
+        method (str): the method it answers at.
+
+    Raises:
+        ValueError: it cannot, as a clause about "script" naming the
+            line.
+        ImportError: the ``monty`` extra is not installed.
+    """
+    program_source(source, method)
+    refused = await compile_error(source)
+    if refused is None:
+        return
+    at = "" if refused.line is None else f" at line {refused.line}"
+    raise ValueError(f"script has an error{at}: {refused.message}")
 
 
 def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:

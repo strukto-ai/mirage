@@ -18,6 +18,7 @@ from mirage.policy.constants import (
 from mirage.policy.policies import Policies
 from mirage.policy.script import (
     ScriptPolicy,
+    check_program,
     program_source,
     script_action,
     script_context,
@@ -532,6 +533,32 @@ def test_a_program_must_define_the_methods_function():
     ):
         with pytest.raises(ValueError, match=r"defines no pre_command\(ctx\)"):
             program_source(source, "pre_command")
+
+
+@pytest.mark.asyncio
+async def test_a_program_that_defines_the_function_and_parses_passes():
+    await check_program(SOURCE, "pre_command")
+
+
+@pytest.mark.asyncio
+async def test_a_program_checked_for_another_method_is_refused():
+    with pytest.raises(ValueError, match=r"script defines no pre_vfs\(ctx\)"):
+        await check_program(
+            "def pre_command(ctx):\n    return None\n", "pre_vfs"
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_program_monty_cannot_parse_is_refused_at_its_line():
+    with pytest.raises(
+        ValueError,
+        match="script has an error at line 2: Expected `:`, found newline",
+    ):
+        await check_program(
+            'def pre_command(ctx):\n    if ctx["command"] == "rm"\n'
+            "        return None\n",
+            "pre_command",
+        )
 
 
 def test_a_definition_in_a_string_or_a_comment_is_not_the_programs():

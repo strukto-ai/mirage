@@ -17,6 +17,7 @@ import { CommandTimeoutError } from '../errors/types.ts'
 import { WorkspaceBinding } from '../runtime/binding.ts'
 import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
 import type { LanguageRuntime } from '../runtime/language.ts'
+import { compileError } from '../runtime/python/monty/execution.ts'
 import { MontyRuntime } from '../runtime/python/monty/runtime.ts'
 import type { MountResolver } from '../runtime/resolver.ts'
 import { scriptEngine } from '../runtime/script.ts'
@@ -307,6 +308,22 @@ export function programSource(source: string, method: PolicyMethod): string {
     'import json as _mirage_json, os as _mirage_os\n' +
     `print(_mirage_json.dumps(${call}))\n`
   )
+}
+
+/**
+ * Whether a policy program can answer at one method, found without running
+ * it: it defines the method's function at its top level (`programSource`),
+ * and monty parses and compiles it (`compileError`), so a typo is refused
+ * where the program is written rather than as a deny on every line it
+ * judges. Throws a clause about "script" when it cannot, naming the line.
+ * Mirrors the Python `check_program`.
+ */
+export async function checkProgram(source: string, method: PolicyMethod): Promise<void> {
+  programSource(source, method)
+  const refused = await compileError(source)
+  if (refused === null) return
+  const at = refused.line === null ? '' : ` at line ${String(refused.line)}`
+  throw new Error(`script has an error${at}: ${refused.message}`)
 }
 
 /**
