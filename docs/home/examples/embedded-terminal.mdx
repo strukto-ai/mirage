@@ -225,7 +225,7 @@ terminal:
                 runtimes=[
                     MontyRuntime(captures=["python", "python3"]),
                     DockerRuntime(
-                        captures=["python", "python3", "@external"],
+                        captures=["@python", "@external"],
                         config={"container": f"box-{terminal_id}", "mount_type": "ssh"},
                     ),
                 ],
@@ -300,7 +300,7 @@ terminal:
               runtimes: [
                 new MontyRuntime({ captures: ['python', 'python3'] }),
                 new DockerRuntime({
-                  captures: ['python', 'python3', '@external'],
+                  captures: ['@python', '@external'],
                   config: { container: `box-${id}`, mountType: 'ssh' },
                 }),
               ],

@@ -27,8 +27,8 @@ container run -d --cap-add SYS_ADMIN \
 ## Usage
 
 `captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
-every program Mirage does not have itself. Name `python3` and `python` to run
-them in the container too. Use `containers`, a
+every program Mirage does not have itself. Name `@python` to run
+Python in the container too. Use `containers`, a
 map from session ID to container, for one container per agent.
 
 <Tabs>
@@ -38,7 +38,7 @@ map from session ID to container, for one container per agent.
     from mirage.runtime.sandbox.apple_container import AppleContainerRuntime
 
     runtime = AppleContainerRuntime(
-        captures=["python3", "python", "@external"],
+        captures=["@python", "@external"],
         config={"container": "my-sandbox"},
     )
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
@@ -50,7 +50,7 @@ map from session ID to container, for one container per agent.
     import { AppleContainerRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const runtime = new AppleContainerRuntime({
-      captures: ['python3', 'python', '@external'],
+      captures: ['@python', '@external'],
       config: { container: 'my-sandbox' },
     })
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
@@ -62,7 +62,7 @@ map from session ID to container, for one container per agent.
     mode: exec
     runtimes:
       - name: apple_container
-        captures: ["python3", "python", "@external"]
+        captures: ["@python", "@external"]
         config:
           container: my-sandbox
           containers:
