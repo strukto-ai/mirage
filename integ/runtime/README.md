@@ -30,7 +30,7 @@ differs.
 | [`sandbox/`](sandbox/)                 | topic   | the whole-line entry point every sandbox shares                                                   |
 | [`routing/`](routing/)                 | topic   | how a line reaches a runtime                                                                      |
 | [`policy/`](policy/)                   | topic   | route policy, hooks and output limits                                                             |
-| [`config/`](config/)                   | topic   | runtime names, config fields and captures that are refused                                              |
+| [`config/`](config/)                   | topic   | runtime names, config fields and captures that are refused                                        |
 | [`cli/`](cli/)                         | topic   | script CLIs in Python and JavaScript                                                              |
 | [`backend/`](backend/)                 | topic   | guest reads and writes on real redis, S3 and MongoDB                                              |
 | [`facade/`](facade/)                   | topic   | the SDK file API (`ws.vfs`)                                                                       |
