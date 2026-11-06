@@ -64,6 +64,21 @@ def dump(record: Fields) -> str:
     return json.dumps(record, indent=2, ensure_ascii=False) + "\n"
 
 
+# YAML 1.1 reads an unquoted date as a date, which JSON cannot write back;
+# a hand-edited record keeps it as the string it is.
+TIMESTAMP = "tag:yaml.org,2002:timestamp"
+
+
+class PlainLoader(yaml.SafeLoader):
+    """Python's safe YAML loader without timestamps, so every value it
+    reads is one JSON can write back."""
+
+    yaml_implicit_resolvers = {
+        first: [(tag, rule) for tag, rule in resolvers if tag != TIMESTAMP]
+        for first, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+    }
+
+
 def parse_record(path: Path, text: str) -> Fields:
     """A record read back: JSON as written, else YAML, for a file edited
     by hand.
@@ -80,8 +95,9 @@ def parse_record(path: Path, text: str) -> Fields:
     except ValueError:
         logger.debug("%s is not JSON; reading it as YAML", path)
         try:
-            record = yaml.safe_load(text)
-        except yaml.YAMLError as e:
+            record = yaml.load(text, Loader=PlainLoader)
+            json.dumps(record)
+        except (yaml.YAMLError, TypeError, ValueError) as e:
             raise ResourceError("invalid", f"{path} is malformed: {e}") from e
     if not isinstance(record, dict):
         raise ResourceError("invalid", f"{path} is not a mapping")
@@ -115,7 +131,8 @@ def write_whole(path: Path, text: str, mode: int, dir_mode: int) -> None:
 
 
 class FileRecords:
-    """Each record a YAML file at ``<root>/<folder>/<name>.yaml``."""
+    """Each record a YAML file at ``<root>/<folder>/<name>.yaml``, owner
+    only, since a template's config may hold a credential."""
 
     def __init__(self, root: Path) -> None:
         self._root = root
@@ -132,7 +149,7 @@ class FileRecords:
 
     async def write(self, folder: str, name: str, record: Fields) -> None:
         await run_blocking(
-            write_whole, self._path(folder, name), dump(record), 0o644, 0o755
+            write_whole, self._path(folder, name), dump(record), 0o600, 0o700
         )
 
     async def remove(self, folder: str, name: str) -> bool:

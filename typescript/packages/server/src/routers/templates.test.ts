@@ -68,6 +68,12 @@ describe('templates router', () => {
       payload: { name: 'Bad', config: RAM },
     })
     expect(badName.statusCode).toBe(400)
+    const typo = await app.inject({
+      method: 'POST',
+      url: '/v1/templates',
+      payload: { name: 'typo', descripton: 'd', config: RAM },
+    })
+    expect(typo.statusCode).toBe(400)
     expect((await app.inject({ method: 'GET', url: '/v1/templates' })).json()).toEqual([])
     await app.close()
   })
@@ -115,6 +121,12 @@ describe('templates router', () => {
     expect(both.json()).toEqual({ detail: 'give a template or a config, not both' })
     const neither = await app.inject({ method: 'POST', url: '/v1/workspaces', payload: {} })
     expect(neither.statusCode).toBe(400)
+    const listed = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: { template: ['base'] },
+    })
+    expect(listed.statusCode).toBe(400)
     const explained = await app.inject({
       method: 'POST',
       url: '/v1/workspaces?explain=true',

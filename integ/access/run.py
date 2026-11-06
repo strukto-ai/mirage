@@ -53,6 +53,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -752,6 +753,25 @@ async def server_checks(server: Server, report: Report) -> None:
                 [refused.status_code, refused.json().get("detail")],
                 want["no_snapshot_store"],
             )
+        name = f"access-{uuid.uuid4().hex[:8]}"
+        config = {"mounts": {"/": {"vfs": "ram"}}}
+        template = f"/v1/templates/{name}"
+        codes = [
+            (
+                await http.post(
+                    "/v1/templates",
+                    json={"name": name, "config": config},
+                    headers=auth,
+                )
+            ).status_code,
+            (await http.get("/v1/templates", headers=auth)).status_code,
+            (await http.get(template, headers=auth)).status_code,
+            (await http.delete(template, headers=auth)).status_code,
+            (await http.post(f"{template}/restore", headers=auth)).status_code,
+        ]
+        report.check(
+            f"{server.key} server.templates", codes, want["templates"][d.name]
+        )
         stop = await http.post("/v1/shutdown", headers=auth)
         report.check(
             f"{server.key} server.shutdown",

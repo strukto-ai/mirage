@@ -24,6 +24,9 @@ interface RefParams {
   ref: string
 }
 
+/** The fields a saved template takes, as the Python server's model forbids any other. */
+const TEMPLATE_FIELDS: ReadonlySet<string> = new Set(['name', 'description', 'config'])
+
 const STATUS: Readonly<Record<ResourceErrorCode, number>> = {
   not_found: 404,
   conflict: 409,
@@ -88,6 +91,10 @@ export function registerTemplatesRoutes(
     const body = req.body as Partial<CreateTemplateRequest> | null
     if (body === null || typeof body !== 'object' || typeof body.name !== 'string') {
       return reply.status(400).send({ detail: 'name must be a string' })
+    }
+    const unknown = Object.keys(body).filter((k) => !TEMPLATE_FIELDS.has(k))
+    if (unknown.length > 0) {
+      return reply.status(400).send({ detail: `unknown fields: ${unknown.join(', ')}` })
     }
     const { name, description } = body
     if (description !== undefined && description !== null && typeof description !== 'string') {

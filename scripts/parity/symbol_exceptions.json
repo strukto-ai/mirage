@@ -1268,7 +1268,13 @@
    "typescript_only": {
     "RefParams": "Fastify types a route's path params with an interface; FastAPI reads them from the handler's signature.",
     "registerTemplatesRoutes": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
-    "stored": "Each FastAPI handler maps a store refusal in its own try; the TypeScript routes share one wrapper because a refusal answers through the reply."
+    "stored": "Each FastAPI handler maps a store refusal in its own try; the TypeScript routes share one wrapper because a refusal answers through the reply.",
+    "TEMPLATE_FIELDS": "Pydantic's extra='forbid' refuses unknown fields in Python; the TypeScript route checks them against this set."
+   }
+  },
+  "server/resources/files": {
+   "python_only": {
+    "PlainLoader": "PyYAML drops a resolver by subclassing its loader; the TypeScript yaml package filters its tags in the parse options."
    }
   }
  }
