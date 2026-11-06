@@ -22,6 +22,7 @@ from mirage.secrets.errors import SecretsError
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.sources import (
     config_value,
+    fetched_values,
     resolve_sources,
     resolve_sources_for,
 )
@@ -367,4 +368,25 @@ async def test_resolve_sources_for_leaves_a_bad_container_to_the_constructor():
             [{"token": pointer}],
         )
         is None
+    )
+
+
+def test_fetched_values_pairs_each_pointer_with_what_it_read():
+    pointer = {"from": "env", "key": "TOKEN"}
+    raw = {
+        "api_key": pointer,
+        "sandbox_id": "sbx-1",
+        "auth": {"token": pointer},
+        "hosts": ["a", pointer],
+        "note": {"from": "a mapping that is not a pointer", "extra": 1},
+    }
+    resolved = {
+        **raw,
+        "api_key": "k1",
+        "auth": {"token": "k2"},
+        "hosts": ["a", "k3"],
+    }
+    assert fetched_values(raw, resolved) == ["k1", "k2", "k3"]
+    assert (
+        fetched_values({"sandbox_id": "sbx-1"}, {"sandbox_id": "sbx-1"}) == []
     )

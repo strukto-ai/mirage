@@ -22,6 +22,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     StrictFloat,
     field_validator,
     model_validator,
@@ -58,9 +59,11 @@ from mirage.runtime.types import Language, ScriptSource
 from mirage.secrets.config import EnvVar, SecretSource
 from mirage.secrets.sources import (
     config_holds_pointer,
+    fetched_values,
     resolve_config_secrets,
     resolve_sources_for,
 )
+from mirage.secrets.summary import mask_values
 from mirage.types import (
     KERNEL_BACKENDS,
     Limit,
@@ -628,6 +631,7 @@ def _runtime_class(ref: str) -> type[Runtime[Any]]:
 
 def _build_runtime_entries(
     entries: list[str | dict[str, Any]],
+    secrets: tuple[tuple[str, ...], ...] = (),
 ) -> list["Runtime[Any] | str"]:
     """Turn config runtime entries into workspace runtime entries.
 
@@ -636,13 +640,15 @@ def _build_runtime_entries(
             name plus the uniform runtime options (``captures``,
             ``config``). A name is a registered runtime or a
             ``source:Class`` reference to a ``Runtime`` subclass.
+        secrets (tuple[tuple[str, ...], ...]): per entry, the values its
+            config read from a secret, which a refusal of it masks.
 
     Raises:
         ValueError: a map entry without a name, or a reference that is
             not a ``Runtime`` subclass.
     """
     out: list[Runtime[Any] | str] = []
-    for entry in entries:
+    for i, entry in enumerate(entries):
         if isinstance(entry, str):
             out.append(_runtime_class(entry)() if ":" in entry else entry)
             continue
@@ -650,10 +656,22 @@ def _build_runtime_entries(
         name = options.pop("name", None)
         if not isinstance(name, str) or not name:
             raise ValueError("runtime entry needs a non-empty 'name'")
-        if ":" in name:
-            out.append(_runtime_class(name)(**options))
-            continue
-        out.append(build_runtime(name, **options))
+        try:
+            out.append(
+                _runtime_class(name)(**options)
+                if ":" in name
+                else build_runtime(name, **options)
+            )
+        except Exception as exc:
+            # A check that quotes the value it refused would hand back a
+            # secret the config read, and the create route answers this
+            # message as its detail. The chain is cut for the same reason.
+            masked = mask_values(
+                str(exc), secrets[i] if i < len(secrets) else ()
+            )
+            if masked == str(exc):
+                raise
+            raise ValueError(masked) from None
     return out
 
 
@@ -706,6 +724,9 @@ class WorkspaceConfig(BaseModel):
     # with a name plus the uniform runtime options ({name: wasi,
     # config: {home: /opt/...}}). Unset = the default world.
     runtimes: list[str | dict[str, Any]] | None = None
+    # Per runtime entry, the values `resolve_secrets` read into its
+    # config, which a refusal of it masks.
+    _runtime_secrets: tuple[tuple[str, ...], ...] = PrivateAttr(default=())
     # The route policy, a program the way a profile's policy names one:
     # {script: route.py, runtime: monty}. The script is embedded at load;
     # it prints {"kind": "route", "runtime": ...} to place a line, or
@@ -889,7 +910,9 @@ class WorkspaceConfig(BaseModel):
             kwargs["store"] = _build_state_store(self.store)
             kwargs["owns_store"] = True
         if self.runtimes is not None:
-            kwargs["runtimes"] = _build_runtime_entries(self.runtimes)
+            kwargs["runtimes"] = _build_runtime_entries(
+                self.runtimes, self._runtime_secrets
+            )
         if self.route_policy is not None:
             kwargs["route_policy"] = _load_program(self.route_policy)
         if self.profiles is not None:
@@ -1110,23 +1133,24 @@ async def resolve_secrets(config: "WorkspaceConfig") -> "WorkspaceConfig":
             )
             for name, block in config.clis.items()
         }
+    secrets: list[tuple[str, ...]] = []
     if config.runtimes is not None:
-        update["runtimes"] = [
-            entry
-            if isinstance(entry, str) or runtime_config is None
-            else {
-                **entry,
-                "config": await resolve_config_secrets(
-                    runtime_config,
-                    sources,
-                    f"runtimes.{entry.get('name')}.config",
-                ),
-            }
-            for entry, runtime_config in zip(
-                config.runtimes, runtimes, strict=True
+        entries: list[str | dict[str, Any]] = []
+        for entry, raw in zip(config.runtimes, runtimes, strict=True):
+            if isinstance(entry, str) or raw is None:
+                entries.append(entry)
+                secrets.append(())
+                continue
+            read = await resolve_config_secrets(
+                raw, sources, f"runtimes.{entry.get('name')}.config"
             )
-        ]
-    return config.model_copy(update=update)
+            entries.append({**entry, "config": read})
+            secrets.append(tuple(fetched_values(raw, read)))
+        update["runtimes"] = entries
+    resolved = config.model_copy(update=update)
+    if any(secrets):
+        resolved._runtime_secrets = tuple(secrets)
+    return resolved
 
 
 async def build_mcp_clis(config: "WorkspaceConfig") -> dict[str, CLI]:

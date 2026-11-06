@@ -591,13 +591,13 @@ def test_a_runtime_takes_max_memory_as_a_size_or_bytes():
         cfg.to_workspace_kwargs()
 
 
-def e2b_config(api_key, **extra):
+def e2b_config(api_key, runtime="e2b", **extra):
     return load_config(
         {
             "mounts": {"/data": {"vfs": "ram"}},
             "runtimes": [
                 {
-                    "name": "e2b",
+                    "name": runtime,
                     "config": {"sandbox_id": "sbx-1", "api_key": api_key},
                 },
                 "workspace",
@@ -609,14 +609,16 @@ def e2b_config(api_key, **extra):
 
 
 @pytest.mark.asyncio
-async def test_a_runtime_credential_reads_a_pointer(monkeypatch):
-    monkeypatch.setenv("E2B_TEST_KEY", "e2b_from_env")
+@pytest.mark.parametrize("runtime", ["e2b", "daytona"])
+async def test_a_runtime_credential_reads_a_pointer(monkeypatch, runtime):
+    monkeypatch.setenv("E2B_TEST_KEY", "key_from_env")
     cfg = await resolve_secrets(
-        e2b_config({"from": "env", "key": "E2B_TEST_KEY"})
+        e2b_config({"from": "env", "key": "E2B_TEST_KEY"}, runtime)
     )
-    e2b, workspace = cfg.to_workspace_kwargs()["runtimes"]
-    assert e2b.config.api_key == "e2b_from_env"
-    assert e2b.config.sandbox_id == "sbx-1"
+    sandbox, workspace = cfg.to_workspace_kwargs()["runtimes"]
+    assert sandbox.name == runtime
+    assert sandbox.config.api_key == "key_from_env"
+    assert sandbox.config.sandbox_id == "sbx-1"
     assert workspace == "workspace"
 
 
@@ -648,6 +650,47 @@ async def test_a_runtime_pointer_missing_its_field_names_the_runtime(
         await resolve_secrets(
             e2b_config({"from": "env", "key": "E2B_TEST_KEY"})
         )
+
+
+def e2b_mount_type(mount_type):
+    return load_config(
+        {
+            "mounts": {"/data": {"vfs": "ram"}},
+            "runtimes": [
+                {
+                    "name": "e2b",
+                    "config": {
+                        "sandbox_id": "sbx-1",
+                        "mount_type": mount_type,
+                    },
+                }
+            ],
+        },
+        env={},
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_refusal_never_quotes_a_value_read_from_a_secret(
+    monkeypatch,
+):
+    monkeypatch.setenv("E2B_TEST_MOUNT", "sekret-mount")
+    cfg = await resolve_secrets(
+        e2b_mount_type({"from": "env", "key": "E2B_TEST_MOUNT"})
+    )
+    with pytest.raises(ValueError, match="mount_type must be one of") as info:
+        cfg.to_workspace_kwargs()
+    assert "sekret" not in str(info.value)
+    assert "***" in str(info.value)
+    assert info.value.__cause__ is None
+    assert info.value.__suppress_context__
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_refusal_still_quotes_a_literal():
+    cfg = await resolve_secrets(e2b_mount_type("sshh"))
+    with pytest.raises(ValueError, match="not 'sshh'"):
+        cfg.to_workspace_kwargs()
 
 
 @pytest.mark.asyncio

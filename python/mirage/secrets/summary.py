@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
+import json
+from collections.abc import Iterable, Mapping
 
 from pydantic import ValidationError
 
@@ -77,3 +78,32 @@ def error_summary(exc: ValidationError) -> str:
         loc = ".".join(str(part) for part in err["loc"]) or "config"
         parts.append(f"{loc}: {err['type']}")
     return "; ".join(parts)
+
+
+def mask_values(message: str, values: Iterable[str]) -> str:
+    """`message` with each value fetched into a config replaced by `***`.
+
+    For a refusal raised over a config a secret was read into, whose
+    check quotes the value it refused (`not 'ssh2'`): the create route
+    answers that message as its detail, and would hand the secret back.
+    A value is masked as it is, as JSON escapes it and as `repr`
+    escapes it, the longest form first, so a value holding another is
+    masked whole.
+
+    Args:
+        message (str): what the refusal says.
+        values (Iterable[str]): the values the config read from secrets.
+    """
+    forms = {
+        form
+        for value in values
+        if value
+        for form in (
+            value,
+            json.dumps(value, ensure_ascii=False)[1:-1],
+            repr(value)[1:-1],
+        )
+    }
+    for form in sorted(forms, key=len, reverse=True):
+        message = message.replace(form, "***")
+    return message

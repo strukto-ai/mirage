@@ -211,6 +211,34 @@ def _holds_pointer(value: Any) -> bool:
     return False
 
 
+def fetched_values(raw: Any, resolved: Any) -> list[str]:
+    """The values the pointers in `raw` read, as they landed in `resolved`.
+
+    `resolved` is `raw` after :func:`resolve_config_secrets`, so the two
+    walk together: a pointer in one is the fetched string in the other.
+    What a refusal over the resolved config masks before it is shown.
+
+    Args:
+        raw (Any): a config as written, pointers and all.
+        resolved (Any): the same config with its pointers read.
+    """
+    if isinstance(raw, SecretRef) or is_config_pointer(raw):
+        return [resolved] if isinstance(resolved, str) else []
+    if isinstance(raw, Mapping) and isinstance(resolved, Mapping):
+        return [
+            value
+            for key, child in raw.items()
+            for value in fetched_values(child, resolved.get(key))
+        ]
+    if isinstance(raw, (list, tuple)) and isinstance(resolved, (list, tuple)):
+        return [
+            value
+            for item, done in zip(raw, resolved, strict=False)
+            for value in fetched_values(item, done)
+        ]
+    return []
+
+
 async def resolve_sources_for(
     declared: Mapping[str, "SecretSource | Mapping[str, Any]"] | None,
     configs: Iterable[Mapping[str, Any]],

@@ -37,7 +37,13 @@ import type { RuntimeOptions } from './runtime/config.ts'
 import { buildRuntime, checkRuntimeOptions } from './runtime/table.ts'
 import { ScriptSource } from './runtime/types.ts'
 import { EnvVar, SecretSource, type EnvEntries, type SecretEntries } from './secrets/config.ts'
-import { configHoldsPointer, resolveConfigSecrets, resolveSourcesFor } from './secrets/sources.ts'
+import {
+  configHoldsPointer,
+  fetchedValues,
+  resolveConfigSecrets,
+  resolveSourcesFor,
+} from './secrets/sources.ts'
+import { maskValues } from './secrets/summary.ts'
 import type { ResolvedSource } from './secrets/types.ts'
 import {
   KERNEL_BACKENDS,
@@ -142,20 +148,32 @@ async function buildRuntimeEntries(
     // A runtime credential reads a pointer the way a mount's does: E2B's
     // `api_key` reaches the runtime's config as the key, not the pointer.
     const config = runtimeConfig(entry)
+    let secrets: string[] = []
     if (config !== undefined) {
       options.config = await resolveConfigSecrets(config, sources, `runtimes.${name}.config`)
+      secrets = fetchedValues(config, options.config)
     }
-    if (name.includes(':')) {
-      // The key check `buildRuntime` runs for a name: the base
-      // constructor ignores a key it does not read, so without it a typo
-      // would leave the runtime on its defaults where Python's
-      // `**options` refuses the entry.
-      const cls = await loadRuntimeClass(name, host)
-      checkRuntimeOptions(name, options)
-      out.push(new cls(options as RuntimeOptions<never>))
-      continue
+    try {
+      if (name.includes(':')) {
+        // The key check `buildRuntime` runs for a name: the base
+        // constructor ignores a key it does not read, so without it a typo
+        // would leave the runtime on its defaults where Python's
+        // `**options` refuses the entry.
+        const cls = await loadRuntimeClass(name, host)
+        checkRuntimeOptions(name, options)
+        out.push(new cls(options as RuntimeOptions<never>))
+        continue
+      }
+      out.push(buildRuntime(name, options))
+    } catch (err) {
+      // A check that quotes the value it refused would hand back a secret
+      // the config read, and the create route answers this message as its
+      // detail. No cause, for the same reason: it carries the original.
+      const message = err instanceof Error ? err.message : String(err)
+      const masked = maskValues(message, secrets)
+      if (masked === message) throw err
+      throw new Error(masked)
     }
-    out.push(buildRuntime(name, options))
   }
   return out
 }
