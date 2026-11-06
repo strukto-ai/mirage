@@ -46,7 +46,7 @@ resolved paths, and the session. It returns its answer:
 | --- | --- |
 | `{"kind": "route", "runtime": "docker"}` | that runtime serves every command it captures |
 | `{"kind": "route", "runtime": "docker", "reason": "..."}` | the same, with why for `ws.explain(line)` to show |
-| `{"kind": "route", "runtime": "workspace"}` | no whole-line runtime (an `@line` capture) takes the line; each command still goes to the runtime that captures it |
+| `{"kind": "route", "runtime": "workspace"}` | entries that capture `@line` are excluded entirely; other entries still serve their captures, and a command only an excluded entry captures is refused |
 | `None` | the first capturer in `runtimes` order serves each command |
 | `{"kind": "deny", "reason": "..."}` | the line is refused, as by any `pre_execute` program |
 

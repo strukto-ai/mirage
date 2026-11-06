@@ -1001,6 +1001,22 @@ describe('a wrapper runs where the program it runs is captured', () => {
     }
   })
 
+  it('explains a script path as Mirage runs it', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new Box('e2b', '@external'), 'workspace'] },
+    )
+    try {
+      await ws.shell("echo 'echo here' > /data/run.sh; chmod +x /data/run.sh")
+      const io = await ws.shell('/data/run.sh')
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'here\n'])
+      const said = await ws.explain('/data/run.sh')
+      expect(runtimesOf(said.node)[0]).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('runs a wrapper a runtime captures there', async () => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },

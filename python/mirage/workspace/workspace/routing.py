@@ -239,7 +239,8 @@ class Router:
     ) -> str:
         """The runtime entry that serves a command under a decision, as
         its run places it: the ``@external`` runtime for a program no
-        name binds; empty when the workspace runs it itself.
+        name binds (a path runs through the workspace's exec path first);
+        empty when the workspace runs it itself.
 
         Args:
             one (Judged): the command's judgment and the session it was
@@ -267,7 +268,7 @@ class Router:
                 command, one.ctx.argv, one.session, self._registry, decision
             )
             decision = routed or decision
-            if consumer is Consumer.EXTERNAL:
+            if consumer is Consumer.EXTERNAL and "/" not in command:
                 fallback = decision.bindings.get(EXTERNAL_COMMANDS)
         serving = decision.bindings.get(command, fallback)
         if serving is None or isinstance(serving, WorkspaceRuntime):

@@ -75,17 +75,19 @@ To choose a runtime for each command line, see [Route Runtime](/home/policy/rout
   built. `local` and sandboxes take any name.
 - `nice`, `nohup`, `stdbuf`, `ionice` and `setsid` run their program where
   it runs alone: `nice gcc x.c` where `gcc` is taken, `nice grep` in Mirage.
-- A program a captured program starts runs where that one runs: `make`
-  running `gcc`, or a script calling `subprocess`. Capture the launcher on
-  the same runtime as the tool.
+- Under `local` and the sandboxes, a program a captured program starts runs
+  there: `make` running `gcc`, or a script calling `subprocess`. Capture the
+  launcher on the same runtime as the tool. A Pyodide script's `subprocess`
+  calls go back through Mirage's routing like any other command.
 - An alias is captured as the word it expands to, once `shopt -s
   expand_aliases` is on and the alias was defined on an earlier line.
 - If two runtimes take the same name or group, the first wins and Mirage
   logs a warning.
 - A program no runtime takes exits 127, `command not found`.
-- A `workspace` entry with `captures` runs only those commands itself: another
-  Mirage command exits 126, `no runtime accepted this line`, and an unknown
-  program exits 127.
+- A `workspace` entry with `captures` runs only those mount commands itself:
+  another mount command, such as `ls`, exits 126, `no runtime accepted this
+  line`, and an unknown program exits 127. The shell's own words (`cd`,
+  `export`, `echo`) still run.
 - A name only `@external` takes has no file, so `which`, `command -v` and
   `type` report it missing; running it still works.
 - Globs expand against the workspace first (`python3 job.py *.csv` runs

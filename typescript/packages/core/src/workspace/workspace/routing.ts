@@ -174,8 +174,9 @@ export class Router {
 
   /**
    * The runtime entry that serves a command under a decision, as its run
-   * places it: the `@external` runtime for a program no name binds; empty when
-   * the workspace runs it itself. Mirrors Python's `Router.runtime_for`.
+   * places it: the `@external` runtime for a program no name binds (a path runs
+   * through the workspace's exec path first); empty when the workspace runs it
+   * itself. Mirrors Python's `Router.runtime_for`.
    */
   runtimeFor(one: Judged, placed: RouteDecision<Runtime>): string {
     const whole = wholeLineRuntime(placed.bindings)
@@ -195,7 +196,7 @@ export class Router {
         placed,
       )
       decision = routed ?? placed
-      if (consumer === Consumer.EXTERNAL) {
+      if (consumer === Consumer.EXTERNAL && !command.includes('/')) {
         fallback = Object.hasOwn(decision.bindings, EXTERNAL_COMMANDS)
           ? (decision.bindings[EXTERNAL_COMMANDS] ?? null)
           : null
