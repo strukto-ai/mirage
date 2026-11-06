@@ -95,10 +95,18 @@ export class ExpandHost implements TaskHost {
     read: string | null,
   ): Promise<[Uint8Array, Uint8Array, number]> {
     const context = this.context
-    const io = await childLine(context, this.executeFn, body, this.node(node), this.callStack, span, {
-      records: new ShellVars(shell),
-      ...(read === null ? {} : { read }),
-    })
+    const io = await childLine(
+      context,
+      this.executeFn,
+      body,
+      this.node(node),
+      this.callStack,
+      span,
+      {
+        records: new ShellVars(shell),
+        ...(read === null ? {} : { read }),
+      },
+    )
     const stdout = await io.materializeStdout()
     const stderr = await io.materializeStderr()
     // An assignment-only statement whose value ran substitutions reports the
