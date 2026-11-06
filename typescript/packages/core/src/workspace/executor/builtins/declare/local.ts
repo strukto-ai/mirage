@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import { ArithError } from '../../../../shell/errors.ts'
@@ -88,7 +89,7 @@ export async function handleLocal(
     // Without the check the builtin took its operands, stored them
     // globally and exited 0, which is the silent-accept this whole tier
     // exists to remove.
-    return fail('local', 'bash: local: can only be used in a function\n')
+    return fail('local', `${shellVoice()}local: can only be used in a function\n`)
   }
   const view = requireView(state)
   const restore = decl.globalScope
@@ -269,7 +270,7 @@ async function declareOperand(
   // and an array kind the variable cannot take is refused.
   const held = fresh && !inherit ? null : heldValue(session, key)
   const conflict = kindConflict(held, kind)
-  if (conflict !== null) return `bash: ${cmd}: ${key}: ${conflict}`
+  if (conflict !== null) return `${shellVoice()}${cmd}: ${key}: ${conflict}`
   const checked = deref(session, key) || key
   await premark(view, key, shaping)
   const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
@@ -337,7 +338,7 @@ async function aimReference(
     const kept = marks.filter(([attr]) => attr !== VarAttr.Nameref)
     await stampMarks(session, view, key, null, kept, false)
   }
-  return isValidName(given) ? '' : `bash: ${cmd}: \`${given}': not a valid identifier`
+  return isValidName(given) ? '' : `${shellVoice()}${cmd}: \`${given}': not a valid identifier`
 }
 
 /**

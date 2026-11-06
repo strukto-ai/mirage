@@ -21,14 +21,14 @@ CASES = [
         "echo a > /data/f; set -C; echo b > /data/f; echo rc=$?; cat /data/f",
         1,
         "rc=1\na\n",
-        "/data/f: cannot overwrite existing file\n",
+        "bash: line 1: /data/f: cannot overwrite existing file\n",
     ),
     # Existence is the test, not size: an empty file still refuses.
     (
         ": > /data/f; set -C; echo b > /data/f; echo rc=$?",
         1,
         "rc=1\n",
-        "/data/f: cannot overwrite existing file\n",
+        "bash: line 1: /data/f: cannot overwrite existing file\n",
     ),
     # `>|` overrides for one redirect, and does not clear the option.
     (
@@ -42,7 +42,7 @@ CASES = [
         " echo rc=$?",
         1,
         "rc=1\n",
-        "/data/f: cannot overwrite existing file\n",
+        "bash: line 1: /data/f: cannot overwrite existing file\n",
     ),
     # A new target and `>>` are both allowed.
     (
@@ -62,13 +62,13 @@ CASES = [
         "echo a > /data/f; set -C; ls /nope 2> /data/f; echo rc=$?; cat /data/f",
         1,
         "rc=1\na\n",
-        "/data/f: cannot overwrite existing file\n",
+        "bash: line 1: /data/f: cannot overwrite existing file\n",
     ),
     (
         "echo a > /data/f; set -C; echo b &> /data/f; echo rc=$?; cat /data/f",
         1,
         "rc=1\na\n",
-        "/data/f: cannot overwrite existing file\n",
+        "bash: line 1: /data/f: cannot overwrite existing file\n",
     ),
     # bash stops at the first refused open: one message, neither written.
     (
@@ -76,21 +76,21 @@ CASES = [
         " echo b > /data/x > /data/y; echo rc=$?; cat /data/x /data/y",
         1,
         "rc=1\na\na\n",
-        "/data/x: cannot overwrite existing file\n",
+        "bash: line 1: /data/x: cannot overwrite existing file\n",
     ),
     # A directory under the option answers in GNU's wording for that case.
     (
         "mkdir -p /data/d; set -C; echo b > /data/d; echo rc=$?",
         1,
         "rc=1\n",
-        "/data/d: Is a directory\n",
+        "bash: line 1: /data/d: Is a directory\n",
     ),
     # The letter and the long name are the same option, and `+C` clears it.
     (
         "echo a > /data/f; set -o noclobber; echo b > /data/f; echo rc=$?",
         1,
         "rc=1\n",
-        "/data/f: cannot overwrite existing file\n",
+        "bash: line 1: /data/f: cannot overwrite existing file\n",
     ),
     (
         "echo a > /data/f; set -C; set +C; echo b > /data/f; echo rc=$?;"
@@ -127,7 +127,7 @@ def test_a_refused_open_stops_the_command_from_running(shell):
         " echo rc=$?; ls /data/marker"
     )
     assert err == (
-        "/data/f: cannot overwrite existing file\n"
+        "bash: line 1: /data/f: cannot overwrite existing file\n"
         "ls: cannot access '/data/marker':"
         " No such file or directory\n"
     )
@@ -155,7 +155,7 @@ def test_an_earlier_redirect_is_visible_to_a_later_one(shell):
         "set -C; echo x > /data/dup > /data/dup; echo rc=$?;"
         " cat /data/dup; echo end"
     )
-    assert err == "/data/dup: cannot overwrite existing file\n"
+    assert err == "bash: line 1: /data/dup: cannot overwrite existing file\n"
     # The first redirect still created it, and the command never ran, so
     # the file is there and empty.
     assert out == "rc=1\nend\n"
@@ -168,13 +168,13 @@ def test_append_and_override_opens_count_as_creating(shell):
         "set -C; echo x >> /data/ap > /data/ap; echo rc=$?; cat /data/ap;"
         " echo end"
     )
-    assert err == "/data/ap: cannot overwrite existing file\n"
+    assert err == "bash: line 1: /data/ap: cannot overwrite existing file\n"
     assert out == "rc=1\nend\n"
     _, out2, err2 = shell.mirage_result(
         "set -C; echo x >| /data/ov > /data/ov; echo rc=$?; cat /data/ov;"
         " echo end"
     )
-    assert err2 == "/data/ov: cannot overwrite existing file\n"
+    assert err2 == "bash: line 1: /data/ov: cannot overwrite existing file\n"
     assert out2 == "rc=1\nend\n"
 
 

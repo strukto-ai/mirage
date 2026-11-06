@@ -382,7 +382,7 @@
       "expect": {
         "exit": 1,
         "stdout": "declare -- QEO=\"good\"\n",
-        "stderr": "bash: declare: QENOPE: not found\n"
+        "stderr": "bash: line 1: declare: QENOPE: not found\n"
       }
     },
     {
@@ -590,7 +590,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: export: `1QEBAD=x': not a valid identifier\n"
+        "stderr": "bash: line 1: export: `1QEBAD=x': not a valid identifier\n"
       }
     },
     {
@@ -625,7 +625,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: readonly: `2QEBAD=y': not a valid identifier\n"
+        "stderr": "bash: line 1: readonly: `2QEBAD=y': not a valid identifier\n"
       }
     },
     {
@@ -660,7 +660,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: local: `3QEBAD=z': not a valid identifier\n"
+        "stderr": "environment: line 1: local: `3QEBAD=z': not a valid identifier\n"
       }
     },
     {
@@ -695,7 +695,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: declare: `4QEBAD=w': not a valid identifier\n"
+        "stderr": "bash: line 1: declare: `4QEBAD=w': not a valid identifier\n"
       }
     },
     {
@@ -730,7 +730,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: export: `5QEBAD': not a valid identifier\n"
+        "stderr": "bash: line 1: export: `5QEBAD': not a valid identifier\n"
       }
     },
     {
@@ -765,7 +765,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: export: `qearr[0]': not a valid identifier\n"
+        "stderr": "bash: line 1: export: `qearr[0]': not a valid identifier\n"
       }
     },
     {
@@ -800,7 +800,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: export: `6QEBAD=x': not a valid identifier\nbash: export: `7QEBAD=y': not a valid identifier\n"
+        "stderr": "bash: line 1: export: `6QEBAD=x': not a valid identifier\nbash: line 1: export: `7QEBAD=y': not a valid identifier\n"
       }
     },
     {
@@ -835,7 +835,7 @@
       "expect": {
         "exit": 0,
         "stdout": "declare -x QEV=\"1\"\ndeclare -x QEW=\"2\"\n",
-        "stderr": "bash: export: `8QEBAD=x': not a valid identifier\n"
+        "stderr": "bash: line 1: export: `8QEBAD=x': not a valid identifier\n"
       }
     },
     {
@@ -870,7 +870,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: export: `': not a valid identifier\n"
+        "stderr": "bash: line 1: export: `': not a valid identifier\n"
       }
     },
     {
@@ -1080,7 +1080,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "bash: local: can only be used in a function\n"
+        "stderr": "bash: line 1: local: can only be used in a function\n"
       }
     },
     {
@@ -1220,7 +1220,7 @@
       "expect": {
         "exit": 0,
         "stdout": "declare -x QG2=\"1\"\n",
-        "stderr": "bash: declare: `1BAD2=x': not a valid identifier\n"
+        "stderr": "bash: line 1: declare: `1BAD2=x': not a valid identifier\n"
       }
     },
     {
@@ -1255,7 +1255,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1 R=first X=3\nrc=1 L=abc\nrc=1 Q=unset\nrc=0 Y=1\nrc=1 R=1 X=3\nrc=1 Y=4\nrc=0 3\nrc=1 1 2\nrc=1\ndeclare -x A=\"2\"\ndeclare -r R=\"1\"\ndeclare -x B=\"3\"\nrc=1\ndeclare -a C=([0]=\"1\")\ndeclare -x D=\"1\"\ndeclare -x E=\"2\"\n",
-        "stderr": "bash: declare: R: readonly variable\nbash: declare: L: readonly variable\nbash: declare: Q: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\nbash: B: readonly variable\nbash: declare: R: readonly variable\nbash: declare: C: cannot destroy array variables in this way\n"
+        "stderr": "bash: line 1: declare: R: readonly variable\nbash: line 1: declare: L: readonly variable\nbash: line 1: declare: Q: readonly variable\nbash: line 1: R: readonly variable\nbash: line 1: R: readonly variable\nbash: line 1: B: readonly variable\nbash: line 1: declare: R: readonly variable\nbash: line 1: declare: C: cannot destroy array variables in this way\n"
       }
     },
     {
@@ -1360,7 +1360,7 @@
       "expect": {
         "exit": 0,
         "stdout": "Y=ab Z=c\nin=y W=ab\nout=a\ndeclare -a A=([0]=\"oldnew\" [1]=\"keep\")\ndeclare -x E=\"ab\"\ndeclare -r R=\"ab\"\nrc=1\nN=5 M=4\ndeclare -a A=([0]=\"xz\" [1]=\"y\")\ndeclare -a S=([0]=\"xy\")\ndeclare -A T=([0]=\"w\" [k]=\"v\" )\ndeclare -l L=\"abcd\"\nG=ac\nrc=1\n",
-        "stderr": "bash: declare: R: readonly variable\nbash: declare: `1X+=a': not a valid identifier\n"
+        "stderr": "bash: line 1: declare: R: readonly variable\nbash: line 1: declare: `1X+=a': not a valid identifier\n"
       }
     },
     {
@@ -1395,7 +1395,7 @@
       "expect": {
         "exit": 0,
         "stdout": "declare -ar R=([0]=\"1\")\ndeclare -a R2=([0]=\"1\" [1]=\"3\")\ndeclare -a R3=([0]=\"1\" [1]=\"3\")\ndeclare -a R4=([0]=\"1\" [3]=\"x\")\ndeclare -A M=([0]=\"1\" [b]=\"2\" )\nrc=1\nrc=1\nrc=1\ndeclare -ar A=([0]=\"4\")\ndeclare -ar P=([0]=\"3\")\ndeclare -arx Q=([0]=\"1\")\ndeclare -arx S=([0]=\"3\")\ndeclare -a R=([0]=\"3\" [1]=\"4\")\ndeclare -ax E=([0]=\"1\" [1]=\"3\")\ndeclare -ar O=([0]=\"1\" [1]=\"3\")\ndeclare -a L=([0]=\"1\" [1]=\"3\")\n",
-        "stderr": "bash: declare: A: readonly variable\nbash: declare: P: readonly variable\nbash: declare: S: readonly variable\n"
+        "stderr": "bash: line 1: declare: A: readonly variable\nbash: line 1: declare: P: readonly variable\nbash: line 1: declare: S: readonly variable\n"
       }
     },
     {
@@ -1430,7 +1430,7 @@
       "expect": {
         "exit": 0,
         "stdout": "declare -a S=([0]=\"one\")\nT=unset U=unset\nS=x\n",
-        "stderr": "bash: R: readonly variable\nbash: R: readonly variable\n"
+        "stderr": "bash: line 1: R: readonly variable\nbash: line 1: R: readonly variable\n"
       }
     },
     {

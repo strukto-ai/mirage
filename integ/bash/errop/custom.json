@@ -28,7 +28,7 @@
       "expect": {
         "exit": 127,
         "stdout": "",
-        "stderr": "bash: ERRQ2: custom msg\n"
+        "stderr": "bash: line 1: ERRQ2: custom msg\n"
       }
     }
   ]

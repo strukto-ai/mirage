@@ -102,7 +102,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\n",
-        "stderr": "bash: declare: `a b': invalid variable name for name reference\nbash: declare: nre: nameref variable self references not allowed\n"
+        "stderr": "bash: line 1: declare: `a b': invalid variable name for name reference\nbash: line 1: declare: nre: nameref variable self references not allowed\n"
       }
     },
     {
@@ -242,7 +242,7 @@
       "expect": {
         "exit": 0,
         "stdout": "declare -ax r1=([0]=\"new\")\ndeclare -Ar r2=([k]=\"v\" )\ndeclare -a r3=([0]=\"x\" [1]=\"y\")\ndeclare -a r4=([0]=\"z\")\ndeclare -n r5=\"T\"\ndeclare -nr r6=\"T\"\ndeclare -x T=\"5\"\n",
-        "stderr": "bash: warning: r3: removing nameref attribute\nbash: warning: r4: removing nameref attribute\n"
+        "stderr": "bash: line 1: warning: r3: removing nameref attribute\nbash: line 1: warning: r4: removing nameref attribute\n"
       }
     },
     {
@@ -277,7 +277,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=1\nrc=1\nrc=0\ndeclare -nr ref=\"T\"\ndeclare -- T=\"x\"\n",
-        "stderr": "bash: declare: ref: readonly variable\nbash: unset: ref: cannot unset: readonly variable\nbash: declare: ref: readonly variable\nbash: declare: ref: readonly variable\n"
+        "stderr": "bash: line 1: declare: ref: readonly variable\nbash: line 1: unset: ref: cannot unset: readonly variable\nbash: line 1: declare: ref: readonly variable\nbash: line 1: declare: ref: readonly variable\n"
       }
     },
     {
@@ -312,7 +312,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\ndeclare -- R=\"1\"\ndeclare -n R2=\"T\"\nrc=1\nrc=1\nrc=1\nrc=1\nrc=0\nrc=1\nrc=0\ndeclare -n R7\nrc=1\n",
-        "stderr": "bash: declare: `1': invalid variable name for name reference\nbash: declare: A: reference variable cannot be an array\nbash: declare: M: reference variable cannot be an array\nbash: declare: `1': invalid variable name for name reference\nbash: declare: R4: readonly variable\nbash: declare: `': invalid variable name for name reference\nbash: declare: A2: reference variable cannot be an array\n"
+        "stderr": "bash: line 1: declare: `1': invalid variable name for name reference\nbash: line 1: declare: A: reference variable cannot be an array\nbash: line 1: declare: M: reference variable cannot be an array\nbash: line 1: declare: `1': invalid variable name for name reference\nbash: line 1: declare: R4: readonly variable\nbash: line 1: declare: `': invalid variable name for name reference\nbash: line 1: declare: A2: reference variable cannot be an array\n"
       }
     },
     {
@@ -347,7 +347,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=0\ndeclare -nx ref=\"X\"\ndeclare -a T=([0]=\"one\")\nrc=1\ndeclare -a arr=([0]=\"one\")\nright changed prefix\nright again\nrc=1\ndeclare -a A=([0]=\"1\")\n",
-        "stderr": "bash: declare: arr: reference variable cannot be an array\n"
+        "stderr": "bash: line 1: declare: arr: reference variable cannot be an array\n"
       }
     },
     {
@@ -452,7 +452,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1 X=5\nunset\nrc=1\ndeclare -inrx r=\"T\"\nrc=1\ndeclare -inrx r=\"T\"\n",
-        "stderr": "bash: declare: r: readonly variable\n"
+        "stderr": "bash: line 1: declare: r: readonly variable\n"
       }
     },
     {
@@ -487,7 +487,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=1\ndeclare -ar A=([0]=\"one\")\nrc=1\nrc=1\n",
-        "stderr": "bash: declare: A: reference variable cannot be an array\nbash: declare: A: reference variable cannot be an array\nbash: declare: A: reference variable cannot be an array\nbash: local: A: readonly variable\nbash: declare: R: readonly variable\n"
+        "stderr": "bash: line 1: declare: A: reference variable cannot be an array\nbash: line 1: declare: A: reference variable cannot be an array\nbash: line 1: declare: A: reference variable cannot be an array\nenvironment: line 1: local: A: readonly variable\nbash: line 1: declare: R: readonly variable\n"
       }
     },
     {
@@ -522,7 +522,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\ndeclare -rx x=\"1\"\nrc=1\nunset\nrc=1\ndeclare -- n=\"1\"\nrc=1\ndeclare -i z\n",
-        "stderr": "bash: declare: `': not a valid identifier\nbash: declare: `': not a valid identifier\nbash: declare: `': not a valid identifier\nbash: local: `': not a valid identifier\n"
+        "stderr": "bash: line 1: declare: `': not a valid identifier\nbash: line 1: declare: `': not a valid identifier\nbash: line 1: declare: `': not a valid identifier\nenvironment: line 1: local: `': not a valid identifier\n"
       }
     },
     {
@@ -592,7 +592,7 @@
       "expect": {
         "exit": 0,
         "stdout": "X=2\nx=4\ndeclare -ai A=([0]=\"9\" [1]=\"x++\")\nrc=1\n",
-        "stderr": "bash: R: readonly variable\n"
+        "stderr": "bash: line 1: R: readonly variable\n"
       }
     },
     {
@@ -697,7 +697,7 @@
       "expect": {
         "exit": 1,
         "stdout": "rc=1\ndeclare -nrl ref=\"t\"\ndeclare -a t=([0]=\"3\")\n",
-        "stderr": "bash: declare: ref: readonly variable\nbash: declare: `1': invalid variable name for name reference\nbash: declare: X: not found\n"
+        "stderr": "bash: line 1: declare: ref: readonly variable\nbash: line 1: declare: `1': invalid variable name for name reference\nbash: line 1: declare: X: not found\n"
       }
     }
   ]

@@ -32,7 +32,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=127\n",
-        "stderr": "axa: command not found\n"
+        "stderr": "bash: line 1: axa: command not found\n"
       }
     },
     {
@@ -67,7 +67,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi one two\n1\n2\n3\n2\n1\n3\n3\nnone\n1\n",
-        "stderr": "a: command not found\n"
+        "stderr": "bash: line 6: a: command not found\n"
       }
     },
     {
@@ -172,7 +172,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\n",
-        "stderr": "bash: alias: axe: not found\nbash: unalias: nope: not found\n"
+        "stderr": "bash: line 2: alias: axe: not found\nbash: line 2: unalias: nope: not found\n"
       }
     },
     {
@@ -242,7 +242,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=127\n",
-        "stderr": "axd: command not found\n"
+        "stderr": "bash: line 2: axd: command not found\n"
       }
     },
     {
@@ -277,7 +277,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=127\n",
-        "stderr": "axe: command not found\n"
+        "stderr": "bash: line 1: axe: command not found\n"
       }
     },
     {
@@ -522,7 +522,7 @@
       "expect": {
         "exit": 127,
         "stdout": "A\n",
-        "stderr": "e: command not found\n"
+        "stderr": "bash: line 3: e: command not found\n"
       }
     },
     {
@@ -557,7 +557,7 @@
       "expect": {
         "exit": 127,
         "stdout": "B\n",
-        "stderr": "a: command not found\n"
+        "stderr": "bash: line 3: a: command not found\n"
       }
     },
     {
@@ -697,7 +697,7 @@
       "expect": {
         "exit": 127,
         "stdout": "B\n",
-        "stderr": "a: command not found\n"
+        "stderr": "bash: line 3: a: command not found\n"
       }
     },
     {
@@ -732,7 +732,7 @@
       "expect": {
         "exit": 127,
         "stdout": "A\nB\n",
-        "stderr": "b: command not found\n"
+        "stderr": "bash: line 3: b: command not found\n"
       }
     },
     {
@@ -872,7 +872,7 @@
       "expect": {
         "exit": 127,
         "stdout": "A\n",
-        "stderr": "e: command not found\n"
+        "stderr": "environment: line 2: e: command not found\n"
       }
     },
     {
@@ -1117,7 +1117,7 @@
       "expect": {
         "exit": 127,
         "stdout": "",
-        "stderr": "a: command not found\n"
+        "stderr": "bash: line 3: a: command not found\n"
       }
     },
     {

@@ -32,7 +32,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "bash: zqu1: unbound variable\n"
+        "stderr": "bash: line 1: zqu1: unbound variable\n"
       }
     },
     {
@@ -172,7 +172,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "bash: zun1[5]: unbound variable\n"
+        "stderr": "bash: line 1: zun1[5]: unbound variable\n"
       }
     },
     {
@@ -207,7 +207,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "bash: zun2[$zk2]: unbound variable\n"
+        "stderr": "bash: line 1: zun2[$zk2]: unbound variable\n"
       }
     },
     {
@@ -242,7 +242,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "bash: zun3[zv3]: unbound variable\n"
+        "stderr": "bash: line 1: zun3[zv3]: unbound variable\n"
       }
     },
     {
@@ -277,7 +277,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "bash: znv4: unbound variable\n"
+        "stderr": "bash: line 1: znv4: unbound variable\n"
       }
     },
     {
@@ -312,7 +312,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "bash: znv5: unbound variable\n"
+        "stderr": "bash: line 1: znv5: unbound variable\n"
       }
     },
     {
@@ -382,7 +382,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "bash: znv7: unbound variable\n"
+        "stderr": "bash: line 1: znv7: unbound variable\n"
       }
     },
     {
@@ -452,7 +452,7 @@
       "expect": {
         "exit": 0,
         "stdout": "[d]\nrc=1\n",
-        "stderr": "bash: zs9[1]: unbound variable\n"
+        "stderr": "bash: line 1: zs9[1]: unbound variable\n"
       }
     },
     {

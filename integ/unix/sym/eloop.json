@@ -837,7 +837,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/lp1: Too many levels of symbolic links\n"
+        "stderr": "bash: line 1: /data/lp1: Too many levels of symbolic links\n"
       }
     },
     {
@@ -872,7 +872,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: /data/lp1: Too many levels of symbolic links\n"
+        "stderr": "bash: line 1: /data/lp1: Too many levels of symbolic links\n"
       }
     },
     {

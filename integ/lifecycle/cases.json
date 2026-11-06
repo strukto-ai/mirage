@@ -756,7 +756,7 @@
             "value": {
               "exit_code": 127,
               "stdout": "",
-              "stderr": "probe: command not found\n"
+              "stderr": "bash: line 1: probe: command not found\n"
             }
           }
         },
@@ -848,7 +848,7 @@
             "value": {
               "exit_code": 127,
               "stdout": "",
-              "stderr": "probe: command not found\n"
+              "stderr": "bash: line 1: probe: command not found\n"
             }
           }
         },
@@ -2877,11 +2877,11 @@
         },
         {
           "op": "exec",
-          "command": "kill $(ps | grep 'sleep 30$' | cut -f1) 2>&1 | sed 's/[0-9][0-9]*/PID/'",
+          "command": "kill $(ps | grep 'sleep 30$' | cut -f1) 2>&1 | sed 's/([0-9][0-9]*)/(PID)/'",
           "expect": {
             "value": {
               "exit_code": 0,
-              "stdout": "bash: kill: (PID) - Operation not permitted\n",
+              "stdout": "bash: line 1: kill: (PID) - Operation not permitted\n",
               "stderr": ""
             }
           },
@@ -4098,7 +4098,7 @@
             "value": {
               "exit_code": 1,
               "stdout": "",
-              "stderr": "bash: portable: readonly function\n"
+              "stderr": "bash: line 1: portable: readonly function\n"
             }
           }
         },
@@ -4109,7 +4109,7 @@
             "value": {
               "exit_code": 1,
               "stdout": "",
-              "stderr": "bash: unset: portable: cannot unset: readonly function\n"
+              "stderr": "bash: line 1: unset: portable: cannot unset: readonly function\n"
             }
           }
         },
@@ -4142,7 +4142,7 @@
             "value": {
               "exit_code": 127,
               "stdout": "",
-              "stderr": "late: command not found\n"
+              "stderr": "environment: line 1: late: command not found\n"
             }
           }
         }
@@ -4444,7 +4444,7 @@
             "value": {
               "exit_code": 0,
               "stdout": "write=1\n",
-              "stderr": "/data/r.txt: upload refused: 503\n"
+              "stderr": "bash: line 1: /data/r.txt: upload refused: 503\n"
             }
           }
         },
@@ -4466,7 +4466,7 @@
             "value": {
               "exit_code": 0,
               "stdout": "ran\n",
-              "stderr": "/data/r.txt: upload refused: 503\n"
+              "stderr": "bash: line 1: /data/r.txt: upload refused: 503\n"
             }
           }
         },
@@ -4477,7 +4477,7 @@
             "value": {
               "exit_code": 0,
               "stdout": "exec=1\n",
-              "stderr": "/data/r.txt: upload refused: 503\n"
+              "stderr": "bash: line 1: /data/r.txt: upload refused: 503\n"
             }
           }
         },

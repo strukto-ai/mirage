@@ -1327,7 +1327,7 @@
       "expect": {
         "exit": 2,
         "stdout": "cleanup:2\n",
-        "stderr": "bash: exit: abc: numeric argument required\n"
+        "stderr": "bash: line 1: exit: abc: numeric argument required\n"
       }
     },
     {
@@ -1362,7 +1362,7 @@
       "expect": {
         "exit": 1,
         "stdout": "cleanup:1\n",
-        "stderr": "bash: exit: too many arguments\n"
+        "stderr": "bash: line 1: exit: too many arguments\n"
       }
     },
     {
@@ -1432,7 +1432,7 @@
       "expect": {
         "exit": 127,
         "stdout": "cleanup:127\n",
-        "stderr": "bash: nope: unbound variable\n"
+        "stderr": "bash: line 1: nope: unbound variable\n"
       }
     },
     {
@@ -1502,7 +1502,7 @@
       "expect": {
         "exit": 0,
         "stdout": "status:1\n",
-        "stderr": "bash: trap: FOO: invalid signal specification\n"
+        "stderr": "bash: line 1: trap: FOO: invalid signal specification\n"
       }
     },
     {
@@ -1537,7 +1537,7 @@
       "expect": {
         "exit": 0,
         "stdout": "status:1\nstatus:0\nstatus:1\n",
-        "stderr": "bash: trap: IOT: invalid signal specification\nbash: trap: CLD: invalid signal specification\n"
+        "stderr": "bash: line 1: trap: IOT: invalid signal specification\nbash: line 1: trap: CLD: invalid signal specification\n"
       }
     },
     {
@@ -1572,7 +1572,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "bash: trap: -z: invalid option\ntrap: usage: trap [-lp] [[arg] signal_spec ...]\n"
+        "stderr": "bash: line 1: trap: -z: invalid option\ntrap: usage: trap [-lp] [[arg] signal_spec ...]\n"
       }
     },
     {

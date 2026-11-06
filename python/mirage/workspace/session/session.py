@@ -39,9 +39,10 @@ from mirage.shell.constants import (
     SHELL_ARGV0,
 )
 from mirage.shell.descriptors import Descriptor, StreamOwner
+from mirage.shell.helpers import source_row
 from mirage.shell.job_table.table import JobTable
 from mirage.shell.job_table.waits import JobWaits
-from mirage.shell.types import AliasExpansion
+from mirage.shell.types import AliasExpansion, TSNodeLike
 from mirage.shell.variable import (
     ManagedRef,
     ShellVar,
@@ -518,6 +519,17 @@ class SessionState:
     # parsed again from its own source but reads aliases where it was
     # written.
     _parse_row: int = field(default=0, repr=False)
+    # What the running parse's diagnostics name as their source: None for
+    # the shell's own input, `environment` for a function defined there,
+    # the file for one sourced; and the command running in it, whose line
+    # is `$LINENO` (`line_number`).
+    _parse_name: str | None = field(default=None, repr=False)
+    _line_node: TSNodeLike | None = field(default=None, repr=False)
+    # The row the next nested parse starts on, which a sourced file (0)
+    # and the rest of an input read again (its own parse's) set; None
+    # numbers it on from the running command's line, as `eval` and
+    # `$( )` do, or from 0 for a shell's own input.
+    _parse_from: int | None = field(default=None, repr=False)
     # The owner of this session's terminal streams, which an `exec` copy
     # of one names (`exec 3>&1`), and whether a line of the session is
     # running, whose outermost program routes what was written to them.
@@ -866,6 +878,14 @@ class SessionState:
         return SHELL_ARGV0 if self.script_name is None else self.script_name
 
     @property
+    def line_number(self) -> int:
+        """The line of the command running, ``$LINENO``: its row in the
+        text that spelled it, numbered on from where that text's parse
+        starts (``_parse_row``)."""
+        node = self._line_node
+        return self._parse_row + (0 if node is None else source_row(node)) + 1
+
+    @property
     def env(self) -> Mapping[str, str]:
         """The scalar variables, by name.
 
@@ -1002,6 +1022,8 @@ class SessionState:
         child = self.fork()
         child._parse_current = self._parse_current
         child._parse_row = self._parse_row
+        child._parse_name = self._parse_name
+        child._line_node = self._line_node
         child._alias_expansion = self._alias_expansion
         child._local_vars = (
             None if self._local_vars is None else copy_locals(self._local_vars)

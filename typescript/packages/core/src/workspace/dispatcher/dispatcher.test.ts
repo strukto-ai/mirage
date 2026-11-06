@@ -1120,9 +1120,13 @@ describe('a hide answers a create by what its parent answers', () => {
         ).rejects.toMatchObject({ code: 'EACCES' })
       })
       const under = await ws.shell('echo x > /ram/vault/new.txt', { sessionId: 'agent' })
-      expect(DEC.decode(under.stderr)).toBe('/ram/vault/new.txt: No such file or directory\n')
+      expect(DEC.decode(under.stderr)).toBe(
+        'bash: line 1: /ram/vault/new.txt: No such file or directory\n',
+      )
       const control = await ws.shell('echo x > /ram/ghost/new.txt', { sessionId: 'agent' })
-      expect(DEC.decode(control.stderr)).toBe('/ram/ghost/new.txt: No such file or directory\n')
+      expect(DEC.decode(control.stderr)).toBe(
+        'bash: line 1: /ram/ghost/new.txt: No such file or directory\n',
+      )
       expect(DEC.decode((await ws.shell('cat /ram/vault/secret')).stdout)).toBe('s\n')
     } finally {
       await ws.close()
@@ -1288,8 +1292,8 @@ describe('the dispatcher answers extended attributes from the node table', () =>
 
 describe('shell mutations share read-only admission', () => {
   it.each([
-    ['echo x >> /ro/file', '/ro/file: Read-only file system\n'],
-    ['exec >> /ro/file', '/ro/file: Read-only file system\n'],
+    ['echo x >> /ro/file', 'bash: line 1: /ro/file: Read-only file system\n'],
+    ['exec >> /ro/file', 'bash: line 1: /ro/file: Read-only file system\n'],
     [
       'ln -s file /ro/link',
       "ln: failed to create symbolic link '/ro/link': Read-only file system\n",
@@ -3052,7 +3056,7 @@ describe('a hide filters a one-call read', () => {
   it.each([
     ['cat /ram/d/*; echo $?', '126\n', `cat: Argument list too long\ncat: ${refused}\n`],
     ['echo /ram/d/*; echo $?', '126\n', `echo: Argument list too long\necho: ${refused}\n`],
-    ['for f in /ram/d/*; do echo $f; done; echo after', '', `bash: ${refused}\n`],
+    ['for f in /ram/d/*; do echo $f; done; echo after', '', `bash: line 1: ${refused}\n`],
     ['cat /ram/d/a*', 'a\na\n', ''],
     ['echo /ram/d/*/b.txt', '/ram/d/secret/b.txt\n', ''],
   ])('refuses a glob past the walk limit: %s', async (line, out, err) => {

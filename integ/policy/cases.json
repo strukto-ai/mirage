@@ -138,9 +138,9 @@
     {"op": "session", "id": "agent", "profile": {"paths": {"hide": ["/data/vault"]}}},
     {"op": "exec", "command": "echo v > /data/vault/v; echo f > /data/f", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "ls /data", "expect": {"value": {"exit_code": 0, "stdout": "f\n", "stderr": "", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "cd /data/vault", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: cd: /data/vault: No such file or directory\n", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "cd -P /data/vault", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: cd: /data/vault: No such file or directory\n", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "cd /data; cd vault; pwd", "expect": {"value": {"exit_code": 0, "stdout": "/data\n", "stderr": "bash: cd: vault: No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cd /data/vault", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: cd: /data/vault: No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cd -P /data/vault", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: cd: /data/vault: No such file or directory\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "cd /data; cd vault; pwd", "expect": {"value": {"exit_code": 0, "stdout": "/data\n", "stderr": "bash: line 1: cd: vault: No such file or directory\n", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "touch /data/vault", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "touch: cannot touch '/data/vault': Permission denied\n", "refusal": null}}},
     {"op": "exec", "command": "cd /data/vault; pwd; cat v", "expect": {"value": {"exit_code": 0, "stdout": "/data/vault\nv\n", "stderr": "", "refusal": null}}}
    ]
@@ -152,7 +152,7 @@
     {"op": "session", "id": "agent", "profile": {"mounts": {"/data": "read"}}},
     {"op": "exec", "command": "echo x > /data/f", "expect": {"value": {"exit_code": 0, "stdout": "", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "cat /data/f", "expect": {"value": {"exit_code": 0, "stdout": "x\n", "stderr": "", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "echo y > /data/f", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "/data/f: Read-only file system\n", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "echo y > /data/f", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: /data/f: Read-only file system\n", "refusal": null}}},
     {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/f", "data": "eQ=="}, "expect": {"errno": "EROFS"}},
     {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/f", "data": "eQ=="}, "explain": true, "expect": {"value": {"call": "write", "outcome": "deny", "reason": "Read-only file system", "answers": [{"kind": "deny", "policy": "MountModePolicy", "reason": "Read-only file system"}], "refusal": null, "error": "EROFS"}}},
     {"op": "vfs", "session": "agent", "call": "mkdir", "args": {"path": "/data/d"}, "expect": {"errno": "EROFS"}},
@@ -343,7 +343,7 @@
     {"op": "asks", "expect": {"value": [{"command": "", "paths": [], "reason": "LATER needs review"}]}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
     {"op": "exec", "session": "agent", "command": "export LATER=2; echo ${LATER:-unset}", "expect": {"value": {"exit_code": 0, "stdout": "2\n", "stderr": "", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "KEPT=new printenv KEPT", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: KEPT: permission denied\n", "refusal": "KEPT stays"}}},
+    {"op": "exec", "session": "agent", "command": "KEPT=new printenv KEPT", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "bash: line 1: KEPT: permission denied\n", "refusal": "KEPT stays"}}},
     {"op": "exec", "session": "agent", "command": "RANDOM=(1 2)", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "RANDOM: permission denied\n", "refusal": "RANDOM stays"}}},
     {"op": "exec", "session": "agent", "command": "[ \"$RANDOM\" != \"$RANDOM\" ] && echo draws", "expect": {"value": {"exit_code": 0, "stdout": "draws\n", "stderr": "", "refusal": null}}}
    ]
@@ -532,12 +532,12 @@
    "steps": [
     {"op": "session", "id": "agent"},
     {"op": "register_policy", "id": "writes", "pre_session": {"B": {"ask": "B before"}, "C": {"ask": "C before"}}, "post_session": {"B": {"ask": "B after"}}},
-    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "\n", "stderr": "bash: B: permission denied\nC: permission denied\n", "refusal": "C before"}}},
+    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "\n", "stderr": "bash: line 1: B: permission denied\nC: permission denied\n", "refusal": "C before"}}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
-    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "2\n", "stderr": "bash: B: permission denied\n", "refusal": "B after"}}},
+    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "2\n", "stderr": "bash: line 1: B: permission denied\n", "refusal": "B after"}}},
     {"op": "answer", "outcome": "allow", "scope": "once"},
     {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "1\n2\n", "stderr": "", "refusal": null}}},
-    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "2\n", "stderr": "bash: B: permission denied\nC: permission denied\n", "refusal": "C before"}}}
+    {"op": "exec", "session": "agent", "command": "B=1 printenv B; export C=2; echo $C", "expect": {"value": {"exit_code": 0, "stdout": "2\n", "stderr": "bash: line 1: B: permission denied\nC: permission denied\n", "refusal": "C before"}}}
    ]
   },
   {

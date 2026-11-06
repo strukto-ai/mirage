@@ -16,7 +16,10 @@ from collections.abc import Callable
 from functools import partial
 from typing import Any
 
-from mirage.context import clear_program_invocation, reset_program_invocation
+from mirage.context import (
+    clear_program_invocation,
+    reset_program_invocation,
+)
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
 from mirage.io.types import ByteSource
@@ -31,6 +34,7 @@ from mirage.shell.helpers import parse_function
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.variable import ShellVar
+from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec, word_text
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.alias.alias import body_aliases
@@ -117,7 +121,7 @@ async def run_shell_function(
     if cs.function_depth >= limit:
         raise DiscardSignal(
             encode_text(
-                f"bash: {cmd_name}: maximum function nesting level "
+                f"{shell_voice()}{cmd_name}: maximum function nesting level "
                 f"exceeded ({limit})\n"
             )
         )
@@ -157,11 +161,18 @@ async def run_shell_function(
     # whatever `xargs` or `env` marked the line that called it.
     marked = clear_program_invocation()
     # The body is parsed again from its source, so its rows restart at
-    # 0; it expands the aliases its definition saw, or reads them as a
-    # parse of its own when it came from a stored session. It was read
+    # 0; its diagnostics number them from the definition's row, under the
+    # name of where it was defined, and it expands the aliases its
+    # definition saw, or reads them as a parse of its own when it came
+    # from a stored session. It was read
     # apart from the alias that may have called it, whose guards do not
     # reach it (`alias a=f` still lets `f`'s body run its own `a`).
-    outer_parse = (session._parse_current, session._parse_row)
+    outer_parse = (
+        session._parse_current,
+        session._parse_row,
+        session._parse_name,
+        session._line_node,
+    )
     outer_view = session._alias_view
     outer_expansion = session._alias_expansion
     session._alias_expansion = None
@@ -174,6 +185,7 @@ async def run_shell_function(
     else:
         mark = site.mark
     session._parse_current, session._parse_row = mark
+    session._parse_name = "environment" if site is None else site.name
     session._alias_view = (
         dict(site.aliases)
         if site is not None and site.aliases is not None
@@ -223,7 +235,12 @@ async def run_shell_function(
             lifted = (None, None)
         raise
     finally:
-        session._parse_current, session._parse_row = outer_parse
+        (
+            session._parse_current,
+            session._parse_row,
+            session._parse_name,
+            session._line_node,
+        ) = outer_parse
         session._alias_view = outer_view
         session._alias_expansion = outer_expansion
         if nested is not None and decisions is not None:

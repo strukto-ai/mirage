@@ -32,7 +32,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: 1/0: division by 0 (error token is \"0\")\n"
+        "stderr": "bash: line 1: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -67,7 +67,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: 1/0: division by 0 (error token is \"0\")\n"
+        "stderr": "bash: line 1: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -102,7 +102,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: 2**-1: exponent less than 0 (error token is \"1\")\n"
+        "stderr": "bash: line 1: 2**-1: exponent less than 0 (error token is \"1\")\n"
       }
     },
     {
@@ -172,7 +172,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: 1/0: division by 0 (error token is \"0\")\n"
+        "stderr": "bash: line 1: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -207,7 +207,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: 1/0: division by 0 (error token is \"0\")\n"
+        "stderr": "bash: line 1: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -242,7 +242,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: zv: 1/0: division by 0 (error token is \"0\")\n"
+        "stderr": "bash: line 1: zv: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -277,7 +277,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: 1/0: division by 0 (error token is \"0\")\n"
+        "stderr": "bash: line 1: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -312,7 +312,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: zx=3,1/0: division by 0 (error token is \"0\")\n"
+        "stderr": "bash: line 1: zx=3,1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -347,7 +347,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\n",
-        "stderr": "bash: R: readonly variable\nbash: R: readonly variable\n"
+        "stderr": "bash: line 1: R: readonly variable\nbash: line 1: R: readonly variable\n"
       }
     },
     {
@@ -382,7 +382,7 @@
       "expect": {
         "exit": 0,
         "stdout": "a=1\nd=2\ns=1\ne=1\np=2 0\ng=2 0\nx=1\n",
-        "stderr": "bash: R: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\n"
+        "stderr": "bash: line 1: R: readonly variable\nbash: line 1: Q: readonly variable\nbash: line 1: Q: readonly variable\nbash: line 1: Q: readonly variable\nbash: line 1: Q: readonly variable\nbash: line 1: Q: readonly variable\nbash: line 1: Q: readonly variable\n"
       }
     },
     {
@@ -417,7 +417,7 @@
       "expect": {
         "exit": 0,
         "stdout": "cs=1 0\nsub=2 0\njob=2\nps=1 0\n",
-        "stderr": "bash: Q: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\n"
+        "stderr": "bash: line 1: Q: readonly variable\nbash: line 1: Q: readonly variable\nbash: line 1: Q: readonly variable\nbash: line 1: Q: readonly variable\n"
       }
     },
     {
@@ -452,7 +452,7 @@
       "expect": {
         "exit": 0,
         "stdout": "a=1 X=5\nd=1\ne=1\nx=5 y=6\ncmd\nc=0\n",
-        "stderr": "bash: R: readonly variable\nbash: Q: readonly variable\nbash: Q: readonly variable\nside\nbash: r: readonly variable\nelem\nbash: a: readonly variable\nbash: a: readonly variable\nbig\nbash: a: readonly variable\nbash: r: readonly variable\n"
+        "stderr": "bash: line 1: R: readonly variable\nbash: line 1: Q: readonly variable\nbash: line 1: Q: readonly variable\nside\nbash: line 1: r: readonly variable\nelem\nbash: line 2: a: readonly variable\nbash: line 3: a: readonly variable\nbig\nbash: line 4: a: readonly variable\nbash: line 5: r: readonly variable\n"
       }
     },
     {
@@ -487,7 +487,7 @@
       "expect": {
         "exit": 0,
         "stdout": "s=1\ni=1\nl=1\n",
-        "stderr": "bash: R: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\n"
+        "stderr": "bash: line 1: R: readonly variable\nbash: line 1: R: readonly variable\nbash: line 1: R: readonly variable\n"
       }
     },
     {
@@ -522,7 +522,7 @@
       "expect": {
         "exit": 0,
         "stdout": "bg=127\np=127 0\ng=1\nsub=1\n",
-        "stderr": "bash: UZ: m\nbash: UZ: m\nbash: UZ: m\nbash: UZ: m\n"
+        "stderr": "bash: line 1: UZ: m\nbash: line 1: UZ: m\nbash: line 1: UZ: m\nbash: line 1: UZ: m\n"
       }
     },
     {
@@ -557,7 +557,7 @@
       "expect": {
         "exit": 0,
         "stdout": "seed 0 X=5\nlet 1\n",
-        "stderr": "bash: R: readonly variable\nbash: W: readonly variable\n"
+        "stderr": "bash: line 1: R: readonly variable\nbash: line 1: W: readonly variable\n"
       }
     },
     {
@@ -592,7 +592,7 @@
       "expect": {
         "exit": 0,
         "stdout": "1 0\nbg 1\n1 0\n",
-        "stderr": "bash: U: m\nbash: U: m\n"
+        "stderr": "bash: line 1: U: m\nbash: line 1: U: m\n"
       }
     },
     {
@@ -627,7 +627,7 @@
       "expect": {
         "exit": 0,
         "stdout": "r=1\ng=1\na=1\ns=1\nl=1\ne=1\nsub=1\n",
-        "stderr": "bash: read: 1+: syntax error: operand expected (error token is \"+\")\nbash: getopts: ?: syntax error: operand expected (error token is \"?\")\nbash: 2 3: syntax error in expression (error token is \"3\")\nbash: 1+: syntax error: operand expected (error token is \"+\")\nbash: 2+: syntax error: operand expected (error token is \"+\")\nbash: 1/0: division by 0 (error token is \"0\")\nbash: declare: 1+: syntax error: operand expected (error token is \"+\")\n"
+        "stderr": "bash: line 1: read: 1+: syntax error: operand expected (error token is \"+\")\nbash: line 1: getopts: ?: syntax error: operand expected (error token is \"?\")\nbash: line 1: 2 3: syntax error in expression (error token is \"3\")\nbash: line 1: 1+: syntax error: operand expected (error token is \"+\")\nbash: line 1: 2+: syntax error: operand expected (error token is \"+\")\nbash: line 1: 1/0: division by 0 (error token is \"0\")\nbash: line 2: declare: 1+: syntax error: operand expected (error token is \"+\")\n"
       }
     }
   ]

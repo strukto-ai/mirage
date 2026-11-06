@@ -71,7 +71,7 @@
       }
     },
     {
-      "id": "pipe_writer_stopped_between_writes_keeps_its_status",
+      "id": "pipe_writer_past_the_pipe_buffer_dies_of_sigpipe",
       "seq": 1400003,
       "targets": [
         "ram",
@@ -101,10 +101,9 @@
       "command": "seq 100000 | head -1 >/dev/null; echo \"${PIPESTATUS[*]}\"",
       "expect": {
         "exit": 0,
-        "stdout": "0 0\n",
+        "stdout": "141 0\n",
         "stderr": ""
-      },
-      "note": "Divergence: GNU bash 5.2.37 prints \"141 0\\n\": seq keeps writing past the 64 KiB pipe buffer after head exits and dies of SIGPIPE. Mirage pulls a writer's next chunk only once the reader took the last, so a lazy source never fetches another page for a reader that is gone; a writer stopped between its writes keeps its own status, and only a write the closed pipe cuts short is SIGPIPE."
+      }
     },
     {
       "id": "pipe_line_writer_cut_short_dies_of_sigpipe",
@@ -176,7 +175,7 @@
         "stdout": "141 0 0\n0 0 0\n",
         "stderr": ""
       },
-      "note": "Divergence: GNU bash 5.2.37 prints \"141 141 0\\n0 141 0\\n\": tr keeps writing past the 64 KiB pipe buffer after head exits and dies of SIGPIPE. A scanning command reads its input in 16 KiB pieces on both hosts, so mirage's tr writes those pieces and, once its reader is gone, stops between them with its own status (pipe_writer_stopped_between_writes_keeps_its_status); the head before it, whose one write the closed pipe cuts short, is SIGPIPE."
+      "note": "Divergence: GNU bash 5.2.37 prints \"141 141 0\\n0 141 0\\n\": tr keeps writing past the 64 KiB pipe buffer after head exits and dies of SIGPIPE. A scanning command reads its input in 16 KiB pieces on both hosts, so mirage's tr writes those pieces and, once its reader is gone, stops between them with its own status; the head before it, whose one write the closed pipe cuts short, is SIGPIPE."
     }
   ]
 }

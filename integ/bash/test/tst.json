@@ -662,7 +662,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: -bogus: binary operator expected\n"
+        "stderr": "bash: line 1: [: -bogus: binary operator expected\n"
       }
     },
     {
@@ -697,7 +697,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: -bogus: unary operator expected\n"
+        "stderr": "bash: line 1: [: -bogus: unary operator expected\n"
       }
     },
     {
@@ -732,7 +732,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: too many arguments\n"
+        "stderr": "bash: line 1: [: too many arguments\n"
       }
     },
     {
@@ -767,7 +767,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: x: integer expression expected\n"
+        "stderr": "bash: line 1: [: x: integer expression expected\n"
       }
     },
     {
@@ -802,7 +802,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: test: x: integer expression expected\n"
+        "stderr": "bash: line 1: test: x: integer expression expected\n"
       }
     },
     {
@@ -872,7 +872,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n2\n2\n2\n",
-        "stderr": "bash: [: too many arguments\nbash: [: qa: unary operator expected\n"
+        "stderr": "bash: line 1: [: too many arguments\nbash: line 1: [: qa: unary operator expected\n"
       }
     },
     {
@@ -1117,7 +1117,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: =~: binary operator expected\n"
+        "stderr": "bash: line 1: [: =~: binary operator expected\n"
       }
     },
     {
@@ -1152,7 +1152,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: test: =~: binary operator expected\n"
+        "stderr": "bash: line 1: test: =~: binary operator expected\n"
       }
     },
     {
@@ -1187,7 +1187,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: +: binary operator expected\n"
+        "stderr": "bash: line 1: [: +: binary operator expected\n"
       }
     },
     {
@@ -1257,7 +1257,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: missing `]'\n"
+        "stderr": "bash: line 1: [: missing `]'\n"
       }
     },
     {
@@ -1292,7 +1292,7 @@
       "expect": {
         "exit": 0,
         "stdout": "127\n",
-        "stderr": "bash: [: missing `]'\nb: command not found\n"
+        "stderr": "bash: line 1: [: missing `]'\nbash: line 1: b: command not found\n"
       }
     },
     {
@@ -1362,7 +1362,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: missing `]'\n"
+        "stderr": "bash: line 1: [: missing `]'\n"
       }
     },
     {
@@ -1397,7 +1397,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: missing `]'\n"
+        "stderr": "bash: line 1: [: missing `]'\n"
       }
     },
     {
@@ -1432,7 +1432,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: missing `]'\n"
+        "stderr": "bash: line 1: [: missing `]'\n"
       }
     },
     {
@@ -1467,7 +1467,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: missing `]'\n"
+        "stderr": "bash: line 1: [: missing `]'\n"
       }
     },
     {
@@ -1502,7 +1502,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: missing `]'\n"
+        "stderr": "bash: line 1: [: missing `]'\n"
       }
     },
     {
@@ -1537,7 +1537,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: missing `]'\n"
+        "stderr": "bash: line 1: [: missing `]'\n"
       }
     },
     {
@@ -1572,7 +1572,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "bash: [: missing `]'\n"
+        "stderr": "bash: line 1: [: missing `]'\n"
       }
     },
     {
@@ -1607,7 +1607,7 @@
       "expect": {
         "exit": 0,
         "stdout": "x\n2\n",
-        "stderr": "bash: [: missing `]'\n"
+        "stderr": "bash: line 1: [: missing `]'\n"
       }
     },
     {
@@ -1642,7 +1642,7 @@
       "expect": {
         "exit": 0,
         "stdout": "end\n",
-        "stderr": "bash: [: missing `]'\n"
+        "stderr": "bash: line 1: [: missing `]'\n"
       }
     },
     {
@@ -1677,7 +1677,7 @@
       "expect": {
         "exit": 0,
         "stdout": "end\n",
-        "stderr": "bash: [: missing `]'\n"
+        "stderr": "bash: line 1: [: missing `]'\n"
       }
     },
     {

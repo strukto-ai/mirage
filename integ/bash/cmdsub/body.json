@@ -67,7 +67,7 @@
       "expect": {
         "exit": 0,
         "stdout": "yes\n[p 2]\nr=3 a\n1 b\n2 b\nt=2\n",
-        "stderr": "bash: return: can only `return' from a function or sourced script\n"
+        "stderr": "bash: line 1: return: can only `return' from a function or sourced script\n"
       }
     },
     {
@@ -452,7 +452,7 @@
       "expect": {
         "exit": 0,
         "stdout": "[]:1\n",
-        "stderr": "{mount}/cmdsub-missing: No such file or directory\n"
+        "stderr": "bash: line 1: {mount}/cmdsub-missing: No such file or directory\n"
       }
     },
     {

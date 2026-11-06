@@ -52,7 +52,6 @@ class ProcessHandle:
         finished: Callable[[int], None],
         cancel_children: Callable[[int], None] = lambda signal: None,
         bind: ExecutionBind | None = None,
-        signal_children: Callable[[int], None] = lambda signal: None,
         ignores: frozenset[int] = frozenset(),
     ) -> None:
         self._info = info
@@ -62,7 +61,6 @@ class ProcessHandle:
         self._lock = RLock()
         self._finished = finished
         self._cancel_children = cancel_children
-        self._signal_children = signal_children
         self._programs: dict[asyncio.Task[Any], int | None] = {}
         self._takes: dict[asyncio.Task[Any], frozenset[int] | None] = {}
         self._signal: int | None = None
@@ -70,6 +68,9 @@ class ProcessHandle:
         self._runs: dict[str, dict[str, JsonValue]] = {}
         self._completion: Future[ProcessInfo] = Future()
         self.begun = False
+        # The host stopped it (its table stopped, its session closed),
+        # which ends whoever waits for it as well.
+        self.revoked = False
 
     def start(self, eager: bool = False) -> None:
         """Start the runner.
@@ -104,6 +105,14 @@ class ProcessHandle:
         """The signal the runner was stopped with, None while it runs."""
         with self._lock:
             return self._signal
+
+    @property
+    def ended_by(self) -> int | None:
+        """The signal that ended the runner, None while it runs or once
+        it exited on its own (a trap that handled the signal)."""
+        if not self.task.done() or not self.task.cancelled():
+            return None
+        return self.signal or 9
 
     @property
     def interrupted(self) -> int | None:
@@ -224,16 +233,6 @@ class ProcessHandle:
         for task in running:
             task.get_loop().call_soon_threadsafe(task.cancel)
 
-    def signal_children(self, signal: int) -> None:
-        """Deliver a signal to every runner this one started, and theirs,
-        as a process group gets it: one that ignores it hands it to its
-        program (``interrupt``), any other stops with it.
-
-        Args:
-            signal (int): the signal.
-        """
-        self._signal_children(signal)
-
     def terminate(self, signal: int = 9, children: bool = True) -> bool:
         """Request cancellation without waiting for the runner to exit.
 
@@ -302,3 +301,20 @@ class ProcessHandle:
     async def join(self) -> ProcessInfo:
         """Wait asynchronously, including from a different event loop."""
         return await asyncio.shield(asyncio.wrap_future(self._completion))
+
+    async def reap(self) -> int:
+        """Wait for the runner from the shell that forked it, as wait(2)
+        does: its exit status, 128 plus the signal that stopped it. A
+        stop of the waiting shell itself stops the runner with it, and a
+        runner the host stopped (``revoked``) ends the wait cancelled.
+
+        Returns:
+            int: the status.
+        """
+        try:
+            return await self.task
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if self.revoked or (current is not None and current.cancelling()):
+                raise
+            return 128 + (self.signal or 9)

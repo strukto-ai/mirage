@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
@@ -53,7 +54,7 @@ export async function handleSource(
 ): Promise<RedirectResult> {
   const raw = scopePath(path)
   if (wordText(path) === '') {
-    return scriptError('bash', ': No such file or directory', 1, 'source ')
+    return scriptError(shellVoice(), 'No such file or directory', 1, 'source ')
   }
   let script: string
   try {
@@ -62,9 +63,9 @@ export async function handleSource(
     const strerror = fsStrerror(err)
     if (strerror === null) throw err
     if ((err as { code?: unknown }).code === 'EISDIR') {
-      return scriptError(`bash: ${name}`, `${raw}: is a directory`, 1, `source ${raw}`)
+      return scriptError(`${shellVoice()}${name}`, `${raw}: is a directory`, 1, `source ${raw}`)
     }
-    return scriptError('bash', `${raw}: ${strerror}`, 1, `source ${raw}`)
+    return scriptError(`${shellVoice()}${raw}`, strerror, 1, `source ${raw}`)
   }
   const cs = callStack ?? new CallStack(session.shellNesting)
   cs.admit(name)
@@ -73,6 +74,10 @@ export async function handleSource(
   cs.push(params, 'source', true)
   const outerNames = session.functionNames
   if (outerNames !== null) session.functionNames = cs.functionNames()
+  // Its diagnostics name the file, as spelled, and count its own lines.
+  const outerName = session.parseName
+  session.parseName = wordText(path)
+  session.parseFrom = 0
   let io: IOResult
   let stdout: ByteSource | null
   try {
@@ -86,6 +91,10 @@ export async function handleSource(
     } catch (err) {
       if (!(err instanceof ReturnSignal)) throw err
       io = ended(err)
+    } finally {
+      // The RETURN trap speaks as the caller, as bash's does.
+      session.parseName = outerName
+      session.parseFrom = null
     }
     ;[stdout, io] = await returning(executeFn, session, stdin, cs, io.stdout, io)
   } catch (err) {
@@ -109,7 +118,7 @@ export async function sourceBuiltin(call: BuiltinCall): Promise<RedirectResult> 
   const name = call.argv.name
   if (target === undefined) {
     return scriptError(
-      `bash: ${name}`,
+      `${shellVoice()}${name}`,
       `filename argument required\n${builtinUsage(name).trimEnd()}`,
       2,
       name,

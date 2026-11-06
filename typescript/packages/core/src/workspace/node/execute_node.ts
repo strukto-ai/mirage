@@ -12,9 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../shell/voice.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import {
+  currentCaller,
   isProgramInvocation,
   redirectPathsFor,
   type RedirectRunner,
@@ -36,7 +38,12 @@ import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
-import { FORK_FAILED, FORK_FAILED_STATUS, SIGPIPE_STATUS } from '../../shell/constants.ts'
+import {
+  FORK_FAILED,
+  FORK_FAILED_STATUS,
+  SHELL_IGNORED_SIGNALS,
+  SIGPIPE_STATUS,
+} from '../../shell/constants.ts'
 import { ArithError, ExitSignal, PipeClosed, ReadonlyVariableError } from '../../shell/errors.ts'
 import {
   commandRedirects,
@@ -88,10 +95,18 @@ import {
   LoopSignal,
   trailed,
 } from '../executor/control.ts'
-import { drained } from '../executor/jobs.ts'
+import { drained, reportJobs, reportReaped, tell } from '../executor/jobs.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
 import { handleRedirect } from '../executor/redirect.ts'
-import { assignmentStatus, forks, ignoringErrexit, recordStatus } from '../executor/statement.ts'
+import {
+  assignmentStatus,
+  forks,
+  ignoringErrexit,
+  nestedShell,
+  recordStatus,
+  redirectedBody,
+  reportedCommand,
+} from '../executor/statement.ts'
 import { endShell } from '../executor/traps.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
 import { expandArith, expandNode } from '../expand/node.ts'
@@ -884,7 +899,9 @@ export async function executeNode(
       return [processSubs.own(stdout, io, execNode), io, execNode]
     }
     const outer = context.frame.diagnostics
+    const outerReports = context.frame.reports
     context.frame.diagnostics = []
+    context.frame.reports = []
     try {
       const [stdout, io, execNode] = await executeNodeBody(
         deps,
@@ -910,6 +927,15 @@ export async function executeNode(
         io.stderr = merged
         execNode.stderr = merged
       }
+      // A child it reaped is told of after its stderr, with the jobs a signal
+      // ended meanwhile, as bash tells once it reaped one.
+      const reports = context.frame.reports
+      if (reports.length > 0 && redirectedBody(node)) {
+        outerReports.push(...reports)
+      } else if (reports.length > 0) {
+        const report = concat([...reports, reportJobs(context, deps.jobTable)])
+        if (report.length > 0) await tell(report, io, execNode, deps.sink ?? null)
+      }
       return [processSubs.own(stdout, io, execNode), io, execNode]
     } catch (err) {
       if (err instanceof ExitSignal) {
@@ -922,6 +948,7 @@ export async function executeNode(
       throw err
     } finally {
       context.frame.diagnostics = outer
+      context.frame.reports = outerReports
     }
   } catch (err) {
     // `exit`, `return` or `break` ends the node as its last command did:
@@ -1030,6 +1057,8 @@ async function executeNodeBody(
     )
   }
   session.errexitImmune = false
+  // The command whose line bash numbers diagnostics and `$LINENO` by.
+  if (node.type !== NT.PROGRAM) session.lineNode = node
 
   // A sink turns this walk from "return your output" into "write your
   // output". Sequencing constructs pass it to their children so each
@@ -1306,12 +1335,9 @@ async function executeNodeBody(
     // the parent's table never does), mirroring bash's forked process.
     const subTable = jobTable.child()
     const abort = new AbortController()
-    const subDeps: ExecuteNodeDeps = {
-      ...captureDeps,
-      jobTable: subTable,
-      signal:
-        deps.signal === undefined ? abort.signal : AbortSignal.any([deps.signal, abort.signal]),
-    }
+    const subSignal =
+      deps.signal === undefined ? abort.signal : AbortSignal.any([deps.signal, abort.signal])
+    const subDeps: ExecuteNodeDeps = { ...captureDeps, jobTable: subTable, signal: subSignal }
     // The opts parameter is load-bearing, not decoration: a job started
     // inside the subshell body hands `handleBackground` its own console
     // and abort signal through it. Dropping it (a 4-parameter closure
@@ -1336,7 +1362,55 @@ async function executeNodeBody(
       )
     const child = childContext(context)
     const asProgram = isProgramInvocation(session)
-    let result: RedirectResult | undefined
+    let subshellRan: RedirectResult | undefined
+    // A body that is one nested shell (`( sh -c ... )`) is the subshell
+    // itself, as bash execs it there.
+    const statements = node.namedChildren.filter((c) => c.type !== NT.COMMENT)
+    const execs =
+      statements.length === 1 && statements[0] !== undefined && nestedShell(statements[0], session)
+    const forked = (process: ProcessHandle): void => {
+      child.session.processId = process.info.pid
+      child.frame.shell = execs ? null : process
+    }
+    const run = async (): Promise<number> => {
+      const body = () =>
+        handleSubshell(
+          subRecurse,
+          node.children,
+          child,
+          stdin,
+          callStack,
+          subTable,
+          dispatch,
+          deps.handed ?? null,
+          registry.decisions,
+          sink ?? null,
+          // Its EXIT action runs as the subshell, which a stop ends.
+          (cmd, opts) =>
+            executeFn(cmd, {
+              ...opts,
+              signal:
+                opts.signal === undefined ? subSignal : AbortSignal.any([opts.signal, subSignal]),
+            }),
+        )
+      try {
+        subshellRan = await runWithEvaluation(child, () =>
+          asProgram ? runAsProgram(child.session, body) : body(),
+        )
+      } finally {
+        await child.session.closeInputs()
+      }
+      return subshellRan[1].exitCode
+    }
+    const owner = currentCaller().process
+    if (context.frame.shell === null && owner !== null) {
+      // The whole of what its runner runs (`( sleep 3; echo x ) &`) is the
+      // runner itself, as bash forks a job's subshell once: it keeps the INT
+      // its job ignores.
+      forked(owner)
+      const code = await run()
+      return subshellRan ?? result(getText(node), { exitCode: code })
+    }
     let process: ProcessHandle
     try {
       process = subTable.processes.start({
@@ -1348,42 +1422,18 @@ async function executeNodeBody(
           abort.abort()
         },
         limit: session.processes.max,
-        started: (info) => {
-          child.session.processId = info.pid
-        },
-        run: async () => {
-          const body = () =>
-            handleSubshell(
-              subRecurse,
-              node.children,
-              child,
-              stdin,
-              callStack,
-              subTable,
-              dispatch,
-              deps.handed ?? null,
-              registry.decisions,
-              sink ?? null,
-              executeFn,
-            )
-          try {
-            result = await runWithEvaluation(child, () =>
-              asProgram ? runAsProgram(child.session, body) : body(),
-            )
-          } finally {
-            await child.session.closeInputs()
-          }
-          return result[1].exitCode
-        },
+        started: forked,
+        ignores: SHELL_IGNORED_SIGNALS,
+        run,
       })
     } catch (error) {
       if ((error as { code?: unknown }).code === 'EAGAIN')
         throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
       throw error
     }
-    await process.task
-    if (result === undefined) throw new Error('subshell completed without a result')
-    return result
+    const code = await process.reap(mergeSignals(deps.signal, context.frame.abortSignal) ?? null)
+    reportReaped(context.frame, [[process.info.pid, code, process.endedBy, reportedCommand(node)]])
+    return subshellRan ?? result(getText(node), { exitCode: code })
   }
 
   if (kind === NodeKind.ARITH) {
@@ -1393,10 +1443,10 @@ async function executeNodeBody(
     try {
       value = await landedArith(session, view, expr)
     } catch (err) {
-      if (err instanceof PolicyDenied) return fail(text, `bash: ${err.message}\n`)
+      if (err instanceof PolicyDenied) return fail(text, `${shellVoice()}${err.message}\n`)
       if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err
       if (err.inSubscript) throw err.signal()
-      return fail(text, `bash: ${err instanceof ArithError ? '((: ' : ''}${err.message}\n`)
+      return fail(text, `${shellVoice()}${err instanceof ArithError ? '((: ' : ''}${err.message}\n`)
     }
     return result(text, { exitCode: value !== 0n ? 0 : 1 })
   }
@@ -1431,7 +1481,8 @@ async function executeNodeBody(
 
   if (kind === NodeKind.FOR || kind === NodeKind.SELECT) {
     const [variable, values, body] = getForParts(node)
-    if (!isValidName(variable)) return fail(kind, `bash: \`${variable}': not a valid identifier\n`)
+    if (!isValidName(variable))
+      return fail(kind, `${shellVoice()}\`${variable}': not a valid identifier\n`)
     const resolved =
       values === null
         ? positionalParams(session, callStack)
@@ -1494,7 +1545,7 @@ async function executeNodeBody(
       // `readonly -f f` froze the body: either definition syntax refuses
       // with `f: readonly function`, exit 1, and the old body stays,
       // pinned on 5.2.37.
-      return fail(`function ${name}`, `bash: ${name}: readonly function\n`)
+      return fail(`function ${name}`, `${shellVoice()}${name}: readonly function\n`)
     }
     const source = getFunctionSource(node)
     const held = sessionEntry(session.functions, name)
@@ -1505,6 +1556,7 @@ async function executeNodeBody(
       mark: aliasMark(session, node.startPosition?.row ?? 0),
       origin: definedAt(node, deps.handed ?? null),
       aliases: aliasView(session, node, aliasMark(session, readRow(node))),
+      name: session.parseName ?? 'environment',
     })
     return result(`function ${name}`)
   }

@@ -39,7 +39,9 @@ from mirage.shell.array import (
 from mirage.shell.bytes import encode_text, join_bytes
 from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import (
+    BASHPID,
     FUNCNAME,
+    LINENO,
     PIPESTATUS,
     RANDOM,
     RANDOM_MODULUS,
@@ -57,6 +59,7 @@ from mirage.shell.variable import (
     with_attr,
     with_value,
 )
+from mirage.shell.voice import shell_voice
 from mirage.utils.hidden import var_hidden
 from mirage.view.types import EnvSet, SessionView
 from mirage.workspace.session.budget import (
@@ -656,7 +659,9 @@ def conversion_scalar(session: SessionState, name: str) -> str | None:
 
 
 class RandomReader:
-    """Arithmetic's reads of ``$RANDOM``, bound to one session.
+    """Arithmetic's reads of ``$RANDOM``, bound to one session, of
+    ``$LINENO``, the running command's line, and of ``$BASHPID``, the
+    process running it.
 
     A read before the expression assigns ``RANDOM`` draws from the
     session generator. bash seeds at the instant of an assignment and
@@ -704,6 +709,11 @@ class RandomReader:
         Args:
             name (str): the variable the expression reads.
         """
+        if name == LINENO:
+            return str(self.session.line_number)
+        if name == BASHPID:
+            session = self.session
+            return str(session.process_id or session.shell_pid or 0)
         if not self._special(name):
             return None
         if self.seeded is None:
@@ -1166,7 +1176,9 @@ async def set_var(
         and isinstance(value, (ShellArray, dict))
     ):
         diagnostics.append(
-            encode_text(f"bash: warning: {name}: removing nameref attribute\n")
+            encode_text(
+                f"{shell_voice()}warning: {name}: removing nameref attribute\n"
+            )
         )
     stored = (
         ShellVar(value) if existing is None else with_value(existing, value)

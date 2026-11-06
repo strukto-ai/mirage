@@ -392,7 +392,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nonward\n",
-        "stderr": "bash: ZRLV: readonly variable\n"
+        "stderr": "bash: line 1: ZRLV: readonly variable\n"
       },
       "targets": [
         "ram",

@@ -67,7 +67,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=2\n",
-        "stderr": "bash: shopt: bogus: invalid shell option name\nbash: shopt: cannot set and unset shell options simultaneously\nbash: shopt: -z: invalid option\nshopt: usage: shopt [-pqsu] [-o] [optname ...]\n"
+        "stderr": "bash: line 1: shopt: bogus: invalid shell option name\nbash: line 1: shopt: cannot set and unset shell options simultaneously\nbash: line 1: shopt: -z: invalid option\nshopt: usage: shopt [-pqsu] [-o] [optname ...]\n"
       }
     },
     {
@@ -102,7 +102,7 @@
       "expect": {
         "exit": 0,
         "stdout": "errexit        \ton\nrc=1\n",
-        "stderr": "bash: shopt: nullglob: invalid option name\n"
+        "stderr": "bash: line 1: shopt: nullglob: invalid option name\n"
       }
     },
     {

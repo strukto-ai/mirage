@@ -137,7 +137,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: zbr2: readonly variable\n"
+        "stderr": "bash: line 1: zbr2: readonly variable\n"
       }
     },
     {
@@ -172,7 +172,7 @@
       "expect": {
         "exit": 0,
         "stdout": "1\n",
-        "stderr": "bash: unset: zbr3: cannot unset: readonly variable\n"
+        "stderr": "bash: line 1: unset: zbr3: cannot unset: readonly variable\n"
       }
     },
     {
@@ -872,7 +872,7 @@
       "expect": {
         "exit": 0,
         "stdout": "1\n",
-        "stderr": "bash: disown: current: no such job\n"
+        "stderr": "bash: line 1: disown: current: no such job\n"
       }
     },
     {
@@ -977,7 +977,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=2\n",
-        "stderr": "bash: return: can only `return' from a function or sourced script\n"
+        "stderr": "bash: line 1: return: can only `return' from a function or sourced script\n"
       }
     },
     {

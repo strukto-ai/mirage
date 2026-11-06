@@ -31,7 +31,7 @@ async function run(line: string): Promise<[string, string, number]> {
 }
 
 function refused(name: string, limit: number): string {
-  return `bash: ${name}: maximum function nesting level exceeded (${String(limit)})\n`
+  return `environment: line 1: ${name}: maximum function nesting level exceeded (${String(limit)})\n`
 }
 
 describe('function nesting limit', () => {

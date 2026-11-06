@@ -15,22 +15,35 @@
 import { specOf } from '../../../../commands/spec/index.ts'
 import { helpPage, versionLine } from '../../../../commands/spec/standard.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { runAsShell } from '../../../../context/session_context.ts'
+import {
+  currentCaller,
+  isProgramInvocation,
+  runAsShell,
+} from '../../../../context/session_context.ts'
 import { yieldBytes } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
+import type { ProcessHandle } from '../../../../process/handle.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
 import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
-import { SET_OPTION_NAMES } from '../../../../shell/constants.ts'
+import {
+  FORK_FAILED,
+  FORK_FAILED_STATUS,
+  SET_OPTION_NAMES,
+  SHELL_IGNORED_SIGNALS,
+} from '../../../../shell/constants.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
 import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
+import { PathSpec } from '../../../../types.ts'
 import { EvaluationContext } from '../../../evaluation.ts'
 import { setPositionalParams } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { ended } from '../../control.ts'
+import { reportReaped } from '../../jobs.ts'
+import { reportedCommand } from '../../statement.ts'
 import { clearTraps, finishShell } from '../../traps.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 import { BASH_LONG_OPTIONS, BASH_START_FLAGS, BASH_UNSUPPORTED_LONG_OPTIONS } from './constants.ts'
@@ -197,7 +210,11 @@ export async function handleBash(
   }
   const cs = callStack ?? new CallStack(session.shellNesting)
   cs.admit(name)
+  const parentPid = session.processId
+  const shell = context.frame.shell
+  const caller = context
   context = new EvaluationContext(session.newShell(), context.frame.fork(), context)
+  context.frame.substitution = false
   session = context.session
   // The arguments count against max_env, a refusal ending this shell alone.
   try {
@@ -211,6 +228,9 @@ export async function handleBash(
   clearTraps(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
   session.scriptName = scriptName
+  // A script file names its diagnostics, and the functions it defines, as a
+  // sourced one does.
+  session.parseName = parsed.script === null ? parsed.path : null
   for (const [option, enable] of parsed.settings) session.shellOptions[option] = enable
   // A nested shell is its own process, with its own jobs: its `jobs` and
   // `wait` see only them, its EXIT action's included, and they are not its
@@ -219,28 +239,101 @@ export async function handleBash(
   // A nested shell is a program of its own: the builtins it runs are its
   // builtins again, whatever `find -exec` marked the outer line.
 
-  let io: IOResult
-  try {
-    io = await runAsShell(async () =>
-      finishShell(
-        (action, opts) => executeFn(action, { ...opts, ...jobs, context }),
-        session,
-        await executeFn(script, {
-          context,
-          sessionId: session.sessionId,
+  const shellContext = context
+  const shellSession = session
+  const program = script
+  const run = async (signal: AbortSignal | null = null): Promise<IOResult> => {
+    const stops = signal === null ? {} : { signal }
+    try {
+      return await runAsShell(async () =>
+        finishShell(
+          (action, opts) =>
+            executeFn(action, { ...opts, ...jobs, ...stops, context: shellContext }),
+          shellSession,
+          await executeFn(program, {
+            context: shellContext,
+            sessionId: shellSession.sessionId,
+            stdin,
+            ...(sink === undefined ? {} : { sink }),
+            ...jobs,
+            ...stops,
+          }),
           stdin,
-          ...(sink === undefined ? {} : { sink }),
-          ...jobs,
-        }),
-        stdin,
-      ),
-    )
-  } finally {
-    await session.closeInputs()
+        ),
+      )
+    } finally {
+      await shellSession.closeInputs()
+    }
   }
 
   const label = parsed.path !== null ? `${name} ${parsed.path}` : `${name} -c ${script}`
+  let io: IOResult
+  if (shell === null || jobTable === undefined) {
+    // Run in place of the program bash replaces (`bash -c ... &`), its pid
+    // the shell's `$$`.
+    const runner = currentCaller().process
+    if (runner !== null) session.shellPid = runner.info.pid
+    io = await run()
+  } else {
+    io = await inProcess(jobTable, context, caller, parentPid, label, run)
+  }
   return [io.stdout, io, new ExecutionNode({ command: label, exitCode: io.exitCode })]
+}
+
+/**
+ * Run a nested shell as a process its caller forks, whose pid is its `$$` and
+ * which ignores a QUIT its programs still take; the caller (the evaluation
+ * that runs it) reports a signal that ended it. Mirrors Python's
+ * _in_process.
+ */
+async function inProcess(
+  jobTable: JobTable,
+  context: EvaluationContext,
+  caller: EvaluationContext,
+  parentPid: number | null,
+  label: string,
+  run: (signal: AbortSignal) => Promise<IOResult>,
+): Promise<IOResult> {
+  const session = context.session
+  // The stop reaches the shell's own statements, not the frame its jobs
+  // follow: a signal that stops the shell leaves its jobs running.
+  const abort = new AbortController()
+  const outer = context.frame.abortSignal
+  const stops = outer === null ? abort.signal : AbortSignal.any([outer, abort.signal])
+  let ran: IOResult | undefined
+  let process: ProcessHandle
+  try {
+    process = jobTable.processes.start({
+      sessionId: session.sessionId,
+      command: label,
+      cwd: PathSpec.fromStrPath(session.cwd),
+      parentPid,
+      cancel: () => {
+        abort.abort()
+      },
+      limit: session.processes.max,
+      started: (forked) => {
+        session.processId = session.shellPid = forked.info.pid
+        context.frame.shell = forked
+      },
+      ignores: SHELL_IGNORED_SIGNALS,
+      run: async () => {
+        ran = await run(stops)
+        return ran.exitCode
+      },
+    })
+  } catch (error) {
+    if ((error as { code?: unknown }).code === 'EAGAIN')
+      throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
+    throw error
+  }
+  const code = await process.reap(outer)
+  // A program that runs it (`xargs sh -c`) is its parent, not the shell.
+  const node = caller.session.lineNode
+  if (node !== null && !isProgramInvocation(caller.session)) {
+    reportReaped(caller.frame, [[process.info.pid, code, process.endedBy, reportedCommand(node)]])
+  }
+  return ran ?? new IOResult({ exitCode: code })
 }
 
 /** The `bash` / `sh` arm; the head word names the nested shell. */

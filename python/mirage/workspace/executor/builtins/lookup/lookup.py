@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.shell.bytes import encode_text
+from mirage.shell.voice import shell_voice
 from mirage.workspace.executor.builtins.getopt import last_of, scan_options
 from mirage.workspace.executor.builtins.lookup.classify import (
     describe,
@@ -60,7 +61,8 @@ def handle_type(
         return result(
             "type",
             exit_code=2,
-            stderr=f"bash: type: {scan.bad}: invalid option\n{builtin_usage('type')}",
+            stderr=f"{shell_voice()}type: {scan.bad}: invalid option\n"
+            f"{builtin_usage('type')}",
         )
     mode = last_of(scan.letters, "tpP")
     all_mode = "a" in scan.letters
@@ -79,7 +81,7 @@ def handle_type(
         if not kinds:
             all_found = False
             if mode is None:
-                err_lines.append(f"bash: type: {name}: not found\n")
+                err_lines.append(f"{shell_voice()}type: {name}: not found\n")
             continue
         if mode == "t":
             out_lines.extend(f"{kind.value}\n" for kind in kinds)

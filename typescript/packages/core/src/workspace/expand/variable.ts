@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../shell/voice.ts'
 import { substringOperands } from './substring.ts'
 
 import { badSubstitution, scanParameter } from '../../shell/parameter.ts'
@@ -30,7 +31,7 @@ import {
 } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
-import { RANDOM } from '../../shell/constants.ts'
+import { BASHPID, LINENO, RANDOM } from '../../shell/constants.ts'
 import {
   ArithError,
   BadSubstitution,
@@ -133,7 +134,7 @@ function guardExpansionWrite(session: SessionState, ...names: string[]): void {
       ensureVarVisible(session, name)
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
-      throw new DiscardSignal(encodeText(`bash: ${err.message}\n`))
+      throw new DiscardSignal(encodeText(`${shellVoice()}${err.message}\n`))
     }
   }
 }
@@ -187,6 +188,8 @@ export function lookupVar(
     const drawn = nextRandom(session, env[RANDOM])
     if (drawn !== null) return String(drawn)
   }
+  if (name === LINENO) return String(session.lineNumber)
+  if (name === BASHPID) return String(session.processId ?? session.shellPid ?? 0)
   // A name reference resolves to its target before the store is read.
   name = deref(session, name) || name
   const fromArray = visibleArrays(session)[name]
@@ -868,13 +871,13 @@ async function unsetError(
   const message =
     word !== '' ? word : p.op === '?' ? 'parameter not set' : 'parameter null or not set'
   const ref = p.subscript === null ? (p.varName ?? '') : `${p.varName ?? ''}[${p.subscript}]`
-  return new ExitSignal(127, encodeText(`bash: ${ref}: ${message}\n`), null, 1)
+  return new ExitSignal(127, encodeText(`${shellVoice()}${ref}: ${message}\n`), null, 1)
 }
 
 /** The refusal of a `:=` that names no single element. */
 function badSubscript(p: BraceParse): DiscardSignal {
   return new DiscardSignal(
-    encodeText(`bash: ${p.varName ?? ''}[${p.subscript ?? ''}]: bad array subscript\n`),
+    encodeText(`${shellVoice()}${p.varName ?? ''}[${p.subscript ?? ''}]: bad array subscript\n`),
   )
 }
 
@@ -935,7 +938,7 @@ async function valueOp(
  */
 function writeRefusal(err: PolicyDenied | ArithError): ExitSignal {
   return err instanceof PolicyDenied
-    ? new DiscardSignal(encodeText(`bash: ${err.message}\n`))
+    ? new DiscardSignal(encodeText(`${shellVoice()}${err.message}\n`))
     : err.signal('', true)
 }
 
@@ -1023,10 +1026,12 @@ export async function expansionWrite(
     throw writeRefusal(err)
   }
   if (status === 'readonly') {
-    throw new DiscardSignal(encodeText(`bash: ${name}: readonly variable\n`), contained)
+    throw new DiscardSignal(encodeText(`${shellVoice()}${name}: readonly variable\n`), contained)
   }
   if (status !== 'ok') {
-    throw new DiscardSignal(encodeText(`bash: ${name}[${key ?? ''}]: bad array subscript\n`))
+    throw new DiscardSignal(
+      encodeText(`${shellVoice()}${name}[${key ?? ''}]: bad array subscript\n`),
+    )
   }
 }
 
@@ -1180,6 +1185,14 @@ async function expandBracesIn(
         val = String(drawn)
         varInEnv = true
       }
+    }
+    if (!varInEnv && p.varName === LINENO) {
+      val = String(session.lineNumber)
+      varInEnv = true
+    }
+    if (!varInEnv && p.varName === BASHPID) {
+      val = String(session.processId ?? session.shellPid ?? 0)
+      varInEnv = true
     }
     if (!varInEnv && p.varName in env) {
       val = env[p.varName] ?? ''
@@ -1365,7 +1378,9 @@ async function expandSplat(
     }
     if (triggered && p.subscript !== null) throw badSubscript(p)
     if (triggered) {
-      throw new DiscardSignal(encodeText(`bash: $${p.varName ?? ''}: cannot assign in this way\n`))
+      throw new DiscardSignal(
+        encodeText(`${shellVoice()}$${p.varName ?? ''}: cannot assign in this way\n`),
+      )
     }
   }
   if (star && quoted) return [valuePiece(items.join(joiner), true)]

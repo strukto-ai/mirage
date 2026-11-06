@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { SHOPT_DEFAULTS } from '../../../../shell/constants.ts'
@@ -42,7 +43,11 @@ export function handleAlias(
 ): RedirectResult {
   const scan = scanOptions(args, 'p')
   if (scan.bad !== null)
-    return fail('alias', `bash: alias: ${scan.bad}: invalid option\n${builtinUsage('alias')}`, 2)
+    return fail(
+      'alias',
+      `${shellVoice()}alias: ${scan.bad}: invalid option\n${builtinUsage('alias')}`,
+      2,
+    )
   const operands = scan.operands
   const lines: string[] = []
   const errors: string[] = []
@@ -58,8 +63,8 @@ export function handleAlias(
       if (name === '' || BAD_NAME_RE.test(name)) {
         errors.push(
           name === ''
-            ? `bash: alias: ${word}: not found`
-            : `bash: alias: \`${name}': invalid alias name`,
+            ? `${shellVoice()}alias: ${word}: not found`
+            : `${shellVoice()}alias: \`${name}': invalid alias name`,
         )
         continue
       }
@@ -71,12 +76,12 @@ export function handleAlias(
       continue
     }
     if (BAD_NAME_RE.test(word)) {
-      errors.push(`bash: alias: \`${word}': invalid alias name`)
+      errors.push(`${shellVoice()}alias: \`${word}': invalid alias name`)
       continue
     }
     const val = sessionEntry(session.aliases, word)
     if (val !== undefined) lines.push(`alias ${word}=${singleQuote(val)}`)
-    else errors.push(`bash: alias: ${word}: not found`)
+    else errors.push(`${shellVoice()}alias: ${word}: not found`)
   }
   return result('alias', {
     out: lines.length > 0 ? encodeText(lines.map((line) => `${line}\n`).join('')) : null,
@@ -96,7 +101,7 @@ export function handleUnalias(
   if (scan.bad !== null)
     return fail(
       'unalias',
-      `bash: unalias: ${scan.bad}: invalid option\n${builtinUsage('unalias')}`,
+      `${shellVoice()}unalias: ${scan.bad}: invalid option\n${builtinUsage('unalias')}`,
       2,
     )
   const operands = scan.operands
@@ -112,7 +117,7 @@ export function handleUnalias(
       changing(session, name, mark)
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete session.aliases[name]
-    } else errors.push(`bash: unalias: ${name}: not found\n`)
+    } else errors.push(`${shellVoice()}unalias: ${name}: not found\n`)
   }
   return finish('unalias', errors)
 }

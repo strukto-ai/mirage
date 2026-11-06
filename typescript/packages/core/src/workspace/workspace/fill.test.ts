@@ -327,10 +327,10 @@ describe('fillEnv through execute', () => {
     try {
       let io = await ws.shell('EDITOR=x')
       expect(io.exitCode).toBe(1)
-      expect(stderrStr(io)).toBe('bash: EDITOR: readonly variable\n')
+      expect(stderrStr(io)).toBe('bash: line 1: EDITOR: readonly variable\n')
       io = await ws.shell('unset EDITOR')
       expect(io.exitCode).toBe(1)
-      expect(stderrStr(io)).toBe('bash: unset: EDITOR: cannot unset: readonly variable\n')
+      expect(stderrStr(io)).toBe('bash: line 1: unset: EDITOR: cannot unset: readonly variable\n')
       expect(stdoutStr(await ws.shell('echo $EDITOR'))).toBe('vi\n')
     } finally {
       await ws.close()

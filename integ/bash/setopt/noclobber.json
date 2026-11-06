@@ -32,7 +32,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\na\n",
-        "stderr": "/data/zqs1.txt: cannot overwrite existing file\n"
+        "stderr": "bash: line 1: /data/zqs1.txt: cannot overwrite existing file\n"
       }
     },
     {
@@ -172,7 +172,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "/data/zqs5.txt: cannot overwrite existing file\n"
+        "stderr": "bash: line 1: /data/zqs5.txt: cannot overwrite existing file\n"
       }
     },
     {
@@ -205,7 +205,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "/data/zqsd: Is a directory\n"
+        "stderr": "bash: line 1: /data/zqsd: Is a directory\n"
       }
     },
     {
@@ -275,7 +275,7 @@
       "expect": {
         "exit": 2,
         "stdout": "rc=1\n",
-        "stderr": "/data/zqs7.txt: cannot overwrite existing file\nls: cannot access '/data/zqs7m.txt': No such file or directory\n"
+        "stderr": "bash: line 1: /data/zqs7.txt: cannot overwrite existing file\nls: cannot access '/data/zqs7m.txt': No such file or directory\n"
       }
     },
     {
@@ -310,7 +310,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\none\n",
-        "stderr": "/data/zqs8.txt: cannot overwrite existing file\n"
+        "stderr": "bash: line 1: /data/zqs8.txt: cannot overwrite existing file\n"
       }
     },
     {
@@ -345,7 +345,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nend\n",
-        "stderr": "/data/zqd9: cannot overwrite existing file\n"
+        "stderr": "bash: line 1: /data/zqd9: cannot overwrite existing file\n"
       }
     }
   ]

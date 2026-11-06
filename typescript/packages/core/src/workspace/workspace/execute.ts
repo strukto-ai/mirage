@@ -26,7 +26,12 @@ import { ExecutionScope } from '../execution.ts'
 import { newExecutionId } from '../../execution/context.ts'
 import { PathSpec, underCeiling } from '../../types.ts'
 import { literalTree } from '../../shell/literal.ts'
-import { FORK_FAILED, FORK_FAILED_STATUS, INTERRUPTED_STATUS } from '../../shell/constants.ts'
+import {
+  FORK_FAILED,
+  FORK_FAILED_STATUS,
+  INTERRUPTED_STATUS,
+  SHELL_IGNORED_SIGNALS,
+} from '../../shell/constants.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
@@ -360,10 +365,11 @@ async function runLine(
         cancel: () => {
           abort.abort()
         },
-        started: (info) => {
-          targetSession.processId = info.pid
-          targetSession.shellPid ??= info.pid
+        started: (line) => {
+          targetSession.processId = targetSession.shellPid = line.info.pid
         },
+        ignores: SHELL_IGNORED_SIGNALS,
+        pid: targetSession.shellPid,
         run: async () => {
           result = await runWithSession(
             targetSession,
@@ -386,10 +392,14 @@ async function runLine(
       recordStatus(targetSession, FORK_FAILED_STATUS)
       return new ExecuteResult(new Uint8Array(), encodeText(FORK_FAILED), FORK_FAILED_STATUS)
     }
+    // Every line of a session runs under one pid, its `$$`, as one shell runs
+    // them all; the session runs one line at a time. A signal that stops the
+    // shell (`kill $$`) ends the line with 128 plus it, its jobs left running.
     try {
-      await process.task
-      if (result === undefined) throw new Error('process completed without a result')
-      return result
+      const code = await process.reap(lineOptions.signal ?? null)
+      if (result !== undefined) return result
+      recordStatus(targetSession, code)
+      return new ExecuteResult(new Uint8Array(), new Uint8Array(), code)
     } finally {
       targetSession.processId = null
     }
@@ -446,6 +456,7 @@ async function runPreparedLine(
     parent?.session === effectiveSession
       ? parent
       : new EvaluationContext(effectiveSession, parent?.frame.fork(), parent)
+  if (parent === null) context.frame.shell = currentCaller().process
   // A line read now (`eval`, `source`, a trap action, `$( )`) expands the
   // aliases as they are now, not those of the function running it.
   const outerView = effectiveSession.aliasView
@@ -756,6 +767,7 @@ async function runPreparedLine(
             const substitution = opts.substitution === true
             if (substitution) {
               innerContext = childContext(innerContext)
+              innerContext.frame.substitution = true
               session = innerContext.session
               innerOpts.session = session
               innerOpts.evaluation = innerContext

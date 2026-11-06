@@ -76,6 +76,22 @@ def tree_root(node: TSNodeLike) -> TSNodeLike:
     return node
 
 
+def source_row(node: TSNodeLike, end: bool = False) -> int:
+    """The row ``node`` starts on, or ends on, in its text as typed, where
+    a line the parse joined to the next (a backslash before the newline)
+    still counts.
+
+    Args:
+        node (TSNodeLike): a node of a parsed program.
+        end (bool): the row of its last byte instead of its first.
+    """
+    if not isinstance(node, ProgramNode):
+        return node.end_point[0] if end else node.start_point[0]
+    program = node.program
+    byte = max(node.end_byte - 1, node.start_byte) if end else node.start_byte
+    return encode_text(program.original).count(b"\n", 0, program.offsets[byte])
+
+
 def read_row(node: TSNodeLike) -> int:
     """The row the shell began reading ``node``'s command on.
 

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -51,7 +52,7 @@ export function handleType(
   if (scan.bad !== null) {
     return result('type', {
       exitCode: 2,
-      stderr: `bash: type: ${scan.bad}: invalid option\n${builtinUsage('type')}`,
+      stderr: `${shellVoice()}type: ${scan.bad}: invalid option\n${builtinUsage('type')}`,
     })
   }
   const mode = lastOf(scan.letters, 'tpP')
@@ -69,7 +70,7 @@ export function handleType(
     const kinds = locations(name, session, registry, allMode, hidden)
     if (kinds.length === 0) {
       allFound = false
-      if (mode === null) errLines.push(`bash: type: ${name}: not found\n`)
+      if (mode === null) errLines.push(`${shellVoice()}type: ${name}: not found\n`)
       continue
     }
     if (mode === 't') for (const item of kinds.map((kind) => `${kind}\n`)) outLines.push(item)

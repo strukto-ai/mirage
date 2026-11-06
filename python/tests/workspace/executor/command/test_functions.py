@@ -30,7 +30,10 @@ async def _run(line: str) -> tuple[str, str, int]:
 
 
 def _refused(name: str, limit: int) -> str:
-    return f"bash: {name}: maximum function nesting level exceeded ({limit})\n"
+    return (
+        f"environment: line 1: {name}: "
+        f"maximum function nesting level exceeded ({limit})\n"
+    )
 
 
 @pytest.mark.asyncio

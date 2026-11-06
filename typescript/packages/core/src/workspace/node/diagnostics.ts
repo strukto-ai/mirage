@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../shell/voice.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { getText } from '../../shell/helpers.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -27,7 +28,7 @@ export function diagnosticStderr(node: TSNodeLike, context: EvaluationContext): 
   const builtin = ['export', 'declare', 'local', 'readonly', 'read', 'printf', 'let'].includes(head)
     ? head
     : ''
-  const prefix = builtin === '' ? 'bash: ' : `bash: ${builtin}: `
+  const prefix = builtin === '' ? shellVoice() : `${shellVoice()}${builtin}: `
   return concat(
     context.frame.diagnostics.map((message) =>
       typeof message === 'string' ? encodeText(prefix + message + '\n') : message,

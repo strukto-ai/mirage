@@ -83,7 +83,7 @@ describe('exit builtin', () => {
       expect(await runResult(ws, 'exit abc; echo hi')).toEqual([
         2,
         '',
-        'bash: exit: abc: numeric argument required\n',
+        'bash: line 1: exit: abc: numeric argument required\n',
       ])
     })
   })
@@ -93,7 +93,7 @@ describe('exit builtin', () => {
       expect(await runResult(ws, 'exit 1 2; echo after code=$?')).toEqual([
         1,
         '',
-        'bash: exit: too many arguments\n',
+        'bash: line 1: exit: too many arguments\n',
       ])
     })
   })

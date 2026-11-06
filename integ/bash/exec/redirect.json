@@ -32,8 +32,9 @@
       "expect": {
         "exit": 0,
         "stdout": "ok\nafter 1\nnext 1\ncat 1\n",
-        "stderr": "bash: ${exq!y}\n: bad substitution\nbash: ${exq!y}: bad substitution\nbash: ${exq!y}: bad substitution\n"
-      }
+        "stderr": "bash: line 2: ${exq!y}\n: bad substitution\nbash: line 6: ${exq!y}: bad substitution\nbash: line 8: ${exq!y}: bad substitution\n"
+      },
+      "note": "Divergence: GNU bash 5.2.37 numbers the last two errors \"line 4\" and \"line 6\": after an exec whose here-document fails to expand, its line count leaves out the here-document's lines. Mirage counts the lines of the source."
     },
     {
       "id": "exec_runs_its_command_and_ends_the_line",
@@ -98,10 +99,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( exec > exr.txt; echo a; echo b ); cat exr.txt",
+      "command": "( exec > exr.txt; echo a; echo b ); cat exr.txt; ( { echo A; exec > exg.txt; echo B; } > exf.txt; echo C ); cat exf.txt exg.txt; ( { echo A; exec > exk.txt; cat exh.txt; } > exh.txt; echo rc=$? ); cat exh.txt exk.txt; ( for i in 1 2; do echo a$i; exec > exg4.txt; echo b$i; done > exf4.txt ); cat exf4.txt exg4.txt; echo old > exg6.txt; ( { echo A; exec >> exg6.txt; echo B; } > exf6.txt ); cat exf6.txt exg6.txt; rm -f exf.txt exg.txt exh.txt exk.txt exf4.txt exg4.txt exf6.txt exg6.txt",
       "expect": {
         "exit": 0,
-        "stdout": "a\nb\n",
+        "stdout": "a\nb\nC\nA\nB\nrc=0\nA\nA\na1\nb2\nA\nold\nB\n",
         "stderr": ""
       }
     },
@@ -225,8 +226,8 @@
       "command": "( exec > exgood.txt < exmissing.txt; echo visible ); test -e exgood.txt && wc -c < exgood.txt; ( exec 2> exerr.txt < exmissing.txt; echo toerr >&2 ); cat exerr.txt; rm exgood.txt exerr.txt; eval 'exec > exexpand.txt >$((1/0))'; echo restored; wc -c < exexpand.txt; rm exexpand.txt",
       "expect": {
         "exit": 0,
-        "stdout": "visible\n0\nexmissing.txt: No such file or directory\nrestored\n0\n",
-        "stderr": "exmissing.txt: No such file or directory\ntoerr\nbash: 1/0: division by 0 (error token is \"0\")\n"
+        "stdout": "visible\n0\nbash: line 1: exmissing.txt: No such file or directory\nrestored\n0\n",
+        "stderr": "bash: line 1: exmissing.txt: No such file or directory\ntoerr\nbash: line 1: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -260,7 +261,7 @@
       "command": "( exec 2>&1; echo err >&2 ); ( exec 1>&2; echo a ); ( exec 1>&2; exec 2>&1; echo c; echo d >&2 ); ( exec 2>&1 < exmissing.txt; echo out; echo err2 >&2 ); ( exec 3>&1; exec 2>&1; { printf A; printf B >&3; printf C >&2; printf D; }; echo ); echo after >&2",
       "expect": {
         "exit": 0,
-        "stdout": "err\nexmissing.txt: No such file or directory\nout\nABCD\n",
+        "stdout": "err\nbash: line 1: exmissing.txt: No such file or directory\nout\nABCD\n",
         "stderr": "a\nc\nd\nerr2\nafter\n"
       }
     },
@@ -331,7 +332,7 @@
       "expect": {
         "exit": 0,
         "stdout": "l1-l2\nrc=1\n",
-        "stderr": "bash: read: read error: 0: Bad file descriptor\n"
+        "stderr": "bash: line 1: read: read error: 0: Bad file descriptor\n"
       }
     },
     {
@@ -473,7 +474,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nafter\nhi\nrc=0\n",
-        "stderr": "0: Bad file descriptor\n"
+        "stderr": "bash: line 1: 0: Bad file descriptor\n"
       }
     },
     {

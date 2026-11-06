@@ -42,7 +42,7 @@
       "expect": {
         "exit": 1,
         "stdout": "exit=4\ndiscard=1\n",
-        "stderr": "timed\ntimed\ntimed\ntimed\nbash: 1/0: division by 0 (error token is \"0\")\ntimed\ntimed\n"
+        "stderr": "timed\ntimed\ntimed\ntimed\nbash: line 1: 1/0: division by 0 (error token is \"0\")\ntimed\ntimed\n"
       }
     },
     {

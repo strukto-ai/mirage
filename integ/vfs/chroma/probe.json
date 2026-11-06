@@ -23,7 +23,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/knowledge/guides/auth.md: Read-only file system\n"
+        "stderr": "bash: line 1: /knowledge/guides/auth.md: Read-only file system\n"
       }
     },
     {

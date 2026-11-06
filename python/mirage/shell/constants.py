@@ -149,12 +149,15 @@ OUTPUT_ONLY_BUILTINS = frozenset({"echo", "printf", "true", "false", ":"})
 
 # The dynamic variables the shell answers itself: PIPESTATUS reads the
 # session's record of the last pipeline (`SessionState.pipe_status`),
-# FUNCNAME the frames on the call stack (`SessionState.function_names`)
-# and RANDOM steps a generator (`session/rng.py`). None lives in the
+# FUNCNAME the frames on the call stack (`SessionState.function_names`),
+# RANDOM steps a generator (`session/rng.py`), LINENO is the running
+# command's line and BASHPID the process running it. None lives in the
 # variable store.
 PIPESTATUS = "PIPESTATUS"
 FUNCNAME = "FUNCNAME"
 RANDOM = "RANDOM"
+LINENO = "LINENO"
+BASHPID = "BASHPID"
 # bash 5.2's RANDOM generator: a Park-Miller minimal-standard
 # step through Schrage's method, the value folding the state's two
 # halves and keeping 15 bits, and a draw that never repeats the value
@@ -428,3 +431,92 @@ BUILTIN_GROUP: Mapping[ShellBuiltin, BuiltinGroup] = {
 GRAMMAR_BUILTINS: frozenset[ShellBuiltin] = frozenset(
     b for b, g in BUILTIN_GROUP.items() if GROUP_TIER[g] is BuiltinTier.GRAMMAR
 )
+
+INTERPRETER_BUILTINS: frozenset[ShellBuiltin] = frozenset(
+    b for b, g in BUILTIN_GROUP.items() if g is BuiltinGroup.INTERPRETERS
+)
+
+# The commands that start a shell of their own, a process whose own
+# programs a signal it ignores still reaches.
+NESTED_SHELLS: frozenset[ShellBuiltin] = frozenset(
+    {ShellBuiltin.BASH, ShellBuiltin.SH}
+)
+
+# What every bash ignores, interactive or not: a QUIT stops the program a
+# shell runs right now, never the shell.
+SHELL_IGNORED_SIGNALS = frozenset({3})
+
+# Linux's signal numbers by the names bash 5.2 gives them in `kill -l` and
+# `trap -l` (debian:stable-slim). 32 and 33 have no name; 34 to 64 are the
+# realtime range, named from its two ends.
+SIGNALS: dict[int, str] = {
+    1: "HUP",
+    2: "INT",
+    3: "QUIT",
+    4: "ILL",
+    5: "TRAP",
+    6: "ABRT",
+    7: "BUS",
+    8: "FPE",
+    9: "KILL",
+    10: "USR1",
+    11: "SEGV",
+    12: "USR2",
+    13: "PIPE",
+    14: "ALRM",
+    15: "TERM",
+    16: "STKFLT",
+    17: "CHLD",
+    18: "CONT",
+    19: "STOP",
+    20: "TSTP",
+    21: "TTIN",
+    22: "TTOU",
+    23: "URG",
+    24: "XCPU",
+    25: "XFSZ",
+    26: "VTALRM",
+    27: "PROF",
+    28: "WINCH",
+    29: "IO",
+    30: "PWR",
+    31: "SYS",
+}
+
+SIGRTMIN = 34
+SIGRTMAX = 64
+
+# How bash names a signal that ended a command in its report line
+# (debian:stable-slim, bash 5.2), for each signal whose default ends a
+# process; the realtime range is "Real-time signal" and its offset from
+# RTMIN.
+SIGNAL_DESCRIPTIONS: dict[int, str] = {
+    1: "Hangup",
+    2: "Interrupt",
+    3: "Quit",
+    4: "Illegal instruction",
+    5: "Trace/breakpoint trap",
+    6: "Aborted",
+    7: "Bus error",
+    8: "Floating point exception",
+    9: "Killed",
+    10: "User defined signal 1",
+    11: "Segmentation fault",
+    12: "User defined signal 2",
+    13: "Broken pipe",
+    14: "Alarm clock",
+    15: "Terminated",
+    16: "Stack fault",
+    24: "CPU time limit exceeded",
+    25: "File size limit exceeded",
+    26: "Virtual timer expired",
+    27: "Profiling timer expired",
+    29: "I/O possible",
+    30: "Power failure",
+    31: "Bad system call",
+}
+
+# The signals no report names when they end a job's last process: INT and
+# PIPE end it silently, TERM as "Terminated" alone in the foreground.
+UNREPORTED_SIGNALS = frozenset({2, 13})
+SIGTERM = 15

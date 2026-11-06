@@ -36,9 +36,10 @@ import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { concat } from '../../utils/bytes.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { getNegatedCommand, getParts, getRedirects } from '../../shell/helpers.ts'
-import { literalText } from '../../shell/parse/names.ts'
+import { commandInvocations, literalText } from '../../shell/parse/names.ts'
+import { commandText } from '../../shell/printer.ts'
 import { BASH_BUILTINS } from '../lookup/constants.ts'
-import { ERREXIT_EXEMPT_TYPES } from '../../shell/constants.ts'
+import { ERREXIT_EXEMPT_TYPES, NESTED_SHELLS } from '../../shell/constants.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { abortedLine, lineStatusWriter } from '../abort.ts'
@@ -208,6 +209,41 @@ export function forks(
     name === null ||
     (!BASH_BUILTINS.has(name) && !(functions && session.functions[name] !== undefined))
   )
+}
+
+/**
+ * Whether a statement runs a nested shell (`sh -c`), which bash execs in
+ * place of a shell that forked to run it alone, so a signal to that shell
+ * ends it. Mirrors Python's nested_shell.
+ */
+export function nestedShell(node: TSNodeLike, session: SessionState): boolean {
+  const command = node.type === NT.REDIRECTED_STATEMENT ? getRedirects(node)[0] : node
+  if (command?.type !== NT.COMMAND || !forks(command, session)) return false
+  const head = commandInvocations(command)[0]?.[0] ?? null
+  return head !== null && NESTED_SHELLS.has(head)
+}
+
+/**
+ * Whether a node is what a redirected statement runs under its redirects: a
+ * fork's redirects are its own, so the report of how it ended goes around
+ * them (`( kill -9 $BASHPID ) 2>/dev/null`). Mirrors Python's
+ * redirected_body.
+ */
+export function redirectedBody(node: TSNodeLike): boolean {
+  const parent = node.parent ?? null
+  if (parent?.type !== NT.REDIRECTED_STATEMENT) return false
+  const body = parent.childForFieldName?.('body') ?? null
+  return body?.id !== undefined && body.id === node.id
+}
+
+/**
+ * How bash's report names a command its shell forked: as its printer
+ * renders it, with the redirects of the statement the command is the body
+ * of. Mirrors Python's reported_command.
+ */
+export function reportedCommand(node: TSNodeLike): string {
+  const parent = node.parent ?? null
+  return commandText(parent !== null && redirectedBody(node) ? parent : node)
 }
 
 /** A word's text when it is literal, null when an expansion spells it. */

@@ -75,12 +75,18 @@ export async function closeQuietly<T>(
   }
 }
 
-/** Own producer cleanup even when its byte iterator was never started. */
+/**
+ * Own producer cleanup even when its byte iterator was never started.
+ * `eager` says pulling ahead reads nothing (a command with no input or file
+ * operands, `seq`), so a pipe takes what fits in its buffer as a writer's
+ * own process would write it. Mirrors Python's OutputStream.
+ */
 export class OutputStream implements AsyncIterableIterator<Uint8Array> {
   private closing: Promise<IteratorResult<Uint8Array>> | null = null
   constructor(
     private readonly source: AsyncIterator<Uint8Array>,
     private readonly close: () => Promise<void>,
+    readonly eager = false,
   ) {}
 
   [Symbol.asyncIterator](): AsyncIterableIterator<Uint8Array> {

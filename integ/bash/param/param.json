@@ -1607,7 +1607,7 @@
       "expect": {
         "exit": 0,
         "stdout": "subbed\nnext 1\nsecond\nafter 1\n",
-        "stderr": "bash: ${pdx!y}: bad substitution\nbash: ${pdx!y}: bad substitution\nbash: pdr: readonly variable\n"
+        "stderr": "bash: line 2: ${pdx!y}: bad substitution\nbash: line 4: ${pdx!y}: bad substitution\nbash: line 5: pdr: readonly variable\n"
       }
     },
     {
@@ -3077,7 +3077,7 @@
       "expect": {
         "exit": 1,
         "stdout": "before\n",
-        "stderr": "bash: ${pb1 * b}: bad substitution\n"
+        "stderr": "bash: line 1: ${pb1 * b}: bad substitution\n"
       }
     },
     {
@@ -3112,7 +3112,7 @@
       "expect": {
         "exit": 0,
         "stdout": "set\nrc=0\n",
-        "stderr": "bash: x${pb2 b}y: bad substitution\nbash: [${pb2 b}]: bad substitution\nbash: ${pb2 c}: bad substitution\nbash: 1${pb2 b}2: bad substitution\nbash:  1 + ${pb2 b} : bad substitution\n"
+        "stderr": "bash: line 1: x${pb2 b}y: bad substitution\nbash: line 1: [${pb2 b}]: bad substitution\nbash: line 1: ${pb2 c}: bad substitution\nbash: line 1: 1${pb2 b}2: bad substitution\nbash: line 1:  1 + ${pb2 b} : bad substitution\n"
       }
     },
     {
@@ -3147,7 +3147,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2 p2 p2 hello 5 el\nrc=0\n",
-        "stderr": "bash: ${}: bad substitution\nbash: ${.}: bad substitution\nbash: ${pb3.b}: bad substitution\nbash: ${1a}: bad substitution\nbash: ${pb3:}: bad substitution\nbash: ${#pb3 b}: bad substitution\nbash: ${#pb3-x}: bad substitution\nbash: ${!pb3 b}: bad substitution\nbash: ${pb3;b}: bad substitution\nbash: ${pb3[1]x}: bad substitution\nbash: ${pb3*}: bad substitution\nbash: ${ pb3}: bad substitution\nbash: ${pb3 b}: bad substitution\nbash: ${pb3 }: bad substitution\nbash: ${%pb3}: bad substitution\nbash: ${-pb3}: bad substitution\nbash: ${$pb3}: bad substitution\nbash: ${#%}: bad substitution\nbash: ${#!x}: bad substitution\nbash: ${!$}: bad substitution\nbash: ${pb3[]}: bad substitution\nbash: ${@pb3}: bad substitution\nbash: ${pb3\\ b}: bad substitution\nbash: ${pb3\"b\"}: bad substitution\n"
+        "stderr": "bash: line 1: ${}: bad substitution\nbash: line 1: ${.}: bad substitution\nbash: line 1: ${pb3.b}: bad substitution\nbash: line 1: ${1a}: bad substitution\nbash: line 1: ${pb3:}: bad substitution\nbash: line 1: ${#pb3 b}: bad substitution\nbash: line 1: ${#pb3-x}: bad substitution\nbash: line 1: ${!pb3 b}: bad substitution\nbash: line 1: ${pb3;b}: bad substitution\nbash: line 1: ${pb3[1]x}: bad substitution\nbash: line 1: ${pb3*}: bad substitution\nbash: line 1: ${ pb3}: bad substitution\nbash: line 1: ${pb3 b}: bad substitution\nbash: line 1: ${pb3 }: bad substitution\nbash: line 1: ${%pb3}: bad substitution\nbash: line 1: ${-pb3}: bad substitution\nbash: line 1: ${$pb3}: bad substitution\nbash: line 1: ${#%}: bad substitution\nbash: line 1: ${#!x}: bad substitution\nbash: line 1: ${!$}: bad substitution\nbash: line 1: ${pb3[]}: bad substitution\nbash: line 1: ${@pb3}: bad substitution\nbash: line 1: ${pb3\\ b}: bad substitution\nbash: line 1: ${pb3\"b\"}: bad substitution\n"
       }
     },
     {

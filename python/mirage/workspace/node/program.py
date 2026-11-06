@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Awaitable, Callable, Sequence
+from functools import partial
 from typing import Any
 
 from mirage.context.session_context import (
@@ -32,7 +33,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.descriptors import Recorder, StreamOwner
 from mirage.shell.errors import DiscardSignal, ExitSignal, ReturnSignal
-from mirage.shell.helpers import get_text, same_line
+from mirage.shell.helpers import get_text, same_line, source_row
 from mirage.shell.job_table import JobTable
 from mirage.shell.node_kind import pipeline_transparent
 from mirage.shell.parse.constants import PARSED_WORDS
@@ -49,7 +50,7 @@ from mirage.workspace.executor.control import (
     LoopSignal,
     carried,
 )
-from mirage.workspace.executor.jobs import handle_background
+from mirage.workspace.executor.jobs import handle_background, run_program
 from mirage.workspace.executor.statement import (
     as_written,
     errexit_acts,
@@ -138,9 +139,24 @@ async def execute_program(
     # out so a nested parse (`eval`, `source`, `bash -c`) does not leave
     # its id on the enclosing one.
     session._parse_seq += 1
-    outer_parse = (session._parse_current, session._parse_row)
+    outer_parse = (
+        session._parse_current,
+        session._parse_row,
+        session._line_node,
+    )
     session._parse_current = session._parse_seq
-    session._parse_row = 0
+    start = session._parse_from
+    session._parse_from = None
+    if start is None:
+        # A nested parse (`eval`, `$( )`) numbers on from the row the
+        # running command ends on, as bash's reader stands there.
+        running = session._line_node
+        start = (
+            session._parse_row + source_row(running, end=True)
+            if inline and running is not None
+            else 0
+        )
+    session._parse_row = start
     root = not session._line_open
     session._line_open = True
     try:
@@ -160,10 +176,64 @@ async def execute_program(
             execute_fn,
         )
     finally:
-        session._parse_current, session._parse_row = outer_parse
+        (
+            session._parse_current,
+            session._parse_row,
+            session._line_node,
+        ) = outer_parse
         if root:
             session._line_open = False
             session.errexit_exiting = False
+
+
+async def _statement(
+    recurse: Callable[
+        ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
+    ],
+    child: TSNodeLike,
+    context: EvaluationContext,
+    stdin: ByteSource | None,
+    call_stack: CallStack | None,
+    recorder: StatementRecorder,
+) -> tuple[bytes | None, IOResult, ExecutionNode]:
+    """Run one statement of a program to the end of its output.
+
+    Args:
+        recurse (Callable): the node recursion.
+        child (TSNodeLike): the statement.
+        context (EvaluationContext): the program's evaluation.
+        stdin (ByteSource | None): the statement's standard input.
+        call_stack (CallStack | None): the program's frames.
+        recorder (StatementRecorder): where it writes as it runs.
+    """
+    with recording(recorder):
+        stdout, io, ran = await recurse(
+            child, context, stdin, call_stack, sink=recorder
+        )
+    return await _drained(stdout, io, ran)
+
+
+async def _drained(
+    stdout: ByteSource | None, io: IOResult, ran: ExecutionNode
+) -> tuple[bytes | None, IOResult, ExecutionNode]:
+    """A statement's output read to its end. Lazy reads (head or tail
+    opening the stream mid-pipeline) can fail on the first pull, which
+    is the command's failure.
+
+    Args:
+        stdout (ByteSource | None): what it returned.
+        io (IOResult): its result.
+        ran (ExecutionNode): its node.
+    """
+    try:
+        return await materialize(stdout), io, ran
+    except OSError as exc:
+        await failed_read(io, exc, ran)
+    except Exception as exc:
+        existing = await materialize(io.stderr)
+        io.stderr = existing + encode_text(f"{exc}\n")
+        io.exit_code = 1
+    return None, io, ran
 
 
 async def _run_program(
@@ -298,11 +368,11 @@ async def _run_program(
         recorder.output_file = diverted_file(session, sink)
         leave = record_jobs(session, recorder)
         try:
-            with recording(recorder):
-                # `exec < file` feeds the shell's stdin: a later `read` or
-                # `while read` sees it, and each statement reads on from
-                # where the one before it stopped.
-                if reread and reader is not None:
+            # `exec < file` feeds the shell's stdin: a later `read` or
+            # `while read` sees it, and each statement reads on from where
+            # the one before it stopped.
+            if reread and reader is not None:
+                with recording(recorder):
                     stdout, io, last_exec = await _read_on(
                         reader,
                         node,
@@ -313,28 +383,23 @@ async def _run_program(
                         call_stack,
                         reading,
                     )
-                else:
-                    stdout, io, last_exec = await recurse(
+                stdout, io, last_exec = await _drained(stdout, io, last_exec)
+            else:
+                stdout, io, last_exec = await run_program(
+                    child,
+                    context,
+                    partial(
+                        _statement,
+                        recurse,
                         child,
                         context,
                         statement_stdin(session, stdin, bound),
                         call_stack,
-                        sink=recorder,
-                    )
+                        recorder,
+                    ),
+                    job_table,
+                )
             ran.append(last_exec)
-            try:
-                stdout = await materialize(stdout)
-            except OSError as exc:
-                # Lazy reads (head/tail opening the stream mid-pipeline)
-                # can fail on the first pull, which is the command's
-                # failure.
-                await failed_read(io, exc, last_exec)
-                stdout = None
-            except Exception as exc:
-                existing = await materialize(io.stderr)
-                io.stderr = existing + encode_text(f"{exc}\n")
-                io.exit_code = 1
-                stdout = None
             # What was read again stamped its own statuses.
             record_status(
                 session,
@@ -655,13 +720,17 @@ async def _read_on(
     rows = original.count(b"\n", 0, at)
 
     async def run() -> IOResult:
-        io: IOResult = await execute_fn(
-            decode_text(b"\n" * rows + rest),
-            session_id=session.session_id,
-            stdin=stdin,
-            sink=sink,
-            call_stack=call_stack,
-        )
+        session._parse_from = session._parse_row
+        try:
+            io: IOResult = await execute_fn(
+                decode_text(b"\n" * rows + rest),
+                session_id=session.session_id,
+                stdin=stdin,
+                sink=sink,
+                call_stack=call_stack,
+            )
+        finally:
+            session._parse_from = None
         return io
 
     if reading is None:

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../shell/voice.ts'
 import type { Accessor } from '../../accessor/base.ts'
 import { RAMAccessor } from '../../accessor/ram.ts'
 import { publishRead, readVersioned, requireSupported } from '../../cache/context.ts'
@@ -76,7 +77,7 @@ import {
 } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { encodeText } from '../../shell/bytes.ts'
-import { NOT_FOUND_STATUS } from '../../shell/constants.ts'
+import { INTERPRETER_BUILTINS, NOT_FOUND_STATUS } from '../../shell/constants.ts'
 import type { DirListing } from '../../types.ts'
 import {
   DEFAULT_READ_SPEC,
@@ -1854,7 +1855,7 @@ export class MountEntry {
           null,
           new IOResult({
             exitCode: NOT_FOUND_STATUS,
-            stderr: encodeText(`${cmdName}: command not found`),
+            stderr: encodeText(`${shellVoice()}${cmdName}: command not found`),
           }),
         ]
       }
@@ -2071,7 +2072,7 @@ export class MountEntry {
     if (this.isUserCommand(served ?? cmd) && !pathVisible(sessionVisibility(access), this.prefix)) {
       return new IOResult({
         exitCode: NOT_FOUND_STATUS,
-        stderr: encodeText(`${cmdName}: command not found\n`),
+        stderr: encodeText(`${shellVoice()}${cmdName}: command not found\n`),
       })
     }
     const infoOnly =
@@ -2130,6 +2131,7 @@ export class MountEntry {
       // Deferred, so a handler that throws before it returns a promise is
       // still the runner's to word and to drop the caches after.
       (runCtx) => Promise.resolve().then(() => cmd.fn(accessor, paths, texts, runCtx)),
+      paths.length === 0 && (ctx.stdin ?? null) === null && !INTERPRETER_BUILTINS.has(cmdName),
     )
   }
 
@@ -2201,6 +2203,7 @@ export class MountEntry {
     producer: Producer,
     writes: boolean,
     call: (ctx: Context) => Promise<CommandFnResult>,
+    eager = false,
   ): Promise<CommandFnResult> {
     // No hold past an abort: an unmount waits on this mount's activity
     // with no grace, so a body, or a renderer of the rows it handed over,
@@ -2212,6 +2215,7 @@ export class MountEntry {
         ...(writes ? { drop: () => this.dropCaches() } : {}),
         ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
         ...(ctx.vfs !== undefined ? { vfs: ctx.vfs } : {}),
+        eager,
       }),
     )
   }

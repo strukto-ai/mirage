@@ -242,7 +242,7 @@
       "expect": {
         "exit": 0,
         "stdout": "good\nnone\nif [a]\ncase [a]\n",
-        "stderr": "bash: read: read error: 0: Bad file descriptor\nbash: read: read error: 0: Bad file descriptor\n"
+        "stderr": "bash: line 1: read: read error: 0: Bad file descriptor\nbash: line 1: read: read error: 0: Bad file descriptor\n"
       }
     }
   ]

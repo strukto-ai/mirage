@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { isProgramInvocation } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
@@ -32,7 +33,7 @@ export function handlePwd(operands: DirArgs, session: SessionState): RedirectRes
   const { bad, physical } = splitModeOptions(operands, PWD_OPTIONS, shellPhysical)
   if (bad !== null) {
     // The program (`env pwd`) keeps its bare voice.
-    const voice = isProgramInvocation(session) ? '' : 'bash: '
+    const voice = isProgramInvocation(session) ? '' : shellVoice()
     const err = encodeText(`${voice}pwd: -${bad}: invalid option\n${builtinUsage('pwd')}`)
     return [
       null,

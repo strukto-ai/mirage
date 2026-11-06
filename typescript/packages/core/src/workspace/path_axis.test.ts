@@ -160,9 +160,13 @@ describe('the path axis end to end', () => {
     // refusal leaks that the region is read-only. Neither write lands.
     const ws = await carved()
     const create = await ws.shell('echo x > /repo/secrets/new.txt', { sessionId: 'rev' })
-    expect(stderrStr(create)).toBe('/repo/secrets/new.txt: No such file or directory\n')
+    expect(stderrStr(create)).toBe(
+      'bash: line 1: /repo/secrets/new.txt: No such file or directory\n',
+    )
     const clobber = await ws.shell('echo x > /repo/secrets/key.pem', { sessionId: 'rev' })
-    expect(stderrStr(clobber)).toBe('/repo/secrets/key.pem: No such file or directory\n')
+    expect(stderrStr(clobber)).toBe(
+      'bash: line 1: /repo/secrets/key.pem: No such file or directory\n',
+    )
     expect(stdoutStr(await ws.shell('cat /repo/secrets/key.pem'))).toBe('PRIVATE needle\n')
   })
 
@@ -286,7 +290,7 @@ describe('the path axis end to end', () => {
     const ws = await carved()
     const refused = await ws.shell('echo x > /repo/public/new.txt', { sessionId: 'rev' })
     expect(refused.exitCode).not.toBe(0)
-    expect(stderrStr(refused)).toBe('/repo/public/new.txt: Read-only file system\n')
+    expect(stderrStr(refused)).toBe('bash: line 1: /repo/public/new.txt: Read-only file system\n')
   })
 
   it('a deeper show mode refines the mount cap', async () => {
@@ -308,7 +312,7 @@ describe('the path axis end to end', () => {
     expect(ok.exitCode).toBe(0)
     expect(stdoutStr(ok)).toBe('out\n')
     const held = await ws.shell('echo x > /repo/README.md', { sessionId: 'rev' })
-    expect(stderrStr(held)).toBe('/repo/README.md: Read-only file system\n')
+    expect(stderrStr(held)).toBe('bash: line 1: /repo/README.md: Read-only file system\n')
   })
 
   it('a show mode never grants past the configured mode', async () => {
@@ -325,7 +329,7 @@ describe('the path axis end to end', () => {
     })
     const refused = await ws.shell('echo x > /repo/build/a.txt', { sessionId: 'rev' })
     expect(refused.exitCode).not.toBe(0)
-    expect(stderrStr(refused)).toBe('/repo/build/a.txt: Read-only file system\n')
+    expect(stderrStr(refused)).toBe('bash: line 1: /repo/build/a.txt: Read-only file system\n')
   })
 
   it('a show without a covering hide restricts nothing', async () => {

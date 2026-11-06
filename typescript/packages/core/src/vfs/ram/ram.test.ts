@@ -343,7 +343,7 @@ describe('RAMVFS capacity', () => {
     expect((await ws.shell('printf 12345678 > /a/f')).exitCode).toBe(0)
     const refused = await ws.shell('printf 123 > /a/g')
     expect(refused.exitCode).toBe(1)
-    expect(refused.stderrText).toBe('/a/g: Disk quota exceeded\n')
+    expect(refused.stderrText).toBe('bash: line 1: /a/g: Disk quota exceeded\n')
     expect([data.usage?.limit, data.usage?.used]).toEqual([10, 8])
     expect((await ws.shell('printf 12 > /a/g')).exitCode).toBe(0)
     expect((await ws.shell('printf 1 > /a/h')).exitCode).toBe(1)

@@ -19,6 +19,7 @@ from mirage.core.history.render import render_history_listing
 from mirage.io.types import IOResult
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ExitSignal
+from mirage.shell.voice import shell_voice
 from mirage.workspace.executor.builtins.shared import builtin_usage
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.mount.registry import MountRegistry
@@ -50,7 +51,7 @@ def _result(
 
 
 def _out_of_range(value: str) -> Result:
-    err = f"bash: history: {value}: history position out of range\n"
+    err = f"{shell_voice()}history: {value}: history position out of range\n"
     return _result(None, 1, encode_text(err))
 
 
@@ -88,7 +89,11 @@ def _parse_args(
             while j < len(token):
                 ch = token[j]
                 if ch not in _OPTION_CHARS:
-                    return {}, [], f"bash: history: -{ch}: invalid option\n"
+                    return (
+                        {},
+                        [],
+                        f"{shell_voice()}history: -{ch}: invalid option\n",
+                    )
                 flags[ch] = True
                 if ch == "d":
                     rest = token[j + 1 :]
@@ -101,7 +106,8 @@ def _parse_args(
                         return (
                             {},
                             [],
-                            "bash: history: -d: option requires an argument\n",
+                            f"{shell_voice()}history: -d: "
+                            "option requires an argument\n",
                         )
                     break
                 j += 1
@@ -139,11 +145,20 @@ async def handle_history(
     if not flags and len(texts) > 1:
         # bash abandons everything still to run, as `exit 1 2` does;
         # `-p` and `-s` take any number of words.
-        raise ExitSignal(1, stderr=b"bash: history: too many arguments\n")
+        raise ExitSignal(
+            1,
+            stderr=encode_text(
+                f"{shell_voice()}history: too many arguments\n"
+            ),
+        )
     observer = registry.observer
     if observer is None:
         return _result(
-            None, 1, b"bash: history: not enabled for this workspace\n"
+            None,
+            1,
+            encode_text(
+                f"{shell_voice()}history: not enabled for this workspace\n"
+            ),
         )
     fl = FlagView(flags, spec=SPECS["history"])
     c = fl.as_bool("c")
@@ -184,7 +199,7 @@ async def handle_history(
         try:
             count = int(texts[0])
         except ValueError:
-            err = f"bash: history: {texts[0]}: numeric argument required\n"
+            err = f"{shell_voice()}history: {texts[0]}: numeric argument required\n"
             return _result(None, 1, encode_text(err))
     events = await observer.session_command_events(sid)
     return _result(encode_text(render_history_listing(events, n=count)))

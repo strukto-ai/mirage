@@ -15,6 +15,7 @@
 from mirage.policy import PolicyDenied
 from mirage.shell.errors import ArithError
 from mirage.shell.variable import ShellVar, VarAttr
+from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.declare.constants import SUBSCRIPT_RE
 from mirage.workspace.executor.builtins.declare.declare import (
@@ -92,7 +93,9 @@ async def handle_local(
         # level. Without the check the builtin took its operands, stored
         # them globally and exited 0, which is the silent-accept this
         # whole tier exists to remove.
-        return fail("local", "bash: local: can only be used in a function\n")
+        return fail(
+            "local", f"{shell_voice()}local: can only be used in a function\n"
+        )
     view = require_view(state)
     restore = (
         reach_global(
@@ -319,7 +322,7 @@ async def _declare_operand(
     held = None if fresh and not inherit else held_value(session, key)
     conflict = kind_conflict(held, kind)
     if conflict is not None:
-        return f"bash: {cmd}: {key}: {conflict}"
+        return f"{shell_voice()}{cmd}: {key}: {conflict}"
     checked = deref(session, key)
     await premark(view, key, shaping)
     target = session.vars.get(checked)
@@ -419,7 +422,7 @@ async def _aim_reference(
     return (
         ""
         if is_valid_name(given)
-        else f"bash: {cmd}: `{given}': not a valid identifier"
+        else f"{shell_voice()}{cmd}: `{given}': not a valid identifier"
     )
 
 

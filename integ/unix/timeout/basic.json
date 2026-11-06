@@ -322,10 +322,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "timeout -p 1 sh -c 'exit 5'; echo code=$?; timeout --preserve 0.1 sleep 1; echo code=$?",
+      "command": "timeout -p 1 sh -c 'exit 5'; echo code=$?; timeout --preserve 0.1 sleep 1; echo code=$?; timeout -s QUIT 0.1 bash -c 'sleep 1; echo after $?' 2>/dev/null; echo code=$?; timeout -s QUIT 0.1 bash -c 'sleep 1 | cat; echo after ${PIPESTATUS[@]}' 2>/dev/null; echo code=$?; timeout -s QUIT 0.1 bash -c '(sleep 1); echo sub $?' 2>/dev/null; echo code=$?; timeout -p -s QUIT 0.1 sleep 1; echo code=$?",
       "expect": {
         "exit": 0,
-        "stdout": "code=5\ncode=143\n",
+        "stdout": "code=5\ncode=143\nafter 131\ncode=124\nafter 131 131\ncode=124\nsub 131\ncode=124\ncode=131\n",
         "stderr": ""
       },
       "flags": [
@@ -579,10 +579,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "timeout 0.02 sh -c 'sleep 0.08; echo BAD > {mount}/timeout-late'; echo $?; timeout 0.05 sh -c '(sleep 0.1; echo BAD > {mount}/timeout-job) & sleep 1'; echo $?; timeout --foreground 0.05 sh -c '(sleep 0.1; echo kept > {mount}/timeout-fg) & sleep 1'; echo $?; timeout 1 sh -c '(sleep 0.1; echo kept > {mount}/timeout-done) &'; echo $?; sleep 0.5; test -e {mount}/timeout-late; echo $?; test -e {mount}/timeout-job; echo $?; cat {mount}/timeout-fg {mount}/timeout-done; timeout -s INT 0.05 bash -c '(sleep 0.1; echo kept $? > {mount}/timeout-int) & f() { sleep 0.1; echo BAD > {mount}/timeout-fn; }; f & sleep 1'; echo $?; sleep 0.5; cat {mount}/timeout-int; test -e {mount}/timeout-fn; echo $?; timeout -s QUIT 0.05 bash -c '{ sleep 0.1; echo q $? > {mount}/timeout-quit; } & f() { sleep 0.1; echo fq $? > {mount}/timeout-fq; }; f & sleep 1' 2>/dev/null; echo $?; sleep 0.5; cat {mount}/timeout-quit {mount}/timeout-fq",
+      "command": "timeout 0.02 sh -c 'sleep 0.08; echo BAD > {mount}/timeout-late'; echo $?; timeout 0.05 sh -c '(sleep 0.1; echo BAD > {mount}/timeout-job) & sleep 1'; echo $?; timeout --foreground 0.05 sh -c '(sleep 0.1; echo kept > {mount}/timeout-fg) & sleep 1'; echo $?; timeout 1 sh -c '(sleep 0.1; echo kept > {mount}/timeout-done) &'; echo $?; sleep 0.5; test -e {mount}/timeout-late; echo $?; test -e {mount}/timeout-job; echo $?; cat {mount}/timeout-fg {mount}/timeout-done; timeout -s INT 0.05 bash -c '(sleep 0.1; echo kept $? > {mount}/timeout-int) & f() { sleep 0.1; echo BAD > {mount}/timeout-fn; }; f & sleep 1'; echo $?; sleep 0.5; cat {mount}/timeout-int; test -e {mount}/timeout-fn; echo $?; timeout -s QUIT 0.05 bash -c '{ sleep 0.1; echo q $? > {mount}/timeout-quit; } & f() { sleep 0.1; echo fq $? > {mount}/timeout-fq; }; f & sleep 1' 2>/dev/null; echo $?; sleep 0.5; cat {mount}/timeout-quit {mount}/timeout-fq; timeout -s INT 0.05 bash -c '( (sleep 0.1; echo inner $?); echo sub $? ) > {mount}/timeout-sub & { { sleep 0.1; echo stage $?; } | cat; echo pipe $?; } > {mount}/timeout-pipe & ( bash -c \"(sleep 0.1; echo nsub \\$?); echo nested \\$?\"; echo outer $? ) > {mount}/timeout-nest & sleep 1'; echo $?; sleep 0.5; cat {mount}/timeout-sub {mount}/timeout-pipe {mount}/timeout-nest; rm {mount}/timeout-sub {mount}/timeout-pipe {mount}/timeout-nest",
       "expect": {
         "exit": 0,
-        "stdout": "124\n124\n124\n0\n1\n1\nkept\nkept\n124\nkept 130\n1\n124\nq 131\nfq 131\n",
+        "stdout": "124\n124\n124\n0\n1\n1\nkept\nkept\n124\nkept 130\n1\n124\nq 131\nfq 131\n124\nsub 130\npipe 130\nouter 130\n",
         "stderr": ""
       }
     },

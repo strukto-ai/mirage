@@ -440,9 +440,8 @@ async def test_stdin_redirect_binds_last_command():
 # A trailing redirect binds to the command it follows, whatever the
 # parse wrapped it around: a pipeline in an &&/|| list, a list the parse
 # pulled into a pipeline's first stage, a pipeline pulled in the same way,
-# and a `!`. Every row is GNU bash 5.2 in debian:stable-slim (redirect
-# errors without bash's `bash: line N:` prefix); PS prints $? and
-# PIPESTATUS.
+# and a `!`. Every row is GNU bash 5.2 in debian:stable-slim; PS prints
+# $? and PIPESTATUS.
 PS = '; echo "rc=$? ps=${PIPESTATUS[*]}"'
 BINDS = [
     ("true && printf 'x\\n' | cat < /data/b.txt", "1\n2\n3\n", "", 0),
@@ -454,7 +453,7 @@ BINDS = [
     (
         "true && printf 'x\\n' | cat < /nonexistent" + PS,
         "rc=1 ps=0 1\n",
-        "/nonexistent: No such file or directory\n",
+        "bash: line 1: /nonexistent: No such file or directory\n",
         0,
     ),
     (
@@ -532,7 +531,7 @@ BINDS = [
     (
         "! cat < /nonexistent" + PS,
         "rc=0 ps=1\n",
-        "/nonexistent: No such file or directory\n",
+        "bash: line 1: /nonexistent: No such file or directory\n",
         0,
     ),
     (
@@ -698,9 +697,7 @@ async def test_stdin_from_process_substitution():
 # ── unopenable redirect target (GNU bash 5.2.37 pinned) ─────
 # bash answers both `cat < missing` and `echo x > /nosuchdir/f` with
 # "bash: line 1: <target>: No such file or directory", exit 1, and
-# never names the command. mirage drops the "bash: line N:" prefix,
-# matching the house style of the other shell-attributed error
-# ("nosuchcmd: command not found").
+# never names the command.
 
 
 @pytest.mark.asyncio
@@ -708,7 +705,9 @@ async def test_stdin_missing_source_is_shell_attributed():
     ws = await _workspace()
     io = await ws.shell("cat < /data/missing")
     assert io.exit_code == 1
-    assert (io.stderr or b"") == b"/data/missing: No such file or directory\n"
+    assert (
+        io.stderr or b""
+    ) == b"bash: line 1: /data/missing: No such file or directory\n"
 
 
 @pytest.mark.asyncio
@@ -719,7 +718,9 @@ async def test_stdin_missing_source_does_not_run_command():
     io = await ws.shell("echo hi < /data/missing")
     assert io.exit_code == 1
     assert (io.stdout or b"") == b""
-    assert (io.stderr or b"") == b"/data/missing: No such file or directory\n"
+    assert (
+        io.stderr or b""
+    ) == b"bash: line 1: /data/missing: No such file or directory\n"
 
 
 @pytest.mark.asyncio
@@ -730,7 +731,9 @@ async def test_stdin_missing_source_keeps_rest_of_line():
     io = await ws.shell("cat < /data/missing; echo next")
     assert io.exit_code == 0
     assert (io.stdout or b"") == b"next\n"
-    assert (io.stderr or b"") == b"/data/missing: No such file or directory\n"
+    assert (
+        io.stderr or b""
+    ) == b"bash: line 1: /data/missing: No such file or directory\n"
 
 
 @pytest.mark.asyncio
@@ -757,7 +760,9 @@ async def test_stdin_missing_source_leaves_pipeline_running():
     io = await ws.shell("cat < /data/missing | wc -l")
     assert io.exit_code == 0
     assert (io.stdout or b"").strip() == b"0"
-    assert (io.stderr or b"") == b"/data/missing: No such file or directory\n"
+    assert (
+        io.stderr or b""
+    ) == b"bash: line 1: /data/missing: No such file or directory\n"
 
 
 @pytest.mark.asyncio
@@ -766,7 +771,9 @@ async def test_stdin_missing_source_reported_as_typed():
     ws = await _workspace()
     io = await ws.shell("cd /data && cat < missing")
     assert io.exit_code == 1
-    assert (io.stderr or b"") == b"missing: No such file or directory\n"
+    assert (
+        io.stderr or b""
+    ) == b"bash: line 1: missing: No such file or directory\n"
 
 
 @pytest.mark.asyncio
@@ -777,7 +784,9 @@ async def test_stdin_missing_source_stops_at_first_failure():
     await ws.shell("printf PRE > /data/good")
     io = await ws.shell("cat < /data/missing < /data/good")
     assert io.exit_code == 1
-    assert (io.stderr or b"") == b"/data/missing: No such file or directory\n"
+    assert (
+        io.stderr or b""
+    ) == b"bash: line 1: /data/missing: No such file or directory\n"
 
 
 @pytest.mark.asyncio
@@ -809,7 +818,9 @@ async def test_write_target_unwritable_is_shell_attributed():
     ws = await _workspace()
     io = await ws.shell("echo x > /nodir/f")
     assert io.exit_code == 1
-    assert (io.stderr or b"") == b"/nodir/f: No such file or directory\n"
+    assert (
+        io.stderr or b""
+    ) == b"bash: line 1: /nodir/f: No such file or directory\n"
 
 
 @pytest.mark.asyncio
@@ -820,7 +831,9 @@ async def test_write_target_unwritable_keeps_rest_of_line(monkeypatch, caplog):
     io = await ws.shell("echo x > /nodir/f; echo next")
     assert io.exit_code == 0
     assert (io.stdout or b"") == b"next\n"
-    assert (io.stderr or b"") == b"/nodir/f: No such file or directory\n"
+    assert (
+        io.stderr or b""
+    ) == b"bash: line 1: /nodir/f: No such file or directory\n"
     await ws.close()
     vfs = RAMVFS()
     ws = Workspace({"data": vfs}, mode=MountMode.WRITE)
@@ -871,7 +884,7 @@ async def test_write_target_unwritable_keeps_rest_of_line(monkeypatch, caplog):
                     io.exit_code,
                     await io.stdout_str(),
                     await io.stderr_str(),
-                ) == (0, "next\n", f"/data/out: {reason}\n")
+                ) == (0, "next\n", f"bash: line 1: /data/out: {reason}\n")
                 failing = {"/data/err"}
                 for redirects in (
                     "> /data/out 2> /data/err",
@@ -925,7 +938,9 @@ async def test_write_target_unwritable_stops_at_first_failure():
     ws = await _workspace()
     io = await ws.shell("echo x > /nodir/f > /data/out")
     assert io.exit_code == 1
-    assert (io.stderr or b"") == b"/nodir/f: No such file or directory\n"
+    assert (
+        io.stderr or b""
+    ) == b"bash: line 1: /nodir/f: No such file or directory\n"
     assert (await ws.shell("test -e /data/out")).exit_code == 1
 
 
@@ -940,7 +955,9 @@ async def test_write_target_unwritable_keeps_earlier_target(redirect):
     ws = await _workspace()
     io = await ws.shell(f"echo y > /data/out2 {redirect} /nodir/g")
     assert io.exit_code == 1
-    assert (io.stderr or b"") == b"/nodir/g: No such file or directory\n"
+    assert (
+        io.stderr or b""
+    ) == b"bash: line 1: /nodir/g: No such file or directory\n"
     assert (await ws.shell("test -e /data/out2")).exit_code == 0
     assert await _out(ws, "cat /data/out2") == ""
 
@@ -959,7 +976,9 @@ async def test_write_target_unwritable_same_line_for_every_form(line: str):
     ws = await _workspace()
     io = await ws.shell(line)
     assert io.exit_code == 1
-    assert (io.stderr or b"") == b"/nodir/f: No such file or directory\n"
+    assert (
+        io.stderr or b""
+    ) == b"bash: line 1: /nodir/f: No such file or directory\n"
 
 
 @pytest.mark.asyncio
@@ -973,7 +992,10 @@ async def test_write_target_unwritable_same_line_for_every_form(line: str):
         ("echo hi 0<&1; echo rc=$?", ("hi\nrc=0\n", "")),
         (
             "read x 0<&1; echo rc=$?",
-            ("rc=1\n", "bash: read: read error: 0: Bad file descriptor\n"),
+            (
+                "rc=1\n",
+                "bash: line 1: read: read error: 0: Bad file descriptor\n",
+            ),
         ),
     ],
 )
@@ -1126,7 +1148,9 @@ async def test_slashed_redirect_target_is_refused_before_the_command():
         io = await ws.shell(line)
         assert io.exit_code == 1, line
         target = line.split()[-1]
-        assert io.stderr == f"{target}: Is a directory\n".encode(), line
+        assert (
+            io.stderr == f"bash: line 1: {target}: Is a directory\n".encode()
+        ), line
     assert (await ws.shell("test -e /data/missing")).exit_code == 1
     assert (await ws.shell("test -e /data/marker")).exit_code == 1
     assert await _out(ws, "cat /data/reg") == "y"
@@ -1139,7 +1163,7 @@ async def test_slashed_redirect_refusal_keeps_the_opens_before_it():
     ws = await _workspace()
     io = await ws.shell("echo hi > /data/a > /data/missing/")
     assert io.exit_code == 1
-    assert io.stderr == b"/data/missing/: Is a directory\n"
+    assert io.stderr == b"bash: line 1: /data/missing/: Is a directory\n"
     assert await _out(ws, "cat /data/a") == ""
 
 
@@ -1156,7 +1180,10 @@ async def test_an_earlier_failed_open_wins_over_a_later_refusal():
     ):
         io = await ws.shell(line)
         assert io.exit_code == 1, line
-        assert io.stderr == b"/data/nodir/f: No such file or directory\n", line
+        assert (
+            io.stderr
+            == b"bash: line 1: /data/nodir/f: No such file or directory\n"
+        ), line
     assert (await ws.shell("test -e /data/nodir")).exit_code == 1
     assert (await ws.shell("test -e /data/missing")).exit_code == 1
     assert await _out(ws, "cat /data/reg") == "y"
@@ -1304,28 +1331,28 @@ def _rejecting(vfs: RejectingVFS) -> Workspace:
         (
             'echo once > /data/r.txt 2>/dev/null; echo "s=$?"',
             "s=1\n",
-            "/data/r.txt: upload refused: 503\n",
+            "bash: line 1: /data/r.txt: upload refused: 503\n",
         ),
         ('echo once 2>/dev/null > /data/r.txt; echo "s=$?"', "s=1\n", ""),
         (
             'echo once > /data/r.txt; echo "s=$?"',
             "s=1\n",
-            "/data/r.txt: upload refused: 503\n",
+            "bash: line 1: /data/r.txt: upload refused: 503\n",
         ),
         (
             'cat /src/s > /data/r.txt; echo "s=$?"',
             "s=1\n",
-            "/data/r.txt: upload refused: 503\n",
+            "bash: line 1: /data/r.txt: upload refused: 503\n",
         ),
         (
             "echo once >> /data/r.txt || echo ran",
             "ran\n",
-            "/data/r.txt: upload refused: 503\n",
+            "bash: line 1: /data/r.txt: upload refused: 503\n",
         ),
         (
             'exec 3> /data/r.txt; echo "s=$?"',
             "s=1\n",
-            "/data/r.txt: upload refused: 503\n",
+            "bash: line 1: /data/r.txt: upload refused: 503\n",
         ),
     ],
 )
@@ -1365,7 +1392,7 @@ async def test_a_streamed_write_failing_past_its_open_fails_its_redirect(
         io = await ws.shell(f'{line}; echo "s=$?"')
         assert (await io.stdout_str(), await io.stderr_str()) == (
             "s=1\n",
-            "/data/r.txt: upload refused: 503\n",
+            "bash: line 1: /data/r.txt: upload refused: 503\n",
         )
     finally:
         await ws.close()
@@ -1381,7 +1408,7 @@ async def test_a_store_refusing_a_read_fails_its_redirect(op: str):
         io = await ws.shell(f'cat {op} /data/r.txt; echo "s=$?"')
         assert (await io.stdout_str(), await io.stderr_str()) == (
             "s=1\n",
-            "/data/r.txt: download refused: 503\n",
+            "bash: line 1: /data/r.txt: download refused: 503\n",
         )
     finally:
         await ws.close()
@@ -1439,7 +1466,7 @@ async def test_a_store_refusing_the_noclobber_probe_fails_its_redirect():
         io = await ws.shell('set -C; echo x > /data/r.txt; echo "s=$?"')
         assert (await io.stdout_str(), await io.stderr_str()) == (
             "s=1\n",
-            "/data/r.txt: stat refused: 503\n",
+            "bash: line 1: /data/r.txt: stat refused: 503\n",
         )
     finally:
         await ws.close()

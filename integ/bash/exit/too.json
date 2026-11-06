@@ -28,7 +28,7 @@
       "expect": {
         "exit": 1,
         "stdout": "s=4\nt=1\n",
-        "stderr": "bash: exit: too many arguments\nbash: exit: too many arguments\n"
+        "stderr": "bash: line 1: exit: too many arguments\nbash: line 1: exit: too many arguments\n"
       }
     }
   ]

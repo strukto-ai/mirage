@@ -179,7 +179,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/mongo-denied/mirage_integ/collections/books/documents.jsonl: No such file or directory\n"
+        "stderr": "bash: line 1: /mongo-denied/mirage_integ/collections/books/documents.jsonl: No such file or directory\n"
       }
     },
     {

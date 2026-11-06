@@ -33,7 +33,7 @@ async def test_an_unknown_option_letter_refuses_before_any_operand():
     out, err, code = await _run(ws, "declare -q NAME")
     assert out == ""
     assert err == (
-        "bash: declare: -q: invalid option\n"
+        "bash: line 1: declare: -q: invalid option\n"
         "declare: usage: declare [-aAfFgiIlnrtux] [name[=value] "
         "...] or declare -p [-aAfFilnrtux] [name ...]\n"
     )
@@ -57,7 +57,7 @@ async def test_an_unquoted_empty_expansion_is_removed_by_word_splitting():
     _, _, bare = await _run(ws, "export $NOPE")
     assert bare == 0
     _, err, code = await _run(ws, 'export "$NOPE"')
-    assert err == "bash: export: `': not a valid identifier\n"
+    assert err == "bash: line 1: export: `': not a valid identifier\n"
     assert code == 1
 
 
@@ -71,7 +71,7 @@ async def test_a_staged_array_literal_leaves_the_old_value_intact():
     _, err, code = await _run(
         ws, "readonly -a a=(x); readonly -a a=(y); echo REACHED"
     )
-    assert err == "bash: a: readonly variable\n"
+    assert err == "bash: line 1: a: readonly variable\n"
     assert code == 1
     out, _, _ = await _run(ws, "declare -p a")
     assert out == 'declare -ar a=([0]="x")\n'

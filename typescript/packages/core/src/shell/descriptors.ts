@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from './voice.ts'
 import { ByteSpool } from '../io/spool.ts'
 import { chunks } from '../io/cooperative.ts'
 import { OutputStream } from '../io/stream.ts'
@@ -48,9 +49,9 @@ export function unsupportedDescriptor(redirects: readonly Redirect[]): number | 
   return null
 }
 
-/** Bash's error for a closed descriptor, without the line-number prefix. */
+/** Bash's error for a closed descriptor, in the running shell's voice. */
 export function badDescriptorLine(fd: number): Uint8Array {
-  return encodeText(`${String(fd)}: Bad file descriptor\n`)
+  return encodeText(`${shellVoice()}${String(fd)}: Bad file descriptor\n`)
 }
 
 /**
@@ -93,6 +94,16 @@ export class FileDescription {
   get where(): PathSpec {
     return this.landed ?? this.scope
   }
+}
+
+/**
+ * The file a level's stdout writes as a command starts: a streamed
+ * description's file wherever the line moved it, none once the line removed
+ * it. Mirrors Python's output_target.
+ */
+export function outputTarget(output: string | FileDescription | null): string | null {
+  if (!(output instanceof FileDescription)) return output
+  return output.lost ? null : output.where.virtual
 }
 
 export class FileInput extends SharedInput {
@@ -145,17 +156,6 @@ export class Recorder extends JobConsole {
   private storage = new ByteSpool()
   private writing = Promise.resolve()
   private pending = 0
-  /**
-   * The file the level's stdout writes as a command starts: a streamed
-   * description's file wherever the line moved it, none once the line removed
-   * it.
-   */
-  get outputTarget(): string | null {
-    const output = this.outputFile
-    if (!(output instanceof FileDescription)) return output
-    return output.lost ? null : output.where.virtual
-  }
-
   /** Whether a write is under way or recorded bytes wait to be taken. Mirrors Python's busy. */
   get busy(): boolean {
     return this.pending > 0 || this.chunks.length > 0

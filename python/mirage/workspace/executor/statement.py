@@ -33,7 +33,7 @@ from mirage.io.stream import async_chain, discard_streams
 from mirage.io.types import ByteSource, materialize
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.console import Channel, JobConsole
-from mirage.shell.constants import ERREXIT_EXEMPT_TYPES
+from mirage.shell.constants import ERREXIT_EXEMPT_TYPES, NESTED_SHELLS
 from mirage.shell.descriptors import (
     Inherited,
     Recorder,
@@ -47,7 +47,8 @@ from mirage.shell.helpers import (
     get_redirects,
 )
 from mirage.shell.node_kind import pipeline_transparent
-from mirage.shell.parse.names import literal_text
+from mirage.shell.parse.names import command_invocations, literal_text
+from mirage.shell.printer import command_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.workspace.abort import line_status_writer
@@ -263,6 +264,57 @@ def forks(
     return name is None or (
         name not in BASH_BUILTINS
         and not (functions and name in session.functions)
+    )
+
+
+def nested_shell(node: TSNodeLike, session: SessionState) -> bool:
+    """Whether a statement runs a nested shell (``sh -c``), which bash
+    execs in place of a shell that forked to run it alone, so a signal
+    to that shell ends it.
+
+    Args:
+        node (TSNodeLike): the statement.
+        session (SessionState): the shell running it.
+    """
+    command = (
+        get_redirects(node)[0]
+        if node.type == NT.REDIRECTED_STATEMENT
+        else node
+    )
+    return (
+        command is not None
+        and command.type == NT.COMMAND
+        and forks(command, session)
+        and command_invocations(command)[0][0] in NESTED_SHELLS
+    )
+
+
+def redirected_body(node: TSNodeLike) -> bool:
+    """Whether a node is what a redirected statement runs under its
+    redirects: a fork's redirects are its own, so the report of how it
+    ended goes around them (``( kill -9 $BASHPID ) 2>/dev/null``).
+
+    Args:
+        node (TSNodeLike): the node.
+    """
+    parent = node.parent
+    if parent is None or parent.type != NT.REDIRECTED_STATEMENT:
+        return False
+    body = parent.child_by_field_name("body")
+    return body is not None and body.id == node.id
+
+
+def reported_command(node: TSNodeLike) -> str:
+    """How bash's report names a command its shell forked: as its
+    printer renders it, with the redirects of the statement the command
+    is the body of.
+
+    Args:
+        node (TSNodeLike): the command.
+    """
+    parent = node.parent
+    return command_text(
+        parent if parent is not None and redirected_body(node) else node
     )
 
 

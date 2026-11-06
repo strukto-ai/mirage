@@ -26,7 +26,7 @@ import type { CallStack } from '../../shell/call_stack.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { Recorder, type StreamOwner } from '../../shell/descriptors.ts'
 import { DiscardSignal, ExitSignal } from '../../shell/errors.ts'
-import { getText, sameLine } from '../../shell/helpers.ts'
+import { getText, sameLine, sourceRow } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { PARSED_WORDS } from '../../shell/parse/constants.ts'
@@ -39,7 +39,7 @@ import { expandingAliases } from '../executor/builtins/alias/alias.ts'
 import { divertStatement, divertedFile } from '../executor/builtins/exec/index.ts'
 import type { ExecuteNodeFn } from '../executor/command/types.ts'
 import { carried, isUnwinding, LoopSignal, type Unwinding } from '../executor/control.ts'
-import { handleBackground } from '../executor/jobs.ts'
+import { handleBackground, runProgram as runForked } from '../executor/jobs.ts'
 import {
   asWritten,
   errexitActs,
@@ -78,6 +78,42 @@ class StatementRecorder extends Recorder {
     )
       await this.sink.emit(channel, data)
     else await super.emit(channel, data)
+  }
+}
+
+/** Run one statement of a program to the end of its output. */
+async function statement(
+  recurse: ExecuteNodeFn,
+  child: TSNodeLike,
+  context: EvaluationContext,
+  stdin: ByteSource | null,
+  callStack: CallStack | null,
+  recorder: StatementRecorder,
+): Promise<RedirectResult> {
+  return drained(
+    await recording(recorder, () => recurse(child, context, stdin, callStack, { sink: recorder })),
+  )
+}
+
+/**
+ * A statement's output read to its end. Lazy reads can fail on the first pull
+ * (e.g. a backend size guard), which is the command's failure, not a crash.
+ */
+async function drained([source, io, ran]: RedirectResult): Promise<RedirectResult> {
+  try {
+    return [await materialize(source), io, ran]
+  } catch (err) {
+    if (isControlFlowError(err) || err instanceof CommandTimeoutError) throw err
+    if (isFsError(err)) await failedRead(io, err, ran)
+    else {
+      io.stderr = concat([
+        await materialize(io.stderr),
+        encodeText(`${err instanceof Error ? err.message : String(err)}\n`),
+      ])
+      io.exitCode = 1
+    }
+    ran.exitCode = io.exitCode
+    return [null, io, ran]
   }
 }
 
@@ -124,9 +160,21 @@ export async function executeProgram(
   // a use on the same parse and row. Restored on the way out so a nested
   // parse (`eval`, `source`, `bash -c`) does not leave its id behind.
   session.parseSeq += 1
-  const outerParse: [number, number] = [session.parseCurrent, session.parseRow]
+  const outerParse: [number, number, TSNodeLike | null] = [
+    session.parseCurrent,
+    session.parseRow,
+    session.lineNode,
+  ]
   session.parseCurrent = session.parseSeq
-  session.parseRow = 0
+  let start = session.parseFrom
+  session.parseFrom = null
+  if (start === null) {
+    // A nested parse (`eval`, `$( )`) numbers on from the row the running
+    // command ends on, as bash's reader stands there.
+    const running = session.lineNode
+    start = inline && running !== null ? session.parseRow + sourceRow(running, true) : 0
+  }
+  session.parseRow = start
   const root = !session.lineOpen
   session.lineOpen = true
   try {
@@ -146,7 +194,7 @@ export async function executeProgram(
       executeFn,
     )
   } finally {
-    ;[session.parseCurrent, session.parseRow] = outerParse
+    ;[session.parseCurrent, session.parseRow, session.lineNode] = outerParse
     if (root) {
       session.lineOpen = false
       session.errexitExiting = false
@@ -287,31 +335,20 @@ async function runProgram(
       // read` sees it, and each statement reads on from where the one
       // before it stopped.
       const childStdin = statementStdin(session, stdin, bound)
-      let s: ByteSource | null
-      ;[s, io, lastExec] = await recording(recorder, () =>
-        reread
-          ? readOn(reader, node, child, session, childStdin, recorder, callStack, reading)
-          : recurse(child, context, childStdin, callStack, { sink: recorder }),
-      )
-      ran.push(lastExec)
       let stdout: ByteSource | null
-      try {
-        stdout = await materialize(s)
-      } catch (err) {
-        if (isControlFlowError(err) || err instanceof CommandTimeoutError) throw err
-        // Lazy reads can fail on the first pull (e.g. a backend size
-        // guard), which is the command's failure, not a crash.
-        if (isFsError(err)) await failedRead(io, err, lastExec)
-        else {
-          io.stderr = concat([
-            await materialize(io.stderr),
-            encodeText(`${err instanceof Error ? err.message : String(err)}\n`),
-          ])
-          io.exitCode = 1
-        }
-        lastExec.exitCode = io.exitCode
-        stdout = null
-      }
+      ;[stdout, io, lastExec] = reread
+        ? await drained(
+            await recording(recorder, () =>
+              readOn(reader, node, child, session, childStdin, recorder, callStack, reading),
+            ),
+          )
+        : await runForked(
+            child,
+            context,
+            () => statement(recurse, child, context, childStdin, callStack, recorder),
+            jobTable,
+          )
+      ran.push(lastExec)
       // What was read again stamped its own statuses.
       recordStatus(session, io.exitCode, reread || pipelineTransparent(child))
       // An `exec` redirect sends the shell's own output to a file: every
@@ -559,13 +596,19 @@ async function readOn(
   const at = node.offsets?.[child.startIndex ?? 0] ?? 0
   const rest = original.slice(at)
   const rows = original.slice(0, at).split('\n').length - 1
-  const run = (): Promise<IOResult> =>
-    executeFn('\n'.repeat(rows) + rest, {
-      sessionId: session.sessionId,
-      stdin,
-      ...(sink === null ? {} : { sink }),
-      ...(callStack === null ? {} : { callStack }),
-    })
+  const run = async (): Promise<IOResult> => {
+    session.parseFrom = session.parseRow
+    try {
+      return await executeFn('\n'.repeat(rows) + rest, {
+        sessionId: session.sessionId,
+        stdin,
+        ...(sink === null ? {} : { sink }),
+        ...(callStack === null ? {} : { callStack }),
+      })
+    } finally {
+      session.parseFrom = null
+    }
+  }
   // The root the rest is read as takes the line's history over through
   // this call alone, never a job's root that runs meanwhile.
   const io =

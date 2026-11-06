@@ -29,6 +29,7 @@ from mirage.io.stream import (
 from mirage.io.types import ByteSource, materialize
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
+from mirage.process.handle import ProcessHandle
 from mirage.process.table import ProcessTable
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
@@ -39,6 +40,7 @@ from mirage.shell.console.types import Channel
 from mirage.shell.constants import (
     FORK_FAILED,
     FORK_FAILED_STATUS,
+    SHELL_IGNORED_SIGNALS,
     SIGPIPE_STATUS,
 )
 from mirage.shell.descriptors import Recorder
@@ -54,7 +56,12 @@ from mirage.workspace.executor.builtins.exec import (
     diverted_file,
 )
 from mirage.workspace.executor.control import UNWINDING, carried, ended
-from mirage.workspace.executor.jobs import handle_background, pump, run_program
+from mirage.workspace.executor.jobs import (
+    handle_background,
+    pump,
+    report_reaped,
+    run_program,
+)
 from mirage.workspace.executor.statement import (
     answer_closed,
     as_written,
@@ -65,9 +72,11 @@ from mirage.workspace.executor.statement import (
     ignoring_errexit,
     land,
     land_late,
+    nested_shell,
     record_jobs,
     record_status,
     recording,
+    reported_command,
     statement_output,
     statement_stdin,
     writer_forks,
@@ -81,6 +90,18 @@ from mirage.workspace.executor.traps import (
 )
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
+
+
+def _shell_stage(cmd: TSNodeLike, session: SessionState) -> bool:
+    """Whether a stage is one shell bash runs as the stage itself: a
+    subshell, or a nested shell it execs (``nested_shell``), which a
+    signal to the stage then ends with it.
+
+    Args:
+        cmd (TSNodeLike): the stage.
+        session (SessionState): the shell running the pipeline.
+    """
+    return cmd.type == NT.SUBSHELL or nested_shell(cmd, session)
 
 
 async def handle_pipe(
@@ -118,13 +139,11 @@ async def handle_pipe(
     forked = call_stack is not None and call_stack.subshell
     child_nodes: list[ExecutionNode] = [ExecutionNode() for _ in commands]
 
-    # Each segment is a child shell: bash forks one per stage. In a
-    # background job each is a program a signal the job ignores still
-    # stops whole (``run_program``), and one that ended keeps its status.
+    # Each segment is a child shell: bash forks one per stage, which a
+    # signal stops on its own, its status 128 plus it, and which hands a
+    # QUIT to the program it runs right now (``run_program``).
     children = [child_context(context) for _ in commands]
-    job = context.frame.job
-    for child_evaluation in children:
-        child_evaluation.frame.job = None
+    stages: list[ProcessHandle | None] = [None for _ in commands]
 
     async def run_segment(i: int, cmd: TSNodeLike) -> int:
         child_evaluation = children[i]
@@ -155,19 +174,23 @@ async def handle_pipe(
             child.job_output = waits.output
             child.job_waits = waits
         rest = session.job_output or session.tty.jobs
+
+        async def statement() -> tuple[
+            ByteSource | None, IOResult, ExecutionNode
+        ]:
+            stdout, io, ran = await execute_node(
+                cmd, child_evaluation, input_stream, stage_stack, sink=output
+            )
+            await pump(output, Channel.STDOUT, stdout)
+            return None, io, ran
+
         try:
             stdout, io, child_exec = await end_shell(
                 execute_fn,
                 child,
                 input_stream,
                 stage_stack,
-                execute_node(
-                    cmd,
-                    child_evaluation,
-                    input_stream,
-                    stage_stack,
-                    sink=output,
-                ),
+                run_program(cmd, child_evaluation, statement),
             )
             await pump(output, Channel.STDOUT, stdout)
             await pump(output, Channel.STDERR, io.stderr)
@@ -185,12 +208,13 @@ async def handle_pipe(
             if waits is not None:
                 await waits.join(rest)
         except BaseException as error:
-            # One an interrupt stopped closes its pipe as a killed child
-            # does: the reader sees the end, not the stop.
+            # One a signal stopped closes its pipe as a killed child does:
+            # the reader sees the end, not the stop.
+            process = stages[i]
             stopped = (
                 isinstance(error, asyncio.CancelledError)
-                and job is not None
-                and job.interrupted is not None
+                and process is not None
+                and process.signal is not None
             )
             output.end(None if stopped else error)
             raise
@@ -209,22 +233,17 @@ async def handle_pipe(
             await child.close_inputs()
         return io.exit_code
 
-    async def stage(i: int, cmd: TSNodeLike) -> int:
-        if job is None:
-            return await run_segment(i, cmd)
-        code, signal = await job.program(partial(run_segment, i, cmd))
-        if signal is None:
-            assert code is not None
-            return code
-        ios[i].exit_code = 128 + signal
-        return ios[i].exit_code
+    async def reaped(i: int, process: ProcessHandle) -> int:
+        code = await process.reap()
+        ios[i].exit_code = code
+        return code
 
     tasks: list[asyncio.Task[int]] = []
     failed = False
     try:
         for i, cmd in enumerate(commands):
             if processes is None:
-                tasks.append(asyncio.create_task(stage(i, cmd)))
+                tasks.append(asyncio.create_task(run_segment(i, cmd)))
                 continue
             try:
                 process = processes.start(
@@ -232,14 +251,19 @@ async def handle_pipe(
                     command=decode_text(cmd.text or b""),
                     cwd=PathSpec.from_str_path(session.cwd),
                     parent_pid=session.process_id,
-                    run=partial(stage, i, cmd),
+                    run=partial(run_segment, i, cmd),
                     limit=session.processes.max,
+                    ignores=SHELL_IGNORED_SIGNALS,
                 )
             except BlockingIOError as exc:
                 raise ExitSignal(
                     FORK_FAILED_STATUS, stderr=FORK_FAILED
                 ) from exc
             children[i].session.process_id = process.info.pid
+            stages[i] = process
+            children[i].frame.shell = (
+                None if _shell_stage(cmd, session) else process
+            )
             tasks.append(process.task)
         last = pipes[-1].stream()
         output_task = asyncio.create_task(
@@ -247,7 +271,13 @@ async def handle_pipe(
             if sink is None
             else pump(sink, Channel.STDOUT, last)
         )
-        await asyncio.gather(output_task, *tasks)
+        await asyncio.gather(
+            output_task,
+            *(
+                task if process is None else reaped(i, process)
+                for i, (task, process) in enumerate(zip(tasks, stages))
+            ),
+        )
         last_stdout = output_task.result()
     except BaseException:
         failed = True
@@ -272,6 +302,13 @@ async def handle_pipe(
     # `${PIPESTATUS[@]}`: the raw per-segment statuses, before pipefail
     # rewrites the pipeline's own.
     session._pipe_status_pending = tuple(io.exit_code for io in ios)
+    waited = [
+        (stage.info.pid, io.exit_code, stage.ended_by, reported_command(cmd))
+        for stage, io, cmd in zip(stages, ios, commands)
+        if stage is not None
+    ]
+    if waited:
+        report_reaped(context.frame, waited)
     if session.shell_options.get("pipefail"):
         rightmost_failure = next(
             (io.exit_code for io in reversed(ios) if io.exit_code != 0), 0

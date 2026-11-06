@@ -413,7 +413,10 @@ async def test_test_and_cd_see_no_hidden_link():
     cd = await ws.shell("cd /data/dl.sec", session_id="agent")
     assert hidden.stdout == b"1\n1\n"
     assert cd.exit_code == 1
-    assert cd.stderr == b"bash: cd: /data/dl.sec: No such file or directory\n"
+    assert (
+        cd.stderr
+        == b"bash: line 1: cd: /data/dl.sec: No such file or directory\n"
+    )
     seen = await ws.shell(f"{probe}; cd /data/dl.sec && pwd")
     assert seen.stdout == b"0\n0\n/data/dl.sec\n"
 

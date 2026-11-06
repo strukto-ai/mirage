@@ -44,7 +44,7 @@
           "expect": {
             "exit": 0,
             "stdout": "137\n",
-            "stderr": ""
+            "stderr": "bash: line 1:     5 Killed                  python3 -c 'import signal, sys, time; signal.signal(signal.SIGTERM, lambda *_: sys.exit(3)); open(sys.argv[1], \"w\").close(); time.sleep(60)' \"$F\"\n"
           }
         },
         {
@@ -92,7 +92,7 @@
           "expect": {
             "exit": 0,
             "stdout": "137\n",
-            "stderr": ""
+            "stderr": "bash: line 1:    11 Killed                  python3 -c 'import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); open(sys.argv[1], \"w\").close(); time.sleep(60)' \"$F\"\n"
           }
         }
       ]

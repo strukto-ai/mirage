@@ -248,7 +248,7 @@ describe('external program capture', () => {
         expect(DEC.decode(result.stdout), line).toBe('')
       }
       const typed = await ws.shell('type native-tool')
-      expect(DEC.decode(typed.stderr)).toBe('bash: type: native-tool: not found\n')
+      expect(DEC.decode(typed.stderr)).toBe('bash: line 1: type: native-tool: not found\n')
       expect((await ws.shell('native-tool')).exitCode).toBe(0)
       expect(probe.requests[0]?.argv).toEqual(['native-tool'])
     } finally {
@@ -499,7 +499,7 @@ describe.each(['process', 'shell'] as const)('external %s text-slot globs', (kin
       await ws.shell('shopt -s failglob')
       const result = await ws.shell('python3 s.py *.none')
       expect(result.exitCode).toBe(1)
-      expect(DEC.decode(result.stderr)).toBe('bash: no match: *.none\n')
+      expect(DEC.decode(result.stderr)).toBe('bash: line 1: no match: *.none\n')
       expect(probe instanceof ProcessProbe ? probe.requests : probe.lines).toHaveLength(0)
     } finally {
       await ws.close()

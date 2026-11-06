@@ -82,19 +82,19 @@ def test_error_op_unset_is_fatal_127(shell):
     code, out, err = shell.mirage_result("echo ${UNSET:?}; echo after")
     assert code == 127
     assert out == ""
-    assert err == "bash: UNSET: parameter null or not set\n"
+    assert err == "bash: line 1: UNSET: parameter null or not set\n"
 
 
 def test_error_op_custom_multiword_message(shell):
     code, _, err = shell.mirage_result("echo ${UNSET:?custom msg}")
     assert code == 127
-    assert err == "bash: UNSET: custom msg\n"
+    assert err == "bash: line 1: UNSET: custom msg\n"
 
 
 def test_error_op_unset_only_default_message(shell):
     code, _, err = shell.mirage_result("echo ${UNSET?}")
     assert code == 127
-    assert err == "bash: UNSET: parameter not set\n"
+    assert err == "bash: line 1: UNSET: parameter not set\n"
 
 
 def test_error_op_contained_by_subshell(shell):
@@ -153,28 +153,34 @@ SLICE_CASES = [
         'sales=(1 2); echo "a${sales[vid]:.2f}b"',
         1,
         "",
-        "bash: sales[vid]: .2f: syntax error: operand expected"
+        "bash: line 1: sales[vid]: .2f: syntax error: operand expected"
         ' (error token is ".2f")\n',
     ),
     (
         'x=; echo "a${x:.2f}b"',
         1,
         "",
-        'bash: x: .2f: syntax error: operand expected (error token is ".2f")\n',
+        'bash: line 1: x: .2f: syntax error: operand expected (error token is ".2f")\n',
     ),
     (
         'set -- ""; echo "a${1:.2f}b"',
         1,
         "",
-        'bash: 1: .2f: syntax error: operand expected (error token is ".2f")\n',
+        'bash: line 1: 1: .2f: syntax error: operand expected (error token is ".2f")\n',
     ),
     (
         'a=(); a[3]=x; echo "[${a[@]:.2f}]"',
         1,
         "",
-        'bash: a[@]: .2f: syntax error: operand expected (error token is ".2f")\n',
+        "bash: line 1: "
+        'a[@]: .2f: syntax error: operand expected (error token is ".2f")\n',
     ),
-    ('set -u; echo "a${x:.2f}b"', 127, "", "bash: x: unbound variable\n"),
+    (
+        'set -u; echo "a${x:.2f}b"',
+        127,
+        "",
+        "bash: line 1: x: unbound variable\n",
+    ),
     (
         'set -- a ""; echo "[${2-u}] [${2+s}] [${3-u}] [${3+s}]"',
         0,
@@ -196,86 +202,91 @@ NOUNSET_CASES = [
         'set -u; a=(1); echo "[${a[5]}]"; echo after',
         127,
         "",
-        "bash: a[5]: unbound variable\n",
+        "bash: line 1: a[5]: unbound variable\n",
     ),
     (
         'set -u; a=(1); i=5; echo "[${a[i]:1}]"',
         127,
         "",
-        "bash: a[i]: unbound variable\n",
+        "bash: line 1: a[i]: unbound variable\n",
     ),
     (
         'set -u; a=(1); echo "[${a[5]#x}]"',
         127,
         "",
-        "bash: a[5]: unbound variable\n",
+        "bash: line 1: a[5]: unbound variable\n",
     ),
     (
         'set -u; declare -A m; k=x; echo "[${m[$k]}]"',
         127,
         "",
-        "bash: m[$k]: unbound variable\n",
+        "bash: line 1: m[$k]: unbound variable\n",
     ),
     (
         'set -u; x=s; echo "[${x[0]}]"; echo "[${x[1]}]"',
         127,
         "[s]\n",
-        "bash: x[1]: unbound variable\n",
+        "bash: line 1: x[1]: unbound variable\n",
     ),
     (
         'set -u; arr=(1); echo "a${arr[vid]:.2f}b"',
         127,
         "",
-        "bash: vid: unbound variable\n",
+        "bash: line 1: vid: unbound variable\n",
     ),
     (
         'set -u; arr=(1); vid=3; echo "a${arr[vid]:.2f}b"',
         127,
         "",
-        "bash: arr[vid]: unbound variable\n",
+        "bash: line 1: arr[vid]: unbound variable\n",
     ),
     (
         'set -u; a=(1); echo "[${a[i+4]}]"',
         127,
         "",
-        "bash: i: unbound variable\n",
+        "bash: line 1: i: unbound variable\n",
     ),
     (
         'set -u; w=v; a=(1); echo "[${a[w]}]"',
         127,
         "",
-        "bash: v: unbound variable\n",
+        "bash: line 1: v: unbound variable\n",
     ),
     (
         'set -u; x=hello; echo "[${x:1:v}]"',
         127,
         "",
-        "bash: v: unbound variable\n",
+        "bash: line 1: v: unbound variable\n",
     ),
     (
         'set -u; a=(x y z); echo "[${a[@]:v}]"',
         127,
         "",
-        "bash: v: unbound variable\n",
+        "bash: line 1: v: unbound variable\n",
     ),
     (
         "set -u; a=(1); unset 'a[v]'; echo after",
         127,
         "",
-        "bash: v: unbound variable\n",
+        "bash: line 1: v: unbound variable\n",
     ),
     (
         "set -u; a=(1); [[ -v a[v] ]]; echo after",
         127,
         "",
-        "bash: v: unbound variable\n",
+        "bash: line 1: v: unbound variable\n",
     ),
-    ("set -u; a[v]=1; echo after", 127, "", "bash: v: unbound variable\n"),
+    (
+        "set -u; a[v]=1; echo after",
+        127,
+        "",
+        "bash: line 1: v: unbound variable\n",
+    ),
     (
         'set -u; (a=(1); echo "[${a[5]}]"); echo "rc=$?"',
         0,
         "rc=1\n",
-        "bash: a[5]: unbound variable\n",
+        "bash: line 1: a[5]: unbound variable\n",
     ),
     (
         'set -u; a=(1); echo "[${a[5]-d}] [${a[5]:-d}] [${a[5]+s}] '

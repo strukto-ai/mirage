@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../shell/voice.ts'
 import { RELAY_COMMANDS } from '../../../commands/builtin/generic/crossmount/constants.ts'
 import { aggregateFor } from '../../../commands/builtin/generic/crossmount/detect.ts'
 import {
@@ -392,7 +393,7 @@ export async function handleCommand(
   // dispatch chokepoint) stay ahead of this so
   // protective refusals keep their specific messages.
   if (lookup(typed, session, registry) === Consumer.UNKNOWN) {
-    const errBytes = encodeText(`${typed}: command not found\n`)
+    const errBytes = encodeText(`${shellVoice()}${typed}: command not found\n`)
     return [
       null,
       new IOResult({ exitCode: NOT_FOUND_STATUS, stderr: errBytes }),
@@ -868,7 +869,7 @@ export async function handleCommand(
     throw err
   }
   if (mount === null) {
-    const err = encodeText(`${cmdName}: command not found`)
+    const err = encodeText(`${shellVoice()}${cmdName}: command not found`)
     return [
       null,
       new IOResult({ exitCode: NOT_FOUND_STATUS, stderr: err }),

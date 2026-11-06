@@ -31,7 +31,7 @@
       "command": "read -q v 2>&1; echo code=$?",
       "expect": {
         "exit": 0,
-        "stdout": "bash: read: -q: invalid option\nread: usage: read [-ers] [-a array] [-d delim] [-i text] [-n nchars] [-N nchars] [-p prompt] [-t timeout] [-u fd] [name ...]\ncode=2\n",
+        "stdout": "bash: line 1: read: -q: invalid option\nread: usage: read [-ers] [-a array] [-d delim] [-i text] [-n nchars] [-N nchars] [-p prompt] [-t timeout] [-u fd] [name ...]\ncode=2\n",
         "stderr": ""
       }
     }

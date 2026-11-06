@@ -347,7 +347,7 @@
       "expect": {
         "exit": 1,
         "stdout": "hi\nc=1\nzcfi=5\nkept\n",
-        "stderr": "bash: zcfi: readonly variable\nbash: 1+: syntax error: operand expected (error token is \"+\")\n"
+        "stderr": "bash: line 1: zcfi: readonly variable\nbash: line 1: 1+: syntax error: operand expected (error token is \"+\")\n"
       }
     },
     {

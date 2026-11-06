@@ -28,7 +28,7 @@
       "command": "type -x cd 2>&1; echo \"rc=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "bash: type: -x: invalid option\ntype: usage: type [-afptP] name [name ...]\nrc=2\n",
+        "stdout": "bash: line 1: type: -x: invalid option\ntype: usage: type [-afptP] name [name ...]\nrc=2\n",
         "stderr": ""
       }
     }

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../shell/voice.ts'
 import type { Caller, RedirectResult } from '../../context/session_context.ts'
 import {
   currentCaller,
@@ -78,6 +79,7 @@ import {
   OPEN_FOR_READ_WRITE,
   OPEN_FOR_READING,
 } from './builtins/exec/constants.ts'
+import { routeRebound } from './builtins/exec/index.ts'
 import { toScope } from './builtins/scope.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
@@ -162,6 +164,9 @@ export class PipeRecorder extends Recorder {
   // Descriptions an op reached: what they get next lands at their offset.
   private readonly resumed = new Set<FileDescription>()
   private streaming: Promise<void> = Promise.resolve()
+  // The shell whose `exec` may point a channel the redirect claimed elsewhere.
+  session: SessionState | null = null
+  claimed: ReadonlySet<Channel> = new Set()
   file: FileDescription | null = null
   failure: unknown = null
 
@@ -339,6 +344,25 @@ export class PipeRecorder extends Recorder {
   }
 
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    // An `exec` the command runs points a channel the redirect claimed
+    // elsewhere until the command ends (`{ exec >g; echo B; } > f`).
+    if (this.claimed.has(channel) && this.session !== null) {
+      const routed = await routeRebound(this.dispatch, this.session, channel, data)
+      if (routed !== null) {
+        const [out, err] = routed
+        if (out !== null) await this.emitLevel(Channel.STDOUT, await materialize(out))
+        if (err !== null) await this.emitLevel(Channel.STDERR, await materialize(err))
+        return
+      }
+    }
+    await this.emitLevel(channel, data)
+  }
+
+  /**
+   * Write bytes through the level's own descriptors, as a write through the
+   * description it opened does whatever `exec` did.
+   */
+  async emitLevel(channel: Channel, data: Uint8Array): Promise<void> {
     if (this.bound.has(channel) && (await this.streamed(channel, data))) return
     const scope = this.streams.get(channel)
     if (scope === undefined) {
@@ -665,7 +689,7 @@ async function runRedirects(
     expanded.push(r)
     if (r.kind === RedirectKind.AMBIGUOUS) {
       const word = r.target instanceof PathSpec ? r.target.rawPath : String(r.target)
-      return failed(shellFailure(encodeText(`${word}: ambiguous redirect\n`)))
+      return failed(shellFailure(encodeText(`${shellVoice()}${word}: ambiguous redirect\n`)))
     }
     if (r.kind === RedirectKind.UNEXPANDED && r.target instanceof ExitSignal) {
       return failed(shellFailure(r.target.stderr, r.target.exitCode))
@@ -839,7 +863,7 @@ async function runRedirects(
       [2, Channel.STDERR],
     ] as const) {
       if (outputs.get(fd) === file) {
-        file.emit = (data) => recorder.emit(channel, data)
+        file.emit = (data) => recorder.emitLevel(channel, data)
         break
       }
     }
@@ -885,6 +909,10 @@ async function runRedirects(
   let io = new IOResult()
   const saved = session.descriptors
   const claimed = new Set(redirects.flatMap((r) => (r.fd === FD_BOTH ? [1, 2] : [r.fd])))
+  recorder.session = session
+  recorder.claimed = new Set(
+    [...claimed].flatMap((fd) => (fd === 1 ? [Channel.STDOUT] : fd === 2 ? [Channel.STDERR] : [])),
+  )
   session.descriptors = new Map([
     ...saved,
     ...[...outputs]
@@ -1233,19 +1261,12 @@ function describe(output: FdDest, source: Input, owner: Recorder | null): Descri
  * error belongs to the shell, not the command, and the rest of the line keeps
  * running (`;` continues, `&&` short-circuits, `||` runs).
  *
- * Deliberate divergence from bash: the `bash: line N:` prefix is dropped, so
- * the line is `<target>: <strerror>`. This matches the house style already
- * set by the other shell-attributed error, `nosuchcmd: command not found`
- * (bash prints `bash: line 1: nosuchcmd: command not found`) — `bash:` is
- * bash's `$0` and mirage is not bash, and `line N` has no meaning for a
- * one-line `Workspace.shell` call.
- *
  * The label is the target's own spelling, never the error's message: backends
  * raise write failures with prose in the message (`parent directory does not
  * exist: /nodir`), which used to reach the user as the path.
  */
 function redirectErrorLine(scope: PathSpec, err: unknown): Uint8Array {
-  return encodeText(`${scope.rawPath}: ${strerrorOf(err)}\n`)
+  return encodeText(`${shellVoice()}${scope.rawPath}: ${strerrorOf(err)}\n`)
 }
 
 /**
@@ -1391,7 +1412,7 @@ async function openRefusal(
     const scope = ensureScope(r.target)
     // Behind a dot (`x/./`) the open's own walk answers instead.
     if (scope.rawPath.endsWith('/') && !endsAtDot(scope.rawPath)) {
-      return shellFailure(encodeText(`${scope.rawPath}: Is a directory\n`))
+      return shellFailure(encodeText(`${shellVoice()}${scope.rawPath}: Is a directory\n`))
     }
     let exists = false
     let isDir = false
@@ -1411,7 +1432,7 @@ async function openRefusal(
     }
     if (noclobber && exists && !r.append && !r.clobber) {
       const detail = isDir ? posixPhrase('EISDIR') : 'cannot overwrite existing file'
-      return shellFailure(encodeText(`${scope.rawPath}: ${detail}\n`))
+      return shellFailure(encodeText(`${shellVoice()}${scope.rawPath}: ${detail}\n`))
     }
   }
   return null

@@ -102,7 +102,7 @@
       "expect": {
         "exit": 0,
         "stdout": "code=1\n",
-        "stderr": "bash: shift: -1: shift count out of range\n"
+        "stderr": "bash: line 1: shift: -1: shift count out of range\n"
       }
     }
   ]

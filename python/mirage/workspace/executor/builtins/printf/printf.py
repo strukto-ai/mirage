@@ -23,6 +23,7 @@ from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
 from mirage.shell.bytes import decode_text, encode_text, utf8_locale
 from mirage.shell.errors import ArithError
+from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.printf.format import (
@@ -94,7 +95,7 @@ async def handle_printf(
             # suppresses the conversion errors the format would report.
             return fail(
                 "printf",
-                f"bash: printf: `{target}': not a valid identifier\n",
+                f"{shell_voice()}printf: `{target}': not a valid identifier\n",
                 2,
             )
     if args and not program:
@@ -122,7 +123,8 @@ async def handle_printf(
             # change.
             return fail(
                 "printf",
-                f"bash: printf: -{first[1]}: invalid option\n{builtin_usage('printf')}",
+                f"{shell_voice()}printf: -{first[1]}: invalid option\n"
+                f"{builtin_usage('printf')}",
                 2,
             )
     elif args and args[0] == "--":
@@ -149,7 +151,7 @@ async def handle_printf(
     try:
         status = await assign_element(session, view, base, subscript, text)
     except PolicyDenied as exc:
-        return fail("printf", errors + f"bash: {exc.strerror}\n")
+        return fail("printf", errors + f"{shell_voice()}{exc.strerror}\n")
     except ArithError as exc:
         # The target carries `-i` and the formatted text does not
         # evaluate, which ends the shell as any `-i` value does.
@@ -157,12 +159,17 @@ async def handle_printf(
         signal.stderr = encode_text(errors) + signal.stderr
         raise signal from exc
     if status == "readonly":
-        return fail("printf", errors + f"bash: {base}: readonly variable\n")
+        return fail(
+            "printf", errors + f"{shell_voice()}{base}: readonly variable\n"
+        )
     if status == "denied":
-        return fail("printf", errors + f"bash: {base}: permission denied\n")
+        return fail(
+            "printf", errors + f"{shell_voice()}{base}: permission denied\n"
+        )
     if status != "ok":
         return fail(
-            "printf", errors + f"bash: {target}: bad array subscript\n"
+            "printf",
+            errors + f"{shell_voice()}{target}: bad array subscript\n",
         )
     return result("printf", exit_code=exit_code, stderr=errors)
 

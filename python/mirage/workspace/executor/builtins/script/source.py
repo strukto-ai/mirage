@@ -23,6 +23,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.errors import ExitSignal, ReturnSignal
+from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec, word_text
 from mirage.workspace.executor.builtins.scope import _scope_path
 from mirage.workspace.executor.builtins.script.script import (
@@ -85,17 +86,20 @@ async def handle_source(
     raw = _scope_path(path)
     if word_text(path) == "":
         return script_error(
-            "bash", ": No such file or directory", 1, command="source "
+            shell_voice(), "No such file or directory", 1, command="source "
         )
     try:
         script = await read_script_text(dispatch, raw, session.cwd)
     except IsADirectoryError:
         return script_error(
-            f"bash: {name}", f"{raw}: is a directory", 1, f"source {raw}"
+            f"{shell_voice()}{name}",
+            f"{raw}: is a directory",
+            1,
+            f"source {raw}",
         )
     except FS_ERRORS as exc:
         return script_error(
-            "bash", f"{raw}: {fs_strerror(exc)}", 1, f"source {raw}"
+            f"{shell_voice()}{raw}", f"{fs_strerror(exc)}", 1, f"source {raw}"
         )
     cs = (
         call_stack
@@ -109,6 +113,10 @@ async def handle_source(
     outer_names = session.function_names
     if outer_names is not None:
         session.function_names = cs.function_names()
+    # Its diagnostics name the file, as spelled, and count its own lines.
+    outer_name = session._parse_name
+    session._parse_name = word_text(path)
+    session._parse_from = 0
     try:
         try:
             io = await execute_fn(
@@ -120,6 +128,10 @@ async def handle_source(
             )
         except ReturnSignal as sig:
             io = ended(sig)
+        finally:
+            # The RETURN trap speaks as the caller, as bash's does.
+            session._parse_name = outer_name
+            session._parse_from = None
         stdout, io = await returning(
             execute_fn, session, stdin, cs, io.stdout, io
         )
@@ -152,7 +164,7 @@ async def source_builtin(call: BuiltinCall) -> Result:
     name = str(call.argv.name)
     if not operands:
         return script_error(
-            f"bash: {name}",
+            f"{shell_voice()}{name}",
             "filename argument required\n" + builtin_usage(name).rstrip("\n"),
             2,
             name,

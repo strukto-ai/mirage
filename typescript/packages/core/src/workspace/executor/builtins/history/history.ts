@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import { specOf } from '../../../../commands/spec/builtins.ts'
 import { FlagView } from '../../../../commands/spec/flag_view.ts'
 import type { FlagValue } from '../../../../commands/spec/types.ts'
@@ -42,7 +43,11 @@ function result(
 }
 
 function outOfRange(value: string): RedirectResult {
-  return result(null, 1, encodeText(`bash: history: ${value}: history position out of range\n`))
+  return result(
+    null,
+    1,
+    encodeText(`${shellVoice()}history: ${value}: history position out of range\n`),
+  )
 }
 
 // Mirrors Python int(): trims surrounding whitespace, accepts an
@@ -72,7 +77,7 @@ export function parseArgs(args: string[]) {
       while (j < token.length) {
         const ch = token[j] ?? ''
         if (!OPTION_CHARS.includes(ch)) {
-          return { flags: {}, texts: [], error: `bash: history: -${ch}: invalid option\n` }
+          return { flags: {}, texts: [], error: `${shellVoice()}history: -${ch}: invalid option\n` }
         }
         flags[ch] = true
         if (ch === 'd') {
@@ -86,7 +91,7 @@ export function parseArgs(args: string[]) {
             return {
               flags: {},
               texts: [],
-              error: 'bash: history: -d: option requires an argument\n',
+              error: `${shellVoice()}history: -d: option requires an argument\n`,
             }
           }
           break
@@ -119,11 +124,11 @@ export async function handleHistory(
   // bash abandons everything still to run, as `exit 1 2` does; `-p` and
   // `-s` take any number of words.
   if (Object.keys(flags).length === 0 && texts.length > 1) {
-    throw new ExitSignal(1, encodeText('bash: history: too many arguments\n'))
+    throw new ExitSignal(1, encodeText(`${shellVoice()}history: too many arguments\n`))
   }
   const observer = registry.observer
   if (observer === null) {
-    return result(null, 1, encodeText('bash: history: not enabled for this workspace\n'))
+    return result(null, 1, encodeText(`${shellVoice()}history: not enabled for this workspace\n`))
   }
   const fl = new FlagView(flags, specOf('history'))
   const c = fl.asBool('c')
@@ -162,7 +167,11 @@ export async function handleHistory(
   if (arg !== undefined) {
     const parsed = parseIntStrict(arg)
     if (parsed === null) {
-      return result(null, 1, encodeText(`bash: history: ${arg}: numeric argument required\n`))
+      return result(
+        null,
+        1,
+        encodeText(`${shellVoice()}history: ${arg}: numeric argument required\n`),
+      )
     }
     count = parsed
   }

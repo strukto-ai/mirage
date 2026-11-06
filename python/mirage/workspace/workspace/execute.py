@@ -41,8 +41,8 @@ from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
 from mirage.policy.builtin.output_cap import LINE_NAME, line_timeout
 from mirage.policy.decisions import is_pending
+from mirage.process.handle import ProcessHandle
 from mirage.process.table import ProcessTable
-from mirage.process.types import ProcessInfo
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import whole_line_runtime
 from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
@@ -53,6 +53,7 @@ from mirage.shell.constants import (
     FORK_FAILED,
     FORK_FAILED_STATUS,
     INTERRUPTED_STATUS,
+    SHELL_IGNORED_SIGNALS,
 )
 from mirage.shell.errors import DiscardSignal, ExitSignal
 from mirage.shell.helpers import input_substitution_redirect
@@ -329,6 +330,7 @@ async def recurse(
     child_token = None
     if substitution:
         context = child_context(context)
+        context.frame.substitution = True
         session = context.session
         child_token = set_current_evaluation(context, owner=ws.sessions)
     capture = Terminal()
@@ -588,6 +590,11 @@ async def _run_line(
 ) -> IOResult:
     """Run a line as the session's process, starting one if it has none.
 
+    Every line of a session runs under one pid, its ``$$``, as one shell
+    runs them all; the session runs one line at a time. A signal that
+    stops the shell (``kill $$``) ends the line with 128 plus it, its jobs
+    left running.
+
     Args:
         ws (ExecuteEnv): the workspace.
         command (str): the line's text.
@@ -608,10 +615,8 @@ async def _run_line(
             finally:
                 reset_current_session(token)
 
-        def started(info: ProcessInfo) -> None:
-            session.process_id = info.pid
-            if session.shell_pid is None:
-                session.shell_pid = info.pid
+        def started(process: ProcessHandle) -> None:
+            session.process_id = session.shell_pid = process.info.pid
 
         try:
             process = ws.processes.start(
@@ -622,13 +627,18 @@ async def _run_line(
                 limit=session.processes.max,
                 execution_id=execution_scope.id,
                 started=started,
+                ignores=SHELL_IGNORED_SIGNALS,
+                pid=session.shell_pid,
             )
         except BlockingIOError:
             record_status(session, FORK_FAILED_STATUS)
             return IOResult(exit_code=FORK_FAILED_STATUS, stderr=FORK_FAILED)
         try:
-            await process.task
-            return results[0]
+            code = await process.reap()
+            if results:
+                return results[0]
+            record_status(session, code)
+            return IOResult(exit_code=code)
         finally:
             session.process_id = None
     return await run_line()
@@ -698,6 +708,12 @@ async def run_prepared_line(
         if parent is not None and parent.session is effective_session
         else EvaluationContext(effective_session, parent=parent)
     )
+    if context is not parent:
+        context.frame.shell = (
+            parent.frame.shell
+            if parent is not None
+            else current_caller().process
+        )
     io = IOResult()
     # The line-reader decision (GNU: history is appended where the
     # typed line is read, never inside the evaluator). Internal

@@ -37,9 +37,12 @@ class FunctionSite:
         aliases (Mapping[str, str] | None): the aliases the body runs,
             as its definition saw them (``alias_view``); None to read
             them as they are when it runs.
+        name (str): what the body's diagnostics name as their source:
+            the file it was sourced from, else ``environment``.
     """
 
     source: str
     mark: tuple[int, int]
     origin: Occurrence | None
     aliases: Mapping[str, str] | None = None
+    name: str = "environment"

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../shell/voice.ts'
 import { UsageError } from '../../../commands/errors.ts'
 import type { CommandSpec } from '../../../commands/spec/types.ts'
 import { readFailExitCode } from '../../../commands/spec/usage.ts'
@@ -222,7 +223,7 @@ export async function runOnMount(
       throw err
     }
     if (mount === null) {
-      const errBytes = encodeText(`${cmdName}: command not found`)
+      const errBytes = encodeText(`${shellVoice()}${cmdName}: command not found`)
       return [null, new IOResult({ exitCode: NOT_FOUND_STATUS, stderr: errBytes })]
     }
   }

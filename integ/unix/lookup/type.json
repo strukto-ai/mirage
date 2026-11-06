@@ -25,7 +25,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: type: nope-xyz: not found\n"
+        "stderr": "bash: line 1: type: nope-xyz: not found\n"
       }
     },
     {
@@ -39,7 +39,7 @@
       "expect": {
         "exit": 1,
         "stdout": "cd is a shell builtin\n",
-        "stderr": "bash: type: nope-xyz: not found\n"
+        "stderr": "bash: line 1: type: nope-xyz: not found\n"
       }
     },
     {
@@ -81,7 +81,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "bash: type: -x: invalid option\ntype: usage: type [-afptP] name [name ...]\n"
+        "stderr": "bash: line 1: type: -x: invalid option\ntype: usage: type [-afptP] name [name ...]\n"
       }
     },
     {

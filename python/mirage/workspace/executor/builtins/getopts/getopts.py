@@ -18,6 +18,7 @@ from mirage.policy import PolicyDenied
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ReadonlyVariableError
+from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
@@ -49,11 +50,11 @@ async def _getopts_finish(
     try:
         if not is_valid_name(name):
             stderr = encode_text(
-                f"bash: getopts: `{name}': not a valid identifier\n"
+                f"{shell_voice()}getopts: `{name}': not a valid identifier\n"
             )
             exit_code = 1
         elif name in session.readonly_vars:
-            stderr = encode_text(f"bash: {name}: readonly variable\n")
+            stderr = encode_text(f"{shell_voice()}{name}: readonly variable\n")
             exit_code = 1
         else:
             await view.set(name, opt_value)
@@ -63,7 +64,7 @@ async def _getopts_finish(
             await view.set("OPTARG", optarg)
         await view.set("OPTIND", str(new_optind))
     except ReadonlyVariableError as exc:
-        stderr = encode_text(f"bash: {exc.name}: readonly variable\n")
+        stderr = encode_text(f"{shell_voice()}{exc.name}: readonly variable\n")
         exit_code = 1
     except PolicyDenied as exc:
         stderr = encode_text(f"{exc.strerror}\n")

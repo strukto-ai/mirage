@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../shell/voice.ts'
 import { atoi } from '../../commands/builtin/utils/strtol.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import { lineBuffer } from '../../io/async_line_iterator.ts'
@@ -107,20 +108,26 @@ export async function executeBody(
     if (cmd.type === NT.COMMENT) continue
     const armed = errTrapArmed(session)
     try {
-      const [stdout, io, execNode] = await runProgram(cmd, context, async () => {
-        const [out, ranIo, ran] = await runStatement(
-          executeNode,
-          cmd,
-          context,
-          stdin,
-          bound,
-          callStack,
-          jobTable,
-          handed,
-          decisions,
-        )
-        return [await finishStatement(out, ranIo, session, cmd), ranIo, ran]
-      })
+      const [stdout, io, execNode] = await runProgram(
+        cmd,
+        context,
+        async () => {
+          const [out, ranIo, ran] = await runStatement(
+            executeNode,
+            cmd,
+            context,
+            stdin,
+            bound,
+            callStack,
+            jobTable,
+            handed,
+            decisions,
+          )
+          return [await finishStatement(out, ranIo, session, cmd), ranIo, ran]
+        },
+        jobTable,
+        sink,
+      )
       lastExec = execNode
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
@@ -371,7 +378,7 @@ export async function handleFor(
   // rule, checked up front so the loop never starts, exactly as bash
   // refuses `for x` on a readonly x before the first iteration.
   if (view.isReadonly(variable)) {
-    const err = encodeText(`bash: ${variable}: readonly variable\n`)
+    const err = encodeText(`${shellVoice()}${variable}: readonly variable\n`)
     return collectLoopResult([], new IOResult({ exitCode: 1, stderr: err }), 'for')
   }
   // Each iteration reads the fd 0 the loop started with, so an `exec < f` in
@@ -515,7 +522,7 @@ export async function handleCfor(
     if (err instanceof ArithError && err.inSubscript) {
       throw await carried(err.signal(), chainStreams(allStdout), mergedIo)
     }
-    const prefix = err instanceof ArithError ? 'bash: ((: ' : 'bash: '
+    const prefix = err instanceof ArithError ? `${shellVoice()}((: ` : shellVoice()
     const errBytes = encodeText(`${prefix}${err.message}\n`)
     mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: errBytes }))
     mergedIo.exitCode = 1
@@ -650,7 +657,8 @@ export async function handleSelect(
       else allStdout.push(encodeText('\n'))
     }
     if (reply === null || frozen !== null) {
-      const err = frozen !== null ? encodeText(`bash: ${frozen}: readonly variable\n`) : null
+      const err =
+        frozen !== null ? encodeText(`${shellVoice()}${frozen}: readonly variable\n`) : null
       mergedIo = await mergedIo.merge(new IOResult({ exitCode: 1, stderr: err }))
       break
     }

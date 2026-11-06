@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { callerSignal, runAsProgram } from '../../../../context/session_context.ts'
 import { isAborting, isMissingPath, strerrorOf } from '../../../../errors/fs.ts'
@@ -131,7 +132,7 @@ export async function handleExecCommand(
 
 /** bash's line for a redirect target it could not open. */
 function errorLine(label: string, err: unknown): Uint8Array {
-  return encodeText(`${label}: ${strerrorOf(err)}\n`)
+  return encodeText(`${shellVoice()}${label}: ${strerrorOf(err)}\n`)
 }
 
 /** The shell-attributed refusal of an `exec` redirect line; the line is
@@ -262,6 +263,25 @@ async function route(
   if (target === CLOSED) await discardStreams(data)
   else await append(dispatch, target, data)
   return [null, null, false]
+}
+
+/**
+ * Send one write where an `exec` binding points its channel, for a redirect
+ * level whose own descriptor the binding shadows: null while the channel is
+ * unbound, else what is left for the level's stdout and stderr (`exec >&2`
+ * crosses over, a file takes it all). Mirrors Python's route_rebound.
+ */
+export async function routeRebound(
+  dispatch: DispatchFn,
+  session: SessionState,
+  channel: Channel,
+  data: Uint8Array,
+): Promise<[ByteSource | null, ByteSource | null] | null> {
+  const stdout = channel === Channel.STDOUT
+  const binding = stdout ? session.execStdout : session.execStderr
+  if (binding === null) return null
+  const [out, err] = await route(dispatch, session, binding, data, stdout ? TO_STDOUT : TO_STDERR)
+  return [out, err]
 }
 
 type StreamBindings = Pick<SessionState, (typeof EXEC_STREAM_FIELDS)[number] | 'descriptors'>

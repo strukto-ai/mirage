@@ -644,6 +644,60 @@ async def test_int_and_quit_from_kill_leave_a_job_running(line, out):
         await ws.close()
 
 
+# Every line of a session runs under one pid, its $$: a signal to it ends
+# the line with 128 plus it, the next line's $?, and leaves its jobs
+# running; a QUIT, which every shell ignores, does nothing. A nested shell
+# is a process of its own, with a $$ of its own.
+@pytest.mark.asyncio
+async def test_dollar_dollar_names_the_sessions_shell():
+    ws = _workspace()
+    try:
+        pid = (await (await ws.shell("echo $$")).stdout_str()).strip()
+        io = await ws.shell("sleep 0.3 & echo before; kill $$; echo after")
+        assert (await io.stdout_str(), io.exit_code) == ("before\n", 143)
+        io = await ws.shell(
+            "echo $? $$; kill -QUIT $$; echo quit=$?; wait; echo job=$?; "
+            "[ \"$(bash -c 'echo $$')\" != $$ ] && echo own; "
+            "bash -c 'kill $$; echo no'; echo nested=$?"
+        )
+        assert await io.stdout_str() == (
+            f"143 {pid}\nquit=0\njob=0\nown\nnested=143\n"
+        )
+    finally:
+        await ws.close()
+
+
+# kill -SIG -- -PGID signals every process of a group, as killpg(2) does:
+# the session's shell leads one, which its jobs and nested shells are in. A
+# shell hands a QUIT to the program it runs right now; a job ignores an INT
+# too, which ends the line's own shell.
+@pytest.mark.asyncio
+async def test_kill_signals_a_process_group():
+    ws = _workspace()
+    try:
+        io = await ws.shell(
+            '{ sleep 1; echo "q $?"; } & sleep 0.1; kill -QUIT -- -$$; '
+            "wait $!; echo after=$?; kill -0 -- -$$; echo grp=$?; "
+            "bash -c 'kill -0 -- -$$' 2>/dev/null; echo nested=$?; "
+            "kill -s TERM -- -999999; echo missing=$?"
+        )
+        assert await io.stdout_str() == (
+            "q 131\nafter=0\ngrp=0\nnested=1\nmissing=1\n"
+        )
+        assert await io.stderr_str() == (
+            "bash: line 1: kill: (-999999) - No such process\n"
+        )
+        io = await ws.shell(
+            '{ sleep 1; echo "a $?" > /m/a; } & sleep 0.1; '
+            "kill -INT -- -$$; echo no"
+        )
+        assert (await io.stdout_str(), io.exit_code) == ("", 130)
+        io = await ws.shell("wait; cat /m/a")
+        assert await io.stdout_str() == "a 130\n"
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_jobs_prints_nothing_when_the_table_is_empty():
     out, io, _ = await handle_jobs(JobTable(), ["jobs"])
@@ -1110,7 +1164,7 @@ async def test_ps_and_kill_reach_other_sessions_as_far_as_the_profile_says():
         io = await ws.shell(stop, session_id="audit")
         assert (await io.stdout_str(), await io.stderr_str()) == (
             "rc=1\n",
-            f"bash: kill: ({pid.decode().strip()}) - Operation not permitted\n",
+            f"bash: line 1: kill: ({pid.decode().strip()}) - Operation not permitted\n",
         )
         assert (await ws.shell(stop, session_id="ops")).stdout == b"rc=0\n"
     finally:
@@ -1242,8 +1296,9 @@ async def test_kill_succeeds_when_any_operand_was_signalled():
         result = await ws.shell(f"kill 999999 %9 abc {pid}; echo rc=$?")
         assert result.stdout == b"rc=0\n"
         assert result.stderr == (
-            b"bash: kill: (999999) - No such process\nbash: kill: %9: no such job\n"
-            b"bash: kill: abc: arguments must be process or job IDs\n"
+            b"bash: line 1: "
+            b"kill: (999999) - No such process\nbash: line 1: kill: %9: no such job\n"
+            b"bash: line 1: kill: abc: arguments must be process or job IDs\n"
         )
     finally:
         await ws.close()
@@ -1567,9 +1622,9 @@ async def test_kill_refuses_an_owner_pid_nobody_runs():
         killed = await ws.shell("kill ab12:3 :3 ab12:x", session_id="s")
         assert killed.exit_code == 1
         assert killed.stderr.decode().splitlines() == [
-            "bash: kill: (ab12:3) - No such process",
-            "bash: kill: :3: arguments must be process or job IDs",
-            "bash: kill: ab12:x: arguments must be process or job IDs",
+            "bash: line 1: kill: (ab12:3) - No such process",
+            "bash: line 1: kill: :3: arguments must be process or job IDs",
+            "bash: line 1: kill: ab12:x: arguments must be process or job IDs",
         ]
         listed = await ws.shell("ps -p ab12:3", session_id="s")
         assert (listed.exit_code, listed.stdout) == (1, b"")

@@ -39,7 +39,9 @@ export type JobRunner = (job: Job) => Promise<JobResult>
  * handled a `kill` leaves the job its own status. Its `owner` is the job
  * table that runs it; a job another workspace runs has no `process` here.
  * Its `consoleName` is the name its job store keeps the console under,
- * which tells apart two jobs a reused number gave the same id.
+ * which tells apart two jobs a reused number gave the same id. A `reported`
+ * job's shell printed the report of the signal that ended it, so `jobs` and
+ * a `%N` no longer name it, and its pid still answers `wait`.
  */
 export class Job {
   id: number
@@ -58,6 +60,7 @@ export class Job {
 
   status: JobStatus = JobStatus.RUNNING
   exitCode = 0
+  reported = false
 
   constructor(init: {
     id: number

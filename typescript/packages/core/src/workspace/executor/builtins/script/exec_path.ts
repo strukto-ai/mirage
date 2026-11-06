@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { runAsProgram } from '../../../../context/session_context.ts'
 import { fsStrerror } from '../../../../errors/fs.ts'
@@ -121,10 +122,20 @@ export async function handleExecPath(
     const strerror = fsStrerror(exc)
     if (strerror === null) throw exc
     const code = (exc as { code?: string }).code
-    return scriptError(path, strerror, code === 'ENOENT' ? NOT_FOUND_STATUS : CANNOT_EXECUTE_STATUS)
+    return scriptError(
+      `${shellVoice()}${path}`,
+      strerror,
+      code === 'ENOENT' ? NOT_FOUND_STATUS : CANNOT_EXECUTE_STATUS,
+      path,
+    )
   }
   if (isBinary(data))
-    return scriptError(path, 'cannot execute binary file: Exec format error', CANNOT_EXECUTE_STATUS)
+    return scriptError(
+      `${shellVoice()}${path}`,
+      'cannot execute binary file: Exec format error',
+      CANNOT_EXECUTE_STATUS,
+      path,
+    )
   const script = decodeText(data)
   const target = namespace.sessionLinks(session).follow(resolvePath(path, session.cwd))
   const [vfs, spec] = registry.resolve(target)

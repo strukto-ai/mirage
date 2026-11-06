@@ -72,7 +72,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/sessvis/vault/new.txt: No such file or directory\n"
+        "stderr": "bash: line 1: /data/sessvis/vault/new.txt: No such file or directory\n"
       }
     },
     {
@@ -123,7 +123,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/sessvis/new.key: Permission denied\n"
+        "stderr": "bash: line 1: /data/sessvis/new.key: Permission denied\n"
       }
     },
     {
@@ -171,7 +171,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/sessvis/ghost/new.txt: No such file or directory\n"
+        "stderr": "bash: line 1: /data/sessvis/ghost/new.txt: No such file or directory\n"
       }
     },
     {
@@ -247,7 +247,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/sessvis/Vault/new.txt: No such file or directory\n"
+        "stderr": "bash: line 1: /data/sessvis/Vault/new.txt: No such file or directory\n"
       }
     },
     {

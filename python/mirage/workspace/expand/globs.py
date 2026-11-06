@@ -25,6 +25,7 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.constants import SHOPT_DEFAULTS
 from mirage.shell.errors import DiscardSignal, TooManyMatches
+from mirage.shell.voice import shell_voice
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.glob_walk import (
     glob_name_matches,
@@ -773,7 +774,7 @@ async def resolve_globs(
                     if opts.failglob:
                         word = unmark_globs(typed.raw_path)
                         raise DiscardSignal(
-                            encode_text(f"bash: no match: {word}\n")
+                            encode_text(f"{shell_voice()}no match: {word}\n")
                         )
                     if not opts.nullglob:
                         result.append(

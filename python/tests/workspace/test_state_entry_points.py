@@ -754,7 +754,9 @@ def test_readonly_declaration_array_abandons_the_line():
     denied, out, after = asyncio.run(run())
     assert denied.exit_code == 1
     assert out == ""
-    assert (denied.stderr or b"") == b"bash: LOCKED: readonly variable\n"
+    assert (
+        denied.stderr or b""
+    ) == b"bash: line 1: LOCKED: readonly variable\n"
     assert after.exit_code == 0
 
 

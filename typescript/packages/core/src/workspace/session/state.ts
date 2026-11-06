@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../shell/voice.ts'
 import { sessionAccess } from '../../context/session_context.ts'
 import type { SessionView } from '../../view/types.ts'
 import {
@@ -33,7 +34,9 @@ import {
   ShellArray,
 } from '../../shell/array.ts'
 import {
+  BASHPID,
   FUNCNAME,
+  LINENO,
   PIPESTATUS,
   RANDOM,
   RANDOM_MODULUS,
@@ -484,7 +487,8 @@ export function nextRandom(session: SessionState, stored: string | undefined): n
 }
 
 /**
- * Arithmetic's reads of `$RANDOM`, bound to one session.
+ * Arithmetic's reads of `$RANDOM`, bound to one session, of `$LINENO`, the
+ * running command's line, and of `$BASHPID`, the process running it.
  *
  * A read before the expression assigns `RANDOM` draws from the session
  * generator. bash seeds at the instant of an assignment and every later
@@ -524,6 +528,8 @@ export class RandomReader {
 
   /** The dynamic value of a name, null for a name that has none. */
   readonly read = (name: string): string | null => {
+    if (name === LINENO) return String(this.session.lineNumber)
+    if (name === BASHPID) return String(this.session.processId ?? this.session.shellPid ?? 0)
     if (!this.special(name)) return null
     if (this.seeded === null) {
       const value = nextRandom(this.session, visibleEnv(this.session)[name])
@@ -857,7 +863,7 @@ async function setVar(
     existing?.attrs.has(VarAttr.Nameref) === true &&
     typeof shaped === 'object'
   ) {
-    diagnostics.push(encodeText(`bash: warning: ${name}: removing nameref attribute\n`))
+    diagnostics.push(encodeText(`${shellVoice()}warning: ${name}: removing nameref attribute\n`))
   }
   let stored = existing === undefined ? makeVar(shaped) : withValue(existing, shaped)
   // An agent write to a managed name shadows session-locally: the

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import { parseShellOptions, SHELL_SPECS } from '../../../../commands/spec/shell.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { lineBuffer } from '../../../../io/async_line_iterator.ts'
@@ -56,12 +57,12 @@ export async function handleMapfile(
   const parse = parseShellOptions(SHELL_SPECS.mapfile, args)
   if (parse.invalid !== null) {
     const token = parse.invalid.startsWith('--') ? parse.invalid : `-${parse.invalid}`
-    return fail(cmd, `bash: ${cmd}: ${token}: invalid option\n${builtinUsage(cmd)}`, 2)
+    return fail(cmd, `${shellVoice()}${cmd}: ${token}: invalid option\n${builtinUsage(cmd)}`, 2)
   }
   if (parse.needsValue !== null) {
     return fail(
       cmd,
-      `bash: ${cmd}: -${parse.needsValue}: option requires an argument\n${builtinUsage(cmd)}`,
+      `${shellVoice()}${cmd}: -${parse.needsValue}: option requires an argument\n${builtinUsage(cmd)}`,
       2,
     )
   }
@@ -82,22 +83,26 @@ export async function handleMapfile(
     if (typeof raw !== 'string') continue
     const value = countOperand(raw)
     if (value === null || value > COUNT_MAX || (key === 'c' && value === 0)) {
-      return fail(cmd, `bash: ${cmd}: ${raw}: invalid ${label}\n`, 1)
+      return fail(cmd, `${shellVoice()}${cmd}: ${raw}: invalid ${label}\n`, 1)
     }
     apply(value)
   }
   if (typeof flags.u === 'string' && flags.u !== '0') {
-    return fail(cmd, `bash: ${cmd}: ${flags.u}: invalid file descriptor: Bad file descriptor\n`, 1)
+    return fail(
+      cmd,
+      `${shellVoice()}${cmd}: ${flags.u}: invalid file descriptor: Bad file descriptor\n`,
+      1,
+    )
   }
   const strip = flags.t === true
   const callback = typeof flags.C === 'string' ? flags.C : null
   const name = parse.operands.length > 0 ? (parse.operands[0] ?? '') : 'MAPFILE'
   if (!IDENTIFIER.test(name))
-    return fail(cmd, `bash: ${cmd}: \`${name}': not a valid identifier\n`, 1)
+    return fail(cmd, `${shellVoice()}${cmd}: \`${name}': not a valid identifier\n`, 1)
   const view = requireView(state)
-  if (view.isReadonly(name)) return fail(cmd, `bash: ${name}: readonly variable\n`, 1)
+  if (view.isReadonly(name)) return fail(cmd, `${shellVoice()}${name}: readonly variable\n`, 1)
   if (name in visibleAssocs(session))
-    return fail(cmd, `bash: ${cmd}: ${name}: not an indexed array\n`, 1)
+    return fail(cmd, `${shellVoice()}${cmd}: ${name}: not an indexed array\n`, 1)
 
   const buffer = stdin !== null ? lineBuffer(stdin) : null
   const existing = visibleArrays(session)[name]

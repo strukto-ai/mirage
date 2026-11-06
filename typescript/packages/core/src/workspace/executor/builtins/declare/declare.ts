@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
 import {
@@ -292,7 +293,7 @@ export function plusRefusal(
   }
   const isMap = value !== null && typeof value === 'object' && !(value instanceof ShellArray)
   if ((plus.includes('a') && value instanceof ShellArray) || (plus.includes('A') && isMap)) {
-    return `bash: ${cmd}: ${name}: cannot destroy array variables in this way`
+    return `${shellVoice()}${cmd}: ${name}: cannot destroy array variables in this way`
   }
   return null
 }
@@ -355,7 +356,7 @@ export async function storeStagedArrays(
     const { name, append, items } = operand
     if (view.isReadonly(name)) {
       if (fatal || globalScope)
-        throw new DiscardSignal(encodeText(`bash: ${name}: readonly variable\n`))
+        throw new DiscardSignal(encodeText(`${shellVoice()}${name}: readonly variable\n`))
       errors.push(readonlyLine(cmd, name))
       continue
     }
@@ -365,8 +366,8 @@ export async function storeStagedArrays(
     const held = fresh && !inherit ? null : heldValue(session, name)
     const conflict = kindConflict(held, kind)
     if (conflict !== null) {
-      if (fatal) throw new DiscardSignal(encodeText(`bash: ${name}: ${conflict}\n`))
-      errors.push(`bash: ${cmd}: ${name}: ${conflict}`)
+      if (fatal) throw new DiscardSignal(encodeText(`${shellVoice()}${name}: ${conflict}\n`))
+      errors.push(`${shellVoice()}${cmd}: ${name}: ${conflict}`)
       continue
     }
     try {
@@ -386,7 +387,7 @@ export async function storeStagedArrays(
         const { map, badWords } = buildAssocLiteral(session.assocs[name] ?? null, items, append)
         for (const word of badWords) {
           warnings.push(
-            `bash: ${name}: '${word}': must use subscript when assigning associative array`,
+            `${shellVoice()}${name}: '${word}': must use subscript when assigning associative array`,
           )
         }
         base = map
@@ -532,7 +533,7 @@ export function identifierRefusal(cmd: string, word: string): string | null {
   const [name] = operandParts(word)
   if (isValidName(name)) return null
   const quoted = SUBSCRIPT_RE.test(name) ? name : word
-  return `bash: ${cmd}: \`${quoted}': not a valid identifier`
+  return `${shellVoice()}${cmd}: \`${quoted}': not a valid identifier`
 }
 
 /**
@@ -620,7 +621,7 @@ export function handleDeclarePrint(
   const errors: string[] = []
   for (const name of targets) {
     const line = declareLine(session, name)
-    if (line === null) errors.push(`bash: declare: ${name}: not found`)
+    if (line === null) errors.push(`${shellVoice()}declare: ${name}: not found`)
     else lines.push(line)
   }
   return result('declare', {
@@ -710,7 +711,7 @@ export function handleDeclareFunctions(
     }
     return result(cmd, {
       exitCode: missing.length > 0 || frozen.length > 0 ? 1 : 0,
-      stderr: frozen.map((name) => `bash: ${cmd}: ${name}: readonly function\n`).join(''),
+      stderr: frozen.map((name) => `${shellVoice()}${cmd}: ${name}: readonly function\n`).join(''),
     })
   }
   if (names.length === 0) {
@@ -731,7 +732,9 @@ export function handleDeclareFunctions(
   return result(cmd, {
     out: encodeText(lines.map((line) => `${line}\n`).join('')),
     exitCode: missing.length > 0 ? 1 : 0,
-    stderr: printing ? missing.map((name) => `bash: ${cmd}: ${name}: not found\n`).join('') : '',
+    stderr: printing
+      ? missing.map((name) => `${shellVoice()}${cmd}: ${name}: not found\n`).join('')
+      : '',
   })
 }
 
@@ -761,7 +764,7 @@ export async function markNames(
   )
   if (bad !== null) {
     const usage = builtinUsage(exporting ? 'export' : 'readonly')
-    return fail(cmd, `bash: ${cmd}: -${bad}: invalid option\n${usage}`, 2)
+    return fail(cmd, `${shellVoice()}${cmd}: -${bad}: invalid option\n${usage}`, 2)
   }
   const on = !flags.has('n')
   const kind = declaredKind(flags)
@@ -824,7 +827,7 @@ export async function markFunctions(
     return ok(cmd, encodeText(lines.map((line) => `${line}\n`).join('')))
   }
   for (const name of names) {
-    if (!(name in session.functions)) errors.push(`bash: ${cmd}: ${name}: not a function`)
+    if (!(name in session.functions)) errors.push(`${shellVoice()}${cmd}: ${name}: not a function`)
     else if (on) marked.add(name)
     else marked.delete(name)
   }
@@ -945,7 +948,7 @@ async function markOperand(
     await view.mark(key, attr, on)
   }
   if (on) outliveCall(session, key)
-  return conflict === null ? null : `bash: ${cmd}: ${key}: ${conflict}`
+  return conflict === null ? null : `${shellVoice()}${cmd}: ${key}: ${conflict}`
 }
 
 /**
@@ -974,10 +977,10 @@ export function namerefRefusal(cmd: string, name: string, target: string): strin
     return `mirage: ${cmd}: ${target}: name reference to an array element is not supported`
   }
   if (!isValidName(target)) {
-    return `bash: ${cmd}: \`${target}': invalid variable name for name reference`
+    return `${shellVoice()}${cmd}: \`${target}': invalid variable name for name reference`
   }
   if (target === name) {
-    return `bash: ${cmd}: ${name}: nameref variable self references not allowed`
+    return `${shellVoice()}${cmd}: ${name}: nameref variable self references not allowed`
   }
   return null
 }
@@ -997,7 +1000,7 @@ export function referenceRefusal(
   bare: boolean,
 ): string | null {
   if (own !== undefined && own.value !== null && typeof own.value === 'object') {
-    return `bash: ${cmd}: ${name}: reference variable cannot be an array`
+    return `${shellVoice()}${cmd}: ${name}: reference variable cannot be an array`
   }
   if (
     !bare ||

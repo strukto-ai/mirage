@@ -34,7 +34,8 @@ import {
 } from '../../shell/constants.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 import type { JobTable, JobWaits } from '../../shell/job_table/index.ts'
-import type { AliasExpansion } from '../../shell/types.ts'
+import { sourceRow } from '../../shell/helpers.ts'
+import type { AliasExpansion, TSNodeLike } from '../../shell/types.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
 import { attrsFromLetters, copyVar, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
 import type { Limit, MountMode } from '../../types.ts'
@@ -487,6 +488,17 @@ export class SessionState {
   // for a line, a function's definition row for its body, which is parsed
   // again from its own source but reads aliases where it was written.
   parseRow = 0
+  // What the running parse's diagnostics name as their source: null for the
+  // shell's own input, `environment` for a function defined there, the file
+  // for one sourced; and the command running in it, whose line is `$LINENO`
+  // (`lineNumber`).
+  parseName: string | null = null
+  lineNode: TSNodeLike | null = null
+  // The row the next nested parse starts on, which a sourced file (0) and
+  // the rest of an input read again (its own parse's) set; null numbers it
+  // on from the running command's line, as `eval` and `$( )` do, or from 0
+  // for a shell's own input.
+  parseFrom: number | null = null
   // Where each function was defined (`FunctionSite`), so its body expands
   // the aliases of that place and its approvals stand under it; a function
   // loaded from a stored session has none and runs as a parse of its own.
@@ -719,6 +731,8 @@ export class SessionState {
     const child = this.fork()
     child.parseCurrent = this.parseCurrent
     child.parseRow = this.parseRow
+    child.parseName = this.parseName
+    child.lineNode = this.lineNode
     child.aliasExpansion = this.aliasExpansion
     child.localVars = this.localVars === null ? null : copyLocals(this.localVars)
     child.localFrames = this.localFrames.map((frame) =>
@@ -809,6 +823,14 @@ export class SessionState {
    * `-c`. An empty name is a name, so it is not folded into the default:
    * GNU `bash -c 'echo "[$0]"' ""` prints `[]`.
    */
+  /**
+   * The line of the command running, `$LINENO`: its row in the text that
+   * spelled it, numbered on from where that text's parse starts (`parseRow`).
+   */
+  get lineNumber(): number {
+    return this.parseRow + (this.lineNode === null ? 0 : sourceRow(this.lineNode)) + 1
+  }
+
   get argv0(): string {
     return this.scriptName ?? SHELL_ARGV0
   }

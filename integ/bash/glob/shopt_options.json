@@ -67,7 +67,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: no match: zz*\n"
+        "stderr": "bash: line 1: no match: zz*\n"
       }
     },
     {

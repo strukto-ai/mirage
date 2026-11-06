@@ -31,7 +31,7 @@
       "command": "fnx(){ echo F; }; fnx=keep; unset -f fnx; echo v=$fnx; fnx 2>&1; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "v=keep\nfnx: command not found\nrc=127\n",
+        "stdout": "v=keep\nbash: line 1: fnx: command not found\nrc=127\n",
         "stderr": ""
       }
     },
@@ -172,7 +172,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n[x y]\n",
-        "stderr": "bash: unset: UC: cannot unset: readonly variable\n"
+        "stderr": "bash: line 1: unset: UC: cannot unset: readonly variable\n"
       }
     },
     {
@@ -242,7 +242,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "bash: unset: UE: not an array variable\n"
+        "stderr": "bash: line 1: unset: UE: not an array variable\n"
       }
     },
     {

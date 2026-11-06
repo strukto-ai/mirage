@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../shell/voice.ts'
 import { childMountNames, namespaceNames } from '../../view/namespace_view.ts'
 import {
   callerSignal,
@@ -634,7 +635,7 @@ export async function resolveGlobs(
           // reads it as no entity name.
           if (opts.failglob) {
             const word = unmarkGlobs(typed.rawPath)
-            throw new DiscardSignal(encodeText(`bash: no match: ${word}\n`))
+            throw new DiscardSignal(encodeText(`${shellVoice()}no match: ${word}\n`))
           }
           if (!opts.nullglob) {
             result.push(

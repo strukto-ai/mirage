@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import { linkView } from '../../../../commands/builtin/utils/links.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { isProgramInvocation, runWithAdmission } from '../../../../context/session_context.ts'
@@ -99,7 +100,7 @@ export async function handleTest(
     // The builtin's own diagnostic is in bash's voice; the program
     // (`find -exec test`) keeps its bare one.
     const own = exc.message.startsWith(`${name}: `) && !isProgramInvocation(session)
-    const stderr = encodeText(`${own ? 'bash: ' : ''}${exc.message}\n`)
+    const stderr = encodeText(`${own ? shellVoice() : ''}${exc.message}\n`)
     if (name === '[[' && exc.fatal) {
       // A bad [[ ]] operator is a bash PARSE error: the whole input
       // line dies, not just this command.
@@ -145,7 +146,9 @@ export async function testBuiltin(call: BuiltinCall): Promise<RedirectResult> {
       testArgs = testArgs.slice(0, -1)
     } else {
       const err = encodeText(
-        isProgramInvocation(call.context.session) ? "[: missing ']'\n" : "bash: [: missing `]'\n",
+        isProgramInvocation(call.context.session)
+          ? "[: missing ']'\n"
+          : `${shellVoice()}[: missing \`]'\n`,
       )
       return [
         null,

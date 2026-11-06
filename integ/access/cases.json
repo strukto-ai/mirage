@@ -314,7 +314,7 @@
     {"id": "installs_an_mcp_cli", "input": {"step": "set_cli", "id": "w", "name": "items"}, "expect": {"text": "items"}},
     {"id": "runs_one_of_its_tools", "input": {"step": "shell", "id": "w", "command": "items list-items"}, "expect": {"text": "apple\nbanana\n", "is_error": false}},
     {"id": "removes_it", "input": {"step": "delete_cli", "id": "w", "name": "items"}, "expect": {"text": "items"}},
-    {"id": "its_name_is_gone", "input": {"step": "shell", "id": "w", "command": "items list-items"}, "expect": {"text": "items: command not found\n", "is_error": true}},
+    {"id": "its_name_is_gone", "input": {"step": "shell", "id": "w", "command": "items list-items"}, "expect": {"text": "bash: line 1: items: command not found\n", "is_error": true}},
     {"id": "installs_it_again", "input": {"step": "set_cli", "id": "w", "name": "items"}, "expect": {"text": "items"}},
     {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
    ]
@@ -399,7 +399,7 @@
     {"id": "resolves_no_link_into_it", "input": {"command": "readlink -f /data/lnk; readlink -m /data/dl/x; echo $?"}, "expect": {"text": "/data/lnk\n/data/dl/x\n0\n", "is_error": false}},
     {"id": "tests_it_alike_in_every_spelling", "input": {"command": "test -e /data/secret.txt; echo $?; [ -e /data/hdir ]; echo $?; [[ -e /data/secret.txt ]]; echo $?"}, "expect": {"text": "1\n1\n1\n", "is_error": false}},
     {"id": "reads_nothing_through_a_link", "input": {"command": "cat /data/lnk /data/dl/inner.txt"}, "expect": {"text": "cat: /data/lnk: No such file or directory\ncat: /data/dl/inner.txt: No such file or directory\n", "is_error": true}},
-    {"id": "writes_nothing_to_it", "input": {"command": "echo x > /data/secret.txt; echo $?"}, "expect": {"text": "1\n\n/data/secret.txt: Permission denied\n", "is_error": false}},
+    {"id": "writes_nothing_to_it", "input": {"command": "echo x > /data/secret.txt; echo $?"}, "expect": {"text": "1\n\nbash: line 1: /data/secret.txt: Permission denied\n", "is_error": false}},
     {"id": "leaves_it_to_a_glob_removal", "input": {"command": "rm -f /data/*; ls -A /data"}, "expect": {"text": "", "is_error": false}}
    ]
   },

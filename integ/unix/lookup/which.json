@@ -255,7 +255,7 @@
       "expect": {
         "exit": 0,
         "stdout": "-rwxr-xr-x\n",
-        "stderr": "/usr/bin/ls: Read-only file system\nchmod: changing permissions of '/usr/bin/ls': Read-only file system\n"
+        "stderr": "bash: line 1: /usr/bin/ls: Read-only file system\nchmod: changing permissions of '/usr/bin/ls': Read-only file system\n"
       }
     },
     {

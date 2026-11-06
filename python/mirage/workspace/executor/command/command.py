@@ -53,6 +53,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.shell.job_table import JobTable
+from mirage.shell.voice import shell_voice
 from mirage.types import Follow, PathSpec, Producer
 from mirage.view.types import StatPath
 from mirage.workspace.evaluation import EvaluationContext
@@ -457,7 +458,7 @@ async def handle_command(
     # dispatch chokepoint) stay ahead of this so protective refusals
     # keep their specific messages.
     if lookup(typed, session, registry) is Consumer.UNKNOWN:
-        err = encode_text(f"{typed}: command not found\n")
+        err = encode_text(f"{shell_voice()}{typed}: command not found\n")
         return (
             None,
             IOResult(exit_code=NOT_FOUND_STATUS, stderr=err),
@@ -965,7 +966,9 @@ async def handle_command(
             None,
             IOResult(
                 exit_code=NOT_FOUND_STATUS,
-                stderr=encode_text(f"{cmd_name}: command not found"),
+                stderr=encode_text(
+                    f"{shell_voice()}{cmd_name}: command not found"
+                ),
             ),
             ExecutionNode(command=cmd_str, exit_code=NOT_FOUND_STATUS),
         )

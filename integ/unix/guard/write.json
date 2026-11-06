@@ -93,7 +93,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/guard/nodir/f.txt: No such file or directory\n"
+        "stderr": "bash: line 1: /data/guard/nodir/f.txt: No such file or directory\n"
       }
     },
     {
@@ -109,7 +109,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/guard/nodir/f.txt: No such file or directory\n"
+        "stderr": "bash: line 1: /data/guard/nodir/f.txt: No such file or directory\n"
       }
     },
     {
@@ -157,7 +157,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/guard/sub: Is a directory\n"
+        "stderr": "bash: line 1: /data/guard/sub: Is a directory\n"
       }
     },
     {
@@ -173,7 +173,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/guard/sub: Is a directory\n"
+        "stderr": "bash: line 1: /data/guard/sub: Is a directory\n"
       }
     },
     {
@@ -221,7 +221,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/guard/nodir/f: No such file or directory\n"
+        "stderr": "bash: line 1: /data/guard/nodir/f: No such file or directory\n"
       }
     },
     {

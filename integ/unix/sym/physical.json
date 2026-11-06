@@ -277,7 +277,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "bash: set: bogusname: invalid option name\n"
+        "stderr": "bash: line 1: set: bogusname: invalid option name\n"
       }
     },
     {

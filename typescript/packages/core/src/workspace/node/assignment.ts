@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../shell/voice.ts'
 import { runInCommandScope } from '../../cache/index/scope.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import { PolicyDenied } from '../../policy/errors.ts'
@@ -85,7 +86,7 @@ async function fatalIndexLiteral(
  */
 function refuseReadonly(view: SessionView, key: string): void {
   if (view.isReadonly(key, false)) {
-    throw new DiscardSignal(encodeText(`bash: ${key}: readonly variable\n`))
+    throw new DiscardSignal(encodeText(`${shellVoice()}${key}: readonly variable\n`))
   }
 }
 
@@ -111,7 +112,7 @@ async function assignVar(
   } catch (err) {
     if (err instanceof PolicyDenied) throw new DiscardSignal(encodeText(`${err.message}\n`))
     if (err instanceof ReadonlyVariableError) {
-      throw new DiscardSignal(encodeText(`bash: ${err.message}\n`))
+      throw new DiscardSignal(encodeText(`${shellVoice()}${err.message}\n`))
     }
     if (err instanceof ArithError) throw err.signal('', true)
     throw err
@@ -257,7 +258,7 @@ export async function executeAssignment(
         stderr: badWords
           .map(
             (word) =>
-              `bash: ${key}: ${word}: must use subscript when assigning associative array\n`,
+              `${shellVoice()}${key}: ${word}: must use subscript when assigning associative array\n`,
           )
           .join(''),
       })
@@ -303,7 +304,7 @@ export async function executeAssignment(
       // empty stays legal (arithmetic on nothing is 0), so only the
       // associative kind checks the expanded text.
       const nameText = text.slice(0, eq).replace(/\+$/, '')
-      throw new DiscardSignal(encodeText(`bash: ${nameText}: bad array subscript\n`))
+      throw new DiscardSignal(encodeText(`${shellVoice()}${nameText}: bad array subscript\n`))
     }
     if (heldMap !== undefined) {
       // The subscript is the key: no arithmetic, `m[1+1]` writes the
@@ -324,7 +325,7 @@ export async function executeAssignment(
     if (idx < 0n) {
       // Same fatal shape as the empty subscript above.
       const nameText = text.slice(0, eq).replace(/\+$/, '')
-      throw new DiscardSignal(encodeText(`bash: ${nameText}: bad array subscript\n`))
+      throw new DiscardSignal(encodeText(`${shellVoice()}${nameText}: bad array subscript\n`))
     }
     refuseReadonly(view, key)
     const [slot, added] = append ? appended(arrayGet(arr, idx), val, integer) : [val, null]

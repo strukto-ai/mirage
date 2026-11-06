@@ -28,7 +28,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "bash: exit: abc: numeric argument required\n"
+        "stderr": "bash: line 1: exit: abc: numeric argument required\n"
       }
     }
   ]

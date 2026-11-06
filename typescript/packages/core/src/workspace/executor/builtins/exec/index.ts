@@ -13,4 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 export { CLOSED } from './constants.ts'
-export { divertStatement, divertedFile, handleExecCommand, installExecRedirects } from './exec.ts'
+export {
+  divertStatement,
+  divertedFile,
+  handleExecCommand,
+  installExecRedirects,
+  routeRebound,
+} from './exec.ts'

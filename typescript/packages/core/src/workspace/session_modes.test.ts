@@ -89,7 +89,7 @@ describe('per-session mount grants', () => {
 
     const denied = await ws.shell('echo leaked > /a/y.txt', { sessionId: 'agent' })
     expect(denied.exitCode).not.toBe(0)
-    expect(stderrStr(denied)).toBe('/a/y.txt: Read-only file system\n')
+    expect(stderrStr(denied)).toBe('bash: line 1: /a/y.txt: Read-only file system\n')
     expect(a.store.files.has('/y.txt')).toBe(false)
   })
 
@@ -107,7 +107,7 @@ describe('per-session mount grants', () => {
       const denied = await ws.shell(line, { sessionId: 'agent' })
       expect(denied.exitCode).toBe(0)
       expect(stdoutStr(denied)).toBe('next\n')
-      expect(stderrStr(denied)).toBe('/b/y.txt: No such file or directory\n')
+      expect(stderrStr(denied)).toBe('bash: line 1: /b/y.txt: No such file or directory\n')
       expect(b.store.files.has('/y.txt')).toBe(false)
     },
   )
@@ -127,7 +127,7 @@ describe('per-session mount grants', () => {
 
     const denied = await ws.shell('echo up > /a/y.txt', { sessionId: 'agent' })
     expect(denied.exitCode).not.toBe(0)
-    expect(stderrStr(denied)).toBe('/a/y.txt: Read-only file system\n')
+    expect(stderrStr(denied)).toBe('bash: line 1: /a/y.txt: Read-only file system\n')
   })
 
   // A list used to mean "only these mounts are reachable"; a mount a profile
@@ -208,7 +208,7 @@ describe('per-session mount grants', () => {
       session.cwd = shape === 'tree' || operand === '' ? '/b' : '/'
       const refused = await ws.shell(`${prog} ${operand}`, { sessionId: 'agent' })
       expect(refused.exitCode).toBe(127)
-      expect(stderrStr(refused)).toBe(`${prog}: command not found\n`)
+      expect(stderrStr(refused)).toBe(`bash: line 1: ${prog}: command not found\n`)
       expect(calls).toEqual([])
     }
   })
@@ -233,7 +233,7 @@ describe('per-session mount grants', () => {
 
     const writeDenied = await ws.shell('echo x > /root.txt', { sessionId: 'root_ro' })
     expect(writeDenied.exitCode).not.toBe(0)
-    expect(stderrStr(writeDenied)).toBe('/root.txt: Read-only file system\n')
+    expect(stderrStr(writeDenied)).toBe('bash: line 1: /root.txt: Read-only file system\n')
   })
 
   it('the implicit scratch root keeps pathless commands working', async () => {

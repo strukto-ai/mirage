@@ -101,7 +101,7 @@
       "command": "for i in 1 2; do for j in a b; do echo $i$j; break 9; done; done; echo after; for bq in 1 2; do ( break; echo s$bq ); bqf() { break; }; bqf; echo f$bq; bqx=$(echo c; break; echo no); echo \"[$bqx]\"; echo p | break; done 2>&1; for bq in 1; do bqg() { for bj in a b; do break 2; done; echo g; }; bqg; break 0; echo no; done 2>&1; echo rc=$?; break 2>&1; echo top=$?",
       "expect": {
         "exit": 0,
-        "stdout": "1a\nafter\nbash: break: only meaningful in a `for', `while', or `until' loop\ns1\nbash: break: only meaningful in a `for', `while', or `until' loop\nf1\n[c]\nbash: break: only meaningful in a `for', `while', or `until' loop\ns2\nbash: break: only meaningful in a `for', `while', or `until' loop\nf2\n[c]\ng\nbash: break: 0: loop count out of range\nrc=1\nbash: break: only meaningful in a `for', `while', or `until' loop\ntop=0\n",
+        "stdout": "1a\nafter\nbash: line 1: break: only meaningful in a `for', `while', or `until' loop\ns1\nenvironment: line 1: break: only meaningful in a `for', `while', or `until' loop\nf1\n[c]\nbash: line 1: break: only meaningful in a `for', `while', or `until' loop\ns2\nenvironment: line 1: break: only meaningful in a `for', `while', or `until' loop\nf2\n[c]\ng\nbash: line 1: break: 0: loop count out of range\nrc=1\nbash: line 1: break: only meaningful in a `for', `while', or `until' loop\ntop=0\n",
         "stderr": ""
       }
     },
@@ -137,7 +137,7 @@
       "expect": {
         "exit": 131,
         "stdout": "1:1\n",
-        "stderr": "bash: break: x: numeric argument required\n"
+        "stderr": "bash: line 1: break: x: numeric argument required\n"
       }
     }
   ]

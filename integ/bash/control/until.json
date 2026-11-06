@@ -172,7 +172,7 @@
       "expect": {
         "exit": 0,
         "stdout": "if 1\nf 1\ncase 1\na\nuntil 0\nfor [a]\nfor [b]\ncfor [a]\ncfor [b]\nwhile [a]\nwhile [b]\n",
-        "stderr": "bash: read: read error: 0: Bad file descriptor\nbash: R: readonly variable\n"
+        "stderr": "bash: line 5: read: read error: 0: Bad file descriptor\nbash: line 5: R: readonly variable\n"
       }
     }
   ]

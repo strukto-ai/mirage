@@ -27,12 +27,19 @@ class ProcessSubLine(Protocol):
 class ExecutionFrame:
     """Temporary state of one evaluation; never part of a session record.
 
-    ``job`` is the background job whose shell the evaluation runs in,
-    when that shell runs commands of its own (``{ sleep 3; echo x; } &``),
-    each of which a signal the shell ignores still reaches.
+    ``shell`` is the process whose shell the evaluation runs in (a line,
+    a subshell, a pipeline stage, a nested shell, a job that runs
+    commands of its own), each program of which a signal the shell
+    ignores still reaches; None where the evaluation is one program run
+    in place (``sleep 3 &``). ``reports`` are the report lines of the
+    jobs a signal ended that the running command reaped, which go out
+    after its stderr, around a redirect of its own; a command
+    substitution's shell, and the shells it forks, make none
+    (``substitution``).
     """
 
     diagnostics: list[str | bytes] = field(default_factory=list)
+    reports: list[bytes] = field(default_factory=list)
     cmdsub_seq: int = 0
     cmdsub_status: int = 0
     process_sub: (
@@ -40,13 +47,15 @@ class ExecutionFrame:
     ) = None
     routing: RouteDecision[RuntimeIdentity] | None = None
     line_timeout: float | None = None
-    job: ProcessHandle | None = None
+    shell: ProcessHandle | None = None
+    substitution: bool = False
 
     def fork(self) -> ExecutionFrame:
         """A child evaluation's frame, which starts empty but for the
         line's routing decision, since nested lines never re-route, its
         time limit, which a job it starts runs under from its own start,
-        and the job whose shell it is part of.
+        the process whose shell it is part of, and whether that shell is
+        a substitution's.
 
         TypeScript's also carries the abort signal; here cancellation is
         the asyncio task's and is ambient.
@@ -55,5 +64,8 @@ class ExecutionFrame:
             None
         """
         return ExecutionFrame(
-            routing=self.routing, line_timeout=self.line_timeout, job=self.job
+            routing=self.routing,
+            line_timeout=self.line_timeout,
+            shell=self.shell,
+            substitution=self.substitution,
         )

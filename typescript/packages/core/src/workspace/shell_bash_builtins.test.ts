@@ -42,7 +42,7 @@ const CASES: [string, string, string, string, number][] = [
     '',
     0,
   ],
-  ['let_no_operand', 'let', '', 'bash: let: expression expected\n', 1],
+  ['let_no_operand', 'let', '', 'bash: line 1: let: expression expected\n', 1],
   [
     'let_array_element',
     "a=(1 2); let 'a[1]+=5'; declare -p a",
@@ -61,7 +61,7 @@ const CASES: [string, string, string, string, number][] = [
     'umask_refuses_bad_mode',
     'umask 999; echo rc=$?; umask',
     'rc=1\n0022\n',
-    'bash: umask: 999: octal number out of range\n',
+    'bash: line 1: umask: 999: octal number out of range\n',
     0,
   ],
   [
@@ -80,19 +80,25 @@ const CASES: [string, string, string, string, number][] = [
     '',
     0,
   ],
-  ['shopt_bad_name', 'shopt -s bogus', '', 'bash: shopt: bogus: invalid shell option name\n', 1],
+  [
+    'shopt_bad_name',
+    'shopt -s bogus',
+    '',
+    'bash: line 1: shopt: bogus: invalid shell option name\n',
+    1,
+  ],
   [
     'shopt_conflicting_flags',
     'shopt -su nullglob',
     '',
-    'bash: shopt: cannot set and unset shell options simultaneously\n',
+    'bash: line 1: shopt: cannot set and unset shell options simultaneously\n',
     1,
   ],
   [
     'shopt_bad_letter',
     'shopt -z',
     '',
-    'bash: shopt: -z: invalid option\nshopt: usage: shopt [-pqsu] [-o] [optname ...]\n',
+    'bash: line 1: shopt: -z: invalid option\nshopt: usage: shopt [-pqsu] [-o] [optname ...]\n',
     2,
   ],
   ['shopt_o_bridges_set', 'shopt -so errexit; shopt -o errexit', 'errexit        \ton\n', '', 0],
@@ -105,7 +111,7 @@ const CASES: [string, string, string, string, number][] = [
     'glob_failglob_is_fatal',
     'shopt -s failglob; echo /data/zz*',
     '',
-    'bash: no match: /data/zz*\n',
+    'bash: line 1: no match: /data/zz*\n',
     1,
   ],
   [
@@ -126,7 +132,7 @@ const CASES: [string, string, string, string, number][] = [
   ],
 
   // ── alias ─────────────────────────────────────────────────
-  ['alias_off_by_default', "alias x='echo hi'\nx", '', 'x: command not found\n', 127],
+  ['alias_off_by_default', "alias x='echo hi'\nx", '', 'bash: line 2: x: command not found\n', 127],
   [
     'alias_expands_from_next_line',
     "shopt -s expand_aliases\nalias x='echo hi'\nx one",
@@ -138,7 +144,7 @@ const CASES: [string, string, string, string, number][] = [
     'alias_same_line_does_not_expand',
     "shopt -s expand_aliases\nalias x='echo hi'; x",
     '',
-    'x: command not found\n',
+    'bash: line 2: x: command not found\n',
     127,
   ],
   [
@@ -163,8 +169,8 @@ const CASES: [string, string, string, string, number][] = [
     '',
     0,
   ],
-  ['unalias_missing_name', 'unalias nope', '', 'bash: unalias: nope: not found\n', 1],
-  ['alias_bad_name', "alias 'a b'=x", '', "bash: alias: `a b': invalid alias name\n", 1],
+  ['unalias_missing_name', 'unalias nope', '', 'bash: line 1: unalias: nope: not found\n', 1],
+  ['alias_bad_name', "alias 'a b'=x", '', "bash: line 1: alias: `a b': invalid alias name\n", 1],
   ['alias_value_holding_a_quote', 'alias x="it\'s"; alias x', "alias x='it'\\''s'\n", '', 0],
 
   // ── mapfile / readarray ───────────────────────────────────
@@ -218,7 +224,13 @@ const CASES: [string, string, string, string, number][] = [
     '',
     0,
   ],
-  ['mapfile_bad_name', 'mapfile 1bad', '', "bash: mapfile: `1bad': not a valid identifier\n", 1],
+  [
+    'mapfile_bad_name',
+    'mapfile 1bad',
+    '',
+    "bash: line 1: mapfile: `1bad': not a valid identifier\n",
+    1,
+  ],
   [
     'mapfile_callback_gets_one_argument',
     'cb(){ echo "argc=$# [$2]"; }; ' +
@@ -232,7 +244,7 @@ const CASES: [string, string, string, string, number][] = [
     'mapfile_refuses_assoc',
     "declare -A M; printf 'x\\n' | { mapfile -t M; }",
     '',
-    'bash: mapfile: M: not an indexed array\n',
+    'bash: line 1: mapfile: M: not an indexed array\n',
     1,
   ],
 
@@ -261,12 +273,18 @@ const CASES: [string, string, string, string, number][] = [
     '',
     0,
   ],
-  ['read_bad_timeout', 'read -t x V', '', 'bash: read: x: invalid timeout specification\n', 1],
+  [
+    'read_bad_timeout',
+    'read -t x V',
+    '',
+    'bash: line 1: read: x: invalid timeout specification\n',
+    1,
+  ],
   [
     'read_bad_descriptor',
     'read -u 3 V',
     '',
-    'bash: read: 3: invalid file descriptor: Bad file descriptor\n',
+    'bash: line 1: read: 3: invalid file descriptor: Bad file descriptor\n',
     1,
   ],
 
@@ -296,14 +314,14 @@ const CASES: [string, string, string, string, number][] = [
     'nameref_self_reference_refused',
     'declare -n s=s',
     '',
-    'bash: declare: s: nameref variable self references not allowed\n',
+    'bash: line 1: declare: s: nameref variable self references not allowed\n',
     1,
   ],
   [
     'nameref_bad_target_refused',
     "declare -n r='a b'",
     '',
-    "bash: declare: `a b': invalid variable name for name reference\n",
+    "bash: line 1: declare: `a b': invalid variable name for name reference\n",
     1,
   ],
   ['unset_n_drops_the_reference', 'v=1; declare -n r=v; unset -n r; echo $v', '1\n', '', 0],
@@ -331,12 +349,12 @@ const CASES: [string, string, string, string, number][] = [
 
   // ── disown / wait ─────────────────────────────────────────
   ['disown_drops_the_job', 'sleep 5 & disown; echo rc=$?; jobs', 'rc=0\n', '', 0],
-  ['disown_with_no_jobs', 'disown', '', 'bash: disown: current: no such job\n', 1],
+  ['disown_with_no_jobs', 'disown', '', 'bash: line 1: disown: current: no such job\n', 1],
   [
     'disown_bad_option',
     'disown -x',
     '',
-    'bash: disown: -x: invalid option\ndisown: usage: disown [-h] [-ar] [jobspec ... | pid ...]\n',
+    'bash: line 1: disown: -x: invalid option\ndisown: usage: disown [-h] [-ar] [jobspec ... | pid ...]\n',
     2,
   ],
   ['wait_n_answers_first_finisher', '(exit 3) & wait -n', '', '', 3],
@@ -348,12 +366,18 @@ const CASES: [string, string, string, string, number][] = [
     0,
   ],
   ['wait_n_with_no_jobs', 'wait -n', '', '', 127],
-  ['wait_bad_spec', 'wait bogus', '', "bash: wait: `bogus': not a pid or valid job spec\n", 1],
+  [
+    'wait_bad_spec',
+    'wait bogus',
+    '',
+    "bash: line 1: wait: `bogus': not a pid or valid job spec\n",
+    1,
+  ],
   [
     'wait_bad_option',
     'wait -x',
     '',
-    'bash: wait: -x: invalid option\nwait: usage: wait [-fn] [-p var] [id ...]\n',
+    'bash: line 1: wait: -x: invalid option\nwait: usage: wait [-fn] [-p var] [id ...]\n',
     2,
   ],
 
@@ -398,7 +422,7 @@ const CASES: [string, string, string, string, number][] = [
     '( exec > /data/good < /data/missing; echo visible ); ' +
       'test -e /data/good && wc -c < /data/good',
     'visible\n0\n',
-    '/data/missing: No such file or directory\n',
+    'bash: line 1: /data/missing: No such file or directory\n',
     0,
   ],
   [
@@ -413,7 +437,7 @@ const CASES: [string, string, string, string, number][] = [
   [
     'exec_failed_redirect_diagnostic_follows_a_dup_to_stdout',
     '( exec 2>&1 < /data/missing; echo out; echo err >&2 )',
-    '/data/missing: No such file or directory\nout\n',
+    'bash: line 1: /data/missing: No such file or directory\nout\n',
     'err\n',
     0,
   ],
@@ -432,13 +456,13 @@ const CASES: [string, string, string, string, number][] = [
     'exec_stdin_dup_onto_itself_keeps_the_bound_file',
     "printf 'l1\\nl2\\n' > /data/in; ( exec < /data/in; exec 0<&0; read a; exec 0>&0; read b; echo $a-$b; exec <&-; read c; echo rc=$? )",
     'l1-l2\nrc=1\n',
-    'bash: read: read error: 0: Bad file descriptor\n',
+    'bash: line 1: read: read error: 0: Bad file descriptor\n',
     0,
   ],
   [
     'exec_failed_redirect_diagnostic_goes_where_stderr_pointed',
     '( exec 2> /data/e < /data/missing; echo toerr >&2 ); cat /data/e',
-    '/data/missing: No such file or directory\n',
+    'bash: line 1: /data/missing: No such file or directory\n',
     'toerr\n',
     0,
   ],

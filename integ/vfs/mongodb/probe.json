@@ -23,7 +23,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/mongodb/mirage_integ/collections/books/documents.jsonl: Read-only file system\n"
+        "stderr": "bash: line 1: /mongodb/mirage_integ/collections/books/documents.jsonl: Read-only file system\n"
       }
     },
     {

@@ -13,13 +13,18 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.commands.builtin.utils.links import link_view
-from mirage.context import program_invocation, reset_admission, set_admission
+from mirage.context import (
+    program_invocation,
+    reset_admission,
+    set_admission,
+)
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ExitSignal
 from mirage.shell.types import ShellBuiltin as SB
+from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec, word_text
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.condition.errors import (
@@ -110,7 +115,7 @@ async def handle_test(
         # (`find -exec test`) keeps its bare one.
         message = err.message
         if message.startswith(f"{name}: ") and not program_invocation(session):
-            message = f"bash: {message}"
+            message = f"{shell_voice()}{message}"
         stderr = encode_text(message + "\n")
         if name == "[[" and err.fatal:
             # A bad [[ ]] operator is a bash PARSE error: the whole
@@ -168,7 +173,7 @@ async def test_builtin(call: BuiltinCall) -> Result:
             err = encode_text(
                 "[: missing ']'\n"
                 if program_invocation(call.context.session)
-                else "bash: [: missing `]'\n"
+                else f"{shell_voice()}[: missing `]'\n"
             )
             return (
                 None,

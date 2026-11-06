@@ -257,7 +257,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/pg-contract/public/tables/books/rows.jsonl: No such file or directory\n"
+        "stderr": "bash: line 1: /pg-contract/public/tables/books/rows.jsonl: No such file or directory\n"
       }
     },
     {

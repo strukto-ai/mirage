@@ -94,21 +94,23 @@ def test_shebang_interpreter_options_apply(ws):
 def test_missing_file_is_127(ws):
     result = _run(ws, "/work/nope.sh")
     assert result.exit_code == 127
-    assert result.stderr == b"/work/nope.sh: No such file or directory\n"
+    assert result.stderr == (
+        b"bash: line 1: /work/nope.sh: No such file or directory\n"
+    )
 
 
 def test_directory_is_126(ws):
     _run(ws, "mkdir -p /work/adir")
     result = _run(ws, "/work/adir")
     assert result.exit_code == 126
-    assert result.stderr == b"/work/adir: Is a directory\n"
+    assert result.stderr == b"bash: line 1: /work/adir: Is a directory\n"
 
 
 def test_unknown_interpreter_reports_command_not_found(ws):
     _run(ws, "printf '#!/usr/bin/env ruby\\nputs 1\\n' > /work/r.rb")
     result = _run(ws, "/work/r.rb")
     assert result.exit_code == 127
-    assert result.stderr == b"ruby: command not found\n"
+    assert result.stderr == b"bash: line 1: ruby: command not found\n"
 
 
 def test_child_shell_state_does_not_leak(ws):
@@ -256,6 +258,8 @@ def test_binary_execution_refused_before_parsing(ws, data, command):
         if command.startswith(("bash ", "sh "))
         else "/work/binary: cannot execute binary file: Exec format error\n"
     )
+    if not command.startswith(("bash ", "sh ", "env ", "exec ")):
+        message = f"bash: line 1: {message}"
     assert result.stderr.decode() == message
     assert _run(ws, "echo alive").stdout == b"alive\n"
 

@@ -36,6 +36,7 @@ from mirage.shell.errors import (
 from mirage.shell.job_table import JobTable
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
+from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.evaluation import EvaluationContext
@@ -119,7 +120,9 @@ async def execute_body(
             return await finish_statement(stdout, io, session, cmd), io, ran
 
         try:
-            stdout, io, last_exec = await run_program(cmd, context, statement)
+            stdout, io, last_exec = await run_program(
+                cmd, context, statement, job_table, sink
+            )
             all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
             merged_io = await land(
@@ -425,7 +428,7 @@ async def handle_for(
     # rule, checked up front so the loop never starts, exactly as bash
     # refuses `for x` on a readonly x before the first iteration.
     if view.is_readonly(variable):
-        err = encode_text(f"bash: {variable}: readonly variable\n")
+        err = encode_text(f"{shell_voice()}{variable}: readonly variable\n")
         return _collect_loop_result(
             [], IOResult(exit_code=1, stderr=err), "for"
         )
@@ -574,7 +577,10 @@ async def handle_cfor(
         voice = "((: " if isinstance(exc, ArithError) else ""
         said = exc.strerror if isinstance(exc, PolicyDenied) else exc
         merged_io = await merged_io.merge(
-            IOResult(exit_code=1, stderr=encode_text(f"bash: {voice}{said}\n"))
+            IOResult(
+                exit_code=1,
+                stderr=encode_text(f"{shell_voice()}{voice}{said}\n"),
+            )
         )
         merged_io.exit_code = 1
     return _collect_loop_result(all_stdout, merged_io, "for")
@@ -714,7 +720,11 @@ async def handle_select(
             else:
                 all_stdout.append(b"\n")
         if reply is None or frozen is not None:
-            err = f"bash: {frozen}: readonly variable\n" if frozen else ""
+            err = (
+                f"{shell_voice()}{frozen}: readonly variable\n"
+                if frozen
+                else ""
+            )
             merged_io = await merged_io.merge(
                 IOResult(exit_code=1, stderr=encode_text(err) or None)
             )

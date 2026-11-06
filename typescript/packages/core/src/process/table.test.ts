@@ -427,24 +427,30 @@ it('stopping a runner alone leaves its children running', async () => {
   await child.join()
 })
 
-// A signal to the group reaches the program a runner whose shell ignores it
-// runs right now, which ends with it, and the shell goes on; a runner that
-// does not ignore it stops with it, as its native program would, unless
-// such a shell started it.
-it("a group signal ends an ignoring child's program and stops the rest", async () => {
+// A signal to a process group reaches every runner in it, as killpg(2) does:
+// one that ignores it (a shell) hands it to the program it runs right now,
+// which ends with it, and goes on; any other stops with it, a child of such a
+// shell too. A runner leading a group of its own is not in it.
+it("a group signal ends an ignoring shell's program and stops the rest", async () => {
   const processes = new ProcessTable()
   const init = { sessionId: 'a', command: 'sh', cwd: PathSpec.fromStrPath('/') }
-  const release = gate()
-  const parent = processes.start({
-    ...init,
-    cancel: () => {
-      release.release()
-    },
-    run: async () => {
-      await release.promise
-      return 0
-    },
-  })
+  const hung = (parentPid: number | null, extra: { ownGroup?: boolean } = {}) => {
+    const stopped = gate()
+    return processes.start({
+      ...init,
+      ...extra,
+      command: 'sleep',
+      parentPid,
+      cancel: () => {
+        stopped.release()
+      },
+      run: async () => {
+        await stopped.promise
+        throw Object.assign(new Error('aborted'), { name: 'AbortError' })
+      },
+    })
+  }
+  const parent = hung(null)
   const started = gate()
   const outcome: [number | null, number | null][] = []
   const child = processes.start({
@@ -467,43 +473,53 @@ it("a group signal ends an ignoring child's program and stops the rest", async (
       return 0
     },
   })
-  const stopped = gate()
-  const other = processes.start({
+  const other = hung(parent.info.pid)
+  const forked = hung(child.info.pid)
+  const outside = hung(parent.info.pid, { ownGroup: true })
+  await started.promise
+  expect(processes.signalGroup(parent.info.groupId, 2)).toBe(true)
+  expect((await child.join()).exitCode).toBe(0)
+  expect((await other.join()).exitCode).toBe(130)
+  expect((await forked.join()).exitCode).toBe(130)
+  expect((await parent.join()).exitCode).toBe(130)
+  expect(outcome).toEqual([[null, 2]])
+  expect(outside.signal).toBeNull()
+  expect(processes.signalGroup(outside.info.pid + 1, 2)).toBe(false)
+  outside.terminate()
+  await outside.join()
+})
+
+// A pid a session's lines take in turn runs each line under it; one a live
+// runner holds is not taken twice, and later pids go on past it.
+it('takes a given pid while it is free', async () => {
+  const processes = new ProcessTable()
+  const init = {
+    sessionId: 'a',
+    command: 'line',
+    cwd: PathSpec.fromStrPath('/'),
+    cancel: () => undefined,
+  }
+  const first = processes.start({ ...init, pid: 7, run: () => Promise.resolve(0) })
+  const release = gate()
+  const held = processes.start({
     ...init,
-    command: 'sleep',
-    parentPid: parent.info.pid,
+    pid: 7,
     cancel: () => {
-      stopped.release()
+      release.release()
     },
     run: async () => {
-      await stopped.promise
-      throw Object.assign(new Error('aborted'), { name: 'AbortError' })
-    },
-  })
-  const forkedRelease = gate()
-  const forked = processes.start({
-    ...init,
-    command: 'sleep',
-    parentPid: child.info.pid,
-    cancel: () => {
-      forkedRelease.release()
-    },
-    run: async () => {
-      await forkedRelease.promise
+      await release.promise
       return 0
     },
   })
-  await started.promise
-  parent.signalChildren(2)
-  expect(forked.signal).toBeNull()
-  expect((await child.join()).exitCode).toBe(0)
-  expect((await other.join()).exitCode).toBe(130)
-  expect(outcome).toEqual([[null, 2]])
-  expect(other.signal).toBe(2)
-  forked.terminate()
-  await forked.join()
-  parent.terminate()
-  await parent.join()
+  expect([first.info.pid, held.info.pid]).toEqual([7, 8])
+  await first.join()
+  const again = processes.start({ ...init, pid: 7, run: () => Promise.resolve(0) })
+  expect(again.info.pid).toBe(7)
+  await again.join()
+  expect(processes.live().map((p) => p.info.pid)).toEqual([8])
+  held.terminate()
+  await held.join()
 })
 
 // A runner that already exited has nothing left to cancel, but stopping it
@@ -567,9 +583,9 @@ it('a group stopped with a signal passes it to every child', async () => {
   expect((await child.join()).exitCode).toBe(143)
 })
 
-// A caller's setup from the new process's identity (the session's
-// $BASHPID) runs before the runner does, with the process already live,
-// so a runner that starts at once sees both.
+// A caller's setup from the new process (the session's $$) runs before the
+// runner does, with the process already live, so a runner that starts at
+// once sees both.
 it('runs started before the runner with the process live', async () => {
   const processes = new ProcessTable()
   const order: string[] = []
@@ -578,8 +594,8 @@ it('runs started before the runner with the process live', async () => {
     command: 'probe',
     cwd: PathSpec.fromStrPath('/'),
     cancel: () => undefined,
-    started: (info) => {
-      order.push(`started ${String(info.pid)}`)
+    started: (process) => {
+      order.push(`started ${String(process.info.pid)}`)
     },
     run: () => {
       order.push(`run ${JSON.stringify(processes.live().map((p) => p.info.pid))}`)

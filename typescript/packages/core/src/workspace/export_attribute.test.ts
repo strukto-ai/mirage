@@ -159,7 +159,7 @@ describe('declare -p reports an unknown name', () => {
     const io = await ws.shell('G=good; declare -p G NOPE')
     expect(io.exitCode).toBe(1)
     expect(stdoutStr(io)).toBe('declare -- G="good"\n')
-    expect(stderrStr(io)).toBe('bash: declare: NOPE: not found\n')
+    expect(stderrStr(io)).toBe('bash: line 1: declare: NOPE: not found\n')
     await ws.close()
   })
 })
@@ -218,7 +218,7 @@ describe('a bare local declares without assigning', () => {
   it('refuses `local` outside a function', async () => {
     const { ws } = makeWorkspace()
     const io = await ws.shell('local x=1; echo rc=$?')
-    expect(stderrStr(io)).toBe('bash: local: can only be used in a function\n')
+    expect(stderrStr(io)).toBe('bash: line 1: local: can only be used in a function\n')
     expect(stdoutStr(io)).toBe('rc=1\n')
     // `declare` is the spelling that is legal at top level.
     expect(stdoutStr(await ws.shell('declare x=1; declare -p x'))).toBe('declare -- x="1"\n')

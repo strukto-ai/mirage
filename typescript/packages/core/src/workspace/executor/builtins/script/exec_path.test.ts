@@ -76,7 +76,7 @@ describe('direct path execution', () => {
     const ws = makeWs()
     const io = await ws.shell('/work/nope.sh')
     expect(io.exitCode).toBe(127)
-    expect(stderrStr(io)).toBe('/work/nope.sh: No such file or directory\n')
+    expect(stderrStr(io)).toBe('bash: line 1: /work/nope.sh: No such file or directory\n')
   })
 
   it('a directory is 126', async () => {
@@ -84,7 +84,7 @@ describe('direct path execution', () => {
     await ws.shell('mkdir -p /work/adir')
     const io = await ws.shell('/work/adir')
     expect(io.exitCode).toBe(126)
-    expect(stderrStr(io)).toBe('/work/adir: Is a directory\n')
+    expect(stderrStr(io)).toBe('bash: line 1: /work/adir: Is a directory\n')
   })
 
   it('an unknown interpreter reports command not found', async () => {
@@ -92,7 +92,7 @@ describe('direct path execution', () => {
     await ws.shell("printf '#!/usr/bin/env ruby\\nputs 1\\n' > /work/r.rb")
     const io = await ws.shell('/work/r.rb')
     expect(io.exitCode).toBe(127)
-    expect(stderrStr(io)).toBe('ruby: command not found\n')
+    expect(stderrStr(io)).toBe('bash: line 1: ruby: command not found\n')
   })
 
   it('child shell state does not leak', async () => {
@@ -231,7 +231,9 @@ it.each([
     const message = /^(bash|sh) /.test(command)
       ? '/work/binary: /work/binary: cannot execute binary file\n'
       : '/work/binary: cannot execute binary file: Exec format error\n'
-    expect(stderrStr(result)).toBe(message)
+    expect(stderrStr(result)).toBe(
+      /^(bash|sh|env|exec) /.test(command) ? message : `bash: line 1: ${message}`,
+    )
     expect(stdoutStr(await ws.shell('echo alive'))).toBe('alive\n')
   }
 })

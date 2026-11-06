@@ -97,7 +97,7 @@ async def test_hidden_mounts_never_run_custom_handlers_for_bound_paths_or_cwd():
     try:
         named = await ws.shell("stamp /hidden/file", session_id="agent")
         assert named.exit_code == 127
-        assert named.stderr == b"stamp: command not found\n"
+        assert named.stderr == b"bash: line 1: stamp: command not found\n"
         session.cwd = "/hidden"
         for line, name in (
             ("stamp", "stamp"),
@@ -106,7 +106,9 @@ async def test_hidden_mounts_never_run_custom_handlers_for_bound_paths_or_cwd():
         ):
             result = await ws.shell(line, session_id="agent")
             assert result.exit_code == 127
-            assert result.stderr == f"{name}: command not found\n".encode()
+            assert result.stderr == (
+                f"bash: line 1: {name}: command not found\n".encode()
+            )
         assert called == []
     finally:
         await ws.close()
@@ -291,7 +293,9 @@ def test_redirect_to_forbidden_mount_is_denied():
     # hidden mount does not exist for the session, so a create under it
     # answers as every read does, rather than an EACCES that would let
     # the session map the hide by probing writes.
-    assert (io.stderr or b"") == b"/b/leaked.txt: No such file or directory\n"
+    assert (
+        io.stderr or b""
+    ) == b"bash: line 1: /b/leaked.txt: No such file or directory\n"
 
 
 def test_append_to_forbidden_mount_is_shell_attributed():
@@ -310,7 +314,9 @@ def test_append_to_forbidden_mount_is_shell_attributed():
     io = asyncio.run(run())
     assert io.exit_code == 0
     assert (io.stdout or b"") == b"next\n"
-    assert (io.stderr or b"") == b"/b/leaked.txt: No such file or directory\n"
+    assert (
+        io.stderr or b""
+    ) == b"bash: line 1: /b/leaked.txt: No such file or directory\n"
 
 
 def test_cross_mount_copy_into_forbidden_mount_is_denied():
@@ -400,7 +406,7 @@ def test_read_grant_blocks_redirect_write():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert io.stderr == b"/a/y.txt: Read-only file system\n"
+    assert io.stderr == b"bash: line 1: /a/y.txt: Read-only file system\n"
     assert "/y.txt" not in a._store.files
 
 
@@ -427,7 +433,7 @@ def test_grant_cannot_widen_read_mount():
 
     io = asyncio.run(run())
     assert io.exit_code != 0
-    assert io.stderr == b"/a/y.txt: Read-only file system\n"
+    assert io.stderr == b"bash: line 1: /a/y.txt: Read-only file system\n"
 
 
 def test_the_user_root_mount_is_governed_like_any_other():
@@ -456,7 +462,10 @@ def test_the_user_root_mount_is_governed_like_any_other():
     assert b"No such file or directory" in (denied.stderr or b"")
     assert read_ok.exit_code == 0 and b"top" in (read_ok.stdout or b"")
     assert write_denied.exit_code != 0
-    assert write_denied.stderr == b"/root.txt: Read-only file system\n"
+    assert (
+        write_denied.stderr
+        == b"bash: line 1: /root.txt: Read-only file system\n"
+    )
 
 
 def test_implicit_root_keeps_pathless_commands_working():

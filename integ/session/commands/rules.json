@@ -49,7 +49,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/repo/sealed/x: Permission denied\n"
+        "stderr": "bash: line 1: /repo/sealed/x: Permission denied\n"
       }
     },
     {

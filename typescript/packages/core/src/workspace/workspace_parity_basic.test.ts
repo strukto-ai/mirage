@@ -366,7 +366,7 @@ describe('workspace: C-style for', () => {
     const { ws } = makeWorkspace()
     const io = await ws.shell('readonly i=5; for ((i=0;i<2;i++)); do echo x; done; echo c=$?')
     expect(stdoutStr(io)).toBe('c=1\n')
-    expect(new TextDecoder().decode(io.stderr)).toBe('bash: i: readonly variable\n')
+    expect(new TextDecoder().decode(io.stderr)).toBe('bash: line 1: i: readonly variable\n')
     await ws.close()
   })
 
@@ -646,7 +646,7 @@ describe('expanded arithmetic diagnostics', () => {
         const io = await ws.shell(line)
         expect(io.exitCode).toBe(1)
         expect(io.stdoutText).toBe('')
-        expect(io.stderrText).toBe('bash: 1/0: division by 0 (error token is "0")\n')
+        expect(io.stderrText).toBe('bash: line 1: 1/0: division by 0 (error token is "0")\n')
       } finally {
         await ws.close()
       }

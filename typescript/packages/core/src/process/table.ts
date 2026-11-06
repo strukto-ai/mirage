@@ -1,11 +1,21 @@
 import { DEFAULT_PROCESS_PERMISSIONS, type ProcessPermissions } from './config.ts'
 import { underCeiling, type PathSpec, type ProcessScope } from '../types.ts'
 import { ProcessHandle, type ExecutionBind } from './handle.ts'
-import type { ProcessInfo, ProcessRunner } from './types.ts'
+import type { ProcessRunner } from './types.ts'
 import type { ProcessView } from './view.ts'
 import { newExecutionId } from '../execution/context.ts'
 import type { IdSource } from '../utils/ids.ts'
 import { systemNow } from '../utils/clock.ts'
+
+/**
+ * Deliver a signal to one runner of a group: one that ignores it hands it to
+ * the program it runs right now, any other stops with it. Mirrors Python's
+ * deliver.
+ */
+export function deliver(handle: ProcessHandle, signal: number): void {
+  if (handle.ignores.has(signal)) handle.interrupt(signal)
+  else handle.terminate(signal, false)
+}
 
 /** Workspace-owned live runners; exited handles retain their own results. */
 export class ProcessTable {
@@ -53,13 +63,17 @@ export class ProcessTable {
    * held under `ceiling`;
    * stopping runners count until they finish cleanup and leave the live registry.
    * Past it this throws EAGAIN, what fork(2) answers at `ulimit -u`.
-   * `started` is what the caller sets up from the process's identity before
-   * its runner runs (the session's `$BASHPID`); a caller that passes it has
-   * nothing left to do first, so the runner then starts at once, unless a
-   * runner started before it has yet to begin: runners begin in the order
-   * they were started, so a job's redirect lands before the line that
-   * started it reads the file. `ignores` are the signals the runner ignores,
-   * which stop neither it nor what it started.
+   * `started` is what the caller sets up from the process before its runner
+   * runs (the session's `$$`, the shell its programs run in); a caller that
+   * passes it has nothing left to do first, so the runner then starts at
+   * once, unless a runner started before it has yet to begin: runners begin
+   * in the order they were started, so a job's redirect lands before the
+   * line that started it reads the file. `ignores` are the signals the
+   * runner ignores, which stop neither it nor what it started. `pid` is the
+   * pid to run under, a session's `$$` that each of its lines takes in
+   * turn; a fresh one when absent or when a live runner holds it.
+   * `ownGroup` leads a process group of its own, as timeout's command does,
+   * instead of joining its parent's.
    */
   start(init: {
     sessionId: string
@@ -70,8 +84,10 @@ export class ProcessTable {
     parentPid?: number | null
     limit?: number | null
     executionId?: string
-    started?: (info: ProcessInfo) => void
+    started?: (handle: ProcessHandle) => void
     ignores?: ReadonlySet<number>
+    pid?: number | null
+    ownGroup?: boolean
   }): ProcessHandle {
     if (this.stopped) throw new Error('process table is stopped')
     const limit = underCeiling(init.limit ?? null, this.ceiling)
@@ -87,16 +103,14 @@ export class ProcessTable {
       (parent === undefined || parent.handle.info.cancellationRequested)
     )
       throw new Error('parent process is no longer accepting children')
-    const pid = this.nextPid++
-    const handle = new ProcessHandle(
+    const pid = init.pid == null || this.runners.has(init.pid) ? this.nextPid : init.pid
+    this.nextPid = Math.max(this.nextPid, pid + 1)
+    const handle: ProcessHandle = new ProcessHandle(
       {
         pid,
         executionId: init.executionId ?? newExecutionId(this.ids),
         parentPid: init.parentPid ?? null,
-        groupId:
-          (init.parentPid == null
-            ? undefined
-            : this.runners.get(init.parentPid)?.handle.info.groupId) ?? pid,
+        groupId: (init.ownGroup === true ? undefined : parent?.handle.info.groupId) ?? pid,
         sessionId: init.sessionId,
         command: init.command,
         cwd: init.cwd,
@@ -111,6 +125,7 @@ export class ProcessTable {
         init.cancel()
       },
       (id) => {
+        if (this.runners.get(id)?.handle !== handle) return
         this.runners.delete(id)
         this.ancestors.delete(id)
       },
@@ -118,9 +133,6 @@ export class ProcessTable {
         this.terminateChildren(pid, signal)
       },
       this.bind,
-      (signal) => {
-        this.signalChildren(pid, signal)
-      },
       init.ignores,
     )
     const eager = init.started !== undefined && !this.queued()
@@ -129,7 +141,7 @@ export class ProcessTable {
       pid,
       init.parentPid == null ? [] : [...(this.ancestors.get(init.parentPid) ?? []), init.parentPid],
     )
-    init.started?.(handle.info)
+    init.started?.(handle)
     handle.start(eager)
     this.changed?.()
     return handle
@@ -147,27 +159,25 @@ export class ProcessTable {
   }
 
   /**
-   * Deliver a signal to every live runner under `pid`, as a process group
-   * gets it: a runner that ignores it (a job's shell) hands it to the program
-   * it runs right now (`ProcessHandle.interrupt`), and any other stops with
-   * it, so a native program it started receives that signal. A runner such a
-   * shell started is one of its programs, which the shell sees end and goes
-   * on past, so the signal reaches it through that shell. Mirrors Python's
-   * signal_children.
+   * Deliver a signal to every live runner of a process group, as killpg(2)
+   * does: a runner that ignores it (a shell) hands it to the program it runs
+   * right now (`ProcessHandle.interrupt`), and any other stops with it and
+   * leaves the rest of the group to their own delivery. The deepest runners
+   * hear it first, so a native program knows the signal before the shell
+   * that waits for it stops. Returns whether the group had a live runner.
+   * Mirrors Python's signal_group.
    */
-  signalChildren(pid: number, signal: number): void {
-    for (const child of this.under(pid)) {
-      if (child.ignores.has(signal)) child.interrupt(signal)
-      else if (!this.ignoredAbove(child.info.pid, pid, signal)) child.terminate(signal, false)
-    }
+  signalGroup(groupId: number, signal: number): boolean {
+    const members = this.members(groupId)
+    for (const member of members) deliver(member, signal)
+    return members.length > 0
   }
 
-  private ignoredAbove(pid: number, top: number, signal: number): boolean {
-    const chain = this.ancestors.get(pid) ?? []
-    const at = chain.indexOf(top)
-    return chain
-      .slice(at < 0 ? chain.length : at + 1)
-      .some((ancestor) => this.runners.get(ancestor)?.handle.ignores.has(signal) === true)
+  private members(groupId: number): ProcessHandle[] {
+    const depth = (handle: ProcessHandle) => this.ancestors.get(handle.info.pid)?.length ?? 0
+    return this.live()
+      .filter((handle) => handle.info.groupId === groupId)
+      .sort((a, b) => depth(b) - depth(a))
   }
 
   private under(pid: number): ProcessHandle[] {
@@ -200,6 +210,13 @@ export class ProcessTable {
         throw Object.assign(new Error('Operation not permitted'), { code: 'EPERM' })
       return entry.handle
     }
+    const group = (groupId: number): ProcessHandle[] | null => {
+      const members = this.members(groupId).filter((handle) => visible(handle) !== null)
+      if (members.length === 0) return null
+      if (!members.every((handle) => allowed(permissions().kill, handle)))
+        throw Object.assign(new Error('Operation not permitted'), { code: 'EPERM' })
+      return members
+    }
     return Object.freeze({
       list: () =>
         Object.freeze(
@@ -213,11 +230,21 @@ export class ProcessTable {
           throw Object.assign(new Error('process spawn is not permitted'), { code: 'EACCES' })
       },
       probe: (pid: number) => signalTarget(pid) !== null,
+      // A session's shell leaves its jobs running, as bash's do when it dies.
       terminate: (pid: number, signal: number) => {
         const handle = signalTarget(pid)
-        return handle !== null && (handle.ignores.has(signal) || handle.terminate(signal))
+        return (
+          handle !== null &&
+          (handle.ignores.has(signal) || handle.terminate(signal, handle.info.parentPid !== null))
+        )
       },
       permissions: () => (valid() ? permissions() : null),
+      probeGroup: (groupId: number) => group(groupId) !== null,
+      signalGroup: (groupId: number, signal: number) => {
+        const members = group(groupId)
+        for (const member of members ?? []) deliver(member, signal)
+        return members !== null
+      },
     })
   }
 
@@ -228,7 +255,11 @@ export class ProcessTable {
    */
   revokeSession(sessionId: string): void {
     this.generations.set(sessionId, (this.generations.get(sessionId) ?? 0) + 1)
-    for (const process of this.live()) if (process.info.sessionId === sessionId) process.terminate()
+    for (const process of this.live()) {
+      if (process.info.sessionId !== sessionId) continue
+      process.revoked = true
+      process.terminate()
+    }
   }
 
   /** Host-only inventory, including disowned and stopping runners. */
@@ -246,6 +277,7 @@ export class ProcessTable {
     this.stopped = true
     const errors: unknown[] = []
     for (const process of this.live()) {
+      process.revoked = true
       try {
         process.terminate()
       } catch (error) {

@@ -66,7 +66,7 @@
       "command": "for i in 1 2; do for j in a b; do if [ $j = a ]; then continue 2; fi; echo $i$j; done; echo inner:$i; done; echo after; for ((k=0;k<2;k++)); do for j in x; do echo k$k; continue 2; done; echo no; done; for cq in 1 2; do for cj in a b; do continue 0; done; echo no; done 2>&1; echo rc=$?; cqf() { eval continue; }; for cq in 1 2; do cqf; echo e$cq; done 2>&1; for cq in 1; do continue -- 1; done; echo ok",
       "expect": {
         "exit": 0,
-        "stdout": "after\nk0\nk1\nbash: continue: 0: loop count out of range\nrc=1\nbash: continue: only meaningful in a `for', `while', or `until' loop\ne1\nbash: continue: only meaningful in a `for', `while', or `until' loop\ne2\nok\n",
+        "stdout": "after\nk0\nk1\nbash: line 1: continue: 0: loop count out of range\nrc=1\nenvironment: line 1: continue: only meaningful in a `for', `while', or `until' loop\ne1\nenvironment: line 1: continue: only meaningful in a `for', `while', or `until' loop\ne2\nok\n",
         "stderr": ""
       }
     }

@@ -40,7 +40,9 @@ class Job:
     ``owner`` is the job table that runs it; a job another workspace
     runs has no ``process`` here. Its ``console_name`` is the name its
     job store keeps the console under, which tells apart two jobs a
-    reused number gave the same id.
+    reused number gave the same id. A ``reported`` job's shell printed
+    the report of the signal that ended it, so ``jobs`` and a ``%N`` no
+    longer name it, and its pid still answers ``wait``.
     """
 
     id: int
@@ -55,6 +57,7 @@ class Job:
     simple: bool = False
     owner: str = ""
     console_name: str = ""
+    reported: bool = False
 
     @property
     def execution_id(self) -> str | None:

@@ -29,7 +29,12 @@ import { CallStack } from '../../shell/call_stack.ts'
 import { type JobConsole, JobOutput } from '../../shell/console/index.ts'
 import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel } from '../../shell/console/types.ts'
-import { FORK_FAILED, FORK_FAILED_STATUS, SIGPIPE_STATUS } from '../../shell/constants.ts'
+import {
+  FORK_FAILED,
+  FORK_FAILED_STATUS,
+  SHELL_IGNORED_SIGNALS,
+  SIGPIPE_STATUS,
+} from '../../shell/constants.ts'
 import { Recorder } from '../../shell/descriptors.ts'
 import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
@@ -48,7 +53,7 @@ import { divertStatement, divertedFile } from './builtins/exec/index.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, ended, isUnwinding } from './control.ts'
-import { handleBackground, pump, runProgram } from './jobs.ts'
+import { handleBackground, pump, reportReaped, runProgram } from './jobs.ts'
 import {
   answerClosed,
   asWritten,
@@ -59,14 +64,25 @@ import {
   ignoringErrexit,
   land,
   landLate,
+  nestedShell,
   recording,
   recordJobs,
   recordStatus,
+  reportedCommand,
   statementOutput,
   statementStdin,
   writerForks,
 } from './statement.ts'
 import { endShell, errTrapArmed, inheritTraps, runErrTrap, runExitTrap } from './traps.ts'
+
+/**
+ * Whether a stage is one shell bash runs as the stage itself: a subshell, or
+ * a nested shell it execs (`nestedShell`), which a signal to the stage then
+ * ends with it. Mirrors Python's _shell_stage.
+ */
+function shellStage(cmd: TSNodeLike, session: SessionState): boolean {
+  return cmd.type === NT.SUBSHELL || nestedShell(cmd, session)
+}
 
 export async function handlePipe(
   executeNode: ExecuteNodeFn,
@@ -109,15 +125,14 @@ export async function handlePipe(
 
   let failed = false
   const tasks: Promise<void>[] = []
-  const job = context.frame.job
+  const stages: (ProcessHandle | null)[] = commands.map(() => null)
   const launch = (cmd: TSNodeLike, i: number): Promise<void> => {
-    // Each segment is a child shell: bash forks one per stage. In a
-    // background job each is a program a signal the job ignores still stops
-    // whole (`runProgram`), and one that ended keeps its status.
+    // Each segment is a child shell: bash forks one per stage, which a signal
+    // stops on its own, its status 128 plus it, and which hands a QUIT to the
+    // program it runs right now (`runProgram`).
     const childEvaluation = childContext(context)
-    childEvaluation.frame.job = null
-    const interrupted = new AbortController()
-    const stops = mergeSignals(abort.signal, interrupted.signal) ?? abort.signal
+    const stopped = new AbortController()
+    const stops = mergeSignals(abort.signal, stopped.signal) ?? abort.signal
     const child = childEvaluation.session
     inheritTraps(child)
     child.terminalOutput = session.terminalOutput && i === commands.length - 1
@@ -152,9 +167,13 @@ export async function handlePipe(
           child,
           input,
           stageStack,
-          executeNode(cmd, childEvaluation, input, stageStack, {
-            sink: output,
-            signal: stops,
+          runProgram(cmd, childEvaluation, async () => {
+            const [out, ran, node] = await executeNode(cmd, childEvaluation, input, stageStack, {
+              sink: output,
+              signal: stops,
+            })
+            await pump(output, Channel.STDOUT, out)
+            return [null, ran, node]
           }),
         )
         io = result
@@ -174,9 +193,9 @@ export async function handlePipe(
           await pump(output, Channel.STDERR, unwound.stderr)
           await waits?.join(rest)
         } else {
-          // One an interrupt stopped closes its pipe as a killed child
-          // does: the reader sees the end, not the stop.
-          output.end(interrupted.signal.aborted && isAborting(error) ? undefined : error)
+          // One a signal stopped closes its pipe as a killed child does: the
+          // reader sees the end, not the stop.
+          output.end(stopped.signal.aborted && isAborting(error) ? undefined : error)
           throw error
         }
       } finally {
@@ -192,22 +211,7 @@ export async function handlePipe(
     }
     const isolated = () =>
       asyncContextIsolatesTasks ? runWithEvaluation(childEvaluation, run) : run()
-    const execute = async (): Promise<void> => {
-      if (job === null) return isolated()
-      const [, signal] = await job.program(async (stop) => {
-        stop.addEventListener(
-          'abort',
-          () => {
-            interrupted.abort(stop.reason)
-          },
-          { once: true },
-        )
-        await isolated()
-      })
-      const io = ios[i]
-      if (signal !== null && io !== undefined) io.exitCode = 128 + signal
-    }
-    if (processes === undefined) return execute()
+    if (processes === undefined) return isolated()
     let process: ProcessHandle
     try {
       process = processes.start({
@@ -216,13 +220,14 @@ export async function handlePipe(
         cwd: PathSpec.fromStrPath(child.cwd),
         parentPid: session.processId,
         cancel: () => {
-          abort.abort()
+          stopped.abort()
         },
         run: async () => {
-          await execute()
+          await isolated()
           return ios[i]?.exitCode ?? 0
         },
         limit: session.processes.max,
+        ignores: SHELL_IGNORED_SIGNALS,
       })
     } catch (error) {
       if ((error as { code?: unknown }).code === 'EAGAIN')
@@ -230,7 +235,12 @@ export async function handlePipe(
       throw error
     }
     child.processId = process.info.pid
-    return process.task.then(() => undefined)
+    stages[i] = process
+    childEvaluation.frame.shell = shellStage(cmd, session) ? null : process
+    return process.reap(parentSignal ?? null).then((code) => {
+      const io = ios[i]
+      if (io !== undefined) io.exitCode = code
+    })
   }
   let lastStdout: ByteSource | null = null
   try {
@@ -273,6 +283,14 @@ export async function handlePipe(
   // `${PIPESTATUS[@]}`: the raw per-segment statuses, before pipefail
   // rewrites the pipeline's own.
   session.pipeStatusPending = ios.map((io) => io.exitCode)
+  const waited: [number, number, number | null, string][] = []
+  commands.forEach((cmd, i) => {
+    const stage = stages[i]
+    if (stage !== null && stage !== undefined) {
+      waited.push([stage.info.pid, ios[i]?.exitCode ?? 0, stage.endedBy, reportedCommand(cmd)])
+    }
+  })
+  if (waited.length > 0) reportReaped(context.frame, waited)
   if (session.shellOptions.pipefail === true) {
     let rightmostFailure = 0
     for (let k = ios.length - 1; k >= 0; k--) {

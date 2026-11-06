@@ -1346,8 +1346,14 @@ async def test_nofollow_reads_the_links_own_xattrs():
 @pytest.mark.parametrize(
     "command, diagnostic",
     [
-        ("echo x >> /ro/file", "/ro/file: Read-only file system\n"),
-        ("exec >> /ro/file", "/ro/file: Read-only file system\n"),
+        (
+            "echo x >> /ro/file",
+            "bash: line 1: /ro/file: Read-only file system\n",
+        ),
+        (
+            "exec >> /ro/file",
+            "bash: line 1: /ro/file: Read-only file system\n",
+        ),
         (
             "ln -s file /ro/link",
             "ln: failed to create symbolic link '/ro/link': Read-only file system\n",
@@ -3078,7 +3084,7 @@ GLOB_REFUSED = (
         (
             "for f in /ram/d/*; do echo $f; done; echo after",
             "",
-            f"bash: {GLOB_REFUSED}\n",
+            f"bash: line 1: {GLOB_REFUSED}\n",
         ),
         ("cat /ram/d/a*", "a\na\n", ""),
         ("echo /ram/d/*/b.txt", "/ram/d/secret/b.txt\n", ""),

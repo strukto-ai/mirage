@@ -15,7 +15,7 @@
 import asyncio
 import logging
 import re
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, tzinfo
 from typing import Any
@@ -27,6 +27,7 @@ from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.context import (
     bind_caller,
     current_caller,
+    get_current_evaluation,
     program_invocation,
     reset_caller,
 )
@@ -34,7 +35,7 @@ from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, hold_inputs
 from mirage.io.errors import PipeClosed
-from mirage.io.stream import close_quietly
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource
 from mirage.policy.builtin.output_cap import LINE_NAME
 from mirage.policy.decisions import Decisions, is_pending
@@ -56,7 +57,9 @@ from mirage.shell.constants import (
     FD_CLOSE,
     FORK_FAILED,
     FORK_FAILED_STATUS,
+    NESTED_SHELLS,
     NOT_FOUND_STATUS,
+    SIGRTMAX,
     TIMEOUT_STATUS,
 )
 from mirage.shell.errors import ExitSignal, ReturnSignal
@@ -69,8 +72,15 @@ from mirage.shell.job_table.constants import (
 from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.names import command_invocations
 from mirage.shell.parse.program import retain_programs
+from mirage.shell.signals import (
+    signal_name,
+    signal_number,
+    signal_report,
+    signal_table,
+)
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
+from mirage.shell.voice import shell_voice
 from mirage.types import JsonValue, PathSpec, Refusal
 from mirage.utils.clock import system_now
 from mirage.utils.timezone import zone_from_env
@@ -87,6 +97,7 @@ from mirage.workspace.executor.statement import (
     statement_stdin,
 )
 from mirage.workspace.executor.traps import inherit_traps
+from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS, SHELL_NAMES
 from mirage.workspace.node.occurrence import occurrence_of
 from mirage.workspace.record.types import RecordFields
@@ -108,8 +119,10 @@ async def pump(
     computes its output eagerly still lands in one chunk, because there
     was nothing to observe before it finished. A pipe is drained before
     the next chunk is pulled, so a reader that closed stops the source
-    before it fetches more. A write that fails closes the source too, as
-    TypeScript's ``for await`` does.
+    before it fetches more; a source that reads nothing to make its
+    bytes (``OutputStream.eager``) runs ahead into the pipe's buffer, as
+    bash's ``seq 1 | sleep 30`` writer does and exits. A write that fails
+    closes the source too, as TypeScript's ``for await`` does.
 
     Args:
         console (JobConsole): where the output goes.
@@ -122,13 +135,15 @@ async def pump(
         if stream:
             await console.emit(channel, stream)
         return
+    eager = isinstance(stream, OutputStream) and stream.eager
     try:
         async for chunk in stream:
             if chunk:
                 await console.emit(channel, chunk)
             if not isinstance(console, PipeConsole):
                 continue
-            await console.drain()
+            if not eager:
+                await console.drain()
             if console.closed_reader:
                 return
     finally:
@@ -255,9 +270,10 @@ def _one_program(left: TSNodeLike, session: SessionState) -> bool:
 
 
 def _forked(node: TSNodeLike | None, session: SessionState) -> bool:
-    """Whether bash forks a statement as one child: a program or a
-    subshell. The shell's own work (a builtin, a function, a compound
-    command) is not, and a pipeline forks each stage (``handle_pipe``).
+    """Whether bash forks a statement as one program. The shell's own
+    work (a builtin, a function, a compound command) is not one, and a
+    subshell, a nested shell (``bash -c``) and a pipeline's stages are
+    processes of their own, each a shell that runs its own programs.
 
     Args:
         node (TSNodeLike | None): the statement.
@@ -267,9 +283,95 @@ def _forked(node: TSNodeLike | None, session: SessionState) -> bool:
         return False
     if node.type == NT.REDIRECTED_STATEMENT:
         return _forked(get_redirects(node)[0], session)
-    return node.type == NT.SUBSHELL or (
-        node.type == NT.COMMAND and forks(node, session)
+    return (
+        node.type == NT.COMMAND
+        and forks(node, session)
+        and command_invocations(node)[0][0] not in NESTED_SHELLS
     )
+
+
+async def tell(
+    report: bytes,
+    io: IOResult,
+    exec_node: ExecutionNode,
+    sink: JobConsole | None,
+) -> None:
+    """Put the report of a child a statement reaped after the statement's
+    stderr: into the sink it writes to as it runs, or after the stderr it
+    returns.
+
+    Args:
+        report (bytes): the report lines.
+        io (IOResult): the statement's result.
+        exec_node (ExecutionNode): its record.
+        sink (JobConsole | None): where it writes, if anywhere.
+    """
+    if sink is None:
+        io.stderr = await io.materialize_stderr() + report
+        exec_node.stderr = (exec_node.stderr or b"") + report
+        return
+    await _send_stderr(sink, io)
+    await sink.emit(Channel.STDERR, report)
+
+
+def report_jobs(
+    context: EvaluationContext, job_table: JobTable | None
+) -> bytes:
+    """bash's reports of the jobs its shell started that a signal ended
+    since it last told, as it tells once it reaped a child or waited:
+    each once, and the TERM, INT or PIPE that ended one untold. A
+    substitution's shell tells of none.
+
+    Args:
+        context (EvaluationContext): the shell.
+        job_table (JobTable | None): its jobs, None where it keeps none.
+    """
+    session = context.session
+    if (
+        job_table is None
+        or session.process_id is None
+        or context.frame.substitution
+    ):
+        return b""
+    told = []
+    for job in job_table.list_jobs(_session_of(session)):
+        if (
+            job.reported
+            or job.status != JobStatus.KILLED
+            or job.exit_code <= 128
+            or job.process is None
+            or job.process.info.parent_pid != session.process_id
+        ):
+            continue
+        report = signal_report(
+            shell_voice(),
+            [(job.pid, job.exit_code, job.exit_code - 128, job.command)],
+            False,
+        )
+        if report:
+            job.reported = True
+            told.append(report)
+    return encode_text("".join(told))
+
+
+def report_reaped(
+    frame: ExecutionFrame,
+    processes: Sequence[tuple[int, int, int | None, str]],
+) -> None:
+    """Queue bash's report of a child its shell waited for that a signal
+    ended (``signal_report``), empty when it prints none, to follow the
+    reaping command's stderr with those of the shell's jobs.
+
+    Args:
+        frame (ExecutionFrame): the evaluation of the reaping command.
+        processes (Sequence[tuple[int, int, int | None, str]]): each
+            process of the child: pid, status, the signal that ended it
+            and command.
+    """
+    if not frame.substitution:
+        frame.reports.append(
+            encode_text(signal_report(shell_voice(), processes, True))
+        )
 
 
 async def run_program(
@@ -279,39 +381,50 @@ async def run_program(
         [],
         Coroutine[Any, Any, tuple[ByteSource | None, IOResult, ExecutionNode]],
     ],
+    job_table: JobTable | None = None,
+    sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Run one statement to the end of its output. A program or a
-    subshell a background job's shell runs (``sleep 3`` in ``{ sleep 3;
-    echo x; } &``) runs where a signal that shell ignores still stops it,
-    whole, as bash forks each with INT back at its default: the statement
-    ends with 128 plus the signal, and the job goes on.
+    """Run one statement to the end of its output. A program its shell
+    forks (``sleep 3``) runs where a signal the shell ignores still stops
+    it, whole, as bash forks each with that signal back at its default:
+    QUIT, which every shell ignores, and INT, which a background job's
+    does. The statement ends with 128 plus the signal, and the shell
+    goes on, telling of the jobs a signal ended as it reaped the child.
 
     Args:
         node (TSNodeLike): the statement.
         context (EvaluationContext): the evaluation's session and frame.
         run (Callable): the statement, its output drained.
+        job_table (JobTable | None): the shell's jobs, None to leave
+            their reports to the node running the statement.
+        sink (JobConsole | None): where the statement writes as it runs.
     """
-    job = context.frame.job
-    if job is None or not _forked(node, context.session):
+    shell = context.frame.shell
+    if shell is None or not _forked(node, context.session):
         return await run()
     # What the child runs is its own, which the signal stops with it.
-    context.frame.job = None
+    context.frame.shell = None
     try:
-        result, signal = await job.program(run)
+        result, signal = await shell.program(run)
     finally:
-        context.frame.job = job
+        context.frame.shell = shell
     if signal is None:
         assert result is not None
-        return result
-    code = 128 + signal
-    if node.type != NT.COMMAND:
-        context.session._pipe_status_pending = (code,)
-    record_status(context.session, code)
-    return (
-        None,
-        IOResult(exit_code=code),
-        ExecutionNode(command=get_text(node), exit_code=code),
-    )
+        stdout, io, ran = result
+    else:
+        code = 128 + signal
+        if node.type != NT.COMMAND:
+            context.session._pipe_status_pending = (code,)
+        record_status(context.session, code)
+        stdout, io = None, IOResult(exit_code=code)
+        ran = ExecutionNode(command=get_text(node), exit_code=code)
+    if job_table is None:
+        context.frame.reports.append(b"")
+        return stdout, io, ran
+    told = report_jobs(context, job_table)
+    if told:
+        await tell(told, io, ran, sink)
+    return stdout, io, ran
 
 
 async def handle_background(
@@ -397,11 +510,12 @@ async def handle_background(
     # died of.
     one_command = command is not None and command.type == NT.COMMAND
     ends = one_command and not forks(command, session)
+    in_place = (one_command and not ends) or (
+        command is not None and command.type == NT.SUBSHELL
+    )
 
     async def _run_bg(job: Job) -> tuple[IOResult, ExecutionNode]:
-        child_evaluation.frame.job = (
-            None if one_command and not ends else job.process
-        )
+        child_evaluation.frame.shell = None if in_place else job.process
         # Background jobs don't receive stdin, matching real shell
         # behavior where bg processes get /dev/null. This prevents
         # race conditions when stdin is an async iterator.
@@ -729,13 +843,14 @@ def _process_view(
 
 
 def _job_numbered(jobs: list[Job], job_id: int) -> Job | None:
-    """The job whose number is `job_id`, the one `%N` names.
+    """The job whose number is `job_id`, the one `%N` names: none once
+    its report was printed, as bash then drops it from its list.
 
     Args:
         jobs (list[Job]): the jobs the builtin can see.
         job_id (int): the job number.
     """
-    return next((j for j in jobs if j.id == job_id), None)
+    return next((j for j in jobs if j.id == job_id and not j.reported), None)
 
 
 def _job_with_pid(jobs: list[Job], pid: int) -> Job | None:
@@ -887,7 +1002,7 @@ async def handle_wait(
                 else:
                     return _job_result(
                         cmd_str,
-                        f"bash: wait: -p: option requires an "
+                        f"{shell_voice()}wait: -p: option requires an "
                         f"argument\n{builtin_usage('wait')}",
                         2,
                     )
@@ -895,7 +1010,8 @@ async def handle_wait(
             else:
                 return _job_result(
                     cmd_str,
-                    f"bash: wait: -{ch}: invalid option\n{builtin_usage('wait')}",
+                    f"{shell_voice()}wait: -{ch}: invalid option\n"
+                    f"{builtin_usage('wait')}",
                     2,
                 )
             j += 1
@@ -903,12 +1019,14 @@ async def handle_wait(
     if var is not None:
         if _JOB_IDENTIFIER.fullmatch(var) is None:
             return _job_result(
-                cmd_str, f"bash: wait: `{var}': not a valid identifier\n", 1
+                cmd_str,
+                f"{shell_voice()}wait: `{var}': not a valid identifier\n",
+                1,
             )
         if view is not None and view.is_readonly(var):
             return _job_result(
                 cmd_str,
-                f"bash: wait: {var}: cannot unset: readonly variable\n",
+                f"{shell_voice()}wait: {var}: cannot unset: readonly variable\n",
                 1,
             )
         if view is not None:
@@ -920,7 +1038,7 @@ async def handle_wait(
     for spec in specs:
         job, refusal = _resolve_spec(visible, spec)
         if job is None:
-            errors.append(f"bash: wait: {refusal}")
+            errors.append(f"{shell_voice()}wait: {refusal}")
             continue
         picked.append(job)
     err_text = ("\n".join(errors) + "\n") if errors else ""
@@ -938,14 +1056,20 @@ async def handle_wait(
         job = await _wait_first(job_table, candidates)
         if var is not None and view is not None:
             await view.set(var, str(job.pid))
+        told = _wait_reports(session, job_table)
         stdout, io, node = await _reaped(job_table, job, cmd_str)
-        if err_text:
-            io.stderr = encode_text(err_text)
+        if err_text or told:
+            io.stderr = encode_text(err_text) + told
         return stdout, io, node
     if not specs:
         await job_table.wait_all(sid)
+        told = _wait_reports(session, job_table)
         await job_table.pop_completed(sid)
-        return None, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
+        return (
+            None,
+            IOResult(stderr=told or None),
+            ExecutionNode(command=cmd_str, exit_code=0),
+        )
     if not picked:
         # Every spec was refused: bash answers 127 for a job it cannot
         # find and 1 for a word that is not a spec at all, the last
@@ -957,13 +1081,14 @@ async def handle_wait(
             else NOT_FOUND_STATUS
         )
         return _job_result(cmd_str, err_text, code)
+    finished = [await job_table.wait(job.id, sid) for job in picked]
+    told = _wait_reports(session, job_table)
     last_code = 0
     last_job: Job | None = None
-    for job in picked:
-        finished = await job_table.wait(job.id, sid)
-        _, io, _ = await _reaped(job_table, finished, cmd_str)
+    for job in finished:
+        _, io, _ = await _reaped(job_table, job, cmd_str)
         last_code = io.exit_code
-        last_job = finished
+        last_job = job
     # `wait id1 id2` answers with the last id's status, so `-p` names
     # that same job however many were waited for. Only the no-operand
     # form leaves the variable unset, since it reports no one job.
@@ -971,9 +1096,27 @@ async def handle_wait(
         await view.set(var, str(last_job.pid))
     return (
         None,
-        IOResult(exit_code=last_code, stderr=encode_text(err_text) or None),
+        IOResult(
+            exit_code=last_code, stderr=encode_text(err_text) + told or None
+        ),
         ExecutionNode(command=cmd_str, exit_code=last_code),
     )
+
+
+def _wait_reports(session: SessionState | None, job_table: JobTable) -> bytes:
+    """What ``wait`` tells of the jobs a signal ended once it waited
+    (``report_jobs``), before it reaps them.
+
+    Args:
+        session (SessionState | None): the shell, None for a bare table.
+        job_table (JobTable): its jobs.
+    """
+    if session is None:
+        return b""
+    context = get_current_evaluation()
+    if context is None or context.session is not session:
+        context = EvaluationContext(session)
+    return report_jobs(context, job_table)
 
 
 async def handle_disown(
@@ -1003,7 +1146,8 @@ async def handle_disown(
     if scan.bad is not None:
         return _job_result(
             cmd_str,
-            f"bash: disown: {scan.bad}: invalid option\n{builtin_usage('disown')}",
+            f"{shell_voice()}disown: {scan.bad}: invalid option\n"
+            f"{builtin_usage('disown')}",
             2,
         )
     all_jobs = "a" in scan.letters
@@ -1018,7 +1162,7 @@ async def handle_disown(
         for spec in specs:
             job, _ = _resolve_spec(jobs, spec)
             if job is None:
-                errors.append(f"bash: disown: {spec}: no such job")
+                errors.append(f"{shell_voice()}disown: {spec}: no such job")
                 continue
             targets.append(job)
     elif all_jobs or running_only:
@@ -1030,7 +1174,7 @@ async def handle_disown(
     else:
         if not jobs:
             return _job_result(
-                cmd_str, "bash: disown: current: no such job\n", 1
+                cmd_str, f"{shell_voice()}disown: current: no such job\n", 1
             )
         targets = [jobs[-1]]
     if not keep:
@@ -1077,7 +1221,7 @@ async def handle_fg(
     jobs = job_table.list_jobs(sid)
     if len(parts) <= 1:
         if not jobs:
-            err = b"bash: fg: current: no such job\n"
+            err = encode_text(f"{shell_voice()}fg: current: no such job\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -1090,7 +1234,7 @@ async def handle_fg(
         try:
             job_id = int(raw)
         except ValueError:
-            err = encode_text(f"bash: fg: {parts[1]}: no such job\n")
+            err = encode_text(f"{shell_voice()}fg: {parts[1]}: no such job\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -1098,7 +1242,7 @@ async def handle_fg(
             )
         numbered = _job_numbered(jobs, job_id)
         if numbered is None:
-            err = encode_text(f"bash: fg: {parts[1]}: no such job\n")
+            err = encode_text(f"{shell_voice()}fg: {parts[1]}: no such job\n")
             return (
                 None,
                 IOResult(exit_code=1, stderr=err),
@@ -1117,34 +1261,67 @@ async def handle_fg(
     )
 
 
-# The signals a managed runner answers besides the probe (0). Each one ends
-# the runner through its cancellation channel, carrying the signal: a
-# native program the runner started receives it, KILL a second later if
-# it is still running, and the waited status is 128 plus it, as bash
-# reports a child the signal ended. A non-interactive bash's asynchronous
-# commands may ignore INT and QUIT, job control being off; a managed
-# runner ends on them as on any other. Stop, continue and the user signals
-# have no managed meaning and are refused as bash refuses a name it does
-# not know.
-_KILL_SIGNALS = {"HUP": 1, "INT": 2, "QUIT": 3, "KILL": 9, "TERM": 15}
+# Signals a running process takes and goes on: those whose default is to
+# ignore them, and the terminal stops a non-interactive bash's
+# asynchronous commands ignore; kill answers for them as for the probe (0).
+_KEPT_SIGNALS = frozenset({0, 17, 18, 20, 21, 22, 23, 28})
+
+# STOP, which suspends a process; a managed runner cannot be suspended.
+_SIGSTOP = 19
 
 # The largest PID operand kill and ps read as a number: the bound both hosts
 # hold exactly (bash's own is intmax_t).
 _MAX_PID_OPERAND = 2**53 - 1
 
+_LISTED_NUMBER = re.compile(r"\s*\+?([0-9]+)")
 
-def _signal_number(spec: str) -> int | None:
-    """bash's sigspec: a number, or a name with or without SIG, any case.
+
+def _kill_list(
+    cmd_str: str, words: list[str], voice: str
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """``kill -l``: the signal table, or each operand's name for a
+    number (a ``$?`` of 128 plus one too) and number for a name.
 
     Args:
-        spec (str): the sigspec as typed.
+        cmd_str (str): the command line.
+        words (list[str]): the operands after ``-l``.
+        voice (str): the prefix bash's diagnostics carry.
     """
-    if spec.isascii() and spec.isdigit():
-        number = int(spec)
-        known = number == 0 or number in _KILL_SIGNALS.values()
-        return number if known else None
-    name = spec.upper()
-    return _KILL_SIGNALS.get(name[3:] if name.startswith("SIG") else name)
+    if words[:1] == ["--"]:
+        words = words[1:]
+    if not words:
+        out = encode_text(signal_table())
+        return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
+    lines: list[str] = []
+    errors: list[str] = []
+    for word in words:
+        number = _LISTED_NUMBER.fullmatch(word) if word.isascii() else None
+        if number is None:
+            value = signal_number(word)
+            if value is None:
+                errors.append(
+                    f"{voice}kill: {word}: invalid signal specification"
+                )
+            else:
+                lines.append(str(value))
+            continue
+        value = int(number.group(1))
+        if 128 < value <= 128 + SIGRTMAX:
+            value -= 128
+        elif value > SIGRTMAX:
+            errors.append(f"{voice}kill: {word}: invalid signal specification")
+            continue
+        name = "EXIT" if value == 0 else signal_name(value)
+        if name is not None:
+            lines.append(name)
+    code = 1 if errors else 0
+    out = encode_text("".join(f"{line}\n" for line in lines))
+    err = encode_text("".join(f"{line}\n" for line in errors))
+    return (
+        out,
+        IOResult(exit_code=code, stderr=err or None),
+        ExecutionNode(command=cmd_str, exit_code=code, stderr=err),
+    )
 
 
 def _kill_pid(jobs: list[Job], operand: str) -> tuple[int | None, str]:
@@ -1202,10 +1379,12 @@ async def handle_kill(
     ``0`` probes and every other signal cancels the runner with it. Every
     operand is tried and each failure is named in bash's words; the
     status is 0 when any operand was signalled, as bash's is. A job
-    spec is ``%N``; a negative number is a process group, which no
-    managed runner leads. ``owner:pid`` names another workspace's
-    runner, as ``ps`` lists it: its owner stops it once it takes the
-    stop.
+    spec is ``%N``; a negative number is a process group, the session's
+    ``-$$`` among them, whose every runner gets the signal (killpg).
+    ``owner:pid`` names another workspace's runner, as ``ps`` lists it:
+    its owner stops it once it takes the stop. A signal that stops the
+    shell running ``kill`` lands before the next statement, as bash's
+    signal to itself does.
 
     Args:
         job_table (JobTable): the session's jobs.
@@ -1215,12 +1394,16 @@ async def handle_kill(
     """
     cmd_str = " ".join(parts)
     sid = _session_of(session)
-    signal = _KILL_SIGNALS["TERM"]
+    signal = 15
     words = parts[1:]
     saw_signal = False
     voice = (
-        "" if session is not None and program_invocation(session) else "bash: "
+        ""
+        if session is not None and program_invocation(session)
+        else f"{shell_voice()}"
     )
+    if words[:1] in (["-l"], ["-L"]):
+        return _kill_list(cmd_str, words[1:], voice)
     while words:
         word = words[0]
         if word in ("-s", "-n"):
@@ -1236,16 +1419,24 @@ async def handle_kill(
             break
         elif word == "-?":
             return _job_result(cmd_str, builtin_usage("kill"), 2)
+        elif (word[:2] == "-s" and word[2:3].isalpha()) or (
+            word[:2] == "-n" and word[2:3].isdigit()
+        ):
+            spec, words = word[2:], words[1:]
         elif word.startswith("-") and len(word) > 1 and not saw_signal:
             spec, words, saw_signal = word[1:], words[1:], True
         else:
             break
-        number = _signal_number(spec)
+        number = signal_number(spec)
         if number is None:
             return _job_result(
                 cmd_str,
                 f"{voice}kill: {spec}: invalid signal specification\n",
                 1,
+            )
+        if number == _SIGSTOP:
+            return _job_result(
+                cmd_str, f"mirage: kill: {spec}: not supported\n", 1
             )
         signal = number
     if not words:
@@ -1282,9 +1473,24 @@ async def handle_kill(
         if pid is None:
             errors.append(f"{voice}kill: {refusal}")
             continue
+        if operand.startswith("-"):
+            try:
+                found = await _kill_group(
+                    job_table, processes, jobs, -pid, signal, sid
+                )
+            except PermissionError:
+                errors.append(
+                    f"{voice}kill: ({pid}) - Operation not permitted"
+                )
+                continue
+            if not found:
+                errors.append(f"{voice}kill: ({pid}) - No such process")
+                continue
+            signalled = True
+            continue
         runnerless = _runnerless(jobs, operand)
         if runnerless is not None:
-            if signal == 0:
+            if signal in _KEPT_SIGNALS:
                 found = runnerless.status == JobStatus.RUNNING
             else:
                 found = await job_table.kill(runnerless.id, sid, signal)
@@ -1294,7 +1500,7 @@ async def handle_kill(
             signalled = True
             continue
         try:
-            if signal == 0:
+            if signal in _KEPT_SIGNALS:
                 found = processes.probe(pid)
             else:
                 found = processes.terminate(pid, signal)
@@ -1315,10 +1521,51 @@ async def handle_kill(
             errors.append(f"{voice}kill: ({pid}) - No such process")
             continue
         signalled = True
+    runner = current_caller().process
+    if runner is not None and runner.info.cancellation_requested:
+        # The shell running kill stopped itself (`kill $$`): the signal
+        # lands here, before its next statement.
+        raise asyncio.CancelledError
     code = 0 if signalled else 1
     err = encode_text("\n".join(errors) + "\n") if errors else b""
     node = ExecutionNode(command=cmd_str, exit_code=code, stderr=err)
     return None, IOResult(exit_code=code, stderr=err or None), node
+
+
+async def _kill_group(
+    job_table: JobTable,
+    processes: ProcessView,
+    jobs: list[Job],
+    group: int,
+    signal: int,
+    session_id: str,
+) -> bool:
+    """Signal a process group as killpg(2) does, its jobs recorded as
+    killed by a signal they take.
+
+    Args:
+        job_table (JobTable): the session's jobs.
+        processes (ProcessView): the session's view of the runners.
+        jobs (list[Job]): the jobs the builtin can see.
+        group (int): the group.
+        signal (int): the signal; a kept one probes.
+        session_id (str): the calling session.
+
+    Returns:
+        bool: whether the group had a runner the view sees.
+    """
+    if signal in _KEPT_SIGNALS:
+        return processes.probe_group(group)
+    if not processes.probe_group(group):
+        return False
+    for job in jobs:
+        if (
+            job.process is not None
+            and job.process.info.group_id == group
+            and signal not in job.process.ignores
+        ):
+            await job_table.kill(job.id, session_id, signal)
+    return processes.signal_group(group, signal)
 
 
 _JOBS_FLAGS = frozenset("lnprs")
@@ -1367,7 +1614,8 @@ async def handle_jobs(
             bad = next((c for c in word[1:] if c not in _JOBS_FLAGS), None)
             if bad is not None:
                 err = encode_text(
-                    f"bash: jobs: -{bad}: invalid option\n{builtin_usage('jobs')}"
+                    f"{shell_voice()}jobs: -{bad}: invalid option\n"
+                    f"{builtin_usage('jobs')}"
                 )
                 return (
                     None,
@@ -1381,14 +1629,16 @@ async def handle_jobs(
     while table is not None:
         await table.sync(sid)
         table = table.parent
-    jobs = job_table.listing(sid)
+    jobs = [j for j in job_table.listing(sid) if not j.reported]
     if specs:
         picked: list[Job] = []
         for spec in specs:
             raw = spec.lstrip("%")
             job = _job_numbered(jobs, int(raw)) if raw.isdigit() else None
             if job is None:
-                err = encode_text(f"bash: jobs: {spec}: no such job\n")
+                err = encode_text(
+                    f"{shell_voice()}jobs: {spec}: no such job\n"
+                )
                 return (
                     None,
                     IOResult(exit_code=1, stderr=err),

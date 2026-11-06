@@ -67,7 +67,7 @@
       "expect": {
         "exit": 0,
         "stdout": "or\n",
-        "stderr": "3: Bad file descriptor\n"
+        "stderr": "bash: line 1: 3: Bad file descriptor\n"
       }
     },
     {
@@ -102,7 +102,7 @@
       "expect": {
         "exit": 0,
         "stdout": "code=1\n",
-        "stderr": "3: Bad file descriptor\n"
+        "stderr": "bash: line 1: 3: Bad file descriptor\n"
       }
     },
     {
@@ -137,7 +137,7 @@
       "expect": {
         "exit": 0,
         "stdout": "code=1\n",
-        "stderr": "3: Bad file descriptor\n"
+        "stderr": "bash: line 1: 3: Bad file descriptor\n"
       }
     },
     {
@@ -432,7 +432,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nrc=1\nrc=0\nhi\nrc=1\n",
-        "stderr": "cat: -: Bad file descriptor\ncat: -: Bad file descriptor\nbash: read: read error: 0: Bad file descriptor\n"
+        "stderr": "cat: -: Bad file descriptor\ncat: -: Bad file descriptor\nbash: line 1: read: read error: 0: Bad file descriptor\n"
       }
     },
     {
@@ -492,7 +492,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n1\nrc=1\n",
-        "stderr": "0: Bad file descriptor\n1: Bad file descriptor\n"
+        "stderr": "bash: line 1: 0: Bad file descriptor\nbash: line 1: 1: Bad file descriptor\n"
       }
     },
     {
@@ -522,7 +522,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n1\n1\nrc=1\nout\nerr\n",
-        "stderr": "/data/foo: ambiguous redirect\n/data/foo: ambiguous redirect\n"
+        "stderr": "bash: line 1: /data/foo: ambiguous redirect\n/data/foo: ambiguous redirect\n"
       }
     },
     {
@@ -552,7 +552,7 @@
       "expect": {
         "exit": 0,
         "stdout": "after\n",
-        "stderr": "1: Bad file descriptor\nrc=1\ne=1\n"
+        "stderr": "bash: line 1: 1: Bad file descriptor\nrc=1\ne=1\n"
       },
       "note": "bash 5.2: a descriptor `exec` closed for the shell refuses a later dup from it before the command runs. In a subshell so the battery's shared session keeps its streams."
     },
@@ -583,7 +583,7 @@
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "1: Bad file descriptor\nrc=1\ne=1\n"
+        "stderr": "bash: line 1: 1: Bad file descriptor\nrc=1\ne=1\n"
       },
       "note": "bash 5.2: a self-dup is a no-op, so a descriptor closed earlier on the line stays closed and the later dup from it is refused before the command runs."
     },

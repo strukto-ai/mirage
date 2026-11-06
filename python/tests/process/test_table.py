@@ -505,12 +505,12 @@ async def test_stopping_a_runner_alone_leaves_its_children_running():
     await child.join()
 
 
-# A signal to the group reaches the program a runner whose shell ignores it
-# runs right now, which ends with it, and the shell goes on; a runner that
-# does not ignore it stops with it, as its native program would, unless
-# such a shell started it.
+# A signal to a process group reaches every runner in it, as killpg(2)
+# does: one that ignores it (a shell) hands it to the program it runs right
+# now, which ends with it, and goes on; any other stops with it, a child of
+# such a shell too. A runner leading a group of its own is not in it.
 @pytest.mark.asyncio
-async def test_a_group_signal_ends_an_ignoring_childs_program_and_stops_the_rest():
+async def test_a_group_signal_ends_an_ignoring_shells_program_and_stops_the_rest():
     processes = ProcessTable()
     parent = processes.start(
         session_id="a",
@@ -551,18 +551,61 @@ async def test_a_group_signal_ends_an_ignoring_childs_program_and_stops_the_rest
         run=_hangs,
         parent_pid=child.info.pid,
     )
+    outside = processes.start(
+        session_id="a",
+        command="timeout",
+        cwd=PathSpec.from_str_path("/"),
+        run=_hangs,
+        parent_pid=parent.info.pid,
+        own_group=True,
+    )
     async with asyncio.timeout(5):
         await started.wait()
-        parent.signal_children(2)
-        assert forked.signal is None
+        assert processes.signal_group(parent.info.group_id, 2)
         assert (await child.join()).exit_code == 0
         assert (await other.join()).exit_code == 130
+        assert (await forked.join()).exit_code == 130
+        assert (await parent.join()).exit_code == 130
     assert outcome == [(None, 2)]
-    assert other.signal == 2
-    forked.terminate()
-    await forked.join()
-    parent.terminate()
-    await parent.join()
+    assert outside.signal is None
+    assert not processes.signal_group(outside.info.pid + 1, 2)
+    outside.terminate()
+    await outside.join()
+
+
+# A pid a session's lines take in turn runs each line under it; one a live
+# runner holds is not taken twice, and later pids go on past it.
+@pytest.mark.asyncio
+async def test_a_given_pid_is_taken_while_free():
+    processes = ProcessTable()
+    first = processes.start(
+        session_id="a",
+        command="line",
+        cwd=PathSpec.from_str_path("/"),
+        run=_exits_0,
+        pid=7,
+    )
+    held = processes.start(
+        session_id="a",
+        command="line",
+        cwd=PathSpec.from_str_path("/"),
+        run=_hangs,
+        pid=7,
+    )
+    assert (first.info.pid, held.info.pid) == (7, 8)
+    await first.join()
+    again = processes.start(
+        session_id="a",
+        command="line",
+        cwd=PathSpec.from_str_path("/"),
+        run=_exits_0,
+        pid=7,
+    )
+    assert again.info.pid == 7
+    await again.join()
+    assert [p.info.pid for p in processes.live()] == [8]
+    held.terminate()
+    await held.join()
 
 
 # A kill reaches the whole group with the signal it named, so a native
@@ -594,9 +637,9 @@ async def test_a_group_stopped_with_a_signal_passes_it_to_every_child():
     assert (await child.join()).exit_code == 143
 
 
-# A caller's setup from the new process's identity (the session's
-# $BASHPID) runs before the runner does, with the process already live,
-# so a runner that starts at once sees both.
+# A caller's setup from the new process (the session's $$) runs before the
+# runner does, with the process already live, so a runner that starts at
+# once sees both.
 @pytest.mark.asyncio
 async def test_started_runs_before_the_runner_with_the_process_live():
     processes = ProcessTable()
@@ -611,7 +654,7 @@ async def test_started_runs_before_the_runner_with_the_process_live():
         command="probe",
         cwd=PathSpec.from_str_path("/"),
         run=run,
-        started=lambda info: order.append(f"started {info.pid}"),
+        started=lambda process: order.append(f"started {process.info.pid}"),
     )
     await handle.join()
     assert order == ["started 1", "run [1]"]

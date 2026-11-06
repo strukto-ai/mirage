@@ -102,7 +102,7 @@
       "expect": {
         "exit": 0,
         "stdout": "orig\n[a][b c]<a><b c>{a}{b c}(1)(2)aa ab c b ca b cb c \nsh x\nsh y\nrc=1\n",
-        "stderr": "bash: `1x': not a valid identifier\nbash: `x-y': not a valid identifier\nbash: `\"x\"': not a valid identifier\nbash: `a.b': not a valid identifier\n"
+        "stderr": "bash: line 2: `1x': not a valid identifier\nbash: line 2: `x-y': not a valid identifier\nbash: line 2: `\"x\"': not a valid identifier\nbash: line 2: `a.b': not a valid identifier\n"
       }
     },
     {

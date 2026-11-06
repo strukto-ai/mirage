@@ -2,6 +2,7 @@ import asyncio
 
 import pytest
 
+from mirage.context import get_current_evaluation
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.shell.console import Channel, JobConsole
@@ -42,7 +43,12 @@ class FakeShell:
         if sink is not None and self.early:
             await sink.emit(Channel.STDOUT, self.early)
         if self.delay:
-            await asyncio.sleep(self.delay)
+            # The line's program, which a signal its shell ignores stops.
+            shell = get_current_evaluation().frame.shell
+            assert shell is not None
+            _, signal = await shell.program(lambda: asyncio.sleep(self.delay))
+            if signal is not None:
+                return IOResult(exit_code=128 + signal)
         return IOResult(stdout=b"done\n", exit_code=self.exit_code)
 
 

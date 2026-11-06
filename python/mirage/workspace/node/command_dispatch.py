@@ -62,7 +62,7 @@ from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
-from mirage.shell.descriptors import Recorder
+from mirage.shell.descriptors import Recorder, output_target
 from mirage.shell.errors import (
     ArithError,
     DiscardSignal,
@@ -85,6 +85,7 @@ from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import AliasExpansion, TSNodeLike
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import TempEnv, VarAttr
+from mirage.shell.voice import shell_voice
 from mirage.shell.xtrace import trace_command
 from mirage.types import PathSpec, Producer, word_text
 from mirage.utils.glob_walk import glob_pattern
@@ -112,6 +113,7 @@ from mirage.workspace.executor.builtins.alias import (
     alias_mark,
     expanding_aliases,
 )
+from mirage.workspace.executor.builtins.exec import diverted_file
 from mirage.workspace.executor.builtins.help import flag_help
 from mirage.workspace.executor.builtins.table import BUILTINS
 from mirage.workspace.executor.builtins.types import BuiltinCall
@@ -366,7 +368,9 @@ async def execute_command(
             continue
         key, _, raw_val = atext.partition("=")
         if name and view.is_readonly(key, False):
-            refused += encode_text(f"bash: {key}: readonly variable\n")
+            refused += encode_text(
+                f"{shell_voice()}{key}: readonly variable\n"
+            )
             continue
         val_nodes = [c for c in p.named_children if c.type != NT.VARIABLE_NAME]
         if val_nodes:
@@ -408,7 +412,9 @@ async def execute_command(
         except PolicyDenied as exc:
             return _write_refused(exc, name or k)
         if k in session.readonly_vars:
-            raise DiscardSignal(encode_text(f"bash: {k}: readonly variable\n"))
+            raise DiscardSignal(
+                encode_text(f"{shell_voice()}{k}: readonly variable\n")
+            )
 
     async def judge_landed(olds: Mapping[str, Any]) -> None:
         # `post_session` asks about each prefix write once it landed.
@@ -626,7 +632,7 @@ def _write_refused(
         exc (PolicyDenied): the refusal.
         command (str): the command the assignment prefixed.
     """
-    err = encode_text(f"bash: {exc.strerror}\n")
+    err = encode_text(f"{shell_voice()}{exc.strerror}\n")
     return (
         None,
         IOResult(exit_code=1, stderr=err),
@@ -898,7 +904,7 @@ async def _run_argv(
                 invocation=admitted.ctx if admitted is not None else None,
                 declared=None,
                 output_file=(
-                    output.output_target
+                    output_target(diverted_file(context.session, output))
                     if isinstance(output, Recorder)
                     else None
                 ),

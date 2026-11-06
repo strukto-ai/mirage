@@ -1047,7 +1047,7 @@
       "expect": {
         "exit": 0,
         "stdout": "0\n1\n1 0\n0 1\n",
-        "stderr": "/data/missing: No such file or directory\n/data/missing: No such file or directory\n/data/missing: No such file or directory\n"
+        "stderr": "bash: line 1: /data/missing: No such file or directory\nbash: line 1: /data/missing: No such file or directory\nbash: line 1: /data/missing: No such file or directory\n"
       }
     },
     {

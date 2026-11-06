@@ -207,7 +207,7 @@
       "expect": {
         "exit": 0,
         "stdout": "1 26794\n1 5\n1 9\n3\n",
-        "stderr": "bash: ((: RANDOM=42, RANDOM + 1/0 : division by 0 (error token is \"0 \")\nbash: ((: zae=5, 1/0 : division by 0 (error token is \"0 \")\nbash: let: zae=9, 1/0: division by 0 (error token is \"0\")\nbash: ((: zae=3, 1/0: division by 0 (error token is \"0\")\n"
+        "stderr": "bash: line 1: ((: RANDOM=42, RANDOM + 1/0 : division by 0 (error token is \"0 \")\nbash: line 1: ((: zae=5, 1/0 : division by 0 (error token is \"0 \")\nbash: line 1: let: zae=9, 1/0: division by 0 (error token is \"0\")\nbash: line 1: ((: zae=3, 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -558,7 +558,7 @@
       "expect": {
         "exit": 0,
         "stdout": "let=1 X=5\ncmd=1 X=6\nargs=1 X=1\nfor=1 X=8\ncond=1 X=4\nif=0\nwhile=0\n",
-        "stderr": "bash: R: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\nbash: R: readonly variable\n"
+        "stderr": "bash: line 1: R: readonly variable\nbash: line 1: R: readonly variable\nbash: line 1: R: readonly variable\nbash: line 1: R: readonly variable\nbash: line 1: R: readonly variable\nbash: line 1: R: readonly variable\nbash: line 1: R: readonly variable\n"
       }
     },
     {

@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -50,7 +51,7 @@ export function symbolicUmask(mask: number): string {
  */
 export function parseUmask(text: string, current: number): number | string {
   if (/^\d+$/.test(text)) {
-    if (!/^[0-7]+$/.test(text)) return `bash: umask: ${text}: octal number out of range\n`
+    if (!/^[0-7]+$/.test(text)) return `${shellVoice()}umask: ${text}: octal number out of range\n`
     return Math.min(parseInt(text, 8), 0o777)
   }
   const perms = 0o777 & ~current
@@ -59,16 +60,16 @@ export function parseUmask(text: string, current: number): number | string {
     while (i < clause.length && 'ugoa'.includes(clause[i] ?? '')) i++
     if (i >= clause.length || !'+-='.includes(clause[i] ?? '')) {
       const bad = i < clause.length ? (clause[i] ?? '') : ''
-      return `bash: umask: \`${bad}': invalid symbolic mode operator\n`
+      return `${shellVoice()}umask: \`${bad}': invalid symbolic mode operator\n`
     }
     for (const ch of clause.slice(i + 1)) {
       if (!'+-=rwx'.includes(ch)) {
-        return `bash: umask: \`${ch}': invalid symbolic mode character\n`
+        return `${shellVoice()}umask: \`${ch}': invalid symbolic mode character\n`
       }
     }
   }
   const parsed = parseChmod(text, perms)
-  if (parsed === null) return `bash: umask: \`${text}': invalid symbolic mode character\n`
+  if (parsed === null) return `${shellVoice()}umask: \`${text}': invalid symbolic mode character\n`
   return 0o777 & ~parsed
 }
 
@@ -82,7 +83,11 @@ export function parseUmask(text: string, current: number): number | string {
 export function handleUmask(args: string[], session: SessionState): RedirectResult {
   const scan = scanOptions(args, 'Sp')
   if (scan.bad !== null)
-    return fail('umask', `bash: umask: ${scan.bad}: invalid option\n${builtinUsage('umask')}`, 2)
+    return fail(
+      'umask',
+      `${shellVoice()}umask: ${scan.bad}: invalid option\n${builtinUsage('umask')}`,
+      2,
+    )
   const symbolic = scan.letters.includes('S')
   const reusable = scan.letters.includes('p')
   const operands = scan.operands

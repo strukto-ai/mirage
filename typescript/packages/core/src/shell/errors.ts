@@ -13,6 +13,7 @@
 
 export { PipeClosed } from '../io/errors.ts'
 
+import { shellVoice } from './voice.ts'
 import type { ByteSource } from '../io/types.ts'
 import type { ArithWrite } from './types.ts'
 import { encodeText } from './bytes.ts'
@@ -58,7 +59,7 @@ export class ArithError extends Error {
    */
   signal(cmd = '', fatal = false): ExitSignal {
     const lead = cmd !== '' && !this.inSubscript ? `${cmd}: ` : ''
-    const stderr = encodeText(`bash: ${lead}${this.message}\n`)
+    const stderr = encodeText(`${shellVoice()}${lead}${this.message}\n`)
     if (fatal || this.inSubscript) return new ExitSignal(1, stderr, null, 1)
     return new DiscardSignal(stderr)
   }
@@ -93,7 +94,7 @@ export class ReadonlyVariableError extends Error {
    * discards the line, as `$((R=3))` does.
    */
   signal(fatal = false): ExitSignal {
-    const stderr = encodeText(`bash: ${this.message}\n`)
+    const stderr = encodeText(`${shellVoice()}${this.message}\n`)
     if (fatal || this.inSubscript) return new ExitSignal(1, stderr, null, 1)
     return new DiscardSignal(stderr)
   }
@@ -176,7 +177,7 @@ export class DiscardSignal extends ExitSignal {
 export class TooManyMatches extends DiscardSignal {
   readonly reason: string
   constructor(reason: string) {
-    super(encodeText(`bash: ${reason}\n`))
+    super(encodeText(`${shellVoice()}${reason}\n`))
     this.name = 'TooManyMatches'
     this.reason = reason
   }
@@ -190,7 +191,7 @@ export class TooManyMatches extends DiscardSignal {
  */
 export class UnboundVariable extends ExitSignal {
   constructor(name: string) {
-    super(127, encodeText(`bash: ${name}: unbound variable\n`), null, 1)
+    super(127, encodeText(`${shellVoice()}${name}: unbound variable\n`), null, 1)
     this.name = 'UnboundVariable'
   }
 }
@@ -214,7 +215,7 @@ export class BadSubstitution extends DiscardSignal {
   /** Name the word being expanded, unless a boundary already has. */
   within(word: string, fixed = false): this {
     if (!this.fixed) {
-      this.stderr = encodeText(`bash: ${word}: bad substitution\n`)
+      this.stderr = encodeText(`${shellVoice()}${word}: bad substitution\n`)
       this.fixed = fixed
     }
     return this

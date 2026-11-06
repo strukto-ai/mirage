@@ -23,6 +23,7 @@ from mirage.shell.errors import DiscardSignal
 from mirage.shell.helpers import get_declaration_keyword, get_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.variable import VarAttr, VarKind
+from mirage.shell.voice import shell_voice
 from mirage.shell.xtrace import trace_array, trace_command
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
@@ -130,7 +131,7 @@ def _declare_option_refusal(
     sign = "-" if bad in flag_chars else "+"
     return fail(
         cmd,
-        f"bash: {cmd}: {sign}{bad}: invalid option\n{builtin_usage(cmd)}",
+        f"{shell_voice()}{cmd}: {sign}{bad}: invalid option\n{builtin_usage(cmd)}",
         2,
     )
 
@@ -376,7 +377,7 @@ async def execute_declaration(
             conflict = kind_conflict(held, kind)
             if conflict is not None:
                 conversion_errors.append(
-                    f"bash: {cmd_word}: {bare}: {conflict}"
+                    f"{shell_voice()}{cmd_word}: {bare}: {conflict}"
                 )
                 continue
             if isinstance(held, dict if want_assoc else ShellArray):

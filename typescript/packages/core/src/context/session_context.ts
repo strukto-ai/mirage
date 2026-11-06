@@ -26,6 +26,7 @@ import type {
 import type { ProcessHandle } from '../process/handle.ts'
 import { fromUnits, units } from '../rs/document.ts'
 import { visibilityMatcher } from '../rs/policy.ts'
+import { useVoice } from '../shell/voice.ts'
 import type { JobConsole } from '../shell/console/index.ts'
 import type { FileDescription } from '../shell/descriptors.ts'
 import type { Redirect } from '../shell/types.ts'
@@ -565,6 +566,23 @@ export function sessionUmask(access?: SessionAccess): number {
   for (const sess of live) mask |= sess.umask
   return mask
 }
+
+/**
+ * The voice of the shell bound to the running context (`shellVoice`). The
+ * name is the file a sourced script, or a function defined in one, came from;
+ * `environment` for a function defined in the shell's own input; else the
+ * nested shell's `$0`, else `bash`. A builtin run as a program (`env`, `xargs`)
+ * is not the shell and leads with nothing. Mirrors Python's _running_voice.
+ */
+function runningVoice(): string {
+  const session = getCurrentSession()
+  if (session === null) return 'bash: '
+  if (isProgramInvocation(session)) return ''
+  const name = session.parseName ?? session.scriptName ?? 'bash'
+  return `${name === '' ? 'bash' : name}: line ${String(session.lineNumber)}: `
+}
+
+useVoice(runningVoice)
 
 /** Whether the owner's pathname expansion includes leading dots.
  * Unbound browser calls require every live session to opt in; no live

@@ -12,18 +12,21 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../shell/voice.ts'
 import { UNKNOWN_NAME } from '../../commands/builtin/utils/identity.ts'
 import { gnuStrftime } from '../../commands/builtin/utils/strftime.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import {
   type Caller,
   currentCaller,
+  getCurrentEvaluation,
   isProgramInvocation,
   runWithCaller,
 } from '../../context/session_context.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { holdInputs, type SharedInput } from '../../io/async_line_iterator.ts'
 import { PipeClosed } from '../../io/errors.ts'
+import { OutputStream } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
@@ -32,6 +35,7 @@ import type { HandOff } from '../../policy/types.ts'
 import type { ProcessInfo, ProcessState } from '../../process/types.ts'
 import type { ProcessView } from '../../process/view.ts'
 import { encodeText } from '../../shell/bytes.ts'
+import { concat } from '../../utils/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
 import { PipeConsole } from '../../shell/console/pipe.ts'
@@ -40,9 +44,12 @@ import {
   FD_CLOSE,
   FORK_FAILED,
   FORK_FAILED_STATUS,
+  NESTED_SHELLS,
   NOT_FOUND_STATUS,
+  SIGRTMAX,
   TIMEOUT_STATUS,
 } from '../../shell/constants.ts'
+import { signalName, signalNumber, signalReport, signalTable } from '../../shell/signals.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
 import { ENDING_SIGNALS, STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
@@ -57,7 +64,8 @@ import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { systemNow } from '../../utils/clock.ts'
 import { LOCAL_ZONE, type Zone, zoneFromEnv } from '../../utils/timezone.ts'
 import type { SessionView } from '../../view/types.ts'
-import { childContext, type EvaluationContext } from '../evaluation.ts'
+import { childContext, EvaluationContext } from '../evaluation.ts'
+import type { ExecutionFrame } from '../frame.ts'
 import { ExecutionScope } from '../execution.ts'
 import { CAPTURABLE_BUILTINS, SHELL_NAMES } from '../lookup/constants.ts'
 import { occurrenceOf } from '../node/occurrence.ts'
@@ -81,7 +89,10 @@ export const logger: { debug?: (message: string) => void } = {}
  * is what lets a reader watch a running job. A command that computes its
  * output eagerly still lands in one chunk, because there was nothing to
  * observe before it finished. A pipe is drained before the next chunk is
- * pulled, so a reader that closed stops the source before it fetches more.
+ * pulled, so a reader that closed stops the source before it fetches more; a
+ * source that reads nothing to make its bytes (`OutputStream.eager`) runs
+ * ahead into the pipe's buffer, as bash's `seq 1 | sleep 30` writer does and
+ * exits.
  */
 export async function pump(
   console_: JobConsole,
@@ -93,10 +104,11 @@ export async function pump(
     if (stream.byteLength > 0) await console_.emit(channel, stream)
     return
   }
+  const eager = stream instanceof OutputStream && stream.eager
   for await (const chunk of stream) {
     if (chunk.byteLength > 0) await console_.emit(channel, chunk)
     if (!(console_ instanceof PipeConsole)) continue
-    await console_.drain()
+    if (!eager) await console_.drain()
     if (console_.closedReader) return
   }
 }
@@ -223,51 +235,138 @@ function oneProgram(left: TSNodeLike, session: SessionState): boolean {
 }
 
 /**
- * Whether bash forks a statement as one child: a program or a subshell. The
- * shell's own work (a builtin, a function, a compound command) is not, and a
- * pipeline forks each stage (`handlePipe`). Mirrors Python's _forked.
+ * Whether bash forks a statement as one program. The shell's own work (a
+ * builtin, a function, a compound command) is not one, and a subshell, a
+ * nested shell (`bash -c`) and a pipeline's stages are processes of their
+ * own, each a shell that runs its own programs. Mirrors Python's _forked.
  */
 function forked(node: TSNodeLike | null, session: SessionState): boolean {
   if (node === null || isBackgrounded(node)) return false
   if (node.type === NT.REDIRECTED_STATEMENT) return forked(getRedirects(node)[0], session)
-  return node.type === NT.SUBSHELL || (node.type === NT.COMMAND && forks(node, session))
+  if (node.type !== NT.COMMAND || !forks(node, session)) return false
+  const head = commandInvocations(node)[0]?.[0] ?? null
+  return head === null || !NESTED_SHELLS.has(head)
 }
 
 /**
- * Run one statement to the end of its output. A program or a subshell a
- * background job's shell runs (`sleep 3` in `{ sleep 3; echo x; } &`) runs
- * where a signal that shell ignores still stops it, whole, as bash forks each
- * with INT back at its default: the statement ends with 128 plus the signal,
- * and the job goes on. Mirrors Python's run_program.
+ * Run one statement to the end of its output. A program its shell forks
+ * (`sleep 3`) runs where a signal the shell ignores still stops it, whole, as
+ * bash forks each with that signal back at its default: QUIT, which every
+ * shell ignores, and INT, which a background job's does. The statement ends
+ * with 128 plus the signal, and the shell goes on. Mirrors Python's
+ * run_program.
  */
 export async function runProgram(
   node: TSNodeLike,
   context: EvaluationContext,
   run: () => Promise<RedirectResult>,
+  jobTable: JobTable | null = null,
+  sink: JobConsole | null = null,
 ): Promise<RedirectResult> {
-  const job = context.frame.job
-  if (job === null || !forked(node, context.session)) return run()
+  const shell = context.frame.shell
+  if (shell === null || !forked(node, context.session)) return run()
   const outer = context.frame.abortSignal
-  const [ran, signal] = await job.program(async (stop) => {
+  const [ran, signal] = await shell.program(async (stop) => {
     context.frame.abortSignal = outer === null ? stop : AbortSignal.any([outer, stop])
     // What the child runs is its own, which the signal stops with it.
-    context.frame.job = null
+    context.frame.shell = null
     try {
       return await run()
     } finally {
       context.frame.abortSignal = outer
-      context.frame.job = job
+      context.frame.shell = shell
     }
   })
-  if (signal === null) return ran
-  const code = 128 + signal
-  if (node.type !== NT.COMMAND) context.session.pipeStatusPending = [code]
-  recordStatus(context.session, code)
-  return [
-    null,
-    new IOResult({ exitCode: code }),
-    new ExecutionNode({ command: node.text, exitCode: code }),
-  ]
+  let result: RedirectResult
+  if (signal === null) {
+    result = ran
+  } else {
+    const code = 128 + signal
+    if (node.type !== NT.COMMAND) context.session.pipeStatusPending = [code]
+    recordStatus(context.session, code)
+    result = [
+      null,
+      new IOResult({ exitCode: code }),
+      new ExecutionNode({ command: node.text, exitCode: code }),
+    ]
+  }
+  if (jobTable === null) {
+    context.frame.reports.push(new Uint8Array())
+    return result
+  }
+  const told = reportJobs(context, jobTable)
+  if (told.length > 0) await tell(told, result[1], result[2], sink)
+  return result
+}
+
+/**
+ * Put the report of a child a statement reaped after the statement's stderr:
+ * into the sink it writes to as it runs, or after the stderr it returns.
+ * Mirrors Python's tell.
+ */
+export async function tell(
+  report: Uint8Array,
+  io: IOResult,
+  execNode: ExecutionNode,
+  sink: JobConsole | null,
+): Promise<void> {
+  if (sink === null) {
+    const merged = concat([await io.materializeStderr(), report])
+    io.stderr = merged
+    execNode.stderr = merged
+    return
+  }
+  await sendStderr(sink, io)
+  await sink.emit(Channel.STDERR, report)
+}
+
+/**
+ * bash's reports of the jobs its shell started that a signal ended since it
+ * last told, as it tells once it reaped a child or waited: each once, and
+ * the TERM, INT or PIPE that ended one untold. A substitution's shell tells
+ * of none. Mirrors Python's report_jobs.
+ */
+export function reportJobs(context: EvaluationContext, jobTable: JobTable | null): Uint8Array {
+  const session = context.session
+  if (jobTable === null || session.processId === null || context.frame.substitution) {
+    return new Uint8Array()
+  }
+  const told: string[] = []
+  for (const job of jobTable.listJobs(sessionOf(session))) {
+    if (
+      job.reported ||
+      job.status !== JobStatus.KILLED ||
+      job.exitCode <= 128 ||
+      job.process?.info.parentPid !== session.processId
+    ) {
+      continue
+    }
+    const report = signalReport(
+      shellVoice(),
+      [[job.pid, job.exitCode, job.exitCode - 128, job.command]],
+      false,
+    )
+    if (report !== '') {
+      job.reported = true
+      told.push(report)
+    }
+  }
+  return encodeText(told.join(''))
+}
+
+/**
+ * Queue bash's report of a child its shell waited for that a signal ended
+ * (`signalReport`), empty when it prints none, to follow the reaping
+ * command's stderr with those of the shell's jobs. Each process is its pid,
+ * status, the signal that ended it and command. Mirrors Python's
+ * report_reaped.
+ */
+export function reportReaped(
+  frame: ExecutionFrame,
+  processes: readonly (readonly [number, number, number | null, string])[],
+): void {
+  if (!frame.substitution)
+    frame.reports.push(encodeText(signalReport(shellVoice(), processes, true)))
 }
 
 export async function handleBackground(
@@ -302,6 +401,7 @@ export async function handleBackground(
   const command = left.type === NT.REDIRECTED_STATEMENT ? getRedirects(left)[0] : left
   const oneCommand = command !== null && command.type === NT.COMMAND
   const ends = oneCommand && !forks(command, session)
+  const inPlace = (oneCommand && !ends) || (command !== null && command.type === NT.SUBSHELL)
   const heldInputs = holdInputs(bgSession.openInputs())
   const dropHolds = async (): Promise<void> => {
     let failure: { error: unknown } | undefined
@@ -357,7 +457,7 @@ export async function handleBackground(
   childEvaluation.frame.abortSignal = stopped
   const cmdStrInner = left.text
   const runBg = async (job: Job): Promise<[IOResult, ExecutionNode]> => {
-    childEvaluation.frame.job = oneCommand && !ends ? null : job.process
+    childEvaluation.frame.shell = inPlace ? null : job.process
     // What the job writes stays in its console and goes where its shell
     // writes as it is written: the terminal, or the substitution or pipe
     // it was started in.
@@ -651,9 +751,12 @@ function processView(jobTable: JobTable, session: SessionState | null): ProcessV
     : jobTable.processes.view(session.sessionId, () => session.processes)
 }
 
-/** The job whose number is `jobId`, the one `%N` names. */
+/**
+ * The job whose number is `jobId`, the one `%N` names: none once its report
+ * was printed, as bash then drops it from its list.
+ */
 function jobNumbered(jobs: readonly Job[], jobId: number): Job | null {
-  return jobs.find((j) => j.id === jobId) ?? null
+  return jobs.find((j) => j.id === jobId && !j.reported) ?? null
 }
 
 /**
@@ -774,7 +877,7 @@ export async function handleWait(
         } else {
           return jobResult(
             cmdStr,
-            `bash: wait: -p: option requires an argument\n${builtinUsage('wait')}`,
+            `${shellVoice()}wait: -p: option requires an argument\n${builtinUsage('wait')}`,
             2,
           )
         }
@@ -786,16 +889,24 @@ export async function handleWait(
       j++
     }
     if (bad !== null) {
-      return jobResult(cmdStr, `bash: wait: -${bad}: invalid option\n${builtinUsage('wait')}`, 2)
+      return jobResult(
+        cmdStr,
+        `${shellVoice()}wait: -${bad}: invalid option\n${builtinUsage('wait')}`,
+        2,
+      )
     }
     i++
   }
   if (varName !== null) {
     if (!JOB_IDENTIFIER.test(varName)) {
-      return jobResult(cmdStr, `bash: wait: \`${varName}': not a valid identifier\n`, 1)
+      return jobResult(cmdStr, `${shellVoice()}wait: \`${varName}': not a valid identifier\n`, 1)
     }
     if (view?.isReadonly(varName) === true) {
-      return jobResult(cmdStr, `bash: wait: ${varName}: cannot unset: readonly variable\n`, 1)
+      return jobResult(
+        cmdStr,
+        `${shellVoice()}wait: ${varName}: cannot unset: readonly variable\n`,
+        1,
+      )
     }
     if (view !== null) await view.unset(varName)
   }
@@ -806,7 +917,7 @@ export async function handleWait(
   for (const spec of specs) {
     const [job, refusal] = resolveSpec(visible, spec)
     if (job === null) {
-      errors.push(`bash: wait: ${refusal}`)
+      errors.push(`${shellVoice()}wait: ${refusal}`)
       continue
     }
     picked.push(job)
@@ -824,14 +935,22 @@ export async function handleWait(
     }
     const job = await abortable(waitFirst(jobTable, candidates, signal), signal)
     if (varName !== null && view !== null) await view.set(varName, String(job.pid))
+    const told = waitReports(session, jobTable)
     const [stdout, io, node] = await reaped(jobTable, job, cmdStr)
-    if (errBytes !== null) io.stderr = errBytes
+    if (errBytes !== null || told.length > 0) {
+      io.stderr = concat([errBytes ?? new Uint8Array(), told])
+    }
     return [stdout, io, node]
   }
   if (specs.length === 0) {
     await abortable(jobTable.waitAll(sid, signal), signal)
+    const told = waitReports(session, jobTable)
     await jobTable.popCompleted(sid)
-    return [null, new IOResult(), new ExecutionNode({ command: cmdStr, exitCode: 0 })]
+    return [
+      null,
+      new IOResult({ stderr: told.length > 0 ? told : null }),
+      new ExecutionNode({ command: cmdStr, exitCode: 0 }),
+    ]
   }
   if (picked.length === 0) {
     // Every spec was refused: bash answers 127 for a job it cannot find
@@ -840,13 +959,16 @@ export async function handleWait(
     const code = last.endsWith('not a pid or valid job spec') ? 1 : NOT_FOUND_STATUS
     return jobResult(cmdStr, errText, code)
   }
+  const finished: Job[] = []
+  for (const job of picked)
+    finished.push(await abortable(jobTable.wait(job.id, sid, signal), signal))
+  const told = waitReports(session, jobTable)
   let lastCode = 0
   let lastJob: Job | null = null
-  for (const job of picked) {
-    const finished = await abortable(jobTable.wait(job.id, sid, signal), signal)
-    const [, io] = await reaped(jobTable, finished, cmdStr)
+  for (const job of finished) {
+    const [, io] = await reaped(jobTable, job, cmdStr)
     lastCode = io.exitCode
-    lastJob = finished
+    lastJob = job
   }
   // `wait id1 id2` answers with the last id's status, so `-p` names that
   // same job however many were waited for. Only the no-operand form
@@ -854,11 +976,24 @@ export async function handleWait(
   if (varName !== null && view !== null && lastJob !== null) {
     await view.set(varName, String(lastJob.pid))
   }
+  const stderr = concat([errBytes ?? new Uint8Array(), told])
   return [
     null,
-    new IOResult({ exitCode: lastCode, stderr: errBytes }),
+    new IOResult({ exitCode: lastCode, stderr: stderr.length > 0 ? stderr : null }),
     new ExecutionNode({ command: cmdStr, exitCode: lastCode }),
   ]
+}
+
+/**
+ * What `wait` tells of the jobs a signal ended once it waited (`reportJobs`),
+ * before it reaps them. Mirrors Python's _wait_reports.
+ */
+function waitReports(session: SessionState | null, jobTable: JobTable): Uint8Array {
+  if (session === null) return new Uint8Array()
+  const current = getCurrentEvaluation()
+  const context =
+    current !== null && current.session === session ? current : new EvaluationContext(session)
+  return reportJobs(context, jobTable)
 }
 
 /**
@@ -880,7 +1015,7 @@ export async function handleDisown(
   if (scan.bad !== null) {
     return jobResult(
       cmdStr,
-      `bash: disown: ${scan.bad}: invalid option\n${builtinUsage('disown')}`,
+      `${shellVoice()}disown: ${scan.bad}: invalid option\n${builtinUsage('disown')}`,
       2,
     )
   }
@@ -896,7 +1031,7 @@ export async function handleDisown(
     for (const spec of specs) {
       const [job] = resolveSpec(jobs, spec)
       if (job === null) {
-        errors.push(`bash: disown: ${spec}: no such job`)
+        errors.push(`${shellVoice()}disown: ${spec}: no such job`)
         continue
       }
       targets.push(job)
@@ -906,7 +1041,7 @@ export async function handleDisown(
   } else {
     const current = jobs[jobs.length - 1]
     if (current === undefined) {
-      return jobResult(cmdStr, 'bash: disown: current: no such job\n', 1)
+      return jobResult(cmdStr, `${shellVoice()}disown: current: no such job\n`, 1)
     }
     targets = [current]
   }
@@ -950,7 +1085,7 @@ export async function handleFg(
   if (parts.length <= 1) {
     const current = jobs.filter((j) => j.status === JobStatus.RUNNING).at(-1) ?? jobs.at(-1)
     if (current === undefined) {
-      const err = encodeText('bash: fg: current: no such job\n')
+      const err = encodeText(`${shellVoice()}fg: current: no such job\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -963,7 +1098,7 @@ export async function handleFg(
     const jobId = Number(raw)
     const numbered = Number.isInteger(jobId) ? jobNumbered(jobs, jobId) : null
     if (numbered === null) {
-      const err = encodeText(`bash: fg: ${parts[1] ?? ''}: no such job\n`)
+      const err = encodeText(`${shellVoice()}fg: ${parts[1] ?? ''}: no such job\n`)
       return [
         null,
         new IOResult({ exitCode: 1, stderr: err }),
@@ -983,35 +1118,61 @@ export async function handleFg(
   ]
 }
 
-// The signals a managed runner answers besides the probe (0). Each one ends
-// the runner through its cancellation channel, carrying the signal: a
-// native program the runner started receives it, KILL a second later if
-// it is still running, and the waited status is 128 plus it, as bash
-// reports a child the signal ended. A non-interactive bash's asynchronous
-// commands may ignore INT and QUIT, job control being off; a managed
-// runner ends on them as on any other. Stop, continue and the user signals
-// have no managed meaning and are refused as bash refuses a name it does
-// not know.
-const KILL_SIGNALS: Readonly<Record<string, number>> = {
-  HUP: 1,
-  INT: 2,
-  QUIT: 3,
-  KILL: 9,
-  TERM: 15,
-}
+// Signals a running process takes and goes on: those whose default is to
+// ignore them, and the terminal stops a non-interactive bash's asynchronous
+// commands ignore; kill answers for them as for the probe (0). Mirrors
+// Python's _KEPT_SIGNALS.
+const KEPT_SIGNALS: ReadonlySet<number> = new Set([0, 17, 18, 20, 21, 22, 23, 28])
+
+// STOP, which suspends a process; a managed runner cannot be suspended.
+const SIGSTOP = 19
 
 // The largest PID operand kill and ps read as a number: the bound both hosts
 // hold exactly (bash's own is intmax_t).
 const MAX_PID_OPERAND = Number.MAX_SAFE_INTEGER
 
-/** bash's sigspec: a number, or a name with or without SIG, any case. */
-function signalNumber(spec: string): number | null {
-  if (/^[0-9]+$/.test(spec)) {
-    const number = Number(spec)
-    return number === 0 || Object.values(KILL_SIGNALS).includes(number) ? number : null
+const LISTED_NUMBER = /^\s*\+?([0-9]+)$/
+
+/**
+ * `kill -l`: the signal table, or each operand's name for a number (a `$?`
+ * of 128 plus one too) and number for a name. Mirrors Python's _kill_list.
+ */
+function killList(cmdStr: string, operands: string[], voice: string): RedirectResult {
+  const words = operands[0] === '--' ? operands.slice(1) : operands
+  if (words.length === 0) {
+    return [
+      encodeText(signalTable()),
+      new IOResult(),
+      new ExecutionNode({ command: cmdStr, exitCode: 0 }),
+    ]
   }
-  const name = spec.toUpperCase()
-  return KILL_SIGNALS[name.startsWith('SIG') ? name.slice(3) : name] ?? null
+  const lines: string[] = []
+  const errors: string[] = []
+  for (const word of words) {
+    // eslint-disable-next-line no-control-regex
+    const number = /^[\x00-\x7f]*$/.test(word) ? LISTED_NUMBER.exec(word) : null
+    if (number === null) {
+      const value = signalNumber(word)
+      if (value === null) errors.push(`${voice}kill: ${word}: invalid signal specification`)
+      else lines.push(String(value))
+      continue
+    }
+    let value = Number(number[1])
+    if (value > 128 && value <= 128 + SIGRTMAX) value -= 128
+    else if (value > SIGRTMAX) {
+      errors.push(`${voice}kill: ${word}: invalid signal specification`)
+      continue
+    }
+    const name = value === 0 ? 'EXIT' : signalName(value)
+    if (name !== null) lines.push(name)
+  }
+  const code = errors.length > 0 ? 1 : 0
+  const err = encodeText(errors.map((line) => `${line}\n`).join(''))
+  return [
+    encodeText(lines.map((line) => `${line}\n`).join('')),
+    new IOResult({ exitCode: code, ...(errors.length > 0 ? { stderr: err } : {}) }),
+    new ExecutionNode({ command: cmdStr, exitCode: code, stderr: err }),
+  ]
 }
 
 /** The managed PID one kill operand names, or bash's refusal. */
@@ -1048,8 +1209,11 @@ function runnerless(jobs: Job[], operand: string): Job | null {
  * signal cancels the runner with it. Every operand is tried and each failure is
  * named in bash's words; the status is 0 when any operand was signalled,
  * as bash's is. A job spec is `%N`; a negative number is a process group,
- * which no managed runner leads. `owner:pid` names another workspace's
- * runner, as `ps` lists it: its owner stops it once it takes the stop.
+ * the session's `-$$` among them, whose every runner gets the signal
+ * (killpg). `owner:pid` names another workspace's runner, as `ps` lists it:
+ * its owner stops it once it takes the stop. A signal that stops the shell
+ * running `kill` lands before the next statement, as bash's signal to itself
+ * does: its abort fails that statement's checkpoint.
  */
 export async function handleKill(
   jobTable: JobTable,
@@ -1059,11 +1223,12 @@ export async function handleKill(
 ): Promise<RedirectResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
-  let signal = KILL_SIGNALS.TERM ?? 15
+  let signal = 15
   let words = parts.slice(1)
   let sawSignal = false
   // The program (`xargs kill`) keeps its bare voice.
-  const voice = session !== null && isProgramInvocation(session) ? '' : 'bash: '
+  const voice = session !== null && isProgramInvocation(session) ? '' : shellVoice()
+  if (words[0] === '-l' || words[0] === '-L') return killList(cmdStr, words.slice(1), voice)
   while (words.length > 0) {
     const word = words[0] ?? ''
     let spec: string
@@ -1077,6 +1242,12 @@ export async function handleKill(
       break
     } else if (word === '-?') {
       return jobResult(cmdStr, builtinUsage('kill'), 2)
+    } else if (
+      (word.startsWith('-s') && /^[A-Za-z]/.test(word.slice(2))) ||
+      (word.startsWith('-n') && /^[0-9]/.test(word.slice(2)))
+    ) {
+      spec = word.slice(2)
+      words = words.slice(1)
     } else if (word.startsWith('-') && word.length > 1 && !sawSignal) {
       spec = word.slice(1)
       words = words.slice(1)
@@ -1085,6 +1256,7 @@ export async function handleKill(
     const number = signalNumber(spec)
     if (number === null)
       return jobResult(cmdStr, `${voice}kill: ${spec}: invalid signal specification\n`, 1)
+    if (number === SIGSTOP) return jobResult(cmdStr, `mirage: kill: ${spec}: not supported\n`, 1)
     signal = number
   }
   if (words.length === 0) return jobResult(cmdStr, builtinUsage('kill'), 2)
@@ -1128,12 +1300,27 @@ export async function handleKill(
       errors.push(`${voice}kill: ${refusal}`)
       continue
     }
+    if (operand.startsWith('-')) {
+      let found: boolean
+      try {
+        found = await killGroup(jobTable, processes, jobs, -pid, signal, sid)
+      } catch (err) {
+        if ((err as { code?: unknown }).code !== 'EPERM') throw err
+        errors.push(`${voice}kill: (${String(pid)}) - Operation not permitted`)
+        continue
+      }
+      if (!found) {
+        errors.push(`${voice}kill: (${String(pid)}) - No such process`)
+        continue
+      }
+      signalled = true
+      continue
+    }
     const unrun = runnerless(jobs, operand)
     if (unrun !== null) {
-      const found =
-        signal === 0
-          ? unrun.status === JobStatus.RUNNING
-          : await jobTable.kill(unrun.id, sid, signal)
+      const found = KEPT_SIGNALS.has(signal)
+        ? unrun.status === JobStatus.RUNNING
+        : await jobTable.kill(unrun.id, sid, signal)
       if (!found) {
         errors.push(`${voice}kill: (${String(pid)}) - No such process`)
         continue
@@ -1143,7 +1330,7 @@ export async function handleKill(
     }
     let found: boolean
     try {
-      if (signal === 0) found = processes.probe(pid)
+      if (KEPT_SIGNALS.has(signal)) found = processes.probe(pid)
       else {
         found = processes.terminate(pid, signal)
         const job = jobs.find((j) => j.process !== null && j.pid === pid)
@@ -1167,6 +1354,32 @@ export async function handleKill(
     new IOResult({ exitCode: code, stderr }),
     new ExecutionNode({ command: cmdStr, exitCode: code, stderr: stderr ?? new Uint8Array() }),
   ]
+}
+
+/**
+ * Signal a process group as killpg(2) does, its jobs recorded as killed by a
+ * signal they take. Returns whether the group had a runner the view sees.
+ * Mirrors Python's _kill_group.
+ */
+async function killGroup(
+  jobTable: JobTable,
+  processes: ProcessView,
+  jobs: Job[],
+  group: number,
+  signal: number,
+  sessionId: string,
+): Promise<boolean> {
+  if (KEPT_SIGNALS.has(signal)) return processes.probeGroup(group)
+  if (!processes.probeGroup(group)) return false
+  for (const job of jobs) {
+    if (
+      job.process !== null &&
+      job.process.info.groupId === group &&
+      !job.process.ignores.has(signal)
+    )
+      await jobTable.kill(job.id, sessionId, signal)
+  }
+  return processes.signalGroup(group, signal)
 }
 
 const JOBS_FLAGS: ReadonlySet<string> = new Set('lnprs')
@@ -1205,7 +1418,9 @@ export async function handleJobs(
       if (word === '--') continue
       const bad = Array.from(word.slice(1)).find((c) => !JOBS_FLAGS.has(c))
       if (bad !== undefined) {
-        const err = encodeText(`bash: jobs: -${bad}: invalid option\n${builtinUsage('jobs')}`)
+        const err = encodeText(
+          `${shellVoice()}jobs: -${bad}: invalid option\n${builtinUsage('jobs')}`,
+        )
         return [
           null,
           new IOResult({ exitCode: 2, stderr: err }),
@@ -1219,14 +1434,14 @@ export async function handleJobs(
   }
   for (let table: JobTable | null = jobTable; table !== null; table = table.parent)
     await table.sync(sid)
-  let jobs = jobTable.listing(sid)
+  let jobs = jobTable.listing(sid).filter((j) => !j.reported)
   if (specs.length > 0) {
     const picked: Job[] = []
     for (const spec of specs) {
       const raw = spec.replace(/^%+/, '')
       const job = /^\d+$/.test(raw) ? jobNumbered(jobs, Number(raw)) : null
       if (job === null) {
-        const err = encodeText(`bash: jobs: ${spec}: no such job\n`)
+        const err = encodeText(`${shellVoice()}jobs: ${spec}: no such job\n`)
         return [
           null,
           new IOResult({ exitCode: 1, stderr: err }),

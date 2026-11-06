@@ -343,7 +343,9 @@ describe('background job kill', () => {
     try {
       const running = ws.shell('(trap "started; sleep 0.3; reached" EXIT; true); echo after')
       const subshell = () =>
-        ws.jobTable.processes.live().find((p) => p.info.command.startsWith('(trap'))
+        ws.jobTable.processes
+          .live()
+          .find((p) => p.info.command.startsWith('(trap') && p.info.parentPid !== null)
       const deadline = Date.now() + 3000
       while (subshell() === undefined) {
         if (Date.now() > deadline) throw new Error('the subshell never started')
@@ -351,7 +353,7 @@ describe('background job kill', () => {
       }
       await new Promise((resolve) => setTimeout(resolve, 50))
       subshell()?.terminate()
-      await expect(running).rejects.toMatchObject({ name: 'AbortError' })
+      expect((await running).stdoutText).toBe('after\n')
       await new Promise((resolve) => setTimeout(resolve, 600))
       expect(reached).toEqual(['started'])
     } finally {

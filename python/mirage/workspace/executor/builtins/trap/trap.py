@@ -14,12 +14,12 @@
 
 from mirage.commands.builtin.utils.strtol import bounded_decimal
 from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.constants import SIGNALS
 from mirage.workspace.executor.builtins.shared import (
     builtin_error,
     builtin_usage,
     result,
 )
-from mirage.workspace.executor.builtins.timeout.constants import SIGNALS
 from mirage.workspace.executor.builtins.trap.constants import (
     PSEUDO_SIGNALS,
     RUN_EVENTS,

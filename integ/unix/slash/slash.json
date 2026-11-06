@@ -1083,7 +1083,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/slashr/a.txt/: Not a directory\n"
+        "stderr": "bash: line 1: /data/slashr/a.txt/: Not a directory\n"
       }
     },
     {
@@ -1259,7 +1259,7 @@
       "command": "mkdir -p /data/slashw/d && printf 'x\n' > /data/slashw/d/f && printf 'hi\n' > /data/slashw/a.txt; for n in missing/ missing/./ a.txt/ a.txt/./ d/ d/./; do p=/data/slashw/$n; printf x | tee $p 2>&1 >/dev/null; truncate -s 0 $p 2>&1; { printf x > $p; } 2>&1; done; cat /data/slashw/a.txt; ls /data/slashw",
       "expect": {
         "exit": 0,
-        "stdout": "tee: /data/slashw/missing/: Is a directory\ntruncate: cannot open '/data/slashw/missing/' for writing: Is a directory\n/data/slashw/missing/: Is a directory\ntee: /data/slashw/missing/./: No such file or directory\ntruncate: cannot open '/data/slashw/missing/./' for writing: No such file or directory\n/data/slashw/missing/./: No such file or directory\ntee: /data/slashw/a.txt/: Is a directory\ntruncate: cannot open '/data/slashw/a.txt/' for writing: Is a directory\n/data/slashw/a.txt/: Is a directory\ntee: /data/slashw/a.txt/./: Not a directory\ntruncate: cannot open '/data/slashw/a.txt/./' for writing: Not a directory\n/data/slashw/a.txt/./: Not a directory\ntee: /data/slashw/d/: Is a directory\ntruncate: cannot open '/data/slashw/d/' for writing: Is a directory\n/data/slashw/d/: Is a directory\ntee: /data/slashw/d/./: Is a directory\ntruncate: cannot open '/data/slashw/d/./' for writing: Is a directory\n/data/slashw/d/./: Is a directory\nhi\na.txt\nd\n",
+        "stdout": "tee: /data/slashw/missing/: Is a directory\ntruncate: cannot open '/data/slashw/missing/' for writing: Is a directory\nbash: line 3: /data/slashw/missing/: Is a directory\ntee: /data/slashw/missing/./: No such file or directory\ntruncate: cannot open '/data/slashw/missing/./' for writing: No such file or directory\nbash: line 3: /data/slashw/missing/./: No such file or directory\ntee: /data/slashw/a.txt/: Is a directory\ntruncate: cannot open '/data/slashw/a.txt/' for writing: Is a directory\nbash: line 3: /data/slashw/a.txt/: Is a directory\ntee: /data/slashw/a.txt/./: Not a directory\ntruncate: cannot open '/data/slashw/a.txt/./' for writing: Not a directory\nbash: line 3: /data/slashw/a.txt/./: Not a directory\ntee: /data/slashw/d/: Is a directory\ntruncate: cannot open '/data/slashw/d/' for writing: Is a directory\nbash: line 3: /data/slashw/d/: Is a directory\ntee: /data/slashw/d/./: Is a directory\ntruncate: cannot open '/data/slashw/d/./' for writing: Is a directory\nbash: line 3: /data/slashw/d/./: Is a directory\nhi\na.txt\nd\n",
         "stderr": ""
       }
     }

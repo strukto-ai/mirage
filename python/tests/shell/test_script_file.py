@@ -183,21 +183,21 @@ def test_sourced_shell_options_stay_set_in_the_caller(shell):
 
 def test_source_reports_a_missing_file_as_typed(shell):
     code, _, err = shell.mirage_result("source nope.sh")
-    assert err == "bash: nope.sh: No such file or directory\n"
+    assert err == "bash: line 1: nope.sh: No such file or directory\n"
     assert code == 1
 
 
 def test_source_reports_a_directory_operand(shell):
     shell.create_file("sub/keep.txt", b"x\n")
     code, _, err = shell.mirage_result("source /data/sub")
-    assert err == "bash: source: /data/sub: is a directory\n"
+    assert err == "bash: line 1: source: /data/sub: is a directory\n"
     assert code == 1
 
 
 def test_source_with_no_operand_is_a_usage_error(shell):
     code, out, err = shell.mirage_result("source; echo after=$?")
     assert err == (
-        "bash: source: filename argument required\n"
+        "bash: line 1: source: filename argument required\n"
         "source: usage: source filename [arguments]\n"
     )
     assert out == "after=2\n"
@@ -232,7 +232,8 @@ def test_return_in_a_child_shell_is_invalid_even_when_sourced(shell):
     code, out, err = shell.mirage_result("source /data/lib.sh; echo done")
     assert out == "child-after\nafter=0\ndone\n"
     assert err == (
-        "bash: return: can only `return' from a function or sourced script\n"
+        "/data/child.sh: line 1: return: "
+        "can only `return' from a function or sourced script\n"
     )
     assert code == 0
 

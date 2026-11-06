@@ -32,22 +32,22 @@ from mirage.workspace import Workspace
         (
             "[ a =~ a ]; echo $?",
             "2\n",
-            "bash: [: =~: binary operator expected\n",
+            "bash: line 1: [: =~: binary operator expected\n",
         ),
         (
             "[ 1 + 1 ]; echo $?",
             "2\n",
-            "bash: [: +: binary operator expected\n",
+            "bash: line 1: [: +: binary operator expected\n",
         ),
         (
             "[ a += b ]; echo $?",
             "2\n",
-            "bash: [: +=: binary operator expected\n",
+            "bash: line 1: [: +=: binary operator expected\n",
         ),
         (
             "[ a -= b ]; echo $?",
             "2\n",
-            "bash: [: -=: binary operator expected\n",
+            "bash: line 1: [: -=: binary operator expected\n",
         ),
     ],
 )

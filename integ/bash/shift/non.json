@@ -31,7 +31,7 @@
       "command": "shift x 2>&1; echo code=$?",
       "expect": {
         "exit": 0,
-        "stdout": "bash: shift: x: numeric argument required\ncode=1\n",
+        "stdout": "bash: line 1: shift: x: numeric argument required\ncode=1\n",
         "stderr": ""
       }
     }

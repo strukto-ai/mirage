@@ -243,7 +243,8 @@ async def test_a_name_only_the_fallback_takes_runs_but_is_not_found():
             assert await result.stdout_str() == "", line
         result = await ws.shell("type native-tool")
         assert (
-            await result.stderr_str() == "bash: type: native-tool: not found\n"
+            await result.stderr_str()
+            == "bash: line 1: type: native-tool: not found\n"
         )
         assert (await ws.shell("native-tool")).exit_code == 0
         assert probe.requests[0].argv == ("native-tool",)
@@ -501,7 +502,7 @@ async def test_external_text_slot_glob_obeys_failglob(kind):
         await ws.shell("shopt -s failglob")
         result = await ws.shell("python3 s.py *.none")
         assert result.exit_code == 1
-        assert await result.stderr_str() == "bash: no match: *.none\n"
+        assert await result.stderr_str() == "bash: line 1: no match: *.none\n"
         assert not (
             probe.requests if isinstance(probe, ProcessProbe) else probe.lines
         )

@@ -96,14 +96,14 @@ async def test_self_dups_change_nothing():
             "touch /data/marker 1>&- 1>&1 2>&1; echo rc=$? >&2; "
             "test -e /data/marker; echo e=$? >&2",
             "",
-            "1: Bad file descriptor\nrc=1\ne=1\n",
+            "bash: line 1: 1: Bad file descriptor\nrc=1\ne=1\n",
             0,
         ),
         (
             "exec 1>&-; touch /data/marker 1>&1 2>&1; echo rc=$? >&2; "
             "test -e /data/marker; echo e=$? >&2",
             "",
-            "1: Bad file descriptor\nrc=1\ne=1\n",
+            "bash: line 1: 1: Bad file descriptor\nrc=1\ne=1\n",
             0,
         ),
         (
@@ -127,10 +127,10 @@ async def test_self_dups_change_nothing():
         (
             "touch /data/marker 0<&- 1<&0; test -e /data/marker",
             "",
-            "0: Bad file descriptor\n",
+            "bash: line 1: 0: Bad file descriptor\n",
             1,
         ),
-        ("echo hi 1>&- 2>&1", "", "1: Bad file descriptor\n", 1),
+        ("echo hi 1>&- 2>&1", "", "bash: line 1: 1: Bad file descriptor\n", 1),
         ("cat 0<&- 0<&0 </data/a.txt", "a", "", 0),
         # `>&word` on a descriptor other than 1 is bash's ambiguous
         # redirect, refused before the command runs; bare and on 1 it is
@@ -139,13 +139,13 @@ async def test_self_dups_change_nothing():
             "touch /data/marker 3>&/data/foo; "
             "test -e /data/marker || test -e /data/foo",
             "",
-            "/data/foo: ambiguous redirect\n",
+            "bash: line 1: /data/foo: ambiguous redirect\n",
             1,
         ),
         (
             "echo x 2>&/data/foo; test -e /data/foo",
             "",
-            "/data/foo: ambiguous redirect\n",
+            "bash: line 1: /data/foo: ambiguous redirect\n",
             1,
         ),
         (
@@ -177,14 +177,14 @@ async def test_self_dups_change_nothing():
             "exec 1>&-; touch /data/marker 2>&1; echo rc=$? >&2; "
             "test -e /data/marker; echo e=$? >&2",
             "",
-            "1: Bad file descriptor\nrc=1\ne=1\n",
+            "bash: line 1: 1: Bad file descriptor\nrc=1\ne=1\n",
             0,
         ),
         (
             "exec 0<&-; touch /data/marker 1<&0; echo rc=$? >&2; "
             "test -e /data/marker; echo e=$? >&2",
             "",
-            "0: Bad file descriptor\nrc=1\ne=1\n",
+            "bash: line 1: 0: Bad file descriptor\nrc=1\ne=1\n",
             0,
         ),
         ("exec 1>&-; true 1>&1; echo rc=$? >&2", "", "rc=0\n", 0),

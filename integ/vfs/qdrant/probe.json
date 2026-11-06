@@ -23,7 +23,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/db/cat/big/1.txt: Read-only file system\n"
+        "stderr": "bash: line 1: /db/cat/big/1.txt: Read-only file system\n"
       }
     },
     {

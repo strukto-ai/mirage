@@ -74,10 +74,12 @@ from mirage.shell.descriptors import (
 from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text, literal_word
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
+from mirage.shell.voice import shell_voice
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import CycleError, ends_at_dot, owner_prefix
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import _to_scope
+from mirage.workspace.executor.builtins.exec import route_rebound
 from mirage.workspace.executor.builtins.exec.constants import (
     CLOSED,
     EXEC_STREAM_UNBOUND,
@@ -232,6 +234,8 @@ class PipeRecorder(Recorder):
         self.writers: dict[Channel, tuple[FileDescription, ByteWriter]] = {}
         self.broken: set[int] = set()
         self.resumed: set[int] = set()
+        self.session: SessionState | None = None
+        self.claimed: frozenset[Channel] = frozenset()
         self.file: FileDescription | None = None
         self.failure: Exception | None = None
         self.streaming = asyncio.Lock()
@@ -402,6 +406,27 @@ class PipeRecorder(Recorder):
             return True
 
     async def emit(self, channel: Channel, data: bytes) -> None:
+        # An `exec` the command runs points a channel the redirect claimed
+        # elsewhere until the command ends (`{ exec >g; echo B; } > f`).
+        if channel in self.claimed and self.session is not None:
+            routed = await route_rebound(
+                self.dispatch, self.session, channel, data
+            )
+            if routed is not None:
+                for to, part in zip((Channel.STDOUT, Channel.STDERR), routed):
+                    if part:
+                        await self.emit_level(to, await materialize(part))
+                return
+        await self.emit_level(channel, data)
+
+    async def emit_level(self, channel: Channel, data: bytes) -> None:
+        """Write bytes through the level's own descriptors, as a write
+        through the description it opened does whatever ``exec`` did.
+
+        Args:
+            channel (Channel): the stream the write is on.
+            data (bytes): the bytes written.
+        """
         if channel in self.bound and await self._streamed(channel, data):
             return
         scope = self.streams.get(channel)
@@ -857,7 +882,9 @@ async def _handle_redirect(
                 else str(r.target)
             )
             return await failed(
-                _shell_failure(encode_text(f"{word}: ambiguous redirect\n"))
+                _shell_failure(
+                    encode_text(f"{shell_voice()}{word}: ambiguous redirect\n")
+                )
             )
         if r.kind == RedirectKind.UNEXPANDED and isinstance(
             r.target, ExitSignal
@@ -1039,7 +1066,7 @@ async def _handle_redirect(
         if file.source is None:
             for fd, channel in ((1, Channel.STDOUT), (2, Channel.STDERR)):
                 if outputs[fd] is file:
-                    file.emit = partial(recorder.emit, channel)
+                    file.emit = partial(recorder.emit_level, channel)
                     break
     # What the command writes as it runs (a group's, a loop's, a
     # function's statements) goes into its file as it is written, its
@@ -1078,6 +1105,12 @@ async def _handle_redirect(
         fd for r in redirects for fd in ([1, 2] if r.fd == FD_BOTH else [r.fd])
     }
     session.descriptors = dict(saved)
+    recorder.session = session
+    recorder.claimed = frozenset(
+        Channel.STDOUT if fd == 1 else Channel.STDERR
+        for fd in claimed
+        if fd in (1, 2)
+    )
     for fd in outputs:
         if fd > 2 or fd in claimed:
             session.descriptors[fd] = _describe(
@@ -1528,14 +1561,6 @@ def _redirect_error_line(scope: PathSpec, exc: Exception) -> bytes:
     error belongs to the shell, not the command, and the rest of the line
     keeps running (``;`` continues, ``&&`` short-circuits, ``||`` runs).
 
-    Deliberate divergence from bash: the ``bash: line N:`` prefix is
-    dropped, so the line is ``<target>: <strerror>``. This matches the
-    house style already set by the other shell-attributed error,
-    ``nosuchcmd: command not found`` (bash prints
-    ``bash: line 1: nosuchcmd: command not found``) — ``bash:`` is bash's
-    ``$0`` and mirage is not bash, and ``line N`` has no meaning for a
-    one-line ``Workspace.shell`` call.
-
     The label is the target's own spelling, never the exception's message:
     backends raise write failures with prose in ``str(exc)`` (``parent
     directory does not exist: /nodir``), which used to reach the user as
@@ -1546,7 +1571,9 @@ def _redirect_error_line(scope: PathSpec, exc: Exception) -> bytes:
         scope (PathSpec): The redirect target that could not be opened.
         exc (Exception): The error raised by the read or write.
     """
-    return encode_text(f"{scope.raw_path}: {strerror_of(exc)}\n")
+    return encode_text(
+        f"{shell_voice()}{scope.raw_path}: {strerror_of(exc)}\n"
+    )
 
 
 def _closed_write_line(
@@ -1737,7 +1764,9 @@ async def _open_refusal(
         # Behind a dot (`x/./`) the open's own walk answers instead.
         if scope.raw_path.endswith("/") and not ends_at_dot(scope.raw_path):
             return _shell_failure(
-                encode_text(f"{scope.raw_path}: Is a directory\n")
+                encode_text(
+                    f"{shell_voice()}{scope.raw_path}: Is a directory\n"
+                )
             )
         is_dir = False
         exists = False
@@ -1766,7 +1795,9 @@ async def _open_refusal(
                 if is_dir
                 else "cannot overwrite existing file"
             )
-            return _shell_failure(encode_text(f"{scope.raw_path}: {detail}\n"))
+            return _shell_failure(
+                encode_text(f"{shell_voice()}{scope.raw_path}: {detail}\n")
+            )
     return None
 
 

@@ -217,6 +217,7 @@ async def run_handler(
     drop: Callable[[], Awaitable[None]] | None = None,
     scope: Callable[[CommandOutput], CommandOutput] | None = None,
     vfs: Files | None = None,
+    eager: bool = False,
 ) -> CommandFnResult:
     """Run one handler body: a mount command's, or a CLI leaf's.
 
@@ -250,6 +251,8 @@ async def run_handler(
             its recorder and revisions to the stream).
         vfs (Files | None): the handler's files, whose session's hides
             filter the rows it hands over; None filters none.
+        eager (bool): the handler reads nothing, so its stream may be
+            pulled ahead (``OutputStream.eager``).
     """
     try:
         out = await _rendered(body, vfs, name)
@@ -286,7 +289,7 @@ async def run_handler(
         if drop is not None and lazy:
             await drop()
 
-    return OutputStream(pulled, close), io
+    return OutputStream(pulled, close, eager), io
 
 
 async def _rendered(

@@ -137,7 +137,7 @@
       "expect": {
         "exit": 1,
         "stdout": "before\n",
-        "stderr": "bash: x: .2f: syntax error: operand expected (error token is \".2f\")\n"
+        "stderr": "bash: line 1: x: .2f: syntax error: operand expected (error token is \".2f\")\n"
       }
     },
     {
@@ -242,7 +242,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: x: 1+: syntax error: operand expected (error token is \"+\")\n"
+        "stderr": "bash: line 1: x: 1+: syntax error: operand expected (error token is \"+\")\n"
       }
     },
     {
@@ -277,7 +277,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: x: .2f: syntax error: operand expected (error token is \".2f\")\n"
+        "stderr": "bash: line 1: x: .2f: syntax error: operand expected (error token is \".2f\")\n"
       }
     },
     {
@@ -382,7 +382,7 @@
       "expect": {
         "exit": 1,
         "stdout": "0 1 8 9\n",
-        "stderr": "bash: 08: value too great for base (error token is \"08\")\nbash: 1_0: value too great for base (error token is \"1_0\")\nbash: x: 08: value too great for base (error token is \"08\")\n"
+        "stderr": "bash: line 1: 08: value too great for base (error token is \"08\")\nbash: line 1: 1_0: value too great for base (error token is \"1_0\")\nbash: line 1: x: 08: value too great for base (error token is \"08\")\n"
       }
     },
     {
@@ -452,7 +452,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: x: 1:2: syntax error in expression (error token is \":2\")\n"
+        "stderr": "bash: line 1: x: 1:2: syntax error in expression (error token is \":2\")\n"
       }
     },
     {
@@ -732,7 +732,7 @@
       "expect": {
         "exit": 0,
         "stdout": "after\n",
-        "stderr": "bash: x: .2f: syntax error: operand expected (error token is \".2f\")\n"
+        "stderr": "bash: line 1: x: .2f: syntax error: operand expected (error token is \".2f\")\n"
       }
     },
     {
@@ -767,7 +767,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1 out=\n",
-        "stderr": "bash: x: .2f: syntax error: operand expected (error token is \".2f\")\n"
+        "stderr": "bash: line 1: x: .2f: syntax error: operand expected (error token is \".2f\")\n"
       }
     },
     {
@@ -907,7 +907,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: x: 1/0: division by 0 (error token is \"0\")\n"
+        "stderr": "bash: line 1: x: 1/0: division by 0 (error token is \"0\")\n"
       }
     },
     {
@@ -1012,7 +1012,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: x: 1:2: syntax error in expression (error token is \":2\")\n"
+        "stderr": "bash: line 1: x: 1:2: syntax error in expression (error token is \":2\")\n"
       }
     },
     {
@@ -1082,7 +1082,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: x: .2f: syntax error: operand expected (error token is \".2f\")\n"
+        "stderr": "bash: line 1: x: .2f: syntax error: operand expected (error token is \".2f\")\n"
       }
     },
     {
@@ -1117,7 +1117,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: a[@]: .2f: syntax error: operand expected (error token is \".2f\")\n"
+        "stderr": "bash: line 1: a[@]: .2f: syntax error: operand expected (error token is \".2f\")\n"
       }
     },
     {
@@ -1607,7 +1607,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: sa2[vi2]: .2f: syntax error: operand expected (error token is \".2f\")\n"
+        "stderr": "bash: line 1: sa2[vi2]: .2f: syntax error: operand expected (error token is \".2f\")\n"
       }
     },
     {
@@ -1677,7 +1677,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "bash: 1: .2f: syntax error: operand expected (error token is \".2f\")\n"
+        "stderr": "bash: line 1: 1: .2f: syntax error: operand expected (error token is \".2f\")\n"
       }
     },
     {

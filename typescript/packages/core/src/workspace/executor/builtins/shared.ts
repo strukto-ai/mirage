@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { shellVoice } from '../../../shell/voice.ts'
 import { specOf } from '../../../commands/spec/builtins.ts'
 import { FlagView } from '../../../commands/spec/flag_view.ts'
 import { SHELL_SYNOPSES } from '../../../commands/spec/synopsis.ts'
@@ -261,7 +262,7 @@ export function refusal(cmd: string, err: PolicyDenied): RedirectResult {
  */
 export function readonlyLine(cmd: string, name: string): string {
   const voice = cmd === 'declare' || cmd === 'local' || cmd === 'typeset' ? `${cmd}: ` : ''
-  return `bash: ${voice}${name}: readonly variable`
+  return `${shellVoice()}${voice}${name}: readonly variable`
 }
 
 /** Render the readonly refusal (`readonlyLine`) as the result. */
@@ -296,7 +297,7 @@ export function isCountWord(word: string): boolean {
 
 /** A shell builtin's diagnostic in bash's voice. Mirrors Python's builtin_error. */
 export function builtinError(name: string, message: string): Uint8Array {
-  return encodeText(`bash: ${name}: ${message}\n`)
+  return encodeText(`${shellVoice()}${name}: ${message}\n`)
 }
 
 /**

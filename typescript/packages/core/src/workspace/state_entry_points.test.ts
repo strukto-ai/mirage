@@ -529,7 +529,7 @@ describe('the remaining session writers clear the same gate', () => {
     const denied = await ws.shell('export LOCKED=(a); echo unreached')
     expect(denied.exitCode).toBe(1)
     expect(stdoutStr(denied)).toBe('')
-    expect(voicedStderr(denied)).toBe('bash: LOCKED: readonly variable\n')
+    expect(voicedStderr(denied)).toBe('bash: line 1: LOCKED: readonly variable\n')
     const after = await ws.shell('echo after')
     expect(after.exitCode).toBe(0)
   })

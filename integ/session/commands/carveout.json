@@ -56,7 +56,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/scratch/grove/open/new.txt: Read-only file system\n"
+        "stderr": "bash: line 1: /scratch/grove/open/new.txt: Read-only file system\n"
       }
     },
     {
@@ -68,7 +68,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/scratch/grove/store/new.txt: No such file or directory\n"
+        "stderr": "bash: line 1: /scratch/grove/store/new.txt: No such file or directory\n"
       }
     },
     {
@@ -88,7 +88,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/scratch/grove/open/index.txt: Read-only file system\n"
+        "stderr": "bash: line 1: /scratch/grove/open/index.txt: Read-only file system\n"
       }
     },
     {

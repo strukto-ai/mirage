@@ -172,7 +172,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "bash: kill: (999999) - No such process\nbash: kill: %9: no such job\nbash: kill: abc: arguments must be process or job IDs\nbash: kill: FOO: invalid signal specification\n"
+        "stderr": "bash: line 1: kill: (999999) - No such process\nbash: line 1: kill: %9: no such job\nbash: line 1: kill: abc: arguments must be process or job IDs\nbash: line 1: kill: FOO: invalid signal specification\n"
       },
       "note": "bash 5.2's wording for each refusal (debian:stable-slim), with the `bash: line 1:` prefix a non-interactive shell adds left off, as every mirage builtin does."
     },
@@ -275,10 +275,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(sleep 5 & p=$!; kill \"$p\"; wait \"$p\"; echo term=$?; sleep 5 & kill -s HUP %1; wait %1; echo hup=$?; sleep 0.5 & sleep 0.1; kill -INT $!; wait $!; echo int=$?; sleep 0.5 & sleep 0.1; kill -s QUIT %1; wait %1; echo quit=$?) 2>/dev/null",
+      "command": "(sleep 5 & p=$!; kill \"$p\"; wait \"$p\"; echo term=$?; sleep 5 & kill -s HUP %1; wait %1; echo hup=$?; sleep 0.5 & sleep 0.1; kill -INT $!; wait $!; echo int=$?; sleep 0.5 & sleep 0.1; kill -s QUIT %1; wait %1; echo quit=$?) 2>/dev/null; { sleep 1; echo \"q $?\"; } 2>/dev/null & sleep 0.1; kill -QUIT -- -$$; wait $!; echo after=$?; bash -c 'kill -0 -- -$$' 2>/dev/null; echo nested=$?; { bash -c 'kill -9 $$'; bash -c 'kill $$'; bash -c 'kill -HUP $$' 2>/dev/null; true | bash -c 'kill -9 $$'; ( kill -9 $BASHPID ); x=$(bash -c 'kill -9 $$'); f() { bash -c 'kill -USR1 $$'; }; f; sleep 5 & kill -9 $!; wait; sleep 5 & kill $!; wait; echo \"end $x\"; } 2>&1 | sed -E -e 's/(line [0-9]+:) +[0-9]+ /\\1 N /' -e 's/^ +[0-9]+ /     N /'",
       "expect": {
         "exit": 0,
-        "stdout": "term=143\nhup=129\nint=0\nquit=0\n",
+        "stdout": "term=143\nhup=129\nint=0\nquit=0\nq 131\nafter=0\nnested=1\nbash: line 1: N Killed                  bash -c 'kill -9 $$'\nTerminated\nbash: line 1: N Hangup                  bash -c 'kill -HUP $$' 2> /dev/null\nbash: line 1: N Done                    true\n     N Killed                  | bash -c 'kill -9 $$'\nbash: line 1: N Killed                  ( kill -9 $BASHPID )\nenvironment: line 1: N User defined signal 1   bash -c 'kill -USR1 $$'\nbash: line 1: N Killed                  sleep 5\nend \n",
         "stderr": ""
       },
       "note": "bash reports a child a signal ended as 128 plus it, and a managed runner's cancellation carries the signal kill named. INT and QUIT reach a job and do nothing, as a non-interactive bash starts each asynchronous command ignoring them; the kill waits for the job to start, which bash's ignoring would otherwise race."
@@ -592,11 +592,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "kill -s; echo rc=$?; kill -n; echo rc=$?; kill '-?'; echo rc=$?; kill ''; echo rc=$?; (sleep 5 & kill -- %1; wait %1; echo rc=$?)",
+      "command": "kill -s; echo rc=$?; kill -n; echo rc=$?; kill '-?'; echo rc=$?; kill ''; echo rc=$?; (sleep 5 & kill -- %1; wait %1; echo rc=$?); kill -l | head -2 | tail -1; kill -l 15 2 USR1 143 0; kill -L RTMIN+3 50; (sleep 5 & kill -sUSR1 $!; wait $!; echo usr1=$?; sleep 5 & kill -n9 $!; wait $!; echo nine=$?; sleep 0.2 & kill -CHLD $!; echo chld=$?; wait $!; echo w=$?) 2>/dev/null; kill -0 -- -$$; echo grp=$?; kill -s TERM -- -999999 2>/dev/null; echo rc=$?; kill -QUIT $$; echo quit=$?; { bash -c 'kill $$; echo no'; } 2>/dev/null; echo self=$?; [ \"$(bash -c 'echo $$')\" != \"$$\" ] && echo own; [ \"$(ps -o pid= -p $$ | tr -d ' ')\" = \"$$\" ] && echo live",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\nrc=1\nrc=2\nrc=1\nrc=143\n",
-        "stderr": "bash: kill: -s: option requires an argument\nbash: kill: -n: option requires an argument\nkill: usage: kill [-s sigspec | -n signum | -sigspec] pid | jobspec ... or kill -l [sigspec]\nbash: kill: `': not a pid or valid job spec\n"
+        "stdout": "rc=1\nrc=1\nrc=2\nrc=1\nrc=143\n 6) SIGABRT\t 7) SIGBUS\t 8) SIGFPE\t 9) SIGKILL\t10) SIGUSR1\nTERM\nINT\n10\nTERM\nEXIT\n37\nRTMAX-14\nusr1=138\nnine=137\nchld=0\nw=0\ngrp=0\nrc=1\nquit=0\nself=143\nown\nlive\n",
+        "stderr": "bash: line 1: kill: -s: option requires an argument\nbash: line 1: kill: -n: option requires an argument\nkill: usage: kill [-s sigspec | -n signum | -sigspec] pid | jobspec ... or kill -l [sigspec]\nbash: line 1: kill: `': not a pid or valid job spec\n"
       }
     },
     {
@@ -631,7 +631,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "bash: kill: (ab12:3) - No such process\nbash: kill: ab12:x: arguments must be process or job IDs\n"
+        "stderr": "bash: line 1: kill: (ab12:3) - No such process\nbash: line 1: kill: ab12:x: arguments must be process or job IDs\n"
       },
       "note": "mirage's own operand: owner:pid names a process another workspace on a shared store runs, as ps lists it, where bash refuses any non-numeric operand as not a process or job ID. One no live workspace runs is no such process, and ps -p of it selects nothing."
     },

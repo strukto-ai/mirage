@@ -171,7 +171,7 @@
       "command": "nosuchcmd --version 2>&1; echo code=$?",
       "expect": {
         "exit": 0,
-        "stdout": "nosuchcmd: command not found\ncode=127\n",
+        "stdout": "bash: line 1: nosuchcmd: command not found\ncode=127\n",
         "stderr": ""
       }
     },

@@ -60,7 +60,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/sess/new.txt: Read-only file system\n"
+        "stderr": "bash: line 1: /data/sess/new.txt: Read-only file system\n"
       }
     },
     {
@@ -139,7 +139,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/ro/sess_y.txt: Read-only file system\n"
+        "stderr": "bash: line 1: /ro/sess_y.txt: Read-only file system\n"
       }
     },
     {
@@ -225,7 +225,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/root.txt: Read-only file system\n"
+        "stderr": "bash: line 1: /root.txt: Read-only file system\n"
       }
     },
     {
@@ -494,7 +494,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/ro/nope.txt: Read-only file system\n"
+        "stderr": "bash: line 1: /ro/nope.txt: Read-only file system\n"
       }
     },
     {
@@ -540,7 +540,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/sess/guard.txt: Read-only file system\n"
+        "stderr": "bash: line 1: /data/sess/guard.txt: Read-only file system\n"
       },
       "session": "reader"
     },
@@ -556,7 +556,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/sess/guard.txt: Read-only file system\n"
+        "stderr": "bash: line 1: /data/sess/guard.txt: Read-only file system\n"
       },
       "session": "reader"
     },

@@ -1362,7 +1362,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "/data/rfredir: Is a directory\n"
+        "stderr": "bash: line 1: /data/rfredir: Is a directory\n"
       },
       "note": "Every backend now reads a directory as EISDIR. GNU bash opens it and lets cat fail the read (`cat: -: Is a directory`); Mirage refuses at the redirect, as it does on disk."
     }

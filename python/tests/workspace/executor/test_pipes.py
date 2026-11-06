@@ -12,10 +12,16 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+
 import pytest
 
+from mirage.commands.cli.types import CLI, CLIHandler
+from mirage.commands.spec.types import CommandSpec
+from mirage.context import current_caller
 from mirage.io import IOResult
 from mirage.io.types import materialize
+from mirage.runtime.sandbox.constants import stop_signal
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -160,5 +166,37 @@ async def test_a_segment_expands_the_pre_pipeline_status():
             assert (await io.stdout_str(), io.exit_code) == ("1\n", 0), line
         io = await ws.shell("false; { false; } | true; echo $?")
         assert await io.stdout_str() == "0\n"
+    finally:
+        await ws.close()
+
+
+# A pipeline's stage is a process of its own, which a signal stops whole: in
+# a job, whose shell ignores INT, an INT to the group stops the stage, so
+# what the stage runs learns the signal it was stopped with.
+@pytest.mark.asyncio
+async def test_a_stage_in_a_job_is_stopped_with_the_groups_signal():
+    ws = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
+    seen: list[int | None] = []
+
+    async def hang(accessor, paths, texts, ctx) -> tuple[None, IOResult]:
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            seen.append(stop_signal(current_caller().process))
+            raise
+        return None, IOResult()
+
+    ws.register_cli(
+        "hang",
+        CLI(spec=CommandSpec(name="hang"), handlers={"": CLIHandler(fn=hang)}),
+    )
+    try:
+        io = await ws.shell(
+            "timeout -s INT 0.2 bash -c "
+            "'{ seq 1 | hang; echo ${PIPESTATUS[@]} > /m/p; } & wait'; "
+            "sleep 0.2; cat /m/p"
+        )
+        assert await io.stdout_str() == "0 130\n"
+        assert seen == [2]
     finally:
         await ws.close()
