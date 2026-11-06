@@ -81,9 +81,9 @@ class PlainLoader(yaml.SafeLoader):
 
 def parse_record(path: Path, text: str) -> Fields:
     """A record read back: JSON as written, else YAML, for a file edited
-    by hand. Neither the log nor the error quotes the file, since a sealed
-    one holds secrets and the parser's message quotes the line it stopped
-    at.
+    by hand. Neither the log nor the error, traceback included, quotes the
+    file, since a sealed one holds secrets and the parser's message quotes
+    the line it stopped at.
 
     Args:
         path (Path): the file, for the error.
@@ -99,8 +99,8 @@ def parse_record(path: Path, text: str) -> Fields:
         try:
             record = yaml.load(text, Loader=PlainLoader)
             json.dumps(record)
-        except (yaml.YAMLError, TypeError, ValueError) as e:
-            raise ResourceError("invalid", f"{path} is malformed") from e
+        except (yaml.YAMLError, TypeError, ValueError):
+            raise ResourceError("invalid", f"{path} is malformed") from None
     if not isinstance(record, dict):
         raise ResourceError("invalid", f"{path} is not a mapping")
     return record

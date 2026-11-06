@@ -15,6 +15,7 @@
 
 import logging
 import stat
+import traceback
 
 import pytest
 
@@ -70,12 +71,14 @@ async def test_a_malformed_sealed_file_is_never_quoted(tmp_path, caplog):
     await store.create_entry(
         "cli", EntryInput("gh", "gh", {}, {"token": "secret-x"})
     )
-    (tmp_path / ".sealed" / "cli" / "gh.json").write_text("token: [secret-x\n")
+    sealed = tmp_path / ".sealed" / "cli" / "gh.json"
+    sealed.write_text("token: [secret-x\n")
     with pytest.raises(ResourceError) as broken:
         await store.reveal_entry("cli", "gh")
     assert broken.value.code == "invalid"
-    assert "secret-x" not in str(broken.value)
+    assert "secret-x" not in "".join(traceback.format_exception(broken.value))
     assert "secret-x" not in caplog.text
+    assert str(sealed) not in caplog.text
 
 
 @pytest.mark.asyncio
