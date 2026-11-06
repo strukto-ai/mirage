@@ -5,9 +5,10 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyList, PyTuple};
 use streams::arith;
-use streams::interp::expand::Substitution;
+use streams::interp::expand::{Substitution, marked};
+use streams::interp::job::{Job, Output, Running, Step};
 use streams::interp::shell::Shell as Inner;
-use streams::interp::task::{self, Answer, Ask, Ended, Expanded, Mode, Task, Write};
+use streams::interp::task::{self, Answer, Ask, Expanded, Mode, Write};
 use streams::interp::write::{Denied, Fault, Verb};
 use streams::interp::{Diagnostic, Signal};
 use streams::shell::Tree;
@@ -15,10 +16,6 @@ use streams::vars::{self, Assigned, Indexed, Kind, Managed, Store, Value, Var};
 
 use crate::shell::ShellNode;
 use crate::text::{bytes_of, text_of};
-
-/// The characters the glob matcher reads specially, each a quoted field's
-/// mark at `0xFDD0` plus its place here, as `mark_globs` spells them.
-const GLOB_SPECIALS: &[u8] = b"*?[@+!()|";
 
 /// A managed variable's pointer as Python passes it: source, reference,
 /// key, and whether it is fetched eagerly.
@@ -121,29 +118,6 @@ fn record_in(
             })
         }),
     })
-}
-
-/// A field as the host's globbing reads it: each quoted glob character
-/// under its mark.
-fn marked(runs: &[(Vec<u8>, bool)]) -> Vec<u8> {
-    let mut out = Vec::new();
-    for (text, quoted) in runs {
-        if !quoted {
-            out.extend_from_slice(text);
-            continue;
-        }
-        for &byte in text {
-            match GLOB_SPECIALS.iter().position(|&c| c == byte) {
-                Some(at) => {
-                    let mark = char::from_u32(0xFDD0 + at as u32).unwrap_or('\u{FFFD}');
-                    let mut buf = [0; 4];
-                    out.extend_from_slice(mark.encode_utf8(&mut buf).as_bytes());
-                }
-                None => out.push(byte),
-            }
-        }
-    }
-    out
 }
 
 fn arith_error<'py>(py: Python<'py>, error: &arith::Error) -> PyResult<Bound<'py, PyAny>> {
@@ -281,30 +255,14 @@ impl Shell {
         Ok(&mut self.shell_mut()?.vars)
     }
 
-    /// Hand the shell to a task, which gives it back when it finishes.
-    fn start<T: 'static>(
-        slf: &Bound<'_, Self>,
-        run: impl FnOnce(Inner) -> Task<Ended<T>>,
-    ) -> PyResult<Task<Ended<T>>> {
-        let mut shell = slf.borrow_mut();
-        let inner = shell.inner.take().ok_or_else(running)?;
-        shell.parked = inner.vars.held();
-        drop(shell);
-        Ok(run(inner))
-    }
-
     fn write_task(
         slf: &Bound<'_, Self>,
         write: Write,
         listens: bool,
         warns: bool,
     ) -> PyResult<ShellTask> {
-        let task = Self::start(slf, |inner| task::write(inner, write, listens, warns))?;
-        Ok(ShellTask {
-            running: Running::Write(task),
-            owner: slf.clone().unbind(),
-            tree: None,
-            ended: None,
+        ShellTask::start(slf, None, |inner| {
+            Running::Write(task::write(inner, write, listens, warns))
         })
     }
 }
@@ -427,6 +385,12 @@ impl Shell {
         self.inner
             .as_ref()
             .map_or(self.parked, |inner| inner.vars.held())
+    }
+
+    /// The number of the records' last change, which a copy holding the
+    /// same records shares: the host saves them again only once it moves.
+    fn version(&self) -> PyResult<u64> {
+        Ok(self.store()?.version())
     }
 
     /// Hide the names a session's visibility lists, exactly or by glob.
@@ -691,14 +655,8 @@ impl Shell {
         };
         let tree = Arc::clone(&node.tree);
         let index = node.index as usize;
-        let task = Self::start(slf, |inner| {
-            task::expand(inner, Arc::clone(&tree), index, mode, listens)
-        })?;
-        Ok(ShellTask {
-            running: Running::Expand(task),
-            owner: slf.clone().unbind(),
-            tree: Some((tree, node.serial)),
-            ended: None,
+        ShellTask::start(slf, Some((Arc::clone(&tree), node.serial)), |inner| {
+            Running::Expand(task::expand(inner, tree, index, mode, listens))
         })
     }
 
@@ -842,27 +800,49 @@ impl Shell {
     }
 }
 
-enum Running {
-    Expand(Task<Ended<Expanded>>),
-    Write(Task<Ended<i64>>),
-}
-
 /// What an ended task leaves: its result tuple and diagnostics.
 type Outcome = (Py<PyAny>, Py<PyList>);
 
-/// An operation running on a shell, stepped by the host: each `step`
-/// returns the request it waits on, answered with one `answer_*` call,
-/// or None once it has ended, when `finish` gives the shell back and
-/// returns `(("ok", value) | fault, diagnostics)`.
+/// An operation running on a shell, driven by the host. Started, it has
+/// run to its first request or its end: `step` returns the request it
+/// waits on, which one `answer_*` call answers, running it to the next,
+/// or None once it has ended, when the shell is its owner's again and
+/// `finish` returns `(("ok", value) | fault, diagnostics)`. A long list
+/// of fields comes in slices: the first in `finish`, the rest from
+/// `slice` while `more` says some are left.
 #[pyclass(module = "mirage._rs", unsendable)]
 pub struct ShellTask {
-    running: Running,
+    job: Job,
     owner: Py<Shell>,
     tree: Option<(Arc<Tree>, u64)>,
+    asked: Option<Py<PyAny>>,
     ended: Option<Outcome>,
 }
 
 impl ShellTask {
+    /// Hand the shell to an operation and run it to its first request
+    /// or its end, when the shell comes back.
+    fn start(
+        slf: &Bound<'_, Shell>,
+        tree: Option<(Arc<Tree>, u64)>,
+        run: impl FnOnce(Inner) -> Running,
+    ) -> PyResult<Self> {
+        let mut shell = slf.borrow_mut();
+        let inner = shell.inner.take().ok_or_else(running)?;
+        shell.parked = inner.vars.held();
+        drop(shell);
+        let (job, step) = Job::start(run(inner));
+        let mut task = Self {
+            job,
+            owner: slf.clone().unbind(),
+            tree,
+            asked: None,
+            ended: None,
+        };
+        task.land(slf.py(), step)?;
+        Ok(task)
+    }
+
     fn node(&self, index: usize) -> PyResult<ShellNode> {
         let (tree, serial) = self
             .tree
@@ -925,98 +905,97 @@ impl ShellTask {
                     .into_pyobject(py)?
                     .into_any()
             }
-            Ask::Pause => ("pause",).into_pyobject(py)?.into_any(),
+            Ask::Pause { view } => ("pause", Shell::wrap(Inner::new(view)))
+                .into_pyobject(py)?
+                .into_any(),
         })
     }
 
-    fn end<T>(
-        &mut self,
-        py: Python<'_>,
-        ended: Ended<T>,
-        value: impl FnOnce(Python<'_>, &T) -> PyResult<Py<PyAny>>,
-    ) -> PyResult<()> {
+    /// Keep where a run stopped: the request it waits on, or its end,
+    /// giving the shell back to its owner.
+    fn land(&mut self, py: Python<'_>, step: Step) -> PyResult<()> {
+        let ended = match step {
+            Step::Asked(ask) => {
+                self.asked = Some(self.ask(py, ask)?.unbind());
+                return Ok(());
+            }
+            Step::Ended(ended) => ended,
+        };
         let result = match &ended.result {
-            Ok(done) => ("ok", value(py, done)?).into_pyobject(py)?.into_any(),
+            Ok(Output::Expanded(done)) => ("ok", expanded_out(py, done)?)
+                .into_pyobject(py)?
+                .into_any(),
+            Ok(Output::Wrote(value)) => ("ok", *value).into_pyobject(py)?.into_any(),
             Err(fault) => fault_out(py, fault)?,
         };
         let diagnostics = diagnostics_out(py, &ended.diagnostics)?;
         self.owner.borrow_mut(py).inner = Some(ended.shell);
+        self.asked = None;
         self.ended = Some((result.unbind(), diagnostics.unbind()));
         Ok(())
     }
 
-    fn answer(&mut self, answer: Answer) {
-        match &mut self.running {
-            Running::Expand(task) => task.answer(answer),
-            Running::Write(task) => task.answer(answer),
-        }
+    fn answer(&mut self, py: Python<'_>, answer: Answer) -> PyResult<()> {
+        let step = self
+            .job
+            .answer(answer)
+            .ok_or_else(|| PyRuntimeError::new_err("the task has ended"))?;
+        self.land(py, step)
     }
 }
 
 #[pymethods]
 impl ShellTask {
-    /// Run to the next request, None once the operation has ended. A
-    /// request is `("substitute", shell, body, node, span)`, `("process",
-    /// shell, node)`, `("gate", post, verb, key, value, old, view)` or
-    /// `("pause",)`.
-    fn step<'py>(&mut self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
-        if self.ended.is_some() {
-            return Ok(None);
-        }
-        let asked = match &mut self.running {
-            Running::Expand(task) => task.step(),
-            Running::Write(task) => task.step(),
-        };
-        if let Some(ask) = asked {
-            return self.ask(py, ask).map(Some);
-        }
-        match &mut self.running {
-            Running::Expand(task) => {
-                let ended = task.output().ok_or_else(running)?;
-                self.end(py, ended, |py, done| Ok(expanded_out(py, done)?.unbind()))?;
-            }
-            Running::Write(task) => {
-                let ended = task.output().ok_or_else(running)?;
-                self.end(py, ended, |py, done| {
-                    Ok(done.into_pyobject(py)?.into_any().unbind())
-                })?;
-            }
-        }
-        Ok(None)
+    /// The request the operation waits on, None once it has ended. A
+    /// request is `("substitute", shell, body, node, span, read)`,
+    /// `("process", shell, node)`, `("gate", post, verb, key, value, old,
+    /// view)` or `("pause", view)`; each shell is one the host may read
+    /// while it answers.
+    fn step<'py>(&self, py: Python<'py>) -> Option<Bound<'py, PyAny>> {
+        self.asked.as_ref().map(|ask| ask.bind(py).clone())
     }
 
-    fn answer_substituted(&mut self, stdout: &[u8], stderr: &[u8], status: i32) {
-        self.answer(Answer::Substituted(Substitution {
-            stdout: stdout.to_vec(),
-            stderr: stderr.to_vec(),
-            status,
-        }));
+    fn answer_substituted(
+        &mut self,
+        py: Python<'_>,
+        stdout: &[u8],
+        stderr: &[u8],
+        status: i32,
+    ) -> PyResult<()> {
+        self.answer(
+            py,
+            Answer::Substituted(Substitution {
+                stdout: stdout.to_vec(),
+                stderr: stderr.to_vec(),
+                status,
+            }),
+        )
     }
 
-    fn answer_path(&mut self, path: Bound<'_, PyAny>) -> PyResult<()> {
-        self.answer(Answer::Path(bytes_of(&path)?));
-        Ok(())
+    fn answer_path(&mut self, py: Python<'_>, path: Bound<'_, PyAny>) -> PyResult<()> {
+        let path = bytes_of(&path)?;
+        self.answer(py, Answer::Path(path))
     }
 
     /// The gate's answer: None to let the write through, or the refused
     /// name and the host's record of the refusal.
     #[pyo3(signature = (denied))]
-    fn answer_gate(&mut self, denied: Option<(String, u32)>) {
+    fn answer_gate(&mut self, py: Python<'_>, denied: Option<(String, u32)>) -> PyResult<()> {
         let answer = match denied {
             None => Ok(()),
             Some((name, record)) => Err(Denied { name, record }),
         };
-        self.answer(Answer::Gate(answer));
+        self.answer(py, Answer::Gate(answer))
     }
 
     /// The host has let others run; the operation goes on.
-    fn answer_resumed(&mut self) {
-        self.answer(Answer::Resumed);
+    fn answer_resumed(&mut self, py: Python<'_>) -> PyResult<()> {
+        self.answer(py, Answer::Resumed)
     }
 
     /// The host could not do what was asked; the operation stops.
-    fn answer_failed(&mut self) {
-        self.answer(Answer::Failed(Fault::Unsupported("the host failed")));
+    fn answer_failed(&mut self, py: Python<'_>) -> PyResult<()> {
+        self.answer(py, Answer::Failed(Fault::Unsupported("the host failed")))
     }
 
     /// The result once `step` has returned None: the shell is the
@@ -1024,5 +1003,21 @@ impl ShellTask {
     fn finish(&mut self, py: Python<'_>) -> PyResult<Outcome> {
         let (result, diagnostics) = self.ended.as_ref().ok_or_else(running)?;
         Ok((result.clone_ref(py), diagnostics.clone_ref(py)))
+    }
+
+    /// Whether slices of a long list of fields are left to take.
+    fn more(&self) -> bool {
+        self.job.more()
+    }
+
+    /// The next slice of a long list of fields.
+    fn slice<'py>(&mut self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
+        let fields = self
+            .job
+            .slice()
+            .iter()
+            .map(|field| text_of(py, &marked(&field.0)))
+            .collect::<PyResult<Vec<_>>>()?;
+        PyList::new(py, fields)
     }
 }

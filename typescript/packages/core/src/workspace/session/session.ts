@@ -93,6 +93,41 @@ export function ownRecord<T>(record?: Record<string, T>): Record<string, T> {
   return Object.assign(Object.create(null) as Record<string, T>, record)
 }
 
+/**
+ * A live, read-only view of the records holding one kind of value, as
+ * stored: hidden names and references are not resolved, and a lookup reads
+ * the one record it names, so `session.arrays[key]` costs one record however
+ * many the session holds. Mirrors Python's `_Records`.
+ */
+function records<T>(
+  vars: ShellVars,
+  pick: (value: ShellVar['value']) => T | undefined,
+): Readonly<Record<string, T>> {
+  const lookup = (name: string | symbol): T | undefined => {
+    if (typeof name !== 'string') return undefined
+    const v = vars.get(name)
+    return v === undefined ? undefined : pick(v.value)
+  }
+  return new Proxy(ownRecord<T>(), {
+    get: (_, name) => lookup(name),
+    has: (_, name) => lookup(name) !== undefined,
+    ownKeys: () =>
+      vars
+        .records()
+        .filter(([, v]) => pick(v.value) !== undefined)
+        .map(([name]) => name),
+    getOwnPropertyDescriptor: (_, name) => {
+      const value = lookup(name)
+      return value === undefined
+        ? undefined
+        : { value, enumerable: true, configurable: true, writable: false }
+    },
+    set: () => false,
+    defineProperty: () => false,
+    deleteProperty: () => false,
+  })
+}
+
 export interface SessionInit {
   sessionId: string
   cwd?: string
@@ -867,40 +902,31 @@ export class SessionState {
   /**
    * The scalar variables, by name.
    *
-   * A frozen read-only projection of `vars`, not a container: a writer
+   * A live read-only projection of `vars`, not a container: a writer
    * goes through `SessionView.set` (or `seedVar` when seeding a session
    * before it is narrowed), so a `pre_session` policy sees every write.
-   * `state.ts` has always documented that rule; freezing the projection
-   * is what stops it being walked around by assigning into storage, and
-   * an assignment into a plain object would land in a throwaway and
-   * vanish -- silent loss is the exact failure this store removes.
+   * `state.ts` has always documented that rule; refusing writes to the
+   * projection is what stops it being walked around by assigning into
+   * storage, and an assignment into a plain object would land in a
+   * throwaway and vanish -- silent loss is the exact failure this store
+   * removes.
    */
   get env(): Readonly<Record<string, string>> {
-    const out = ownRecord<string>()
-    for (const [name, v] of this.vars.records()) {
-      if (typeof v.value === 'string') out[name] = v.value
-    }
-    return Object.freeze(out)
+    return records(this.vars, (value) => (typeof value === 'string' ? value : undefined))
   }
 
   /** The indexed arrays, by name. Read-only, like `env`. */
   get arrays(): Readonly<Record<string, ShellArray>> {
-    const out = ownRecord<ShellArray>()
-    for (const [name, v] of this.vars.records()) {
-      if (v.value instanceof ShellArray) out[name] = v.value
-    }
-    return Object.freeze(out)
+    return records(this.vars, (value) => (value instanceof ShellArray ? value : undefined))
   }
 
   /** The associative arrays, by name. Read-only, like `env`. */
   get assocs(): Readonly<Record<string, Record<string, string>>> {
-    const out = ownRecord<Record<string, string>>()
-    for (const [name, v] of this.vars.records()) {
-      if (v.value !== null && typeof v.value === 'object' && !(v.value instanceof ShellArray)) {
-        out[name] = v.value
-      }
-    }
-    return Object.freeze(out)
+    return records(this.vars, (value) =>
+      value !== null && typeof value === 'object' && !(value instanceof ShellArray)
+        ? value
+        : undefined,
+    )
   }
 
   /** The names `readonly` has marked. Read-only, like `env`. */
@@ -945,7 +971,8 @@ export class SessionState {
     return this.toDict()
   }
 
-  toDict(): Record<string, unknown> {
+  /** The record's keys the variables fill: `env`, `arrays`, `assocs`, `var_attrs` and `managed`. */
+  variablesToDict(): Record<string, unknown> {
     // A managed name serializes as its pointer, never its value: a
     // stored session may leak only where a secret lives. `env` skips
     // the name (the fetched plaintext must not land in the record)
@@ -968,13 +995,7 @@ export class SessionState {
     for (const [name, v] of records) {
       if (typeof v.value === 'string' && !Object.hasOwn(managed, name)) scalars[name] = v.value
     }
-    const data: Record<string, unknown> = {
-      session_id: this.sessionId,
-      cwd: this.cwd,
-      env: scalars,
-      created_at: this.createdAt,
-      generation: this.generation,
-    }
+    const data: Record<string, unknown> = { env: scalars }
     // Arrays ride beside `env`, which stays the plain name/value map an
     // embedder reads: an indexed array by index, an associative one in the
     // order its keys were first assigned.
@@ -1009,6 +1030,22 @@ export class SessionState {
       }
       data.managed = refs
     }
+    return data
+  }
+
+  /**
+   * The session's record; `variables` false leaves out the keys the variables
+   * fill, for a flush that compares their store's version instead of reading
+   * them.
+   */
+  toDict(variables = true): Record<string, unknown> {
+    const data: Record<string, unknown> = {
+      session_id: this.sessionId,
+      cwd: this.cwd,
+      created_at: this.createdAt,
+      generation: this.generation,
+    }
+    if (variables) Object.assign(data, this.variablesToDict())
     if (Object.keys(this.functions).length > 0) data.functions = { ...this.functions }
     if (this.readonlyFunctions.size > 0)
       data.readonly_functions = [...this.readonlyFunctions].sort(compareCodePoints)

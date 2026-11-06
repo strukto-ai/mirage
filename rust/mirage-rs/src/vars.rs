@@ -18,6 +18,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::arith::{self, Halt, Outcome, Vars};
 use crate::policy::{VarScope, Visibility, VisibilityMatcher};
@@ -397,6 +398,17 @@ pub struct Store {
     hidden: Option<Arc<VisibilityMatcher>>,
     ids: Ids,
     held: usize,
+    /// The number of the last change to the records, which every copy
+    /// holding the same records shares.
+    version: u64,
+}
+
+/// The number the next change to any store's records takes: one count for
+/// every store, so two stores at one number hold the same records.
+static VERSIONS: AtomicU64 = AtomicU64::new(1);
+
+fn next_version() -> u64 {
+    VERSIONS.fetch_add(1, Ordering::Relaxed)
 }
 
 impl std::fmt::Debug for Store {
@@ -433,7 +445,15 @@ impl Store {
             hidden: None,
             ids,
             held: 0,
+            version: next_version(),
         }
+    }
+
+    /// The number of the records' last change: a store at the number it
+    /// was at before holds the records it held then, so a host can tell
+    /// whether to save them again without reading them.
+    pub fn version(&self) -> u64 {
+        self.version
     }
 
     /// Draw first seeds from `ids` from now on.
@@ -503,6 +523,7 @@ impl Store {
             return None;
         }
         let vars = Arc::make_mut(&mut self.vars);
+        self.version = next_version();
         let old = match var {
             Some(var) => {
                 self.held += entry_bytes(name, var.value.as_ref());
@@ -910,6 +931,7 @@ impl Store {
         let mut forked = Self::new(self.ids.clone());
         forked.vars = self.vars.clone();
         forked.held = self.held;
+        forked.version = self.version;
         forked.hidden = self.hidden.clone();
         if self.random_seed == Seed::Off {
             forked.random_seed = Seed::Off;
@@ -1541,6 +1563,23 @@ mod tests {
         store.seed("z", Value::Scalar(b"3".to_vec()));
         assert!(Arc::ptr_eq(&store.vars["y"], &forked.vars["y"]));
         assert_eq!(forked.scalar("z"), None);
+    }
+
+    #[test]
+    fn a_version_moves_with_every_change_and_copies_share_it() {
+        let mut store = store();
+        store.seed("x", Value::Scalar(b"1".to_vec()));
+        let before = store.version();
+        let forked = store.fork();
+        assert_eq!(forked.version(), before);
+        store.drop_var("absent");
+        assert_eq!(store.version(), before);
+        store.set_attr("x", Some(EXPORT), true);
+        let marked = store.version();
+        assert_ne!(marked, before);
+        store.seed("x", Value::Scalar(b"2".to_vec()));
+        assert_ne!(store.version(), marked);
+        assert_eq!(forked.version(), before);
     }
 
     #[test]

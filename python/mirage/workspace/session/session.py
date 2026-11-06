@@ -601,7 +601,9 @@ class SessionState:
         ones it inherited stay with the shell that opened them."""
         await release_inputs(self.open_inputs(), self._borrowed)
 
-    def to_dict(self) -> dict[str, Any]:
+    def variables_to_dict(self) -> dict[str, Any]:
+        """The record's keys the variables fill: ``env``, ``arrays``,
+        ``assocs``, ``var_attrs`` and ``managed``."""
         # A managed name serializes as its pointer, never its value: a
         # stored session may leak only where a secret lives. `env` skips
         # the name (the fetched plaintext must not land in the record)
@@ -621,16 +623,12 @@ class SessionState:
         # beside it. Without the second key a reload could only guess,
         # and guessing "exported" turned every plain `X=hello` into an
         # exported one on the first round trip.
-        data = {
-            "session_id": self.session_id,
-            "cwd": self.cwd,
+        data: dict[str, Any] = {
             "env": {
                 name: var.value
                 for name, var in records
                 if isinstance(var.value, str) and name not in managed
             },
-            "created_at": self.created_at,
-            "generation": self.generation,
         }
         # Arrays ride beside `env`, which stays the plain name/value map
         # an embedder reads: an indexed array by index, an associative
@@ -666,6 +664,24 @@ class SessionState:
                     entry["fetch"] = "eager"
                 refs[name] = entry
             data["managed"] = refs
+        return data
+
+    def to_dict(self, variables: bool = True) -> dict[str, Any]:
+        """The session's record.
+
+        Args:
+            variables (bool): include the keys the variables fill; False
+                leaves them out, for a flush that compares their store's
+                version instead of reading them.
+        """
+        data: dict[str, Any] = {
+            "session_id": self.session_id,
+            "cwd": self.cwd,
+            "created_at": self.created_at,
+            "generation": self.generation,
+        }
+        if variables:
+            data.update(self.variables_to_dict())
         if self.functions:
             data["functions"] = dict(self.functions)
         if self.readonly_functions:

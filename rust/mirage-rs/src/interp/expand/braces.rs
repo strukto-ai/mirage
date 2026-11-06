@@ -249,8 +249,8 @@ impl<H: Host> Expander<'_, H> {
         let (extglob, utf8) = (self.shell.shopt("extglob"), self.shell.utf8());
         let pattern = &operands.pattern;
         let room = self.room;
-        let host = &mut *self.host;
-        let pause = &mut async || host.pause().await;
+        let (host, shell) = (&mut *self.host, &*self.shell);
+        let pause = &mut async || host.pause(shell).await;
         Ok(match op {
             "#" | "##" | "%" | "%%" => {
                 pattern::strip(

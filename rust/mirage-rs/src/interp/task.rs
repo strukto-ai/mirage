@@ -44,8 +44,10 @@ pub enum Ask {
         view: Store,
     },
     /// A long piece of work has run a while; the host lets others run, or
-    /// stops the operation, before it goes on.
-    Pause,
+    /// stops the operation, before it goes on. `view` is the session as the
+    /// work has left it so far, which whatever the host runs meanwhile reads
+    /// (a call forking the session) while the operation holds the shell.
+    Pause { view: Store },
 }
 
 /// The host's answer to an `Ask`.
@@ -188,7 +190,7 @@ impl Host for Line {
         }
     }
 
-    async fn pause(&mut self) -> Result<(), Fault> {
+    async fn pause(&mut self, shell: &Shell) -> Result<(), Fault> {
         let due = {
             let mut slot = self.slot.borrow_mut();
             slot.slices += 1;
@@ -197,7 +199,12 @@ impl Host for Line {
         if !due {
             return Ok(());
         }
-        match self.ask(Ask::Pause).await {
+        match self
+            .ask(Ask::Pause {
+                view: shell.vars.fork(),
+            })
+            .await
+        {
             Answer::Resumed => Ok(()),
             Answer::Failed(fault) => Err(fault),
             _ => Err(Fault::Unsupported("an answer that is no resumption")),
@@ -292,6 +299,17 @@ pub struct Ended<T> {
     pub shell: Shell,
     pub result: Result<T, Fault>,
     pub diagnostics: Vec<Diagnostic>,
+}
+
+impl<T> Ended<T> {
+    /// The same end, its result's value made another.
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Ended<U> {
+        Ended {
+            shell: self.shell,
+            result: self.result.map(f),
+            diagnostics: self.diagnostics,
+        }
+    }
 }
 
 /// Expand `node` of `tree` as `mode` says.

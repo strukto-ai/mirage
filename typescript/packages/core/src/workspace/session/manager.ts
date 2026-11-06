@@ -21,6 +21,7 @@ import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
 import { applyProfile, narrow } from './resolve.ts'
 import { checkEnvFits, entryBytes } from './budget.ts'
+import { VAR_KEYS } from './constants.ts'
 import { CAS_MAX_RETRIES, generationOf, type RecordFields } from '../record/types.ts'
 import type { AdmissionRules, Decision, ProfileScripts } from '../../policy/types.ts'
 import type { EnvEntries } from '../../secrets/config.ts'
@@ -33,6 +34,25 @@ import { checkName, SystemIdSource, type IdSource } from '../../utils/ids.ts'
 type StoredSession = Parameters<typeof SessionState.fromDict>[0]
 
 /** Whether any of the session's variables carries a pointer. */
+/**
+ * What a flush compares a session against: the version its variables' store
+ * was at and the rest of its record, as JSON. Two equal versions hold the same
+ * variables, so a clean session is told apart without copying them out of the
+ * store, and the baseline keeps no copy of them either.
+ */
+type Baseline = readonly [bigint, string]
+
+/** What the session would write now, as a flush compares it. */
+function baseline(session: SessionState): Baseline {
+  return [session.vars.shell.version(), JSON.stringify(session.toDict(false))]
+}
+
+/** The baseline of a record written whole, at the version its variables were read at. */
+function written(version: bigint, fields: RecordFields): Baseline {
+  const rest = Object.fromEntries(Object.entries(fields).filter(([key]) => !VAR_KEYS.has(key)))
+  return [version, JSON.stringify(rest)]
+}
+
 function holdsManaged(session: SessionState): boolean {
   return session.vars.records().some(([, v]) => v.managed !== undefined)
 }
@@ -83,9 +103,8 @@ export class SessionManager extends SessionOwner {
   private loadPromise: Promise<void> | null = null
   // What the store last saw from us, per session id. Flush compares
   // against this to skip clean sessions without a network read, and to
-  // avoid clobbering other writers. Kept as JSON strings: a string
-  // cannot alias the live session (Python needs a deep copy instead).
-  private readonly persisted = new Map<string, string>()
+  // avoid clobbering other writers.
+  private readonly persisted = new Map<string, Baseline>()
 
   private defaultProfileInternal: CompiledProfile | null = null
 
@@ -361,7 +380,7 @@ export class SessionManager extends SessionOwner {
         dflt.generation = stored.generation
         // Hydrated sessions start clean: baseline what the store
         // holds so the next flush skips them.
-        this.persisted.set(sid, JSON.stringify(dflt.toDict()))
+        this.persisted.set(sid, baseline(dflt))
         // The document outranks the record for the fields no line can
         // edit; stamped after the baseline so a stale record is
         // rewritten on the next flush.
@@ -374,7 +393,7 @@ export class SessionManager extends SessionOwner {
       }
       stored.ids = this.ids
       this.sessions.set(sid, stored)
-      this.persisted.set(sid, JSON.stringify(stored.toDict()))
+      this.persisted.set(sid, baseline(stored))
       mergeSeedVars(stored, this.seedVarsInternal)
       this.hasManaged = this.hasManaged || holdsManaged(stored)
     }
@@ -404,13 +423,16 @@ export class SessionManager extends SessionOwner {
   private async flushOne(session: SessionState): Promise<void> {
     const sid = session.sessionId
     // Clean: the store already has exactly this state.
-    if (JSON.stringify(session.toDict()) === this.persisted.get(sid)) return
+    const [version, rest] = baseline(session)
+    const stored = this.persisted.get(sid)
+    if (stored?.[0] === version && stored[1] === rest) return
     for (let attempt = 0; attempt < CAS_MAX_RETRIES; attempt++) {
       const expected = session.generation
       session.generation = expected + 1
+      const version = session.vars.shell.version()
       const fields = session.toDict() as RecordFields
       if (await this.sessionStore.casSet(sid, fields, expected)) {
-        this.persisted.set(sid, JSON.stringify(fields))
+        this.persisted.set(sid, written(version, fields))
         return
       }
       // Lost the race: adopt the winner's generation and retry our
@@ -433,14 +455,17 @@ export class SessionManager extends SessionOwner {
     this.loaded = true
     this.loadPromise = Promise.resolve()
     const entries = new Map<string, RecordFields>()
-    for (const s of this.sessions.values()) entries.set(s.sessionId, s.toDict() as RecordFields)
-    for (const s of sessions) {
+    const versions = new Map<string, bigint>()
+    for (const s of [...this.sessions.values(), ...sessions]) {
+      versions.set(s.sessionId, s.vars.shell.version())
       entries.set(s.sessionId, s.toDict() as RecordFields)
-      this.hasManaged = this.hasManaged || holdsManaged(s)
     }
+    for (const s of sessions) this.hasManaged = this.hasManaged || holdsManaged(s)
     await this.sessionStore.replaceAll(entries)
     this.persisted.clear()
-    for (const [sid, fields] of entries) this.persisted.set(sid, JSON.stringify(fields))
+    for (const [sid, fields] of entries) {
+      this.persisted.set(sid, written(versions.get(sid) ?? 0n, fields))
+    }
   }
 
   /**

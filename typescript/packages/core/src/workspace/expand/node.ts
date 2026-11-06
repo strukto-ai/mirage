@@ -23,6 +23,7 @@ import { markGlobs } from '../../utils/glob_walk.ts'
 import { childContext, type EvaluationContext } from '../evaluation.ts'
 import { recordStatus } from '../executor/statement.ts'
 import type { ProcessSubLine } from '../frame.ts'
+import type { SessionState } from '../session/session.ts'
 import { frame } from '../session/state.ts'
 import { SessionGate, drive, listens, type TaskHost } from '../session/task.ts'
 import type { ExecuteFn } from './types.ts'
@@ -68,6 +69,7 @@ export async function childLine(
 export class ExpandHost implements TaskHost {
   private readonly gates: SessionGate
   private readonly program: ParsedProgram | null
+  readonly session: SessionState
 
   constructor(
     readonly context: EvaluationContext,
@@ -76,6 +78,7 @@ export class ExpandHost implements TaskHost {
     policies: Policies | null,
     word: TSNodeLike,
   ) {
+    this.session = context.session
     this.gates = new SessionGate(context.session, policies)
     this.program = word instanceof ProgramNode ? word.program : null
   }
@@ -92,24 +95,10 @@ export class ExpandHost implements TaskHost {
     read: string | null,
   ): Promise<[Uint8Array, Uint8Array, number]> {
     const context = this.context
-    // The session's own shell is the running expansion's until it ends;
-    // whatever reads the session by its id while the line runs (a policy's
-    // view, the store's flush) reads a copy of it as the substitution found
-    // it, which the child's own tasks never hold.
-    const records = context.session.vars
-    const held = records.shell
-    const copy = shell.fork()
-    records.shell = copy
-    let io: IOResult
-    try {
-      io = await childLine(context, this.executeFn, body, this.node(node), this.callStack, span, {
-        records: new ShellVars(shell),
-        ...(read === null ? {} : { read }),
-      })
-    } finally {
-      records.shell = held
-      copy.close()
-    }
+    const io = await childLine(context, this.executeFn, body, this.node(node), this.callStack, span, {
+      records: new ShellVars(shell),
+      ...(read === null ? {} : { read }),
+    })
     const stdout = await io.materializeStdout()
     const stderr = await io.materializeStderr()
     // An assignment-only statement whose value ran substitutions reports the
@@ -141,9 +130,8 @@ export class ExpandHost implements TaskHost {
     key: string,
     value: string | null,
     old: string | null,
-    view: Shell,
   ): Promise<void> {
-    return this.gates.gate(post, verb, key, value, old, view)
+    return this.gates.gate(post, verb, key, value, old)
   }
 }
 

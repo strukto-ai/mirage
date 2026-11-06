@@ -9,9 +9,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use mirage_rs::arith;
-use mirage_rs::interp::expand::Substitution;
+use mirage_rs::interp::expand::{Substitution, marked};
+use mirage_rs::interp::job::{Job, Output, Running, Step};
 use mirage_rs::interp::shell::Shell as Inner;
-use mirage_rs::interp::task::{self, Answer, Ask, Ended, Expanded, Mode, Task, Write};
+use mirage_rs::interp::task::{self, Answer, Ask, Expanded, Mode, Write};
 use mirage_rs::interp::write::{Denied, Fault, Verb};
 use mirage_rs::interp::{Diagnostic, Signal};
 use mirage_rs::vars::{self, Assigned, Indexed, Kind, Managed, Store, Value, Var};
@@ -27,10 +28,6 @@ unsafe extern "C" {
     /// No shell draws from `source` any more.
     fn mirage_ids_release(source: u32);
 }
-
-/// The characters the glob matcher reads specially, each a quoted field's
-/// mark at `0xFDD0` plus its place here, as `markGlobs` spells them.
-const GLOB_SPECIALS: &[u8] = b"*?[@+!()|";
 
 type Reply = Result<Item, String>;
 
@@ -93,21 +90,16 @@ impl Shell {
     }
 }
 
-enum Running {
-    Expand(Task<Ended<Expanded>>),
-    Write(Task<Ended<i64>>),
-}
-
-struct Job {
-    running: Running,
+/// A running operation and the shell it gives back when it ends.
+struct Owned {
+    job: Job,
     owner: u32,
-    ended: Option<Item>,
 }
 
 #[derive(Default)]
 struct Engine {
     shells: HashMap<u32, Shell>,
-    jobs: HashMap<u32, Job>,
+    jobs: HashMap<u32, Owned>,
     next: u32,
     out: Vec<u8>,
 }
@@ -133,28 +125,53 @@ impl Engine {
             .ok_or_else(|| format!("no shell {handle}"))
     }
 
-    fn job(&mut self, handle: u32) -> Result<&mut Job, String> {
+    fn job(&mut self, handle: u32) -> Result<&mut Owned, String> {
         self.jobs
             .get_mut(&handle)
             .ok_or_else(|| format!("no task {handle}"))
     }
 
-    /// Hand a shell to a task, which gives it back when it ends.
+    /// Hand a shell to an operation and run it to its first request or
+    /// its end: the task's handle and where it stopped.
     fn start(&mut self, owner: u32, run: impl FnOnce(Inner) -> Running) -> Reply {
         let shell = self.shell(owner)?;
         let inner = shell.inner.take().ok_or_else(running)?;
         shell.parked = inner.vars.held();
-        let running = run(inner);
+        let (job, step) = Job::start(run(inner));
         let handle = self.handle();
-        self.jobs.insert(
-            handle,
-            Job {
-                running,
-                owner,
-                ended: None,
-            },
-        );
-        Ok(Item::int(handle))
+        self.jobs.insert(handle, Owned { job, owner });
+        Ok(Item::list([Item::int(handle), self.land(handle, step)]))
+    }
+
+    /// Where a run stopped, as the host reads it: `["ask", request]`, or
+    /// `["done", result, diagnostics, more]` with the shell back with its
+    /// owner and the task gone unless slices of its fields are left.
+    fn land(&mut self, handle: u32, step: Step) -> Item {
+        let ended = match step {
+            Step::Asked(ask) => return Item::list([Item::text("ask"), ask_out(self, ask)]),
+            Step::Ended(ended) => ended,
+        };
+        let result = match &ended.result {
+            Ok(Output::Expanded(done)) => Item::list([Item::text("ok"), expanded_out(done)]),
+            Ok(Output::Wrote(value)) => Item::list([Item::text("ok"), Item::Big(*value)]),
+            Err(fault) => fault_out(fault),
+        };
+        let more = self.jobs.get(&handle).is_some_and(|owned| owned.job.more());
+        if let Some(owned) = self.jobs.get(&handle) {
+            let owner = owned.owner;
+            if let Some(shell) = self.shells.get_mut(&owner) {
+                shell.inner = Some(ended.shell);
+            }
+        }
+        if !more {
+            self.jobs.remove(&handle);
+        }
+        Item::list([
+            Item::text("done"),
+            result,
+            diagnostics_out(&ended.diagnostics),
+            Item::Bool(more),
+        ])
     }
 
     fn write(&mut self, owner: u32, write: Write, listens: bool, warns: bool) -> Reply {
@@ -249,29 +266,6 @@ fn record_in(item: Item) -> Result<Var, String> {
         attrs: vars::attrs_of(&cluster),
         managed,
     })
-}
-
-/// A field as the host's globbing reads it: each quoted glob character
-/// under its mark.
-fn marked(runs: &[(Vec<u8>, bool)]) -> Vec<u8> {
-    let mut out = Vec::new();
-    for (text, quoted) in runs {
-        if !quoted {
-            out.extend_from_slice(text);
-            continue;
-        }
-        for &byte in text {
-            match GLOB_SPECIALS.iter().position(|&c| c == byte) {
-                Some(at) => {
-                    let mark = char::from_u32(0xFDD0 + at as u32).unwrap_or('\u{FFFD}');
-                    let mut buf = [0; 4];
-                    out.extend_from_slice(mark.encode_utf8(&mut buf).as_bytes());
-                }
-                None => out.push(byte),
-            }
-        }
-    }
-    out
 }
 
 fn arith_error(error: &arith::Error) -> Item {
@@ -581,6 +575,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         ),
         "len" => Item::int(shell.store()?.records().count()),
         "contains" => Item::Bool(shell.store()?.record(&args.string()?).is_some()),
+        "version" => Item::Big(i64::try_from(shell.store()?.version()).unwrap_or(i64::MAX)),
         "held" => Item::int(
             shell
                 .inner
@@ -772,68 +767,38 @@ fn ask_out(engine: &mut Engine, ask: Ask) -> Item {
             Item::opt(old, Item::text),
             Item::int(engine.adopt(Inner::new(view))),
         ]),
-        Ask::Pause => Item::list([Item::text("pause")]),
+        Ask::Pause { view } => Item::list([
+            Item::text("pause"),
+            Item::int(engine.adopt(Inner::new(view))),
+        ]),
     }
 }
 
-/// An ended task's output, taken before the shell goes back to its owner.
-enum Done {
-    Expand(Ended<Expanded>),
-    Write(Ended<i64>),
-}
-
-fn ended<T>(
-    engine: &mut Engine,
-    owner: u32,
-    ended: Ended<T>,
-    value: impl FnOnce(&T) -> Item,
-) -> Item {
-    let result = match &ended.result {
-        Ok(done) => Item::list([Item::text("ok"), value(done)]),
-        Err(fault) => fault_out(fault),
-    };
-    if let Some(shell) = engine.shells.get_mut(&owner) {
-        shell.inner = Some(ended.shell);
-    }
-    Item::list([result, diagnostics_out(&ended.diagnostics)])
-}
-
-/// One operation on a task, the handle its first argument.
+/// One operation on a task, the handle its first argument: an answer,
+/// which runs the task to where it stops next, the next slice of its
+/// fields, or dropping a task the host gives up on.
 fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
     let handle = args.handle()?;
     if op == "drop" {
         engine.jobs.remove(&handle);
         return Ok(Item::Nil);
     }
+    if op == "slice" {
+        let owned = engine.job(handle)?;
+        let fields = Item::list(
+            owned
+                .job
+                .slice()
+                .iter()
+                .map(|field| Item::Text(marked(&field.0))),
+        );
+        let more = owned.job.more();
+        if !more {
+            engine.jobs.remove(&handle);
+        }
+        return Ok(Item::list([fields, Item::Bool(more)]));
+    }
     let answer = match op {
-        "step" => {
-            let job = engine.job(handle)?;
-            if job.ended.is_some() {
-                return Ok(Item::Nil);
-            }
-            let asked = match &mut job.running {
-                Running::Expand(task) => task.step(),
-                Running::Write(task) => task.step(),
-            };
-            if let Some(ask) = asked {
-                return Ok(ask_out(engine, ask));
-            }
-            let owner = job.owner;
-            let done = match &mut job.running {
-                Running::Expand(task) => Done::Expand(task.output().ok_or_else(running)?),
-                Running::Write(task) => Done::Write(task.output().ok_or_else(running)?),
-            };
-            let outcome = match done {
-                Done::Expand(done) => ended(engine, owner, done, expanded_out),
-                Done::Write(done) => ended(engine, owner, done, |value| Item::Big(*value)),
-            };
-            engine.job(handle)?.ended = Some(outcome);
-            return Ok(Item::Nil);
-        }
-        "finish" => {
-            let job = engine.job(handle)?;
-            return job.ended.take().ok_or_else(running);
-        }
         "answer_substituted" => Answer::Substituted(Substitution {
             stdout: args.bytes()?,
             stderr: args.bytes()?,
@@ -853,19 +818,36 @@ fn task_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "answer_failed" => Answer::Failed(Fault::Unsupported("the host failed")),
         other => return Err(format!("no task operation {other}")),
     };
-    match &mut engine.job(handle)?.running {
-        Running::Expand(task) => task.answer(answer),
-        Running::Write(task) => task.answer(answer),
-    }
-    Ok(Item::Nil)
+    let step = engine
+        .job(handle)?
+        .job
+        .answer(answer)
+        .ok_or_else(|| "the task has ended".to_owned())?;
+    Ok(engine.land(handle, step))
 }
 
+/// A request, or a batch of them run in order whose last reply is the
+/// batch's: a frame goes with the operation that reads it, in one call.
 fn call(request: &[u8]) -> Reply {
     let mut bytes = request;
     let Some(Item::List(items)) = Item::decode(&mut bytes) else {
         return Err("a request is malformed".to_owned());
     };
-    let mut args = Args::new(items);
+    if !matches!(items.first(), Some(Item::List(_))) {
+        return run(items);
+    }
+    let mut reply = Ok(Item::Nil);
+    for item in items {
+        let Item::List(request) = item else {
+            return Err("a batch holds a request that is no list".to_owned());
+        };
+        reply = Ok(run(request)?);
+    }
+    reply
+}
+
+fn run(request: Vec<Item>) -> Reply {
+    let mut args = Args::new(request);
     let target = args.string()?;
     let op = args.string()?;
     ENGINE.with_borrow_mut(|engine| match target.as_str() {

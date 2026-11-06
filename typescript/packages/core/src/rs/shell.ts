@@ -517,11 +517,26 @@ function decodeItem(bytes: Uint8Array, view: DataView, at: { pos: number }): Ite
   }
 }
 
+// The shells closed since the last request, dropped ahead of the next one
+// rather than in calls of their own.
+const closing: number[] = []
+
 /** Run one engine request: its target, operation and arguments; its reply. */
 function engine(target: 'shell' | 'task', op: string, args: readonly Item[]): Item {
+  return batch([[target, op, ...args]])
+}
+
+/** Run engine requests in order in one call; the last one's reply. */
+function batch(requests: readonly (readonly Item[])[]): Item {
+  const all = [...closing.splice(0).map((handle) => ['shell', 'drop', handle]), ...requests]
+  const [first, ...rest] = all
+  return send(first !== undefined && rest.length === 0 ? first : all)
+}
+
+function send(request: Item): Item {
   const wasm = instance()
   used = 0
-  encodeItem([target, op, ...args])
+  encodeItem(request)
   const ptr = wasm.mirage_rs_args(used)
   bytesAt(wasm, ptr, used).set(scratch.subarray(0, used))
   const status = wasm.mirage_rs_engine(used)
@@ -572,7 +587,7 @@ export type Ask =
     ]
   | readonly ['process', Shell, ShellTreeNode]
   | readonly ['gate', boolean, 'set' | 'unset', string, string | null, string | null, Shell]
-  | readonly ['pause']
+  | readonly ['pause', Shell]
 
 /** The state around a line that the shell reads, as `Shell.frame` takes it. */
 export interface ShellFrame {
@@ -620,6 +635,9 @@ function texts(items: Item): string[] {
  */
 export class Shell {
   private closed = false
+  // The frame `frame` set, sent with the next request rather than in one of
+  // its own.
+  private framed: Item[] | null = null
 
   private constructor(readonly handle: number) {
     shells.register(this, handle, this)
@@ -635,20 +653,27 @@ export class Shell {
     return new Shell(handle)
   }
 
-  /** Free the shell now, rather than when it is collected. */
+  /** Free the shell with the next request, rather than when it is collected. */
   close(): void {
     if (this.closed) return
     this.closed = true
     shells.unregister(this)
-    engine('shell', 'drop', [this.handle])
+    closing.push(this.handle)
   }
 
   private call(op: string, ...args: Item[]): Item {
-    return engine('shell', op, [this.handle, ...args])
+    const framed = this.framed
+    if (framed === null) return engine('shell', op, [this.handle, ...args])
+    this.framed = null
+    return batch([
+      ['shell', 'frame', this.handle, ...framed],
+      ['shell', op, this.handle, ...args],
+    ])
   }
 
   private task(op: string, tree: ShellTree | null, ...args: Item[]): ShellTask {
-    return new ShellTask(this.call(op, ...args) as number, tree)
+    const [handle, step] = this.call(op, ...args) as readonly [number, Item]
+    return new ShellTask(handle, step, tree)
   }
 
   /** Draw `$RANDOM`'s first seeds from `ids` from now on. */
@@ -823,9 +848,9 @@ export class Shell {
   }
 
   /** Hand the shell the state around a line that it reads. */
+  /** Set the frame the next operation reads, sent along with it. */
   frame(frame: ShellFrame): void {
-    this.call(
-      'frame',
+    this.framed = [
       frame.positional,
       frame.calls,
       frame.status,
@@ -840,7 +865,12 @@ export class Shell {
       frame.functionNames,
       frame.paren,
       frame.memoryRoom,
-    )
+    ]
+  }
+
+  /** The number of the records' last change, which a copy holding the same records shares. */
+  version(): bigint {
+    return this.call('version') as bigint
   }
 
   /** The scalar an array conversion keeps as element 0, or a seed's error. */
@@ -965,19 +995,29 @@ export class Shell {
 export type Finished = readonly [readonly Item[], (string | Uint8Array)[]]
 
 /**
- * An operation running on a shell, stepped by the host: each `step` returns
- * the request it waits on, answered with one `answer*` call, or null once it
- * has ended, when `finish` gives the shell back. Mirrors Python's
+ * An operation running on a shell, driven by the host. Started, it has run to
+ * its first request or its end: `step` returns the request it waits on, which
+ * one `answer*` call answers, running it to the next, or null once it has
+ * ended, when the shell is its owner's again and `finish` returns the result.
+ * A long list of fields comes in slices: the first in `finish`, the rest from
+ * `slice` while `more` says some are left. Mirrors Python's
  * mirage._rs.ShellTask.
  */
 export class ShellTask {
-  private finished = false
+  private asked: Ask | null = null
+  private ended: Finished | null = null
+  private left = false
+  // Whether the engine still holds the task: until it ends, or until its
+  // last slice is taken.
+  private held = true
 
   constructor(
     readonly handle: number,
+    step: Item,
     private readonly tree: ShellTree | null,
   ) {
     tasks.register(this, handle, this)
+    this.land(step)
   }
 
   private call(op: string, ...args: Item[]): Item {
@@ -989,10 +1029,26 @@ export class ShellTask {
     return new ShellTreeNode(this.tree, index as number)
   }
 
-  /** Run to the next request, null once the operation has ended. */
-  step(): Ask | null {
-    const asked = this.call('step') as readonly Item[] | null
-    if (asked === null) return null
+  /** Keep where a run stopped: `['ask', request]` or `['done', result, said, more]`. */
+  private land(step: Item): void {
+    const stopped = step as readonly Item[]
+    if (stopped[0] === 'ask') {
+      this.asked = this.ask(stopped[1] as readonly Item[])
+      return
+    }
+    this.asked = null
+    this.ended = [stopped[1] as readonly Item[], stopped[2] as (string | Uint8Array)[]]
+    this.left = stopped[3] === true
+    if (!this.left) this.release()
+  }
+
+  private release(): void {
+    if (!this.held) return
+    this.held = false
+    tasks.unregister(this)
+  }
+
+  private ask(asked: readonly Item[]): Ask {
     switch (asked[0]) {
       case 'substitute':
         return [
@@ -1016,40 +1072,61 @@ export class ShellTask {
           Shell.adopt(asked[6] as number),
         ]
       default:
-        return ['pause']
+        return ['pause', Shell.adopt(asked[1] as number)]
     }
   }
 
+  /** The request the operation waits on, null once it has ended. */
+  step(): Ask | null {
+    return this.asked
+  }
+
   answerSubstituted(stdout: Uint8Array, stderr: Uint8Array, status: number): void {
-    this.call('answer_substituted', stdout, stderr, status)
+    this.land(this.call('answer_substituted', stdout, stderr, status))
   }
 
   answerPath(path: string): void {
-    this.call('answer_path', path)
+    this.land(this.call('answer_path', path))
   }
 
   /** The gate's answer: null to let the write through, or the refused name and its record. */
   answerGate(denied: readonly [string, number] | null): void {
-    this.call('answer_gate', denied)
+    this.land(this.call('answer_gate', denied))
   }
 
   /** The host has let others run; the operation goes on. */
   answerResumed(): void {
-    this.call('answer_resumed')
+    this.land(this.call('answer_resumed'))
   }
 
   /** The host could not do what was asked; the operation stops. */
   answerFailed(): void {
-    this.call('answer_failed')
+    this.land(this.call('answer_failed'))
   }
 
   /** The result once `step` has returned null; the shell is the owner's again. */
   finish(): Finished {
-    if (this.finished) throw new Error('the task has finished')
-    this.finished = true
-    const out = this.call('finish') as unknown as Finished
-    tasks.unregister(this)
+    if (this.ended === null) throw new Error('the task is running')
+    return this.ended
+  }
+
+  /** Whether slices of a long list of fields are left to take. */
+  more(): boolean {
+    return this.left
+  }
+
+  /** The next slice of a long list of fields. */
+  slice(): string[] {
+    const [fields, more] = this.call('slice') as readonly [Item, boolean]
+    this.left = more
+    if (!more) this.release()
+    return fields as string[]
+  }
+
+  /** Give the task up before the engine is done with it. */
+  close(): void {
+    if (!this.held) return
+    this.release()
     this.call('drop')
-    return out
   }
 }

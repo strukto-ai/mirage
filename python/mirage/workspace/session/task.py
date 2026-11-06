@@ -40,7 +40,10 @@ Fault = tuple[Any, ...]
 
 
 class TaskHost(Protocol):
-    """What a running shell task asks the host for."""
+    """What a running shell task asks the host for, on the session whose
+    shell the task holds."""
+
+    session: SessionState
 
     async def substitute(
         self,
@@ -79,9 +82,9 @@ class TaskHost(Protocol):
         key: str,
         value: str | None,
         old: str | None,
-        view: Shell,
     ) -> None:
         """Ask the session policies about one write; a refusal raises.
+        The session reads as the write finds it while they answer.
 
         Args:
             post (bool): ``post_session``, after the write landed.
@@ -89,7 +92,6 @@ class TaskHost(Protocol):
             key (str): the variable.
             value (str | None): the value rendered, None for an unset.
             old (str | None): the value it replaced, for ``post``.
-            view (Shell): the session as the write finds it, read only.
         """
         ...
 
@@ -143,7 +145,6 @@ class SessionGate:
         key: str,
         value: str | None,
         old: str | None,
-        view: Shell,
     ) -> None:
         ctx = SessionContext(
             verb=verb,
@@ -151,16 +152,10 @@ class SessionGate:
             value=value,
             session_id=self.session.session_id,
         )
-        records = self.session.vars
-        held = records.shell
-        records.shell = view
-        try:
-            if post:
-                await post_session_gate(self.policies, ctx, old)
-            else:
-                await pre_session_gate(self.policies, ctx)
-        finally:
-            records.shell = held
+        if post:
+            await post_session_gate(self.policies, ctx, old)
+        else:
+            await pre_session_gate(self.policies, ctx)
 
 
 def fault_error(
@@ -212,7 +207,12 @@ async def drive(
     """Run a task to its end, answering what it asks.
 
     A failure of the host's stops the task and raises once the shell is
-    back with its owner; so does the task's own stop.
+    back with its owner; so does the task's own stop. The session's own
+    shell is the task's until it ends, so while the host answers, whatever
+    reads the session by its id (a policy's view, a call forking it, the
+    store's flush) reads a copy as the task left it: the request's view,
+    or a copy of the child shell it hands on. A long list of fields comes
+    in slices, the host letting others run between them.
 
     Args:
         task (ShellTask): the running operation.
@@ -222,7 +222,12 @@ async def drive(
     """
     refusals: dict[int, BaseException] = {}
     failure: BaseException | None = None
+    records = host.session.vars
     while (ask := task.step()) is not None:
+        held = records.shell
+        records.shell = (
+            ask[-1] if ask[0] in ("gate", "pause") else ask[1].fork()
+        )
         try:
             match ask:
                 case ("substitute", shell, body, node, span, read):
@@ -232,25 +237,33 @@ async def drive(
                     task.answer_substituted(out, err, status)
                 case ("process", shell, node):
                     task.answer_path(await host.process(shell, node))
-                case ("gate", post, verb, key, value, old, view):
+                case ("gate", post, verb, key, value, old, _):
                     try:
-                        await host.gate(post, verb, key, value, old, view)
+                        await host.gate(post, verb, key, value, old)
                     except PolicyDenied as exc:
                         record = len(refusals) + 1
                         refusals[record] = exc
                         task.answer_gate((key, record))
                     else:
                         task.answer_gate(None)
-                case ("pause",):
+                case ("pause", _):
                     await task_turn()
                     task.answer_resumed()
         except BaseException as exc:
             failure = exc
             task.answer_failed()
+        finally:
+            records.shell = held
     result, said = task.finish()
     diagnostics.extend(said)
     if failure is not None:
         raise failure
-    if result[0] == "ok":
+    if result[0] != "ok":
+        raise fault_error(result, refusals)
+    if not task.more():
         return result[1]
-    raise fault_error(result, refusals)
+    fields = list(result[1])
+    while task.more():
+        await task_turn()
+        fields.extend(task.slice())
+    return fields

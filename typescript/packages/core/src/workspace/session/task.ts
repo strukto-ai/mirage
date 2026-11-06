@@ -34,8 +34,12 @@ import {
 } from '../../shell/errors.ts'
 import type { SessionState } from './session.ts'
 
-/** What a running shell task asks the host for. Mirrors Python's TaskHost. */
+/**
+ * What a running shell task asks the host for, on the session whose shell the
+ * task holds. Mirrors Python's TaskHost.
+ */
 export interface TaskHost {
+  readonly session: SessionState
   /**
    * Run a command substitution's body in the child `shell`, a copy of the
    * task's; `span` is the body's span within the node, for a backtick region
@@ -53,7 +57,7 @@ export interface TaskHost {
   process(shell: Shell, node: ShellTreeNode): Promise<string>
   /**
    * Ask the session policies about one write (`post` after it landed); a
-   * refusal throws. `view` is the session as the write finds it, read only.
+   * refusal throws. The session reads as the write finds it while they answer.
    */
   gate(
     post: boolean,
@@ -61,7 +65,6 @@ export interface TaskHost {
     key: string,
     value: string | null,
     old: string | null,
-    view: Shell,
   ): Promise<void>
 }
 
@@ -98,19 +101,10 @@ export class SessionGate implements TaskHost {
     key: string,
     value: string | null,
     old: string | null,
-    view: Shell,
   ): Promise<void> {
     const ctx: SessionContext = { verb, key, value, sessionId: this.session.sessionId }
-    const records = this.session.vars
-    const held = records.shell
-    records.shell = view
-    try {
-      if (post) await postSessionGate(this.policies, ctx, old)
-      else await preSessionGate(this.policies, ctx)
-    } finally {
-      records.shell = held
-      view.close()
-    }
+    if (post) await postSessionGate(this.policies, ctx, old)
+    else await preSessionGate(this.policies, ctx)
   }
 }
 
@@ -160,7 +154,12 @@ export function faultError(fault: readonly Item[], refusals: Map<number, Error>)
  * Run a task to its end, answering what it asks. A failure of the host's
  * stops the task and throws once the shell is back with its owner; so does
  * the task's own stop. Its warnings go to `diagnostics`, in order, whether it
- * ends or stops. Mirrors Python's drive.
+ * ends or stops. The session's own shell is the task's until it ends, so while
+ * the host answers, whatever reads the session by its id (a policy's view, a
+ * call forking it, the store's flush) reads a copy as the task left it: the
+ * request's view, or a copy of the child shell it hands on. A long list of
+ * fields comes in slices, the host letting others run between them. Mirrors
+ * Python's drive.
  */
 export async function drive(
   task: ShellTask,
@@ -171,7 +170,11 @@ export async function drive(
   let failure: unknown = undefined
   let failed = false
   let budget: YieldBudget | undefined
+  const records = host.session.vars
   for (let ask = task.step(); ask !== null; ask = task.step()) {
+    const held = records.shell
+    const lent = ask[0] === 'gate' ? ask[6] : ask[0] === 'pause' ? ask[1] : ask[1].fork()
+    records.shell = lent
     try {
       switch (ask[0]) {
         case 'substitute': {
@@ -189,9 +192,9 @@ export async function drive(
           task.answerPath(await host.process(ask[1], ask[2]))
           break
         case 'gate': {
-          const [, post, verb, key, value, old, view] = ask
+          const [, post, verb, key, value, old] = ask
           try {
-            await host.gate(post, verb, key, value, old, view)
+            await host.gate(post, verb, key, value, old)
           } catch (err) {
             if (!(err instanceof PolicyDenied)) throw err
             const record = refusals.size + 1
@@ -211,11 +214,25 @@ export async function drive(
       failure = err
       failed = true
       task.answerFailed()
+    } finally {
+      records.shell = held
+      lent.close()
     }
   }
   const [result, said] = task.finish()
   diagnostics.push(...said)
   if (failed) throw failure
-  if (result[0] === 'ok') return result[1] ?? null
-  throw faultError(result, refusals)
+  if (result[0] !== 'ok') throw faultError(result, refusals)
+  if (!task.more()) return result[1] ?? null
+  const fields = [...(result[1] as readonly Item[])]
+  try {
+    while (task.more()) {
+      budget ??= new YieldBudget(callerSignal())
+      await budget.run()
+      fields.push(...task.slice())
+    }
+  } finally {
+    task.close()
+  }
+  return fields
 }

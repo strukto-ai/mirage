@@ -235,7 +235,9 @@
     "ShellTreeNode": "Python's tree and node are mirage-rs's own PyO3 classes (mirage._rs.ShellTree and ShellNode); TypeScript wraps the wasm node table in classes of its own.",
     "WORDS": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
     "asRecord": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
+    "batch": "The wasm engine ABI's request transport: closed shells and a pending frame ride with the next request in one batch; Python calls the PyO3 classes directly, so it has no request to send.",
     "bytesAt": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "closing": "The wasm engine ABI's request transport: closed shells and a pending frame ride with the next request in one batch; Python calls the PyO3 classes directly, so it has no request to send.",
     "decodeItem": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
     "drawId": "The id sources the shell module imports, one per shell; Python hands the PyO3 class a callable, which mirage-rs calls itself.",
     "encodeItem": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
@@ -253,6 +255,7 @@
     "putWord": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
     "room": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
     "scratch": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
+    "send": "The wasm engine ABI's request transport: closed shells and a pending frame ride with the next request in one batch; Python calls the PyO3 classes directly, so it has no request to send.",
     "shells": "Frees the shells, tasks and trees the wasm module holds once their wrapper is collected; Python releases the PyO3 objects by reference counting.",
     "tasks": "Frees the shells, tasks and trees the wasm module holds once their wrapper is collected; Python releases the PyO3 objects by reference counting.",
     "texts": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
@@ -1318,7 +1321,6 @@
   },
   "workspace/session/session": {
    "python_only": {
-    "_Records": "Python's live read-only Mapping over one kind of record (session.arrays, session.assocs); TypeScript's getters build the record each call.",
     "_Readonly": "Python's live Set of the readonly names (session.readonly_vars); TypeScript's getter builds the set each call."
    },
    "typescript_only": {

@@ -73,6 +73,34 @@ impl Chunk {
     }
 }
 
+/// The characters the glob matcher reads specially, each a quoted run's
+/// mark at `0xFDD0` plus its place here, as the hosts' `mark_globs` spells
+/// them.
+const GLOB_SPECIALS: &[u8] = b"*?[@+!()|";
+
+/// Runs as the hosts' globbing reads them: each quoted glob character
+/// under its mark, everything else as it is.
+pub fn marked(runs: &[(Vec<u8>, bool)]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (text, quoted) in runs {
+        if !quoted {
+            out.extend_from_slice(text);
+            continue;
+        }
+        for &byte in text {
+            match GLOB_SPECIALS.iter().position(|&c| c == byte) {
+                Some(at) => {
+                    let mark = char::from_u32(0xFDD0 + at as u32).unwrap_or('\u{FFFD}');
+                    let mut buf = [0; 4];
+                    out.extend_from_slice(mark.encode_utf8(&mut buf).as_bytes());
+                }
+                None => out.push(byte),
+            }
+        }
+    }
+    out
+}
+
 /// A field after splitting: its runs, each quoted or live for globbing.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Field(pub Vec<(Vec<u8>, bool)>);
@@ -253,9 +281,9 @@ pub trait Host: Gate {
     ) -> impl Future<Output = Result<Vec<u8>, Fault>>;
 
     /// Let the host run others, or stop the operation, between slices of
-    /// a long piece of work; a host that runs nothing else goes straight
-    /// on.
-    fn pause(&mut self) -> impl Future<Output = Result<(), Fault>> {
+    /// a long piece of work on `shell`; a host that runs nothing else goes
+    /// straight on.
+    fn pause(&mut self, _shell: &Shell) -> impl Future<Output = Result<(), Fault>> {
         async { Ok(()) }
     }
 }
@@ -315,6 +343,9 @@ struct Operands {
     replacement: Replacement,
     letter: Option<u8>,
 }
+
+/// The brace words made between two pauses.
+const BRACE_SLICE: usize = 1024;
 
 const PATTERN_OPS: [&str; 14] = [
     "#", "##", "%", "%%", "/", "//", "/#", "/%", "^", "^^", ",", ",,", "~", "~~",
@@ -575,10 +606,15 @@ impl<H: Host> Expander<'_, H> {
             return Ok(None);
         };
         let mut out = Vec::with_capacity(words.len());
-        for word in &words {
+        // `{1..1000000}` is a million words: making them pauses as it goes,
+        // so a cancel or the line's deadline lands before the last.
+        for (index, word) in words.iter().enumerate() {
             let chunks = self.brace_word(word, &atoms).await?;
             self.spend(chunk_bytes(&chunks))?;
             out.push(chunks);
+            if index % BRACE_SLICE == BRACE_SLICE - 1 {
+                self.host.pause(self.shell).await?;
+            }
         }
         Ok(Some(out))
     }

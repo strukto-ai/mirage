@@ -113,6 +113,7 @@ class ExpandHost:
         word: TSNodeLike,
     ) -> None:
         self.context = context
+        self.session = context.session
         self.execute_fn = execute_fn
         self.call_stack = call_stack
         self.gates = SessionGate(context.session, policies)
@@ -132,26 +133,16 @@ class ExpandHost:
         read: str | None,
     ) -> tuple[bytes, bytes, int]:
         context = self.context
-        # The session's own shell is the running expansion's until it
-        # ends; whatever reads the session by its id while the line runs
-        # (a policy's view, the store's flush) reads a copy of it as the
-        # substitution found it, which the child's own tasks never hold.
-        records = context.session.vars
-        held = records.shell
-        records.shell = shell.fork()
-        try:
-            io = await child_line(
-                context,
-                self.execute_fn,
-                body,
-                self._node(node),
-                self.call_stack,
-                span,
-                records=ShellVars(shell),
-                read=read,
-            )
-        finally:
-            records.shell = held
+        io = await child_line(
+            context,
+            self.execute_fn,
+            body,
+            self._node(node),
+            self.call_stack,
+            span,
+            records=ShellVars(shell),
+            read=read,
+        )
         stdout = await io.materialize_stdout()
         stderr = await io.materialize_stderr()
         # An assignment-only statement whose value ran substitutions
@@ -189,9 +180,8 @@ class ExpandHost:
         key: str,
         value: str | None,
         old: str | None,
-        view: Shell,
     ) -> None:
-        await self.gates.gate(post, verb, key, value, old, view)
+        await self.gates.gate(post, verb, key, value, old)
 
 
 def _literal(node: LiteralNode) -> str:

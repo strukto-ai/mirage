@@ -5,6 +5,7 @@
 pub mod brace;
 pub mod escapes;
 pub mod expand;
+pub mod job;
 pub mod parameter;
 pub mod pattern;
 pub mod quote;
