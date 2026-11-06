@@ -15,6 +15,7 @@ Routes are under `/v1` and take and return JSON. Send
 is the contract both servers are checked against.
 
 Rows marked **daemon and console** are also served by the hosted console.
+An error answers `{detail, errno?, refusal?}`; `429` adds `Retry-After`.
 
 <ApiExplorer>
 
@@ -24,7 +25,24 @@ Rows marked **daemon and console** are also served by the hosted console.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `WorkspaceBrief[]`
+
+<ResponseField name="id" type="string" required>
+</ResponseField>
+<ResponseField name="mode" type="string" required>
+</ResponseField>
+<ResponseField name="mount_count" type="integer" required>
+</ResponseField>
+<ResponseField name="session_count" type="integer" required>
+</ResponseField>
+<ResponseField name="created_at" type="number" required>
+</ResponseField>
+
+`401` The token is missing or wrong
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -45,6 +63,7 @@ before any of it is built: a refusal is 403 with its reason, and
 **Query**
 
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
 </ParamField>
 
 **Body** `application/json`
@@ -58,7 +77,13 @@ before any of it is built: a refusal is 403 with its reason, and
 
 **Responses**
 
-`201` Successful Response
+`200` An identical retry answers the existing workspace; with explain=true, what the server's policies say about the config
+
+`application/json` `WorkspaceDetail | object`
+
+`201` Created
+
+`application/json` `WorkspaceDetail`
 
 <ResponseField name="id" type="string" required>
 </ResponseField>
@@ -77,10 +102,22 @@ before any of it is built: a refusal is 403 with its reason, and
 <ResponseField name="internals" type="WorkspaceInternals | null">
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`409` The id or name is taken, the workspace is busy, or a file changed since it was read
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`503` The server is at max_workspaces, or shutting down
 
 </Operation>
 
@@ -91,6 +128,7 @@ before any of it is built: a refusal is 403 with its reason, and
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
@@ -100,7 +138,9 @@ before any of it is built: a refusal is 403 with its reason, and
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `WorkspaceDetail`
 
 <ResponseField name="id" type="string" required>
 </ResponseField>
@@ -119,10 +159,18 @@ before any of it is built: a refusal is 403 with its reason, and
 <ResponseField name="internals" type="WorkspaceInternals | null">
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -133,21 +181,32 @@ before any of it is built: a refusal is 403 with its reason, and
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `DeleteWorkspaceResponse`
 
 <ResponseField name="id" type="string" required>
 </ResponseField>
 <ResponseField name="closed_at" type="number" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -160,19 +219,30 @@ Cancel every session's running and queued lines; all stay open.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `CancelLinesResponse`
 
 <ResponseField name="canceled" type="integer" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -189,6 +259,7 @@ under the workspace's network. A name already installed answers 409.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 <ParamField path="name" type="string" required>
 </ParamField>
@@ -206,12 +277,22 @@ under the workspace's network. A name already installed answers 409.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `object`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -224,18 +305,29 @@ Remove an MCP CLI from the live workspace.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 <ParamField path="name" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `object`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -248,21 +340,32 @@ Close the workspace and keep its state for the owner to reopen.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `DeleteWorkspaceResponse`
 
 <ResponseField name="id" type="string" required>
 </ResponseField>
 <ResponseField name="closed_at" type="number" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -278,11 +381,13 @@ own loop.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="since" type="integer | null">
 </ParamField>
@@ -293,12 +398,22 @@ own loop.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `object[]`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -311,19 +426,30 @@ Kill every session's background jobs and runners.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `KillJobsResponse`
 
 <ResponseField name="killed" type="integer" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -339,6 +465,7 @@ onto the name, and the workspace's config is never rewritten.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 <ParamField path="name" type="string" required>
 </ParamField>
@@ -368,12 +495,22 @@ onto the name, and the workspace's config is never rewritten.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `object`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -384,16 +521,32 @@ onto the name, and the workspace's config is never rewritten.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `SessionResponse[]`
+
+<ResponseField name="session_id" type="string" required>
+</ResponseField>
+<ResponseField name="cwd" type="string" required>
+</ResponseField>
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -404,6 +557,7 @@ onto the name, and the workspace's config is never rewritten.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Body** `application/json`
@@ -417,17 +571,27 @@ onto the name, and the workspace's config is never rewritten.
 
 **Responses**
 
-`201` Successful Response
+`201` Created
+
+`application/json` `SessionResponse`
 
 <ResponseField name="session_id" type="string" required>
 </ResponseField>
 <ResponseField name="cwd" type="string" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -440,6 +604,7 @@ Replace the session's profile; its cwd, env and history stay.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 <ParamField path="session_id" type="string" required>
 </ParamField>
@@ -451,17 +616,27 @@ Replace the session's profile; its cwd, env and history stay.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `SessionResponse`
 
 <ResponseField name="session_id" type="string" required>
 </ResponseField>
 <ResponseField name="cwd" type="string" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -472,21 +647,32 @@ Replace the session's profile; its cwd, env and history stay.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 <ParamField path="session_id" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `DeleteSessionResponse`
 
 <ResponseField name="session_id" type="string" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -501,21 +687,32 @@ The session stays open; returns once those lines have ended.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 <ParamField path="session_id" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `CancelLinesResponse`
 
 <ResponseField name="canceled" type="integer" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -528,21 +725,32 @@ Kill the session's background jobs and runners; it stays open.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 <ParamField path="session_id" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `KillJobsResponse`
 
 <ResponseField name="killed" type="integer" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -556,21 +764,41 @@ sees them.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="pattern" type="string" required>
+A pathname pattern, such as /src/**/*.py.
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` Every matching path visible to the session
+
+`application/json` `string[]`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -581,25 +809,77 @@ sees them.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
 </ParamField>
 <ParamField query="stream" type="boolean">
+Stream stdout, stderr and the final status as NDJSON. Cannot be combined with explain.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="command" type="string" required>
+The line.
+</ParamField>
+<ParamField body="cwd" type="string">
+A working directory for this line only.
+</ParamField>
+<ParamField body="runtime" type="string">
+Run the line on this runtime, by name, instead of the one routing picks.
+</ParamField>
+<ParamField body="record" type="boolean">
+Add the line to the session's history.
+</ParamField>
+
+**Body** `multipart/form-data`
+
+<ParamField body="request" type="ShellRequest" required>
+</ParamField>
+<ParamField body="stdin" type="string">
+Up to 64 MiB, read as it arrives.
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` The line's result, or with stream=true an NDJSON stream of output records ending in a status record
+
+`application/json` `ShellResult`
+
+<ResponseField name="kind" type="string" required>
+</ResponseField>
+<ResponseField name="exit_code" type="integer" required>
+</ResponseField>
+<ResponseField name="stdout" type="string" required>
+</ResponseField>
+<ResponseField name="stderr" type="string" required>
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+
+`application/x-ndjson` `string`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -607,26 +887,50 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-append)
 
+Append bytes to a file.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+</ParamField>
+<ParamField body="data" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `null`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -634,26 +938,48 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-create)
 
+Create an empty file.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `null`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -661,26 +987,48 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-exists)
 
+Whether a path exists.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `boolean`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -688,26 +1036,52 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-getxattr)
 
+One extended attribute's value.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+</ParamField>
+<ParamField body="name" type="string" required>
+</ParamField>
+<ParamField body="nofollow" type="boolean">
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `string`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -715,26 +1089,48 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-is_dir)
 
+Whether a path is a directory.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `boolean`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -742,26 +1138,48 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-is_file)
 
+Whether a path is a file.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `boolean`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -769,26 +1187,48 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-list_files)
 
+The names of a directory's files.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `string[]`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -796,26 +1236,50 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-listxattr)
 
+A path's extended attribute names.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+</ParamField>
+<ParamField body="nofollow" type="boolean">
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `string[]`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -823,26 +1287,48 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-mkdir)
 
+Make a directory.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `null`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -850,26 +1336,52 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-pwrite)
 
+Write bytes into a file at an offset.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+</ParamField>
+<ParamField body="data" type="string" required>
+</ParamField>
+<ParamField body="offset" type="integer" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `null`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -877,26 +1389,59 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-read)
 
+Read a file's bytes, from an offset.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+</ParamField>
+<ParamField body="offset" type="integer">
+</ParamField>
+<ParamField body="size" type="integer | null">
+</ParamField>
+<ParamField body="raw" type="boolean">
+</ParamField>
+<ParamField body="stream" type="boolean">
+Answer the bytes themselves as application/octet-stream.
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `string`
+
+`application/octet-stream` `string`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -904,26 +1449,48 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-readdir)
 
+A directory's entries.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `string[]`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -931,26 +1498,48 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-readlink)
 
+Where a symbolic link points.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `string`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -958,26 +1547,52 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-removexattr)
 
+Remove an extended attribute.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+</ParamField>
+<ParamField body="name" type="string" required>
+</ParamField>
+<ParamField body="nofollow" type="boolean">
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `null`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -985,26 +1600,50 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-rename)
 
+Rename a path within its mount.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="src" type="string" required>
+</ParamField>
+<ParamField body="dst" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `null`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1012,26 +1651,48 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-rmdir)
 
+Remove an empty directory.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `null`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1039,26 +1700,60 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-setattr)
 
+Change a path's mode, owner or times.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+</ParamField>
+<ParamField body="mode" type="integer">
+</ParamField>
+<ParamField body="uid" type="integer | string">
+</ParamField>
+<ParamField body="gid" type="integer | string">
+</ParamField>
+<ParamField body="atime" type="string">
+</ParamField>
+<ParamField body="mtime" type="string">
+</ParamField>
+<ParamField body="nofollow" type="boolean">
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `object`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1066,26 +1761,58 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-setxattr)
 
+Set an extended attribute.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+</ParamField>
+<ParamField body="name" type="string" required>
+</ParamField>
+<ParamField body="value" type="string" required>
+</ParamField>
+<ParamField body="create" type="boolean">
+</ParamField>
+<ParamField body="replace" type="boolean">
+</ParamField>
+<ParamField body="nofollow" type="boolean">
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `null`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1093,26 +1820,50 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-stat)
 
+A path's metadata.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+</ParamField>
+<ParamField body="nofollow" type="boolean">
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `object`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1120,26 +1871,50 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-symlink)
 
+Make a symbolic link at a path.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+</ParamField>
+<ParamField body="target" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `null`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1147,26 +1922,50 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-truncate)
 
+Cut or extend a file to a length.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+</ParamField>
+<ParamField body="length" type="integer" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `null`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1174,26 +1973,48 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-unlink)
 
+Remove a file.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `null`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1201,26 +2022,50 @@ sees them.
 
 [Open page](/api/operations/vfs/vfs-write)
 
+Write a file's bytes, replacing what it held.
+
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="explain" type="boolean">
+Return what the call would do without running it.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+</ParamField>
+<ParamField body="data" type="string" required>
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` What the call returns
+
+`application/json` `null`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1233,23 +2078,46 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 <ParamField path="name" type="string" required>
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+The path the function acts on.
+</ParamField>
+<ParamField body="kwargs" type="object">
+The function's keyword arguments, Python only.
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `any`
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1260,26 +2128,55 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+Absolute path of the file to edit.
+</ParamField>
+<ParamField body="old_string" type="string" required>
+The exact text to replace.
+</ParamField>
+<ParamField body="new_string" type="string" required>
+The text to put in its place.
+</ParamField>
+<ParamField body="replace_all" type="boolean">
+Replace every occurrence instead of exactly one (default false).
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `ToolResponse`
 
 <ResponseField name="text" type="string" required>
 </ResponseField>
 <ResponseField name="is_error" type="boolean" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1290,26 +2187,49 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="pattern" type="string" required>
+Pathname pattern such as **/*.py or src/*.ts; a relative one is matched under path.
+</ParamField>
+<ParamField body="path" type="string">
+Absolute path of the directory a relative pattern is matched under (default /).
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `ToolResponse`
 
 <ResponseField name="text" type="string" required>
 </ResponseField>
 <ResponseField name="is_error" type="boolean" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1320,26 +2240,70 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="pattern" type="string" required>
+Regular expression to search for.
+</ParamField>
+<ParamField body="path" type="string" required>
+Absolute path of the file or directory to search under.
+</ParamField>
+<ParamField body="ignore_case" type="boolean">
+Match case-insensitively (-i).
+</ParamField>
+<ParamField body="fixed_strings" type="boolean">
+Read pattern as a literal string, not a regex (-F).
+</ParamField>
+<ParamField body="include" type="string">
+Search only files whose name matches this glob, such as *.py (--include).
+</ParamField>
+<ParamField body="context" type="integer">
+Lines of context to print around each match (-C).
+</ParamField>
+<ParamField body="files_with_matches" type="boolean">
+Print only the names of files that match (-l).
+</ParamField>
+<ParamField body="count" type="boolean">
+Print only a count of matching lines per file (-c).
+</ParamField>
+<ParamField body="max_count" type="integer">
+Stop each file after this many matching lines (-m).
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `ToolResponse`
 
 <ResponseField name="text" type="string" required>
 </ResponseField>
 <ResponseField name="is_error" type="boolean" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1350,26 +2314,46 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+Absolute path of the directory to list.
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `ToolResponse`
 
 <ResponseField name="text" type="string" required>
 </ResponseField>
 <ResponseField name="is_error" type="boolean" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1380,26 +2364,52 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+Absolute path of the file to read.
+</ParamField>
+<ParamField body="offset" type="integer">
+First line to return, zero-based (default 0).
+</ParamField>
+<ParamField body="limit" type="integer">
+Maximum number of lines to return (default 2000).
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `ToolResponse`
 
 <ResponseField name="text" type="string" required>
 </ResponseField>
 <ResponseField name="is_error" type="boolean" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1410,26 +2420,46 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="command" type="string" required>
+The command line to run.
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `ToolResponse`
 
 <ResponseField name="text" type="string" required>
 </ResponseField>
 <ResponseField name="is_error" type="boolean" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1440,26 +2470,49 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="path" type="string" required>
+Absolute path of the file to write.
+</ParamField>
+<ParamField body="content" type="string" required>
+The text to write.
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `ToolResponse`
 
 <ResponseField name="text" type="string" required>
 </ResponseField>
 <ResponseField name="is_error" type="boolean" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1470,6 +2523,7 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 <ParamField path="session_id" type="string | null" required>
 </ParamField>
@@ -1481,12 +2535,22 @@ Call a declared VFS function using the ordinary session and policy gate.
 
 **Responses**
 
-`200` Successful Response
+`200` The document
+
+`text/markdown` `string`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1497,6 +2561,7 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 <ParamField path="session_id" type="string | null" required>
 </ParamField>
@@ -1513,12 +2578,22 @@ Call a declared VFS function using the ordinary session and policy gate.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `any`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1529,6 +2604,7 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 <ParamField path="session_id" type="string | null" required>
 </ParamField>
@@ -1540,12 +2616,22 @@ Call a declared VFS function using the ordinary session and policy gate.
 
 **Responses**
 
-`200` Successful Response
+`200` The document
+
+`text/markdown` `string`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1556,6 +2642,7 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 <ParamField path="session_id" type="string | null" required>
 </ParamField>
@@ -1572,12 +2659,22 @@ Call a declared VFS function using the ordinary session and policy gate.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `any`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1588,23 +2685,35 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="profile" type="string | null">
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` The document
+
+`text/markdown` `string`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1615,11 +2724,13 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="profile" type="string | null">
 </ParamField>
@@ -1631,12 +2742,22 @@ Call a declared VFS function using the ordinary session and policy gate.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `any`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1647,23 +2768,35 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="profile" type="string | null">
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` The document
+
+`text/markdown` `string`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1674,11 +2807,13 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
-<ParamField query="session_id" type="string | null">
+<ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="profile" type="string | null">
 </ParamField>
@@ -1690,12 +2825,22 @@ Call a declared VFS function using the ordinary session and policy gate.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `any`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1703,9 +2848,31 @@ Call a declared VFS function using the ordinary session and policy gate.
 
 [Open page](/api/operations/snapshots/load-a-snapshot)
 
+**Body** `application/json`
+
+<ParamField body="key" type="string">
+The tar's key in the snapshot store; leave it out when uploading.
+</ParamField>
+<ParamField body="id" type="string">
+The new workspace's id.
+</ParamField>
+<ParamField body="override" type="object">
+Configuration overrides for the restored workspace, including credentials redacted from the snapshot.
+</ParamField>
+
+**Body** `multipart/form-data`
+
+<ParamField body="request" type="LoadRequest">
+</ParamField>
+<ParamField body="snapshot" type="string" required>
+The tar archive, up to 1 GiB.
+</ParamField>
+
 **Responses**
 
-`201` Successful Response
+`201` Created
+
+`application/json` `WorkspaceDetail`
 
 <ResponseField name="id" type="string" required>
 </ResponseField>
@@ -1724,6 +2891,12 @@ Call a declared VFS function using the ordinary session and policy gate.
 <ResponseField name="internals" type="WorkspaceInternals | null">
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`409` The id or name is taken, the workspace is busy, or a file changed since it was read
+
+`429` Past a rate limit, or a new session past max_sessions
+
 </Operation>
 
 <Operation resource="Snapshots" method="POST" path="/v1/workspaces/{workspace_id}/clone" summary="Clone a workspace" hosts="daemon">
@@ -1733,6 +2906,7 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Body** `application/json`
@@ -1744,7 +2918,9 @@ Call a declared VFS function using the ordinary session and policy gate.
 
 **Responses**
 
-`201` Successful Response
+`201` Created
+
+`application/json` `WorkspaceDetail`
 
 <ResponseField name="id" type="string" required>
 </ResponseField>
@@ -1763,10 +2939,18 @@ Call a declared VFS function using the ordinary session and policy gate.
 <ResponseField name="internals" type="WorkspaceInternals | null">
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1777,16 +2961,29 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` The tar archive, with secrets redacted
+
+`application/x-tar` `string`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`409` The id or name is taken, the workspace is busy, or a file changed since it was read
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1797,6 +2994,7 @@ Call a declared VFS function using the ordinary session and policy gate.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Body** `application/json`
@@ -1806,7 +3004,9 @@ Call a declared VFS function using the ordinary session and policy gate.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `SnapshotWorkspaceResponse`
 
 <ResponseField name="id" type="string" required>
 </ResponseField>
@@ -1815,10 +3015,18 @@ Call a declared VFS function using the ordinary session and policy gate.
 <ResponseField name="size" type="integer" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1830,7 +3038,20 @@ The saved templates, by name.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `TemplateResponse[]`
+
+<ResponseField name="name" type="string" required>
+</ResponseField>
+<ResponseField name="description" type="string | null" required>
+</ResponseField>
+<ResponseField name="config" type="object" required>
+</ResponseField>
+
+`401` The token is missing or wrong
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1852,7 +3073,9 @@ checks one, and kept as written. A name already saved is a 409.
 
 **Responses**
 
-`201` Successful Response
+`201` Created
+
+`application/json` `TemplateResponse`
 
 <ResponseField name="name" type="string" required>
 </ResponseField>
@@ -1861,10 +3084,16 @@ checks one, and kept as written. A name already saved is a 409.
 <ResponseField name="config" type="object" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1879,7 +3108,9 @@ checks one, and kept as written. A name already saved is a 409.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `TemplateResponse`
 
 <ResponseField name="name" type="string" required>
 </ResponseField>
@@ -1888,10 +3119,18 @@ checks one, and kept as written. A name already saved is a 409.
 <ResponseField name="config" type="object" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1908,12 +3147,20 @@ Delete a template; `restore` brings it back.
 
 **Responses**
 
-`204` Successful Response
+`204` No content
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
 
 `422` Validation Error
 
+`application/json` `HTTPValidationError`
+
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1928,7 +3175,9 @@ Delete a template; `restore` brings it back.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `TemplateResponse`
 
 <ResponseField name="name" type="string" required>
 </ResponseField>
@@ -1937,10 +3186,18 @@ Delete a template; `restore` brings it back.
 <ResponseField name="config" type="object" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -1955,54 +3212,22 @@ so the entry point only picks which query to run.
 **Path**
 
 <ParamField path="workspace_id" type="string" required>
+The workspace's id.
 </ParamField>
 
 **Query**
 
 <ParamField query="session_id" type="string">
+The session the call acts as; the default session when absent.
 </ParamField>
 <ParamField query="all" type="boolean">
 </ParamField>
 
 **Responses**
 
-`200` Successful Response
+`200` OK
 
-`422` Validation Error
-
-<ResponseField name="detail" type="ValidationError[]">
-</ResponseField>
-
-</Operation>
-
-<Operation resource="Asks" method="POST" path="/v1/workspaces/{workspace_id}/asks/{ask_id}" summary="Answer an ask" hosts="daemon">
-
-[Open page](/api/operations/asks/answer-an-ask)
-
-Answer one waiting ask, allow or deny, and return the settled
-record. A known id with nothing waiting is 409 rather than 404, so
-an operator retrying a click reads "already answered", not "not
-found".
-
-**Path**
-
-<ParamField path="workspace_id" type="string" required>
-</ParamField>
-<ParamField path="ask_id" type="string" required>
-</ParamField>
-
-**Body** `application/json`
-
-<ParamField body="answer" type="string" required>
-</ParamField>
-<ParamField body="scope" type="string">
-</ParamField>
-<ParamField body="note" type="string">
-</ParamField>
-
-**Responses**
-
-`200` Successful Response
+`application/json` `AskResponse[]`
 
 <ResponseField name="id" type="string" required>
 </ResponseField>
@@ -2025,10 +3250,86 @@ found".
 <ResponseField name="note" type="string" required>
 </ResponseField>
 
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
 `422` Validation Error
+
+`application/json` `HTTPValidationError`
 
 <ResponseField name="detail" type="ValidationError[]">
 </ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+</Operation>
+
+<Operation resource="Asks" method="POST" path="/v1/workspaces/{workspace_id}/asks/{ask_id}" summary="Answer an ask" hosts="daemon">
+
+[Open page](/api/operations/asks/answer-an-ask)
+
+Answer one waiting ask, allow or deny, and return the settled
+record. A known id with nothing waiting is 409 rather than 404, so
+an operator retrying a click reads "already answered", not "not
+found".
+
+**Path**
+
+<ParamField path="workspace_id" type="string" required>
+The workspace's id.
+</ParamField>
+<ParamField path="ask_id" type="string" required>
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="answer" type="string" required>
+</ParamField>
+<ParamField body="scope" type="string">
+</ParamField>
+<ParamField body="note" type="string">
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `AskResponse`
+
+<ResponseField name="id" type="string" required>
+</ResponseField>
+<ResponseField name="session_id" type="string" required>
+</ResponseField>
+<ResponseField name="command" type="string" required>
+</ResponseField>
+<ResponseField name="argv" type="string[]" required>
+</ResponseField>
+<ResponseField name="cwd" type="string" required>
+</ResponseField>
+<ResponseField name="paths" type="string[]" required>
+</ResponseField>
+<ResponseField name="reason" type="string" required>
+</ResponseField>
+<ResponseField name="outcome" type="string | null" required>
+</ResponseField>
+<ResponseField name="scope" type="string" required>
+</ResponseField>
+<ResponseField name="note" type="string" required>
+</ResponseField>
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -2038,7 +3339,9 @@ found".
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `HealthResponse`
 
 <ResponseField name="status" type="string">
 </ResponseField>
@@ -2059,7 +3362,9 @@ work elsewhere. `/v1/health` only says the process is up.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `any`
 
 </Operation>
 
@@ -2076,12 +3381,18 @@ every account, so an account may not stop it.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `ShutdownResponse`
 
 <ResponseField name="status" type="string" required>
 </ResponseField>
 <ResponseField name="pid" type="integer" required>
 </ResponseField>
+
+`401` The token is missing or wrong
+
+`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
@@ -2097,7 +3408,9 @@ publishes no login answers 404, so the CLI knows it needs none.
 
 **Responses**
 
-`200` Successful Response
+`200` OK
+
+`application/json` `ProtectedResource`
 
 <ResponseField name="resource" type="string" required>
 </ResponseField>

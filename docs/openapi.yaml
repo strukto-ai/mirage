@@ -5,6 +5,8 @@ info:
 servers:
   - url: http://127.0.0.1:8765
     description: A local daemon on its default port
+security:
+  - bearerAuth: []
 paths:
   /v1/workspaces:
     post:
@@ -13,11 +15,11 @@ paths:
       parameters:
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       requestBody:
         required: true
         content:
@@ -25,18 +27,37 @@ paths:
             schema:
               $ref: '#/components/schemas/CreateWorkspaceRequest'
       responses:
+        '200':
+          description: An identical retry answers the existing workspace; with explain=true,
+            what the server's policies say about the config
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/WorkspaceDetail'
+                  - type: object
         '201':
-          description: Successful Response
+          description: Created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceDetail'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '409':
+          $ref: '#/components/responses/409'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+        '503':
+          $ref: '#/components/responses/503'
       description: 'Create a workspace, or answer the live one created from this config.
 
 
@@ -63,7 +84,7 @@ paths:
       operationId: list_workspaces_v1_workspaces_get
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
@@ -71,6 +92,10 @@ paths:
                 items:
                   $ref: '#/components/schemas/WorkspaceBrief'
                 title: Response List Workspaces V1 Workspaces Get
+        '401':
+          $ref: '#/components/responses/401'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Workspaces
       x-hosts:
@@ -81,32 +106,32 @@ paths:
       summary: Get a workspace
       operationId: get_workspace_v1_workspaces__workspace_id__get
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: verbose
           in: query
           required: false
           schema:
             type: boolean
             default: false
-            title: Verbose
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceDetail'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Workspaces
       x-hosts:
@@ -116,25 +141,26 @@ paths:
       summary: Delete a workspace
       operationId: delete_workspace_v1_workspaces__workspace_id__delete
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteWorkspaceResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Workspaces
       x-hosts:
@@ -145,20 +171,8 @@ paths:
       summary: Read a workspace's history
       operationId: workspace_history_v1_workspaces__workspace_id__history_get
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: since
           in: query
           required: false
@@ -167,7 +181,6 @@ paths:
               - type: integer
                 minimum: 0
               - type: 'null'
-            title: Since
         - name: last
           in: query
           required: false
@@ -176,17 +189,15 @@ paths:
               - type: integer
                 minimum: 0
               - type: 'null'
-            title: Last
         - name: vfs
           in: query
           required: false
           schema:
             type: boolean
             default: false
-            title: Vfs
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
@@ -195,12 +206,18 @@ paths:
                   type: object
                   additionalProperties: true
                 title: Response Workspace History V1 Workspaces  Workspace Id  History Get
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: 'The workspace''s recorded history, oldest first: a `command`
 
         entry for every line its sessions ran, and with `vfs` a `vfs`
@@ -217,25 +234,26 @@ paths:
       summary: Close a workspace
       operationId: close_workspace_v1_workspaces__workspace_id__close_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteWorkspaceResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: Close the workspace and keep its state for the owner to reopen.
       tags:
         - Workspaces
@@ -246,25 +264,26 @@ paths:
       summary: Cancel a workspace's lines
       operationId: cancel_workspace_lines_v1_workspaces__workspace_id__cancel_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CancelLinesResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: Cancel every session's running and queued lines; all stay open.
       tags:
         - Workspaces
@@ -276,25 +295,26 @@ paths:
       summary: Kill a workspace's jobs
       operationId: kill_workspace_jobs_v1_workspaces__workspace_id__kill_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/KillJobsResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: Kill every session's background jobs and runners.
       tags:
         - Workspaces
@@ -305,18 +325,12 @@ paths:
       summary: Set a profile
       operationId: set_profile_v1_workspaces__workspace_id__profiles__name__put
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: name
           in: path
           required: true
           schema:
             type: string
-            title: Name
       requestBody:
         required: true
         content:
@@ -325,7 +339,7 @@ paths:
               $ref: '#/components/schemas/SessionProfile'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
@@ -333,12 +347,18 @@ paths:
                 additionalProperties:
                   type: string
                 title: Response Set Profile V1 Workspaces  Workspace Id  Profiles  Name  Put
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: 'Define a named profile on the live workspace, or replace it.
 
 
@@ -354,18 +374,12 @@ paths:
       summary: Install an MCP CLI
       operationId: set_cli_v1_workspaces__workspace_id__clis__name__put
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: name
           in: path
           required: true
           schema:
             type: string
-            title: Name
       requestBody:
         required: true
         content:
@@ -374,7 +388,7 @@ paths:
               $ref: '#/components/schemas/CLIBlock'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
@@ -382,12 +396,18 @@ paths:
                 additionalProperties:
                   type: string
                 title: Response Set Cli V1 Workspaces  Workspace Id  Clis  Name  Put
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: 'Install an MCP server as a CLI on the live workspace.
 
 
@@ -404,21 +424,15 @@ paths:
       summary: Remove an MCP CLI
       operationId: delete_cli_v1_workspaces__workspace_id__clis__name__delete
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: name
           in: path
           required: true
           schema:
             type: string
-            title: Name
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
@@ -426,12 +440,18 @@ paths:
                 additionalProperties:
                   type: string
                 title: Response Delete Cli V1 Workspaces  Workspace Id  Clis  Name  Delete
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: Remove an MCP CLI from the live workspace.
       tags:
         - Workspaces
@@ -442,12 +462,7 @@ paths:
       summary: Clone a workspace
       operationId: clone_workspace_v1_workspaces__workspace_id__clone_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
       requestBody:
         required: true
         content:
@@ -456,17 +471,23 @@ paths:
               $ref: '#/components/schemas/CloneWorkspaceRequest'
       responses:
         '201':
-          description: Successful Response
+          description: Created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceDetail'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Snapshots
       x-hosts:
@@ -476,24 +497,29 @@ paths:
       summary: Download a snapshot
       operationId: download_snapshot_v1_workspaces__workspace_id__snapshot_get
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
       responses:
         '200':
-          description: Successful Response
+          description: The tar archive, with secrets redacted
           content:
-            application/json:
-              schema: {}
+            application/x-tar:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Snapshots
       x-hosts:
@@ -502,12 +528,7 @@ paths:
       summary: Snapshot a workspace
       operationId: snapshot_workspace_v1_workspaces__workspace_id__snapshot_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
       requestBody:
         required: true
         content:
@@ -516,17 +537,23 @@ paths:
               $ref: '#/components/schemas/SnapshotWorkspaceRequest'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SnapshotWorkspaceResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Snapshots
       x-hosts:
@@ -537,22 +564,46 @@ paths:
       operationId: load_workspace_v1_workspaces_load_post
       responses:
         '201':
-          description: Successful Response
+          description: Created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceDetail'
+        '401':
+          $ref: '#/components/responses/401'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Snapshots
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoadRequest'
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                request:
+                  $ref: '#/components/schemas/LoadRequest'
+                snapshot:
+                  type: string
+                  format: binary
+                  description: The tar archive, up to 1 GiB.
+              required:
+                - snapshot
   /v1/templates:
     get:
       summary: List templates
       operationId: list_templates_v1_templates_get
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
@@ -560,6 +611,10 @@ paths:
                   $ref: '#/components/schemas/TemplateResponse'
                 type: array
                 title: Response List Templates V1 Templates Get
+        '401':
+          $ref: '#/components/responses/401'
+        '429':
+          $ref: '#/components/responses/429'
       description: The saved templates, by name.
       tags:
         - Templates
@@ -577,17 +632,21 @@ paths:
         required: true
       responses:
         '201':
-          description: Successful Response
+          description: Created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/TemplateResponse'
+        '401':
+          $ref: '#/components/responses/401'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: 'Save a template: a whole workspace config, checked as a create
 
         checks one, and kept as written. A name already saved is a 409.'
@@ -606,20 +665,25 @@ paths:
           required: true
           schema:
             type: string
-            title: Ref
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/TemplateResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Templates
       x-hosts:
@@ -634,16 +698,21 @@ paths:
           required: true
           schema:
             type: string
-            title: Ref
       responses:
         '204':
-          description: Successful Response
+          description: No content
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: Delete a template; `restore` brings it back.
       tags:
         - Templates
@@ -660,20 +729,25 @@ paths:
           required: true
           schema:
             type: string
-            title: Ref
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/TemplateResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Templates
       x-hosts:
@@ -684,20 +758,8 @@ paths:
       summary: Read the workspace's VFS.md
       operationId: get_v1_workspaces__workspace_id__vfs_md_get
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: profile
           in: query
           required: false
@@ -705,19 +767,25 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-            title: Profile
       responses:
         '200':
-          description: Successful Response
+          description: The document
           content:
-            application/json:
-              schema: {}
+            text/markdown:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Documents
       x-hosts:
@@ -726,20 +794,8 @@ paths:
       summary: Write the workspace's VFS.md
       operationId: put_v1_workspaces__workspace_id__vfs_md_put
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: profile
           in: query
           required: false
@@ -747,7 +803,6 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-            title: Profile
       requestBody:
         required: true
         content:
@@ -756,16 +811,22 @@ paths:
               $ref: '#/components/schemas/DocumentPath'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema: {}
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Documents
       x-hosts:
@@ -775,12 +836,7 @@ paths:
       summary: Read a session's VFS.md
       operationId: get_v1_workspaces__workspace_id__sessions__session_id__vfs_md_get
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: session_id
           in: path
           required: true
@@ -788,7 +844,6 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-            title: Session Id
         - name: profile
           in: query
           required: false
@@ -796,19 +851,25 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-            title: Profile
       responses:
         '200':
-          description: Successful Response
+          description: The document
           content:
-            application/json:
-              schema: {}
+            text/markdown:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Documents
       x-hosts:
@@ -817,12 +878,7 @@ paths:
       summary: Write a session's VFS.md
       operationId: put_v1_workspaces__workspace_id__sessions__session_id__vfs_md_put
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: session_id
           in: path
           required: true
@@ -830,7 +886,6 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-            title: Session Id
         - name: profile
           in: query
           required: false
@@ -838,7 +893,6 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-            title: Profile
       requestBody:
         required: true
         content:
@@ -847,16 +901,22 @@ paths:
               $ref: '#/components/schemas/DocumentPath'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema: {}
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Documents
       x-hosts:
@@ -866,20 +926,8 @@ paths:
       summary: Read the workspace's SKILL.md
       operationId: get_v1_workspaces__workspace_id__skill_md_get
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: profile
           in: query
           required: false
@@ -887,19 +935,25 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-            title: Profile
       responses:
         '200':
-          description: Successful Response
+          description: The document
           content:
-            application/json:
-              schema: {}
+            text/markdown:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Documents
       x-hosts:
@@ -908,20 +962,8 @@ paths:
       summary: Write the workspace's SKILL.md
       operationId: put_v1_workspaces__workspace_id__skill_md_put
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: profile
           in: query
           required: false
@@ -929,7 +971,6 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-            title: Profile
       requestBody:
         required: true
         content:
@@ -938,16 +979,22 @@ paths:
               $ref: '#/components/schemas/DocumentPath'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema: {}
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Documents
       x-hosts:
@@ -957,12 +1004,7 @@ paths:
       summary: Read a session's SKILL.md
       operationId: get_v1_workspaces__workspace_id__sessions__session_id__skill_md_get
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: session_id
           in: path
           required: true
@@ -970,7 +1012,6 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-            title: Session Id
         - name: profile
           in: query
           required: false
@@ -978,19 +1019,25 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-            title: Profile
       responses:
         '200':
-          description: Successful Response
+          description: The document
           content:
-            application/json:
-              schema: {}
+            text/markdown:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Documents
       x-hosts:
@@ -999,12 +1046,7 @@ paths:
       summary: Write a session's SKILL.md
       operationId: put_v1_workspaces__workspace_id__sessions__session_id__skill_md_put
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: session_id
           in: path
           required: true
@@ -1012,7 +1054,6 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-            title: Session Id
         - name: profile
           in: query
           required: false
@@ -1020,7 +1061,6 @@ paths:
             anyOf:
               - type: string
               - type: 'null'
-            title: Profile
       requestBody:
         required: true
         content:
@@ -1029,16 +1069,22 @@ paths:
               $ref: '#/components/schemas/DocumentPath'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema: {}
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Documents
       x-hosts:
@@ -1048,12 +1094,7 @@ paths:
       summary: Create a session
       operationId: create_session_v1_workspaces__workspace_id__sessions_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
       requestBody:
         required: true
         content:
@@ -1062,17 +1103,23 @@ paths:
               $ref: '#/components/schemas/CreateSessionRequest'
       responses:
         '201':
-          description: Successful Response
+          description: Created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Sessions
       x-hosts:
@@ -1082,15 +1129,10 @@ paths:
       summary: List sessions
       operationId: list_sessions_v1_workspaces__workspace_id__sessions_get
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
@@ -1098,12 +1140,18 @@ paths:
                 items:
                   $ref: '#/components/schemas/SessionResponse'
                 title: Response List Sessions V1 Workspaces  Workspace Id  Sessions Get
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Sessions
       x-hosts:
@@ -1114,31 +1162,31 @@ paths:
       summary: Delete a session
       operationId: delete_session_v1_workspaces__workspace_id__sessions__session_id__delete
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: session_id
           in: path
           required: true
           schema:
             type: string
-            title: Session Id
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeleteSessionResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Sessions
       x-hosts:
@@ -1147,18 +1195,12 @@ paths:
       summary: Change a session's profile
       operationId: update_session_v1_workspaces__workspace_id__sessions__session_id__patch
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: session_id
           in: path
           required: true
           schema:
             type: string
-            title: Session Id
       requestBody:
         required: true
         content:
@@ -1167,17 +1209,23 @@ paths:
               $ref: '#/components/schemas/UpdateSessionRequest'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SessionResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: Replace the session's profile; its cwd, env and history stay.
       tags:
         - Sessions
@@ -1188,31 +1236,31 @@ paths:
       summary: Cancel a session's lines
       operationId: cancel_session_lines_v1_workspaces__workspace_id__sessions__session_id__cancel_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: session_id
           in: path
           required: true
           schema:
             type: string
-            title: Session Id
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/CancelLinesResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: 'Cancel the session''s running and queued lines, from every entry point.
 
 
@@ -1226,31 +1274,31 @@ paths:
       summary: Kill a session's jobs
       operationId: kill_session_jobs_v1_workspaces__workspace_id__sessions__session_id__kill_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: session_id
           in: path
           required: true
           schema:
             type: string
-            title: Session Id
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/KillJobsResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: Kill the session's background jobs and runners; it stays open.
       tags:
         - Sessions
@@ -1261,29 +1309,17 @@ paths:
       summary: List asks
       operationId: list_asks_v1_workspaces__workspace_id__asks_get
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            type: string
-            default: ''
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: all
           in: query
           required: false
           schema:
             type: boolean
             default: false
-            title: All
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
@@ -1291,12 +1327,18 @@ paths:
                 items:
                   $ref: '#/components/schemas/AskResponse'
                 title: Response List Asks V1 Workspaces  Workspace Id  Asks Get
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: 'The workspace''s asks: pending by default, every decision under
 
         `all=true`. The ledger already serves both views from one store,
@@ -1311,18 +1353,12 @@ paths:
       summary: Answer an ask
       operationId: answer_ask_v1_workspaces__workspace_id__asks__ask_id__post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: ask_id
           in: path
           required: true
           schema:
             type: string
-            title: Ask Id
       requestBody:
         required: true
         content:
@@ -1331,17 +1367,23 @@ paths:
               $ref: '#/components/schemas/AnswerAskRequest'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AskResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: 'Answer one waiting ask, allow or deny, and return the settled
 
         record. A known id with nothing waiting is 409 rather than 404, so
@@ -1358,1300 +1400,1730 @@ paths:
       summary: Run a shell line
       operationId: shell_v1_workspaces__workspace_id__shell_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
         - name: stream
           in: query
+          description: Stream stdout, stderr and the final status as NDJSON. Cannot be combined with explain.
           required: false
           schema:
             type: boolean
             default: false
-            title: Stream
       responses:
         '200':
-          description: Successful Response
+          description: The line's result, or with stream=true an NDJSON stream of output records
+            ending in a status record
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/ShellResult'
+            application/x-ndjson:
+              schema:
+                type: string
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Shell
       x-hosts:
         - daemon
         - console
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShellRequest'
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                request:
+                  $ref: '#/components/schemas/ShellRequest'
+                stdin:
+                  type: string
+                  format: binary
+                  description: Up to 64 MiB, read as it arrives.
+              required:
+                - request
   /v1/workspaces/{workspace_id}/tools/shell:
     post:
       summary: Shell tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_shell_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Tools
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                command:
+                  type: string
+                  description: The command line to run.
+              required:
+                - command
   /v1/workspaces/{workspace_id}/tools/read:
     post:
       summary: Read tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_read_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Tools
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                  description: Absolute path of the file to read.
+                offset:
+                  type: integer
+                  minimum: 0
+                  description: First line to return, zero-based (default 0).
+                limit:
+                  type: integer
+                  minimum: 1
+                  description: Maximum number of lines to return (default 2000).
+              required:
+                - path
   /v1/workspaces/{workspace_id}/tools/write:
     post:
       summary: Write tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_write_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Tools
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                  description: Absolute path of the file to write.
+                content:
+                  type: string
+                  description: The text to write.
+              required:
+                - path
+                - content
   /v1/workspaces/{workspace_id}/tools/edit:
     post:
       summary: Edit tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_edit_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Tools
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                  description: Absolute path of the file to edit.
+                old_string:
+                  type: string
+                  description: The exact text to replace.
+                new_string:
+                  type: string
+                  description: The text to put in its place.
+                replace_all:
+                  type: boolean
+                  description: Replace every occurrence instead of exactly one (default false).
+              required:
+                - path
+                - old_string
+                - new_string
   /v1/workspaces/{workspace_id}/tools/ls:
     post:
       summary: Ls tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_ls_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Tools
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                  description: Absolute path of the directory to list.
+              required:
+                - path
   /v1/workspaces/{workspace_id}/tools/grep:
     post:
       summary: Grep tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_grep_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Tools
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pattern:
+                  type: string
+                  description: Regular expression to search for.
+                path:
+                  type: string
+                  description: Absolute path of the file or directory to search under.
+                ignore_case:
+                  type: boolean
+                  description: Match case-insensitively (-i).
+                fixed_strings:
+                  type: boolean
+                  description: Read pattern as a literal string, not a regex (-F).
+                include:
+                  type: string
+                  description: Search only files whose name matches this glob, such as *.py
+                    (--include).
+                context:
+                  type: integer
+                  minimum: 0
+                  description: Lines of context to print around each match (-C).
+                files_with_matches:
+                  type: boolean
+                  description: Print only the names of files that match (-l).
+                count:
+                  type: boolean
+                  description: Print only a count of matching lines per file (-c).
+                max_count:
+                  type: integer
+                  minimum: 1
+                  description: Stop each file after this many matching lines (-m).
+              required:
+                - pattern
+                - path
   /v1/workspaces/{workspace_id}/tools/glob:
     post:
       summary: Glob tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_glob_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ToolResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - Tools
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pattern:
+                  type: string
+                  description: Pathname pattern such as **/*.py or src/*.ts; a relative one
+                    is matched under path.
+                path:
+                  type: string
+                  description: Absolute path of the directory a relative pattern is matched
+                    under (default /).
+              required:
+                - pattern
   /v1/workspaces/{workspace_id}/vfs/read:
     post:
       summary: VFS read
       operationId: endpoint_v1_workspaces__workspace_id__vfs_read_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: string
+                description: The bytes, base64.
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                offset:
+                  type: integer
+                size:
+                  type:
+                    - integer
+                    - 'null'
+                raw:
+                  type: boolean
+                stream:
+                  type: boolean
+                  description: Answer the bytes themselves as application/octet-stream.
+              required:
+                - path
+      description: Read a file's bytes, from an offset.
   /v1/workspaces/{workspace_id}/vfs/write:
     post:
       summary: VFS write
       operationId: endpoint_v1_workspaces__workspace_id__vfs_write_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: 'null'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                data:
+                  type: string
+                  contentEncoding: base64
+              required:
+                - path
+                - data
+      description: Write a file's bytes, replacing what it held.
   /v1/workspaces/{workspace_id}/vfs/append:
     post:
       summary: VFS append
       operationId: endpoint_v1_workspaces__workspace_id__vfs_append_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: 'null'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                data:
+                  type: string
+                  contentEncoding: base64
+              required:
+                - path
+                - data
+      description: Append bytes to a file.
   /v1/workspaces/{workspace_id}/vfs/pwrite:
     post:
       summary: VFS pwrite
       operationId: endpoint_v1_workspaces__workspace_id__vfs_pwrite_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: 'null'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                data:
+                  type: string
+                  contentEncoding: base64
+                offset:
+                  type: integer
+              required:
+                - path
+                - data
+                - offset
+      description: Write bytes into a file at an offset.
   /v1/workspaces/{workspace_id}/vfs/stat:
     post:
       summary: VFS stat
       operationId: endpoint_v1_workspaces__workspace_id__vfs_stat_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: object
+                description: A FileStat.
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                nofollow:
+                  type: boolean
+              required:
+                - path
+      description: A path's metadata.
   /v1/workspaces/{workspace_id}/vfs/readdir:
     post:
       summary: VFS readdir
       operationId: endpoint_v1_workspaces__workspace_id__vfs_readdir_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: array
+                items:
+                  type: string
+                description: Full paths.
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+              required:
+                - path
+      description: A directory's entries.
   /v1/workspaces/{workspace_id}/vfs/exists:
     post:
       summary: VFS exists
       operationId: endpoint_v1_workspaces__workspace_id__vfs_exists_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: boolean
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+              required:
+                - path
+      description: Whether a path exists.
   /v1/workspaces/{workspace_id}/vfs/is_dir:
     post:
       summary: VFS is_dir
       operationId: endpoint_v1_workspaces__workspace_id__vfs_is_dir_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: boolean
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+              required:
+                - path
+      description: Whether a path is a directory.
   /v1/workspaces/{workspace_id}/vfs/is_file:
     post:
       summary: VFS is_file
       operationId: endpoint_v1_workspaces__workspace_id__vfs_is_file_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: boolean
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+              required:
+                - path
+      description: Whether a path is a file.
   /v1/workspaces/{workspace_id}/vfs/list_files:
     post:
       summary: VFS list_files
       operationId: endpoint_v1_workspaces__workspace_id__vfs_list_files_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: array
+                items:
+                  type: string
+                description: File names only.
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+              required:
+                - path
+      description: The names of a directory's files.
   /v1/workspaces/{workspace_id}/vfs/mkdir:
     post:
       summary: VFS mkdir
       operationId: endpoint_v1_workspaces__workspace_id__vfs_mkdir_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: 'null'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+              required:
+                - path
+      description: Make a directory.
   /v1/workspaces/{workspace_id}/vfs/rmdir:
     post:
       summary: VFS rmdir
       operationId: endpoint_v1_workspaces__workspace_id__vfs_rmdir_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: 'null'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+              required:
+                - path
+      description: Remove an empty directory.
   /v1/workspaces/{workspace_id}/vfs/unlink:
     post:
       summary: VFS unlink
       operationId: endpoint_v1_workspaces__workspace_id__vfs_unlink_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: 'null'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+              required:
+                - path
+      description: Remove a file.
   /v1/workspaces/{workspace_id}/vfs/create:
     post:
       summary: VFS create
       operationId: endpoint_v1_workspaces__workspace_id__vfs_create_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: 'null'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+              required:
+                - path
+      description: Create an empty file.
   /v1/workspaces/{workspace_id}/vfs/rename:
     post:
       summary: VFS rename
       operationId: endpoint_v1_workspaces__workspace_id__vfs_rename_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: 'null'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                src:
+                  type: string
+                dst:
+                  type: string
+              required:
+                - src
+                - dst
+      description: Rename a path within its mount.
   /v1/workspaces/{workspace_id}/vfs/symlink:
     post:
       summary: VFS symlink
       operationId: endpoint_v1_workspaces__workspace_id__vfs_symlink_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: 'null'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                target:
+                  type: string
+              required:
+                - path
+                - target
+      description: Make a symbolic link at a path.
   /v1/workspaces/{workspace_id}/vfs/readlink:
     post:
       summary: VFS readlink
       operationId: endpoint_v1_workspaces__workspace_id__vfs_readlink_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: string
+                description: The link's target.
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+              required:
+                - path
+      description: Where a symbolic link points.
   /v1/workspaces/{workspace_id}/vfs/setattr:
     post:
       summary: VFS setattr
       operationId: endpoint_v1_workspaces__workspace_id__vfs_setattr_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: object
+                description: The fields the backend could not keep, which Mirage stores instead.
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                mode:
+                  type: integer
+                uid:
+                  type: &id001
+                    - integer
+                    - string
+                gid:
+                  type: *id001
+                atime:
+                  type: string
+                mtime:
+                  type: string
+                nofollow:
+                  type: boolean
+              required:
+                - path
+      description: Change a path's mode, owner or times.
   /v1/workspaces/{workspace_id}/vfs/getxattr:
     post:
       summary: VFS getxattr
       operationId: endpoint_v1_workspaces__workspace_id__vfs_getxattr_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: string
+                description: The bytes, base64.
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                name:
+                  type: string
+                nofollow:
+                  type: boolean
+              required:
+                - path
+                - name
+      description: One extended attribute's value.
   /v1/workspaces/{workspace_id}/vfs/listxattr:
     post:
       summary: VFS listxattr
       operationId: endpoint_v1_workspaces__workspace_id__vfs_listxattr_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: array
+                items:
+                  type: string
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                nofollow:
+                  type: boolean
+              required:
+                - path
+      description: A path's extended attribute names.
   /v1/workspaces/{workspace_id}/vfs/setxattr:
     post:
       summary: VFS setxattr
       operationId: endpoint_v1_workspaces__workspace_id__vfs_setxattr_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: 'null'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                name:
+                  type: string
+                value:
+                  type: string
+                  contentEncoding: base64
+                create:
+                  type: boolean
+                replace:
+                  type: boolean
+                nofollow:
+                  type: boolean
+              required:
+                - path
+                - name
+                - value
+      description: Set an extended attribute.
   /v1/workspaces/{workspace_id}/vfs/removexattr:
     post:
       summary: VFS removexattr
       operationId: endpoint_v1_workspaces__workspace_id__vfs_removexattr_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: 'null'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                name:
+                  type: string
+                nofollow:
+                  type: boolean
+              required:
+                - path
+                - name
+      description: Remove an extended attribute.
   /v1/workspaces/{workspace_id}/vfs/truncate:
     post:
       summary: VFS truncate
       operationId: endpoint_v1_workspaces__workspace_id__vfs_truncate_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
         - name: explain
           in: query
+          description: Return what the call would do without running it.
           required: false
           schema:
             type: boolean
             default: false
-            title: Explain
       responses:
         '200':
-          description: Successful Response
+          description: What the call returns
           content:
             application/json:
-              schema: {}
+              schema:
+                type: 'null'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                length:
+                  type: integer
+              required:
+                - path
+                - length
+      description: Cut or extend a file to a length.
   /v1/workspaces/{workspace_id}/glob:
     post:
       summary: Match paths
       operationId: glob_v1_workspaces__workspace_id__glob_post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/workspaceId'
+        - $ref: '#/components/parameters/sessionId'
       responses:
         '200':
-          description: Successful Response
+          description: Every matching path visible to the session
           content:
             application/json:
-              schema: {}
+              schema:
+                type: array
+                items:
+                  type: string
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: '`session.glob`: every path a pattern matches, as the session
 
         sees them.'
@@ -2660,55 +3132,77 @@ paths:
       x-hosts:
         - daemon
         - console
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                pattern:
+                  type: string
+                  description: A pathname pattern, such as /src/**/*.py.
+              required:
+                - pattern
   /v1/workspaces/{workspace_id}/vfs/{name}:
     post:
       summary: Call any VFS function
       operationId: custom_function_v1_workspaces__workspace_id__vfs__name__post
       parameters:
-        - name: workspace_id
-          in: path
-          required: true
-          schema:
-            type: string
-            title: Workspace Id
+        - $ref: '#/components/parameters/workspaceId'
         - name: name
           in: path
           required: true
           schema:
             type: string
-            title: Name
-        - name: session_id
-          in: query
-          required: false
-          schema:
-            anyOf:
-              - type: string
-              - type: 'null'
-            title: Session Id
+        - $ref: '#/components/parameters/sessionId'
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema: {}
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
       description: Call a declared VFS function using the ordinary session and policy gate.
       tags:
         - VFS
       x-hosts:
         - daemon
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                  description: The path the function acts on.
+                kwargs:
+                  type: object
+                  description: The function's keyword arguments, Python only.
+              required:
+                - path
   /v1/health:
     get:
       summary: Check health
       operationId: health_v1_health_get
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
@@ -2717,13 +3211,14 @@ paths:
         - Server
       x-hosts:
         - daemon
+      security: []
   /v1/ready:
     get:
       summary: Check readiness
       operationId: ready_v1_ready_get
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema: {}
@@ -2736,17 +3231,22 @@ paths:
         - Server
       x-hosts:
         - daemon
+      security: []
   /v1/shutdown:
     post:
       summary: Shut down the server
       operationId: shutdown_v1_shutdown_post
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ShutdownResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '429':
+          $ref: '#/components/responses/429'
       description: 'Trip the exit event, which the app''s `on_idle_exit` acts on.
 
 
@@ -2767,7 +3267,7 @@ paths:
       operationId: protected_resource__well_known_oauth_protected_resource_get
       responses:
         '200':
-          description: Successful Response
+          description: OK
           content:
             application/json:
               schema:
@@ -2784,6 +3284,7 @@ paths:
         - Auth
       x-hosts:
         - daemon
+      security: []
 components:
   schemas:
     AnswerAskRequest:
@@ -4646,3 +5147,139 @@ components:
         bytes. STAGED names a staging layer mirage does not have; a mount declaring it is
 
         refused at mount time, as ``read: pinned`` is.'
+    Error:
+      type: object
+      properties:
+        detail:
+          description: What went wrong, as text or a structured record.
+        errno:
+          type: string
+          description: The errno of a failed file call, such as ENOENT.
+        refusal:
+          type: object
+          description: The policy refusal, when a policy refused the call.
+      required:
+        - detail
+    ShellResult:
+      type: object
+      properties:
+        kind:
+          type: string
+        exit_code:
+          type: integer
+        stdout:
+          type: string
+        stderr:
+          type: string
+        refusal:
+          anyOf:
+            - type: object
+            - type: 'null'
+      required:
+        - kind
+        - exit_code
+        - stdout
+        - stderr
+    ShellRequest:
+      type: object
+      properties:
+        command:
+          type: string
+          description: The line.
+        cwd:
+          type: string
+          description: A working directory for this line only.
+        runtime:
+          type: string
+          description: Run the line on this runtime, by name, instead of the one routing picks.
+        record:
+          type: boolean
+          default: true
+          description: Add the line to the session's history.
+      required:
+        - command
+    LoadRequest:
+      type: object
+      properties:
+        key:
+          type: string
+          description: The tar's key in the snapshot store; leave it out when uploading.
+        id:
+          type: string
+          description: The new workspace's id.
+        override:
+          type: object
+          description: Configuration overrides for the restored workspace, including credentials
+            redacted from the snapshot.
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: The server's token (MIRAGE_AUTH_TOKEN) or a JWT. A daemon in the default
+        local mode with no token accepts requests without one.
+  responses:
+    '400':
+      description: 'Bad request: malformed, a host not allowed, or a browser page from another
+        origin'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    '401':
+      description: The token is missing or wrong
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    '403':
+      description: A policy or mount mode refused the call
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    '404':
+      description: The workspace, session, job or file does not exist
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    '409':
+      description: The id or name is taken, the workspace is busy, or a file changed since
+        it was read
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    '429':
+      description: Past a rate limit, or a new session past max_sessions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+            minimum: 0
+    '503':
+      description: The server is at max_workspaces, or shutting down
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  parameters:
+    workspaceId:
+      name: workspace_id
+      in: path
+      required: true
+      description: The workspace's id.
+      schema:
+        type: string
+    sessionId:
+      name: session_id
+      in: query
+      required: false
+      description: The session the call acts as; the default session when absent.
+      schema:
+        type: string

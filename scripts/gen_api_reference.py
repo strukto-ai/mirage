@@ -54,6 +54,7 @@ Routes are under `/v1` and take and return JSON. Send
 is the contract both servers are checked against.
 
 Rows marked **daemon and console** are also served by the hosted console.
+An error answers `{detail, errno?, refusal?}`; `429` adds `Retry-After`.
 """
 
 
@@ -96,17 +97,19 @@ def attr(text: str) -> str:
     return text.replace("\\", "\\\\").replace('"', "&quot;")
 
 
-def resolve(doc: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
-    """Follow a ``$ref`` to its component schema.
+def resolve(doc: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
+    """Follow a ``$ref`` to its component: a schema, parameter or
+    response.
 
     Args:
         doc (dict[str, Any]): the OpenAPI document.
-        schema (dict[str, Any]): a schema that may be a reference.
+        node (dict[str, Any]): an object that may be a reference.
     """
-    ref = schema.get("$ref")
+    ref = node.get("$ref")
     if ref:
-        return dict(doc["components"]["schemas"][ref.rsplit("/", 1)[-1]])
-    return schema
+        _, _, kind, name = ref.split("/")
+        return dict(doc["components"][kind][name])
+    return node
 
 
 def type_of(schema: dict[str, Any]) -> str:
@@ -186,7 +189,7 @@ def operation(
     lines += [f"[Open page]({page})", ""]
     if op.get("description"):
         lines += [escape(op["description"].strip()), ""]
-    params = op.get("parameters", [])
+    params = [resolve(doc, p) for p in op.get("parameters", [])]
     for place, title in (
         ("path", "Path"),
         ("query", "Query"),
@@ -213,16 +216,35 @@ def operation(
         lines += fields(doc, media.get("schema", {}), "ParamField", "body")
         lines.append("")
     lines += ["**Responses**", ""]
-    for code, response in op.get("responses", {}).items():
+    for code, raw in op.get("responses", {}).items():
+        response = resolve(doc, raw)
         text = escape(response.get("description", "").strip())
         lines += [f"`{code}` {text}", ""]
-        for media in response.get("content", {}).values():
+        if "$ref" in raw:
+            continue
+        for kind, media in response.get("content", {}).items():
             schema = media.get("schema", {})
-            if resolve(doc, schema).get("properties"):
-                lines += fields(doc, schema, "ResponseField", "")
+            lines += [f"`{kind}` `{attr(type_of(schema))}`", ""]
+            items = resolve(doc, schema).get("items", {})
+            shape = items if resolve(doc, items).get("properties") else schema
+            if resolve(doc, shape).get("properties"):
+                lines += fields(doc, shape, "ResponseField", "")
                 lines.append("")
     lines += ["</Operation>", ""]
     return lines
+
+
+def order(item: tuple[str, str, dict[str, Any]]) -> tuple[int, str, int]:
+    """Where an operation sits on the page: by resource, then path, then
+    method.
+
+    Args:
+        item (tuple[str, str, dict[str, Any]]): ``(path, method, op)``.
+    """
+    path, method, op = item
+    tag = op["tags"][0]
+    rank = TAG_ORDER.index(tag) if tag in TAG_ORDER else len(TAG_ORDER)
+    return rank, path, METHOD_ORDER.index(method)
 
 
 def render(doc: dict[str, Any]) -> str:
@@ -235,14 +257,8 @@ def render(doc: dict[str, Any]) -> str:
         (path, method, op)
         for path, methods in doc["paths"].items()
         for method, op in methods.items()
+        if method in METHOD_ORDER
     ]
-
-    def order(item: tuple[str, str, dict[str, Any]]) -> tuple[int, str, int]:
-        path, method, op = item
-        tag = op["tags"][0]
-        rank = TAG_ORDER.index(tag) if tag in TAG_ORDER else len(TAG_ORDER)
-        return rank, path, METHOD_ORDER.index(method)
-
     lines = [HEADER, "<ApiExplorer>", ""]
     for path, method, op in sorted(ops, key=order):
         lines += operation(doc, path, method, op)
