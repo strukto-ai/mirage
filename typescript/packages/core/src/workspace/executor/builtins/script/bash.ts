@@ -24,10 +24,13 @@ import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
 import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
 import { SET_OPTION_NAMES } from '../../../../shell/constants.ts'
+import { ExitSignal } from '../../../../shell/errors.ts'
 import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
 import { EvaluationContext } from '../../../evaluation.ts'
+import { setPositionalParams } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
+import { ended } from '../../control.ts'
 import { clearTraps, finishShell } from '../../traps.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 import { BASH_LONG_OPTIONS, BASH_START_FLAGS, BASH_UNSUPPORTED_LONG_OPTIONS } from './constants.ts'
@@ -196,10 +199,17 @@ export async function handleBash(
   cs.admit(name)
   context = new EvaluationContext(session.newShell(), context.frame.fork(), context)
   session = context.session
+  // The arguments count against max_env, a refusal ending this shell alone.
+  try {
+    setPositionalParams(session, null, positional)
+  } catch (err) {
+    if (!(err instanceof ExitSignal)) throw err
+    const io = ended(err)
+    return [null, io, new ExecutionNode({ command: name, exitCode: io.exitCode })]
+  }
   session.shellNesting = cs.nesting + 1
   clearTraps(session)
   session.jobOutput = new JobOutput(session.jobOutput ?? session.tty.jobs)
-  session.positionalArgs = positional
   session.scriptName = scriptName
   for (const [option, enable] of parsed.settings) session.shellOptions[option] = enable
   // A nested shell is its own process, with its own jobs: its `jobs` and

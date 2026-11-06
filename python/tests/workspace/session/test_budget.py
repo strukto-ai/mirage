@@ -93,6 +93,132 @@ async def test_arguments_a_call_or_source_passes_count():
 
 
 @pytest.mark.asyncio
+async def test_a_nested_shell_s_arguments_count_and_it_dies_alone():
+    refused = await run("bash -c 'set -- $(seq 1 100)'; echo rc=$?")
+    assert refused == (
+        "rc=2\n",
+        "bash: xmalloc: cannot allocate 292 bytes (past max_env of 200"
+        " bytes, a mirage workspace setting)\n",
+        0,
+    )
+    assert await run("bash -c : _ $(seq 1 100); echo rc=$?") == refused
+    out, _, code = await run(
+        "set -- p q; bash -c : _ $(seq 1 100); echo rc=$? $# $1"
+    )
+    assert (out, code) == ("rc=2 2 p\n", 0)
+    out, err, code = await run(
+        "echo '[ $# -ge 100 ] && { echo reached; exit; };"
+        ' bash /x.sh "$@" "$@"\' > /x.sh; bash /x.sh aaaaaaaa; echo rc=$?'
+    )
+    assert (out, code) == ("rc=2\n", 0)
+    assert "past max_env of 200 bytes" in err
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "size"),
+    [
+        (
+            "f() { [ ${#X} -ge 1000 ] && { echo reached; return; };"
+            ' X="$X$X" f; }; X=aaaaaaaa f; echo after',
+            65,
+        ),
+        ("X=$(seq 1 100) eval :; echo after", 292),
+    ],
+)
+async def test_a_prefix_assignment_counts(line: str, size: int):
+    assert await run(line) == (
+        "",
+        f"bash: xmalloc: cannot allocate {size} bytes (past max_env of 200"
+        " bytes, a mirage workspace setting)\n",
+        2,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "size"),
+    [
+        (
+            "X=$(printf %0100d 0); X= eval 'Y=$(printf %0100d 0)'; echo after",
+            101,
+        ),
+        (
+            "X=$(printf %0100d 0); f() { Y=$(printf %0100d 0); }; X= f; echo after",
+            101,
+        ),
+        ("X=$(printf %0100d 0); X=$(printf %099d 0) eval :; echo after", 100),
+    ],
+)
+async def test_the_value_a_prefix_sets_aside_counts(line: str, size: int):
+    assert await run(line) == (
+        "",
+        f"bash: xmalloc: cannot allocate {size} bytes (past max_env of 200"
+        " bytes, a mirage workspace setting)\n",
+        2,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_global_declaration_past_a_prefix_counts_the_record_once():
+    out, _, code = await run(
+        "X=$(printf %0100d 0); f() { declare -g X=$(printf %0150d 0); };"
+        " X= f; echo ${#X}",
+        300,
+    )
+    assert (out, code) == ("150\n", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_global_declaration_counts_the_prefix_value_it_holds_aside():
+    out, err, code = await run(
+        "f() { declare -g X=1 Y=$(printf %0100d 0); };"
+        " X=$(printf %0100d 0) f; echo after"
+    )
+    assert (out, code) == ("", 2)
+    assert "past max_env of 200 bytes" in err
+
+
+@pytest.mark.asyncio
+async def test_arithmetic_a_global_declaration_runs_counts_the_global():
+    out, err, code = await run(
+        "X=$(printf %0100d 0); Y=11;"
+        " f() { declare -gi Y='Z=1234567890123456789,0' X; }; X= f; echo after"
+    )
+    assert (out, code) == ("", 2)
+    assert "past max_env of 200 bytes" in err
+
+
+@pytest.mark.asyncio
+async def test_a_prefix_s_set_aside_value_stops_counting_once_restored():
+    out, _, code = await run(
+        "X=$(printf %0100d 0); X= eval :; Y=$(printf %050d 0); echo ok"
+    )
+    assert (out, code) == ("ok\n", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_nested_shell_and_a_prefix_under_max_env_run():
+    out, _, code = await run(
+        "set -- p q; bash -c 'echo $# $1' _ a b c; echo $# $1;"
+        " f() { bash -c 'echo $#' _ a b; echo $#; }; f x y z;"
+        " X=ab bash -c 'echo $X'; X=cd eval 'echo $X'; echo ${X-unset}"
+    )
+    assert (out, code) == ("3 a\n2 p\n2\n3\nab\ncd\nunset\n", 0)
+
+
+@pytest.mark.asyncio
+async def test_a_refused_prefix_leaves_no_value_behind():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE, max_env=200)
+    try:
+        await ws.shell("A=1 B=$(seq 1 100) eval :")
+        io = await ws.shell("echo ${A-unset} ${B-unset}")
+        assert await io.stdout_str() == "unset unset\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_function_s_own_parameters_count():
     out, _, code = await run(
         "(f() { set -- a; while :; do set -- $1$1; done; }; f); echo rc=$?"

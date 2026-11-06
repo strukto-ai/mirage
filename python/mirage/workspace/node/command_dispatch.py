@@ -147,6 +147,7 @@ from mirage.workspace.node.admission import (
 from mirage.workspace.node.occurrence import claimant_for, evaluated_from
 from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.budget import check_env, entry_bytes
 from mirage.workspace.session.state import (
     ensure_var_visible,
     gate_rendering,
@@ -430,6 +431,8 @@ async def execute_command(
                 session.vars.pop(k, None)
             else:
                 session.vars[k] = prev
+        saves = session._prefix_saves
+        saves[:] = [s for s in saves if s is not saved]
 
     if prefix_assignments and not name:
         olds = {k: session.vars.get(k) for k, _ in prefix_assignments}
@@ -471,7 +474,15 @@ async def execute_command(
         # expands them with the values from before the assignment:
         # `x=new echo $x` prints the old x and `IFS=, cmd $v` splits on
         # the old IFS.
+        session._prefix_saves.append(saved_env_overrides)
         for k, v in prefix_assignments:
+            # A first write's old record stays held; a repeat drops the earlier value.
+            old = session.vars.get(k) if k in saved_env_overrides else None
+            check_env(
+                session,
+                0 if old is None else entry_bytes(k, old.value),
+                entry_bytes(k, v),
+            )
             saved_env_overrides.setdefault(k, session.vars.get(k))
             # Exported for the duration, which is the whole point of the
             # form: `TOKEN=x printenv TOKEN` prints `x` because bash puts

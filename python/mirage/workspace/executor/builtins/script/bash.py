@@ -32,6 +32,7 @@ from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.constants import SET_OPTION_NAMES
+from mirage.shell.errors import ExitSignal
 from mirage.shell.job_table import JobTable
 from mirage.shell.options import parse_option_word
 from mirage.workspace.evaluation import EvaluationContext
@@ -46,7 +47,9 @@ from mirage.workspace.executor.builtins.script.script import (
 )
 from mirage.workspace.executor.builtins.script.types import BashArgs
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.executor.control import ended
 from mirage.workspace.executor.traps import clear_traps, finish_shell
+from mirage.workspace.session.state import set_positional_params
 from mirage.workspace.types import ExecutionNode
 
 
@@ -225,11 +228,16 @@ async def handle_bash(
         context.session.new_shell(), context.frame.fork(), context
     )
     session = context.session
+    # The arguments count against max_env, a refusal ending this shell alone.
+    try:
+        set_positional_params(session, None, positional)
+    except ExitSignal as sig:
+        io = ended(sig)
+        return None, io, ExecutionNode(command=name, exit_code=io.exit_code)
     session.shell_nesting = cs.nesting + 1
     child_token = set_current_evaluation(context)
     clear_traps(session)
     session.job_output = JobOutput(session.job_output or session.tty.jobs)
-    session.positional_args = positional
     session.script_name = script_name
     for option, enable in parsed.settings:
         session.shell_options[option] = enable

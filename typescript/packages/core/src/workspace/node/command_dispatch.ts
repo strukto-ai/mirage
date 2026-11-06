@@ -108,6 +108,7 @@ import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.
 import { mirageProgramAt, routedConsumer, wrapperRefusal } from '../lookup/lookup.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { checkEnv, entryBytes } from '../session/budget.ts'
 import { type SessionState, sessionEntry, setSessionEntry } from '../session/session.ts'
 import { ensureVarVisible, gateRendering, seedVar, sessionView, setAttr } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
@@ -351,6 +352,7 @@ export async function executeCommand(
         setSessionEntry(session.vars, k, prev)
       }
     }
+    session.prefixSaves = session.prefixSaves.filter((s) => s !== saved)
   }
 
   if (prefixAssignments.length > 0 && name === '') {
@@ -382,7 +384,11 @@ export async function executeCommand(
   // with the values from before the assignment: `x=new echo $x` prints the
   // old x and `IFS=, cmd $v` splits on the old IFS.
   const seedPrefix = async (command: string): Promise<void> => {
+    session.prefixSaves.push(savedEnvOverrides)
     for (const [k, v] of prefixAssignments) {
+      // A first write's old record stays held; a repeat drops the earlier value.
+      const old = savedEnvOverrides.has(k) ? sessionEntry(session.vars, k) : undefined
+      checkEnv(session, old === undefined ? 0 : entryBytes(k, old.value), entryBytes(k, v))
       if (!savedEnvOverrides.has(k)) {
         savedEnvOverrides.set(k, sessionEntry(session.vars, k) ?? null)
       }
