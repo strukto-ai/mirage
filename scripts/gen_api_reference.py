@@ -134,6 +134,48 @@ def type_of(schema: dict[str, Any]) -> str:
     return str(kind or "any")
 
 
+def flatten(doc: dict[str, Any], schema: dict[str, Any]) -> dict[str, Any]:
+    """An object schema with its ``allOf`` parts merged into one set of
+    properties and required names.
+
+    Args:
+        doc (dict[str, Any]): the OpenAPI document.
+        schema (dict[str, Any]): the schema, or a reference to it.
+    """
+    obj = resolve(doc, schema)
+    if "allOf" not in obj:
+        return obj
+    props: dict[str, Any] = {}
+    required: list[str] = []
+    for part in obj["allOf"]:
+        merged = flatten(doc, part)
+        props.update(merged.get("properties", {}))
+        required += merged.get("required", [])
+    return {"properties": props, "required": required}
+
+
+def shapes(
+    doc: dict[str, Any], schema: dict[str, Any]
+) -> list[tuple[str, dict[str, Any]]]:
+    """Each object a response body can be, named: every ``anyOf`` or
+    ``oneOf`` branch, an array's items, or the schema itself.
+
+    Args:
+        doc (dict[str, Any]): the OpenAPI document.
+        schema (dict[str, Any]): the response body's schema.
+    """
+    obj = resolve(doc, schema)
+    for key in ("anyOf", "oneOf"):
+        if key in obj:
+            return [s for branch in obj[key] for s in shapes(doc, branch)]
+    if obj.get("type") == "array":
+        return shapes(doc, obj.get("items", {}))
+    flat = flatten(doc, schema)
+    if flat.get("properties"):
+        return [(type_of(schema), flat)]
+    return []
+
+
 def fields(
     doc: dict[str, Any], schema: dict[str, Any], tag: str, place: str
 ) -> list[str]:
@@ -146,7 +188,7 @@ def fields(
         tag (str): ``ParamField`` or ``ResponseField``.
         place (str): ``body`` for a request, empty for a response.
     """
-    obj = resolve(doc, schema)
+    obj = flatten(doc, schema)
     required = set(obj.get("required", []))
     lines: list[str] = []
     for name, prop in obj.get("properties", {}).items():
@@ -228,9 +270,10 @@ def operation(
         for kind, media in response.get("content", {}).items():
             schema = media.get("schema", {})
             lines += [f"`{kind}` `{attr(type_of(schema))}`", ""]
-            items = resolve(doc, schema).get("items", {})
-            shape = items if resolve(doc, items).get("properties") else schema
-            if resolve(doc, shape).get("properties"):
+            found = shapes(doc, schema)
+            for name, shape in found:
+                if len(found) > 1:
+                    lines += [f"*{name}*", ""]
                 lines += fields(doc, shape, "ResponseField", "")
                 lines.append("")
     lines += ["</Operation>", ""]

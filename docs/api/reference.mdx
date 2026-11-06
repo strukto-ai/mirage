@@ -81,6 +81,23 @@ Return what the call would do without running it.
 
 `application/json` `WorkspaceDetail | object`
 
+<ResponseField name="id" type="string" required>
+</ResponseField>
+<ResponseField name="mode" type="string" required>
+</ResponseField>
+<ResponseField name="created_at" type="number" required>
+</ResponseField>
+<ResponseField name="fuse_mountpoints" type="object">
+</ResponseField>
+<ResponseField name="system_time" type="string | null">
+</ResponseField>
+<ResponseField name="sessions" type="SessionSummary[]">
+</ResponseField>
+<ResponseField name="mounts" type="MountSummary[]">
+</ResponseField>
+<ResponseField name="internals" type="WorkspaceInternals | null">
+</ResponseField>
+
 `201` Created
 
 `application/json` `WorkspaceDetail`
@@ -853,6 +870,48 @@ Up to 64 MiB, read as it arrives.
 
 `application/json` `ShellResult | ShellExplanation`
 
+*ShellResult*
+
+<ResponseField name="kind" type="string" required>
+</ResponseField>
+<ResponseField name="exit_code" type="integer" required>
+</ResponseField>
+<ResponseField name="stdout" type="string" required>
+</ResponseField>
+<ResponseField name="stderr" type="string" required>
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+
+*ShellExplanation*
+
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="line" type="string">
+</ResponseField>
+<ResponseField name="exit_code" type="integer">
+What the line is refused with, 0 when it runs.
+</ResponseField>
+<ResponseField name="stderr" type="string">
+</ResponseField>
+<ResponseField name="node" type="object">
+The parsed line and each command's explanation.
+</ResponseField>
+
 `application/x-ndjson` `string`
 
 `401` The token is missing or wrong
@@ -907,6 +966,30 @@ The bytes, base64-encoded.
 
 `application/json` `null | VfsExplanation`
 
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
+
 `401` The token is missing or wrong
 
 `403` A policy or mount mode refused the call
@@ -956,6 +1039,30 @@ Return what the call would do without running it.
 
 `application/json` `null | VfsExplanation`
 
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
+
 `401` The token is missing or wrong
 
 `403` A policy or mount mode refused the call
@@ -1004,6 +1111,30 @@ Return what the call would do without running it.
 `200` What the call returns; with explain=true, its explanation
 
 `application/json` `boolean | VfsExplanation`
+
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
 
 `401` The token is missing or wrong
 
@@ -1058,6 +1189,30 @@ Return what the call would do without running it.
 
 `application/json` `string | VfsExplanation`
 
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
+
 `401` The token is missing or wrong
 
 `403` A policy or mount mode refused the call
@@ -1106,6 +1261,30 @@ Return what the call would do without running it.
 `200` What the call returns; with explain=true, its explanation
 
 `application/json` `boolean | VfsExplanation`
+
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
 
 `401` The token is missing or wrong
 
@@ -1156,6 +1335,30 @@ Return what the call would do without running it.
 
 `application/json` `boolean | VfsExplanation`
 
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
+
 `401` The token is missing or wrong
 
 `403` A policy or mount mode refused the call
@@ -1204,6 +1407,30 @@ Return what the call would do without running it.
 `200` What the call returns; with explain=true, its explanation
 
 `application/json` `string[] | VfsExplanation`
+
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
 
 `401` The token is missing or wrong
 
@@ -1256,6 +1483,30 @@ Return what the call would do without running it.
 
 `application/json` `string[] | VfsExplanation`
 
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
+
 `401` The token is missing or wrong
 
 `403` A policy or mount mode refused the call
@@ -1304,6 +1555,30 @@ Return what the call would do without running it.
 `200` What the call returns; with explain=true, its explanation
 
 `application/json` `null | VfsExplanation`
+
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
 
 `401` The token is missing or wrong
 
@@ -1358,6 +1633,30 @@ The bytes, base64-encoded.
 `200` What the call returns; with explain=true, its explanation
 
 `application/json` `null | VfsExplanation`
+
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
 
 `401` The token is missing or wrong
 
@@ -1417,6 +1716,30 @@ Answer the bytes themselves as application/octet-stream.
 
 `application/json` `string | VfsExplanation`
 
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
+
 `application/octet-stream` `string`
 
 `401` The token is missing or wrong
@@ -1468,6 +1791,30 @@ Return what the call would do without running it.
 
 `application/json` `string[] | VfsExplanation`
 
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
+
 `401` The token is missing or wrong
 
 `403` A policy or mount mode refused the call
@@ -1516,6 +1863,30 @@ Return what the call would do without running it.
 `200` What the call returns; with explain=true, its explanation
 
 `application/json` `string | VfsExplanation`
+
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
 
 `401` The token is missing or wrong
 
@@ -1570,6 +1941,30 @@ Return what the call would do without running it.
 
 `application/json` `null | VfsExplanation`
 
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
+
 `401` The token is missing or wrong
 
 `403` A policy or mount mode refused the call
@@ -1621,6 +2016,30 @@ Return what the call would do without running it.
 
 `application/json` `null | VfsExplanation`
 
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
+
 `401` The token is missing or wrong
 
 `403` A policy or mount mode refused the call
@@ -1669,6 +2088,30 @@ Return what the call would do without running it.
 `200` What the call returns; with explain=true, its explanation
 
 `application/json` `null | VfsExplanation`
+
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
 
 `401` The token is missing or wrong
 
@@ -1731,6 +2174,30 @@ Return what the call would do without running it.
 
 `application/json` `object | VfsExplanation`
 
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
+
 `401` The token is missing or wrong
 
 `403` A policy or mount mode refused the call
@@ -1791,6 +2258,30 @@ The bytes, base64-encoded.
 
 `application/json` `null | VfsExplanation`
 
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
+
 `401` The token is missing or wrong
 
 `403` A policy or mount mode refused the call
@@ -1841,6 +2332,30 @@ Return what the call would do without running it.
 `200` What the call returns; with explain=true, its explanation
 
 `application/json` `object | VfsExplanation`
+
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
 
 `401` The token is missing or wrong
 
@@ -1893,6 +2408,30 @@ Return what the call would do without running it.
 
 `application/json` `null | VfsExplanation`
 
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
+
 `401` The token is missing or wrong
 
 `403` A policy or mount mode refused the call
@@ -1944,6 +2483,30 @@ Return what the call would do without running it.
 
 `application/json` `null | VfsExplanation`
 
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
+
 `401` The token is missing or wrong
 
 `403` A policy or mount mode refused the call
@@ -1992,6 +2555,30 @@ Return what the call would do without running it.
 `200` What the call returns; with explain=true, its explanation
 
 `application/json` `null | VfsExplanation`
+
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
 
 `401` The token is missing or wrong
 
@@ -2044,6 +2631,30 @@ The bytes, base64-encoded.
 `200` What the call returns; with explain=true, its explanation
 
 `application/json` `null | VfsExplanation`
+
+<ResponseField name="type" type="string">
+line, command or vfs.
+</ResponseField>
+<ResponseField name="outcome" type="string" required>
+</ResponseField>
+<ResponseField name="reason" type="string">
+Why, in the deciding policy's words.
+</ResponseField>
+<ResponseField name="source" type="string">
+Where in the profile the deciding rule is written.
+</ResponseField>
+<ResponseField name="answers" type="object[]">
+Every policy's answer.
+</ResponseField>
+<ResponseField name="refusal" type="object | null">
+</ResponseField>
+<ResponseField name="call" type="string">
+</ResponseField>
+<ResponseField name="paths" type="string[]">
+</ResponseField>
+<ResponseField name="error" type="string">
+The errno name the call would raise, empty when it runs.
+</ResponseField>
 
 `401` The token is missing or wrong
 
