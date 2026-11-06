@@ -12,32 +12,46 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { EnvVar } from '../secrets/config.ts'
 import { isConfigPointer } from '../secrets/sources.ts'
+import { isPlainObject } from '../utils/records.ts'
 import { STRUKTO } from './constants.ts'
 import type { Template } from './types.ts'
 
+/** Whether an `env` block's entry is a managed one, `{from, ref, key?, readonly?, fetch?}`. */
+function managed(entry: Record<string, unknown>): boolean {
+  return Object.hasOwn(entry, 'from') && EnvVar.safeParse(entry).success
+}
+
 /**
- * The saved entries a config names through `{from: strukto, ref, key}`, each
- * once, in order. Only a pointer counts, by the rule the secrets layer reads
- * one by, so a map such as an `env` holding `from` and `ref` is not one.
+ * The saved entries a config names, each once, in order: through a
+ * `{from: strukto, ref, key}` pointer, or a managed entry of an `env` block,
+ * whose `key` is optional. A pointer counts by the rule the secrets layer
+ * reads one by, and a managed entry only as an `env` block's entry, so a
+ * runtime's `env` map holding `from` and `ref` is neither.
  */
 export function secretRefs(config: unknown): string[] {
   const found: string[] = []
-  const walk = (v: unknown): void => {
+  const walk = (v: unknown, env = false): void => {
     if (Array.isArray(v)) {
-      v.forEach(walk)
+      for (const item of v) walk(item)
       return
     }
-    if (v === null || typeof v !== 'object') return
-    const o = v as Record<string, unknown>
-    if (isConfigPointer(o)) {
-      const ref = o.ref
-      if (o.from === STRUKTO && typeof ref === 'string' && ref !== '' && !found.includes(ref)) {
+    if (!isPlainObject(v)) return
+    if (isConfigPointer(v) || (env && managed(v))) {
+      const ref = v.ref
+      if (v.from === STRUKTO && typeof ref === 'string' && ref !== '' && !found.includes(ref)) {
         found.push(ref)
       }
       return
     }
-    Object.values(o).forEach(walk)
+    for (const [name, item] of Object.entries(v)) {
+      if (name === 'env' && isPlainObject(item)) {
+        for (const entry of Object.values(item)) walk(entry, true)
+      } else {
+        walk(item)
+      }
+    }
   }
   walk(config)
   return found

@@ -146,6 +146,33 @@ async def test_a_template_builds_from_a_saved_connection(
 
 
 @pytest.mark.asyncio
+async def test_a_managed_env_entry_reads_a_saved_field(app, client):
+    await app.state.resources.create_entry(
+        "vfs",
+        EntryInput(
+            name="gh",
+            type="github",
+            fields={"owner": "o"},
+            sealed={"token": "t"},
+        ),
+    )
+    env = {
+        name: {"from": "strukto", "ref": "gh", "key": key, "readonly": True}
+        for name, key in (("TOKEN", "token"), ("OWNER", "owner"))
+    }
+    config = {"mounts": {"/": {"vfs": "ram", "mode": "WRITE"}}, "env": env}
+    r = await client.post(
+        "/v1/workspaces", json={"id": "envd", "config": config}
+    )
+    assert r.status_code == 201, r.text
+    ran = await client.post(
+        "/v1/workspaces/envd/shell", json={"command": "echo $TOKEN $OWNER"}
+    )
+    assert ran.json()["stdout"] == "t o\n"
+    await client.delete("/v1/workspaces/envd")
+
+
+@pytest.mark.asyncio
 async def test_a_create_names_one_known_template_or_a_config(app, client):
     r = await client.post("/v1/workspaces", json={"template": "nope"})
     assert r.status_code == 404

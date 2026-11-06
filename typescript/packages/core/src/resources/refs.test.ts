@@ -16,13 +16,17 @@ import { describe, expect, it } from 'vitest'
 import { secretRefs } from './refs.ts'
 
 describe('secretRefs', () => {
-  it('counts only a keyed pointer as a saved entry', () => {
+  it('counts a keyed pointer and a managed env entry as a saved entry', () => {
     const config = {
       mounts: {
         '/gh': { vfs: 'github', config: { token: { from: 'strukto', ref: 'gh', key: 'token' } } },
       },
       runtimes: [{ name: 'local', config: { env: { from: 'strukto', ref: 'x' } } }],
+      env: {
+        TOKEN: { from: 'strukto', ref: 'ci', readonly: true },
+        PLAIN: { value: 'v', readonly: true },
+      },
     }
-    expect(secretRefs(config)).toEqual(['gh'])
+    expect(secretRefs(config)).toEqual(['gh', 'ci'])
   })
 })

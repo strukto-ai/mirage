@@ -47,6 +47,5 @@ async def test_a_plain_field_keeps_its_type_and_a_sealed_one_is_read():
     assert mount["schemas"] == ["public", "analytics"]
     assert SecretRef.model_validate(mount["password"]).key == "password"
     assert config.secrets is not None
-    assert config.secrets["strukto"].config == {
-        "entries": {"db": {"password": "pw"}}
-    }
+    opened = {"schemas": '["public","analytics"]', "password": "pw"}
+    assert config.secrets["strukto"].config == {"entries": {"db": opened}}

@@ -31,12 +31,12 @@ from mirage.types import JsonValue
 
 
 class StruktoSourceConfig(BaseModel):
-    """The ``strukto`` secrets source's config: the sealed fields of each
-    saved entry a workspace's config names.
+    """The ``strukto`` secrets source's config: the fields of each saved
+    entry a workspace's config names, the sealed ones opened.
 
     Args:
-        entries (dict[str, dict[str, str]]): the sealed fields of each
-            entry, by the entry's name.
+        entries (dict[str, dict[str, str]]): the fields of each entry, by
+            the entry's name.
     """
 
     entries: dict[str, dict[str, str]]
@@ -45,8 +45,8 @@ class StruktoSourceConfig(BaseModel):
 async def fetch_strukto(
     config: StruktoSourceConfig, ref: str
 ) -> ResolvedSecret:
-    """The sealed fields of the saved entry ``ref``, as a workspace was
-    handed them.
+    """The fields of the saved entry ``ref``, as a workspace was handed
+    them.
 
     Args:
         config (StruktoSourceConfig): the entries the workspace names.
@@ -62,13 +62,15 @@ async def fetch_strukto(
 
 
 def _flat(value: JsonValue) -> str:
-    """A sealed value as a secret's field holds it: a string as it is,
+    """A saved value as a secret's field holds it: a string as it is,
     anything else as JSON.
 
     Args:
-        value (JsonValue): the sealed value.
+        value (JsonValue): the saved value.
     """
-    return value if isinstance(value, str) else json.dumps(value)
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
 
 
 def _inline(value: Any, plain: dict[str, Fields]) -> Any:
@@ -96,8 +98,9 @@ async def with_entries(
 ) -> WorkspaceConfig:
     """The config to build, with the saved entries its ``{from: strukto,
     ref, key}`` pointers name filled in. A pointer at a plain field becomes
-    the field's value, so a list stays a list; one at a sealed field reads
-    it from the ``strukto`` source, declared here with the sealed fields
+    the field's value, so a list stays a list; one at a sealed field, and a
+    managed ``env`` entry at any field, reads it from the ``strukto``
+    source, declared here with each entry's fields and the sealed ones
     opened, as mirage reads any secret's. A saved field never points at a
     store, since a save refuses one.
 
@@ -116,7 +119,7 @@ async def with_entries(
         for entry in await store.list_entries(kind)
     }
     plain: dict[str, Fields] = {}
-    sealed: dict[str, dict[str, str]] = {}
+    opened: dict[str, dict[str, str]] = {}
     for ref in refs:
         kind = kinds.get(ref)
         if kind is None:
@@ -125,13 +128,14 @@ async def with_entries(
             )
         entry = await store.reveal_entry(kind, ref)
         plain[ref] = entry.fields
-        sealed[ref] = {k: _flat(v) for k, v in entry.sealed.items()}
+        every = {**entry.fields, **entry.sealed}
+        opened[ref] = {k: _flat(v) for k, v in every.items()}
     try:
         config = check_config(_inline(written, plain))
     except ValueError as e:
         raise ResourceError("invalid", str(e)) from e
     declared = {
         **(config.secrets or {}),
-        STRUKTO: SecretSource(source=STRUKTO, config={"entries": sealed}),
+        STRUKTO: SecretSource(source=STRUKTO, config={"entries": opened}),
     }
     return config.model_copy(update={"secrets": declared})
