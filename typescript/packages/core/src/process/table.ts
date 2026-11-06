@@ -116,6 +116,9 @@ export class ProcessTable {
         this.terminateChildren(pid, signal)
       },
       this.bind,
+      (signal) => {
+        this.interruptChildren(pid, signal)
+      },
     )
     const eager = init.started !== undefined && !this.queued()
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
@@ -137,8 +140,19 @@ export class ProcessTable {
    * @param signal what the stop stands for, as the parent's.
    */
   terminateChildren(pid: number, signal = 9): void {
-    for (const child of this.live())
-      if (this.ancestors.get(child.info.pid)?.includes(pid) === true) child.terminate(signal)
+    for (const child of this.under(pid)) child.terminate(signal)
+  }
+
+  /**
+   * Deliver a signal their shells ignore to every live runner under `pid`
+   * (`ProcessHandle.interrupt`). Mirrors Python's interrupt_children.
+   */
+  interruptChildren(pid: number, signal: number): void {
+    for (const child of this.under(pid)) child.interrupt(signal)
+  }
+
+  private under(pid: number): ProcessHandle[] {
+    return this.live().filter((child) => this.ancestors.get(child.info.pid)?.includes(pid) === true)
   }
 
   view(

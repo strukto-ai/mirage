@@ -65,6 +65,15 @@ describe('ProcessHandle', () => {
     expect([done.exitCode, done.failure]).toEqual([1, 'boom'])
   })
 
+  // A program the runner runs where an interrupt reaches it hands back what
+  // it returned; a failure of its own is still its failure.
+  it('a program returns unless interrupted and its own failure passes', async () => {
+    const handle = new ProcessHandle(info(), () => Promise.resolve(0), ignore, ignore)
+    handle.interrupt(2)
+    expect(await handle.program(() => Promise.resolve(3))).toEqual([3, null])
+    await expect(handle.program(raises)).rejects.toThrow('boom')
+  })
+
   it('terminate asks once and the runner exits 137', async () => {
     const abort = new AbortController()
     let started = ignore

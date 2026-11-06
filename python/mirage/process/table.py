@@ -135,6 +135,7 @@ class ProcessTable:
                 self._retire,
                 lambda signal: self.terminate_children(pid, signal),
                 self._bind,
+                lambda signal: self.interrupt_children(pid, signal),
             )
             eager = started is not None and not self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
@@ -161,14 +162,27 @@ class ProcessTable:
             pid (int): the parent or ancestor.
             signal (int): what the stop stands for, as the parent's.
         """
+        for child in self._under(pid):
+            child.terminate(signal)
+
+    def interrupt_children(self, pid: int, signal: int) -> None:
+        """Deliver a signal their shells ignore to every live runner
+        under ``pid`` (``ProcessHandle.interrupt``).
+
+        Args:
+            pid (int): the parent or ancestor.
+            signal (int): the signal.
+        """
+        for child in self._under(pid):
+            child.interrupt(signal)
+
+    def _under(self, pid: int) -> list[ProcessHandle]:
         with self._lock:
-            under = [
+            return [
                 handle
                 for _, handle in self._live.values()
                 if pid in self._ancestors.get(handle.info.pid, ())
             ]
-        for child in under:
-            child.terminate(signal)
 
     def _retire(self, pid: int) -> None:
         with self._lock:

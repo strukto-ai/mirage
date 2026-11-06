@@ -505,6 +505,44 @@ async def test_stopping_a_runner_alone_leaves_its_children_running():
     await child.join()
 
 
+# A signal the runners' shells ignore reaches the program each runs right
+# now, which ends with it, and the shell goes on.
+@pytest.mark.asyncio
+async def test_an_interrupt_ends_the_program_a_child_runs_and_not_the_child():
+    processes = ProcessTable()
+    parent = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=_hangs,
+    )
+    started = asyncio.Event()
+    outcome: list[tuple[int | None, int | None]] = []
+
+    async def program() -> int:
+        started.set()
+        return await _hangs()
+
+    async def shell() -> int:
+        outcome.append(await child.program(program))
+        return 0
+
+    child = processes.start(
+        session_id="a",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=shell,
+        parent_pid=parent.info.pid,
+    )
+    async with asyncio.timeout(5):
+        await started.wait()
+        parent.interrupt_children(2)
+        assert (await child.join()).exit_code == 0
+    assert outcome == [(None, 2)]
+    parent.terminate()
+    await parent.join()
+
+
 # A kill reaches the whole group with the signal it named, so a native
 # program a child runner started receives that signal too.
 @pytest.mark.asyncio

@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from concurrent.futures import Future
 from dataclasses import replace
 from threading import RLock
-from typing import Protocol, cast
+from typing import Any, Protocol, TypeVar, cast
 
 from mirage.concurrency.limiter import owned_task
 from mirage.process.types import ProcessInfo, ProcessRunner, ProcessState
 from mirage.types import JsonValue
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 class ExecutionBind(Protocol):
@@ -50,6 +52,7 @@ class ProcessHandle:
         finished: Callable[[int], None],
         cancel_children: Callable[[int], None] = lambda signal: None,
         bind: ExecutionBind | None = None,
+        interrupt_children: Callable[[int], None] = lambda signal: None,
     ) -> None:
         self._info = info
         self._run = run
@@ -57,6 +60,8 @@ class ProcessHandle:
         self._lock = RLock()
         self._finished = finished
         self._cancel_children = cancel_children
+        self._interrupt_children = interrupt_children
+        self._programs: dict[asyncio.Task[Any], int | None] = {}
         self._signal: int | None = None
         self._program_code: int | None = None
         self._runs: dict[str, dict[str, JsonValue]] = {}
@@ -141,6 +146,67 @@ class ProcessHandle:
         """
         with self._lock:
             self._program_code = code
+
+    async def program(
+        self, run: Callable[[], Coroutine[Any, Any, T]]
+    ) -> tuple[T, None] | tuple[None, int]:
+        """Run one program of the runner's shell where ``interrupt``
+        reaches it, as bash's background job runs each program as a
+        child that takes the INT the job itself ignores.
+
+        Args:
+            run (Callable[[], Coroutine[Any, Any, T]]): the program, to
+                its end.
+
+        Returns:
+            tuple[T, None] | tuple[None, int]: what it returned, or the
+            signal ``interrupt`` stopped it with.
+        """
+        # Eager, so the program begins where the statement stands, before
+        # what the shell runs next (a job's redirect lands first).
+        task: asyncio.Task[T] = asyncio.Task(
+            run(), loop=asyncio.get_running_loop(), eager_start=True
+        )
+        with self._lock:
+            self._programs[task] = None
+        try:
+            return await task, None
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            signal = self._programs.get(task)
+            if signal is None or (
+                current is not None and current.cancelling()
+            ):
+                raise
+            return None, signal
+        finally:
+            with self._lock:
+                self._programs.pop(task, None)
+
+    def interrupt(self, signal: int) -> None:
+        """Deliver a signal the runner's shell ignores, as bash's
+        background job ignores INT: the program it runs right now
+        (``program``) gets it, and the shell goes on.
+
+        Args:
+            signal (int): the signal.
+        """
+        with self._lock:
+            running = [
+                task for task, sent in self._programs.items() if sent is None
+            ]
+            for task in running:
+                self._programs[task] = signal
+        for task in running:
+            task.get_loop().call_soon_threadsafe(task.cancel)
+
+    def interrupt_children(self, signal: int) -> None:
+        """``interrupt`` every runner this one started, and theirs.
+
+        Args:
+            signal (int): the signal.
+        """
+        self._interrupt_children(signal)
 
     def terminate(self, signal: int = 9, children: bool = True) -> bool:
         """Request cancellation without waiting for the runner to exit.

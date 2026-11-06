@@ -40,8 +40,10 @@ session that would start past it, from the workspace's `env`, a profile's or a
 snapshot, is refused. `processes.max` counts every pipeline stage, subshell
 and background job a session has running. `timeout` stops the jobs its
 command started when the time runs out, as GNU's does by signalling its
-process group, unless it is given `--foreground` or `-s INT`, which a
-background job ignores.
+process group, unless it is given `--foreground` or `-s INT`. As in Bash, a
+background job that is one program ignores `INT`, one that runs several
+commands loses only the command it is running and goes on, and one that runs
+a function ends with it.
 
 Some bounds are fixed:
 

@@ -47,7 +47,7 @@ import { divertStatement } from './builtins/exec/index.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, ended, isUnwinding } from './control.ts'
-import { handleBackground, pump } from './jobs.ts'
+import { handleBackground, pump, runProgram } from './jobs.ts'
 import {
   answerClosed,
   asWritten,
@@ -302,37 +302,40 @@ export async function handleConnection(
 ): Promise<RedirectResult> {
   const session = context.session
   const bound = fd0Binding(session)
-  const [leftStdout, leftIo, leftExec] = await ignoringErrexit(session, () =>
-    executeNode(left, context, stdin, callStack),
-  )
+  const [leftBytes, leftIo, leftExec] = await runProgram(left, context, async () => {
+    const [out, io, ran] = await ignoringErrexit(session, () =>
+      executeNode(left, context, stdin, callStack),
+    )
+    return [await finishStatement(out, io, session, left), io, ran]
+  })
   const children = [leftExec]
-
-  const leftBytes = await finishStatement(leftStdout, leftIo, session, left)
   if ((op === NT.AND && leftIo.exitCode !== 0) || (op === NT.OR && leftIo.exitCode === 0)) {
     if (op === NT.AND) session.errexitImmune = true
     carryStatus(session)
     return [leftBytes, leftIo, new ExecutionNode({ op, exitCode: leftIo.exitCode, children })]
   }
-  let rightStdout: ByteSource | null
+  let rightBytes: ByteSource | null
   let rightIo: IOResult
   let rightExec: ExecutionNode
   const armed = errTrapArmed(session)
   try {
-    ;[rightStdout, rightIo, rightExec] = await executeNode(
-      right,
-      context,
-      statementStdin(session, stdin, bound),
-      callStack,
-    )
+    // The right command closes here, so its ERR action reads its status and
+    // `${PIPESTATUS[@]}`; the list's boundary claims them again once the
+    // action is done.
+    ;[rightBytes, rightIo, rightExec] = await runProgram(right, context, async () => {
+      const [out, io, ran] = await executeNode(
+        right,
+        context,
+        statementStdin(session, stdin, bound),
+        callStack,
+      )
+      return [await finishStatement(out, io, session, right), io, ran]
+    })
   } catch (err) {
     if (isUnwinding(err)) throw await carried(err, leftBytes, leftIo)
     throw err
   }
   children.push(rightExec)
-  // The right command closes here, so its ERR action reads its status and
-  // `${PIPESTATUS[@]}`; the list's boundary claims them again once the
-  // action is done.
-  const rightBytes = await finishStatement(rightStdout, rightIo, session, right)
   let merged = await leftIo.merge(rightIo)
   const outputs: (ByteSource | null)[] = [leftBytes, rightBytes]
   try {
@@ -499,10 +502,12 @@ export async function handleSubshell(
     try {
       const childStdin = statementStdin(session, stdin, bound)
       let stdout: ByteSource | null
-      ;[stdout, io, lastExec] = await recording(recorder, () =>
-        executeNode(child, context, childStdin, callStack, { sink: recorder }),
-      )
-      stdout = await finishStatement(stdout, io, session, child, lastExec)
+      ;[stdout, io, lastExec] = await runProgram(child, context, async () => {
+        const [out, ranIo, ran] = await recording(recorder, () =>
+          executeNode(child, context, childStdin, callStack, { sink: recorder }),
+        )
+        return [await finishStatement(out, ranIo, session, child, ran), ranIo, ran]
+      })
       const written = await divertStatement(
         dispatch,
         session,

@@ -51,7 +51,7 @@ from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.exec import divert_statement
 from mirage.workspace.executor.control import UNWINDING, carried, ended
-from mirage.workspace.executor.jobs import handle_background, pump
+from mirage.workspace.executor.jobs import handle_background, pump, run_program
 from mirage.workspace.executor.statement import (
     answer_closed,
     as_written,
@@ -299,13 +299,16 @@ async def handle_connection(
     """
     session = context.session
     bound = fd0_binding(session)
-    with ignoring_errexit(session):
-        left_stdout, left_io, left_exec = await execute_node(
-            left, context, stdin, call_stack
-        )
-    children = [left_exec]
 
-    left_bytes = await finish_statement(left_stdout, left_io, session, left)
+    async def tested() -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+        with ignoring_errexit(session):
+            stdout, io, ran = await execute_node(
+                left, context, stdin, call_stack
+            )
+        return await finish_statement(stdout, io, session, left), io, ran
+
+    left_bytes, left_io, left_exec = await run_program(left, context, tested)
+    children = [left_exec]
     if (op == NT.AND and left_io.exit_code != 0) or (
         op == NT.OR and left_io.exit_code == 0
     ):
@@ -321,19 +324,23 @@ async def handle_connection(
         )
 
     armed = err_trap_armed(session)
-    try:
-        right_stdout, right_io, right_exec = await execute_node(
+
+    # The right command closes here, so its ERR action reads its status
+    # and ``${PIPESTATUS[@]}``; the list's boundary claims them again
+    # once the action is done.
+    async def ran_on() -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+        stdout, io, ran = await execute_node(
             right, context, statement_stdin(session, stdin, bound), call_stack
+        )
+        return await finish_statement(stdout, io, session, right), io, ran
+
+    try:
+        right_bytes, right_io, right_exec = await run_program(
+            right, context, ran_on
         )
     except UNWINDING as sig:
         raise await carried(sig, left_bytes, left_io)
     children.append(right_exec)
-    # The right command closes here, so its ERR action reads its status
-    # and ``${PIPESTATUS[@]}``; the list's boundary claims them again
-    # once the action is done.
-    right_bytes = await finish_statement(
-        right_stdout, right_io, session, right
-    )
     merged = await left_io.merge(right_io)
     outputs: list[ByteSource | None] = [left_bytes, right_bytes]
     try:
@@ -510,17 +517,27 @@ async def handle_subshell(
         i += 1
         recorder = Recorder()
         leave = record_jobs(session, recorder)
-        try:
+
+        async def statement() -> tuple[
+            ByteSource | None, IOResult, ExecutionNode
+        ]:
             with recording(recorder):
-                stdout, io, last_exec = await execute_node(
+                stdout, io, ran = await execute_node(
                     child,
                     context,
                     statement_stdin(session, stdin, bound),
                     call_stack,
                     sink=recorder,
                 )
-            stdout = await finish_statement(
-                stdout, io, session, child, last_exec
+            return (
+                await finish_statement(stdout, io, session, child, ran),
+                io,
+                ran,
+            )
+
+        try:
+            stdout, io, last_exec = await run_program(
+                child, context, statement
             )
             written = await divert_statement(
                 dispatch,

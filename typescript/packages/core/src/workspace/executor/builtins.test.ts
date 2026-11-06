@@ -3065,6 +3065,25 @@ describe('handleTimeout', () => {
     }
   })
 
+  // A job's shell ignores INT, but the program it runs right now takes it,
+  // so the job goes on past it with 130; a function or a builtin the job's
+  // shell runs (`f &`) ends with it.
+  it('an INT ends the program a job runs and the job goes on', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const io = await ws.shell(
+        "timeout -s INT 0.1 sh -c '{ sleep 30; echo $? > /a; } & " +
+          '{ sleep 30 | cat; echo ${PIPESTATUS[@]} > /b; } & ' +
+          'sleep 30 && : || echo $? > /c & ' +
+          "f() { sleep 30; echo > /d; }; f & sleep 30'; " +
+          'sleep 0.3; cat /a /b /c; test -e /d; echo $?',
+      )
+      expect(decode(io.stdout).split('\n')).toEqual(['130', '130 130', '130', '1', ''])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('cannot start the command once its session holds processes.max', async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { processes: { max: 1 } })
     try {

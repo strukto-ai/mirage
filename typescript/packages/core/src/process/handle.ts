@@ -1,3 +1,4 @@
+import { isAborting } from '../errors/fs.ts'
 import type { JsonValue } from '../types.ts'
 import type { ProcessInfo, ProcessRunner } from './types.ts'
 
@@ -29,6 +30,8 @@ export class ProcessHandle {
   private stopSignal: number | null = null
   private exitedCode: number | null = null
   private readonly nativeRuns = new Map<string, Record<string, JsonValue>>()
+  // The programs `program` runs, each with the signal `interrupt` sent it.
+  private readonly programs = new Map<AbortController, number | null>()
   private completion!: Promise<ProcessInfo>
 
   constructor(
@@ -38,6 +41,7 @@ export class ProcessHandle {
     private readonly finished: (pid: number) => void,
     private readonly cancelChildren: (signal: number) => void = () => undefined,
     private readonly bind: ExecutionBind = (_id, run) => run(),
+    private readonly interruptChildrenOf: (signal: number) => void = () => undefined,
   ) {
     this.current = Object.freeze(info)
   }
@@ -117,6 +121,45 @@ export class ProcessHandle {
    */
   programExited(code: number): void {
     this.exitedCode = code
+  }
+
+  /**
+   * Run one program of the runner's shell where `interrupt` reaches it, as
+   * bash's background job runs each program as a child that takes the INT
+   * the job itself ignores. The program stops when the signal it is handed
+   * aborts. Resolves to what it returned, or the signal `interrupt` stopped
+   * it with. Mirrors Python's program.
+   */
+  async program<T>(run: (stop: AbortSignal) => Promise<T>): Promise<[T, null] | [null, number]> {
+    const stop = new AbortController()
+    this.programs.set(stop, null)
+    try {
+      return [await run(stop.signal), null]
+    } catch (error) {
+      const signal = this.programs.get(stop) ?? null
+      if (signal === null || !isAborting(error)) throw error
+      return [null, signal]
+    } finally {
+      this.programs.delete(stop)
+    }
+  }
+
+  /**
+   * Deliver a signal the runner's shell ignores, as bash's background job
+   * ignores INT: the program it runs right now (`program`) gets it, and the
+   * shell goes on.
+   */
+  interrupt(signal: number): void {
+    for (const [stop, sent] of this.programs) {
+      if (sent !== null) continue
+      this.programs.set(stop, signal)
+      stop.abort(new DOMException('interrupted', 'AbortError'))
+    }
+  }
+
+  /** `interrupt` every runner this one started, and theirs. */
+  interruptChildren(signal: number): void {
+    this.interruptChildrenOf(signal)
   }
 
   /**

@@ -40,7 +40,7 @@ from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.read.read import read_reply
-from mirage.workspace.executor.jobs import run_statement
+from mirage.workspace.executor.jobs import run_program, run_statement
 from mirage.workspace.executor.statement import (
     errexit_acts,
     fd0_binding,
@@ -101,8 +101,11 @@ async def execute_body(
         if cmd.type == NT.COMMENT:
             continue
         armed = err_trap_armed(session)
-        try:
-            stdout, io, last_exec = await run_statement(
+
+        async def statement() -> tuple[
+            ByteSource | None, IOResult, ExecutionNode
+        ]:
+            stdout, io, ran = await run_statement(
                 execute_node,
                 cmd,
                 context,
@@ -113,7 +116,11 @@ async def execute_body(
                 handed,
                 decisions,
             )
-            all_stdout.append(await finish_statement(stdout, io, session, cmd))
+            return await finish_statement(stdout, io, session, cmd), io, ran
+
+        try:
+            stdout, io, last_exec = await run_program(cmd, context, statement)
+            all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
             merged_io = await land(
                 await run_err_trap(

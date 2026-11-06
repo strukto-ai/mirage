@@ -81,6 +81,7 @@ FORK_FAILED = (
 # it dies of them too: KILL, and the two glibc reserves for itself.
 SELF_KILLING_SIGNALS = frozenset({SIGKILL, 32, 33})
 
-# What a background job ignores, as bash starts each with job control
-# off: the jobs a command started outlive timeout's INT.
+# What a background job's shell ignores, as bash starts each with job
+# control off: the jobs a command started outlive timeout's INT, though
+# the program one runs right now does not.
 JOB_IGNORED_SIGNALS = frozenset({2})

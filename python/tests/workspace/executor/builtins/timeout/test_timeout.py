@@ -469,6 +469,26 @@ async def test_the_deadline_stops_the_jobs_its_command_started():
     assert "sleep 31" in out and "sleep 32" in out
 
 
+# A job's shell ignores INT, but the program it runs right now takes it,
+# so the job goes on past it with 130; a function or a builtin the job's
+# shell runs (`f &`) ends with it.
+@pytest.mark.asyncio
+async def test_an_int_ends_the_program_a_job_runs_and_the_job_goes_on():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        io = await ws.shell(
+            "timeout -s INT 0.1 sh -c '{ sleep 30; echo $? > /a; } & "
+            "{ sleep 30 | cat; echo ${PIPESTATUS[@]} > /b; } & "
+            "sleep 30 && : || echo $? > /c & "
+            "f() { sleep 30; echo > /d; }; f & sleep 30'; "
+            "sleep 0.3; cat /a /b /c; test -e /d; echo $?"
+        )
+        out = (await io.stdout_str()).splitlines()
+    finally:
+        await ws.close()
+    assert out == ["130", "130 130", "130", "1"]
+
+
 @pytest.mark.asyncio
 async def test_a_session_at_its_process_cap_cannot_start_the_command():
     ws = Workspace({"/": RAMVFS()}, processes={"max": 1})

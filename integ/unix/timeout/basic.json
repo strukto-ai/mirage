@@ -579,10 +579,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "timeout 0.02 sh -c 'sleep 0.08; echo BAD > {mount}/timeout-late'; echo $?; timeout 0.05 sh -c '(sleep 0.1; echo BAD > {mount}/timeout-job) & sleep 1'; echo $?; timeout --foreground 0.05 sh -c '(sleep 0.1; echo kept > {mount}/timeout-fg) & sleep 1'; echo $?; timeout 1 sh -c '(sleep 0.1; echo kept > {mount}/timeout-done) &'; echo $?; sleep 0.5; test -e {mount}/timeout-late; echo $?; test -e {mount}/timeout-job; echo $?; cat {mount}/timeout-fg {mount}/timeout-done; timeout -s INT 0.05 sh -c '(sleep 0.1; echo kept > {mount}/timeout-int) & sleep 1'; echo $?; sleep 0.5; cat {mount}/timeout-int",
+      "command": "timeout 0.02 sh -c 'sleep 0.08; echo BAD > {mount}/timeout-late'; echo $?; timeout 0.05 sh -c '(sleep 0.1; echo BAD > {mount}/timeout-job) & sleep 1'; echo $?; timeout --foreground 0.05 sh -c '(sleep 0.1; echo kept > {mount}/timeout-fg) & sleep 1'; echo $?; timeout 1 sh -c '(sleep 0.1; echo kept > {mount}/timeout-done) &'; echo $?; sleep 0.5; test -e {mount}/timeout-late; echo $?; test -e {mount}/timeout-job; echo $?; cat {mount}/timeout-fg {mount}/timeout-done; timeout -s INT 0.05 bash -c '(sleep 0.1; echo kept $? > {mount}/timeout-int) & f() { sleep 0.1; echo BAD > {mount}/timeout-fn; }; f & sleep 1'; echo $?; sleep 0.5; cat {mount}/timeout-int; test -e {mount}/timeout-fn; echo $?",
       "expect": {
         "exit": 0,
-        "stdout": "124\n124\n124\n0\n1\n1\nkept\nkept\n124\nkept\n",
+        "stdout": "124\n124\n124\n0\n1\n1\nkept\nkept\n124\nkept 130\n1\n",
         "stderr": ""
       }
     },

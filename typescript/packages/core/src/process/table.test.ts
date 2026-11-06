@@ -427,6 +427,51 @@ it('stopping a runner alone leaves its children running', async () => {
   await child.join()
 })
 
+// A signal the runners' shells ignore reaches the program each runs right
+// now, which ends with it, and the shell goes on.
+it('an interrupt ends the program a child runs and not the child', async () => {
+  const processes = new ProcessTable()
+  const init = { sessionId: 'a', command: 'sh', cwd: PathSpec.fromStrPath('/') }
+  const release = gate()
+  const parent = processes.start({
+    ...init,
+    cancel: () => {
+      release.release()
+    },
+    run: async () => {
+      await release.promise
+      return 0
+    },
+  })
+  const started = gate()
+  const outcome: [number | null, number | null][] = []
+  const child = processes.start({
+    ...init,
+    parentPid: parent.info.pid,
+    cancel: () => undefined,
+    run: async () => {
+      outcome.push(
+        await child.program(
+          (stop) =>
+            new Promise<number>((_resolve, reject) => {
+              started.release()
+              stop.addEventListener('abort', () => {
+                reject(stop.reason as Error)
+              })
+            }),
+        ),
+      )
+      return 0
+    },
+  })
+  await started.promise
+  parent.interruptChildren(2)
+  expect((await child.join()).exitCode).toBe(0)
+  expect(outcome).toEqual([[null, 2]])
+  parent.terminate()
+  await parent.join()
+})
+
 // A runner that already exited has nothing left to cancel, but stopping it
 // still stops what it left running (`sh -c 'sleep 100 &'`).
 it('stopping an exited runner stops what it left running', async () => {

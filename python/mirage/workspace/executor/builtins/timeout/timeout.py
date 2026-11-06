@@ -573,11 +573,13 @@ async def _deadline(
 
 async def _stop(process: ProcessHandle, signal: int, foreground: bool) -> None:
     # timeout signals its own process group unless --foreground, so the
-    # jobs the command started end with it unless they ignore the signal;
-    # the command itself gets it either way.
-    process.terminate(
-        signal, children=not foreground and signal not in JOB_IGNORED_SIGNALS
-    )
+    # jobs the command started end with it, or, when their shells ignore
+    # the signal, the programs they run right now do; the command itself
+    # gets it either way.
+    ignored = signal in JOB_IGNORED_SIGNALS
+    process.terminate(signal, children=not foreground and not ignored)
+    if ignored and not foreground:
+        process.interrupt_children(signal)
     await _cancel(process.task)
 
 
