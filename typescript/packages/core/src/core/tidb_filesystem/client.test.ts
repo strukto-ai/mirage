@@ -137,9 +137,21 @@ describe('appendTo', () => {
   it('aborts the upload when the file is another size', async () => {
     const data = new Uint8Array(70_000).fill(120)
     drive9.files.set('/root/big.bin', data)
-    expect(await appendTo(accessor, '/root/big.bin', new Uint8Array(40_000), 60_000)).toBe(false)
+    await expect(
+      appendTo(accessor, '/root/big.bin', new Uint8Array(40_000), 60_000),
+    ).rejects.toMatchObject({ name: 'TiDBFilesystemApiError', status: 412 })
     expect(drive9.files.get('/root/big.bin')).toEqual(data)
     expect(drive9.count('PUT', '/s3/upload')).toBe(0)
+    expect(drive9.uploads.size).toBe(0)
+  })
+
+  it('aborts the upload when the file was cut below its size', async () => {
+    const data = new Uint8Array(60_000).fill(120)
+    drive9.files.set('/root/big.bin', data)
+    await expect(
+      appendTo(accessor, '/root/big.bin', new Uint8Array(10_000), 70_000),
+    ).rejects.toMatchObject({ name: 'TiDBFilesystemApiError', status: 412 })
+    expect(drive9.files.get('/root/big.bin')).toEqual(data)
     expect(drive9.uploads.size).toBe(0)
   })
 

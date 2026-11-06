@@ -80,6 +80,33 @@ describe('truncate', () => {
     expect(drive9.count('PUT', '/root')).toBe(0)
   })
 
+  it('refuses a grow racing an append and keeps the appended bytes', async () => {
+    drive9.partSize = 25_000
+    drive9.files.set('/root/big.bin', new Uint8Array(60_000).fill(120))
+    drive9.racingAppend = new Uint8Array(5_000).fill(121)
+    await expect(truncate(accessor, spec('/fs/big.bin'), 70_000)).rejects.toMatchObject({
+      code: 'STALE_WRITE',
+      virtualPath: '/fs/big.bin',
+    })
+    const want = new Uint8Array(65_000).fill(120)
+    want.fill(121, 60_000)
+    expect(drive9.files.get('/root/big.bin')).toEqual(want)
+    expect(drive9.uploads.size).toBe(0)
+    expect(drive9.count('PUT')).toBe(0)
+  })
+
+  it('does not report a failed part of a grow as a stale write', async () => {
+    drive9.partSize = 25_000
+    const data = new Uint8Array(60_000).fill(120)
+    drive9.files.set('/root/big.bin', data)
+    drive9.failParts = true
+    await expect(truncate(accessor, spec('/fs/big.bin'), 70_000)).rejects.toMatchObject({
+      name: 'TiDBFilesystemApiError',
+      status: 500,
+    })
+    expect(drive9.files.get('/root/big.bin')).toEqual(data)
+  })
+
   it('cuts an inline file by a rewrite', async () => {
     drive9.files.set('/root/a.txt', ENC.encode('hello world'))
     await truncate(accessor, spec('/fs/a.txt'), 5)
