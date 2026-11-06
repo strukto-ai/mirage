@@ -103,6 +103,7 @@ import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, lookup, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+import { checkEnv, entryBytes } from '../session/budget.ts'
 import { type SessionState, sessionEntry, setSessionEntry } from '../session/session.ts'
 import { ensureVarVisible, gateRendering, seedVar, sessionView, setAttr } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
@@ -337,6 +338,13 @@ export async function executeCommand(
     }
   }
 
+  // `seedVar` counts nothing, so the write is checked against max_env.
+  const seed = (k: string, v: string): void => {
+    const old = sessionEntry(session.vars, k)
+    checkEnv(session, old === undefined ? 0 : entryBytes(k, old.value), entryBytes(k, v))
+    seedVar(session, k, v)
+  }
+
   const restore = (saved: ReadonlyMap<string, ShellVar | null>): void => {
     for (const [k, prev] of saved) {
       if (prev === null) {
@@ -389,7 +397,7 @@ export async function executeCommand(
       // runtime — once that view narrowed to the exported set. The saved
       // record is put back below, so neither the value nor the attribute
       // outlives the command.
-      seedVar(session, k, v)
+      seed(k, v)
       setAttr(session, k, VarAttr.Export)
     }
     // A function runs with the prefix as its temporary environment, a

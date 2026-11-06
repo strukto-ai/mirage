@@ -95,6 +95,57 @@ describe('max_env', () => {
     }
   })
 
+  it("counts a nested shell's arguments, and the nested shell dies alone", async () => {
+    const refused = await run(`bash -c 'set -- $(seq 1 100)'; echo rc=$?`)
+    expect(refused).toEqual([
+      'rc=2\n',
+      'bash: xmalloc: cannot allocate 292 bytes (past max_env of 200 bytes, a mirage workspace setting)\n',
+      0,
+    ])
+    expect(await run('bash -c : _ $(seq 1 100); echo rc=$?')).toEqual(refused)
+    const [kept, , keptCode] = await run('set -- p q; bash -c : _ $(seq 1 100); echo rc=$? $# $1')
+    expect([kept, keptCode]).toEqual(['rc=2 2 p\n', 0])
+    const [out, err, code] = await run(
+      `echo '[ $# -ge 100 ] && { echo reached; exit; }; bash /x.sh "$@" "$@"' > /x.sh; bash /x.sh aaaaaaaa; echo rc=$?`,
+    )
+    expect([out, code]).toEqual(['rc=2\n', 0])
+    expect(err).toContain('past max_env of 200 bytes')
+  })
+
+  it('counts a prefix assignment', async () => {
+    for (const [line, bytes] of [
+      [
+        'f() { [ ${#X} -ge 1000 ] && { echo reached; return; }; X="$X$X" f; }; X=aaaaaaaa f; echo after',
+        129,
+      ],
+      ['X=$(seq 1 100) eval :; echo after', 292],
+    ] as const) {
+      expect(await run(line)).toEqual([
+        '',
+        `bash: xmalloc: cannot allocate ${String(bytes)} bytes (past max_env of 200 bytes, a mirage workspace setting)\n`,
+        2,
+      ])
+    }
+  })
+
+  it('runs a nested shell and a prefix under it', async () => {
+    const [out, , code] = await run(
+      `set -- p q; bash -c 'echo $# $1' _ a b c; echo $# $1; f() { bash -c 'echo $#' _ a b; echo $#; }; f x y z; X=ab bash -c 'echo $X'; X=cd eval 'echo $X'; echo \${X-unset}`,
+    )
+    expect([out, code]).toEqual(['3 a\n2 p\n2\n3\nab\ncd\nunset\n', 0])
+  })
+
+  it('leaves no value behind from a refused prefix', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE, maxEnv: 200 })
+    try {
+      await ws.shell('A=1 B=$(seq 1 100) eval :')
+      const io = await ws.shell('echo ${A-unset} ${B-unset}')
+      expect(DEC.decode(io.stdout)).toBe('unset unset\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it("counts a function's own parameters", async () => {
     const [out, , code] = await run(
       '(f() { set -- a; while :; do set -- $1$1; done; }; f); echo rc=$?',
