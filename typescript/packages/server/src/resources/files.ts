@@ -31,6 +31,12 @@ import { resourcesRootPath } from '../paths.ts'
 /** The folder under the root that holds sealed values, apart from the records. */
 const SEALED_DIR = '.sealed'
 
+/**
+ * YAML 1.1 reads an unquoted date as a date, which JSON cannot write back; a
+ * hand-edited record keeps it as the string it is.
+ */
+const TIMESTAMP = 'tag:yaml.org,2002:timestamp'
+
 async function readOrNull(path: string): Promise<string | null> {
   try {
     return await readFile(path, 'utf-8')
@@ -65,7 +71,11 @@ function parseRecord(path: string, text: string): Fields {
     record = JSON.parse(text)
   } catch {
     try {
-      record = parse(text, { version: '1.1' })
+      record = parse(text, {
+        version: '1.1',
+        customTags: (tags) =>
+          tags.filter((t) => (typeof t === 'string' ? t !== 'timestamp' : t.tag !== TIMESTAMP)),
+      })
     } catch (e) {
       throw new ResourceError('invalid', `${path} is malformed: ${(e as Error).message}`)
     }
@@ -99,7 +109,7 @@ async function writeWhole(path: string, text: string, mode: number, dirMode: num
   }
 }
 
-/** Each record a YAML file at `<root>/<folder>/<name>.yaml`. */
+/** Each record a YAML file at `<root>/<folder>/<name>.yaml`, owner only, since a template's config may hold a credential. */
 class FileRecords implements ResourceRecords {
   private readonly root: string
 
@@ -118,7 +128,7 @@ class FileRecords implements ResourceRecords {
   }
 
   async write(folder: string, name: string, record: Fields): Promise<void> {
-    await writeWhole(this.path(folder, name), dump(record), 0o644, 0o755)
+    await writeWhole(this.path(folder, name), dump(record), 0o600, 0o700)
   }
 
   remove(folder: string, name: string): Promise<boolean> {

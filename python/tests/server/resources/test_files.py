@@ -60,3 +60,27 @@ async def test_a_hand_edited_file_reads_as_yaml_or_refuses(tmp_path):
     with pytest.raises(ResourceError) as broken:
         await store.get_policy("b.py")
     assert broken.value.code == "invalid"
+
+
+@pytest.mark.asyncio
+async def test_records_are_owner_only(tmp_path):
+    await files_resource_store(tmp_path).put_template(
+        TemplateInput(name="t", config={"env": {"TOKEN": "x"}})
+    )
+    record = tmp_path / "template" / "t.yaml"
+    assert stat.S_IMODE(record.stat().st_mode) == 0o600
+    assert stat.S_IMODE(record.parent.stat().st_mode) == 0o700
+
+
+@pytest.mark.asyncio
+async def test_a_hand_edited_date_stays_a_string(tmp_path):
+    store = files_resource_store(tmp_path)
+    (tmp_path / "template").mkdir()
+    (tmp_path / "template" / "t.yaml").write_text(
+        "name: t\nconfig: {since: 2020-01-01}\n"
+    )
+    assert (await store.get_template("t")).config == {"since": "2020-01-01"}
+    await store.delete_template("t")
+    assert (await store.restore_template("t")).config == {
+        "since": "2020-01-01"
+    }

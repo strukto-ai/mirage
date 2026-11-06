@@ -83,6 +83,8 @@ async function configOf(
   const given = body.config ?? undefined
   let written: unknown = given
   if (body.template !== undefined) {
+    if (typeof body.template !== 'string')
+      return { status: 400, detail: 'template must be a string' }
     if (given !== undefined) return { status: 400, detail: 'give a template or a config, not both' }
     if (resources === undefined) return { status: 400, detail: 'this server keeps no templates' }
     const refused = requireOneAccount(registry)

@@ -594,6 +594,11 @@
    "delete": 405
   },
   "no_snapshot_store": [400, "this server has no snapshot store"],
+  "templates": {
+   "dev": [201, 200, 200, 204, 200],
+   "token": [201, 200, 200, 204, 200],
+   "jwt": [501, 501, 501, 501, 501]
+  },
   "shutdown": {
    "dev": 200,
    "token": 200,

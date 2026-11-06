@@ -79,6 +79,8 @@ async def test_a_template_is_checked_when_saved(client):
     assert (await client.post("/v1/templates", json=bad)).status_code == 422
     r = await client.post("/v1/templates", json={"name": "Bad", "config": RAM})
     assert r.status_code == 400
+    typo = {"name": "typo", "descripton": "d", "config": RAM}
+    assert (await client.post("/v1/templates", json=typo)).status_code == 422
     assert (await client.get("/v1/templates")).json() == []
 
 
@@ -109,6 +111,8 @@ async def test_a_create_names_one_known_template_or_a_config(client):
     assert r.status_code == 400
     assert r.json()["detail"] == "give a template or a config, not both"
     assert (await client.post("/v1/workspaces", json={})).status_code == 400
+    r = await client.post("/v1/workspaces", json={"template": ["base"]})
+    assert r.status_code == 422
     r = await client.post(
         "/v1/workspaces?explain=true", json={"template": "base"}
     )

@@ -58,4 +58,21 @@ describe('filesResourceStore', () => {
     writeFileSync(join(dir, 'policy', 'b.py.yaml'), 'source: [\n')
     await expect(store.getPolicy('b.py')).rejects.toMatchObject({ code: 'invalid' })
   })
+
+  it('writes records owner only', async () => {
+    const dir = root()
+    await filesResourceStore(dir).putTemplate({ name: 't', config: { env: { TOKEN: 'x' } } })
+    expect(statSync(join(dir, 'template', 't.yaml')).mode & 0o777).toBe(0o600)
+    expect(statSync(join(dir, 'template')).mode & 0o777).toBe(0o700)
+  })
+
+  it('keeps a hand-edited date as a string', async () => {
+    const dir = root()
+    const store = filesResourceStore(dir)
+    mkdirSync(join(dir, 'template'))
+    writeFileSync(join(dir, 'template', 't.yaml'), 'name: t\nconfig: {since: 2020-01-01}\n')
+    expect((await store.getTemplate('t')).config).toEqual({ since: '2020-01-01' })
+    await store.deleteTemplate('t')
+    expect((await store.restoreTemplate('t')).config).toEqual({ since: '2020-01-01' })
+  })
 })
