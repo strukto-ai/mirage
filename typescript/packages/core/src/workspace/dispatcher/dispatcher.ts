@@ -848,13 +848,16 @@ export class Dispatcher {
           this.access?.sessionId ?? this.caller?.session?.sessionId ?? null,
           true,
         )
+      const dst = args?.[0] instanceof PathSpec ? args[0] : null
+      const moved =
+        streamed.length > 0 && UNLINKING_OPS.has(name)
+          ? ([this.spelled(path, false), dst === null ? null : this.spelled(dst, false)] as const)
+          : null
       const answer =
         this.admitWrite === null || !POLICY_WRITE_OPS.has(name)
           ? await run()
           : await this.admitWrite(run)
-      if (streamed.length > 0 && UNLINKING_OPS.has(name)) {
-        this.carry(streamed, name, path, args?.[0] instanceof PathSpec ? args[0] : null)
-      }
+      if (moved !== null) this.carry(streamed, ...moved)
       return answer
     } catch (error) {
       if (error instanceof ResponseTooLargeError) {
@@ -902,20 +905,14 @@ export class Dispatcher {
   /**
    * Move each streamed description along a rename of its file or a directory
    * above it; lose it to a removal of either or to a file renamed over it, as
-   * a descriptor keeps writing an unlinked file. The op's names are taken as
-   * it acts on them, a final link itself.
+   * a descriptor keeps writing an unlinked file. The op's names are walked
+   * before it runs, as the kernel walks them, a final link itself: a rename
+   * can change the links that spelled them.
    * shortcut: only the line's own ops are seen, so a change from another
    * session or through FUSE leaves the old name bound; carry a backend's file
    * identity once every VFS reports one.
    */
-  private carry(
-    streamed: Caller['streamed'],
-    name: string,
-    path: PathSpec,
-    dst: PathSpec | null,
-  ): void {
-    const src = this.spelled(path, false)
-    const to = dst === null ? null : this.spelled(dst, false)
+  private carry(streamed: Caller['streamed'], src: string, to: string | null): void {
     for (const [file] of streamed) {
       const at = file.where.virtual
       if (ownerPrefix([src], at) !== null) {

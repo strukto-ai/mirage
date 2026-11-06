@@ -174,6 +174,12 @@ async def test_an_op_on_a_streamed_file_finds_what_was_written(
             " { echo A; wc -l < /data/tl/../f; echo B; } > /data/tl/../f",
             {"/data/s/f": "A\n1\nB\n", "/data/f": "z\n"},
         ),
+        (
+            "mkdir -p /data/d /data/o/t; ln -s /data/d /data/q;"
+            " ln -s /data/o/t /data/x;"
+            " { echo A; mv -T /data/q/../x /data/q; echo B; } > /data/o/x",
+            {"/data/o/x": "A\nB\n"},
+        ),
         ("{ echo AAAA; rm /data/f; echo C; } > /data/f", {"/data/f": None}),
         (
             "{ echo AAAA; mv /data/f /data/g; echo C; } > /data/f",

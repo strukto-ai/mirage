@@ -1007,8 +1007,17 @@ class Dispatcher:
         try:
             if caller is None:
                 caller = current_caller()
+            moved = None
             if caller.streamed:
                 await self._hand_over(caller.streamed, name, path, kwargs)
+                if name in UNLINKING_OPS:
+                    dst = kwargs.get("dst")
+                    moved = (
+                        self._spelled(path, last=False),
+                        None
+                        if dst is None
+                        else self._spelled(dst, last=False),
+                    )
             if self._admit_write is None or name not in POLICY_WRITE_OPS:
                 answer = await run_with_system_clock(
                     system_clock,
@@ -1044,8 +1053,8 @@ class Dispatcher:
                             op=True,
                         ),
                     )
-            if caller.streamed and name in UNLINKING_OPS:
-                self._carry(caller.streamed, name, path, kwargs.get("dst"))
+            if moved is not None:
+                self._carry(caller.streamed, *moved)
             return answer
         finally:
             if name in ("write", "append", "pwrite"):
@@ -1095,14 +1104,15 @@ class Dispatcher:
         streamed: tuple[
             tuple[FileDescription, Callable[[], Awaitable[None]]], ...
         ],
-        name: str,
-        path: PathSpec,
-        dst: PathSpec | None,
+        src: str,
+        to: str | None,
     ) -> None:
         """Move each streamed description along a rename of its file or
         a directory above it; lose it to a removal of either or to a file
         renamed over it, as a descriptor keeps writing an unlinked file.
-        The op's names are taken as it acts on them, a final link itself.
+        The op's names are walked before it runs, as the kernel walks
+        them, a final link itself: a rename can change the links that
+        spelled them.
         shortcut: only the line's own ops are seen, so a change from
         another session or through FUSE leaves the old name bound; carry
         a backend's file identity once every VFS reports one.
@@ -1111,12 +1121,9 @@ class Dispatcher:
             streamed (tuple[tuple[FileDescription,
                 Callable[[], Awaitable[None]]], ...]): the caller's
                 streamed descriptions.
-            name (str): the op that ran, one of ``UNLINKING_OPS``.
-            path (PathSpec): its path.
-            dst (PathSpec | None): a rename's destination.
+            src (str): what the op renamed or removed.
+            to (str | None): where a rename put it, None for a removal.
         """
-        src = self._spelled(path, last=False)
-        to = None if dst is None else self._spelled(dst, last=False)
         for file, _ in streamed:
             at = file.where.virtual
             if owner_prefix((src,), at) is not None:
