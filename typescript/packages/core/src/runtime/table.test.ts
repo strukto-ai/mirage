@@ -197,6 +197,11 @@ describe('bindCommands', () => {
     ])
   })
 
+  // Twin of test_an_explicit_empty_list_captures_nothing.
+  it('an explicit empty list captures nothing', () => {
+    expect(new PyEngine([]).captures).toEqual([])
+  })
+
   // Twin of test_a_group_in_a_class_default_expands_too.
   it('a group in a default expands too', () => {
     class GroupDefault extends Runtime {

@@ -149,6 +149,10 @@ def test_a_group_expands_to_the_interpreter_names_mirage_owns():
     assert mixed.captures == ("python3", "python", "pip", "@external")
 
 
+def test_an_explicit_empty_list_captures_nothing():
+    assert PyEngine(captures=[]).captures == ()
+
+
 def test_a_group_in_a_class_default_expands_too():
     class GroupDefault(FakeRuntime):
         captures = ("@python", "pip")
