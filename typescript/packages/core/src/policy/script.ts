@@ -312,9 +312,8 @@ export function programSource(source: string, method: PolicyMethod): string {
 
 /**
  * Whether a policy program can answer at each method it is given, found
- * without running it: it defines each one's function at its top level
- * (`programSource`), and monty parses and compiles it once
- * (`compileError`), so a typo is refused where the program is written
+ * without running it: monty parses and compiles it once (`compileError`),
+ * and it defines each one's function at its top level (`programSource`), so a typo is refused where the program is written
  * rather than as a deny on every line it judges. Given no method, only the
  * parse. Throws a clause about "script" when it cannot, naming the line.
  * Mirrors the Python `check_program`.
@@ -323,11 +322,14 @@ export async function checkProgram(
   source: string,
   methods: readonly PolicyMethod[],
 ): Promise<void> {
-  for (const method of methods) programSource(source, method)
+  // The parse first: a program indented whole defines no function at its
+  // top level, but its indent is what to fix.
   const refused = await compileError(source)
-  if (refused === null) return
-  const at = refused.line === null ? '' : ` at line ${String(refused.line)}`
-  throw new Error(`script has an error${at}: ${refused.message}`)
+  if (refused !== null) {
+    const at = refused.line === null ? '' : ` at line ${String(refused.line)}`
+    throw new Error(`script has an error${at}: ${refused.message}`)
+  }
+  for (const method of methods) programSource(source, method)
 }
 
 /**

@@ -561,6 +561,13 @@ async def test_a_program_monty_cannot_parse_is_refused_at_its_line():
             "        return None\n",
             [],
         )
+    with pytest.raises(
+        ValueError,
+        match="script has an error at line 1: Unexpected indentation",
+    ):
+        await check_program(
+            "    def pre_command(ctx):\n        return None\n", ["pre_command"]
+        )
 
 
 def test_a_definition_in_a_string_or_a_comment_is_not_the_programs():

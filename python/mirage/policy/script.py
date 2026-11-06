@@ -360,9 +360,9 @@ def program_source(source: str, method: str) -> str:
 
 async def check_program(source: str, methods: Sequence[str]) -> None:
     """Whether a policy program can answer at each method it is given,
-    found without running it: it defines each one's function at its top
-    level (``program_source``), and monty parses and compiles it once
-    (``compile_error``), so a typo is refused where the program is
+    found without running it: monty parses and compiles it once
+    (``compile_error``), and it defines each one's function at its top
+    level (``program_source``), so a typo is refused where the program is
     written rather than as a deny on every line it judges. Given no
     method, only the parse. Mirrors the TypeScript ``checkProgram``.
 
@@ -375,13 +375,14 @@ async def check_program(source: str, methods: Sequence[str]) -> None:
             line.
         ImportError: the ``monty`` extra is not installed.
     """
+    # The parse first: a program indented whole defines no function at
+    # its top level, but its indent is what to fix.
+    refused = await compile_error(source)
+    if refused is not None:
+        at = "" if refused.line is None else f" at line {refused.line}"
+        raise ValueError(f"script has an error{at}: {refused.message}")
     for method in methods:
         program_source(source, method)
-    refused = await compile_error(source)
-    if refused is None:
-        return
-    at = "" if refused.line is None else f" at line {refused.line}"
-    raise ValueError(f"script has an error{at}: {refused.message}")
 
 
 def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:

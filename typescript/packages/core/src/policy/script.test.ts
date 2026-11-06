@@ -962,6 +962,9 @@ describe('checkProgram', () => {
         [],
       ),
     ).rejects.toThrow('script has an error at line 2: Expected `:`, found newline')
+    await expect(
+      checkProgram('    def pre_command(ctx):\n        return None\n', ['preCommand']),
+    ).rejects.toThrow('script has an error at line 1: Unexpected indentation')
   })
 })
 
