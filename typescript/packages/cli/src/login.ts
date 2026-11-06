@@ -23,6 +23,21 @@ import {
   PROTECTED_RESOURCE_PATH,
 } from '@struktoai/mirage-server/auth/config'
 
+import { readDaemonTable } from '@struktoai/mirage-server/daemon_config'
+import { mirageHome } from '@struktoai/mirage-server/paths'
+import {
+  checkName,
+  currentName,
+  currentWorkspace,
+  header,
+  HOSTED,
+  HOSTED_URL,
+  LOCAL,
+  localUrl,
+  loginPath,
+  readContexts,
+  writeContexts,
+} from './context.ts'
 import {
   LoginError,
   endsAt,
@@ -255,15 +270,64 @@ export async function tokenLogin(url: string, token: string): Promise<Login> {
   }
 }
 
+/** The context a login makes when given no `--name`: `strukto` for the hosted console, `local` for this machine, else the server's host. */
+export function contextName(url: string): string {
+  if (url === HOSTED_URL) return HOSTED
+  if (isLocalUrl(url)) return LOCAL
+  return new URL(url).hostname.toLowerCase()
+}
+
+/** The team a login acts for, as the server's `/v1/me` names it, or null when it names none. */
+export async function teamOf(url: string, token: string): Promise<string | null> {
+  let reply: Response
+  try {
+    reply = await fetch(`${url}/v1/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch {
+    return null
+  }
+  const team = reply.ok ? (await jsonBody(reply)).team_id : undefined
+  return typeof team === 'string' && team !== '' ? team : null
+}
+
+/**
+ * Keep a context for `url` and make it current. It keeps its workspace
+ * while it points at the same server; `local` keeps no URL when `url` is
+ * the one it follows anyway.
+ */
+async function saveContext(name: string, url: string, login: Login | null): Promise<void> {
+  const contexts = readContexts()
+  const kept = contexts.contexts[name]
+  let stored = url
+  if (name === LOCAL) {
+    contexts.contexts[LOCAL] = { url: '', team: null, workspace: null }
+    if (url === localUrl(readDaemonTable(mirageHome(process.env)), contexts)) stored = ''
+  }
+  contexts.contexts[name] = {
+    url: stored,
+    team: login !== null ? await teamOf(url, login.access_token) : null,
+    workspace: kept !== undefined && kept.url === stored ? kept.workspace : null,
+  }
+  contexts.current = name
+  writeContexts(contexts)
+}
+
 export function registerLoginCommands(program: Command): void {
   program
     .command('login')
-    .description('Log in to the server the CLI points at.')
+    .description('Log in to a server and make it the current context.')
+    .argument('[url]', 'The server; the hosted console when left out')
+    .option(
+      '--name <name>',
+      "Name the context; by default strukto for the hosted console, local for this machine, else the server's host",
+    )
     .option(
       '--token <token>',
       'Keep this token instead of using the browser; - reads it from stdin',
     )
-    .action(async (opts: { token?: string }) => {
+    .action(async (given: string | undefined, opts: { name?: string; token?: string }) => {
       let token = opts.token
       if (token === '-') {
         const chunks: Buffer[] = []
@@ -271,42 +335,53 @@ export function registerLoginCommands(program: Command): void {
         token = Buffer.concat(chunks).toString('utf-8').trim()
         if (token === '') fail('no token on stdin')
       }
-      const url = rstripSlash(loadDaemonSettings().url)
+      const url = rstripSlash(given ?? HOSTED_URL)
+      const name = checkName(opts.name ?? contextName(url))
       const login =
         token !== undefined && token !== '' ? await tokenLogin(url, token) : await browserLogin(url)
+      await saveContext(name, url, login)
       if (login === null) {
         process.stdout.write(noLogin(url) + '\n')
         return
       }
-      writeLogin(login)
+      writeLogin(login, loginPath(name))
+      header('logged in', name)
       const account = tokenClaims(login.access_token).sub
       const who = typeof account === 'string' ? ` as ${account}.` : '.'
       process.stdout.write(`Logged in to ${url}${who}\n`)
     })
   program
     .command('logout')
-    .description('Forget the stored login.')
+    .description('Sign out of the current context; the context stays.')
     .action(() => {
       const login = removeLogin()
       process.stdout.write(login !== null ? `Logged out of ${login.url}.\n` : 'Not logged in.\n')
     })
   program
     .command('whoami')
-    .description('Print who the login is for, and when to log in again.')
+    .description(
+      'Print the current context: its server, team, user and workspace, and when to log in again.',
+    )
     .action(() => {
       const url = rstripSlash(loadDaemonSettings().url)
-      const login = readLogin()
-      if (login?.url !== url) fail(`not logged in to ${url}`)
-      const account = tokenClaims(login.access_token).sub
+      const contexts = readContexts()
+      const name = currentName(contexts)
+      const stored = readLogin(loginPath(name))
+      const login = stored?.url === url ? stored : null
+      const account = login !== null ? tokenClaims(login.access_token).sub : undefined
       emit(
         {
-          account: typeof account === 'string' ? account : null,
+          context: name,
           url,
-          renew_by: new Date(renewBy(login) * 1000).toISOString().slice(0, 10),
+          team: contexts.contexts[name]?.team ?? null,
+          user: typeof account === 'string' ? account : null,
+          workspace: currentWorkspace(),
+          renew_by:
+            login !== null ? new Date(renewBy(login) * 1000).toISOString().slice(0, 10) : null,
         },
         (row) =>
           Object.entries(row)
-            .map(([k, v]) => `${k}: ${String(v)}`)
+            .map(([k, v]) => `${k}: ${v === null ? '-' : String(v)}`)
             .join('\n'),
       )
     })

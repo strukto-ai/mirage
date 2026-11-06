@@ -15,6 +15,7 @@
 import base64
 import hashlib
 import html
+import logging
 import secrets
 import sys
 import threading
@@ -29,6 +30,20 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import typer
 
+from mirage.cli.context import (
+    HOSTED,
+    HOSTED_URL,
+    LOCAL,
+    Context,
+    check_name,
+    current_name,
+    current_workspace,
+    header,
+    local_url,
+    login_path,
+    read_contexts,
+    write_contexts,
+)
 from mirage.cli.credentials import (
     Login,
     LoginError,
@@ -42,6 +57,8 @@ from mirage.cli.credentials import (
 )
 from mirage.cli.output import emit, fail
 from mirage.cli.settings import is_local_url, load_daemon_settings
+from mirage.server.daemon_config import read_daemon_table
+from mirage.server.paths import mirage_home
 from mirage.server.auth.config import (
     AUTHORIZATION_SERVER_PATH,
     PROTECTED_RESOURCE_PATH,
@@ -51,6 +68,8 @@ from mirage.types import JsonValue
 CALLBACK_PATH = "/callback"
 CALLBACK_TIMEOUT_SECONDS = 300
 SCOPE = "profile email offline_access"
+
+logger = logging.getLogger(__name__)
 
 
 def no_login(url: str) -> str:
@@ -310,7 +329,85 @@ def token_login(url: str, token: str) -> Login:
     )
 
 
+def context_name(url: str) -> str:
+    """The context a login makes when given no ``--name``.
+
+    Args:
+        url (str): the server.
+
+    Returns:
+        str: ``strukto`` for the hosted console, ``local`` for this
+            machine, else the server's host.
+    """
+    if url == HOSTED_URL:
+        return HOSTED
+    if is_local_url(url):
+        return LOCAL
+    return (urlsplit(url).hostname or "").lower()
+
+
+def team_of(url: str, token: str) -> str | None:
+    """The team a login acts for, as the server's ``/v1/me`` names it.
+
+    Args:
+        url (str): the server.
+        token (str): the login's token.
+
+    Returns:
+        str | None: the team, or None when the server names none.
+    """
+    try:
+        reply = httpx.get(
+            f"{url}/v1/me",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30,
+        )
+    except httpx.RequestError as e:
+        logger.debug("%s/v1/me is out of reach: %s", url, e)
+        return None
+    team = json_body(reply).get("team_id") if reply.is_success else None
+    return team if isinstance(team, str) and team else None
+
+
+def save_context(name: str, url: str, login: Login | None) -> None:
+    """Keep a context for ``url`` and make it current.
+
+    It keeps its workspace while it points at the same server.
+    ``local`` keeps no URL when ``url`` is the one it follows anyway.
+
+    Args:
+        name (str): the context.
+        url (str): the server.
+        login (Login | None): the login, when the server has one.
+    """
+    contexts = read_contexts()
+    kept = contexts.contexts.get(name)
+    stored = url
+    if name == LOCAL:
+        contexts.contexts[LOCAL] = Context()
+        if url == local_url(read_daemon_table(mirage_home()), contexts):
+            stored = ""
+    contexts.contexts[name] = Context(
+        url=stored,
+        team=team_of(url, login.access_token) if login else None,
+        workspace=kept.workspace
+        if kept is not None and kept.url == stored
+        else None,
+    )
+    contexts.current = name
+    write_contexts(contexts)
+
+
 def login_cmd(
+    url: str | None = typer.Argument(
+        None, help="The server; the hosted console when left out."
+    ),
+    name: str | None = typer.Option(
+        None,
+        "--name",
+        help="Name the context; by default strukto for the hosted "
+        "console, local for this machine, else the server's host.",
+    ),
     token: str | None = typer.Option(
         None,
         "--token",
@@ -318,46 +415,66 @@ def login_cmd(
         "from stdin.",
     ),
 ) -> None:
-    """Log in to the server the CLI points at.
+    """Log in to a server and make it the current context.
 
     Opens the browser on the server's sign-in, or keeps ``--token``
     (``-`` reads it from stdin, out of the shell's history). Every
-    command then sends the login's token to that server, and to no
-    other; the login lasts 30 days.
+    command in the context then sends the login's token to that
+    server, and to no other; the login lasts 30 days.
     """
     if token == "-":
         token = sys.stdin.read().strip()
         if not token:
             fail("no token on stdin")
-    url = load_daemon_settings().url.rstrip("/")
-    login = token_login(url, token) if token else browser_login(url)
+    target = (url or HOSTED_URL).rstrip("/")
+    context = check_name(name or context_name(target))
+    login = token_login(target, token) if token else browser_login(target)
+    save_context(context, target, login)
     if login is None:
-        typer.echo(no_login(url))
+        typer.echo(no_login(target))
         return
-    write_login(login)
+    write_login(login, login_path(context))
+    header("logged in", context)
     account = token_claims(login.access_token).get("sub")
-    typer.echo(f"Logged in to {url}" + (f" as {account}." if account else "."))
+    typer.echo(
+        f"Logged in to {target}" + (f" as {account}." if account else ".")
+    )
 
 
 def logout_cmd() -> None:
-    """Forget the stored login."""
+    """Sign out of the current context; the context stays."""
     login = remove_login()
     typer.echo(f"Logged out of {login.url}." if login else "Not logged in.")
 
 
 def whoami_cmd() -> None:
-    """Print who the login is for, and when to log in again."""
+    """Print the current context: its server, team, user and
+    workspace, and when to log in again."""
     url = load_daemon_settings().url.rstrip("/")
-    login = read_login()
-    if login is None or login.url != url:
-        fail(f"not logged in to {url}")
-    account = token_claims(login.access_token).get("sub")
-    renew = datetime.fromtimestamp(renew_by(login), timezone.utc)
+    contexts = read_contexts()
+    name = current_name(contexts)
+    login = read_login(login_path(name))
+    if login is not None and login.url != url:
+        login = None
+    renew = (
+        datetime.fromtimestamp(renew_by(login), timezone.utc).strftime(
+            "%Y-%m-%d"
+        )
+        if login
+        else None
+    )
     emit(
         {
-            "account": account,
+            "context": name,
             "url": url,
-            "renew_by": renew.strftime("%Y-%m-%d"),
+            "team": contexts.contexts[name].team,
+            "user": token_claims(login.access_token).get("sub")
+            if login
+            else None,
+            "workspace": current_workspace(),
+            "renew_by": renew,
         },
-        human=lambda row: "\n".join(f"{k}: {v}" for k, v in row.items()),
+        human=lambda row: "\n".join(
+            f"{k}: {'-' if v is None else v}" for k, v in row.items()
+        ),
     )

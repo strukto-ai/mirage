@@ -94,7 +94,7 @@ def test_a_login_ends_30_days_after_sign_in_however_often_refreshed(
 
 def test_an_ended_token_with_nothing_to_refresh_asks_to_log_in(tmp_path):
     pasted = _login(refresh_token=None, expires_at=time.time() - 1)
-    with pytest.raises(LoginError, match="expired; run `mirage login`"):
+    with pytest.raises(LoginError, match="expired; run `mirage login https://mirage.example.com`"):
         fresh_token(pasted, tmp_path / "login.json")
 
 

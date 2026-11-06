@@ -19,7 +19,9 @@ from urllib.parse import quote
 import typer
 
 from mirage.cli.client import make_client
+from mirage.cli.context import resolve_workspace
 from mirage.cli.output import emit, handle_response
+from mirage.cli.vfs import WORKSPACE
 
 app = typer.Typer(
     help="The session's agent tools, as MCP serves them.", no_args_is_help=True
@@ -27,7 +29,7 @@ app = typer.Typer(
 
 
 def call_tool(
-    workspace_id: str,
+    workspace_id: str | None,
     session_id: str | None,
     name: str,
     arguments: dict[str, Any],
@@ -38,11 +40,13 @@ def call_tool(
     exits 1 when the tool failed.
 
     Args:
-        workspace_id (str): the workspace.
+        workspace_id (str | None): the workspace; the current one when
+            None.
         session_id (str | None): the session; None is the default.
         name (str): the tool.
         arguments (dict[str, Any]): the tool's input.
     """
+    workspace_id = resolve_workspace(workspace_id)
     path = f"/v1/workspaces/{quote(workspace_id, safe='')}/tools/{name}"
     params = {"session_id": session_id} if session_id else None
     with make_client() as client:
@@ -56,9 +60,7 @@ def call_tool(
 
 def read_cmd(
     path: str = typer.Argument(..., help="File to read."),
-    workspace_id: str = typer.Option(
-        ..., "--workspace_id", "--workspace", "-w", help="Workspace id."
-    ),
+    workspace_id: str | None = WORKSPACE,
     session_id: str | None = typer.Option(
         None, "--session_id", "--session", "-s", help="Session id."
     ),
@@ -80,9 +82,7 @@ def read_cmd(
 
 def write_cmd(
     path: str = typer.Argument(..., help="File to write."),
-    workspace_id: str = typer.Option(
-        ..., "--workspace_id", "--workspace", "-w", help="Workspace id."
-    ),
+    workspace_id: str | None = WORKSPACE,
     session_id: str | None = typer.Option(
         None, "--session_id", "--session", "-s", help="Session id."
     ),
@@ -103,9 +103,7 @@ def edit_cmd(
     new_string: str = typer.Argument(
         ..., help="The text to put in its place."
     ),
-    workspace_id: str = typer.Option(
-        ..., "--workspace_id", "--workspace", "-w", help="Workspace id."
-    ),
+    workspace_id: str | None = WORKSPACE,
     session_id: str | None = typer.Option(
         None, "--session_id", "--session", "-s", help="Session id."
     ),
@@ -129,9 +127,7 @@ def edit_cmd(
 
 def ls_cmd(
     path: str = typer.Argument(..., help="Directory to list."),
-    workspace_id: str = typer.Option(
-        ..., "--workspace_id", "--workspace", "-w", help="Workspace id."
-    ),
+    workspace_id: str | None = WORKSPACE,
     session_id: str | None = typer.Option(
         None, "--session_id", "--session", "-s", help="Session id."
     ),
@@ -145,9 +141,7 @@ def grep_cmd(
         ..., help="Regular expression to search for."
     ),
     path: str = typer.Argument(..., help="File or directory to search under."),
-    workspace_id: str = typer.Option(
-        ..., "--workspace_id", "--workspace", "-w", help="Workspace id."
-    ),
+    workspace_id: str | None = WORKSPACE,
     session_id: str | None = typer.Option(
         None, "--session_id", "--session", "-s", help="Session id."
     ),
@@ -213,9 +207,7 @@ def glob_cmd(
     path: str = typer.Argument(
         "/", help="Directory a relative pattern is matched under."
     ),
-    workspace_id: str = typer.Option(
-        ..., "--workspace_id", "--workspace", "-w", help="Workspace id."
-    ),
+    workspace_id: str | None = WORKSPACE,
     session_id: str | None = typer.Option(
         None, "--session_id", "--session", "-s", help="Session id."
     ),
@@ -228,9 +220,7 @@ def glob_cmd(
 
 def shell_cmd(
     command: str = typer.Argument(..., help="The command line to run."),
-    workspace_id: str = typer.Option(
-        ..., "--workspace_id", "--workspace", "-w", help="Workspace id."
-    ),
+    workspace_id: str | None = WORKSPACE,
     session_id: str | None = typer.Option(
         None, "--session_id", "--session", "-s", help="Session id."
     ),

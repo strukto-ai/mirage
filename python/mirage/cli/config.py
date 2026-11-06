@@ -29,6 +29,17 @@ from mirage.server.daemon_config import ALLOWED_KEYS, DaemonConfigError
 app = typer.Typer(
     no_args_is_help=True, help="Read and write daemon settings in config.toml."
 )
+moved = typer.Typer(
+    no_args_is_help=True,
+    help="Moved to `mirage daemon config`; this name goes in the next "
+    "release.",
+)
+
+LEAVING = {
+    "url": "the local context follows `port`, and `mirage login URL` "
+    "adds another server",
+    "socket": "nothing reads it",
+}
 
 
 def _mask(key: str, value: str) -> str:
@@ -117,6 +128,12 @@ def set_cmd(
         set_config(key, value)
     except DaemonConfigError as e:
         fail(str(e), exit_code=2)
+    if key in LEAVING:
+        typer.echo(
+            f"warning: {key} leaves config.toml in the next release: "
+            f"{LEAVING[key]}",
+            err=True,
+        )
     emit({key: value, "written": True}, human=lambda d: f"{key} = {value}")
 
 
@@ -128,3 +145,17 @@ def unset_cmd(key: str = typer.Argument(..., help="config key")) -> None:
     except DaemonConfigError as e:
         fail(str(e), exit_code=2)
     emit({key: None, "unset": True}, human=lambda d: f"unset {key}")
+
+
+@moved.callback()
+def moved_cmd() -> None:
+    """Warn that the settings moved under ``mirage daemon``."""
+    typer.echo(
+        "warning: `mirage config` moved to `mirage daemon config`", err=True
+    )
+
+
+moved.command("list")(list_cmd)
+moved.command("get")(get_cmd)
+moved.command("set")(set_cmd)
+moved.command("unset")(unset_cmd)

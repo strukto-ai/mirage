@@ -26,6 +26,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from mirage.cli.context import login_path
 from mirage.cli.credentials import LoginError, fresh_token, read_login
 from mirage.cli.env import ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT
 from mirage.cli.settings import (
@@ -96,18 +97,19 @@ class DaemonClient:
             self.held = self.settings.auth_token
             return self.held
         bound = self.settings.login
+        path = login_path(self.settings.context)
         with self._refreshing:
-            login = read_login()
+            login = read_login(path)
             if login is None or login.url != bound.url:
                 raise LoginError(
                     f"not logged in to {bound.url} any more; "
-                    "run `mirage login`"
+                    f"run `mirage login {bound.url}`"
                 )
             if login.logged_in_at != bound.logged_in_at:
                 raise LoginError(
                     f"the login to {bound.url} changed; run the command again"
                 )
-            self.held = fresh_token(login)
+            self.held = fresh_token(login, path)
             return self.held
 
     def _headers(self) -> dict[str, str]:

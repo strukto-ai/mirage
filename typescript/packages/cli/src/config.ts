@@ -18,6 +18,12 @@ import type { Command } from 'commander'
 import { emit, fail } from './output.ts'
 import { getConfig, listConfig, resolvedConfig, setConfig, unsetConfig } from './settings.ts'
 
+/** Keys that leave config.toml in the next release, and why. */
+const LEAVING: Record<string, string> = {
+  url: 'the local context follows `port`, and `mirage login URL` adds another server',
+  socket: 'nothing reads it',
+}
+
 function mask(key: string, value: string): string {
   if (key === 'auth_token' && value !== '') return '***'
   return value
@@ -75,10 +81,23 @@ function listFile(): void {
   emit(table, humanTable)
 }
 
-export function registerConfigCommands(program: Command): void {
-  const config = program
+/**
+ * `config` under `parent`: `mirage daemon config`, or, `moved`, the old
+ * `mirage config`, which warns that it moved.
+ */
+export function registerConfigCommands(parent: Command, moved = false): void {
+  const config = parent
     .command('config')
-    .description('Read and write daemon settings in config.toml.')
+    .description(
+      moved
+        ? 'Moved to `mirage daemon config`; this name goes in the next release.'
+        : 'Read and write daemon settings in config.toml.',
+    )
+  if (moved) {
+    config.hook('preAction', () => {
+      process.stderr.write('warning: `mirage config` moved to `mirage daemon config`\n')
+    })
+  }
 
   config
     .command('list')
@@ -119,6 +138,12 @@ export function registerConfigCommands(program: Command): void {
       } catch (e) {
         fail((e as Error).message, 2)
         return
+      }
+      const leaving = LEAVING[key]
+      if (leaving !== undefined) {
+        process.stderr.write(
+          `warning: ${key} leaves config.toml in the next release: ${leaving}\n`,
+        )
       }
       emit({ [key]: value, written: true }, () => `${key} = ${value}`)
     })

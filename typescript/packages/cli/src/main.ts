@@ -21,6 +21,8 @@ import { registerApiCommand } from './api.ts'
 import { DaemonUnreachable } from './client.ts'
 import { LoginError } from './credentials.ts'
 import { registerConfigCommands } from './config.ts'
+import { ContextError, registerContextCommands } from './context.ts'
+import { ENV_CONTEXT } from './env.ts'
 import { registerDaemonCommands } from './daemon.ts'
 import { registerShellCommand } from './shell.ts'
 import { registerToolCommands } from './tools.ts'
@@ -55,6 +57,11 @@ export function buildProgram(): Command {
     .name('mirage')
     .description('Mirage daemon CLI: manage workspaces and run shell lines.')
     .version(resolveVersion())
+    .option('--context <name>', 'Run this one command in another context; $MIRAGE_CONTEXT does the same')
+    .hook('preAction', (root) => {
+      const context = root.opts<{ context?: string }>().context
+      if (context !== undefined && context !== '') process.env[ENV_CONTEXT] = context
+    })
   registerWorkspaceCommands(program)
   registerSessionCommands(program)
   registerShellCommand(program)
@@ -67,12 +74,13 @@ export function buildProgram(): Command {
   registerCodexExecCommand(program)
   registerLoginCommands(program)
   registerDaemonCommands(program)
-  registerConfigCommands(program)
+  registerConfigCommands(program, true)
+  registerContextCommands(program)
   return program
 }
 
 /**
- * Entry point that turns config errors into clean exit-2 lines and an
+ * Entry point that turns config and context errors into clean exit-2 lines and an
  * unreachable daemon or an ended login into a clean exit-1 line. `argv` is
  * the arguments after the program name.
  */
@@ -80,7 +88,7 @@ export async function main(argv: string[]): Promise<void> {
   try {
     await buildProgram().parseAsync(argv, { from: 'user' })
   } catch (err) {
-    if (err instanceof DaemonConfigError) {
+    if (err instanceof DaemonConfigError || err instanceof ContextError) {
       console.error(err.message)
       process.exit(2)
     }

@@ -19,6 +19,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from mirage.cli.context import (
+    LOCAL,
+    current_name,
+    local_url,
+    login_path,
+    read_contexts,
+)
 from mirage.cli.credentials import Login, read_login
 from mirage.cli.env import ENV_DAEMON_URL, ENV_TOKEN
 from mirage.server.auth import storage as auth_storage
@@ -101,6 +108,7 @@ def is_local_url(url: str) -> bool:
 
 @dataclass
 class DaemonSettings:
+    context: str = LOCAL
     url: str = DEFAULT_DAEMON_URL
     socket: str = ""
     auth_token: str = ""
@@ -113,17 +121,14 @@ def config_path() -> Path:
 
 
 def load_daemon_settings(path: Path | None = None) -> DaemonSettings:
-    """Load daemon settings, applying the override chain.
+    """Load the settings for the current context.
 
-    Order of precedence (highest first):
-        1. ``MIRAGE_DAEMON_URL`` env var
-        2. ``MIRAGE_TOKEN`` env var
-        3. values in ``$MIRAGE_HOME/config.toml`` (default
-           ``~/.mirage/config.toml``) ``[daemon]`` table
-        4. defaults
-
-    With no token from those, a ``mirage login`` made for this URL
-    gives one, and then a local URL takes the token file's.
+    The URL is ``MIRAGE_DAEMON_URL``, else the context's: a context
+    made by ``mirage login`` keeps its URL, and ``local`` follows
+    config.toml. The token is ``MIRAGE_TOKEN``, else, for ``local``
+    only, config.toml's ``auth_token``. With neither, the context's
+    login gives one when it was made for this URL, and then a local
+    URL takes the token file's.
 
     Args:
         path (Path | None): config file location. Defaults to
@@ -141,10 +146,16 @@ def load_daemon_settings(path: Path | None = None) -> DaemonSettings:
             table = {}
     else:
         table = read_daemon_table(mirage_home())
+    contexts = read_contexts()
+    name = current_name(contexts)
+    local = name == LOCAL
     settings = DaemonSettings(
-        url=str(table.get("url", DEFAULT_DAEMON_URL)),
-        socket=str(table.get("socket", "")),
-        auth_token=str(table.get("auth_token", "")),
+        context=name,
+        url=local_url(table, contexts)
+        if local
+        else contexts.contexts[name].url,
+        socket=str(table.get("socket", "")) if local else "",
+        auth_token=str(table.get("auth_token", "")) if local else "",
         idle_grace_seconds=float(table.get("idle_grace_seconds", 30.0)),
     )
     env_url = os.environ.get(ENV_DAEMON_URL)
@@ -154,7 +165,7 @@ def load_daemon_settings(path: Path | None = None) -> DaemonSettings:
     if env_token:
         settings.auth_token = env_token
     if not settings.auth_token:
-        login = read_login()
+        login = read_login(login_path(name))
         if login is not None and login.url == settings.url.rstrip("/"):
             settings.login = login
             return settings

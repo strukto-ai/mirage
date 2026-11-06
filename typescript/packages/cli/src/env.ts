@@ -15,6 +15,7 @@
 export { ENV_AUTH_MODE, ENV_AUTH_TOKEN } from '@struktoai/mirage-server/auth/config'
 export { ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from '@struktoai/mirage-server/env'
 
+export const ENV_CONTEXT = 'MIRAGE_CONTEXT'
 export const ENV_DAEMON_URL = 'MIRAGE_DAEMON_URL'
 export const ENV_SESSION = 'MIRAGE_SESSION'
 export const ENV_TOKEN = 'MIRAGE_TOKEN'
