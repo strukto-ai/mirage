@@ -11,5 +11,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-class ContextError(RuntimeError):
-    """A context that does not exist, or one that cannot be changed."""
+
+import pytest
+
+
+@pytest.fixture
+def home(tmp_path, monkeypatch):
+    """A fresh mirage home with no context, workspace, URL, port or token
+    from the environment."""
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    for name in (
+        "MIRAGE_CONTEXT",
+        "MIRAGE_WORKSPACE",
+        "MIRAGE_DAEMON_URL",
+        "MIRAGE_DAEMON_PORT",
+        "MIRAGE_TOKEN",
+    ):
+        monkeypatch.setenv(name, "")
+    return tmp_path

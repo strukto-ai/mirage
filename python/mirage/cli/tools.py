@@ -19,8 +19,8 @@ from urllib.parse import quote
 import typer
 
 from mirage.cli.client import make_client
-from mirage.cli.context import resolve_workspace
 from mirage.cli.output import emit, handle_response
+from mirage.cli.settings import resolve_workspace
 from mirage.cli.vfs import WORKSPACE
 
 app = typer.Typer(

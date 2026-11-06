@@ -15,8 +15,18 @@
 import time
 
 import pytest
+from typer.testing import CliRunner
 
-from mirage.cli.credentials import Login, write_login
+from mirage.cli.credentials import (
+    Context,
+    Contexts,
+    Login,
+    login_path,
+    read_contexts,
+    write_contexts,
+    write_login,
+)
+from mirage.cli.main import app
 from mirage.cli.settings import (
     DEFAULT_DAEMON_URL,
     config_path,
@@ -24,6 +34,8 @@ from mirage.cli.settings import (
     is_local_url,
     list_config,
     load_daemon_settings,
+    local_url,
+    resolve_workspace,
     resolved_config,
     set_config,
     unset_config,
@@ -330,3 +342,60 @@ def test_a_set_token_comes_before_the_login(tmp_path, monkeypatch):
     settings = load_daemon_settings(path=tmp_path / "config.toml")
     assert settings.auth_token == "from-env"
     assert settings.login is None
+
+
+def test_local_follows_the_daemon_port_after_its_own_url_and_config(
+    home,
+    monkeypatch,
+):
+    contexts = read_contexts()
+    assert local_url({}, contexts) == "http://127.0.0.1:8765"
+    assert local_url({"port": 9100}, contexts) == "http://127.0.0.1:9100"
+    monkeypatch.setenv("MIRAGE_DAEMON_PORT", "9200")
+    assert local_url({"port": 9100}, contexts) == "http://127.0.0.1:9200"
+    table = {"url": "http://127.0.0.1:9300"}
+    assert local_url(table, contexts) == "http://127.0.0.1:9300"
+    contexts.contexts["local"].url = "http://127.0.0.1:9400"
+    assert local_url(table, contexts) == "http://127.0.0.1:9400"
+
+
+def test_a_remote_context_gets_its_login_never_config_tokens(home):
+    (home / "config.toml").write_text('[daemon]\nauth_token = "local-only"\n')
+    write_contexts(
+        Contexts(
+            current="dev",
+            contexts={"dev": Context(url="https://dev.example", team="acme")},
+        )
+    )
+    assert load_daemon_settings().auth_token == ""
+    write_login(
+        Login(
+            url="https://dev.example",
+            access_token="from-login",
+            logged_in_at=time.time(),
+        ),
+        login_path("dev"),
+    )
+    settings = load_daemon_settings()
+    assert (settings.context, settings.url, settings.auth_token) == (
+        "dev",
+        "https://dev.example",
+        "",
+    )
+    assert settings.login.access_token == "from-login"
+
+
+def test_the_workspace_is_the_flag_then_env_then_the_context(
+    home, monkeypatch
+):
+    write_contexts(Contexts(contexts={"local": Context(workspace="kept")}))
+    assert resolve_workspace(None) == "kept"
+    monkeypatch.setenv("MIRAGE_WORKSPACE", "env")
+    assert resolve_workspace(None) == "env"
+    assert resolve_workspace("flag") == "flag"
+
+
+def test_no_workspace_selected_gives_a_hint(home):
+    done = CliRunner().invoke(app, ["shell", "-c", "true"])
+    assert done.exit_code == 2
+    assert "run `mirage workspace use <id>` or pass -w" in done.output

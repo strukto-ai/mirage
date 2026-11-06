@@ -13,21 +13,28 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import os
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from mirage.cli.constants import LOCAL
-from mirage.cli.context import (
+import typer
+
+from mirage.cli.constants import DEFAULT_PORT, LOCAL
+from mirage.cli.credentials import (
+    ContextError,
+    Contexts,
+    Login,
     current_name,
-    local_url,
     login_path,
     read_contexts,
+    read_login,
+    update_contexts,
 )
-from mirage.cli.credentials import Login, read_login
-from mirage.cli.env import ENV_DAEMON_URL, ENV_TOKEN
+from mirage.cli.env import ENV_DAEMON_URL, ENV_TOKEN, ENV_WORKSPACE
+from mirage.cli.output import fail
 from mirage.server.auth import storage as auth_storage
 from mirage.server.auth.config import CONFIG_ENV_KEYS
 from mirage.server.daemon_config import (
@@ -89,6 +96,100 @@ _ENV_FOR_KEY = {
     "port": ENV_DAEMON_PORT,
     **SSH_ENV_KEYS,
 }
+
+
+def local_url(table: dict[str, Any], contexts: Contexts) -> str:
+    """The ``local`` context's URL: the one it logged in to, else
+    config.toml's ``url`` (until that key goes), else this machine at
+    the port a spawned daemon listens on.
+
+    Args:
+        table (dict[str, Any]): config.toml's ``[daemon]`` table.
+        contexts (Contexts): the contexts.
+
+    Returns:
+        str: the URL.
+    """
+    port = (
+        os.environ.get(ENV_DAEMON_PORT)
+        or str(table.get("port", ""))
+        or DEFAULT_PORT
+    )
+    return (
+        contexts.contexts[LOCAL].url
+        or str(table.get("url", ""))
+        or f"http://127.0.0.1:{port}"
+    )
+
+
+def current_workspace() -> str | None:
+    """The workspace a command uses when given none:
+    ``$MIRAGE_WORKSPACE``, else the current context's.
+
+    Returns:
+        str | None: the workspace, or None when none is selected.
+    """
+    env = os.environ.get(ENV_WORKSPACE)
+    if env:
+        return env
+    contexts = read_contexts()
+    return contexts.contexts[current_name(contexts)].workspace
+
+
+def resolve_workspace(given: str | None) -> str:
+    """The workspace to act on: ``-w``, else ``$MIRAGE_WORKSPACE``,
+    else the current context's.
+
+    Args:
+        given (str | None): the ``-w`` value.
+
+    Returns:
+        str: the workspace.
+    """
+    found = given or current_workspace()
+    if not found:
+        fail(
+            "no workspace selected · run `mirage workspace use <id>` "
+            "or pass -w",
+            2,
+        )
+    return found
+
+
+def header(action: str, name: str | None = None) -> None:
+    """Say on a terminal which context and team a command acted in,
+    as ``strukto · team acme · created demo``.
+
+    Args:
+        action (str): what the command did.
+        name (str | None): the context; the current one when None.
+    """
+    if not sys.stderr.isatty():
+        return
+    contexts = read_contexts()
+    name = name or current_name(contexts)
+    team = contexts.contexts[name].team
+    parts = [name, *([f"team {team}"] if team else []), action]
+    typer.echo(" · ".join(parts), err=True)
+
+
+def use_workspace(name: str, workspace_id: str) -> None:
+    """Make a workspace a context's current one.
+
+    Args:
+        name (str): the context, as the command chose it.
+        workspace_id (str): the workspace.
+
+    Raises:
+        ContextError: the context was deleted meanwhile.
+    """
+
+    def change(contexts: Contexts) -> None:
+        if name not in contexts.contexts:
+            raise ContextError(f"no context {name!r}")
+        contexts.contexts[name].workspace = workspace_id
+
+    update_contexts(change)
 
 
 def is_local_url(url: str) -> bool:

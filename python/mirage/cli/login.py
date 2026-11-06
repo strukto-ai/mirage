@@ -30,31 +30,34 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import typer
 
-from mirage.cli.constants import HOSTED, HOSTED_URL, LOCAL
-from mirage.cli.context import (
-    check_name,
-    current_name,
-    current_workspace,
-    header,
-    local_url,
-    login_path,
-    read_contexts,
-    update_contexts,
-)
+from mirage.cli.constants import HOSTED, HOSTED_URL, LOCAL, LOGINS_DIR
 from mirage.cli.credentials import (
+    Context,
+    ContextError,
+    Contexts,
     Login,
     LoginError,
+    check_name,
+    current_name,
     ends_at,
     json_body,
+    login_path,
+    read_contexts,
     read_login,
     remove_login,
     renew_by,
     token_claims,
+    update_contexts,
     write_login,
 )
-from mirage.cli.output import emit, fail
-from mirage.cli.settings import is_local_url, load_daemon_settings
-from mirage.cli.types import Context, Contexts
+from mirage.cli.output import emit, fail, format_table
+from mirage.cli.settings import (
+    current_workspace,
+    header,
+    is_local_url,
+    load_daemon_settings,
+    local_url,
+)
 from mirage.server.auth.config import (
     AUTHORIZATION_SERVER_PATH,
     PROTECTED_RESOURCE_PATH,
@@ -66,6 +69,11 @@ from mirage.types import JsonValue
 CALLBACK_PATH = "/callback"
 CALLBACK_TIMEOUT_SECONDS = 300
 SCOPE = "profile email offline_access"
+
+context_app = typer.Typer(
+    no_args_is_help=True,
+    help="The servers the CLI talks to: list, switch, forget.",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -480,3 +488,75 @@ def whoami_cmd() -> None:
             f"{k}: {'-' if v is None else v}" for k, v in row.items()
         ),
     )
+
+
+@context_app.command("list")
+def list_cmd() -> None:
+    """List the contexts; the current one is marked."""
+    contexts = read_contexts()
+    current = current_name(contexts)
+    table = read_daemon_table(mirage_home())
+    rows = [
+        {
+            "name": name,
+            "url": entry.url or local_url(table, contexts),
+            "team": entry.team,
+            "workspace": entry.workspace,
+            "current": name == current,
+        }
+        for name, entry in sorted(contexts.contexts.items())
+    ]
+    emit(
+        rows,
+        human=lambda items: format_table(
+            ["", "NAME", "URL", "TEAM", "WORKSPACE"],
+            [
+                [
+                    "*" if r["current"] else "",
+                    r["name"],
+                    r["url"],
+                    r["team"] or "",
+                    r["workspace"] or "",
+                ]
+                for r in items
+            ],
+        ),
+    )
+
+
+@context_app.command("use")
+def use_cmd(name: str = typer.Argument(..., help="Context name.")) -> None:
+    """Make a context the current one."""
+
+    def change(contexts: Contexts) -> None:
+        if name not in contexts.contexts:
+            raise ContextError(
+                f"no context {name!r}; run `mirage context list`"
+            )
+        contexts.current = name
+
+    update_contexts(change)
+    header("now current", name)
+    emit({"current": name}, human=lambda d: f"Using context {name}.")
+
+
+@context_app.command("delete")
+def delete_cmd(
+    name: str = typer.Argument(..., help="Context name."),
+) -> None:
+    """Forget a context and its login; ``local`` stays."""
+    if name == LOCAL:
+        raise ContextError("the local context cannot be deleted")
+
+    def change(contexts: Contexts) -> None:
+        if name not in contexts.contexts:
+            raise ContextError(
+                f"no context {name!r}; run `mirage context list`"
+            )
+        del contexts.contexts[name]
+        if contexts.current == name:
+            contexts.current = LOCAL
+
+    update_contexts(change)
+    (mirage_home() / LOGINS_DIR / f"{name}.json").unlink(missing_ok=True)
+    emit({"deleted": name}, human=lambda d: f"Deleted context {name}.")

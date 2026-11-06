@@ -15,7 +15,7 @@
 import { buffer } from 'node:stream/consumers'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
-import { resolveWorkspace } from './context.ts'
+import { resolveWorkspace } from './settings.ts'
 import { emit, handleResponse } from './output.ts'
 
 interface Target {

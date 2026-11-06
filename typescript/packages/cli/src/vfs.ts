@@ -25,7 +25,7 @@ import {
   type VfsCall,
 } from '@struktoai/mirage-server/vfs_calls'
 import { makeClient } from './client.ts'
-import { resolveWorkspace } from './context.ts'
+import { resolveWorkspace } from './settings.ts'
 import { emit, handleResponse } from './output.ts'
 
 interface Target {

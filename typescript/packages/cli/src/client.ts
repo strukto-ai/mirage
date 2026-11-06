@@ -24,8 +24,7 @@ import { readDaemonTable, validateDaemonTable } from '@struktoai/mirage-server/d
 import { mirageHome } from '@struktoai/mirage-server/paths'
 
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
-import { loginCommand, loginPath } from './context.ts'
-import { LoginError, freshToken, readLogin } from './credentials.ts'
+import { LoginError, freshToken, loginCommand, loginPath, readLogin } from './credentials.ts'
 import { isLocalUrl, loadDaemonSettings, type DaemonSettings } from './settings.ts'
 
 const requireFromHere = createRequire(import.meta.url)

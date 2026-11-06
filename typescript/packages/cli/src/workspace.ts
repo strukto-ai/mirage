@@ -17,7 +17,7 @@ import { dirname, resolve } from 'node:path'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
-import { header, useWorkspace } from './context.ts'
+import { header, useWorkspace } from './settings.ts'
 import { emit, fail, formatAge, formatTable, handleResponse } from './output.ts'
 
 // A config handed to `load` or `clone`: env-interpolated, and with its

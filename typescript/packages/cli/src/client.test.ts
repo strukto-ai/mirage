@@ -187,7 +187,13 @@ describe('DaemonClient token', () => {
   })
 
   function client(kept: Login): DaemonClient {
-    return new DaemonClient({ context: 'local', url: login.url, idleGraceSeconds: 30, authToken: '', login: kept })
+    return new DaemonClient({
+      context: 'local',
+      url: login.url,
+      idleGraceSeconds: 30,
+      authToken: '',
+      login: kept,
+    })
   }
 
   it("is the settings' own, else the login's", async () => {

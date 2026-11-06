@@ -16,7 +16,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { loginPath } from './context.ts'
+import { loginPath } from './credentials.ts'
 import { writeLogin, type Login } from './credentials.ts'
 import {
   DEFAULT_DAEMON_URL,
@@ -141,7 +141,10 @@ describe('loadDaemonSettings', () => {
   it('takes a set token before the login', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-settings-'))
     try {
-      writeLogin(storedLogin('https://mirage.example.com'), loginPath('local', { MIRAGE_HOME: dir }))
+      writeLogin(
+        storedLogin('https://mirage.example.com'),
+        loginPath('local', { MIRAGE_HOME: dir }),
+      )
       const s = loadDaemonSettings({
         env: {
           MIRAGE_HOME: dir,

@@ -620,10 +620,16 @@
     "login_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
     "logout_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
     "whoami_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
-    "QuietHandler": "Python's http.server serves through a handler class, whose access log is silenced here; Node's createServer takes the handler as a function and logs nothing."
+    "QuietHandler": "Python's http.server serves through a handler class, whose access log is silenced here; Node's createServer takes the handler as a function and logs nothing.",
+    "context_app": "The Typer group of the context verbs; commander builds the same group in registerContextCommands.",
+    "list_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "use_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "delete_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
    },
    "typescript_only": {
-    "registerLoginCommands": "commander registers commands through a function; Typer's are the module functions login_cmd, logout_cmd and whoami_cmd."
+    "registerLoginCommands": "commander registers commands through a function; Typer's are the module functions login_cmd, logout_cmd and whoami_cmd.",
+    "registerContextCommands": "Commander builds the context group in one function; Typer declares it as context_app.",
+    "ContextRow": "The shape of a `context list` row, which Python leaves as a dict."
    }
   },
   "server/routers/oauth": {
@@ -662,7 +668,8 @@
   },
   "utils/yaml": {
    "python_only": {
-    "_YamlLoader": "PyYAML needs a SafeLoader subclass to recognize exponent-only floats without changing yaml.safe_load globally; TypeScript's yaml package already uses YAML 1.2 exponent resolution. Both loaders read the shared YAML scalar fixture."
+    "_YamlLoader": "PyYAML needs a SafeLoader subclass to recognize exponent-only floats without changing yaml.safe_load globally; TypeScript's yaml package already uses YAML 1.2 exponent resolution. Both loaders read the shared YAML scalar fixture.",
+    "_YamlDumper": "PyYAML quotes a string on dump by the dumper's resolvers, so a SafeDumper subclass shares the loader's; TypeScript sets the same rules with YAML 1.1 stringify options in dumpYaml."
    }
   },
   "utils/dates": {
@@ -1278,20 +1285,6 @@
     "PlainLoader": "PyYAML drops a resolver by subclassing its loader; the TypeScript yaml package filters its tags in the parse options."
    }
   },
-  "cli/context": {
-   "python_only": {
-    "app": "The Typer group of the context verbs; commander builds the same group in registerContextCommands.",
-    "list_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
-    "use_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
-    "delete_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
-   },
-   "typescript_only": {
-    "registerContextCommands": "Commander builds the context group in one function; Typer declares it as the module's app.",
-    "ContextRow": "The shape of a `context list` row, which Python leaves as a dict.",
-    "Env": "An environment map passed to the readers, so tests need no process.env; Python reads os.environ.",
-    "emptyContext": "A fresh Context record; Python's Context dataclass has these defaults."
-   }
-  },
   "cli/main": {
    "python_only": {
     "root": "The Typer callback that takes the root --context option; commander takes it with a preAction hook in buildProgram."
@@ -1312,6 +1305,18 @@
     "registerTemplateCommands": "Commander builds the template group in one function; Typer declares it as the module's app.",
     "Template": "The shape of a template answer, which Python leaves as a dict.",
     "call": "One client request per verb; each Typer verb opens its client inline."
+   }
+  },
+  "cli/credentials": {
+   "typescript_only": {
+    "Env": "An environment map passed to the readers, so tests need no process.env; Python reads os.environ.",
+    "emptyContext": "A fresh Context record; Python's Context dataclass has these defaults.",
+    "statOrNull": "Node's statSync throws on a missing file; Python catches FileNotFoundError inline at each stat."
+   }
+  },
+  "cli/settings": {
+   "typescript_only": {
+    "Env": "An environment map passed to the readers, so tests need no process.env; Python reads os.environ."
    }
   }
  }
