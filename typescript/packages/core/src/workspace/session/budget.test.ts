@@ -150,6 +150,22 @@ describe('max_env', () => {
     expect([out, code]).toEqual(['150\n', 0])
   })
 
+  it('counts the prefix value a global declaration holds aside', async () => {
+    const [out, err, code] = await run(
+      'f() { declare -g X=1 Y=$(printf %0100d 0); }; X=$(printf %0100d 0) f; echo after',
+    )
+    expect([out, code]).toEqual(['', 2])
+    expect(err).toContain('past max_env of 200 bytes')
+  })
+
+  it('counts the global while arithmetic a global declaration runs steps back', async () => {
+    const [out, err, code] = await run(
+      `X=$(printf %0100d 0); Y=11; f() { declare -gi Y='Z=1234567890123456789,0' X; }; X= f; echo after`,
+    )
+    expect([out, code]).toEqual(['', 2])
+    expect(err).toContain('past max_env of 200 bytes')
+  })
+
   it('stops counting the set-aside value once the prefix is restored', async () => {
     const [out, , code] = await run('X=$(printf %0100d 0); X= eval :; Y=$(printf %050d 0); echo ok')
     expect([out, code]).toEqual(['ok\n', 0])

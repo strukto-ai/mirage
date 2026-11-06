@@ -20,7 +20,7 @@ import type { ShellValue, ShellVar } from '../../shell/variable.ts'
 import { createAsyncContext } from '../../utils/async_context.ts'
 import { byteLength } from '../../utils/sanitize.ts'
 import { ENV_EXHAUSTED_STATUS } from './constants.ts'
-import type { SessionState } from './session.ts'
+import { type SessionState, sessionEntry } from './session.ts'
 
 // The running workspace's max_env, null for no cap.
 const limits = createAsyncContext<number | null>()
@@ -109,18 +109,22 @@ export function envBytes(session: SessionState): number {
 }
 
 /**
- * The bytes the records running prefix assignments set aside hold. A
- * `declare -g` that reaches past one swaps that record into the variables,
- * where it is counted, and holds the running value aside in its place.
- * Mirrors Python's `saves_bytes`.
+ * The bytes the records running prefix assignments set aside hold, each
+ * record once. A `declare -g` that reaches past one, and the arithmetic it
+ * runs, swap records between the variables, the save and `reached`; a record
+ * the variables hold is counted there. Mirrors Python's `saves_bytes`.
  */
 export function savesBytes(session: SessionState): number {
+  const saves = new Set<ReadonlyMap<string, ShellVar | null>>(session.prefixSaves)
+  const heldAside: [string, ShellVar | null][] = []
+  for (const saved of saves) for (const entry of saved) heldAside.push(entry)
+  for (const [name, frame, running] of session.reached) {
+    if (saves.has(frame)) heldAside.push([name, running])
+  }
   let held = 0
-  for (const saved of session.prefixSaves) {
-    for (const [name, record] of saved) {
-      const swap = session.reached.find(([n, frame]) => frame === saved && n === name)
-      const kept = swap === undefined ? record : swap[2]
-      if (kept !== null) held += recordBytes(name, kept)
+  for (const [name, record] of heldAside) {
+    if (record !== null && record !== sessionEntry(session.vars, name)) {
+      held += recordBytes(name, record)
     }
   }
   return held

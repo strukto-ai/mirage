@@ -95,29 +95,29 @@ def frames_bytes(call_stack: CallStack) -> int:
 
 
 def saves_bytes(session: SessionState) -> int:
-    """The bytes the records running prefix assignments set aside hold.
+    """The bytes the records running prefix assignments set aside hold,
+    each record once.
 
-    A ``declare -g`` that reaches past one swaps that record into the
-    variables, where it is counted, and holds the running value aside in
-    its place.
+    A ``declare -g`` that reaches past one, and the arithmetic it runs,
+    swap records between the variables, the save and ``_reached``; a
+    record the variables hold is counted there.
 
     Args:
         session (SessionState): the session.
     """
-    held = 0
-    for saved in session._prefix_saves:
-        for n, var in saved.items():
-            var = next(
-                (
-                    running
-                    for name, frame, running in session._reached
-                    if frame is saved and name == n
-                ),
-                var,
-            )
-            if var is not None:
-                held += entry_bytes(n, var.value)
-    return held
+    saves = session._prefix_saves
+    frames = {id(saved) for saved in saves}
+    held_aside = [(n, var) for saved in saves for n, var in saved.items()]
+    held_aside += [
+        (n, running)
+        for n, frame, running in session._reached
+        if id(frame) in frames
+    ]
+    return sum(
+        entry_bytes(n, var.value)
+        for n, var in held_aside
+        if var is not None and var is not session.vars.get(n)
+    )
 
 
 def env_bytes(session: SessionState) -> int:

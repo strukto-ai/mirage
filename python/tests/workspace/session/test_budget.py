@@ -170,6 +170,26 @@ async def test_a_global_declaration_past_a_prefix_counts_the_record_once():
 
 
 @pytest.mark.asyncio
+async def test_a_global_declaration_counts_the_prefix_value_it_holds_aside():
+    out, err, code = await run(
+        "f() { declare -g X=1 Y=$(printf %0100d 0); };"
+        " X=$(printf %0100d 0) f; echo after"
+    )
+    assert (out, code) == ("", 2)
+    assert "past max_env of 200 bytes" in err
+
+
+@pytest.mark.asyncio
+async def test_arithmetic_a_global_declaration_runs_counts_the_global():
+    out, err, code = await run(
+        "X=$(printf %0100d 0); Y=11;"
+        " f() { declare -gi Y='Z=1234567890123456789,0' X; }; X= f; echo after"
+    )
+    assert (out, code) == ("", 2)
+    assert "past max_env of 200 bytes" in err
+
+
+@pytest.mark.asyncio
 async def test_a_prefix_s_set_aside_value_stops_counting_once_restored():
     out, _, code = await run(
         "X=$(printf %0100d 0); X= eval :; Y=$(printf %050d 0); echo ok"
