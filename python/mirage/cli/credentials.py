@@ -23,10 +23,9 @@ from pathlib import Path
 
 import httpx
 
-from mirage.server.paths import mirage_home
+from mirage.cli.context import current_name, login_path, read_contexts
 from mirage.types import JsonValue
 
-LOGIN_FILE = "login.json"
 LOGIN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 REFRESH_MARGIN_SECONDS = 60
 
@@ -40,7 +39,7 @@ class LoginError(RuntimeError):
 
 @dataclass
 class Login:
-    """What ``mirage login`` keeps, for the one server it logged in to.
+    """What ``mirage login`` keeps, for the one server a context is.
 
     Args:
         url (str): the server the token is for; it goes nowhere else.
@@ -79,20 +78,22 @@ def renew_by(login: Login) -> float:
     return ends
 
 
-def login_path() -> Path:
-    return mirage_home() / LOGIN_FILE
+def current_login_path() -> Path:
+    """The current context's login file."""
+    return login_path(current_name(read_contexts()))
 
 
 def read_login(path: Path | None = None) -> Login | None:
     """Read the stored login.
 
     Args:
-        path (Path | None): the login file; defaults to ``login_path()``.
+        path (Path | None): the login file; defaults to the current
+            context's.
 
     Returns:
         Login | None: the login, or None when there is none.
     """
-    use = path if path is not None else login_path()
+    use = path if path is not None else current_login_path()
     if not use.exists():
         return None
     return Login(**json.loads(use.read_text()))
@@ -103,9 +104,10 @@ def write_login(login: Login, path: Path | None = None) -> None:
 
     Args:
         login (Login): the login.
-        path (Path | None): the login file; defaults to ``login_path()``.
+        path (Path | None): the login file; defaults to the current
+            context's.
     """
-    use = path if path is not None else login_path()
+    use = path if path is not None else current_login_path()
     use.parent.mkdir(parents=True, exist_ok=True)
     staged = use.with_name(f".{use.name}.{os.getpid()}")
     fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -118,12 +120,13 @@ def remove_login(path: Path | None = None) -> Login | None:
     """Forget the stored login.
 
     Args:
-        path (Path | None): the login file; defaults to ``login_path()``.
+        path (Path | None): the login file; defaults to the current
+            context's.
 
     Returns:
         Login | None: the login removed, or None when there was none.
     """
-    use = path if path is not None else login_path()
+    use = path if path is not None else current_login_path()
     login = read_login(use)
     use.unlink(missing_ok=True)
     return login
@@ -192,7 +195,7 @@ def fresh_token(login: Login, path: Path | None = None) -> str:
     Args:
         login (Login): the login; updated in place on a refresh.
         path (Path | None): the login file a refresh is stored in;
-            defaults to ``login_path()``.
+            defaults to the current context's.
 
     Returns:
         str: a token to send.
@@ -202,7 +205,7 @@ def fresh_token(login: Login, path: Path | None = None) -> str:
             nothing to refresh it, or the issuer refused the refresh.
     """
     now = time.time()
-    again = f"run `mirage login` to log in to {login.url} again"
+    again = f"run `mirage login {login.url}` to log in again"
     if now >= login.logged_in_at + LOGIN_MAX_AGE_SECONDS:
         raise LoginError(f"the login is 30 days old; {again}")
     if login.expires_at is None or now < (

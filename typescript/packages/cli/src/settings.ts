@@ -53,7 +53,8 @@ import {
 } from '@struktoai/mirage-server/ssh/constants'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { loginPath, readLogin, type Login } from './credentials.ts'
+import { currentName, LOCAL, localUrl, loginPath, readContexts } from './context.ts'
+import { readLogin, type Login } from './credentials.ts'
 import { ENV_DAEMON_URL, ENV_TOKEN } from './env.ts'
 
 export const DEFAULT_DAEMON_URL = 'http://127.0.0.1:8765'
@@ -77,6 +78,8 @@ export function isLocalUrl(url: string): boolean {
 }
 
 export interface DaemonSettings {
+  /** The context the settings are for. */
+  context: string
   url: string
   authToken: string
   idleGraceSeconds: number
@@ -84,6 +87,14 @@ export interface DaemonSettings {
   login?: Login
 }
 
+/**
+ * The settings for the current context. The URL is `MIRAGE_DAEMON_URL`,
+ * else the context's: a context made by `mirage login` keeps its URL, and
+ * `local` follows config.toml. The token is `MIRAGE_TOKEN`, else, for
+ * `local` only, config.toml's `auth_token`. With neither, the context's
+ * login gives one when it was made for this URL, and then a local URL
+ * takes the token file's.
+ */
 export function loadDaemonSettings(
   options: {
     env?: Record<string, string | undefined>
@@ -98,9 +109,13 @@ export function loadDaemonSettings(
         ? parseDaemonTable(readFileSync(options.configPath, 'utf-8'))
         : {}
       : readDaemonTable(mirageHome(env))
+  const contexts = readContexts(env)
+  const name = currentName(contexts, env)
+  const local = name === LOCAL
   const settings: DaemonSettings = {
-    url: table.url ?? DEFAULT_DAEMON_URL,
-    authToken: table.auth_token ?? '',
+    context: name,
+    url: local ? localUrl(table, contexts, env) : (contexts.contexts[name]?.url ?? ''),
+    authToken: local ? (table.auth_token ?? '') : '',
     idleGraceSeconds: Number(table.idle_grace_seconds ?? '30'),
   }
   const envUrl = env[ENV_DAEMON_URL]
@@ -112,7 +127,7 @@ export function loadDaemonSettings(
     settings.authToken = envToken
   }
   if (settings.authToken === '') {
-    const login = readLogin(loginPath(env))
+    const login = readLogin(loginPath(name, env))
     if (login !== null && login.url === rstripSlash(settings.url)) {
       settings.login = login
       return settings

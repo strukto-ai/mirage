@@ -22,10 +22,9 @@ import {
   writeSync,
   closeSync,
 } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { mirageHome } from '@struktoai/mirage-server/paths'
+import { basename, dirname, join } from 'node:path'
+import { currentName, loginPath, readContexts } from './context.ts'
 
-const LOGIN_FILE = 'login.json'
 export const LOGIN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 const REFRESH_MARGIN_SECONDS = 60
 
@@ -35,7 +34,7 @@ export class LoginError extends Error {
 }
 
 /**
- * What `mirage login` keeps, for the one server it logged in to: the
+ * What `mirage login` keeps, for the one server a context is: the
  * server the token is for (it goes nowhere else), the bearer token, when
  * the user signed in (the login ends 30 days later, however often it was
  * refreshed), the refresh token (null for a pasted token), when the
@@ -61,20 +60,21 @@ export function renewBy(login: Login): number {
   return ends
 }
 
-export function loginPath(env: Record<string, string | undefined> = process.env): string {
-  return join(mirageHome(env), LOGIN_FILE)
+/** The current context's login file. */
+export function currentLoginPath(env: Record<string, string | undefined> = process.env): string {
+  return loginPath(currentName(readContexts(env), env), env)
 }
 
 /** The stored login, or null when there is none. */
-export function readLogin(path: string = loginPath()): Login | null {
+export function readLogin(path: string = currentLoginPath()): Login | null {
   if (!existsSync(path)) return null
   return JSON.parse(readFileSync(path, 'utf-8')) as Login
 }
 
 /** Store a login, readable by this user only. */
-export function writeLogin(login: Login, path: string = loginPath()): void {
+export function writeLogin(login: Login, path: string = currentLoginPath()): void {
   mkdirSync(dirname(path), { recursive: true })
-  const staged = join(dirname(path), `.${LOGIN_FILE}.${String(process.pid)}`)
+  const staged = join(dirname(path), `.${basename(path)}.${String(process.pid)}`)
   const fd = openSync(staged, 'w', 0o600)
   try {
     writeSync(fd, JSON.stringify(login, null, 2))
@@ -85,7 +85,7 @@ export function writeLogin(login: Login, path: string = loginPath()): void {
 }
 
 /** Forget the stored login; returns the login removed, or null when there was none. */
-export function removeLogin(path: string = loginPath()): Login | null {
+export function removeLogin(path: string = currentLoginPath()): Login | null {
   const login = readLogin(path)
   rmSync(path, { force: true })
   return login
@@ -129,9 +129,9 @@ export function endsAt(body: Record<string, unknown>, now: number): number | nul
  * `LoginError` when the login is over 30 days old, its token ended with
  * nothing to refresh it, or the issuer refused the refresh.
  */
-export async function freshToken(login: Login, path: string = loginPath()): Promise<string> {
+export async function freshToken(login: Login, path: string = currentLoginPath()): Promise<string> {
   const now = Date.now() / 1000
-  const again = `run \`mirage login\` to log in to ${login.url} again`
+  const again = `run \`mirage login ${login.url}\` to log in again`
   if (now >= login.logged_in_at + LOGIN_MAX_AGE_SECONDS) {
     throw new LoginError(`the login is 30 days old; ${again}`)
   }

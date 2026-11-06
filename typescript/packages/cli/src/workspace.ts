@@ -17,6 +17,7 @@ import { dirname, resolve } from 'node:path'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
+import { header, useWorkspace } from './context.ts'
 import { emit, fail, formatAge, formatTable, handleResponse } from './output.ts'
 
 // A config handed to `load` or `clone`: env-interpolated, and with its
@@ -312,7 +313,9 @@ export function registerWorkspaceCommands(program: Command): void {
           )
           return
         }
-        emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
+        const created = (await handleResponse(r)) as WorkspaceDetail
+        header(`created ${created.id}`)
+        emit(created, formatWorkspaceDetail)
       },
     )
 
@@ -342,20 +345,29 @@ export function registerWorkspaceCommands(program: Command): void {
       )
     })
 
+  ws.command('use')
+    .description("Make a workspace the current context's, for the commands that take -w.")
+    .argument('<id>', 'Workspace id')
+    .action(async (id: string) => {
+      const c = makeClient()
+      await c.ensureRunning({ allowSpawn: false })
+      await handleResponse(await c.request('GET', `/v1/workspaces/${encodeURIComponent(id)}`))
+      useWorkspace(id)
+      header(`using ${id}`)
+      emit({ workspace: id }, () => `Using workspace ${id}.`)
+    })
+
   ws.command('delete')
     .description('Stop and remove a workspace.')
     .argument('<id>')
     .action(async (id: string) => {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
-      emit(
-        (await handleResponse(
-          await c.request('DELETE', `/v1/workspaces/${encodeURIComponent(id)}`),
-        )) as {
-          id: string
-        },
-        (d) => `Deleted workspace ${d.id}.`,
-      )
+      const deleted = (await handleResponse(
+        await c.request('DELETE', `/v1/workspaces/${encodeURIComponent(id)}`),
+      )) as { id: string }
+      header(`deleted ${id}`)
+      emit(deleted, (d) => `Deleted workspace ${d.id}.`)
     })
 
   ws.command('close')
@@ -364,14 +376,11 @@ export function registerWorkspaceCommands(program: Command): void {
     .action(async (id: string) => {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
-      emit(
-        (await handleResponse(
-          await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/close`),
-        )) as {
-          id: string
-        },
-        (d) => `Closed workspace ${d.id}.`,
-      )
+      const closed = (await handleResponse(
+        await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/close`),
+      )) as { id: string }
+      header(`closed ${id}`)
+      emit(closed, (d) => `Closed workspace ${d.id}.`)
     })
 
   ws.command('cancel')
@@ -602,7 +611,9 @@ export function registerWorkspaceCommands(program: Command): void {
                 name: 'snapshot',
                 data: createReadStream(tarPath),
               })
-        emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
+        const created = (await handleResponse(r)) as WorkspaceDetail
+        header(`created ${created.id}`)
+        emit(created, formatWorkspaceDetail)
       },
     )
 }

@@ -23,6 +23,7 @@ import typer
 import yaml
 
 from mirage.cli.client import make_client
+from mirage.cli.context import header, use_workspace
 from mirage.cli.output import (
     emit,
     fail,
@@ -275,8 +276,11 @@ def create_cmd(
             json=body,
             params={"explain": "true"} if explain else None,
         )
+    created = handle_response(r)
+    if not explain and isinstance(created, dict):
+        header(f"created {created.get('id')}")
     emit(
-        handle_response(r),
+        created,
         human=_format_workspace_explanation
         if explain
         else _format_workspace_detail,
@@ -311,6 +315,24 @@ def get_cmd(
     emit(handle_response(r), human=_format_workspace_detail)
 
 
+@app.command("use")
+def use_cmd(workspace_id: str = typer.Argument(..., help="Workspace id.")) -> None:
+    """Make a workspace the current context's, for the commands that
+    take ``-w``."""
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "GET", f"/v1/workspaces/{quote(workspace_id, safe='')}"
+        )
+    handle_response(r)
+    use_workspace(workspace_id)
+    header(f"using {workspace_id}")
+    emit(
+        {"workspace": workspace_id},
+        human=lambda d: f"Using workspace {workspace_id}.",
+    )
+
+
 @app.command("delete")
 def delete_cmd(workspace_id: str = typer.Argument(...)) -> None:
     """Stop and remove a workspace."""
@@ -319,7 +341,9 @@ def delete_cmd(workspace_id: str = typer.Argument(...)) -> None:
         r = client.request(
             "DELETE", f"/v1/workspaces/{quote(workspace_id, safe='')}"
         )
-    emit(handle_response(r), human=lambda d: f"Deleted workspace {d['id']}.")
+    deleted = handle_response(r)
+    header(f"deleted {workspace_id}")
+    emit(deleted, human=lambda d: f"Deleted workspace {d['id']}.")
 
 
 @app.command("close")
@@ -330,7 +354,9 @@ def close_cmd(workspace_id: str = typer.Argument(...)) -> None:
         r = client.request(
             "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/close"
         )
-    emit(handle_response(r), human=lambda d: f"Closed workspace {d['id']}.")
+    closed = handle_response(r)
+    header(f"closed {workspace_id}")
+    emit(closed, human=lambda d: f"Closed workspace {d['id']}.")
 
 
 @app.command("cancel")

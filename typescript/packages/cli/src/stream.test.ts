@@ -118,6 +118,7 @@ describe('stream HTTP lifecycle', () => {
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
     const { port } = server.address() as AddressInfo
     const client = new DaemonClient({
+      context: 'local',
       url: `http://127.0.0.1:${String(port)}`,
       authToken: '',
       idleGraceSeconds: 30,
@@ -176,6 +177,7 @@ describe('stream HTTP lifecycle', () => {
       await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
       const { port } = server.address() as AddressInfo
       const client = new DaemonClient({
+        context: 'local',
         url: `http://127.0.0.1:${String(port)}`,
         authToken: '',
         idleGraceSeconds: 30,

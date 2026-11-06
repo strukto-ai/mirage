@@ -93,9 +93,9 @@ async function runMcp(
  */
 async function deleteWorkspace(client: DaemonClient, workspaceId: string): Promise<void> {
   const path = `/v1/workspaces/${encodeURIComponent(workspaceId)}`
-  const { url, idleGraceSeconds } = client.settings
+  const { context, url, idleGraceSeconds } = client.settings
   const attempt = (bearer: string): Promise<Response> =>
-    new DaemonClient({ url, idleGraceSeconds, authToken: bearer }).request('DELETE', path)
+    new DaemonClient({ context, url, idleGraceSeconds, authToken: bearer }).request('DELETE', path)
   let done = await attempt(client.held)
   if (done.status === 401 && client.settings.login !== undefined) {
     let fresh: string

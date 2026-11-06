@@ -14,6 +14,7 @@
 
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
+import { resolveWorkspace } from './context.ts'
 import { emit, fail } from './output.ts'
 import { answer, post } from './vfs.ts'
 
@@ -78,7 +79,7 @@ export function registerShellCommand(program: Command): void {
   program
     .command('shell')
     .description('Run a shell line in a workspace.')
-    .requiredOption('-w, --workspace <id>', 'Workspace id')
+    .option('-w, --workspace <id>', 'Workspace id; the current workspace when left out')
     .requiredOption('-c, --command <command>', 'Shell line to run')
     .option('-s, --session <id>', 'Session id')
     .option('--cwd <path>', 'Working directory for this line (a workspace path)')
@@ -87,7 +88,7 @@ export function registerShellCommand(program: Command): void {
     .option('--explain', 'Say what the line would do, as a tree; run nothing')
     .action(
       async (opts: {
-        workspace: string
+        workspace?: string
         command: string
         session?: string
         cwd?: string
@@ -95,17 +96,18 @@ export function registerShellCommand(program: Command): void {
         explain?: boolean
         json?: boolean
       }) => {
+        const workspace = resolveWorkspace(opts.workspace)
         const body: Record<string, unknown> = { command: opts.command }
         if (opts.cwd !== undefined) body.cwd = opts.cwd
         if (opts.runtime !== undefined) body.runtime = opts.runtime
         if (opts.explain === true) {
-          const said = await answer(await post(opts, 'shell', body))
+          const said = await answer(await post({ ...opts, workspace }, 'shell', body))
           emit(said as ExplanationRecord, opts.json === true ? undefined : formatExplanation)
           return
         }
         const session =
           opts.session === undefined ? '' : `session_id=${encodeURIComponent(opts.session)}`
-        const path = `/v1/workspaces/${encodeURIComponent(opts.workspace)}/shell`
+        const path = `/v1/workspaces/${encodeURIComponent(workspace)}/shell`
         const c = makeClient()
         await c.ensureRunning({ allowSpawn: false })
         const { streamShell } = await import('./stream.ts')

@@ -25,10 +25,12 @@ import {
   type VfsCall,
 } from '@struktoai/mirage-server/vfs_calls'
 import { makeClient } from './client.ts'
+import { resolveWorkspace } from './context.ts'
 import { emit, handleResponse } from './output.ts'
 
 interface Target {
-  workspace: string
+  /** The workspace; the current one when left out. */
+  workspace?: string
   session?: string
   explain?: boolean
 }
@@ -41,13 +43,14 @@ export async function post(
   route: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
+  const workspace = resolveWorkspace(target.workspace)
   const c = makeClient()
   await c.ensureRunning({ allowSpawn: false })
   const query = new URLSearchParams()
   if (target.session !== undefined) query.set('session_id', target.session)
   if (target.explain === true) query.set('explain', 'true')
   const suffix = query.size === 0 ? '' : `?${query.toString()}`
-  const path = `/v1/workspaces/${encodeURIComponent(target.workspace)}/${route}${suffix}`
+  const path = `/v1/workspaces/${encodeURIComponent(workspace)}/${route}${suffix}`
   return c.request('POST', path, { body: JSON.stringify(body) })
 }
 
@@ -133,7 +136,7 @@ function command(vfs: Command, call: VfsCall): void {
     }
   }
   cmd
-    .requiredOption('-w, --workspace <id>', 'Workspace id')
+    .option('-w, --workspace <id>', 'Workspace id; the current workspace when left out')
     .option('-s, --session <id>', 'Session id')
     .option('--explain', 'Say what the call would do; run nothing')
     .action(async (...given: unknown[]) => {
@@ -164,7 +167,7 @@ export function registerVfsCommands(program: Command): void {
     .command('glob')
     .description('Every path a pattern matches, as the session sees them.')
     .argument('<pattern>', 'Pathname pattern such as /**/*.py')
-    .requiredOption('-w, --workspace <id>', 'Workspace id')
+    .option('-w, --workspace <id>', 'Workspace id; the current workspace when left out')
     .option('-s, --session <id>', 'Session id')
     .action(async (pattern: string, opts: Target) => {
       emit(await answer(await post(opts, 'glob', { pattern })), lines)

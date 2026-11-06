@@ -23,6 +23,7 @@ import httpx
 import typer
 
 from mirage.cli.client import make_client
+from mirage.cli.context import resolve_workspace
 from mirage.cli.output import emit, handle_response
 from mirage.server.vfs_calls import (
     BYTES,
@@ -40,7 +41,11 @@ app = typer.Typer(
 )
 
 WORKSPACE = typer.Option(
-    ..., "--workspace_id", "--workspace", "-w", help="Workspace id."
+    None,
+    "--workspace_id",
+    "--workspace",
+    "-w",
+    help="Workspace id; the current workspace when left out.",
 )
 SESSION = typer.Option(
     None, "--session_id", "--session", "-s", help="Session id."
@@ -51,7 +56,7 @@ EXPLAIN = typer.Option(
 
 
 def post(
-    workspace_id: str,
+    workspace_id: str | None,
     route: str,
     body: dict[str, Any],
     session_id: str | None,
@@ -60,7 +65,8 @@ def post(
     """Send one session call to the daemon.
 
     Args:
-        workspace_id (str): the workspace.
+        workspace_id (str | None): the workspace; the current one when
+            None.
         route (str): the call's route under the workspace.
         body (dict[str, Any]): its arguments.
         session_id (str | None): the session; None is the default.
@@ -71,6 +77,7 @@ def post(
         params["session_id"] = session_id
     if explain:
         params["explain"] = "true"
+    workspace_id = resolve_workspace(workspace_id)
     path = f"/v1/workspaces/{quote(workspace_id, safe='')}/{route}"
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
@@ -193,7 +200,7 @@ def command(call: VfsCall) -> Callable[..., None]:
             annotation=kind,
         )
         for name, default, kind in (
-            ("workspace_id", WORKSPACE, str),
+            ("workspace_id", WORKSPACE, str | None),
             ("session_id", SESSION, str | None),
             ("explain", EXPLAIN, bool),
         )
@@ -212,7 +219,7 @@ def glob_cmd(
     pattern: str = typer.Argument(
         ..., help="Pathname pattern such as /**/*.py."
     ),
-    workspace_id: str = WORKSPACE,
+    workspace_id: str | None = WORKSPACE,
     session_id: str | None = SESSION,
 ) -> None:
     """Every path a pattern matches, as the session sees them."""
