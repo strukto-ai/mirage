@@ -737,6 +737,7 @@ fn ask_out(engine: &mut Engine, ask: Ask) -> Item {
             body,
             node,
             span,
+            read,
         } => Item::list([
             Item::text("substitute"),
             Item::int(engine.adopt(shell)),
@@ -745,6 +746,7 @@ fn ask_out(engine: &mut Engine, ask: Ask) -> Item {
             Item::opt(span, |(start, end)| {
                 Item::list([Item::int(start), Item::int(end)])
             }),
+            Item::opt(read, |field| Item::Text(marked(&field.0))),
         ]),
         Ask::ProcessSubstitution { shell, node } => Item::list([
             Item::text("process"),

@@ -545,7 +545,8 @@ function idSource(ids: () => number): number {
 function drawId(source: number): number {
   try {
     return (idSources.get(source)?.() ?? 0) >>> 0
-  } catch {
+  } catch (error) {
+    console.debug('id source failed, seeding from 0:', error)
     return 0
   }
 }
@@ -561,7 +562,14 @@ export type ShellRecord = readonly [RawValue, string, Managed | null]
 
 /** A request a running task waits on. */
 export type Ask =
-  | readonly ['substitute', Shell, string, ShellTreeNode, readonly [number, number] | null]
+  | readonly [
+      'substitute',
+      Shell,
+      string,
+      ShellTreeNode,
+      readonly [number, number] | null,
+      string | null,
+    ]
   | readonly ['process', Shell, ShellTreeNode]
   | readonly ['gate', boolean, 'set' | 'unset', string, string | null, string | null, Shell]
   | readonly ['pause']
@@ -993,6 +1001,7 @@ export class ShellTask {
           asked[2] as string,
           this.node(asked[3] ?? null),
           (asked[4] ?? null) as readonly [number, number] | null,
+          (asked[5] ?? null) as string | null,
         ]
       case 'process':
         return ['process', Shell.adopt(asked[1] as number), this.node(asked[2] ?? null)]

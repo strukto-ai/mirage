@@ -46,7 +46,7 @@ export async function childLine(
   node: TSNodeLike,
   callStack: CallStack | null,
   span?: readonly [number, number] | null,
-  options: NonNullable<Parameters<ProcessSubLine>[1]> & { records?: ShellVars } = {},
+  options: NonNullable<Parameters<ProcessSubLine>[1]> & { records?: ShellVars; read?: string } = {},
 ): Promise<IOResult> {
   const session = context.session
   return executeFn(text, {
@@ -89,6 +89,7 @@ export class ExpandHost implements TaskHost {
     body: string,
     node: ShellTreeNode,
     span: readonly [number, number] | null,
+    read: string | null,
   ): Promise<[Uint8Array, Uint8Array, number]> {
     const context = this.context
     // The session's own shell is the running expansion's until it ends;
@@ -103,6 +104,7 @@ export class ExpandHost implements TaskHost {
     try {
       io = await childLine(context, this.executeFn, body, this.node(node), this.callStack, span, {
         records: new ShellVars(shell),
+        ...(read === null ? {} : { read }),
       })
     } finally {
       records.shell = held

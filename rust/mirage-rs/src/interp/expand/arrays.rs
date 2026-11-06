@@ -72,7 +72,7 @@ impl<H: Host> Expander<'_, H> {
     ) -> Result<Vec<Chunk>, Fault> {
         let star = p.subscript.as_deref().or(p.name.as_deref()) == Some(b"*");
         let joiner = if star {
-            ifs_joiner(self.shell.ifs())
+            ifs_joiner(self.shell.ifs(), self.shell.utf8())
         } else {
             b" ".to_vec()
         };

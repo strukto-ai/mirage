@@ -98,12 +98,22 @@ impl Field {
 }
 
 /// What `"$*"` joins the parameters with: IFS's first character, a space
-/// when IFS is unset and nothing when it is empty.
-pub fn ifs_joiner(ifs: Option<&[u8]>) -> Vec<u8> {
+/// when IFS is unset and nothing when it is empty. A character is a whole
+/// UTF-8 sequence when `utf8`, else a byte.
+pub fn ifs_joiner(ifs: Option<&[u8]>, utf8: bool) -> Vec<u8> {
     match ifs {
         None => b" ".to_vec(),
-        Some(ifs) => ifs.iter().take(1).copied().collect(),
+        Some(ifs) => char_at(ifs, utf8).to_vec(),
     }
+}
+
+/// The character `text` starts with: its UTF-8 sequence when `utf8` and
+/// the bytes form one, else its first byte; empty for empty text.
+fn char_at(text: &[u8], utf8: bool) -> &[u8] {
+    if text.is_empty() {
+        return text;
+    }
+    &text[..if utf8 { patterns::char_len(text) } else { 1 }]
 }
 
 /// A splat's elements, a field boundary between each two.
@@ -138,9 +148,19 @@ pub fn join(chunks: &[Chunk]) -> Vec<u8> {
 /// one. A splat boundary always ends a field. A field exists once literal
 /// or quoted text, or a split value that is not empty, opened it, so an
 /// unquoted expansion that comes back empty is no word while `""` is one.
-pub fn split_fields(chunks: &[Chunk], ifs: Option<&[u8]>) -> Vec<Field> {
+/// Under `utf8` a separator is a whole character, so `IFS=é` splits on
+/// `é` alone and never inside `à`.
+pub fn split_fields(chunks: &[Chunk], ifs: Option<&[u8]>, utf8: bool) -> Vec<Field> {
     let separators = ifs.unwrap_or(IFS_DEFAULT);
-    let blank = |b: u8| IFS_DEFAULT.contains(&b) && separators.contains(&b);
+    let mut set: Vec<&[u8]> = Vec::new();
+    let mut rest = separators;
+    while !rest.is_empty() {
+        let c = char_at(rest, utf8);
+        set.push(c);
+        rest = &rest[c.len()..];
+    }
+    let separator = |text: &[u8]| set.contains(&char_at(text, utf8));
+    let blank = |text: &[u8]| IFS_DEFAULT.contains(&text[0]) && separator(text);
     let mut fields = Vec::new();
     let mut current = Field::default();
     let mut started = false;
@@ -164,24 +184,23 @@ pub fn split_fields(chunks: &[Chunk], ifs: Option<&[u8]>) -> Vec<Field> {
         let text = &piece.text;
         let mut index = 0;
         while index < text.len() {
-            let end = text[index..]
-                .iter()
-                .position(|b| separators.contains(b))
-                .map_or(text.len(), |at| index + at);
+            let mut end = index;
+            while end < text.len() && !separator(&text[end..]) {
+                end += char_at(&text[end..], utf8).len();
+            }
             if end > index {
                 current.push(&text[index..end], false);
                 started = true;
                 index = end;
                 continue;
             }
-            let mut end = end;
-            while end < text.len() && blank(text[end]) {
+            while end < text.len() && blank(&text[end..]) {
                 end += 1;
             }
-            let hard = end < text.len() && separators.contains(&text[end]);
+            let hard = end < text.len() && separator(&text[end..]);
             if hard {
-                end += 1;
-                while end < text.len() && blank(text[end]) {
+                end += char_at(&text[end..], utf8).len();
+                while end < text.len() && blank(&text[end..]) {
                     end += 1;
                 }
             }
@@ -212,13 +231,16 @@ pub struct Substitution {
 pub trait Host: Gate {
     /// Run `body` in a child shell of `shell`, its output captured: the
     /// substitution `node` holds, or with `span` one backtick pair of it,
-    /// its bytes within the node's text.
+    /// its bytes within the node's text. `read` is the file of bash's
+    /// `$(< file)` as this shell expanded its name, which the host reads
+    /// instead of expanding the body's name a second time.
     fn substitute(
         &mut self,
         shell: &mut Shell,
         body: &[u8],
         node: usize,
         span: Option<(usize, usize)>,
+        read: Option<&Field>,
     ) -> impl Future<Output = Result<Substitution, Fault>>;
 
     /// Start the process substitution `node` holds (`<(...)`, `>(...)`)
@@ -328,18 +350,11 @@ impl<H: Host> Expander<'_, H> {
     }
 
     fn writer(&mut self) -> Writer<'_, H> {
-        let outside = self
-            .shell
-            .params()
-            .iter()
-            .chain(self.shell.calls.iter().flatten())
-            .map(|arg| arg.len() + 1)
-            .sum();
         Writer {
             allexport: self.shell.option("allexport"),
             nounset: self.shell.option("nounset"),
             limit: self.shell.env_limit,
-            outside,
+            outside: self.shell.outside,
             store: &mut self.shell.vars,
             gate: self.host,
             diagnostics: Some(self.diagnostics),
@@ -394,7 +409,7 @@ impl<H: Host> Expander<'_, H> {
                 let mut out = Vec::new();
                 for mut chunks in words {
                     self.tilde(&mut chunks);
-                    out.extend(split_fields(&chunks, self.shell.ifs()));
+                    out.extend(split_fields(&chunks, self.shell.ifs(), self.shell.utf8()));
                 }
                 return Ok(out);
             }
@@ -402,7 +417,7 @@ impl<H: Host> Expander<'_, H> {
         let mut chunks = self.chunks(node, false).await?;
         self.tilde(&mut chunks);
         self.assignment_tildes(&mut chunks);
-        Ok(split_fields(&chunks, self.shell.ifs()))
+        Ok(split_fields(&chunks, self.shell.ifs(), self.shell.utf8()))
     }
 
     /// An argument shaped like an assignment (`a=~/x`, `a+=~`, `a[$k]=~`):
@@ -844,7 +859,9 @@ impl<H: Host> Expander<'_, H> {
         let params = self.shell.params();
         match name {
             b"@" => return Ok(params.join(&b' ')),
-            b"*" => return Ok(params.join(ifs_joiner(self.shell.ifs()).as_slice())),
+            b"*" => {
+                return Ok(params.join(ifs_joiner(self.shell.ifs(), self.shell.utf8()).as_slice()));
+            }
             b"#" => return Ok(params.len().to_string().into_bytes()),
             b"?" => return Ok(self.shell.status.to_string().into_bytes()),
             b"$" => return Ok(self.shell.pid.to_string().into_bytes()),
@@ -911,7 +928,7 @@ impl<H: Host> Expander<'_, H> {
         let joiner = if name == b"@" {
             b" ".to_vec()
         } else {
-            ifs_joiner(self.shell.ifs())
+            ifs_joiner(self.shell.ifs(), self.shell.utf8())
         };
         if name == b"*" && quoted {
             return Ok(vec![Chunk::value(params.join(joiner.as_slice()), true)]);

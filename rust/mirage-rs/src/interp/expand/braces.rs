@@ -354,7 +354,7 @@ impl<H: Host> Expander<'_, H> {
         names.sort();
         let star = p.star;
         let joiner = if star {
-            ifs_joiner(self.shell.ifs())
+            ifs_joiner(self.shell.ifs(), self.shell.utf8())
         } else {
             b" ".to_vec()
         };

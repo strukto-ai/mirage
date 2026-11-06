@@ -49,12 +49,13 @@ const ALLOWED: Record<string, string> = {
     'OLDPWD as part of a cd the router already authorized, not a name ' +
     'the agent chose; an agent-typed `PWD=x` is an ordinary ' +
     'assignment and goes through the session view',
-  'workspace/session/state.ts::markVar':
-    'this is the gated session view itself: the write lands after ' +
-    '`ensureVarVisible` and `preSessionGate`',
 }
 
 const DECL = /^\s*(?:export\s+)?(?:async\s+)?function\s+([A-Za-z0-9_$]+)/
+// A call of the entry point itself, as Python's twin counts calls of the bare
+// name: not the engine's own method (`shell.setAttr(`) nor its definition.
+const CALL = /(?<![.\w$])setAttr\(/
+const METHOD = /^\s*setAttr\([^)]*\)\s*:/
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = []
@@ -79,7 +80,7 @@ function callSites(): Set<string> {
     const rel = relative(SRC, file).split('\\').join('/')
     const lines = text.split('\n')
     lines.forEach((line, i) => {
-      if (!line.includes('setAttr(') || line.includes('function setAttr(')) {
+      if (!CALL.test(line) || line.includes('function setAttr(') || METHOD.test(line)) {
         return
       }
       let owner = '<top-level>'

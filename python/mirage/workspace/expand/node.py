@@ -43,6 +43,7 @@ async def child_line(
     span: tuple[int, int] | None = None,
     *,
     records: ShellVars | None = None,
+    read: str | None = None,
     stdin: ByteSource | None = None,
     sink: JobConsole | None = None,
 ) -> IOResult:
@@ -66,6 +67,9 @@ async def child_line(
             node, for a backtick region holding several.
         records (ShellVars | None): the child shell's variables, the
             copy the expansion made where the substitution stood.
+        read (str | None): for ``$(< file)``, the file's name as the
+            expanding shell expanded it, which the read uses instead of
+            expanding the line's own a second time.
         stdin (ByteSource | None): the line's stdin, a process
             substitution's pipe for ``>(...)``.
         sink (JobConsole | None): where the line writes as it runs.
@@ -79,6 +83,7 @@ async def child_line(
         span=span,
         substitution=True,
         records=records,
+        read=read,
         stdin=stdin,
         sink=sink,
         call_stack=(call_stack or CallStack()).fork(paren=False),
@@ -124,6 +129,7 @@ class ExpandHost:
         body: str,
         node: ShellNode,
         span: tuple[int, int] | None,
+        read: str | None,
     ) -> tuple[bytes, bytes, int]:
         context = self.context
         # The session's own shell is the running expansion's until it
@@ -142,6 +148,7 @@ class ExpandHost:
                 self.call_stack,
                 span,
                 records=ShellVars(shell),
+                read=read,
             )
         finally:
             records.shell = held

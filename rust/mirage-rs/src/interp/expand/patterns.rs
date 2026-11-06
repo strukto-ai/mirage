@@ -292,7 +292,7 @@ pub(super) fn regex_text(runs: &[(Vec<u8>, bool)]) -> Vec<u8> {
 
 /// How many bytes the character at the start of `text` takes: one for a
 /// byte that starts no character.
-fn char_len(text: &[u8]) -> usize {
+pub(super) fn char_len(text: &[u8]) -> usize {
     let width = match text.first() {
         Some(0xC0..=0xDF) => 2,
         Some(0xE0..=0xEF) => 3,

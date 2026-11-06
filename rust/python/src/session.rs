@@ -882,12 +882,15 @@ impl ShellTask {
                 body,
                 node,
                 span,
+                read,
             } => (
                 "substitute",
                 Shell::wrap(shell),
                 text_of(py, &body)?,
                 self.node(node)?,
                 span,
+                read.map(|field| text_of(py, &marked(&field.0)))
+                    .transpose()?,
             )
                 .into_pyobject(py)?
                 .into_any(),

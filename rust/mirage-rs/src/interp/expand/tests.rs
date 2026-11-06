@@ -41,9 +41,15 @@ impl Host for Fake {
         body: &[u8],
         _: usize,
         _: Option<(usize, usize)>,
+        read: Option<&Field>,
     ) -> Result<Substitution, Fault> {
+        let mut stdout = body.to_vec();
+        for (text, quoted) in read.map(|field| field.0.as_slice()).unwrap_or_default() {
+            stdout.extend_from_slice(if *quoted { b" q:" } else { b" u:" });
+            stdout.extend_from_slice(text);
+        }
         Ok(Substitution {
-            stdout: [body, b"\n\n"].concat(),
+            stdout: [stdout.as_slice(), b"\n\n"].concat(),
             stderr: Vec::new(),
             status: 3,
         })
@@ -144,7 +150,9 @@ fn ok(shell: &mut Shell, line: &str) -> Vec<String> {
 fn an_input_substitution_expands_its_file_in_this_shell() {
     let mut shell = shell();
     let out = words(&mut shell, r#"echo "$(< ${f:=a\'b}*)" "$(<"$x")""#).unwrap();
-    assert_eq!(out, [r"< 'a'\''b'*", "< 'a b'"]);
+    // The body goes as typed, beside the name this shell expanded: the
+    // `*` live, the quoted text quoted.
+    assert_eq!(out, [r"< ${f:=a\'b}* u:a'b*", "<\"$x\" q:a b"]);
     assert_eq!(shell.vars.scalar("f"), Some(&b"a'b"[..]));
     // A here-string folds into a `<` too, and stays the body it is.
     let out = words(&mut shell, r#"echo "$(<<<'body')""#).unwrap();
@@ -175,6 +183,44 @@ fn positional_splats() {
     assert_eq!(ok(&mut sh, "echo $@"), ["1", "2"]);
     sh.positional.clear();
     assert_eq!(ok(&mut sh, "echo \"$@\" \"${@}\" \"$*\""), [""]);
+}
+
+#[test]
+fn an_assigning_default_counts_what_the_session_holds_outside_its_variables() {
+    let mut sh = shell();
+    sh.env_limit = Some(sh.vars.held() + 100);
+    assert_eq!(ok(&mut sh, "echo ${a:=0123456789}"), ["0123456789"]);
+    sh.outside = 90;
+    let refused = words(&mut sh, "echo ${b:=0123456789}").unwrap_err();
+    assert!(refused.contains("past max_env of"), "{refused}");
+    assert!(sh.vars.record("b").is_none());
+}
+
+#[test]
+fn a_multibyte_separator_is_one_character_under_utf8_and_bytes_under_c() {
+    for (locale, x, y, joined) in [
+        ("C.UTF-8", vec!["a", "b"], vec!["a\u{e0}b"], "p\u{e9}q"),
+        (
+            "C",
+            vec!["a", "", "b"],
+            vec!["a", "\u{fffd}b"],
+            "p\u{fffd}q",
+        ),
+    ] {
+        let mut sh = shell();
+        sh.vars
+            .seed("LC_ALL", Value::Scalar(locale.as_bytes().to_vec()));
+        sh.vars
+            .seed("IFS", Value::Scalar("\u{e9}".as_bytes().to_vec()));
+        sh.vars
+            .seed("x", Value::Scalar("a\u{e9}b".as_bytes().to_vec()));
+        sh.vars
+            .seed("y", Value::Scalar("a\u{e0}b".as_bytes().to_vec()));
+        sh.positional = vec![b"p".to_vec(), b"q".to_vec()];
+        assert_eq!(ok(&mut sh, "echo $x"), x, "{locale}");
+        assert_eq!(ok(&mut sh, "echo $y"), y, "{locale}");
+        assert_eq!(ok(&mut sh, "echo \"$*\""), [joined], "{locale}");
+    }
 }
 
 #[test]

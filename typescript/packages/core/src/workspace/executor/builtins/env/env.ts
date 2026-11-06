@@ -31,7 +31,8 @@ function envError(message: string): RedirectResult {
 
 /**
  * What `env` runs and the environment it runs it in, read off its words:
- * the command's words, the environment in `environ` order, whether `-i`
+ * the command's words, the environment (the session's sorted by name, each
+ * `NAME=VALUE` replacing its name in place or adding it last), whether `-i`
  * cleared it and whether `-0` was given; or the message for words env
  * refuses. Mirrors the Python `env_child`.
  */

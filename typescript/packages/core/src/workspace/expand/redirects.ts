@@ -38,9 +38,21 @@ export async function expandRedirect(
   policies: Policies | null = null,
   forked = false,
   links: NamespaceLinks | null = null,
+  // The target's words when another shell expanded them already (`$(< file)`),
+  // glob marks kept; null expands the target here.
+  words: readonly string[] | null = null,
 ): Promise<Redirect> {
   try {
-    return await expandTarget(redirect, context, executeFn, registry, callStack, policies, links)
+    return await expandTarget(
+      redirect,
+      context,
+      executeFn,
+      registry,
+      callStack,
+      policies,
+      links,
+      words,
+    )
   } catch (error) {
     if (!(error instanceof ExitSignal) || !forked) throw error
     return new Redirect({ fd: redirect.fd, target: error, kind: RedirectKind.UNEXPANDED })
@@ -56,6 +68,7 @@ async function expandTarget(
   callStack: CallStack | null,
   policies: Policies | null,
   links: NamespaceLinks | null,
+  expanded: readonly string[] | null,
 ): Promise<Redirect> {
   const session = context.session
   if (r.kind === RedirectKind.HEREDOC || r.kind === RedirectKind.HERESTRING) {
@@ -78,7 +91,8 @@ async function expandTarget(
   const targetNode = r.targetNode as TSNodeLike | null
   let targetScope: unknown = r.target
   if (targetNode !== null) {
-    const words = await expandWords([targetNode], context, executeFn, callStack, policies)
+    const words =
+      expanded ?? (await expandWords([targetNode], context, executeFn, callStack, policies))
     const targets = await resolveGlobs(
       words.map((word) => classifyBarePath(word, registry, session.cwd, sessionAccess(session))),
       registry,

@@ -1,7 +1,7 @@
 //! `$(...)` and backticks: the body the host runs in a child shell, its
 //! output with trailing newlines removed, and `$(< file)`.
 
-use super::{Expander, Host};
+use super::{Expander, Field, Host};
 
 use crate::interp::Diagnostic;
 use crate::interp::write::Fault;
@@ -29,7 +29,7 @@ impl<H: Host> Expander<'_, H> {
                     continue;
                 }
                 let span = Some((fold + start, fold + end));
-                out.extend(self.run_substitution(&text, node, span).await?);
+                out.extend(self.run_substitution(&text, node, span, None).await?);
             }
             return Ok(out);
         }
@@ -40,11 +40,10 @@ impl<H: Host> Expander<'_, H> {
         if let Some(target) = self.input_redirect(node) {
             let fields = self.fields(target).await?;
             if let [field] = fields.as_slice() {
-                let body = [b"< ".as_slice(), &requote(&field.0)].concat();
-                return self.run_substitution(&body, node, None).await;
+                return self.run_substitution(inner, node, None, Some(field)).await;
             }
         }
-        self.run_substitution(inner, node, None).await
+        self.run_substitution(inner, node, None, None).await
     }
 
     /// The file of bash's `$(< file)`, a lone foreground `<` (or `0<`)
@@ -88,8 +87,12 @@ impl<H: Host> Expander<'_, H> {
         body: &[u8],
         node: usize,
         span: Option<(usize, usize)>,
+        read: Option<&Field>,
     ) -> Result<Vec<u8>, Fault> {
-        let ran = self.host.substitute(self.shell, body, node, span).await?;
+        let ran = self
+            .host
+            .substitute(self.shell, body, node, span, read)
+            .await?;
         self.diagnostics.push(Diagnostic::Bytes(ran.stderr));
         self.shell.status = ran.status;
         self.shell.substituted = Some(ran.status);
@@ -99,41 +102,6 @@ impl<H: Host> Expander<'_, H> {
         }
         Ok(out)
     }
-}
-
-/// An expanded word as shell text that reads back as it: every byte quoted
-/// but the live glob characters, which the host's redirect still globs.
-fn requote(runs: &[(Vec<u8>, bool)]) -> Vec<u8> {
-    let mut out = Vec::new();
-    let mut open = false;
-    for (text, quoted) in runs {
-        for &byte in text {
-            if !quoted && b"*?[]".contains(&byte) {
-                if open {
-                    out.push(b'\'');
-                    open = false;
-                }
-                out.push(byte);
-                continue;
-            }
-            if !open {
-                out.push(b'\'');
-                open = true;
-            }
-            if byte == b'\'' {
-                out.extend_from_slice(b"'\\''");
-            } else {
-                out.push(byte);
-            }
-        }
-    }
-    if open {
-        out.push(b'\'');
-    }
-    if out.is_empty() {
-        out.extend_from_slice(b"''");
-    }
-    out
 }
 
 /// A backtick region's commands and the text between them, each with its

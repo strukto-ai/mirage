@@ -38,8 +38,9 @@ def env_child(
     args: list[str], session: SessionState
 ) -> tuple[list[str], dict[str, str], bool, bool] | str:
     """What ``env`` runs and the environment it runs it in, read off its
-    words: the command's words, the environment in ``environ`` order,
-    whether ``-i`` cleared it and whether ``-0`` was given; or the
+    words: the command's words, the environment (the session's sorted by
+    name, each ``NAME=VALUE`` replacing its name in place or adding it
+    last), whether ``-i`` cleared it and whether ``-0`` was given; or the
     message for words env refuses.
 
     Args:
@@ -148,8 +149,9 @@ async def handle_env(
     """Run the ``env`` builtin (print environment or run a command).
 
     Usage: ``env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]``.
-    With no command it prints the (optionally modified) environment in
-    ``environ`` order, unsorted, terminated per entry by newline or NUL
+    With no command it prints the (optionally modified) environment,
+    the session's sorted by name (mirage's pinned order where bash's
+    follows its hash table), terminated per entry by newline or NUL
     (``-0``). With a command it runs it under the modified environment,
     forwarding stdin, then restores the session environment. Missing
     commands fail like GNU with the shell's own exit 127.

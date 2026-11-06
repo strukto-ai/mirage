@@ -726,9 +726,11 @@ impl<'t> Reader<'_, '_, '_, 't> {
             return Err(self.fail("expression expected", None));
         }
         self.skip += usize::from(taken);
-        let other = self.ternary()?;
+        self.nest()?;
+        let other = self.ternary();
+        self.record.nest -= 1;
         self.skip -= usize::from(taken);
-        Ok(if taken { then } else { other })
+        Ok(if taken { then } else { other? })
     }
 
     /// Binary operators binding at least as tightly as `floor`.
@@ -756,7 +758,16 @@ impl<'t> Reader<'_, '_, '_, 't> {
                 left = i64::from(truth);
                 continue;
             }
-            let right = self.binary(precedence + usize::from(op != b"**"))?;
+            // `**` binds right to left, so its right side recurses once per
+            // operator, which a variable's text can repeat without bound.
+            let right = if op == b"**" {
+                self.nest()?;
+                let right = self.binary(precedence);
+                self.record.nest -= 1;
+                right?
+            } else {
+                self.binary(precedence + 1)?
+            };
             left = self.apply(op, left, right, divisor)?;
         }
         Ok(left)
@@ -1120,6 +1131,21 @@ mod tests {
             value(&format!("{}1{}", "(".repeat(250), ")".repeat(250))),
             1
         );
+    }
+
+    #[test]
+    fn long_power_and_conditional_chains_stop_with_the_recursion_error() {
+        let power = format!("1{}", "**1".repeat(100_000));
+        let ternary = format!("{}0", "0?1:".repeat(100_000));
+        for chain in [power, ternary] {
+            let outcome = run(chain.as_bytes(), &mut Session::default());
+            assert!(matches!(
+                outcome.value,
+                Err(Error::Arith { ref reason, .. }) if reason == "expression recursion level exceeded"
+            ));
+        }
+        assert_eq!(value(&format!("2{}", "**1".repeat(200))), 2);
+        assert_eq!(value(&format!("{}7", "0?1:".repeat(200))), 7);
     }
 
     #[test]

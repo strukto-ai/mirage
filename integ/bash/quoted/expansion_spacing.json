@@ -2128,10 +2128,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(IFS=,; x=',a,,b, '; printf '[%s]\\n' $x q$x \"$x\"; IFS=', '; y=' a , b ,,c '; printf '[%s]\\n' $y; a=($y); printf '<%s>' \"${#a[@]}\" \"${a[@]}\"; echo; for i in $y; do printf '{%s}' \"$i\"; done; echo)",
+      "command": "(IFS=,; x=',a,,b, '; printf '[%s]\\n' $x q$x \"$x\"; IFS=', '; y=' a , b ,,c '; printf '[%s]\\n' $y; a=($y); printf '<%s>' \"${#a[@]}\" \"${a[@]}\"; echo; for i in $y; do printf '{%s}' \"$i\"; done; echo); (LC_ALL=C.UTF-8; IFS=\u00e9; x=a\u00e9b; y=a\u00e0b; set -- $x; echo \"$# [$1] [$2]\"; set -- $y; echo \"$# $1\"; set -- p q; echo \"$*\")",
       "expect": {
         "exit": 0,
-        "stdout": "[]\n[a]\n[]\n[b]\n[ ]\n[q]\n[a]\n[]\n[b]\n[ ]\n[,a,,b, ]\n[a]\n[b]\n[]\n[c]\n<4><a><b><><c>\n{a}{b}{}{c}\n",
+        "stdout": "[]\n[a]\n[]\n[b]\n[ ]\n[q]\n[a]\n[]\n[b]\n[ ]\n[,a,,b, ]\n[a]\n[b]\n[]\n[c]\n<4><a><b><><c>\n{a}{b}{}{c}\n2 [a] [b]\n1 a\u00e0b\np\u00e9q\n",
         "stderr": ""
       }
     },

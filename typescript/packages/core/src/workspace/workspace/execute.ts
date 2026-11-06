@@ -755,6 +755,7 @@ async function runPreparedLine(
                           ),
                         )
                       : null,
+                    opts.read ?? null,
                   )
                   io.stdout = stdout
                   recordStatus(session, io.exitCode, true)

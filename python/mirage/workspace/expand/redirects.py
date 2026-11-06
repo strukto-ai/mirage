@@ -36,6 +36,7 @@ async def expand_redirect(
     policies: Policies | None = None,
     forked: bool = False,
     links: NamespaceLinks | None = None,
+    words: list[str] | None = None,
 ) -> Redirect:
     """Expand one redirect immediately before the executor applies it.
 
@@ -48,6 +49,9 @@ async def expand_redirect(
         policies (Policies | None): the policies its writes clear.
         forked (bool): retain an expansion error for the child command.
         links (NamespaceLinks | None): namespace links for pathname expansion.
+        words (list[str] | None): the target's words when another shell
+            expanded them already (``$(< file)``), glob marks kept; None
+            expands the target here.
     """
     try:
         return await _expand_target(
@@ -58,6 +62,7 @@ async def expand_redirect(
             call_stack,
             policies,
             links,
+            words,
         )
     except ExitSignal as exc:
         if not forked:
@@ -75,6 +80,7 @@ async def _expand_target(
     call_stack: CallStack | None,
     policies: Policies | None,
     links: NamespaceLinks | None,
+    words: list[str] | None = None,
 ) -> Redirect:
     """Expand one redirect's body or target.
 
@@ -86,6 +92,8 @@ async def _expand_target(
         call_stack (CallStack | None): shell call stack for expansion.
         policies (Policies | None): the policies its writes clear.
         links (NamespaceLinks | None): namespace links for pathname expansion.
+        words (list[str] | None): the target's words, expanded already;
+            None expands them here.
     """
     session = context.session
     if r.kind in (RedirectKind.HEREDOC, RedirectKind.HERESTRING):
@@ -107,9 +115,10 @@ async def _expand_target(
         return r
     target_scope = r.target
     if r.target_node is not None:
-        words = await expand_words(
-            [r.target_node], context, execute_fn, call_stack, policies
-        )
+        if words is None:
+            words = await expand_words(
+                [r.target_node], context, execute_fn, call_stack, policies
+            )
         targets = await resolve_globs(
             [
                 classify_bare_path(word, registry, session.cwd)

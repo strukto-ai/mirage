@@ -18,15 +18,18 @@ from pathlib import Path
 SOURCE = Path(__file__).resolve().parents[2] / "mirage"
 
 # Every place `object` is still the honest annotation, each because the
-# signature is not ours to choose. The first four are Python protocol
-# methods, whose parameters the language types as object so that a
-# membership or attribute test on an unrelated value stays legal.
+# signature is not ours to choose. The `__contains__`, `__setattr__` and
+# `pop` entries are Python protocol methods, whose parameters the language
+# types as object so that a membership or attribute test on an unrelated
+# value stays legal.
 ALLOWED = {
     # Overrides an external base class that declares `dict[str, object]`;
     # narrowing it here would break Liskov and mypy says so.
     ("agents/openai_agents/sandbox.py", "deserialize_session_state"),
     ("io/types.py", "__setattr__"),
     ("commands/cli/builtin/git/objects.py", "__contains__"),
+    ("rs/session.py", "__contains__"),
+    ("workspace/session/session.py", "__contains__"),
     ("vfs/dev/store.py", "__contains__"),
     ("vfs/dev/store.py", "pop"),
     # Override asyncssh.SFTPServer, which types the file handle it hands

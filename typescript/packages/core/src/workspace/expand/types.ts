@@ -48,6 +48,7 @@ export type ExecuteFn = (
     handed?: HandOff
     substitution?: boolean
     records?: ShellVars
+    read?: string
     sink?: JobConsole
     callStack?: CallStack
     jobTable?: JobTable

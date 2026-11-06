@@ -254,6 +254,7 @@ async def recurse(
             walk, which makes the inner line a line of its own.
     """
     records = opts.pop("records", None)
+    read = opts.pop("read", None)
     if handed is None:
         inner = None
     elif node is None:
@@ -310,6 +311,7 @@ async def recurse(
                     cancel,
                     handed=inner,
                     command_substitution=True,
+                    read=read,
                     execution_scope=execution_scope,
                     route=ws.router.context(
                         cmd,

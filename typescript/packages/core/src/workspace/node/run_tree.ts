@@ -50,6 +50,9 @@ export async function runCommandTree(
   // What `preExecute` saw of the line, which `postExecute` sees with what
   // came back; null when no policy reads `postExecute`.
   route: RouteContext | null = null,
+  // The lone input redirect's file name as the shell expanding the
+  // substitution expanded it, glob marks kept; null expands the redirect's own.
+  read: string | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   const redirect = commandSubstitution ? inputSubstitutionRedirect(node) : null
@@ -66,6 +69,7 @@ export async function runCommandTree(
       deps.registry.policies,
       false,
       deps.namespace.sessionLinks(session),
+      read === null ? null : [read],
     )
     // Bash's implicit read uses cat's policy identity without invoking
     // a shadowing function/alias or expanding the filename a second time.
