@@ -25,7 +25,6 @@ from mirage.shell.voice import shell_voice
 @dataclass
 class CallFrame:
     positional: list[str] = field(default_factory=list)
-    locals: dict[str, str] = field(default_factory=dict)
     function_name: str = ""
     loop_level: int = 0
     sourced: bool = False
@@ -69,7 +68,6 @@ class CallStack:
             replace(
                 frame,
                 positional=list(frame.positional),
-                locals=dict(frame.locals),
                 loop_level=frame.loop_level if loops else 0,
             )
             for frame in self._frames
@@ -194,12 +192,3 @@ class CallStack:
     def positionals(self) -> list[list[str]]:
         """Every frame's positional parameters, outermost first."""
         return [frame.positional for frame in self._frames]
-
-    def set_local(self, name: str, value: str) -> None:
-        self.current.locals[name] = value
-
-    def get_local(self, name: str) -> str | None:
-        for frame in reversed(self._frames):
-            if name in frame.locals:
-                return frame.locals[name]
-        return None

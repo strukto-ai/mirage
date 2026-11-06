@@ -12,130 +12,72 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ExecuteFn } from './types.ts'
-import { sessionAccess } from '../../context/session_context.ts'
-import type { EvaluationContext } from '../evaluation.ts'
-import type { SessionView } from '../../view/types.ts'
-import type { CallStack } from '../../shell/call_stack.ts'
-import type { PathSpec } from '../../types.ts'
-import { markEscapedGlobs } from '../../utils/glob_walk.ts'
-import { expandTilde } from '../../utils/path.ts'
-import type { MountRegistry } from '../mount/registry.ts'
-
-import { homeDir } from '../session/shell_dirs.ts'
-import { expandTemplate, makeInert, substitute } from './brace.ts'
-import { classifyWord } from './classify/index.ts'
-import { BRACE_LITERAL_TYPES, BRACE_WORD_TYPES } from './constants.ts'
-import { splitFields } from './fields.ts'
-import { callerSignal } from '../../context/session_context.ts'
+import { callerSignal, sessionAccess } from '../../context/session_context.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
-import { expandChunks } from './node.ts'
-import type { Chunk } from './types.ts'
-import { ifsValue } from './variable.ts'
-import { unescapeUnquoted } from '../../shell/escapes.ts'
+import type { Policies } from '../../policy/index.ts'
+import type { CallStack } from '../../shell/call_stack.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
-
-// Brace-expand a concatenation or brace_expression into words. Literal
-// word tokens form the brace template; every other child (expansions,
-// strings, substitutions) expands first and joins as an inert atom, so
-// `{a,$v}` alternates on the expanded value while `{1..$n}` stays
-// literal, matching bash's brace-before-parameter ordering. Deliberate
-// divergence: bash rewrites `$v{a,b}` to `$va $vb` before parameter
-// expansion; here the prefix keeps its own expansion (`prea preb`),
-// which is the useful reading.
-//
-// Quoting rides along per character: an atom keeps whatever marks its
-// own expansion produced, and the template's escapes are marked before
-// quote removal drops them, so `{'*',x}` stays literal while `{$p,x}`
-// keeps the value live. Each word keeps its atoms' pieces, so an
-// unquoted value still splits: `{a,b}$x` is `a$x b$x`.
-async function expandBraceWord(
-  node: TSNodeLike,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  callStack: CallStack | null,
-  view?: SessionView,
-): Promise<Chunk[][] | null> {
-  const session = context.session
-  const pieces: string[] = []
-  const atoms: TSNodeLike[] = []
-  for (const child of node.children) {
-    if (child.isNamed !== true || BRACE_LITERAL_TYPES.has(child.type)) {
-      pieces.push(child.text)
-    } else {
-      atoms.push(child)
-      pieces.push(makeInert(atoms.length - 1))
-    }
-  }
-  const words = expandTemplate(pieces.join(''))
-  if (words === null) return null
-  const values: Chunk[][] = []
-  for (const atom of atoms) {
-    values.push(await expandChunks(atom, context, executeFn, callStack, view))
-  }
-  const home = homeDir(session)
-  // `{1..1000000}` is a million words: they yield as they are made, so a
-  // cancel or the line's deadline lands before the last.
-  const budget = new YieldBudget(callerSignal())
-  const out: Chunk[][] = []
-  for (const w of words) {
-    out.push(substitute(expandTilde(unescapeUnquoted(markEscapedGlobs(w)), home), values))
-    await budget.run()
-  }
-  return out
-}
+import type { PathSpec } from '../../types.ts'
+import type { EvaluationContext } from '../evaluation.ts'
+import type { MountRegistry } from '../mount/registry.ts'
+import { classifyWord } from './classify/index.ts'
+import { expand } from './node.ts'
+import type { ExecuteFn } from './types.ts'
 
 /**
  * Expand parsed child nodes to words that still know their quoting.
  *
- * Each node expands to its pieces, which IFS then splits into fields, so
- * an unquoted expansion anywhere in a word splits (`q$x` too) and quoted
- * text never does. A glob character quoting made literal travels under its
- * own mark, so `"/data/"*.txt` still globs while `'/data/*'.txt` does not
- * and `'/data/*'?.txt` globs on the `?` alone; `unmarkGlobs` takes the
- * marks off.
+ * Each node brace-expands, expands and splits on IFS, so an unquoted
+ * expansion anywhere in a word splits (`q$x` too) and quoted text never
+ * does. A glob character quoting made literal travels under its own mark,
+ * so `"/data/"*.txt` still globs while `'/data/*'.txt` does not;
+ * `unmarkGlobs` takes the marks off.
  */
 export async function expandWords(
-  parts: TSNodeLike[],
+  parts: readonly TSNodeLike[],
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null = null,
-  view?: SessionView,
+  policies: Policies | null = null,
 ): Promise<string[]> {
-  const session = context.session
-  const ifs = ifsValue(session, callStack)
   const result: string[] = []
-  for (const p of parts) {
-    if (BRACE_WORD_TYPES.has(p.type) && session.shellOptions.braceexpand !== false) {
-      const braceWords = await expandBraceWord(p, context, executeFn, callStack, view)
-      if (braceWords !== null) {
-        const budget = new YieldBudget(callerSignal())
-        for (const chunks of braceWords) {
-          for (const w of await splitFields(chunks, ifs)) result.push(w)
-          await budget.run()
-        }
-        continue
-      }
-    }
-    const chunks = await expandChunks(p, context, executeFn, callStack, view)
-    for (const w of await splitFields(chunks, ifs)) result.push(w)
+  // Each word expands in one step; the line yields between words, so a
+  // cancel or its deadline lands before the last.
+  const budget = new YieldBudget(callerSignal())
+  for (const part of parts) {
+    const fields = await expand(part, 'fields', context, executeFn, callStack, policies)
+    for (const field of fields as readonly string[]) result.push(field)
+    await budget.run()
   }
   return result
 }
 
+/**
+ * Expand words, classify as PathSpec or text. Used by for/select where
+ * concrete values are needed before iteration. Words keep their glob marks,
+ * because the loop list is glob-resolved next (`resolveGlobs`, which is
+ * where the marks come off): `for f in '/data/*.txt'` iterates once over
+ * the name as typed, like bash, while `for f in '/data/*'?.txt` still globs
+ * on the `?`.
+ */
 export async function expandAndClassify(
-  words: TSNodeLike[],
+  words: readonly TSNodeLike[],
   context: EvaluationContext,
   executeFn: ExecuteFn,
   registry: MountRegistry,
   cwd: string,
   callStack: CallStack | null = null,
-  view?: SessionView,
+  policies: Policies | null = null,
 ): Promise<(string | PathSpec)[]> {
-  // Words keep their glob marks, because the loop list is glob-resolved
-  // next (`resolveGlobs`, which is where the marks come off): `for f in
-  // '/data/*.txt'` iterates once over the name as typed, like bash,
-  // while `for f in '/data/*'?.txt` still globs on the `?`.
-  const expanded = await expandWords(words, context, executeFn, callStack, view)
-  return expanded.map((w) => classifyWord(w, registry, cwd, sessionAccess(context.session)))
+  const expanded = await expandWords(words, context, executeFn, callStack, policies)
+  // One word can expand to a million (`a=($x)`), so classifying them
+  // yields too.
+  const budget = new YieldBudget(callerSignal())
+  const access = sessionAccess(context.session)
+  const classified: (string | PathSpec)[] = []
+  for (const word of expanded) {
+    classified.push(classifyWord(word, registry, cwd, access))
+    await budget.run()
+  }
+  return classified
 }

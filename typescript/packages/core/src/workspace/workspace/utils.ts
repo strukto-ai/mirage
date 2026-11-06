@@ -36,6 +36,8 @@ export function forkForCall(
   if (cwd === undefined && env === undefined) return session
   return session.fork({
     ...(cwd !== undefined ? { cwd } : {}),
-    ...(env !== undefined ? { vars: { ...session.vars, ...varsFromEnv(env) } } : {}),
+    ...(env !== undefined
+      ? { vars: { ...Object.fromEntries(session.vars.records()), ...varsFromEnv(env) } }
+      : {}),
   })
 }

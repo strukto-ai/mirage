@@ -46,6 +46,7 @@ from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
 from mirage.process.handle import ProcessHandle
+from mirage.policy.policies import Policies
 from mirage.process.table import ProcessTable
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
@@ -87,7 +88,6 @@ from mirage.shell.types import (
 )
 from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec
-from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins import handle_test, handle_unset
@@ -157,9 +157,12 @@ from mirage.workspace.node.test_expr import (
 from mirage.workspace.node.timing import timed_by, timing_report
 from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session.budget import check_env, entry_bytes
-from mirage.workspace.session.elements import landed_arith
 from mirage.workspace.session.functions import FunctionSite
-from mirage.workspace.session.state import positional_params, session_view
+from mirage.workspace.session.state import (
+    positional_params,
+    session_arith,
+    session_view,
+)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -169,7 +172,7 @@ async def _eval_cfor_expr(
     context: EvaluationContext,
     execute_fn: ExecuteFn,
     call_stack: CallStack | None,
-    view: SessionView | None = None,
+    policies: Policies | None = None,
 ) -> int:
     """Evaluate one C-style for expression slot.
 
@@ -182,8 +185,7 @@ async def _eval_cfor_expr(
             land in its session's env.
         execute_fn (Callable): recursive execute for substitutions.
         call_stack (CallStack | None): function-call scope, if any.
-        view (SessionView | None): the gated session view the
-            assignments land through; None outside a workspace.
+        policies (Policies | None): the policies its writes clear.
 
     Raises:
         ArithError: the slot did not evaluate; the loop prints it as
@@ -196,9 +198,9 @@ async def _eval_cfor_expr(
     """
     if not exprs:
         return default
-    text = await _slot_text(exprs, context, execute_fn, call_stack, view)
+    text = await _slot_text(exprs, context, execute_fn, call_stack, policies)
     try:
-        return await landed_arith(context.session, view, text)
+        return await session_arith(context.session, text, policies, call_stack)
     except ReadonlyVariableError as exc:
         if exc.in_subscript:
             raise exc.signal() from exc
@@ -210,7 +212,7 @@ async def _slot_text(
     context: EvaluationContext,
     execute_fn: ExecuteFn,
     call_stack: CallStack | None,
-    view: SessionView | None,
+    policies: Policies | None,
 ) -> str:
     """A C-style for slot's text as bash evaluates it: its source up to
     the ``;`` or ``))`` that ends it, each node's expansions substituted.
@@ -220,7 +222,7 @@ async def _slot_text(
         context (EvaluationContext): the evaluation.
         execute_fn (Callable): recursive execute for substitutions.
         call_stack (CallStack | None): function-call scope, if any.
-        view (SessionView | None): the gated session view.
+        policies (Policies | None): the policies its writes clear.
     """
     first, last = exprs[0], exprs[-1]
     parent = first.parent
@@ -238,9 +240,7 @@ async def _slot_text(
     for expr in exprs:
         parts.append(decode_text(raw[at - base : expr.start_byte - base]))
         parts.append(
-            await expand_arith(
-                expr, context, execute_fn, call_stack, view=view
-            )
+            await expand_arith(expr, context, execute_fn, call_stack, policies)
             if expr.is_named
             else get_text(expr)
         )
@@ -305,19 +305,14 @@ async def _recurse_reassociated(
         stdin (Any): input stream.
         call_stack (CallStack | None): shell call stack.
     """
-    session = context.session
     if node.id != right.id:
         return await recurse(node, context, stdin, call_stack, sink=sink)
-    view = session_view(
-        session, registry.policies, diagnostics=context.frame.diagnostics
-    )
     return await _run_redirected(
         recurse,
         dispatch,
         execute_fn,
         registry,
         namespace,
-        view,
         right,
         with_own_redirects(right, redirects),
         processes,
@@ -433,7 +428,6 @@ async def _recurse_stage(
         call_stack (CallStack | None): shell call stack.
         sink (JobConsole | None): the stage's pipe console.
     """
-    session = context.session
     for command, hoisted in zip(stages.commands, stages.redirects):
         if command is not node or not hoisted:
             continue
@@ -442,16 +436,12 @@ async def _recurse_stage(
             bound.append(
                 Redirect(fd=2, target=1, kind=RedirectKind.STDERR_TO_STDOUT)
             )
-        view = session_view(
-            session, registry.policies, diagnostics=context.frame.diagnostics
-        )
         return await _run_redirected(
             recurse,
             dispatch,
             execute_fn,
             registry,
             namespace,
-            view,
             node,
             bound,
             processes,
@@ -588,10 +578,6 @@ async def _recurse_pipe_stderr(
     *,
     sink: JobConsole | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    session = context.session
-    view = session_view(
-        session, registry.policies, diagnostics=context.frame.diagnostics
-    )
     if node not in targets or node_kind(node) != NodeKind.REDIRECT:
         return await recurse(node, context, stdin, call_stack, sink=sink)
     command, redirects = get_redirects(node)
@@ -604,7 +590,6 @@ async def _recurse_pipe_stderr(
         execute_fn,
         registry,
         namespace,
-        view,
         command,
         redirects,
         None,
@@ -657,7 +642,6 @@ async def _run_redirected(
     execute_fn: ExecuteFn,
     registry: MountRegistry,
     namespace: Namespace,
-    view: SessionView | None,
     command: TSNodeLike | None,
     redirects: list[Redirect],
     processes: ProcessTable | None,
@@ -681,7 +665,6 @@ async def _run_redirected(
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry.
         namespace (Namespace): namespace links for redirect pathname expansion.
-        view (SessionView | None): the gated session view.
         command (Any): the redirected command node, None for a bare
             redirect.
         redirects (list[Redirect]): the statement's parsed redirects.
@@ -702,7 +685,6 @@ async def _run_redirected(
             execute_fn,
             registry,
             namespace,
-            view,
             inner,
             [*own, *redirects],
             processes,
@@ -771,7 +753,6 @@ async def _run_redirected(
                 execute_fn,
                 registry,
                 namespace,
-                view,
                 inner,
                 redirects
                 if inner is None
@@ -792,7 +773,7 @@ async def _run_redirected(
         execute_fn=execute_fn,
         registry=registry,
         call_stack=call_stack,
-        view=view,
+        policies=registry.policies,
         forked=forked,
         links=namespace.session_links(context.session),
     )
@@ -1120,12 +1101,6 @@ async def _execute_node(
             leaves them for the redirect to put outside it.
     """
     session = context.session
-    # The session view, bound once for the line: every
-    # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
-    # so a pre_session rule governs those exactly as it governs `X=d`.
-    view = session_view(
-        session, registry.policies, diagnostics=context.frame.diagnostics
-    )
     if session.shell_options.get("noexec"):
         return None, IOResult(), ExecutionNode(command="", exit_code=0)
     cs = (
@@ -1249,7 +1224,6 @@ async def _execute_node(
                     execute_fn,
                     registry,
                     namespace,
-                    view,
                     None,
                     list(pending),
                     job_table.processes if job_table is not None else None,
@@ -1310,7 +1284,6 @@ async def _execute_node(
                 execute_fn,
                 registry,
                 namespace,
-                view,
                 None,
                 command_redirects(node),
                 job_table.processes if job_table is not None else None,
@@ -1345,7 +1318,6 @@ async def _execute_node(
             execute_fn,
             registry,
             namespace,
-            view,
             node,
             own,
             job_table.processes if job_table is not None else None,
@@ -1428,7 +1400,6 @@ async def _execute_node(
             execute_fn,
             registry,
             namespace,
-            view,
             command,
             redirects,
             job_table.processes if job_table is not None else None,
@@ -1519,9 +1490,11 @@ async def _execute_node(
 
     if kind == NodeKind.ARITH:
         text = get_text(node)
-        expr = await expand_arith(node, context, execute_fn, cs, view=view)
+        expr = await expand_arith(
+            node, context, execute_fn, cs, registry.policies
+        )
         try:
-            value = await landed_arith(session, view, expr)
+            value = await session_arith(session, expr, registry.policies, cs)
         except PolicyDenied as exc:
             return fail(text, f"{shell_voice()}{exc.strerror}\n")
         except (ArithError, ReadonlyVariableError) as exc:
@@ -1558,7 +1531,7 @@ async def _execute_node(
             context=context,
             execute_fn=execute_fn,
             call_stack=cs,
-            view=view,
+            policies=registry.policies,
         )
         with cs.loop():
             return await handle_cfor(run_body, exprs, body, eval_expr, session)
@@ -1582,7 +1555,7 @@ async def _execute_node(
                     registry,
                     session.cwd,
                     cs,
-                    view=view,
+                    registry.policies,
                 )
                 # The loop word list is consumed by the shell
                 # (WordPolicy.SHELL): globs resolve to matches before
@@ -1620,7 +1593,9 @@ async def _execute_node(
 
     if kind == NodeKind.CASE:
         word_node = get_case_word(node)
-        word = await expand_node(word_node, context, execute_fn, cs, view=view)
+        word = await expand_node(
+            word_node, context, execute_fn, cs, registry.policies
+        )
         return await handle_case(
             run_body,
             word,
@@ -1631,7 +1606,7 @@ async def _execute_node(
                 context=context,
                 execute_fn=execute_fn,
                 call_stack=cs,
-                view=view,
+                policies=registry.policies,
             ),
         )
 
@@ -1666,7 +1641,17 @@ async def _execute_node(
     if kind == NodeKind.DECLARATION:
         async with command_scope():
             return await execute_declaration(
-                node, context, execute_fn, registry, namespace, cs, view
+                node,
+                context,
+                execute_fn,
+                registry,
+                namespace,
+                cs,
+                session_view(
+                    session,
+                    registry.policies,
+                    diagnostics=context.frame.diagnostics,
+                ),
             )
 
     if kind == NodeKind.UNSET:
@@ -1679,6 +1664,7 @@ async def _execute_node(
                 namespace.registry.policies,
                 diagnostics=context.frame.diagnostics,
             ),
+            namespace.registry.policies,
         )
 
     if kind == NodeKind.TEST:
@@ -1694,7 +1680,7 @@ async def _execute_node(
             claimant=claimant_for(node, handed),
         )
         tree = await expand_double_bracket(
-            node, context, execute_fn, cs, view=view
+            node, context, execute_fn, cs, registry.policies
         )
         return await handle_test(
             dispatch,
@@ -1702,7 +1688,6 @@ async def _execute_node(
             tree,
             session,
             name="[[",
-            view=view,
             admit=admitted,
         )
 

@@ -100,13 +100,19 @@ export function compiledModule(): Promise<WebAssembly.Module> {
   return compiled
 }
 
+/** An embedded module (a `#mirage-*-wasm` import) compiled now, for a caller that cannot wait. */
+export function compileSync(
+  source: string | WebAssembly.Module | (() => WebAssembly.Module),
+): WebAssembly.Module {
+  const module = moduleSource(source)
+  return typeof module === 'string'
+    ? new WebAssembly.Module(decodeBase64(module) as BufferSource)
+    : module
+}
+
 /** The compiled module, compiled now if no one has yet, for a caller that cannot wait. */
 export function moduleSync(): WebAssembly.Module {
-  const source = moduleSource(MIRAGE_RS_WASM)
-  compiledSync ??=
-    typeof source === 'string'
-      ? new WebAssembly.Module(decodeBase64(source) as BufferSource)
-      : source
+  compiledSync ??= compileSync(MIRAGE_RS_WASM)
   compiled ??= Promise.resolve(compiledSync)
   return compiledSync
 }

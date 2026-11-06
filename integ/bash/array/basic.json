@@ -98,11 +98,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "ar3=(one two three); echo ${ar3[-1]}",
+      "command": "ar3=(one two three); echo ${ar3[-1]}; (pzx=s; printf '[%s]' \"${ar3[@]@A}\" \"${pzx[@]@A}\" \"${ar3[*]@A}\"; echo; echo \"[${ar3[-9]}]\" \"[${ar3[-9]:-d}]\")",
       "expect": {
         "exit": 0,
-        "stdout": "three\n",
-        "stderr": ""
+        "stdout": "three\n[declare][-a][ar3=([0]=\"one\" [1]=\"two\" [2]=\"three\")][pzx='s'][declare -a ar3=([0]=\"one\" [1]=\"two\" [2]=\"three\")]\n[] [d]\n",
+        "stderr": "bash: ar3: bad array subscript\nbash: ar3: bad array subscript\n"
       }
     },
     {

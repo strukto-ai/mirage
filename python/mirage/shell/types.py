@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Literal, Protocol, TypeAlias
+from typing import Any, Protocol, TypeAlias
 
 
 class TSNodeLike(Protocol):
@@ -81,81 +81,6 @@ class AliasExpansion:
 
 
 FunctionBody: TypeAlias = list[TSNodeLike]
-
-
-@dataclass(frozen=True, slots=True)
-class ElementOps:
-    """Array-element callbacks the arithmetic evaluator resolves through.
-
-    The evaluator owns no session, so a caller that wants ``a[i]`` and
-    ``m[key]`` to mean anything injects these two facts. The split is
-    what keeps subscript semantics out of the evaluator: whether the
-    subscript text is an arithmetic expression (indexed) or a literal
-    key (associative) is the variable's to answer, and only the session
-    knows the variable.
-
-    Args:
-        resolve (Callable[[str, str, Mapping[str, str]], str]): canonical
-            key for one reference: the evaluated index for an indexed
-            name, the literal (quote-stripped) text for an associative
-            one. The mapping is the evaluator's current view, pending
-            assignments included, so ``i=2, a[i]`` reads the new ``i``.
-        read (Callable[[str, str], str | None]): the element's stored
-            text, None when the element is unset.
-        is_assoc (Callable[[str], bool] | None): whether a name holds an
-            associative array, whose subscript is a key. Given, the
-            evaluator evaluates an indexed subscript itself, in its own
-            record, and hands ``resolve`` the index; absent, ``resolve``
-            evaluates the subscript text (a caller outside a session).
-        holds_array (Callable[[str], bool] | None): whether a name holds
-            an array, indexed or associative, empty or not.
-    """
-
-    resolve: Callable[[str, str, Mapping[str, str]], str]
-    read: Callable[[str, str], str | None]
-    is_assoc: Callable[[str], bool] | None = None
-    holds_array: Callable[[str], bool] | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class ArithWrite:
-    """One assignment an arithmetic evaluation produced.
-
-    Args:
-        name (str): the variable's name.
-        key (str | None): the canonical subscript ``ElementOps.resolve``
-            gave, or None for a bare name (which lands as element 0 of
-            an array, or the scalar itself).
-        value (str): the stored decimal text.
-    """
-
-    name: str
-    key: str | None
-    value: str
-
-
-# What an arithmetic expression's reader stands on: the end, a name (with
-# its subscript), an integer constant, an operator, a `++`/`--` bound to
-# the name after or before it, or a character bash reads no token from.
-ArithTokenKind = Literal["end", "name", "num", "op", "pre", "post", "bad"]
-
-
-@dataclass(frozen=True, slots=True)
-class ArithResult:
-    """What one arithmetic evaluation produced.
-
-    Args:
-        value (int): the expression's value.
-        writes (tuple[ArithWrite, ...]): the assignments made, one per
-            target, in the order of each target's last write, for the
-            caller to land through the session view. Bare and
-            subscripted targets share the one sequence, because a bare
-            name aliases element 0 and ``((a[0]=1, a=2))`` has to
-            leave 2.
-    """
-
-    value: int
-    writes: tuple[ArithWrite, ...] = ()
 
 
 class NodeType(StrEnum):

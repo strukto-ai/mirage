@@ -22,10 +22,8 @@ from mirage.shell.variable import (
     VarKind,
     attr_letters,
     attrs_from_letters,
-    detach,
     stored_attrs,
     var_kind,
-    with_attr,
     with_value,
 )
 
@@ -99,18 +97,6 @@ def test_with_value_keeps_the_attributes():
     assert with_value(var, "3") == ShellVar("3", frozenset({VarAttr.INTEGER}))
 
 
-def test_with_attr_sets_and_clears_without_touching_the_value():
-    var = ShellVar("v")
-    marked = with_attr(var, VarAttr.EXPORT)
-    assert marked == ShellVar("v", frozenset({VarAttr.EXPORT}))
-    assert with_attr(marked, VarAttr.EXPORT, False) == ShellVar(
-        "v", frozenset()
-    )
-    # Clearing an attribute that was never set is a no-op, not an error:
-    # `export -n NAME` on an unexported name exits 0 in bash.
-    assert with_attr(var, VarAttr.EXPORT, False) == var
-
-
 def test_the_record_is_frozen():
     var = ShellVar("v")
     with pytest.raises(Exception):
@@ -134,12 +120,3 @@ def test_with_value_keeps_managed():
     ref = ManagedRef(source="aws-sm", ref="prod/agent", key="TOKEN")
     var = ShellVar(None, frozenset({VarAttr.EXPORT}), managed=ref)
     assert with_value(var, "tok").managed is ref
-
-
-def test_detach():
-    ref = ManagedRef(source="aws-sm", ref="prod/agent", key="TOKEN")
-    var = ShellVar("tok", frozenset({VarAttr.EXPORT}), managed=ref)
-    detached = detach(var)
-    assert detached.managed is None
-    assert detached.value == "tok"
-    assert detached.attrs == var.attrs

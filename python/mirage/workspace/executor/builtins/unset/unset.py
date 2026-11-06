@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.policy import PolicyDenied
+from mirage.policy.policies import Policies
 from mirage.shell.array import array_extent, array_unset
 from mirage.shell.constants import FUNCNAME
 from mirage.shell.errors import ArithError
@@ -57,7 +58,7 @@ def _unset_variable(session: SessionState, name: str) -> None:
 
 
 async def _fatal_index(
-    session: SessionState, subscript: str, view: SessionView
+    session: SessionState, subscript: str, policies: Policies | None
 ) -> int:
     """``subscript_index`` whose failure ends the line, in bash's words:
     ``unset 'a[1/0]'`` aborts with ``1/0: division by 0``.
@@ -65,16 +66,20 @@ async def _fatal_index(
     Args:
         session (SessionState): the session the subscript reads.
         subscript (str): the raw subscript text.
-        view (SessionView): the gated session view.
+        policies (Policies | None): the policies its assignments clear.
     """
     try:
-        return await subscript_index(session, subscript, view)
+        return await subscript_index(session, subscript, policies)
     except ArithError as exc:
         raise exc.signal(fatal=True) from exc
 
 
 async def _unset_element(
-    session: SessionState, view: SessionView, base: str, subscript: str
+    session: SessionState,
+    view: SessionView,
+    base: str,
+    subscript: str,
+    policies: Policies | None = None,
 ) -> str:
     """Clear one array element, or a scalar addressed as ``base[0]``.
 
@@ -98,6 +103,8 @@ async def _unset_element(
         view (SessionView): the gated session view.
         base (str): the variable name without the subscript.
         subscript (str): the subscript text between the brackets.
+        policies (Policies | None): the policies an indexed subscript's
+            assignments clear.
 
     Returns:
         str: ``"ok"``, ``"notarray"`` when a non-zero subscript was
@@ -126,11 +133,11 @@ async def _unset_element(
         # the name's existence.
         if env_get(session, base) is None:
             return "ok"
-        if await _fatal_index(session, subscript, view) != 0:
+        if await _fatal_index(session, subscript, policies) != 0:
             return "notarray"
         await view.unset(base)
         return "ok"
-    idx = await _fatal_index(session, subscript, view)
+    idx = await _fatal_index(session, subscript, policies)
     if idx < 0:
         idx += array_extent(arr)
         if idx < 0:
@@ -145,6 +152,7 @@ async def handle_unset(
     args: list[str],
     session: SessionState,
     state: SessionView | None = None,
+    policies: Policies | None = None,
 ) -> Result:
     """Unset shell variables, arrays, or functions, with bash's flags.
 
@@ -158,6 +166,8 @@ async def handle_unset(
     Args:
         args (list[str]): option words followed by names to unset.
         session (SessionState): shell session state.
+        policies (Policies | None): the policies an indexed subscript's
+            assignments clear.
     """
     if args[:1] == ["--help"]:
         answered = flag_help("unset")
@@ -235,7 +245,7 @@ async def handle_unset(
         try:
             if subscript is not None:
                 status = await _unset_element(
-                    session, require_view(state), base, subscript
+                    session, require_view(state), base, subscript, policies
                 )
             else:
                 await require_view(state).unset(name)
@@ -276,4 +286,5 @@ async def unset_builtin(call: BuiltinCall) -> Result:
             call.namespace.registry.policies,
             diagnostics=call.context.frame.diagnostics,
         ),
+        call.namespace.registry.policies,
     )

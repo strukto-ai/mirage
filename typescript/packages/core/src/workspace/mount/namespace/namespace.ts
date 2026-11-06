@@ -149,7 +149,7 @@ export function metaFromFields(fields: RecordFields): NodeMeta {
 // default, Redis for restart-durable namespaces), and the table hydrates
 // from the store once on first use.
 export class Namespace {
-  private readonly registry: MountRegistry
+  readonly registry: MountRegistry
   private readonly resolveFn: ResolveFn
   private readonly store: NamespaceStore
   private nodeTable = new Map<string, NodeMeta>()

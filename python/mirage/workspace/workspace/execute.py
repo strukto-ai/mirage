@@ -253,6 +253,7 @@ async def recurse(
             went back to a hand-off nothing revokes. None outside a
             walk, which makes the inner line a line of its own.
     """
+    records = opts.pop("records", None)
     if handed is None:
         inner = None
     elif node is None:
@@ -283,6 +284,10 @@ async def recurse(
         try:
             tree = parser.parse(cmd)
             if input_substitution_redirect(tree) is not None:
+                if records is not None:
+                    # The file was named in the shell expanding the
+                    # substitution; the read runs on its child's copy.
+                    context = child_context(context, records)
                 context.frame.routing = routing_decision
                 evaluate = partial(
                     recurse,
@@ -330,7 +335,7 @@ async def recurse(
             parser.release()
     child_token = None
     if substitution:
-        context = child_context(context)
+        context = child_context(context, records)
         context.frame.substitution = True
         session = context.session
         child_token = set_current_evaluation(context, owner=ws.sessions)

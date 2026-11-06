@@ -12,63 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-/**
- * Array-element callbacks the arithmetic evaluator resolves through.
- *
- * The evaluator owns no session, so a caller that wants `a[i]` and
- * `m[key]` to mean anything injects these two facts. The split is what
- * keeps subscript semantics out of the evaluator: whether the subscript
- * text is an arithmetic expression (indexed) or a literal key
- * (associative) is the variable's to answer, and only the session knows
- * the variable. `resolve` receives the evaluator's current view, pending
- * assignments included, so `i=2, a[i]` reads the new `i`; `read` answers
- * the element's stored text, null when unset.
- */
-export interface ElementOps {
-  resolve(name: string, subscript: string, env: Readonly<Record<string, string>>): string
-  read(name: string, key: string): string | null
-  /**
-   * Whether a name holds an associative array, whose subscript is a key.
-   * Given, the evaluator evaluates an indexed subscript itself, in its own
-   * record, and hands `resolve` the index; absent, `resolve` evaluates the
-   * subscript text (a caller outside a session).
-   */
-  isAssoc?(name: string): boolean
-  /** Whether a name holds an array, indexed or associative, empty or not. */
-  holdsArray?(name: string): boolean
-}
-
-/**
- * One assignment an arithmetic evaluation produced. `key` is the
- * canonical subscript `ElementOps.resolve` gave, or null for a bare
- * name (which lands as element 0 of an array, or the scalar itself).
- */
-export interface ArithWrite {
-  readonly name: string
-  readonly key: string | null
-  readonly value: string
-}
-
-/**
- * What an arithmetic expression's reader stands on: the end, a name (with
- * its subscript), an integer constant, an operator, a `++`/`--` bound to
- * the name after or before it, or a character bash reads no token from.
- * Mirrors Python's ArithTokenKind.
- */
-export type ArithTokenKind = 'end' | 'name' | 'num' | 'op' | 'pre' | 'post' | 'bad'
-
-/**
- * What one arithmetic evaluation produced: the value plus the
- * assignments made, one per target, in the order of each target's last
- * write, for the caller to land through the session view. Bare and
- * subscripted targets share the one sequence, because a bare name
- * aliases element 0 and `((a[0]=1, a=2))` has to leave 2.
- */
-export interface ArithResult {
-  readonly value: bigint
-  readonly writes: readonly ArithWrite[]
-}
-
 export const NodeType = Object.freeze({
   TIMED_STATEMENT: 'timed_statement',
   COMMAND: 'command',

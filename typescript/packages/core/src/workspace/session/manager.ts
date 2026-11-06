@@ -34,7 +34,7 @@ type StoredSession = Parameters<typeof SessionState.fromDict>[0]
 
 /** Whether any of the session's variables carries a pointer. */
 function holdsManaged(session: SessionState): boolean {
-  return Object.values(session.vars).some((v) => v.managed !== undefined)
+  return session.vars.records().some(([, v]) => v.managed !== undefined)
 }
 
 /**
@@ -50,7 +50,7 @@ function holdsManaged(session: SessionState): boolean {
  */
 function mergeSeedVars(session: SessionState, seedVars: Record<string, ShellVar>): void {
   for (const [name, seeded] of Object.entries(seedVars)) {
-    if (!(name in session.vars)) session.vars[name] = seeded
+    if (!session.vars.has(name)) session.vars.set(name, seeded)
   }
 }
 
@@ -58,7 +58,7 @@ function mergeSeedVars(session: SessionState, seedVars: Record<string, ShellVar>
 function seedBytes(session: SessionState, seedVars: Record<string, ShellVar>): number {
   let held = 0
   for (const [name, seeded] of Object.entries(seedVars)) {
-    if (!(name in session.vars)) held += entryBytes(name, seeded.value)
+    if (!session.vars.has(name)) held += entryBytes(name, seeded.value)
   }
   return held
 }

@@ -1,3 +1,4 @@
+import type { ShellVars } from '../rs/session.ts'
 import { ExecutionFrame } from './frame.ts'
 import type { SessionState } from './session/session.ts'
 
@@ -15,7 +16,14 @@ export class EvaluationContext {
   }
 }
 
-/** A child shell's evaluation: the session's subshell and a new frame. */
-export function childContext(context: EvaluationContext): EvaluationContext {
-  return new EvaluationContext(context.session.subshell(), context.frame.fork(), context)
+/**
+ * A child shell's evaluation: the session's subshell and a new frame.
+ * `records` is the child's variables when a running expansion made them;
+ * null copies the session's.
+ */
+export function childContext(
+  context: EvaluationContext,
+  records: ShellVars | null = null,
+): EvaluationContext {
+  return new EvaluationContext(context.session.subshell(records), context.frame.fork(), context)
 }

@@ -100,8 +100,8 @@ describe('handleExport / handleUnset / handlePrintenv', () => {
     await handleExport(['X', 'Y'], s, sessionView(s))
     expect(s.env.X).toBe('existing')
     expect(s.env.Y).toBeUndefined()
-    expect(s.vars.Y?.attrs.has(VarAttr.Export)).toBe(true)
-    expect(s.vars.Y?.value).toBeNull()
+    expect(s.vars.get('Y')?.attrs.has(VarAttr.Export)).toBe(true)
+    expect(s.vars.get('Y')?.value).toBeNull()
   })
 
   it('export -p prints declare -x lines', async () => {
@@ -2126,7 +2126,7 @@ describe('handleXargs', () => {
 
   it('--show-limits counts the environment', async () => {
     const counted = new SessionState({ sessionId: 'limits' })
-    counted.vars = { ...counted.vars, ...varsFromEnv({ A: 'bb' }) }
+    for (const [name, v] of Object.entries(varsFromEnv({ A: 'bb' }))) counted.vars.set(name, v)
     let size = 0
     for (const [name, value] of Object.entries(envSnapshot(counted))) {
       size += new TextEncoder().encode(`${name}=${value}`).length + 1

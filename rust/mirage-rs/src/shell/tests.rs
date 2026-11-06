@@ -109,6 +109,18 @@ fn bash_reads_these_as_it_reads_its_words() {
 }
 
 #[test]
+fn a_replacement_takes_operator_bytes_literally() {
+    // `&`, `<`, `>` and the rest are text inside the braces, not the end
+    // of the parse: bash reads `${x/b/[&]}` as a replacement of `b`.
+    assert_eq!(
+        read("echo ${x/b/[&]}"),
+        "(program (command name: (command_name (word=echo)) argument: (expansion (variable_name=x) \
+         (regex=b) (concatenation (word=[) (word=&) (word=])))))"
+    );
+    assert!(read("echo ${x//[ac]/<&>}").contains("(variable_name=x)"));
+}
+
+#[test]
 fn a_redirect_takes_one_word() {
     // The words after it are the command's; redirects that end it wrap it.
     assert_eq!(
@@ -860,4 +872,17 @@ fn a_case_pattern_takes_an_extglob_group_only_with_extglob_on() {
     assert_eq!(refusal.message, b"mirage: syntax error near '('\n");
     assert_eq!(parse(line).error, None);
     assert_eq!(parse_with(b"[[ a == @(a) ]]", &off).error, None);
+}
+
+#[test]
+fn a_subscript_holds_its_blanks() {
+    // bash reads an element's subscript to its `]`, blanks and all, when
+    // the element assigns.
+    assert_eq!(
+        read("a=([x y]=z [k]=v)"),
+        "(program (variable_assignment name: (variable_name=a) value: (array \
+         (concatenation (word=[) (word=x) (word= ) (word=y) (word=]) (word==z)) \
+         (concatenation (word=[) (word=k) (word=]) (word==v)))))"
+    );
+    assert_eq!(parse(b"a=([$k x]=v)").error, None);
 }

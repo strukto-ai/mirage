@@ -13,26 +13,24 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.policy import PolicyDenied
+from mirage.policy.policies import Policies
 from mirage.shell.errors import ArithError, ReadonlyVariableError
 from mirage.shell.voice import shell_voice
-from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.shared import (
     fail,
     readonly_refusal,
     refusal,
-    require_view,
     result,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.elements import landed_arith
-from mirage.workspace.session.state import session_view
+from mirage.workspace.session.state import session_arith
 
 
 async def handle_let(
     args: list[str],
     session: SessionState,
-    state: SessionView | None = None,
+    policies: Policies | None = None,
 ) -> Result:
     """Evaluate each operand as an arithmetic expression.
 
@@ -50,15 +48,14 @@ async def handle_let(
     Args:
         args (list[str]): the words after ``let``, one expression each.
         session (SessionState): shell session state.
-        state (SessionView | None): the gated session view.
+        policies (Policies | None): the policies its writes clear.
     """
     if not args:
         return fail("let", f"{shell_voice()}let: expression expected\n")
-    view = require_view(state)
     value = 0
     for expr in args:
         try:
-            value = await landed_arith(session, view, expr)
+            value = await session_arith(session, expr, policies)
         except PolicyDenied as exc:
             return refusal("let", exc)
         except (ArithError, ReadonlyVariableError) as exc:
@@ -79,9 +76,5 @@ async def let_builtin(call: BuiltinCall) -> Result:
     return await handle_let(
         list(call.argv.args),
         call.context.session,
-        session_view(
-            call.context.session,
-            call.namespace.registry.policies,
-            diagnostics=call.context.frame.diagnostics,
-        ),
+        call.namespace.registry.policies,
     )

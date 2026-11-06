@@ -47,7 +47,7 @@ async def run_with_env_limit(limit: int | None, call: Awaitable[T]) -> T:
         _limits.reset(token)
 
 
-def _env_limit() -> int | None:
+def env_limit() -> int | None:
     """The running workspace's max_env, None for no cap."""
     return _limits.get()
 
@@ -95,46 +95,43 @@ def frames_bytes(call_stack: CallStack) -> int:
 
 
 def saves_bytes(session: SessionState) -> int:
-    """The bytes the records running prefix assignments set aside hold,
-    each record once.
-
-    A ``declare -g`` that reaches past one, and the arithmetic it runs,
-    swap records between the variables, the save and ``_reached``; a
-    record the variables hold is counted there.
+    """The bytes the records running prefix assignments set aside hold.
 
     Args:
         session (SessionState): the session.
     """
-    saves = session._prefix_saves
-    frames = {id(saved) for saved in saves}
-    held_aside = [(n, var) for saved in saves for n, var in saved.items()]
-    held_aside += [
-        (n, running)
-        for n, frame, running in session._reached
-        if id(frame) in frames
-    ]
     return sum(
         entry_bytes(n, var.value)
-        for n, var in held_aside
-        if var is not None and var is not session.vars.get(n)
+        for saved in session._prefix_saves
+        for n, var in saved.items()
+        if var is not None
     )
 
 
-def env_bytes(session: SessionState) -> int:
-    """The bytes a session's shell state holds: its variables, functions,
-    aliases and positional parameters, names and values, and the records
-    a running prefix assignment set aside.
+def outside_bytes(session: SessionState) -> int:
+    """The bytes a session's shell state holds beside its variables: its
+    functions, aliases and positional parameters, names and values, and
+    the records a running prefix assignment set aside.
 
     Args:
         session (SessionState): the session.
     """
     return (
-        sum(entry_bytes(n, var.value) for n, var in session.vars.items())
-        + sum(entry_bytes(n, body) for n, body in session.functions.items())
+        sum(entry_bytes(n, body) for n, body in session.functions.items())
         + sum(entry_bytes(n, text) for n, text in session.aliases.items())
         + args_bytes(session.positional_args)
         + saves_bytes(session)
     )
+
+
+def env_bytes(session: SessionState) -> int:
+    """The bytes a session's shell state holds: its variables and
+    :func:`outside_bytes`.
+
+    Args:
+        session (SessionState): the session.
+    """
+    return session.vars.shell.held() + outside_bytes(session)
 
 
 def check_env_fits(
@@ -181,7 +178,7 @@ def check_env(
     Raises:
         ExitSignal: the write would pass max_env.
     """
-    limit = _env_limit()
+    limit = env_limit()
     if limit is None or after <= before:
         return
     if env_bytes(session) + held - before + after > limit:

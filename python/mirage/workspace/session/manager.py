@@ -20,6 +20,7 @@ from mirage.context.session_context import SessionOwner
 from mirage.io.async_line_iterator import release_inputs
 from mirage.policy.profile import CompiledProfile
 from mirage.policy.types import AdmissionRules, Decision, ProfileScripts
+from mirage.rs.session import ShellVars
 from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
@@ -142,7 +143,7 @@ class SessionManager(SessionOwner):
         )
         self._sessions[default_session_id] = SessionState(
             session_id=default_session_id,
-            vars=dict(self._seed_vars),
+            vars=ShellVars.of(self._seed_vars),
             created_at=self._clock.now(),
             ids=self._ids,
         )
@@ -314,7 +315,9 @@ class SessionManager(SessionOwner):
     @env.setter
     def env(self, value: dict[str, str]) -> None:
         session = self._sessions[self._default_id]
-        session.vars = vars_from_env(value)
+        session.vars = ShellVars.of(
+            vars_from_env(value), session.ids.random_u32
+        )
 
     def adopt_default(self, session_id: str) -> None:
         """Re-key the default session to an externally decided id.
@@ -549,7 +552,7 @@ class SessionManager(SessionOwner):
         session = SessionState(
             session_id=session_id,
             mount_modes=mount_modes,
-            vars=seeded,
+            vars=ShellVars.of(seeded),
             created_at=self._clock.now(),
             ids=self._ids,
         )

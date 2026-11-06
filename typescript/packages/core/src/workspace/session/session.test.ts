@@ -301,12 +301,11 @@ describe('SessionState.fork', () => {
 describe('SessionState.fromJSON', () => {
   it('keeps the startup vars a recorded session unset', () => {
     const s = new SessionState({ sessionId: 's' })
-    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-    for (const name of ['OPTIND', 'OPTERR', 'IFS']) delete s.vars[name]
+    for (const name of ['OPTIND', 'OPTERR', 'IFS']) s.vars.delete(name)
     const back = SessionState.fromDict(s.toDict() as Parameters<typeof SessionState.fromDict>[0])
-    expect(['OPTIND', 'OPTERR', 'IFS'].filter((name) => name in back.vars)).toEqual([])
+    expect(['OPTIND', 'OPTERR', 'IFS'].filter((name) => back.vars.has(name))).toEqual([])
     const bare = SessionState.fromDict({ session_id: 's', env: { A: '1' } })
-    expect(bare.vars.OPTIND).toEqual(makeVar('1', new Set([VarAttr.Integer])))
+    expect(bare.vars.get('OPTIND')).toEqual(makeVar('1', new Set([VarAttr.Integer])))
   })
 })
 
@@ -338,7 +337,7 @@ describe('SessionState.newShell', () => {
     parent.getoptsPos = 2
     parent.getoptsOptind = 1
     const child = parent.newShell()
-    expect(child.vars).toEqual({
+    expect(Object.fromEntries(child.vars.records())).toEqual({
       OUT: makeVar('o', exported),
       TOKEN: { value: null, attrs: exported, managed: token },
       OPTIND: makeVar('1', new Set([VarAttr.Integer, VarAttr.Export])),
@@ -354,9 +353,8 @@ describe('SessionState.newShell', () => {
     expect([child.aliases, child.shellOptions]).toEqual([{}, {}])
     expect([child.lastExitCode, child.cwd, child.umask]).toEqual([0, '/w', 0o077])
     expect([child.getoptsPos, child.getoptsOptind]).toEqual([0, null])
-    expect(child.randomSeed).toBe('42')
     expect(Object.keys(parent.functions)).toEqual(['f', 'g'])
-    expect(parent.vars.PLAIN).toEqual(makeVar('p'))
+    expect(parent.vars.get('PLAIN')).toEqual(makeVar('p'))
   })
 })
 
@@ -391,14 +389,14 @@ describe('a stored session keeps its attributes', () => {
     // to every child runtime.
     const s = new SessionState({ sessionId: 's1' })
     seedVar(s, 'PLAIN', 'hello')
-    s.vars.EXPO = makeVar('world', new Set([VarAttr.Export]))
-    s.vars.MARKED = makeVar(null, new Set([VarAttr.Readonly]))
+    s.vars.set('EXPO', makeVar('world', new Set([VarAttr.Export])))
+    s.vars.set('MARKED', makeVar(null, new Set([VarAttr.Readonly])))
     const back = SessionState.fromDict(s.toDict() as Parameters<typeof SessionState.fromDict>[0])
-    expect(back.vars.PLAIN?.attrs.size).toBe(0)
-    expect(back.vars.PLAIN?.value).toBe('hello')
-    expect([...(back.vars.EXPO?.attrs ?? [])]).toEqual([VarAttr.Export])
-    expect(back.vars.MARKED?.value).toBe(null)
-    expect([...(back.vars.MARKED?.attrs ?? [])]).toEqual([VarAttr.Readonly])
+    expect(back.vars.get('PLAIN')?.attrs.size).toBe(0)
+    expect(back.vars.get('PLAIN')?.value).toBe('hello')
+    expect([...(back.vars.get('EXPO')?.attrs ?? [])]).toEqual([VarAttr.Export])
+    expect(back.vars.get('MARKED')?.value).toBe(null)
+    expect([...(back.vars.get('MARKED')?.attrs ?? [])]).toEqual([VarAttr.Readonly])
   })
 
   it('reads a payload with no attributes as a process environment', () => {
@@ -407,7 +405,7 @@ describe('a stored session keeps its attributes', () => {
     // every name in it is exported -- which is what `ws.env = {...}` and
     // a cross-language handoff both mean.
     const back = SessionState.fromDict({ session_id: 'x', env: { A: '1' } })
-    expect([...(back.vars.A?.attrs ?? [])]).toEqual([VarAttr.Export])
+    expect([...(back.vars.get('A')?.attrs ?? [])]).toEqual([VarAttr.Export])
   })
 
   it('writes var_attrs even when empty', () => {
@@ -420,16 +418,16 @@ describe('a stored session keeps its attributes', () => {
     // `export -n PWD` and `unset OPTIND` clear the attributes a fresh
     // session carries.
     setAttr(s, 'PWD', VarAttr.Export, false)
-    delete s.vars.OPTIND
+    s.vars.delete('OPTIND')
     const json = s.toDict() as { var_attrs: Record<string, string> }
     expect(json.var_attrs).toEqual({})
     const back = SessionState.fromDict(json as never)
-    expect(back.vars.X?.attrs.has(VarAttr.Export)).toBe(false)
+    expect(back.vars.get('X')?.attrs.has(VarAttr.Export)).toBe(false)
   })
 
   it('carries an unset marked name through with no value', () => {
     const s = new SessionState({ sessionId: 's1' })
-    s.vars.Z = makeVar(null, new Set([VarAttr.Export]))
+    s.vars.set('Z', makeVar(null, new Set([VarAttr.Export])))
     const json = s.toDict() as { env: Record<string, string>; var_attrs: Record<string, string> }
     expect('Z' in json.env).toBe(false)
     expect(json.var_attrs.Z).toBe('x')
@@ -538,11 +536,11 @@ describe('varsFromEntries', () => {
 describe('managed serialization', () => {
   function managedSession(value: string | null): SessionState {
     const session = new SessionState({ sessionId: 's', cwd: '/' })
-    session.vars.TOKEN = {
+    session.vars.set('TOKEN', {
       value,
       attrs: new Set([VarAttr.Export]),
       managed: { source: 'aws-sm', ref: 'prod/tokens', key: 'api', eager: false },
-    }
+    })
     return session
   }
 
@@ -561,11 +559,11 @@ describe('managed serialization', () => {
 
   it('writes fetch only when eager', () => {
     const session = new SessionState({ sessionId: 's', cwd: '/' })
-    session.vars.E = {
+    session.vars.set('E', {
       value: null,
       attrs: new Set([VarAttr.Export]),
       managed: { source: 'env', ref: '', key: 'E', eager: true },
-    }
+    })
     const data = session.toDict()
     expect(data.managed).toEqual({ E: { from: 'env', ref: '', key: 'E', fetch: 'eager' } })
   })
@@ -573,7 +571,7 @@ describe('managed serialization', () => {
   it('round-trips as declared-but-unfetched', () => {
     const data = managedSession('s3cr3t').toDict()
     const restored = SessionState.fromDict(data as Parameters<typeof SessionState.fromDict>[0])
-    const v = restored.vars.TOKEN
+    const v = restored.vars.get('TOKEN')
     expect(v?.value).toBeNull()
     expect(v?.attrs).toEqual(new Set([VarAttr.Export]))
     expect(v?.managed).toEqual({ source: 'aws-sm', ref: 'prod/tokens', key: 'api', eager: false })
@@ -583,8 +581,8 @@ describe('managed serialization', () => {
     const data = managedSession(null).toDict()
     ;(data.env as Record<string, string>).TOKEN = 'smuggled'
     const restored = SessionState.fromDict(data as Parameters<typeof SessionState.fromDict>[0])
-    expect(restored.vars.TOKEN?.value).toBeNull()
-    expect(restored.vars.TOKEN?.managed).not.toBeUndefined()
+    expect(restored.vars.get('TOKEN')?.value).toBeNull()
+    expect(restored.vars.get('TOKEN')?.managed).not.toBeUndefined()
   })
 })
 

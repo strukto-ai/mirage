@@ -12,93 +12,32 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { lineSignal } from '../../context/session_context.ts'
-import { mergeSignals } from '../../utils/abort.ts'
-import type { ExecuteFn } from './types.ts'
-import type { ProcessSubLine } from '../frame.ts'
-import { childContext, type EvaluationContext } from '../evaluation.ts'
-import type { SessionView } from '../../view/types.ts'
-import { CallStack } from '../../shell/call_stack.ts'
-import { quotedParts } from '../../shell/helpers.ts'
-import { NodeType as NT } from '../../shell/types.ts'
 import type { IOResult } from '../../io/types.ts'
-import type { SessionState } from '../session/session.ts'
-import { landedArith } from '../session/elements.ts'
-import { markEscapedGlobs, markGlobs, unmarkGlobs } from '../../utils/glob_walk.ts'
-import { expandTilde } from '../../utils/path.ts'
-import { homeDir } from '../session/shell_dirs.ts'
-import { splitBacktickRegion } from '../../shell/backticks.ts'
-import { ArithError, BadSubstitution, ReadonlyVariableError, named } from '../../shell/errors.ts'
-import { decodeAnsiC, unescapeDquoted, unescapeUnquoted } from '../../shell/escapes.ts'
-import { ARITH_DELIMITERS, ARITH_OPERATORS } from './constants.ts'
-import { scanParameter } from '../../shell/parameter.ts'
-import { joinChunks, valuePiece } from './fields.ts'
-import { type Chunk, piece } from './types.ts'
-import { expandBraces, isAtSplat, landArithWrites, parameterChunks } from './variable.ts'
+import type { Policies } from '../../policy/index.ts'
+import { ShellVars } from '../../rs/session.ts'
+import type { Item, Shell, ShellTreeNode } from '../../rs/shell.ts'
+import { CallStack } from '../../shell/call_stack.ts'
+import { ProgramNode, type ParsedProgram, shellNode } from '../../shell/parse/program.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
+import { markGlobs } from '../../utils/glob_walk.ts'
+import { childContext, type EvaluationContext } from '../evaluation.ts'
 import { recordStatus } from '../executor/statement.ts'
-import { decodeText } from '../../shell/bytes.ts'
+import type { ProcessSubLine } from '../frame.ts'
+import { frame } from '../session/state.ts'
+import { SessionGate, drive, listens, type TaskHost } from '../session/task.ts'
+import type { ExecuteFn } from './types.ts'
 
-// Whitespace the parser folds into an expansion's opening token.
-// Inside a double-quoted string, a run of whitespace between two
-// expansions is not emitted as string content: it lands inside the
-// following node's extent, so `"$a $(b)"` yields a command substitution
-// whose text is `" $(b)"`. Every expansion branch has to re-emit it or
-// the two values run together. Unquoted words do not fold, so the
-// prefix is empty there and this stays a no-op.
-export function foldedWhitespace(node: TSNodeLike): string {
-  const raw = node.text
-  return raw.slice(0, raw.length - raw.trimStart().length)
-}
-
-/**
- * Expand a backtick region, one nested line per pair. `offset` is where
- * `raw` (the region's text, the folded prefix stripped) starts in the
- * node's text.
- */
-async function expandBacktickRegion(
-  raw: string,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  node: TSNodeLike,
-  offset: number,
-  callStack: CallStack | null,
-): Promise<string> {
-  let out = ''
-  for (const segment of splitBacktickRegion(raw)) {
-    if (!segment.command) {
-      out += segment.text
-      continue
-    }
-    // The command is its own place on the line: the span within the node
-    // says where it stands.
-    const io = await childLine(context, executeFn, segment.text, node, callStack, [
-      offset + segment.start,
-      offset + segment.end,
-    ])
-    out += decodeText(await io.materializeStdout()).replace(/\n+$/, '')
-    context.frame.diagnostics.push(await io.materializeStderr())
-    context.frame.cmdsubSeq += 1
-    context.frame.cmdsubStatus = io.exitCode
-    recordStatus(context.session, io.exitCode, true)
-  }
-  return out
-}
-
-// Unquoted-heredoc escapes: \$, \`, \\, \<newline> only.
-// Unlike double quotes, \" stays literal in heredoc bodies.
 /**
  * Run a substitution's line in a child shell.
  *
- * The evaluator isolates the child shell, except for Bash's `$(< file)`
- * optimization, whose filename expands in the parent. It decides from
- * a fresh parse of the body, including each pair in a backtick region.
  * The line reaches the executor unwrapped, under the node that named it,
- * so the pass places its commands where they were typed rather than
- * under a subshell of their own. The child runs on a copy of the caller's
- * frames: inside a function it reads the function's `$1`, `return` ends it,
- * and so does a `break` from a loop the caller is in. `span` is the pair's
- * span within the node, for a backtick region holding several.
+ * so the pass places its commands where they were typed rather than under
+ * a subshell of their own. The child runs on a copy of the caller's frames:
+ * inside a function it reads the function's `$1`, `return` ends it, and so
+ * does a `break` from a loop the caller is in. `span` is the pair's span
+ * within the node, for a backtick region holding several; `records` the
+ * child shell's variables, the copy the expansion made where the
+ * substitution stood.
  */
 export async function childLine(
   context: EvaluationContext,
@@ -106,8 +45,8 @@ export async function childLine(
   text: string,
   node: TSNodeLike,
   callStack: CallStack | null,
-  span?: [number, number],
-  options: NonNullable<Parameters<ProcessSubLine>[1]> = {},
+  span?: readonly [number, number] | null,
+  options: NonNullable<Parameters<ProcessSubLine>[1]> & { records?: ShellVars } = {},
 ): Promise<IOResult> {
   const session = context.session
   return executeFn(text, {
@@ -117,437 +56,168 @@ export async function childLine(
     node,
     substitution: true,
     callStack: (callStack ?? new CallStack()).fork(true, false),
-    ...(span === undefined ? {} : { span }),
+    ...(span === undefined || span === null ? {} : { span }),
   })
 }
 
-// Reconstruct arithmetic expression text for the shared evaluator.
-// `$`-expansions substitute textually (bash performs expansions before
-// arithmetic evaluation), while bare variable names stay as names so the
-// evaluator can resolve and assign them (`$(( y = 3 ))` needs `y`, not
-// its value).
 /**
- * Reconstruct arithmetic expression text for the shared evaluator. A bad
- * substitution names the expression as written.
+ * What a word's expansion asks of the shell running it: a command
+ * substitution's line, a process substitution's pipe, and the session
+ * policies on the writes it makes. Mirrors Python's ExpandHost.
+ */
+export class ExpandHost implements TaskHost {
+  private readonly gates: SessionGate
+  private readonly program: ParsedProgram | null
+
+  constructor(
+    readonly context: EvaluationContext,
+    readonly executeFn: ExecuteFn,
+    readonly callStack: CallStack | null,
+    policies: Policies | null,
+    word: TSNodeLike,
+  ) {
+    this.gates = new SessionGate(context.session, policies)
+    this.program = word instanceof ProgramNode ? word.program : null
+  }
+
+  private node(node: ShellTreeNode): TSNodeLike {
+    return this.program === null ? node : new ProgramNode(node, this.program)
+  }
+
+  async substitute(
+    shell: Shell,
+    body: string,
+    node: ShellTreeNode,
+    span: readonly [number, number] | null,
+  ): Promise<[Uint8Array, Uint8Array, number]> {
+    const context = this.context
+    // The session's own shell is the running expansion's until it ends;
+    // whatever reads the session by its id while the line runs (a policy's
+    // view, the store's flush) reads a copy of it as the substitution found
+    // it, which the child's own tasks never hold.
+    const records = context.session.vars
+    const held = records.shell
+    const copy = shell.fork()
+    records.shell = copy
+    let io: IOResult
+    try {
+      io = await childLine(context, this.executeFn, body, this.node(node), this.callStack, span, {
+        records: new ShellVars(shell),
+      })
+    } finally {
+      records.shell = held
+      copy.close()
+    }
+    const stdout = await io.materializeStdout()
+    const stderr = await io.materializeStderr()
+    // An assignment-only statement whose value ran substitutions reports the
+    // last one's status as its own, and `$?` reads it in the words that
+    // follow (`false; echo $(true) $?` prints 0).
+    context.frame.cmdsubSeq += 1
+    context.frame.cmdsubStatus = io.exitCode
+    recordStatus(context.session, io.exitCode, true)
+    return [stdout, stderr, io.exitCode]
+  }
+
+  async process(shell: Shell, node: ShellTreeNode): Promise<string> {
+    const context = this.context
+    const named = this.node(node)
+    const processSub = context.frame.processSub
+    if (processSub === null) return named.text
+    // The child shell is taken where the word expands, its function's
+    // locals included, so the substitution sees the shell as it stood then
+    // while the command naming it goes on.
+    const child = childContext(context, new ShellVars(shell))
+    return processSub(named, (text, options) =>
+      childLine(child, this.executeFn, text, named, this.callStack, null, options),
+    )
+  }
+
+  gate(
+    post: boolean,
+    verb: string,
+    key: string,
+    value: string | null,
+    old: string | null,
+    view: Shell,
+  ): Promise<void> {
+    return this.gates.gate(post, verb, key, value, old, view)
+  }
+}
+
+function literal(node: TSNodeLike): string {
+  let at = node
+  while (at.type !== 'raw_string' && at.children[0] !== undefined) at = at.children[0]
+  return at.type === 'raw_string' ? at.text.slice(1, -1) : at.text
+}
+
+/**
+ * Expand one word on the session's shell, as `mode` reads it: `fields`
+ * (argument words, each glob-ready with quoting as marks), `text` (nothing
+ * splits), `assignment`, `pattern` (runs, each quoted or live), `regex` or
+ * `arith` (the expression text).
+ */
+export async function expand(
+  word: TSNodeLike,
+  mode: string,
+  context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null = null,
+  policies: Policies | null = null,
+): Promise<Item> {
+  const node = shellNode(word)
+  if (node === null) {
+    const text = literal(word)
+    if (mode === 'fields') return [markGlobs(text)]
+    return mode === 'pattern' ? [[text, true]] : text
+  }
+  const session = context.session
+  frame(session, callStack)
+  const task = session.vars.shell.expand(node, mode, listens(policies))
+  const host = new ExpandHost(context, executeFn, callStack, policies, word)
+  return drive(task, host, context.frame.diagnostics)
+}
+
+/**
+ * Expand a parsed node to the string it stands for, where nothing splits:
+ * a splat reads as its elements joined (`$@` on a space, `$*` on IFS's
+ * first character).
+ */
+export async function expandNode(
+  tsNode: TSNodeLike,
+  context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null = null,
+  policies: Policies | null = null,
+): Promise<string> {
+  return (await expand(tsNode, 'text', context, executeFn, callStack, policies)) as string
+}
+
+/**
+ * An assignment's value, where nothing splits and a tilde prefix expands at
+ * its start and after each unquoted `:` (`PATH=/a:~/b`).
+ */
+export async function expandAssignment(
+  tsNode: TSNodeLike,
+  context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null = null,
+  policies: Policies | null = null,
+): Promise<string> {
+  return (await expand(tsNode, 'assignment', context, executeFn, callStack, policies)) as string
+}
+
+/**
+ * An arithmetic command's expression text: `$`-expansions substitute
+ * textually, as bash expands before it evaluates, while bare names stay
+ * names for the evaluator to read and assign.
  */
 export async function expandArith(
   tsNode: TSNodeLike,
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
-  view?: SessionView,
+  policies: Policies | null = null,
 ): Promise<string> {
-  return named(arithInside(tsNode), arithText(tsNode, context, executeFn, callStack, view))
-}
-
-function arithInside(tsNode: TSNodeLike): string {
-  const text = tsNode.text.trimStart()
-  for (const [opener, closer] of [
-    ['$((', '))'],
-    ['((', '))'],
-    ['$[', ']'],
-  ] as const) {
-    if (text.startsWith(opener) && text.endsWith(closer))
-      return text.slice(opener.length, -closer.length)
-  }
-  return text
-}
-
-async function arithText(
-  tsNode: TSNodeLike,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  callStack: CallStack | null,
-  view?: SessionView,
-): Promise<string> {
-  const parts: string[] = []
-  const base = tsNode.startIndex ?? 0
-  let end = 0
-  for (const child of tsNode.children) {
-    const start = (child.startIndex ?? base + end) - base
-    parts.push(tsNode.text.slice(end, start))
-    end = (child.endIndex ?? base + start + child.text.length) - base
-    if (ARITH_DELIMITERS.has(child.type)) continue
-    if (
-      child.type === NT.BINARY_EXPRESSION ||
-      child.type === NT.UNARY_EXPRESSION ||
-      child.type === NT.PARENTHESIZED_EXPRESSION ||
-      child.type === NT.TERNARY_EXPRESSION ||
-      child.type === NT.POSTFIX_EXPRESSION ||
-      child.type === NT.CONCATENATION
-    ) {
-      parts.push(await arithText(child, context, executeFn, callStack, view))
-    } else if (child.type === 'subscript') {
-      parts.push(await arithSubscript(child, context, executeFn, callStack, view))
-    } else if (
-      ARITH_OPERATORS.has(child.type) ||
-      child.type === NT.NUMBER ||
-      child.type === NT.VARIABLE_NAME ||
-      child.type === NT.WORD
-    ) {
-      parts.push(child.text)
-    } else {
-      parts.push(await expandNode(child, context, executeFn, callStack, view))
-    }
-  }
-  parts.push(tsNode.text.slice(end))
-  return parts.join('')
-}
-
-/**
- * Reconstruct one element reference for the arithmetic tokenizer.
- *
- * The subscript's `$`-expansions substitute here, since bash expands
- * the whole expression text before evaluating it, while a literal
- * interior rides verbatim: for an associative array the text *is* the
- * key (`m[k]` reads the key `k` even when a variable `k` exists), and
- * for an indexed one the evaluator's resolver still gets the
- * arithmetic spelling.
- */
-async function arithSubscript(
-  subNode: TSNodeLike,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  callStack: CallStack | null,
-  view?: SessionView,
-): Promise<string> {
-  let name = ''
-  const inner: TSNodeLike[] = []
-  for (const sc of subNode.namedChildren) {
-    if (sc.type === NT.VARIABLE_NAME && name === '') {
-      name = sc.text
-    } else {
-      inner.push(sc)
-    }
-  }
-  const raw = subNode.text.slice(name.length + 1, -1)
-  if (!/[$'"`]/.test(raw)) return `${name}[${raw}]`
-  const parts: string[] = []
-  for (const sc of inner) {
-    if (
-      sc.type === NT.SIMPLE_EXPANSION ||
-      sc.type === NT.EXPANSION ||
-      sc.type === NT.COMMAND_SUBSTITUTION ||
-      sc.type === NT.STRING ||
-      sc.type === NT.RAW_STRING ||
-      sc.type === NT.ANSI_C_STRING ||
-      sc.type === NT.TRANSLATED_STRING ||
-      sc.type === NT.CONCATENATION
-    ) {
-      parts.push(await expandNode(sc, context, executeFn, callStack, view))
-    } else {
-      parts.push(sc.text)
-    }
-  }
-  return `${name}[${parts.join('')}]`
-}
-
-// Expand a parsed node to the string it stands for.
-export async function expandNode(
-  tsNode: TSNodeLike,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  callStack: CallStack | null = null,
-  view?: SessionView,
-): Promise<string> {
-  return unmarkGlobs(await expandNodeMarked(tsNode, context, executeFn, callStack, view))
-}
-
-/**
- * Expand a node, marking the glob characters quoting made literal.
- *
- * Same string as `expandNode`, except that a glob character quoting
- * neutralized travels under its own mark. The node is read where no
- * field splitting happens, so a splat reads as its elements joined
- * (`$@` on a space, `$*` on IFS's first character).
- */
-export async function expandNodeMarked(
-  tsNode: TSNodeLike,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  callStack: CallStack | null = null,
-  view?: SessionView,
-): Promise<string> {
-  return joinChunks(await expandChunks(tsNode, context, executeFn, callStack, view))
-}
-
-/**
- * Expand a node to the pieces field splitting reads.
- *
- * What an unquoted expansion produces splits on IFS, and what quoting
- * protects does not; a splat's elements are separate fields.
- * `splitFields` turns the pieces into words and `joinChunks` into the
- * one string a context without splitting reads. `quoted` says whether
- * the node sits inside double quotes. A bad substitution leaving it is
- * renamed after the node, unless a boundary inside named it for good.
- */
-export async function expandChunks(
-  tsNode: TSNodeLike,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  callStack: CallStack | null = null,
-  view?: SessionView,
-  quoted = false,
-): Promise<Chunk[]> {
-  try {
-    return await nodeChunks(tsNode, context, executeFn, callStack, view, quoted)
-  } catch (err) {
-    if (err instanceof BadSubstitution) throw err.within(tsNode.text.trimStart())
-    throw err
-  }
-}
-
-async function nodeChunks(
-  tsNode: TSNodeLike,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  callStack: CallStack | null,
-  view: SessionView | undefined,
-  quoted: boolean,
-): Promise<Chunk[]> {
-  const session = context.session
-  const ntype = tsNode.type
-
-  if (ntype === NT.WORD) {
-    return [piece(expandTilde(unescapeUnquoted(markEscapedGlobs(tsNode.text)), homeDir(session)))]
-  }
-  if (ntype === NT.COMMAND_NAME) {
-    // The name is a word like any other: $CMD, "quoted", $(sub) all
-    // expand. A bare word has one named child (or none) and falls
-    // through to its own expansion rule.
-    const child = tsNode.namedChildren[0]
-    if (child !== undefined) return expandChunks(child, context, executeFn, callStack, view)
-    return [piece(tsNode.text)]
-  }
-
-  if (ntype === NT.SIMPLE_EXPANSION) {
-    const prefix = foldedWhitespace(tsNode)
-    const raw = tsNode.text.slice(prefix.length)
-    const lead = prefix !== '' ? [piece(prefix)] : []
-    const ref = scanParameter(raw, 0)
-    if (ref === null) return [...lead, piece(quoted ? markGlobs(raw) : raw)]
-    const [name, end] = ref
-    const tail = raw.slice(end)
-    return [
-      ...lead,
-      ...(await parameterChunks(name, session, callStack, quoted)),
-      ...(tail !== '' ? [piece(quoted ? markGlobs(tail) : tail)] : []),
-    ]
-  }
-
-  if (ntype === NT.EXPANSION) {
-    const prefix = foldedWhitespace(tsNode)
-    const expandChild = (c: TSNodeLike, inQuotes: boolean): Promise<Chunk[]> =>
-      expandChunks(c, context, executeFn, callStack, view, inQuotes)
-    const chunks = await expandBraces(
-      tsNode,
-      session,
-      callStack,
-      expandChild,
-      view,
-      quoted,
-      mergeSignals(context.frame.abortSignal, lineSignal(session)),
-    )
-    return prefix !== '' ? [piece(prefix), ...chunks] : chunks
-  }
-
-  if (ntype === NT.PROCESS_SUBSTITUTION && context.frame.processSub !== null) {
-    // The child shell is taken where the word expands, its function's
-    // locals included, so the substitution sees the shell as it stood
-    // then while the command naming it goes on.
-    const parent = childContext(context)
-    return [
-      piece(
-        await context.frame.processSub(tsNode, (text, options) =>
-          childLine(parent, executeFn, text, tsNode, callStack, undefined, options),
-        ),
-      ),
-    ]
-  }
-
-  if (ntype === NT.COMMAND_SUBSTITUTION || ntype === NT.ARITHMETIC_EXPANSION) {
-    const text = await substitution(tsNode, context, executeFn, callStack, view)
-    const prefix = foldedWhitespace(tsNode)
-    return [...(prefix !== '' ? [piece(prefix)] : []), valuePiece(text, quoted)]
-  }
-
-  if (ntype === NT.CONCATENATION) {
-    // Each piece carries its own quoting, which is the whole reason
-    // marks are per character: `'*'?.txt` joins a marked star to a live
-    // question mark and still globs, on the `?` alone. A $"..." arrives
-    // as an anonymous `$` token followed by the string node; the `$` is
-    // the translation marker, not text. A bare trailing `$` (a$) has no
-    // string after it and stays literal.
-    const chunks: Chunk[] = []
-    const children = tsNode.children
-    for (let position = 0; position < children.length; position += 1) {
-      const child = children[position]
-      if (child === undefined) continue
-      if (child.type === '$' && children[position + 1]?.type === NT.STRING) continue
-      for (const c of await expandChunks(child, context, executeFn, callStack, view)) chunks.push(c)
-    }
-    return chunks
-  }
-
-  if (ntype === NT.STRING) return stringChunks(tsNode, context, executeFn, callStack, view)
-
-  if (ntype === NT.TRANSLATED_STRING) {
-    // $"..." asks for a locale translation; no message catalog is ever
-    // loaded, so the translation is the identity and the word keeps
-    // plain double-quote semantics.
-    for (const child of tsNode.namedChildren) {
-      if (child.type === NT.STRING) {
-        return stringChunks(child, context, executeFn, callStack, view)
-      }
-    }
-    return [piece('')]
-  }
-
-  const text = await literalNode(tsNode, context, executeFn, callStack, view)
-  return [piece(quoted ? markGlobs(text) : text)]
-}
-
-/**
- * A double-quoted string's pieces, one field unless a splat splits it.
- *
- * Everything the quotes enclose is literal, the text and every value
- * alike: `"$p"?.txt` globs on the `?` alone. The quotes open a field
- * even around nothing (`""`), except that a `$@`-style splat over no
- * elements, with no other text, is no field at all: with no parameters
- * `"$@"` and `"$u$@"` are nothing, while one empty parameter is one
- * empty word. Only the element count decides that, never the rendered
- * text. A bad substitution names what the quotes enclose, or the whole
- * document of a heredoc the string stands for.
- */
-async function stringChunks(
-  node: TSNodeLike,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  callStack: CallStack | null,
-  view: SessionView | undefined,
-): Promise<Chunk[]> {
-  const chunks: Chunk[] = [piece('')]
-  let splat = false
-  let yielded = false
-  const inside = node.parent?.heredoc?.body ?? node.text.slice(1, -1)
-  for (const part of quotedParts(node)) {
-    if (typeof part === 'string') {
-      chunks.push(piece(markGlobs(part)))
-      continue
-    }
-    const pieces = await named(
-      inside,
-      expandChunks(part, context, executeFn, callStack, view, true),
-    )
-    if (isAtSplat(part)) {
-      splat = true
-      yielded = yielded || pieces.length > 0
-    }
-    for (const c of pieces) chunks.push(c)
-  }
-  if (splat && !yielded && joinChunks(chunks) === '') return []
-  return chunks
-}
-
-/**
- * An arithmetic expansion's value. The write-back goes through the session
- * view, so a preSession rule governs `$((X=5))` exactly as it governs
- * `X=5`; an error unwinds as its `signal`.
- */
-async function arithValue(
-  session: SessionState,
-  view: SessionView | undefined,
-  expr: string,
-): Promise<string> {
-  try {
-    return (await landedArith(session, view ?? null, expr, landArithWrites)).toString()
-  } catch (err) {
-    if (err instanceof ArithError || err instanceof ReadonlyVariableError) throw err.signal()
-    throw err
-  }
-}
-
-/** A command substitution's output or an arithmetic expansion's value. */
-async function substitution(
-  tsNode: TSNodeLike,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  callStack: CallStack | null,
-  view: SessionView | undefined,
-): Promise<string> {
-  const session = context.session
-  const prefix = foldedWhitespace(tsNode)
-  if (tsNode.type === NT.ARITHMETIC_EXPANSION) {
-    return arithValue(session, view, await expandArith(tsNode, context, executeFn, callStack, view))
-  }
-  const rawSub = (tsNode.inlined ?? tsNode.sourceText ?? tsNode.text).slice(prefix.length)
-  if (rawSub.startsWith('`') && rawSub.endsWith('`')) {
-    // A backtick body loses its backslashes before it is parsed, so it is
-    // lexed again here (see splitBacktickRegion).
-    return expandBacktickRegion(rawSub, context, executeFn, tsNode, prefix.length, callStack)
-  }
-  // The whole body goes to the evaluator: bash substitutes the full
-  // statement list, and picking child nodes dropped every statement
-  // after a `;` and every non-command statement (declarations,
-  // assignments, control flow).
-  const inner = rawSub.slice(2, -1)
-  if (inner.trim() === '') return ''
-  // The substitution names its own node: the nested line's commands
-  // stand under it, which is where the pass placed them.
-  const io = await childLine(context, executeFn, inner, tsNode, callStack)
-  const text = decodeText(await io.materializeStdout()).replace(/\n+$/, '')
-  // Record the substitution's status: an assignment-only statement
-  // whose value ran substitutions reports the last one's status as
-  // its own (see assignmentStatus), and `$?` reads it in the words that
-  // follow (`false; echo $(true) $?` prints 0).
-  context.frame.diagnostics.push(await io.materializeStderr())
-  context.frame.cmdsubSeq += 1
-  context.frame.cmdsubStatus = io.exitCode
-  recordStatus(context.session, io.exitCode, true)
-  return text
-}
-
-/** The text of a node no expansion splits: quoted words and the rest. */
-async function literalNode(
-  tsNode: TSNodeLike,
-  context: EvaluationContext,
-  executeFn: ExecuteFn,
-  callStack: CallStack | null,
-  view: SessionView | undefined,
-): Promise<string> {
-  const ntype = tsNode.type
-
-  if (ntype === NT.NUMBER) return tsNode.text
-
-  if (ntype === NT.STRING_CONTENT) {
-    return unescapeDquoted(tsNode.text)
-  }
-
-  if (ntype === NT.RAW_STRING) {
-    const raw = tsNode.text
-    return markGlobs(raw.slice(1, -1))
-  }
-
-  if (ntype === NT.ANSI_C_STRING) {
-    const raw = tsNode.text
-    return markGlobs(decodeAnsiC(raw.slice(2, -1)))
-  }
-
-  if (ntype === NT.VARIABLE_ASSIGNMENT) {
-    const raw = tsNode.text
-    if (raw.includes('=')) {
-      const eq = raw.indexOf('=')
-      const key = raw.slice(0, eq)
-      const valPart = raw.slice(eq + 1)
-      const valNodes = tsNode.namedChildren.filter((c) => c.type !== NT.VARIABLE_NAME)
-      if (valNodes.length > 0 && valNodes[0] !== undefined) {
-        const expanded = await expandNode(valNodes[0], context, executeFn, callStack, view)
-        return `${key}=${expanded}`
-      }
-      return `${key}=${valPart}`
-    }
-    return raw
-  }
-
-  return tsNode.text
+  return (await expand(tsNode, 'arith', context, executeFn, callStack, policies)) as string
 }

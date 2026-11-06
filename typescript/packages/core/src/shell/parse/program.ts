@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ShellTreeNode } from '../../rs/shell.ts'
+import { ShellTreeNode } from '../../rs/shell.ts'
 import type { ShellNode, TSNodeLike } from '../types.ts'
 
 /** One parse of a line: its tree, where each of its chars sits in the line as
@@ -82,7 +82,7 @@ export class ProgramNode implements ShellNode {
   private kids: ProgramNode[] | undefined
   private named: ProgramNode[] | undefined
   constructor(
-    private readonly borrowed: ShellNode,
+    readonly borrowed: ShellNode,
     readonly program: ParsedProgram,
   ) {}
   private get node(): ShellNode {
@@ -162,6 +162,13 @@ export class ProgramNode implements ShellNode {
   childForFieldName(name: string): ProgramNode | null {
     return this.wrap(this.node.childForFieldName(name))
   }
+}
+
+/** The parser's own node a node reads, null for a synthetic one. Mirrors
+ * Python's shell_node. */
+export function shellNode(node: TSNodeLike): ShellTreeNode | null {
+  if (node instanceof ProgramNode) return shellNode(node.borrowed)
+  return node instanceof ShellTreeNode ? node : null
 }
 
 /** Retain each defining program once, including synthetic redirect wrappers. */

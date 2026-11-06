@@ -14,9 +14,9 @@
 
 from functools import partial
 
+from mirage.policy.policies import Policies
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import TSNodeLike
-from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.condition.types import (
     CondAnd,
@@ -44,7 +44,7 @@ async def expand_double_bracket(
     context: EvaluationContext,
     execute_fn: ExecuteFn,
     cs: CallStack | None,
-    view: SessionView | None = None,
+    policies: Policies | None = None,
 ) -> CondNode:
     """Build a structured condition tree from a ``[[ ... ]]`` node.
 
@@ -57,9 +57,10 @@ async def expand_double_bracket(
         context (EvaluationContext): the evaluation expanding it.
         execute_fn (ExecuteFn): workspace execute for command substitutions.
         cs (CallStack | None): call stack for positional parameters.
+        policies (Policies | None): the policies its writes clear.
     """
     tree = CondParser(cond_tokens(node)).parse()
-    return await _cond_node(tree, context, execute_fn, cs, view)
+    return await _cond_node(tree, context, execute_fn, cs, policies)
 
 
 async def _cond_node(
@@ -67,7 +68,7 @@ async def _cond_node(
     context: EvaluationContext,
     execute_fn: ExecuteFn,
     cs: CallStack | None,
-    view: SessionView | None,
+    policies: Policies | None,
 ) -> CondNode:
     """Expand one parsed ``[[ ]]`` tree into a CondNode.
 
@@ -76,38 +77,37 @@ async def _cond_node(
         context (EvaluationContext): the evaluation expanding it.
         execute_fn (ExecuteFn): workspace execute for command substitutions.
         cs (CallStack | None): call stack for positional parameters.
+        policies (Policies | None): the policies its writes clear.
     """
     kind = tree[0]
     if kind in ("and", "or"):
         # Expansion is part of evaluating an operand, so skipped branches
         # cannot run substitutions or observe state before the left side.
         first = CondLazy(
-            partial(_cond_node, tree[1], context, execute_fn, cs, view)
+            partial(_cond_node, tree[1], context, execute_fn, cs, policies)
         )
         second = CondLazy(
-            partial(_cond_node, tree[2], context, execute_fn, cs, view)
+            partial(_cond_node, tree[2], context, execute_fn, cs, policies)
         )
         if kind == "and":
             return CondAnd(first, second)
         return CondOr(first, second)
     if kind == "not":
         return CondNot(
-            await _cond_node(tree[1], context, execute_fn, cs, view)
+            await _cond_node(tree[1], context, execute_fn, cs, policies)
         )
     if kind == "group":
-        return await _cond_node(tree[1], context, execute_fn, cs, view)
+        return await _cond_node(tree[1], context, execute_fn, cs, policies)
     if kind == "unary":
-        operand = await expand_node(
-            tree[2], context, execute_fn, cs, view=view
-        )
+        operand = await expand_node(tree[2], context, execute_fn, cs, policies)
         return CondUnary(op=tree[1], operand=operand)
     if kind == "binary":
-        left = await expand_node(tree[2], context, execute_fn, cs, view=view)
+        left = await expand_node(tree[2], context, execute_fn, cs, policies)
         return await _comparison(
-            tree[1], left, tree[3], context, execute_fn, cs, view
+            tree[1], left, tree[3], context, execute_fn, cs, policies
         )
     return CondWord(
-        await expand_node(tree[1], context, execute_fn, cs, view=view)
+        await expand_node(tree[1], context, execute_fn, cs, policies)
     )
 
 
@@ -118,7 +118,7 @@ async def _comparison(
     context: EvaluationContext,
     execute_fn: ExecuteFn,
     cs: CallStack | None,
-    view: SessionView | None,
+    policies: Policies | None,
 ) -> CondNode:
     """A binary test, its right operand expanded as ``op`` reads it.
 
@@ -129,6 +129,7 @@ async def _comparison(
         context (EvaluationContext): the evaluation expanding it.
         execute_fn (ExecuteFn): workspace execute for command substitutions.
         cs (CallStack | None): call stack for positional parameters.
+        policies (Policies | None): the policies its writes clear.
     """
     if op in PATTERN_OPS:
         # The right side of a match is a pattern word; the shared
@@ -137,9 +138,9 @@ async def _comparison(
         # matches unconditionally. A wholly-literal pattern matches
         # exactly itself.
         expand = expand_regex if op == "=~" else expand_pattern
-        pattern = await expand(right_node, context, execute_fn, cs, view)
+        pattern = await expand(right_node, context, execute_fn, cs, policies)
         return CondBinary(left=left_text, op=op, right=pattern)
     right_text = await expand_node(
-        right_node, context, execute_fn, cs, view=view
+        right_node, context, execute_fn, cs, policies
     )
     return CondBinary(left=left_text, op=op, right=right_text)

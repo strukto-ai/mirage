@@ -19,7 +19,6 @@ import { DiscardSignal } from './errors.ts'
 
 export class CallFrame {
   positional: string[]
-  locals: Record<string, string>
   functionName: string
   loopLevel: number
   sourced: boolean
@@ -28,11 +27,10 @@ export class CallFrame {
 
   constructor(
     init: Partial<
-      Pick<CallFrame, 'positional' | 'locals' | 'functionName' | 'loopLevel' | 'sourced' | 'closed'>
+      Pick<CallFrame, 'positional' | 'functionName' | 'loopLevel' | 'sourced' | 'closed'>
     > = {},
   ) {
     this.positional = init.positional ?? []
-    this.locals = init.locals ?? {}
     this.functionName = init.functionName ?? ''
     this.loopLevel = init.loopLevel ?? 0
     this.sourced = init.sourced ?? false
@@ -76,7 +74,6 @@ export class CallStack {
         (frame) =>
           new CallFrame({
             positional: [...frame.positional],
-            locals: { ...frame.locals },
             functionName: frame.functionName,
             loopLevel: loops ? frame.loopLevel : 0,
             sourced: frame.sourced,
@@ -199,19 +196,5 @@ export class CallStack {
   /** Every frame's positional parameters, outermost first. Mirrors Python's `positionals`. */
   positionals(): string[][] {
     return this.frames.map((frame) => frame.positional)
-  }
-
-  setLocal(name: string, value: string): void {
-    this.current.locals[name] = value
-  }
-
-  getLocal(name: string): string | null {
-    for (let i = this.frames.length - 1; i >= 0; i--) {
-      const frame = this.frames[i]
-      if (frame !== undefined && Object.hasOwn(frame.locals, name)) {
-        return frame.locals[name] ?? null
-      }
-    }
-    return null
   }
 }

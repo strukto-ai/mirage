@@ -17,6 +17,7 @@ from typing import Any
 
 from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.io.types import ByteSource
+from mirage.rs.session import ShellVars
 from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
 from mirage.shell.variable import ShellVar
@@ -171,7 +172,9 @@ async def handle_env(
         return ok("env", out)
 
     saved = session.vars
-    session.vars = env_vars(session, base)
+    session.vars = ShellVars.of(
+        env_vars(session, base), session.ids.random_u32
+    )
     # The command gets its own copy of the functions `export -f` marked,
     # empty under `-i`: they are part of bash's environment, as its
     # `BASH_FUNC_NAME%%` entries.

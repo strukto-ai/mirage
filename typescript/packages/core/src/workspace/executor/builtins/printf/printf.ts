@@ -18,13 +18,12 @@ import type { RedirectResult } from '../../../../context/session_context.ts'
 import { isProgramInvocation } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
+import type { Policies } from '../../../../policy/index.ts'
 import { decodeText, encodeText, utf8Locale } from '../../../../shell/bytes.ts'
 import { ArithError } from '../../../../shell/errors.ts'
 import { concat } from '../../../../utils/bytes.ts'
-import type { SessionView } from '../../../../view/types.ts'
-import { assignElement } from '../../../session/elements.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { envSnapshot, sessionView } from '../../../session/state.ts'
+import { assignElement, envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { TARGET_RE } from '../constants.ts'
 import { builtinUsage, fail, result } from '../shared.ts'
@@ -59,7 +58,7 @@ import { printfOutput, runPrintf } from './format.ts'
 export async function handlePrintf(
   args: string[],
   session: SessionState,
-  view?: SessionView,
+  policies: Policies | null = null,
   signal?: AbortSignal,
 ): Promise<RedirectResult> {
   const program = isProgramInvocation(session)
@@ -129,7 +128,7 @@ export async function handlePrintf(
   const text = decodeText(output).split('\0', 1)[0] ?? ''
   let status: 'ok' | 'denied' | 'readonly' | 'subscript'
   try {
-    status = await assignElement(session, view ?? null, base, parsed[2] ?? null, text)
+    status = await assignElement(session, policies, base, parsed[2] ?? null, text)
   } catch (err) {
     if (err instanceof ArithError) {
       // The target carries `-i` and the formatted text does not
@@ -180,7 +179,7 @@ export async function printfBuiltin(call: BuiltinCall): Promise<RedirectResult> 
   return handlePrintf(
     [...call.argv.args],
     call.context.session,
-    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
+    call.registry.policies,
     call.signal,
   )
 }

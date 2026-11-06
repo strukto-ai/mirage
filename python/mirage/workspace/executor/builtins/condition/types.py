@@ -18,7 +18,7 @@ from typing import Union
 
 from mirage.policy.types import EntryGate
 from mirage.runtime.types import DispatchFn
-from mirage.view.types import LinkView, SessionView
+from mirage.view.types import LinkView
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
 
@@ -140,9 +140,6 @@ class CondContext:
     namespace: Namespace
     session: SessionState
     name: str
-    # The gated session view, which an assignment inside a
-    # numeric operand lands through; None outside a workspace.
-    view: SessionView | None = None
     # The links as this session sees them: a hidden link is no link.
     links: LinkView | None = None
     # Admits each ``[[ ]]`` leaf as it is evaluated, its

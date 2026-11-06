@@ -47,7 +47,6 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import Refused, admit
 from mirage.workspace.node.execute_node import execute_node
 from mirage.workspace.node.occurrence import claimant_for
-from mirage.workspace.session import session_view
 from mirage.workspace.types import ExecutionNode
 
 
@@ -130,11 +129,7 @@ async def run_command_tree(
             execute_fn,
             registry,
             links=namespace.session_links(session),
-            view=session_view(
-                session,
-                registry.policies,
-                diagnostics=context.frame.diagnostics,
-            ),
+            policies=registry.policies,
         )
         # Bash's implicit file read has cat's policy identity, without
         # invoking a function/alias or expanding the filename a second time.

@@ -44,7 +44,7 @@ import { lookup } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { parseFunction } from '../../shell/helpers.ts'
-import { type SessionState, sessionEntry, setSessionEntry } from '../session/session.ts'
+import { type SessionState, sessionEntry } from '../session/session.ts'
 import { deref } from '../session/state.ts'
 import { parse } from '../../shell/parse/parse.ts'
 
@@ -235,7 +235,7 @@ export function cliEnvNames(
  */
 function pendingOf(session: SessionState): Map<string, ManagedRef> {
   const out = new Map<string, ManagedRef>()
-  for (const [name, v] of Object.entries(session.vars)) {
+  for (const [name, v] of session.vars.records()) {
     if (v.managed === undefined || v.value !== null) continue
     if (varHidden(session.visibility, name)) continue
     out.set(name, v.managed)
@@ -396,7 +396,7 @@ export function maskedNames(
     const following = children[idx + 1]
     if (following?.type === '&') break
     const readonlyHit = [...masks].some((name) => {
-      const record = Object.hasOwn(session.vars, name) ? session.vars[name] : undefined
+      const record = session.vars.get(name)
       return record?.attrs.has(VarAttr.Readonly) ?? false
     })
     if (readonlyHit) break
@@ -497,7 +497,7 @@ function arithTargets(
     out.add(name)
     const target = deref(session, name)
     if (!out.has(target)) frontier.push(target)
-    const value = session.vars[name]?.value ?? null
+    const value = session.vars.get(name)?.value ?? null
     // Any element of an array or map value may be the one the
     // recursion lands on (`arr=(TOKEN); $((arr))` reads arr[0]), so
     // every string in the structure is chased.
@@ -668,7 +668,7 @@ export async function fillEnv(
   const groups = new Map<string, { source: string; ref: string; members: Member[] }>()
   for (const name of [...names].sort(compareCodePoints)) {
     const pointer = pending.get(name)
-    const record = Object.hasOwn(session.vars, name) ? session.vars[name] : undefined
+    const record = session.vars.get(name)
     if (pointer === undefined || record === undefined) continue
     const groupKey = JSON.stringify([pointer.source, pointer.ref])
     const member = { name, key: pointer.key, record }
@@ -709,7 +709,7 @@ export async function fillEnv(
             fieldSummary(secret.fields, provider),
         )
       }
-      setSessionEntry(session.vars, name, withValue(record, value))
+      session.vars.set(name, withValue(record, value))
     }
   }
 }

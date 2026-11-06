@@ -12,18 +12,12 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 from mirage.shell.array import ShellArray
 
 ShellValue = str | ShellArray | dict[str, str]
-
-# What one attributed write does to a scalar before it is stored.
-# `-i` needs the arithmetic evaluator, which lives above this module,
-# so the caller injects it rather than this leaf importing upward.
-Coercer = Callable[[str], str]
 
 
 class VarAttr(StrEnum):
@@ -120,18 +114,6 @@ class ShellVar:
     managed: ManagedRef | None = None
 
 
-class TempEnv(dict[str, ShellVar | None]):
-    """The records a prefix assignment shadowed for one function call.
-
-    bash runs ``x=1 f`` with ``x`` in a scope of its own around the
-    function, its temporary environment: the caller's value comes back
-    when the call returns, ``unset x`` inside reveals it, and an
-    ``export`` or ``readonly`` of the name lets the value outlive the
-    call. A frame of this type on the call path is that scope; a plain
-    frame holds a function's ``local`` shadows.
-    """
-
-
 def var_kind(var: ShellVar) -> VarKind:
     """What kind of variable this is, read off its value.
 
@@ -148,18 +130,6 @@ def var_kind(var: ShellVar) -> VarKind:
     return VarKind.SCALAR
 
 
-def copy_var(var: ShellVar) -> ShellVar:
-    """Copy a variable and its mutable array value for a child shell.
-
-    Args:
-        var (ShellVar): the variable to copy.
-    """
-    value = var.value
-    if isinstance(value, (ShellArray, dict)):
-        return with_value(var, value.copy())
-    return var
-
-
 def with_value(var: ShellVar, value: ShellValue | None) -> ShellVar:
     """The variable with a new value and the same attributes, but a
     reference's under an array: bash's reference cannot hold one, so
@@ -172,111 +142,6 @@ def with_value(var: ShellVar, value: ShellValue | None) -> ShellVar:
     if isinstance(value, (ShellArray, dict)) and VarAttr.NAMEREF in var.attrs:
         return replace(var, value=value, attrs=var.attrs - {VarAttr.NAMEREF})
     return replace(var, value=value)
-
-
-def detach(var: ShellVar) -> ShellVar:
-    """The variable with its managed pointer dropped, value kept.
-
-    An agent write to a managed name shadows session-locally: the
-    record becomes a plain variable for this session only, so the fill
-    step never clobbers it and the declaration (new sessions fetch
-    fresh) and the remote store are untouched by construction.
-
-    Args:
-        var (ShellVar): the variable to copy.
-    """
-    return replace(var, managed=None)
-
-
-def with_attr(var: ShellVar, attr: VarAttr, on: bool = True) -> ShellVar:
-    """The variable with one attribute turned on or off.
-
-    `+attr` is the off direction, which is why this takes a flag rather
-    than being two functions.
-
-    Args:
-        var (ShellVar): the variable to copy.
-        attr (VarAttr): the attribute to change.
-        on (bool): set it, or clear it.
-    """
-    attrs = var.attrs | {attr} if on else var.attrs - {attr}
-    return replace(var, attrs=frozenset(attrs))
-
-
-def coerce_scalar(
-    text: str, attrs: frozenset[VarAttr], integer: Coercer | None
-) -> str:
-    """Apply the value-shaping attributes to one scalar being stored.
-
-    bash applies these at assignment, not at read: `declare -l s; s=ABC`
-    stores `abc`, and `declare -i n; n=2+2` stores `4`, so `declare -p`
-    and `$s` agree with no per-read work. Order is integer first, then
-    case, which only matters for hex digits and is what GNU does
-    (`declare -il n=0xA` stores `10`).
-
-    `-l` and `-u` cannot both hold; a declaration that sets one clears
-    the other, so at most one applies here.
-
-    Args:
-        text (str): the incoming value.
-        attrs (frozenset[VarAttr]): the attributes on the name.
-        integer (Coercer | None): the arithmetic evaluation `-i` runs,
-            None when the caller has no evaluator (a bare test).
-    """
-    if VarAttr.INTEGER in attrs and integer is not None:
-        text = integer(text)
-    if VarAttr.LOWER in attrs:
-        return text.lower()
-    if VarAttr.UPPER in attrs:
-        return text.upper()
-    return text
-
-
-def coerce_value(
-    value: ShellValue,
-    attrs: frozenset[VarAttr],
-    integer: Coercer | None,
-    assigned: frozenset[int | str] | None = None,
-) -> ShellValue:
-    """`coerce_scalar` lifted over every value shape.
-
-    An array applies the attribute per element, which is GNU's
-    `declare -ai a=(1+1 2*3)` giving `([0]="2" [1]="6")`. A write that
-    assigns some elements only (`a[1]=x`, `a=x`) names them in
-    `assigned`, and the others are carried over as stored: bash shapes
-    a value when it is assigned, so `declare -i a; a[0]=9` never
-    re-evaluates a stored `a[1]`.
-
-    Args:
-        value (ShellValue): the incoming value.
-        attrs (frozenset[VarAttr]): the attributes on the name.
-        integer (Coercer | None): the arithmetic evaluation `-i` runs.
-        assigned (frozenset[int | str] | None): the indexes or keys
-            assigned, None for the whole value.
-    """
-    if not (attrs & {VarAttr.INTEGER, VarAttr.LOWER, VarAttr.UPPER}):
-        return value
-    if isinstance(value, str):
-        return coerce_scalar(value, attrs, integer)
-    if isinstance(value, dict):
-        return {
-            k: (
-                v
-                if assigned is not None and k not in assigned
-                else coerce_scalar(v, attrs, integer)
-            )
-            for k, v in value.items()
-        }
-    return ShellArray(
-        {
-            i: (
-                v
-                if assigned is not None and i not in assigned
-                else coerce_scalar(v, attrs, integer)
-            )
-            for i, v in value.elements.items()
-        }
-    )
 
 
 def stored_attrs(var: ShellVar) -> str:

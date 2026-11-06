@@ -24,66 +24,6 @@ from mirage.shell.types import (
 
 PARAMETER_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*#?$!-]")
 
-# The blanks bash skips between arithmetic tokens.
-ARITH_BLANKS = " \t\n"
-
-# A variable name in an expression: ASCII, as bash's names are.
-ARITH_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-
-# An integer constant as bash reads one off an expression: a digit and the
-# name characters, `@` and `#` after it, judged whole once read (`1a` and
-# `08` are each one constant, too great for their base).
-ARITH_LITERAL = re.compile(r"[0-9][0-9A-Za-z_@#]*")
-
-# Operators longest-first, so `<<=` never lexes as `<<` then `=`.
-ARITH_OPERATOR = re.compile(
-    r"<<=|>>=|\*\*|\+\+|--|<<|>>|<=|>=|==|!=|&&|\|\||[-+*/%&^|]="
-    r"|[-+*/%<>=!~&|^?:(),]"
-)
-
-ARITH_ASSIGN_OPS = frozenset(
-    {"=", "+=", "-=", "*=", "/=", "%=", "<<=", ">>=", "&=", "^=", "|="}
-)
-
-ARITH_UNARY_OPS = frozenset({"!", "~", "-", "+"})
-
-# Binary operators by how tightly they bind, loosest first; `**` alone
-# groups from the right, and a unary operator binds tighter than all of
-# them (`-2**2` is 4).
-ARITH_PRECEDENCE = {
-    "||": 1,
-    "&&": 2,
-    "|": 3,
-    "^": 4,
-    "&": 5,
-    "==": 6,
-    "!=": 6,
-    "<": 7,
-    "<=": 7,
-    ">": 7,
-    ">=": 7,
-    "<<": 8,
-    ">>": 8,
-    "+": 9,
-    "-": 9,
-    "*": 10,
-    "/": 10,
-    "%": 10,
-    "**": 11,
-}
-
-# 64-bit wrap like bash (intmax_t arithmetic).
-ARITH_WRAP = 1 << 64
-ARITH_SIGN = 1 << 63
-
-# How deep variables holding expressions may nest (`x="1+2"; $((x))`): a
-# variable read from an expression this many values deep is past the
-# limit. bash's is 1023; Python's stack holds about a dozen frames per
-# level, so mirage stops at 27, which names the same expression of a
-# reference cycle of 1, 2, 3, 4, 6 or 12 names as bash's limit does (27
-# and 1023 agree modulo 12).
-ARITH_MAX_DEPTH = 27
-
 # How deep the shell may re-enter itself: function calls, sourced files, `eval`
 # lines and nested shells (`bash -c`, a script) together. bash limits none of
 # them unless FUNCNEST names a limit on functions; mirage serves every session
@@ -148,32 +88,16 @@ FD_CLOSE = -1
 OUTPUT_ONLY_BUILTINS = frozenset({"echo", "printf", "true", "false", ":"})
 
 # The dynamic variables the shell answers itself: PIPESTATUS reads the
-# session's record of the last pipeline (`SessionState.pipe_status`),
+# session's record of the last pipeline (`SessionState.pipe_status`) and
 # FUNCNAME the frames on the call stack (`SessionState.function_names`),
-# RANDOM steps a generator (`session/rng.py`), LINENO is the running
-# command's line and BASHPID the process running it. None lives in the
-# variable store.
+# neither held in the variable store; RANDOM steps mirage-rs's generator,
+# which stores each draw on the name; LINENO is the running command's
+# line and BASHPID the process running it.
 PIPESTATUS = "PIPESTATUS"
 FUNCNAME = "FUNCNAME"
 RANDOM = "RANDOM"
 LINENO = "LINENO"
 BASHPID = "BASHPID"
-# bash 5.2's RANDOM generator: a Park-Miller minimal-standard
-# step through Schrage's method, the value folding the state's two
-# halves and keeping 15 bits, and a draw that never repeats the value
-# before it. A seed is the assigned integer truncated to 32 bits, and a
-# zero state steps from ZERO_SEED. Identical in both languages, so
-# `RANDOM=42` is the same sequence everywhere, and bash's.
-RANDOM_A = 16807
-RANDOM_Q = 127773
-RANDOM_R = 2836
-RANDOM_M = 0x7FFFFFFF
-RANDOM_ZERO_SEED = 123459876
-RANDOM_MODULUS = 1 << 32
-RANDOM_MAX = 32767
-# What `SessionState._random_seed` holds once `unset RANDOM` has stripped the
-# name of its meaning: no generated word is ever empty.
-RANDOM_UNSET = ""
 
 # Node types whose failure never triggers `set -e` by shape alone.
 # Lists are NOT exempt: bash exits when the command after the final

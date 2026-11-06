@@ -14,7 +14,7 @@
 
 import type { EntryGate } from '../../../../policy/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import type { LinkView, SessionView } from '../../../../view/types.ts'
+import type { LinkView } from '../../../../view/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 
@@ -128,9 +128,6 @@ export interface CondContext {
   namespace: Namespace
   session: SessionState
   name: string
-  // The gated session view, which an assignment inside a numeric
-  // operand lands through; absent outside a workspace.
-  view?: SessionView
   // The links as this session sees them: a hidden link is no link.
   links?: LinkView
   // Admits each `[[ ]]` leaf as it is evaluated, its branches expanding only

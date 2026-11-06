@@ -54,6 +54,7 @@
       "import": "./dist/runtime/python/pyodide/runtime.js"
     },
     "./mirage_rs.wasm": "./dist/generated/mirage_rs.wasm",
+    "./mirage_shell.wasm": "./dist/generated/mirage_shell.wasm",
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/*.js"
@@ -66,6 +67,12 @@
       "workerd": "./dist/generated/mirage_rs.workerd.js",
       "node": "./dist/generated/mirage_rs.node.js",
       "default": "./dist/generated/mirage_rs.js"
+    },
+    "#mirage-shell-wasm": {
+      "types": "./src/generated/mirage_shell.ts",
+      "workerd": "./dist/generated/mirage_shell.workerd.js",
+      "node": "./dist/generated/mirage_shell.node.js",
+      "default": "./dist/generated/mirage_shell.js"
     }
   },
   "files": [

@@ -906,7 +906,7 @@ export class Workspace {
       vars: varsFromEnv(inheritedEnv),
       functions: {},
     })
-    if (!Object.hasOwn(inheritedEnv, 'PWD')) child.vars.PWD = makeVar(cwd.virtual, new Set())
+    if (!Object.hasOwn(inheritedEnv, 'PWD')) child.vars.set('PWD', makeVar(cwd.virtual, new Set()))
     child.aliases = {}
     // The child's stdout is its handle's result, as a typed line's is the
     // terminal, so the command limits bound what it hands back wherever

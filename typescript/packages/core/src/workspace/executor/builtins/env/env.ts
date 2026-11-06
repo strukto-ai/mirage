@@ -143,7 +143,7 @@ export function envVars(
   base: Record<string, string>,
 ): Record<string, ShellVar> {
   const swapped = ownRecord<ShellVar>()
-  for (const [name, v] of Object.entries(session.vars)) {
+  for (const [name, v] of session.vars.records()) {
     if (typeof v.value !== 'string' && v.managed === undefined) swapped[name] = v
   }
   Object.assign(swapped, varsFromEnv(base))
@@ -174,6 +174,7 @@ export async function handleEnv(
 
   const saved = session.vars
   session.vars = envVars(session, base)
+  const swapped = session.vars
   // The command gets its own copy of the functions `export -f` marked,
   // empty under `-i`: they are part of bash's environment, as its
   // `BASH_FUNC_NAME%%` entries.
@@ -188,6 +189,7 @@ export async function handleEnv(
     return [io.stdout, io, new ExecutionNode({ command: 'env', exitCode: io.exitCode })]
   } finally {
     session.vars = saved
+    swapped.shell.close()
     session.exportedFunctions = exported
   }
 }

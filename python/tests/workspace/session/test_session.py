@@ -32,25 +32,15 @@ from mirage.workspace.session.session import (
 from mirage.workspace.session.state import seed_var, set_attr
 
 # State that belongs to the line being executed, not to the shell, so a
-# fork starts it fresh: the errexit marker and the running function's
-# locals.
+# fork starts it fresh: the errexit marker and the trap bookkeeping.
 TRANSIENT_FIELDS = (
     "errexit_immune",
     "errexit_exiting",
     "err_trap_running",
     "return_trap_running",
-    "_local_vars",
-    "_local_frames",
-    "_local_random",
-    "_local_plain",
-    "_reached",
     "_prefix_saves",
     "_trap_status",
     "_pipe_status_pending",
-    "_random_state",
-    "_random_seed",
-    "_random_last",
-    "_plain_specials",
     "_parse_current",
     "_parse_row",
     "_line_row",
@@ -762,7 +752,6 @@ def test_new_shell_starts_from_the_environment():
     assert (child.aliases, child.shell_options) == ({}, {})
     assert (child.last_exit_code, child.cwd, child.umask) == (0, "/w", 0o077)
     assert (child._getopts_pos, child._getopts_optind) == (0, None)
-    assert child._random_seed == "42"
     assert set(parent.functions) == {"f", "g"}
     assert parent.vars["PLAIN"] == ShellVar("p")
 

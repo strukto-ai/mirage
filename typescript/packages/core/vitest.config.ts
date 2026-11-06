@@ -16,11 +16,14 @@ import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
-  // The package's `#mirage-rs-wasm` import names the built file; the tests
-  // run the source, before any build.
+  // The package's `#mirage-rs-wasm` and `#mirage-shell-wasm` imports name
+  // the built files; the tests run the source, before any build.
   resolve: {
     alias: {
       '#mirage-rs-wasm': fileURLToPath(new URL('./src/generated/mirage_rs.ts', import.meta.url)),
+      '#mirage-shell-wasm': fileURLToPath(
+        new URL('./src/generated/mirage_shell.ts', import.meta.url),
+      ),
     },
   },
   test: {

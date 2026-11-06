@@ -505,7 +505,33 @@ impl Tree {
         out
     }
 
-    fn kind(&self, index: usize) -> &'static str {
+    /// A node's kind, as tree-sitter-bash names it.
+    pub fn kind(&self, index: usize) -> &'static str {
         super::tree::KINDS[self.nodes[index].kind as usize].0
+    }
+
+    /// A node's children, in order.
+    pub fn children(&self, index: usize) -> std::ops::Range<usize> {
+        let node = &self.nodes[index];
+        node.first_child as usize..(node.first_child + node.child_count) as usize
+    }
+
+    /// A node's named children, in order.
+    pub fn named_children(&self, index: usize) -> impl Iterator<Item = usize> + '_ {
+        self.children(index)
+            .filter(|&child| self.nodes[child].named)
+    }
+
+    /// The child a field names.
+    pub fn field(&self, index: usize, name: &str) -> Option<usize> {
+        let id = super::tree::field_id(name)?;
+        self.children(index)
+            .find(|&child| self.nodes[child].field == id)
+    }
+
+    /// The bytes a node reads.
+    pub fn text(&self, index: usize) -> &[u8] {
+        let node = &self.nodes[index];
+        &self.source[node.start as usize..node.end as usize]
     }
 }

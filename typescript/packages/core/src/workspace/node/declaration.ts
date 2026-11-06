@@ -52,7 +52,6 @@ import { expandNode } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { sessionEntry } from '../session/session.ts'
 import { conversionScalar, ensureVarVisible, seedVar, sessionView } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { expandArrayItems } from './assignment.ts'
@@ -211,7 +210,7 @@ export async function executeDeclaration(
         })
         continue
       }
-      const expanded = await expandNode(child, context, executeFn, callStack, view)
+      const expanded = await expandNode(child, context, executeFn, callStack, registry.policies)
       operands.push(expanded)
       traced.push(expanded)
     } else if (
@@ -228,7 +227,7 @@ export async function executeDeclaration(
       child.type === NT.ANSI_C_STRING ||
       child.type === NT.TRANSLATED_STRING
     ) {
-      const expanded = await expandNode(child, context, executeFn, callStack, view)
+      const expanded = await expandNode(child, context, executeFn, callStack, registry.policies)
       // An *unquoted* expansion that came back empty is removed by
       // word splitting, so `export $UNSET` is a bare `export` and
       // prints the listing. A quoted one is a real, empty operand:
@@ -283,7 +282,14 @@ export async function executeDeclaration(
     // only expands and stages. The flags pass through so -p, the bare
     // listing and bad options work.
     const attr = keyword === 'readonly' ? VarAttr.Readonly : VarAttr.Export
-    return await markNames([...flagWords, ...operands], session, view, attr, parser)
+    return await markNames(
+      [...flagWords, ...operands],
+      session,
+      view,
+      attr,
+      parser,
+      registry.policies,
+    )
   }
   const refused = declareOptionRefusal(cmdWord, flagChars, plusChars)
   if (refused !== null) return refused
@@ -330,8 +336,8 @@ export async function executeDeclaration(
         throw new DiscardSignal(encodeText(`${err.message}\n`))
       }
       const fresh =
-        !flagChars.has('g') && session.localVars !== null && !session.localVars.has(bare)
-      const heldVar = sessionEntry(session.vars, bare)
+        !flagChars.has('g') && session.vars.shell.inFunction() && !session.vars.shell.isLocal(bare)
+      const heldVar = session.vars.get(bare)
       // `handleLocal` refuses a readonly name in its voice.
       if (fresh && heldVar?.attrs.has(VarAttr.Readonly) === true) continue
       // Inside a function the name is a local of the declared kind, a new
@@ -350,9 +356,9 @@ export async function executeDeclaration(
       // A local of another kind starts empty; at top level an existing
       // scalar becomes element 0, or the value at the literal key "0" (GNU
       // allows scalar-to-associative conversion, unlike indexed).
-      const scalar = local ? undefined : conversionScalar(session, bare)
-      if (wantAssoc) seedVar(session, bare, scalar === undefined ? {} : { '0': scalar })
-      else seedVar(session, bare, makeArray(scalar === undefined ? [] : [scalar]))
+      const scalar = local ? null : conversionScalar(session, bare)
+      if (wantAssoc) seedVar(session, bare, scalar === null ? {} : { '0': scalar })
+      else seedVar(session, bare, makeArray(scalar === null ? [] : [scalar]))
     }
   }
   // declare/typeset scope like `local` inside a function (bash
@@ -360,15 +366,21 @@ export async function executeDeclaration(
   // handleLocal's fallback when no function scope is active. `-r` rides
   // the same path and lands on what each operand wrote, so
   // `f() { local -r A=(x); }` freezes f's own A, not the caller's.
-  const result = await handleLocal(operands, session, view, {
-    cmd: cmdWord,
-    kind,
-    shaping,
-    marks,
-    plus: [...plusChars].sort(compareCodePoints).join(''),
-    nameref: flagChars.has('n') && !plusChars.has('n'),
-    globalScope: flagChars.has('g'),
-    inherit: flagChars.has('I'),
-  })
+  const result = await handleLocal(
+    operands,
+    session,
+    view,
+    {
+      cmd: cmdWord,
+      kind,
+      shaping,
+      marks,
+      plus: [...plusChars].sort(compareCodePoints).join(''),
+      nameref: flagChars.has('n') && !plusChars.has('n'),
+      globalScope: flagChars.has('g'),
+      inherit: flagChars.has('I'),
+    },
+    registry.policies,
+  )
   return mergeConversionErrors(result, conversionErrors)
 }

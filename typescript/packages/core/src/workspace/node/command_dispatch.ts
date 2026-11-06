@@ -67,7 +67,7 @@ import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { NodeType as NT } from '../../shell/types.ts'
-import { type ShellVar, TempEnv, VarAttr } from '../../shell/variable.ts'
+import { type ShellVar, VarAttr } from '../../shell/variable.ts'
 import { traceCommand } from '../../shell/xtrace.ts'
 import { PathSpec, wordText } from '../../types.ts'
 import { mergeSignals } from '../../utils/abort.ts'
@@ -104,15 +104,15 @@ import { argumentListTooLong } from '../executor/command/handler.ts'
 import type { ExecuteNodeOpts } from '../executor/command/types.ts'
 import { Argv, expandArgv } from '../expand/argv.ts'
 import { expandBoundaryGlobs } from '../expand/globs.ts'
-import { expandNode } from '../expand/node.ts'
+import { expandAssignment } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
 import { mirageProgramAt, routedConsumer, wrapperRefusal } from '../lookup/lookup.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
-import { type SessionState, sessionEntry, setSessionEntry } from '../session/session.ts'
-import { ensureVarVisible, gateRendering, seedVar, sessionView, setAttr } from '../session/state.ts'
+import type { SessionState } from '../session/session.ts'
+import { ensureVarVisible, envIsReadonly, seedVar, setAttr } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { admit, Admitted, classifiedWords } from './admission.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
@@ -278,7 +278,6 @@ export async function executeCommand(
   }
 
   const prefixAssignments: [string, string][] = []
-  const view = sessionView(session, registry.policies, context.frame.diagnostics)
   // A readonly name before a command is refused before its value expands,
   // on the shell's own stderr, and the command runs without it; with no
   // command it is a plain assignment, refused once its value expands
@@ -289,7 +288,7 @@ export async function executeCommand(
     const eq = atext.indexOf('=')
     if (eq < 0) continue
     const key = atext.slice(0, eq)
-    if (name !== '' && view.isReadonly(key, false)) {
+    if (name !== '' && envIsReadonly(session, key, false)) {
       refused += `${shellVoice()}${key}: readonly variable\n`
       continue
     }
@@ -298,7 +297,10 @@ export async function executeCommand(
     const firstVal = valNodes[0]
     const v =
       firstVal !== undefined
-        ? await ownWords(node, expandNode(firstVal, context, executeFn, callStack, view))
+        ? await ownWords(
+            node,
+            expandAssignment(firstVal, context, executeFn, callStack, registry.policies),
+          )
         : rawVal
     prefixAssignments.push([key, v])
   }
@@ -334,34 +336,30 @@ export async function executeCommand(
   }
 
   // `postSession` asks about each prefix write once it landed.
-  const judgeLanded = async (olds: ReadonlyMap<string, ShellVar | null>): Promise<void> => {
+  const judgeLanded = async (renderings: ReadonlyMap<string, string | null>): Promise<void> => {
     for (const [k, v] of prefixAssignments) {
-      const old = olds.get(k) ?? null
       await postSessionGate(
         registry.policies,
         { verb: 'set', key: k, value: v, sessionId: session.sessionId },
-        old === null ? null : gateRendering(old.value),
+        renderings.get(k) ?? null,
       )
     }
   }
 
   const restore = (saved: ReadonlyMap<string, ShellVar | null>): void => {
     for (const [k, prev] of saved) {
-      if (prev === null) {
-        // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-        delete session.vars[k]
-      } else {
-        setSessionEntry(session.vars, k, prev)
-      }
+      if (prev === null) session.vars.delete(k)
+      else session.vars.set(k, prev)
     }
     session.prefixSaves = session.prefixSaves.filter((s) => s !== saved)
   }
 
   if (prefixAssignments.length > 0 && name === '') {
-    const olds = new Map(prefixAssignments.map(([k]) => [k, sessionEntry(session.vars, k) ?? null]))
+    const olds = new Map(prefixAssignments.map(([k]) => [k, session.vars.get(k) ?? null]))
+    const renderings = new Map(prefixAssignments.map(([k]) => [k, session.vars.shell.rendered(k)]))
     for (const [k, v] of prefixAssignments) seedVar(session, k, v)
     try {
-      await judgeLanded(olds)
+      await judgeLanded(renderings)
     } catch (err) {
       if (!(err instanceof PolicyDenied)) throw err
       restore(olds)
@@ -381,19 +379,28 @@ export async function executeCommand(
     return runner(() => Promise.resolve(landed), undefined, '', [])
   }
 
-  const savedEnvOverrides = new TempEnv()
+  const savedEnvOverrides = new Map<string, ShellVar | null>()
+  const savedRenderings = new Map<string, string | null>()
+  // A function's prefix is its temporary environment, a scope the shell
+  // keeps under the function's locals: `unset` inside reveals the caller's
+  // value and `export` keeps the name.
+  let temp = null as number | null
   // Seeded once the command's words are expanded, since bash expands them
   // with the values from before the assignment: `x=new echo $x` prints the
   // old x and `IFS=, cmd $v` splits on the old IFS.
   const seedPrefix = async (command: string): Promise<void> => {
+    const shell = session.vars.shell
+    if (session.functions[command] !== undefined) temp = shell.openTemp()
     session.prefixSaves.push(savedEnvOverrides)
     for (const [k, v] of prefixAssignments) {
       // A first write's old record stays held; a repeat drops the earlier value.
-      const old = savedEnvOverrides.has(k) ? sessionEntry(session.vars, k) : undefined
+      const old = savedEnvOverrides.has(k) ? session.vars.get(k) : undefined
       checkEnv(session, old === undefined ? 0 : entryBytes(k, old.value), entryBytes(k, v))
       if (!savedEnvOverrides.has(k)) {
-        savedEnvOverrides.set(k, sessionEntry(session.vars, k) ?? null)
+        savedEnvOverrides.set(k, session.vars.get(k) ?? null)
+        savedRenderings.set(k, shell.rendered(k))
       }
+      if (temp !== null) shell.saveTemp(temp, k)
       // Exported for the duration, which is the whole point of the form:
       // `TOKEN=x printenv TOKEN` prints `x` because bash puts a prefix
       // assignment in the *command's environment*, not merely in the
@@ -405,13 +412,9 @@ export async function executeCommand(
       seedVar(session, k, v)
       setAttr(session, k, VarAttr.Export)
     }
-    // A function runs with the prefix as its temporary environment, a
-    // scope under its own locals: `unset` inside reveals the caller's
-    // value and `export` keeps the name.
-    if (session.functions[command] !== undefined) session.localFrames.push(savedEnvOverrides)
     // Judged before the command reads them; on a refusal the restore
     // below puts the old values back.
-    await judgeLanded(savedEnvOverrides)
+    await judgeLanded(savedRenderings)
   }
 
   if (refused !== '' && sink !== undefined) {
@@ -457,14 +460,24 @@ export async function executeCommand(
       new ExecutionNode({ command: name, exitCode: CANNOT_EXECUTE_STATUS, stderr }),
     ]
   } finally {
-    const frames = session.localFrames
-    if (frames[frames.length - 1] === savedEnvOverrides) frames.pop()
+    let saved: ReadonlyMap<string, ShellVar | null> = savedEnvOverrides
+    if (temp !== null) {
+      // The scope closes now and puts back what it saved, which a name
+      // `export` let outlive the call no longer is; a run still settling
+      // keeps the prefix until it settles.
+      const names = [...savedEnvOverrides.keys()]
+      const running = new Map(names.map((k) => [k, session.vars.get(k) ?? null]))
+      session.vars.shell.closeTemp(temp)
+      saved = new Map(names.map((k) => [k, session.vars.get(k) ?? null]))
+      if (settling !== null) restore(running)
+    }
     if (settling !== null) {
+      const later = saved
       settling.callbacks.push(() => {
-        restore(savedEnvOverrides)
+        restore(later)
       })
-    } else {
-      restore(savedEnvOverrides)
+    } else if (temp === null) {
+      restore(saved)
     }
   }
 }
@@ -570,7 +583,7 @@ async function runCommandBody(
       callStack,
       registry,
       namespace.sessionLinks(session),
-      sessionView(session, registry.policies, context.frame.diagnostics),
+      registry.policies,
     ),
   )
   if (expanded !== undefined) expanded.words = [argv.name, ...argv.args]

@@ -22,29 +22,11 @@ from mirage._rs import Stream
 from mirage.io.yield_budget import YieldBudget
 
 
-class _Plain(TypedDict):
+class _Operation(TypedDict):
     kind: Literal["matches", "shape", "parts"]
 
 
-class _End(TypedDict):
-    kind: Literal["end"]
-    start: int
-    longest: bool
-
-
-class _Suffix(TypedDict):
-    kind: Literal["suffix"]
-    longest: bool
-
-
-class _Replace(TypedDict):
-    kind: Literal["replace"]
-    all: bool
-    anchor: str | None
-
-
-_Operation: TypeAlias = _Plain | _End | _Suffix | _Replace
-_Reply: TypeAlias = bool | int | None | list[int] | list[list[int]]
+_Reply: TypeAlias = bool | list[int] | list[list[int]]
 _Dialect: TypeAlias = Literal["shell", "python"]
 
 _CHUNK = 4096
@@ -74,13 +56,6 @@ def _config(
     ).encode()
 
 
-def _position(result: _Reply) -> int | None:
-    assert result is None or (
-        isinstance(result, int) and not isinstance(result, bool)
-    )
-    return result
-
-
 def _reply(stream: Stream) -> _Reply:
     out = bytearray(stream.finish())
     while stream.busy():
@@ -98,8 +73,6 @@ def _text(result: _Reply) -> str:
 
 class Glob:
     """One compiled pattern over character values, including lone surrogates.
-
-    Every returned offset counts supplied characters, never encoded bytes.
 
     Args:
         pattern (str): pattern with quoting sentinels intact.
@@ -164,50 +137,13 @@ class Glob:
         assert isinstance(result, bool)
         return result
 
-    def end(self, name: str, start: int, longest: bool = True) -> int | None:
-        return _position(
-            self._run(
-                name, {"kind": "end", "start": start, "longest": longest}
-            )
-        )
-
-    def suffix(self, name: str, longest: bool = True) -> int | None:
-        return _position(
-            self._run(name, {"kind": "suffix", "longest": longest})
-        )
-
-    async def extent(
-        self, name: str, prefix: bool, longest: bool
-    ) -> int | None:
-        operation: _Operation
-        if prefix:
-            operation = {"kind": "end", "start": 0, "longest": longest}
-        else:
-            operation = {"kind": "suffix", "longest": longest}
-        return _position(await self._run_async(name, operation))
-
-    async def spans(
-        self, name: str, all_: bool, anchor: str | None
-    ) -> list[tuple[int, int]]:
-        result = await self._run_async(
-            name, {"kind": "replace", "all": all_, "anchor": anchor}
-        )
-        assert isinstance(result, list)
-        out: list[tuple[int, int]] = []
-        for span in result:
-            assert isinstance(span, list) and len(span) == 2
-            start, end = span
-            assert isinstance(start, int) and isinstance(end, int)
-            out.append((start, end))
-        return out
-
     def shape(self) -> str:
         return _text(self._run("", {"kind": "shape"}))
 
     def parts(self) -> list[str]:
         result = self._run("", {"kind": "parts"})
         assert isinstance(result, list)
-        return [_text(part) for part in result]
+        return [_text(cast(_Reply, part)) for part in result]
 
 
 class GlobMatcher:

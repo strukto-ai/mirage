@@ -294,7 +294,7 @@ async def fill_tree_env(
     )
     before = {n: session.vars.get(n) for n in names}
     await registry.fill_env(session, names)
-    return any(session.vars.get(n) is not before[n] for n in names)
+    return any(session.vars.get(n) != before[n] for n in names)
 
 
 def made_by_command(dispatch: DispatchFn) -> DispatchFn:

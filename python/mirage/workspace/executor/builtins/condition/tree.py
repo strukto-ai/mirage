@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.context import reset_admission, set_admission
+from mirage.policy.errors import PolicyDenied
 from mirage.rs.errors import RegexError
 from mirage.rs.regex import posix_regex
 from mirage.shell.array import make_array
@@ -40,9 +41,7 @@ from mirage.workspace.executor.builtins.condition.types import (
     CondUnary,
     CondWord,
 )
-from mirage.workspace.session.elements import assign_element
 from mirage.workspace.session.state import (
-    random_reader,
     seed_var,
     session_arith,
     visible_env,
@@ -173,44 +172,26 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
         # 5), so each operand lands its assignments through the gated
         # session view before the next reads, RANDOM's seed included
         # (`[[ RANDOM=42 -eq RANDOM ]]` seeds, then draws).
-        reader = random_reader(ctx.session)
+        policies = ctx.namespace.registry.policies
         values = []
         for operand in (node.left, node.right):
-            error: ArithError | ReadonlyVariableError | None = None
-            value = 0
             try:
-                result = session_arith(ctx.session, operand, reader)
-                writes, value = result.writes, result.value
+                values.append(
+                    await session_arith(ctx.session, operand, policies)
+                )
+            except PolicyDenied as exc:
+                raise CondError(f"{ctx.name}: {exc.filename}: denied")
             except (ArithError, ReadonlyVariableError) as exc:
-                # bash bound what the operand assigned before it failed
-                # (`y='x=6,1/0'; [[ 0 -eq y ]]` leaves x at 6, and a
-                # RANDOM seed in it is drawn from); they land, and the
-                # reader settles, before the error reports.
-                error, writes = exc, exc.writes
-            try:
-                for write in writes:
-                    status = await assign_element(
-                        ctx.session,
-                        ctx.view,
-                        write.name,
-                        write.key,
-                        write.value,
-                    )
-                    if status != "ok":
-                        raise CondError(f"{ctx.name}: {write.name}: {status}")
-            finally:
-                reader.settle()
-            if error is not None:
                 # bash: `[[: 1/0: division by 0` or `R: readonly variable`,
                 # status 1, and the line goes on; in a subscript it ends
-                # the shell.
-                if error.in_subscript:
-                    raise error.signal()
-                lead = f"{ctx.name}: " if isinstance(error, ArithError) else ""
+                # the shell. What the operand assigned before it failed
+                # has landed (`y='x=6,1/0'; [[ 0 -eq y ]]` leaves x at 6).
+                if exc.in_subscript:
+                    raise exc.signal() from exc
+                lead = f"{ctx.name}: " if isinstance(exc, ArithError) else ""
                 raise CondError(
-                    f"{shell_voice()}{lead}{error}", exit_code=1, fatal=False
-                )
-            values.append(value)
+                    f"{shell_voice()}{lead}{exc}", exit_code=1, fatal=False
+                ) from exc
         return compare(values[0], values[1])
     if node.op in FILE_PAIR_BINARY:
         return await apply_file_pair(ctx, node.op, node.left, node.right)

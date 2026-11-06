@@ -32,7 +32,6 @@ import type { EvaluationContext } from '../evaluation.ts'
 import { toScope } from '../executor/builtins/scope.ts'
 import { handleRedirect } from '../executor/redirect.ts'
 import { expandRedirect } from '../expand/redirects.ts'
-import { sessionView } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
 import { admit, Admitted } from './admission.ts'
@@ -64,7 +63,7 @@ export async function runCommandTree(
       deps.executeFn,
       deps.registry,
       null,
-      sessionView(session, deps.registry.policies, context.frame.diagnostics),
+      deps.registry.policies,
       false,
       deps.namespace.sessionLinks(session),
     )

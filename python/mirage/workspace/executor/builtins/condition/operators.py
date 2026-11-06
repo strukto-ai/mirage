@@ -41,8 +41,7 @@ from mirage.workspace.executor.builtins.condition.types import CondContext
 from mirage.workspace.executor.builtins.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
 from mirage.workspace.executor.builtins.shared import abs_path
-from mirage.workspace.session.elements import element_is_set
-from mirage.workspace.session.state import nameref_target
+from mirage.workspace.session.state import element_is_set, nameref_target
 
 
 def operand_scope(ctx: CondContext, val: str | PathSpec) -> PathSpec:
@@ -146,7 +145,9 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
         return text == ""
     if op == "-v":
         try:
-            return await element_is_set(ctx.session, text, ctx.view)
+            return await element_is_set(
+                ctx.session, text, ctx.namespace.registry.policies
+            )
         except ArithError as exc:
             # bash aborts the line on `[[ -v a[1/0] ]]` with `1/0:
             # division by 0`, a test's grammar error being the only

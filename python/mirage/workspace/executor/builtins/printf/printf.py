@@ -21,10 +21,10 @@ from mirage.context import program_invocation
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
+from mirage.policy.policies import Policies
 from mirage.shell.bytes import decode_text, encode_text, utf8_locale
 from mirage.shell.errors import ArithError
 from mirage.shell.voice import shell_voice
-from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.printf.format import (
     printf_output,
@@ -37,8 +37,7 @@ from mirage.workspace.executor.builtins.shared import (
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.elements import assign_element
-from mirage.workspace.session.state import env_snapshot, session_view
+from mirage.workspace.session.state import assign_element, env_snapshot
 from mirage.workspace.types import ExecutionNode
 
 # bash 5.2.21's own string, which both the usage error and the
@@ -48,7 +47,7 @@ from mirage.workspace.types import ExecutionNode
 async def handle_printf(
     args: list[str],
     session: SessionState,
-    view: SessionView | None = None,
+    policies: Policies | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Print formatted output, honoring GNU printf's format-reuse rules.
 
@@ -79,9 +78,9 @@ async def handle_printf(
         args (list[str]): the format followed by its arguments, optionally
             preceded by ``-v NAME``.
         session (SessionState): shell session, for the ``-v`` assignment.
-        view (SessionView | None): the session view the ``-v`` write
-            goes through, so a ``pre_session`` refusal is reported in the
-            rule's own words; None outside a workspace.
+        policies (Policies | None): the policies the ``-v`` write clears,
+            so a ``pre_session`` refusal is reported in the rule's own
+            words.
     """
     program = program_invocation(session)
     target: str | None = None
@@ -149,7 +148,7 @@ async def handle_printf(
     base, subscript = parsed.group(1), parsed.group(2)
     text = decode_text(output).partition("\0")[0]
     try:
-        status = await assign_element(session, view, base, subscript, text)
+        status = await assign_element(session, policies, base, subscript, text)
     except PolicyDenied as exc:
         return fail("printf", errors + f"{shell_voice()}{exc.strerror}\n")
     except ArithError as exc:
@@ -213,9 +212,5 @@ async def printf_builtin(call: BuiltinCall) -> Result:
     return await handle_printf(
         list(call.argv.args),
         call.context.session,
-        session_view(
-            call.context.session,
-            call.namespace.registry.policies,
-            diagnostics=call.context.frame.diagnostics,
-        ),
+        call.namespace.registry.policies,
     )

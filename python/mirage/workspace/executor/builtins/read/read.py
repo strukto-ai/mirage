@@ -19,6 +19,7 @@ from mirage.io.async_line_iterator import AsyncLineIterator, line_buffer
 from mirage.io.memory import check_memory
 from mirage.io.types import ByteSource
 from mirage.policy import PolicyDenied
+from mirage.policy.policies import Policies
 from mirage.shell.array import make_array
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.escapes import ends_escaped
@@ -39,8 +40,11 @@ from mirage.workspace.executor.builtins.shared import (
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.elements import assign_element
-from mirage.workspace.session.state import session_view, visible_env
+from mirage.workspace.session.state import (
+    assign_element,
+    session_view,
+    visible_env,
+)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -49,6 +53,7 @@ async def _read_store(
     view: SessionView,
     var: str,
     value: str,
+    policies: Policies | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode] | None:
     """Store one ``read`` target, scalar or ``name[sub]`` element.
 
@@ -60,6 +65,8 @@ async def _read_store(
     Args:
         session (SessionState): shell session state.
         view (SessionView): the gated session view.
+        policies (Policies | None): the policies a subscript's
+            assignments clear.
         var (str): the target as the operand spelled it.
         value (str): the split word to store.
 
@@ -78,7 +85,9 @@ async def _read_store(
             return refusal("read", exc)
         return None
     try:
-        status = await assign_element(session, view, base, subscript, value)
+        status = await assign_element(
+            session, policies, base, subscript, value
+        )
     except PolicyDenied as exc:
         return refusal("read", exc)
     if status == "readonly":
@@ -275,6 +284,7 @@ async def handle_read(
     session: SessionState,
     stdin: ByteSource | None = None,
     state: SessionView | None = None,
+    policies: Policies | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Read one line (or delimited record, or character count) into
     variables, with bash's option surface.
@@ -297,6 +307,8 @@ async def handle_read(
         session (SessionState): shell session state.
         stdin (ByteSource | None): line source.
         state (SessionView | None): the gated session view.
+        policies (Policies | None): the policies a subscript's
+            assignments clear.
     """
     parse = parse_shell_options(SHELL_SPECS["read"], args)
     if parse.invalid is not None:
@@ -413,7 +425,7 @@ async def handle_read(
         parts = _split_read_line(line, ifs, len(variables))
     for i, var in enumerate(variables):
         refused = await _read_store(
-            session, view, var, parts[i] if i < len(parts) else ""
+            session, view, var, parts[i] if i < len(parts) else "", policies
         )
         if refused is not None:
             return refused
@@ -440,4 +452,5 @@ async def read_builtin(call: BuiltinCall) -> Result:
             call.namespace.registry.policies,
             diagnostics=call.context.frame.diagnostics,
         ),
+        call.namespace.registry.policies,
     )

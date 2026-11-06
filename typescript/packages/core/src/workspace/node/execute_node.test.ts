@@ -138,7 +138,7 @@ describe('executeNode dispatcher', () => {
     await executeNode(buildDeps(reg), node, new EvaluationContext(session))
     // Only the seeded $PWD, $PATH, $IFS, $OPTIND and $OPTERR, so the
     // assignment really did nothing.
-    expect(Object.keys(session.env)).toEqual(['PWD', 'PATH', 'IFS', 'OPTIND', 'OPTERR'])
+    expect(Object.keys(session.env).sort()).toEqual(['IFS', 'OPTERR', 'OPTIND', 'PATH', 'PWD'])
   })
 
   it('NEGATED_COMMAND flips a zero exit into one', async () => {

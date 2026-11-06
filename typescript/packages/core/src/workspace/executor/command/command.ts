@@ -69,7 +69,7 @@ import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { pathStat } from '../../mount/namespace/probe.ts'
 import { MountCommandUnsupported, type MountRegistry } from '../../mount/registry.ts'
 import { makeCheckUnlink, makeStorageKey } from '../../mount/storage.ts'
-import { sessionEntry, type SessionState } from '../../session/session.ts'
+import type { SessionState } from '../../session/session.ts'
 import { sessionView } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { operandFollow } from '../builtins/links/links.ts'
@@ -226,9 +226,14 @@ export async function fillTreeEnv(
   const names = new Set(
     [...invokedEnvNames(tree.spec, verbs)].filter((n) => !supplied.has(n) && !skip.has(n)),
   )
-  const before = new Map([...names].map((n) => [n, sessionEntry(session.vars, n)]))
+  // A fill fetches scalars only, so a scalar's text is what it changes.
+  const scalar = (n: string): string | null => {
+    const value = session.vars.get(n)?.value
+    return typeof value === 'string' ? value : null
+  }
+  const before = new Map([...names].map((n) => [n, scalar(n)]))
   await registry.fillEnv(session, names)
-  return [...names].some((n) => sessionEntry(session.vars, n) !== before.get(n))
+  return [...names].some((n) => scalar(n) !== before.get(n))
 }
 
 /**

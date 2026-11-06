@@ -600,12 +600,12 @@ describe('hasManagedEnv', () => {
   it('create seeds the workspace template and session entries win', () => {
     const mgr = new SessionManager('s', undefined, { TOKEN: managed })
     const session = mgr.create('s2', { env: { TOKEN: 'literal', OWN: { from: 'env' } } })
-    expect(session.vars.TOKEN?.managed).toBeUndefined()
-    expect(session.vars.TOKEN?.value).toBe('literal')
-    expect(session.vars.OWN?.managed?.source).toBe('env')
+    expect(session.vars.get('TOKEN')?.managed).toBeUndefined()
+    expect(session.vars.get('TOKEN')?.value).toBe('literal')
+    expect(session.vars.get('OWN')?.managed?.source).toBe('env')
     // The template itself is untouched: a third session still gets the
     // managed TOKEN.
-    expect(mgr.create('s3', {}).vars.TOKEN?.managed).not.toBeUndefined()
+    expect(mgr.create('s3', {}).vars.get('TOKEN')?.managed).not.toBeUndefined()
   })
 
   it('a snapshot carrying a pointer flips it', async () => {
@@ -632,7 +632,7 @@ describe('hasManagedEnv', () => {
     const mgr = new SessionManager('s', store)
     await mgr.ensureLoaded()
     expect(mgr.hasManagedEnv).toBe(true)
-    expect(mgr.get('other').vars.TOKEN?.managed?.source).toBe('env')
+    expect(mgr.get('other').vars.get('TOKEN')?.managed?.source).toBe('env')
   })
 })
 
@@ -647,8 +647,8 @@ describe('restoreSeed', () => {
     mgr.restoreSeed(seed)
     expect(mgr.hasManagedEnv).toBe(true)
     const created = mgr.create('later')
-    expect(created.vars.MODE?.value).toBe('x')
-    expect(created.vars.TOKEN?.managed).not.toBeUndefined()
+    expect(created.vars.get('MODE')?.value).toBe('x')
+    expect(created.vars.get('TOKEN')?.managed).not.toBeUndefined()
     expect(mgr.seedVars).toEqual(seed)
   })
 })
@@ -657,9 +657,9 @@ describe('seed merge on hydration', () => {
   it('merges env entries the record predates, record entries winning', async () => {
     const store = new RAMNamespaceStore()
     const old = new SessionManager('default', store)
-    old.get('default').vars.KEPT = { value: 'stored', attrs: new Set() }
+    old.get('default').vars.set('KEPT', { value: 'stored', attrs: new Set() })
     old.create('agent')
-    old.get('agent').vars.KEPT = { value: 'agent', attrs: new Set() }
+    old.get('agent').vars.set('KEPT', { value: 'agent', attrs: new Set() })
     await old.ensureLoaded()
     await old.flush()
     const seeds = varsFromEntries({
@@ -668,10 +668,10 @@ describe('seed merge on hydration', () => {
     })
     const fresh = new SessionManager('default', store, seeds)
     await fresh.ensureLoaded()
-    expect(fresh.get('default').vars.TOKEN?.managed).not.toBeUndefined()
-    expect(fresh.get('default').vars.KEPT?.value).toBe('stored')
-    expect(fresh.get('agent').vars.TOKEN?.managed).not.toBeUndefined()
-    expect(fresh.get('agent').vars.KEPT?.value).toBe('agent')
+    expect(fresh.get('default').vars.get('TOKEN')?.managed).not.toBeUndefined()
+    expect(fresh.get('default').vars.get('KEPT')?.value).toBe('stored')
+    expect(fresh.get('agent').vars.get('TOKEN')?.managed).not.toBeUndefined()
+    expect(fresh.get('agent').vars.get('KEPT')?.value).toBe('agent')
     expect(fresh.hasManagedEnv).toBe(true)
   })
 

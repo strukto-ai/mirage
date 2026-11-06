@@ -15,6 +15,7 @@
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
+import type { Policies } from '../../../../policy/index.ts'
 import {
   arraySet,
   buildAssocLiteral,
@@ -38,7 +39,7 @@ import { concat } from '../../../../utils/bytes.ts'
 import { varHidden } from '../../../../utils/hidden.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { SessionView } from '../../../../view/types.ts'
-import { sessionEntry, type SessionState, setSessionEntry } from '../../../session/session.ts'
+import type { SessionState } from '../../../session/session.ts'
 import {
   appended,
   conversionScalar,
@@ -105,7 +106,7 @@ export function declaredKind(flags: ReadonlySet<string>): VarKind | null {
  * reference names.
  */
 export function heldValue(session: SessionState, name: string): ShellValue | null {
-  return sessionEntry(session.vars, deref(session, name) || name)?.value ?? null
+  return session.vars.get(deref(session, name) || name)?.value ?? null
 }
 
 /**
@@ -129,12 +130,11 @@ export function localAttrs(v: ShellVar | undefined, inherit: boolean): Set<VarAt
  * gated session view, which judges that write.
  */
 export function startLocal(session: SessionState, name: string, inherit: boolean): void {
-  const v = sessionEntry(session.vars, name)
+  const v = session.vars.get(name)
   const kept = localAttrs(v, inherit)
-  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-  delete session.vars[name]
+  session.vars.delete(name)
   if (v !== undefined && (kept.size > 0 || inherit)) {
-    setSessionEntry(session.vars, name, { value: inherit ? v.value : null, attrs: kept })
+    session.vars.set(name, { value: inherit ? v.value : null, attrs: kept })
   }
 }
 
@@ -253,7 +253,7 @@ export async function dropReference(
   name: string,
 ): Promise<void> {
   const target = deref(session, name) || name
-  if (sessionEntry(session.vars, target)?.attrs.has(VarAttr.Nameref) === true) {
+  if (session.vars.get(target)?.attrs.has(VarAttr.Nameref) === true) {
     await view.mark(target, VarAttr.Nameref, false)
   }
 }
@@ -264,7 +264,7 @@ export async function dropReference(
  */
 export function visibleRecord(session: SessionState, name: string): ShellVar | undefined {
   if (varHidden(session.visibility, name)) return undefined
-  return sessionEntry(session.vars, name)
+  return session.vars.get(name)
 }
 
 /**
@@ -333,7 +333,8 @@ export function plusRefusal(
  * builds a map, since a plain `m+=([k]=v)` keeps the variable's own kind.
  * `warnings` is filled with the `must use subscript` lines for the plain
  * words a keyed associative literal cannot take; GNU stores the valid
- * elements and the status stays 0.
+ * elements and the status stays 0. `policies` are what a subscript's
+ * assignments clear.
  */
 export async function storeStagedArrays(
   cmd: string,
@@ -348,9 +349,10 @@ export async function storeStagedArrays(
   shaping: AttrMarks = [],
   globalScope = false,
   inherit = false,
+  policies: Policies | null = null,
 ): Promise<RedirectResult | null> {
-  const scoped = !globalScope && !VISIBLE_SCOPE_BUILTINS.has(cmd)
-  const locals = scoped ? session.localVars : null
+  const shell = session.vars.shell
+  const scoped = !globalScope && !VISIBLE_SCOPE_BUILTINS.has(cmd) && shell.inFunction()
   for (const [position, operand] of operands.entries()) {
     if (typeof operand === 'string') continue
     const { name, append, items } = operand
@@ -360,8 +362,8 @@ export async function storeStagedArrays(
       errors.push(readonlyLine(cmd, name))
       continue
     }
-    const fresh = locals !== null && !locals.has(name)
-    if (locals !== null) shadowLocal(session, locals, name, inherit)
+    const fresh = scoped && !shell.isLocal(name)
+    if (scoped) shadowLocal(session, name)
     if (fresh && !inCallEnv(session, name)) startLocal(session, name, inherit)
     const held = fresh && !inherit ? null : heldValue(session, name)
     const conflict = kindConflict(held, kind)
@@ -395,10 +397,10 @@ export async function storeStagedArrays(
         let indexed: ShellArray | null = session.arrays[name] ?? null
         if (append && indexed === null) {
           const scalar = conversionScalar(session, name)
-          indexed = scalar === undefined ? null : makeArray([scalar])
+          indexed = scalar === null ? null : makeArray([scalar])
         }
         base = await buildIndexedLiteral(indexed, items, append, (sub) =>
-          subscriptIndex(session, sub, view),
+          subscriptIndex(session, sub, policies),
         )
       }
       await view.set(name, base)
@@ -571,7 +573,7 @@ export function declarationResult(
  */
 export function declareLine(session: SessionState, name: string): string | null {
   if (varHidden(session.visibility, name)) return null
-  const v = sessionEntry(session.vars, name)
+  const v = session.vars.get(name)
   if (v === undefined) return null
   const letters = attrLetters(v)
   const head = letters ? `declare -${letters}` : 'declare --'
@@ -595,7 +597,7 @@ export function declarationListed(
   name: string,
   flags: ReadonlySet<string>,
 ): boolean {
-  const v = sessionEntry(session.vars, name)
+  const v = session.vars.get(name)
   if (v === undefined || !kindListed(session, name, flags)) return false
   const letters = new Set(attrLetters(v))
   const wanted = [...flags].filter((c) => LISTED_ATTRIBUTES.has(c))
@@ -614,7 +616,8 @@ export function handleDeclarePrint(
   const targets =
     names.length > 0
       ? names
-      : Object.keys(session.vars)
+      : session.vars
+          .names()
           .filter((name) => declarationListed(session, name, flags))
           .sort(compareCodePoints)
   const lines: string[] = []
@@ -747,7 +750,8 @@ export function handleDeclareFunctions(
  * / `-A` narrow the listing to that array kind (`kindListed`). Otherwise
  * each operand is assigned and marked through the gated view
  * (`markVariables`); `-a` / `-A` shape only an assigned value, and
- * `export -n` takes the mark off.
+ * `export -n` takes the mark off. `policies` are what a subscript's
+ * assignments clear.
  */
 export async function markNames(
   assignments: readonly DeclarationOperand[],
@@ -755,6 +759,7 @@ export async function markNames(
   state: SessionView | null,
   attr: VarAttr,
   parser?: ParseScope,
+  policies: Policies | null = null,
 ): Promise<RedirectResult> {
   const exporting = attr === VarAttr.Export
   const cmd = exporting ? 'export' : 'readonly'
@@ -770,10 +775,11 @@ export async function markNames(
   const kind = declaredKind(flags)
   if (flags.has('f')) {
     const marked = exporting ? session.exportedFunctions : session.readonlyFunctions
-    return markFunctions(cmd, session, marked, names, on, state, parser, kind)
+    return markFunctions(cmd, session, marked, names, on, state, parser, kind, policies)
   }
   if (names.length === 0) {
-    const lines = Object.entries(session.vars)
+    const lines = session.vars
+      .records()
       .filter(([name, v]) => v.attrs.has(attr) && kindListed(session, name, flags))
       .map(([name]) => name)
       .sort(compareCodePoints)
@@ -781,7 +787,7 @@ export async function markNames(
       .filter((line) => line !== null)
     return ok(cmd, encodeText(lines.map((line) => `${line}\n`).join('')))
   }
-  return markVariables(cmd, session, requireView(state), names, attr, on, kind)
+  return markVariables(cmd, session, requireView(state), names, attr, on, kind, policies)
 }
 
 /**
@@ -803,6 +809,7 @@ export async function markFunctions(
   state: SessionView | null = null,
   parser?: ParseScope,
   kind: VarKind | null = null,
+  policies: Policies | null = null,
 ): Promise<RedirectResult> {
   const errors: string[] = []
   const warnings: string[] = []
@@ -817,6 +824,10 @@ export async function markFunctions(
       true,
       null,
       kind,
+      [],
+      false,
+      false,
+      policies,
     )
     if (refused !== null) return refused
   }
@@ -856,6 +867,7 @@ export async function markVariables(
   attr: VarAttr,
   on: boolean,
   kind: VarKind | null,
+  policies: Policies | null = null,
 ): Promise<RedirectResult> {
   const errors: string[] = []
   const warnings: string[] = []
@@ -870,6 +882,10 @@ export async function markVariables(
     true,
     stored,
     kind,
+    [],
+    false,
+    false,
+    policies,
   )
   const traced = kind === null && session.shellOptions.xtrace === true
   let failed = false
@@ -936,7 +952,7 @@ async function markOperand(
   const conflict = val !== null ? kindConflict(held, kind) : null
   if (val !== null && conflict === null) {
     const checked = deref(session, key) || key
-    const integer = sessionEntry(session.vars, checked)?.attrs.has(VarAttr.Integer) === true
+    const integer = session.vars.get(checked)?.attrs.has(VarAttr.Integer) === true
     const [slot, added] = append ? appended(held, val, integer) : [val, null]
     const [value, assigned] = scalarValue(held, slot, kind)
     if (kind !== null) await dropReference(session, view, key)
@@ -960,9 +976,8 @@ async function markOperand(
  * the caller should shadow rather than reuse whatever is already there.
  */
 export function noteLocalArray(session: SessionState, name: string): boolean {
-  const locals = session.localVars
-  if (locals === null) return false
-  shadowLocal(session, locals, name)
+  if (!session.vars.shell.inFunction()) return false
+  shadowLocal(session, name)
   return true
 }
 

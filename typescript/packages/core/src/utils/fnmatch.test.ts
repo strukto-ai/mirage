@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { Glob } from '../rs/glob.ts'
 import { fnmatch, fnmatchcase } from './fnmatch.ts'
 
 const NAMES = [
@@ -294,110 +293,11 @@ it.each([
   },
 )
 
-it('Matcher.end reads every offset in linear time', () => {
-  const match = new Glob('*b')
-  expect([match.end('abcab', 0), match.end('abcab', 0, false)]).toEqual([5, 2])
-  expect([match.end('abcab', 2), match.end('abcab', 5)]).toEqual([5, null])
-  const blank = new Glob('*b')
-  const subject = ' '.repeat(16000)
-  for (let i = 0; i <= 16000; i++) expect(blank.end(subject, i)).toBeNull()
-  match.close()
-  blank.close()
-})
-
-it.each([
-  ['ab'.repeat(16000), '*a', [null, null]],
-  ['ab'.repeat(16000), 'a*', [31998, 0]],
-  ['xab', '@(b|ab)', [2, 1]],
-  ['ba', '+(@(a|b))', [1, 0]],
-  ['xa)', '!(a)', [3, 0]],
-  ['xa(b)|c', '(b)|c', [2, 2]],
-  ['xa(b)', '@(a(b)|z)', [1, 1]],
-  ['x[a', '[a', [1, 1]],
-  ['x|)', '[)|]', [2, 2]],
-  ['\udcff\ud83d', '*', [2, 0]],
-  ['\udcff\ud83d', '\ud83d', [1, 1]],
-  ['x\udcff\ud83d', '\udcff\ud83d', [1, 1]],
-] as [string, string, (number | null)[]][])(
-  'suffixStart runs the reversed pattern once: %#',
-  (name, pattern, expected) => {
-    const glob = new Glob(pattern, true)
-    try {
-      expect([glob.suffix(name, false), glob.suffix(name)]).toEqual(expected)
-    } finally {
-      glob.close()
-    }
-  },
-)
-
 it.each(['@', '?', '+', '*'])('deep %s groups use an explicit stack', (operator) => {
   const pattern = (operator + '(').repeat(1200) + 'a' + ')'.repeat(1200)
   expect(fnmatch('a', pattern, true)).toBe(true)
   expect(fnmatch('b', pattern, true)).toBe(false)
 })
-
-it.each([
-  {
-    name: 'a😀\udcffb',
-    pattern: '?',
-    ends: [
-      [1, 1],
-      [2, 2],
-      [3, 3],
-      [4, 4],
-      [null, null],
-    ],
-    suffix: [3, 3],
-  },
-  {
-    name: 'a😀\udcffb',
-    pattern: '+(?)',
-    ends: [
-      [1, 4],
-      [2, 4],
-      [3, 4],
-      [4, 4],
-      [null, null],
-    ],
-    suffix: [3, 0],
-  },
-  {
-    name: 'a😀\udcffb',
-    pattern: '?b',
-    ends: [
-      [null, null],
-      [null, null],
-      [4, 4],
-      [null, null],
-      [null, null],
-    ],
-    suffix: [2, 2],
-  },
-  {
-    name: 'x\udcff😀',
-    pattern: '@(😀|\udcff😀)',
-    ends: [
-      [null, null],
-      [3, 3],
-      [3, 3],
-      [null, null],
-    ],
-    suffix: [2, 1],
-  },
-])(
-  'match extents count characters and preserve raw bytes: $pattern',
-  ({ name, pattern, ends, suffix }) => {
-    const matcher = new Glob(pattern, true)
-    expect(
-      Array.from({ length: Array.from(name).length + 1 }, (_, i) => [
-        matcher.end(name, i, false),
-        matcher.end(name, i),
-      ]),
-    ).toEqual(ends)
-    expect([matcher.suffix(name, false), matcher.suffix(name)]).toEqual(suffix)
-    matcher.close()
-  },
-)
 
 it.each(Array.from('*?[@+!()|', (literal, index) => ({ literal, index })))(
   'quoting sentinel $index stays literal in and out of classes',

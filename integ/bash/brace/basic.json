@@ -537,10 +537,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "zbr1=Z; echo {a,$zbr1}; (zbr6='p q'; IFS=,; zbr7=m,n; printf '[%s]\\n' {a,b}$zbr6 x{$zbr7,c})",
+      "command": "zbr1=Z; echo {a,$zbr1}; (zbr6='p q'; IFS=,; zbr7=m,n; printf '[%s]\\n' {a,b}$zbr6 x{$zbr7,c}); (zbr8=A zbr81=B zbr82=C; echo $zbr8{1,2} {x,y}$((zbr9++)) $zbr9; printf '[%s]' {Z..a}; echo)",
       "expect": {
         "exit": 0,
-        "stdout": "a Z\n[ap q]\n[bp q]\n[xm]\n[n]\n[xc]\n",
+        "stdout": "a Z\n[ap q]\n[bp q]\n[xm]\n[n]\n[xc]\nB C x0 y1 2\n[Z][[][][]][^][_][`][a]\n",
         "stderr": ""
       }
     },

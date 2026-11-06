@@ -13,8 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from mirage.policy import PolicyDenied
+from mirage.policy.policies import Policies
 from mirage.shell.errors import ArithError
-from mirage.shell.variable import ShellVar, VarAttr
+from mirage.shell.variable import VarAttr
 from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.declare.constants import SUBSCRIPT_RE
@@ -69,6 +70,7 @@ async def handle_local(
     session: SessionState,
     state: SessionView | None = None,
     decl: Declaration = Declaration(),
+    policies: Policies | None = None,
 ) -> Result:
     """Declare names in the running function's scope, or globally.
 
@@ -86,8 +88,10 @@ async def handle_local(
         session (SessionState): shell session state.
         state (SessionView | None): the gated session view.
         decl (Declaration): the spelling and the letters it carried.
+        policies (Policies | None): the policies an ``-i`` value's
+            assignments clear.
     """
-    if decl.cmd == "local" and session._local_vars is None:
+    if decl.cmd == "local" and not session.vars.shell.in_function():
         # `local` is the one spelling that needs a function scope;
         # `declare`/`typeset` share this handler and are legal at top
         # level. Without the check the builtin took its operands, stored
@@ -114,7 +118,8 @@ async def handle_local(
             session,
             view,
             decl,
-            None if decl.global_scope else session._local_vars,
+            not decl.global_scope and session.vars.shell.in_function(),
+            policies,
         )
     finally:
         if restore is not None:
@@ -126,7 +131,8 @@ async def _declare_operands(
     session: SessionState,
     view: SessionView,
     decl: Declaration,
-    local_vars: dict[str, ShellVar | None] | None,
+    scoped: bool,
+    policies: Policies | None = None,
 ) -> Result:
     """Run ``handle_local``'s operands in the scope it settled on.
 
@@ -135,8 +141,10 @@ async def _declare_operands(
         session (SessionState): shell session state.
         view (SessionView): the gated session view.
         decl (Declaration): the spelling and the letters it carried.
-        local_vars (dict[str, ShellVar | None] | None): the running
-            frame, None at global scope.
+        scoped (bool): a function's own scope, which a local shadows;
+            False at global scope.
+        policies (Policies | None): the policies an ``-i`` value's
+            assignments clear.
     """
     cmd, kind, shaping, marks, plus, nameref, _, inherit = decl
     errors: list[str] = []
@@ -150,12 +158,13 @@ async def _declare_operands(
             operands,
             errors,
             warnings,
-            fatal=session._local_vars is None,
+            fatal=not session.vars.shell.in_function(),
             stored=stored,
             kind=kind,
             shaping=shaping,
-            global_scope=local_vars is None,
+            global_scope=not scoped,
             inherit=inherit,
+            policies=policies,
         )
         for position, operand in enumerate(operands):
             if isinstance(operand, str):
@@ -163,7 +172,7 @@ async def _declare_operands(
                     None
                     if refused is not None
                     else await _declare_operand(
-                        session, view, operand, decl, local_vars
+                        session, view, operand, decl, scoped, policies
                     )
                 )
             elif position in stored:
@@ -227,7 +236,8 @@ async def _declare_operand(
     view: SessionView,
     assign: str,
     decl: Declaration,
-    local_vars: dict[str, ShellVar | None] | None,
+    scoped: bool,
+    policies: Policies | None = None,
 ) -> str | None:
     """Declare one ``NAME``, ``NAME=value`` or ``NAME+=value`` operand
     and mark it.
@@ -241,8 +251,10 @@ async def _declare_operand(
         view (SessionView): the gated session view.
         assign (str): the operand.
         decl (Declaration): the spelling and the letters it carried.
-        local_vars (dict[str, ShellVar | None] | None): the running
-            frame, None at global scope.
+        scoped (bool): a function's own scope, which a local shadows;
+            False at global scope.
+        policies (Policies | None): the policies an ``-i`` value's
+            assignments clear.
 
     Returns:
         The operand's refusal line, or None when it declared.
@@ -256,15 +268,15 @@ async def _declare_operand(
     if bad_name is not None:
         return bad_name
     key, append, val = operand_parts(assign)
-    fresh = local_vars is not None and key not in local_vars
+    fresh = scoped and not session.vars.shell.is_local(key)
     if nameref:
         # The reference's own `-i -l -u` come off unless asked for, as
         # bash's do (`declare -l x=T; declare -n x=U` aims at `U`); its
         # target's stay.
         shaping, marks = _unshaped(shaping), _unshaped(marks)
     if val is None:
-        if local_vars is not None:
-            shadow_local(session, local_vars, key, inherit)
+        if scoped:
+            shadow_local(session, key)
         if fresh:
             line = await _fresh_local(session, view, cmd, key, inherit)
             if line is not None:
@@ -298,8 +310,8 @@ async def _declare_operand(
     creates = fresh and not in_call_env(session, key)
     if (creates or not nameref) and view.is_readonly(key, not nameref):
         return readonly_line(cmd, key)
-    if local_vars is not None:
-        shadow_local(session, local_vars, key, inherit)
+    if scoped:
+        shadow_local(session, key)
     if creates:
         start_local(session, key, inherit)
     # A reference is checked on the local, which exists from here on even
@@ -313,7 +325,16 @@ async def _declare_operand(
         return line
     if nameref:
         return await _aim_reference(
-            session, view, cmd, key, append, val, shaping, marks, creates
+            session,
+            view,
+            cmd,
+            key,
+            append,
+            val,
+            shaping,
+            marks,
+            creates,
+            policies,
         )
     # A new local holds nothing of the caller's but what `start_local`
     # kept; otherwise the value lands as any declaration's does
@@ -363,6 +384,7 @@ async def _aim_reference(
     shaping: AttrMarks,
     marks: AttrMarks,
     creates: bool,
+    policies: Policies | None = None,
 ) -> str | None:
     """Aim a ``declare -n NAME=VALUE`` (or ``NAME+=VALUE``) reference
     once the name may take one.
@@ -387,6 +409,8 @@ async def _aim_reference(
         shaping (AttrMarks): the ``-i -l -u`` / ``+i +l +u`` marks.
         marks (AttrMarks): the attribute marks.
         creates (bool): the declaration made ``key`` a new local.
+        policies (Policies | None): the policies an ``-i`` value's
+            assignments clear.
 
     Returns:
         The refusal line ("" for a silent one), or None once aimed.
@@ -403,7 +427,10 @@ async def _aim_reference(
     value = old + given
     if (VarAttr.INTEGER, True) in shaping:
         await evaluate_integer(
-            session, view, old if append else given, given if append else None
+            session,
+            policies,
+            old if append else given,
+            given if append else None,
         )
         value = ""
     if is_valid_name(value) or SUBSCRIPT_RE.fullmatch(value) is not None:
@@ -490,4 +517,5 @@ async def local_builtin(call: BuiltinCall) -> Result:
             call.namespace.registry.policies,
             diagnostics=call.context.frame.diagnostics,
         ),
+        policies=call.namespace.registry.policies,
     )

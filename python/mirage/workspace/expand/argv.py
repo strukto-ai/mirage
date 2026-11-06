@@ -19,6 +19,7 @@ from typing import Any
 
 from mirage.commands.spec.types import CommandSpec, ValueType
 from mirage.policy.match import scopes_paths
+from mirage.policy.policies import Policies
 from mirage.shell.call_stack import CallStack
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec, word_text
@@ -28,7 +29,6 @@ from mirage.utils.glob_walk import (
     mark_globs,
     unmark_globs,
 )
-from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.condition.operands import (
     TEST_NAMES,
@@ -117,7 +117,7 @@ async def expand_argv(
     call_stack: CallStack | None,
     registry: MountRegistry,
     namespace: Namespace | None = None,
-    view: SessionView | None = None,
+    policies: Policies | None = None,
 ) -> Argv:
     """Expand, classify, and glob-resolve a command's word nodes.
 
@@ -140,7 +140,7 @@ async def expand_argv(
     """
     session = context.session
     expanded = await expand_words(
-        parts, context, execute_fn, call_stack, view=view
+        parts, context, execute_fn, call_stack, policies
     )
     if not expanded:
         return Argv(name="", args=(), operands=())

@@ -21,13 +21,13 @@ import { checkMemory } from '../../../../io/memory.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
+import type { Policies } from '../../../../policy/index.ts'
 import { makeArray } from '../../../../shell/array.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { endsEscaped } from '../../../../shell/escapes.ts'
 import type { SessionView } from '../../../../view/types.ts'
-import { assignElement } from '../../../session/elements.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { sessionView, visibleEnv } from '../../../session/state.ts'
+import { assignElement, sessionView, visibleEnv } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { TARGET_RE } from '../constants.ts'
 import {
@@ -208,6 +208,7 @@ export async function handleRead(
   session: SessionState,
   stdin: ByteSource | null,
   state: SessionView | null = null,
+  policies: Policies | null = null,
   signal?: AbortSignal,
 ): Promise<RedirectResult> {
   const parse = parseShellOptions(SHELL_SPECS.read, args)
@@ -310,7 +311,7 @@ export async function handleRead(
   for (let i = 0; i < variables.length; i++) {
     const name = variables[i]
     if (name === undefined) continue
-    const refused = await readStore(session, view, name, parts[i] ?? '')
+    const refused = await readStore(session, view, name, parts[i] ?? '', policies)
     if (refused !== null) return refused
   }
   const code = complete ? 0 : 1
@@ -327,13 +328,15 @@ export async function handleRead(
  * bash accepts a subscripted target (`read "m[k]"`), which is an
  * element write, not a variable literally named `m[k]`; the readonly
  * guard resolves the base name first, since that is what `readonly`
- * records. Returns the refusal result, or null when the write landed.
+ * records. `policies` are what a subscript's assignments clear. Returns the
+ * refusal result, or null when the write landed.
  */
 async function readStore(
   session: SessionState,
   view: SessionView,
   varName: string,
   value: string,
+  policies: Policies | null = null,
 ): Promise<RedirectResult | null> {
   const match = TARGET_RE.exec(varName)
   const base = match?.[1] ?? varName
@@ -350,7 +353,7 @@ async function readStore(
   }
   let status: 'ok' | 'denied' | 'readonly' | 'subscript'
   try {
-    status = await assignElement(session, view, base, subscript, value)
+    status = await assignElement(session, policies, base, subscript, value)
   } catch (err) {
     if (err instanceof PolicyDenied) return refusal('read', err)
     throw err
@@ -382,6 +385,7 @@ export async function readBuiltin(call: BuiltinCall): Promise<RedirectResult> {
     call.context.session,
     call.stdin,
     sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
+    call.registry.policies,
     call.signal,
   )
 }

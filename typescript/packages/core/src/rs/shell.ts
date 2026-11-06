@@ -12,9 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import MIRAGE_SHELL_WASM from '#mirage-shell-wasm'
 import { decodeText, encodeText } from '../shell/bytes.ts'
 import type { Heredoc, ShellNode } from '../shell/types.ts'
-import { moduleSync } from './stream.ts'
+import { compileSync } from './stream.ts'
 
 interface Exports {
   readonly memory: WebAssembly.Memory
@@ -31,14 +32,15 @@ interface Exports {
   mirage_rs_shell_extras_len(): number
   mirage_rs_shell_text(): number
   mirage_rs_shell_text_len(): number
+  mirage_rs_shell_tree(): number
+  mirage_rs_shell_drop_tree(handle: number): void
+  mirage_rs_engine(len: number): number
+  mirage_rs_engine_output(): number
+  mirage_rs_engine_output_len(): number
 }
 
 /** The `u32`s one node takes in a parse's table: kind | field << 16 | flags << 24, then spans and links. */
 const WORDS = 10
-
-// Linear memory only grows, so an instance a large parse grew is dropped and
-// the next parse gets a fresh one.
-const RECYCLE_BYTES = 32 * 1024 * 1024
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -53,9 +55,22 @@ function bytesAt(wasm: Exports, ptr: number, len: number): Uint8Array {
   return new Uint8Array(wasm.memory.buffer, ptr, len)
 }
 
+// One instance of the shell module (`#mirage-shell-wasm`: the parser and the
+// evaluator, small enough to compile synchronously anywhere) holds every parse
+// tree and every session's shell for the process's life, so it is never
+// swapped for a fresh one.
 function instance(): Exports {
   if (exports === undefined) {
-    const wasm = new WebAssembly.Instance(moduleSync(), {}).exports as unknown as Exports
+    const imports = {
+      mirage: {
+        mirage_ids: drawId,
+        mirage_ids_release: (source: number) => {
+          idSources.delete(source)
+        },
+      },
+    }
+    const wasm = new WebAssembly.Instance(compileSync(MIRAGE_SHELL_WASM), imports)
+      .exports as unknown as Exports
     if (kinds.length === 0) {
       const ptr = wasm.mirage_rs_shell_names()
       const names = decoder.decode(bytesAt(wasm, ptr, wasm.mirage_rs_shell_names_len())).split('\0')
@@ -68,6 +83,10 @@ function instance(): Exports {
   return exports
 }
 
+const kept = new FinalizationRegistry<number>((handle) => {
+  instance().mirage_rs_shell_drop_tree(handle)
+})
+
 /** A shell program as mirage's own parser reads it. Mirrors Python's ShellTree. */
 export class ShellTree {
   /** Unique per tree, so node ids differ across trees. */
@@ -77,6 +96,8 @@ export class ShellTree {
     /** The line as typed. */
     readonly original: string,
     readonly table: Uint32Array,
+    /** The engine's own copy of the tree, which a shell's tasks expand nodes of. */
+    readonly handle: number,
     /**
      * What bash reports of the line when it refuses it: where in the line as
      * typed, in UTF-16 units, the diagnostic lines as mirage prints them, and
@@ -88,7 +109,9 @@ export class ShellTree {
       readonly status: number
     } | null,
     private readonly extras: ReturnType<typeof readExtras>,
-  ) {}
+  ) {
+    kept.register(this, handle)
+  }
 
   get rootNode(): ShellTreeNode {
     return new ShellTreeNode(this, 0)
@@ -325,8 +348,7 @@ export function parseShell(
     }
   }
   const extras = readExtras(wasm)
-  if (wasm.memory.buffer.byteLength > RECYCLE_BYTES) exports = undefined
-  return new ShellTree(source, table, error, extras)
+  return new ShellTree(source, table, wasm.mirage_rs_shell_tree(), error, extras)
 }
 
 /** The parse's extras, laid out as `mirage_rs_shell_extras` describes them. */
@@ -367,4 +389,658 @@ export function readExtras(wasm: Exports) {
     inlined.set(words[word] ?? 0, next(words[word + 1] ?? 0))
   }
   return { source, offsets, heredocs, inlined, warnings: next(warningBytes) }
+}
+
+/**
+ * One item of the engine's layout (`rust/wasm/src/codec.rs`): text is shell
+ * text, a `number` an integer that fits a float, a `bigint` one read exactly,
+ * a `Uint8Array` raw bytes.
+ */
+export type Item =
+  | null
+  | boolean
+  | number
+  | bigint
+  | string
+  | Uint8Array
+  | readonly Item[]
+  | ReadonlyMap<Item, Item>
+
+// A lone surrogate stands for a byte, which only `encodeText` writes.
+const SURROGATE = /[\uD800-\uDFFF]/
+
+let scratch = new Uint8Array(4096)
+let used = 0
+
+function room(len: number): void {
+  if (used + len <= scratch.length) return
+  const grown = new Uint8Array(Math.max(scratch.length * 2, used + len))
+  grown.set(scratch.subarray(0, used))
+  scratch = grown
+}
+
+function putWord(tag: number, value: number): void {
+  room(5)
+  scratch[used] = tag
+  new DataView(scratch.buffer).setUint32(used + 1, value, true)
+  used += 5
+}
+
+function putWide(tag: number, value: bigint): void {
+  room(9)
+  scratch[used] = tag
+  new DataView(scratch.buffer).setBigInt64(used + 1, value, true)
+  used += 9
+}
+
+function putBytes(tag: number, bytes: Uint8Array): void {
+  putWord(tag, bytes.byteLength)
+  room(bytes.byteLength)
+  scratch.set(bytes, used)
+  used += bytes.byteLength
+}
+
+function encodeItem(item: Item): void {
+  if (item === null) {
+    room(1)
+    scratch[used++] = 0
+  } else if (typeof item === 'boolean') {
+    room(1)
+    scratch[used++] = item ? 2 : 1
+  } else if (typeof item === 'number') {
+    putWide(3, BigInt(Math.trunc(item)))
+  } else if (typeof item === 'bigint') {
+    putWide(7, item)
+  } else if (typeof item === 'string') {
+    putBytes(4, SURROGATE.test(item) ? encodeText(item) : encoder.encode(item))
+  } else if (item instanceof Uint8Array) {
+    putBytes(8, item)
+  } else if (item instanceof Map) {
+    putWord(6, item.size)
+    for (const [key, value] of item as ReadonlyMap<Item, Item>) {
+      encodeItem(key)
+      encodeItem(value)
+    }
+  } else {
+    const items = item as readonly Item[]
+    putWord(5, items.length)
+    for (const element of items) encodeItem(element)
+  }
+}
+
+function decodeItem(bytes: Uint8Array, view: DataView, at: { pos: number }): Item {
+  const tag = bytes[at.pos++]
+  const word = (): number => {
+    const value = view.getUint32(at.pos, true)
+    at.pos += 4
+    return value
+  }
+  const wide = (): bigint => {
+    const value = view.getBigInt64(at.pos, true)
+    at.pos += 8
+    return value
+  }
+  switch (tag) {
+    case 0:
+      return null
+    case 1:
+      return false
+    case 2:
+      return true
+    case 3:
+      return Number(wide())
+    case 4:
+    case 8: {
+      const len = word()
+      const body = bytes.subarray(at.pos, (at.pos += len))
+      return tag === 4 ? decodeText(body) : body.slice()
+    }
+    case 5: {
+      const count = word()
+      const items: Item[] = []
+      for (let index = 0; index < count; index++) items.push(decodeItem(bytes, view, at))
+      return items
+    }
+    case 6: {
+      const count = word()
+      const map = new Map<Item, Item>()
+      for (let index = 0; index < count; index++) {
+        const key = decodeItem(bytes, view, at)
+        map.set(key, decodeItem(bytes, view, at))
+      }
+      return map
+    }
+    case 7:
+      return wide()
+    default:
+      throw new Error(`the engine replied with tag ${String(tag)}`)
+  }
+}
+
+/** Run one engine request: its target, operation and arguments; its reply. */
+function engine(target: 'shell' | 'task', op: string, args: readonly Item[]): Item {
+  const wasm = instance()
+  used = 0
+  encodeItem([target, op, ...args])
+  const ptr = wasm.mirage_rs_args(used)
+  bytesAt(wasm, ptr, used).set(scratch.subarray(0, used))
+  const status = wasm.mirage_rs_engine(used)
+  const out = bytesAt(wasm, wasm.mirage_rs_engine_output(), wasm.mirage_rs_engine_output_len())
+  if (status !== 0) throw new Error(decoder.decode(out))
+  return decodeItem(out, new DataView(out.buffer, out.byteOffset, out.byteLength), { pos: 0 })
+}
+
+// The id sources shells draw `$RANDOM`'s first seeds from, by the number the
+// engine holds each under until the last shell drawing from it goes.
+const idSources = new Map<number, () => number>()
+let nextSource = 0
+
+function idSource(ids: () => number): number {
+  nextSource += 1
+  idSources.set(nextSource, ids)
+  return nextSource
+}
+
+/** The ids a source hands out, 0 once it threw: a seed is no failure. */
+function drawId(source: number): number {
+  try {
+    return (idSources.get(source)?.() ?? 0) >>> 0
+  } catch {
+    return 0
+  }
+}
+
+/** A shell's value as the engine holds it: text, or an array's elements. */
+export type RawValue = string | ReadonlyMap<bigint, string> | ReadonlyMap<string, string> | null
+
+/** A managed variable's pointer: source, reference, key, eager. */
+export type Managed = readonly [string, string, string, boolean]
+
+/** A record: the value, null for declared but unset; the cluster `declare -p` prints; the pointer. */
+export type ShellRecord = readonly [RawValue, string, Managed | null]
+
+/** A request a running task waits on. */
+export type Ask =
+  | readonly ['substitute', Shell, string, ShellTreeNode, readonly [number, number] | null]
+  | readonly ['process', Shell, ShellTreeNode]
+  | readonly ['gate', boolean, 'set' | 'unset', string, string | null, string | null, Shell]
+  | readonly ['pause']
+
+/** The state around a line that the shell reads, as `Shell.frame` takes it. */
+export interface ShellFrame {
+  readonly positional: readonly string[]
+  readonly calls: readonly (readonly string[])[]
+  readonly status: number
+  readonly pid: number
+  readonly lastJob: number | null
+  readonly argv0: string
+  readonly options: ReadonlyMap<string, boolean>
+  readonly shopts: ReadonlyMap<string, boolean>
+  readonly envLimit: number | null
+  readonly outside: number
+  readonly pipeStatus: readonly number[]
+  readonly functionNames: readonly string[] | null
+  readonly paren: boolean
+  readonly memoryRoom: number | null
+}
+
+/** The options of a gated write: whether a session policy listens. */
+export interface Heard {
+  readonly listens?: boolean
+}
+
+const shells = new FinalizationRegistry<number>((handle) => {
+  engine('shell', 'drop', [handle])
+})
+const tasks = new FinalizationRegistry<number>((handle) => {
+  engine('task', 'drop', [handle])
+})
+
+function asRecord(item: Item): ShellRecord | null {
+  return item === null ? null : (item as unknown as ShellRecord)
+}
+
+function texts(items: Item): string[] {
+  return items as string[]
+}
+
+/**
+ * One session's shell: its variables, the positional parameters, the
+ * special parameters and the options, held in mirage-rs. While a
+ * `ShellTask` runs on it the shell is the task's, and any read of it throws
+ * until the task finishes. Mirrors Python's mirage._rs.Shell.
+ */
+export class Shell {
+  private closed = false
+
+  private constructor(readonly handle: number) {
+    shells.register(this, handle, this)
+  }
+
+  /** A new shell; `ids` returns the id a fresh `$RANDOM` generator seeds from. */
+  static create(ids: () => number): Shell {
+    return new Shell(engine('shell', 'new', [idSource(ids)]) as number)
+  }
+
+  /** The shell the engine made for a request, under `handle`. */
+  static adopt(handle: number): Shell {
+    return new Shell(handle)
+  }
+
+  /** Free the shell now, rather than when it is collected. */
+  close(): void {
+    if (this.closed) return
+    this.closed = true
+    shells.unregister(this)
+    engine('shell', 'drop', [this.handle])
+  }
+
+  private call(op: string, ...args: Item[]): Item {
+    return engine('shell', op, [this.handle, ...args])
+  }
+
+  private task(op: string, tree: ShellTree | null, ...args: Item[]): ShellTask {
+    return new ShellTask(this.call(op, ...args) as number, tree)
+  }
+
+  /** Draw `$RANDOM`'s first seeds from `ids` from now on. */
+  useIds(ids: () => number): void {
+    this.call('use_ids', idSource(ids))
+  }
+
+  /** The raw record a name holds, references not followed, hidden or not. */
+  get(name: string): ShellRecord | null {
+    return asRecord(this.call('get', name))
+  }
+
+  /** The record a name stands for, references followed; null when unset or hidden. */
+  visible(name: string): ShellRecord | null {
+    return asRecord(this.call('visible', name))
+  }
+
+  /** Replace a name's record, or drop it with null, returning the one it replaced. */
+  place(name: string, record: ShellRecord | null): ShellRecord | null {
+    return asRecord(this.call('place', name, record as Item))
+  }
+
+  /** The names a reader lists for one kind of value, sorted: each a lookup finds. */
+  visibleNames(kind: 'scalar' | 'indexed' | 'assoc'): string[] {
+    return texts(this.call('visible_names', kind))
+  }
+
+  /** An indexed array as `${a[@]}` reads it, `PIPESTATUS` and `FUNCNAME` from the frame. */
+  indexed(name: string): ReadonlyMap<bigint, string> | null {
+    return this.call('indexed', name) as ReadonlyMap<bigint, string> | null
+  }
+
+  /** What a `pre_session` rule is shown for a name's record; null when it is unset. */
+  rendered(name: string): string | null {
+    return this.call('rendered', name) as string | null
+  }
+
+  names(): string[] {
+    return texts(this.call('names'))
+  }
+
+  /** Every record as `[name, record]`, in no order. */
+  records(): (readonly [string, ShellRecord])[] {
+    return this.call('records') as unknown as (readonly [string, ShellRecord])[]
+  }
+
+  get size(): number {
+    return this.call('len') as number
+  }
+
+  has(name: string): boolean {
+    return this.call('contains', name) as boolean
+  }
+
+  /** The bytes every record holds; while a task runs, what they held as it started. */
+  held(): number {
+    return this.call('held') as number
+  }
+
+  /** Hide the names a session's visibility lists, exactly or by glob. */
+  hide(names: readonly string[], patterns: readonly string[]): void {
+    this.call('hide', names, patterns)
+  }
+
+  hidden(name: string): boolean {
+    return this.call('hidden', name) as boolean
+  }
+
+  namerefTarget(name: string): string | null {
+    return this.call('nameref_target', name) as string | null
+  }
+
+  /** The variable a name stands for, references followed. */
+  deref(name: string): string {
+    return this.call('deref', name) as string
+  }
+
+  /** Where a write to a name lands, references followed. */
+  target(name: string): string {
+    return this.call('target', name) as string
+  }
+
+  isReadonly(name: string, followRef: boolean): boolean {
+    return this.call('is_readonly', name, followRef) as boolean
+  }
+
+  /** The readonly variable a write to `name` reaches, if any. */
+  frozen(name: string): string | null {
+    return this.call('frozen', name) as string | null
+  }
+
+  /** The exported scalars a child process inherits, hidden names left out. */
+  exported(): (readonly [string, string])[] {
+    return this.call('exported') as unknown as (readonly [string, string])[]
+  }
+
+  /** Write a value with no gate, as seeding a session does. */
+  seed(name: string, value: RawValue, assoc = false): void {
+    this.call('seed', name, value as Item, assoc)
+  }
+
+  /** Set or clear one attribute (its `declare` letter) with no gate. */
+  setAttr(name: string, letter: string | null, on: boolean): void {
+    this.call('set_attr', name, letter, on)
+  }
+
+  /** Open a function call's scope; the token closes it. */
+  enter(): number | null {
+    return this.call('enter') as number | null
+  }
+
+  leave(outer: number | null): void {
+    this.call('leave', outer)
+  }
+
+  inFunction(): boolean {
+    return this.call('in_function') as boolean
+  }
+
+  isLocal(name: string): boolean {
+    return this.call('is_local', name) as boolean
+  }
+
+  /** Set the caller's record aside before a `local` shadows it. */
+  shadow(name: string): void {
+    this.call('shadow', name)
+  }
+
+  /** Open a prefix assignment's scope around a function call. */
+  openTemp(): number {
+    return this.call('open_temp') as number
+  }
+
+  saveTemp(index: number, name: string): void {
+    this.call('save_temp', index, name)
+  }
+
+  closeTemp(index: number): void {
+    this.call('close_temp', index)
+  }
+
+  /** Let a prefix assignment's value outlive the call. */
+  outliveCall(name: string): void {
+    this.call('outlive_call', name)
+  }
+
+  inCallEnv(name: string): boolean {
+    return this.call('in_call_env', name) as boolean
+  }
+
+  /** `declare -g`: the names reach global scope until `unreach`. */
+  reachGlobal(names: readonly string[]): void {
+    this.call('reach_global', names)
+  }
+
+  unreach(): void {
+    this.call('unreach')
+  }
+
+  /** Step out to the caller's scope until `stepForward`. */
+  stepBack(): void {
+    this.call('step_back')
+  }
+
+  stepForward(): void {
+    this.call('step_forward')
+  }
+
+  /** One `$RANDOM` read: the draw, null once RANDOM is not special, or a seed's error. */
+  nextRandom(): number | null | readonly Item[] {
+    return this.call('next_random') as number | null | readonly Item[]
+  }
+
+  /** Hand the shell the state around a line that it reads. */
+  frame(frame: ShellFrame): void {
+    this.call(
+      'frame',
+      frame.positional,
+      frame.calls,
+      frame.status,
+      frame.pid,
+      frame.lastJob,
+      frame.argv0,
+      frame.options as ReadonlyMap<Item, Item>,
+      frame.shopts as ReadonlyMap<Item, Item>,
+      frame.envLimit,
+      frame.outside,
+      frame.pipeStatus,
+      frame.functionNames,
+      frame.paren,
+      frame.memoryRoom,
+    )
+  }
+
+  /** The scalar an array conversion keeps as element 0, or a seed's error. */
+  conversionScalar(name: string): string | null | readonly Item[] {
+    return this.call('conversion_scalar', name) as string | null | readonly Item[]
+  }
+
+  /** `$?` as the last operation left it. */
+  get status(): number {
+    return this.call('status') as number
+  }
+
+  /** The status of the last command substitution since the last take. */
+  takeSubstituted(): number | null {
+    return this.call('take_substituted') as number | null
+  }
+
+  /** A copy for a fork of the session: the same records, a fresh generator. */
+  fork(): Shell {
+    return new Shell(this.call('fork') as number)
+  }
+
+  /** A child shell's copy: the scopes too, `$RANDOM` starting anew. */
+  subshell(): Shell {
+    return new Shell(this.call('subshell') as number)
+  }
+
+  /** Expand `node` as `mode` says; `listens` when a session policy hears writes. */
+  expand(node: ShellTreeNode, mode: string, listens: boolean): ShellTask {
+    return this.task('expand', node.tree, node.tree.handle, node.index, mode, listens)
+  }
+
+  /** Set a variable through the gate. */
+  set(
+    name: string,
+    value: RawValue,
+    options: Heard & {
+      readonly assoc?: boolean
+      readonly followRef?: boolean
+      readonly assigned?: readonly (bigint | string)[] | null
+      readonly added?: string | null
+      readonly warns?: boolean
+    } = {},
+  ): ShellTask {
+    return this.task(
+      'set',
+      null,
+      name,
+      value as Item,
+      options.assoc ?? false,
+      options.followRef ?? true,
+      options.assigned ?? null,
+      options.added ?? null,
+      options.listens ?? false,
+      options.warns ?? true,
+    )
+  }
+
+  unset(name: string, options: Heard & { readonly followRef?: boolean } = {}): ShellTask {
+    return this.task('unset', null, name, options.followRef ?? true, options.listens ?? false)
+  }
+
+  /** Set or clear an attribute through the gate; no letter declares the name only. */
+  mark(
+    name: string,
+    letter: string | null,
+    on: boolean,
+    options: Heard & { readonly followRef?: boolean } = {},
+  ): ShellTask {
+    return this.task(
+      'mark',
+      null,
+      name,
+      letter,
+      on,
+      options.followRef ?? true,
+      options.listens ?? false,
+    )
+  }
+
+  /** Resolve an indexed array's subscript, what it assigns landed. */
+  index(subscript: string, options: Heard = {}): ShellTask {
+    return this.task('index', null, subscript, options.listens ?? false)
+  }
+
+  /** Whether a `name` / `name[sub]` reference is set, as `test -v` asks; 1 or 0. */
+  isSet(reference: string, options: Heard = {}): ShellTask {
+    return this.task('is_set', null, reference, options.listens ?? false)
+  }
+
+  /** Write one element a builtin names: 0 landed, 1 hidden, 2 readonly, 3 no element. */
+  element(
+    name: string,
+    subscript: string | null,
+    value: string,
+    options: Heard & { readonly append?: boolean; readonly warns?: boolean } = {},
+  ): ShellTask {
+    return this.task(
+      'element',
+      null,
+      name,
+      subscript,
+      value,
+      options.append ?? false,
+      options.listens ?? false,
+      options.warns ?? true,
+    )
+  }
+
+  /** Evaluate an arithmetic command or `let` operand, its writes landed. */
+  arith(text: string, options: Heard = {}): ShellTask {
+    return this.task('arith', null, text, options.listens ?? false)
+  }
+
+  /** Evaluate a value as an `-i` write coerces it; `added` is an integer `+=`'s text. */
+  integer(text: string, added: string | null = null, options: Heard = {}): ShellTask {
+    return this.task('integer', null, text, added, options.listens ?? false)
+  }
+}
+
+/** How a task ended: `['ok', value]` or a fault, and its diagnostics. */
+export type Finished = readonly [readonly Item[], (string | Uint8Array)[]]
+
+/**
+ * An operation running on a shell, stepped by the host: each `step` returns
+ * the request it waits on, answered with one `answer*` call, or null once it
+ * has ended, when `finish` gives the shell back. Mirrors Python's
+ * mirage._rs.ShellTask.
+ */
+export class ShellTask {
+  private finished = false
+
+  constructor(
+    readonly handle: number,
+    private readonly tree: ShellTree | null,
+  ) {
+    tasks.register(this, handle, this)
+  }
+
+  private call(op: string, ...args: Item[]): Item {
+    return engine('task', op, [this.handle, ...args])
+  }
+
+  private node(index: Item): ShellTreeNode {
+    if (this.tree === null) throw new Error('a write has no tree')
+    return new ShellTreeNode(this.tree, index as number)
+  }
+
+  /** Run to the next request, null once the operation has ended. */
+  step(): Ask | null {
+    const asked = this.call('step') as readonly Item[] | null
+    if (asked === null) return null
+    switch (asked[0]) {
+      case 'substitute':
+        return [
+          'substitute',
+          Shell.adopt(asked[1] as number),
+          asked[2] as string,
+          this.node(asked[3] ?? null),
+          (asked[4] ?? null) as readonly [number, number] | null,
+        ]
+      case 'process':
+        return ['process', Shell.adopt(asked[1] as number), this.node(asked[2] ?? null)]
+      case 'gate':
+        return [
+          'gate',
+          asked[1] as boolean,
+          asked[2] as 'set' | 'unset',
+          asked[3] as string,
+          asked[4] as string | null,
+          asked[5] as string | null,
+          Shell.adopt(asked[6] as number),
+        ]
+      default:
+        return ['pause']
+    }
+  }
+
+  answerSubstituted(stdout: Uint8Array, stderr: Uint8Array, status: number): void {
+    this.call('answer_substituted', stdout, stderr, status)
+  }
+
+  answerPath(path: string): void {
+    this.call('answer_path', path)
+  }
+
+  /** The gate's answer: null to let the write through, or the refused name and its record. */
+  answerGate(denied: readonly [string, number] | null): void {
+    this.call('answer_gate', denied)
+  }
+
+  /** The host has let others run; the operation goes on. */
+  answerResumed(): void {
+    this.call('answer_resumed')
+  }
+
+  /** The host could not do what was asked; the operation stops. */
+  answerFailed(): void {
+    this.call('answer_failed')
+  }
+
+  /** The result once `step` has returned null; the shell is the owner's again. */
+  finish(): Finished {
+    if (this.finished) throw new Error('the task has finished')
+    this.finished = true
+    const out = this.call('finish') as unknown as Finished
+    tasks.unregister(this)
+    this.call('drop')
+    return out
+  }
 }

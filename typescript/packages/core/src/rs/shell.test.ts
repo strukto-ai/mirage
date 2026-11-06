@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { parseShell, type ShellTreeNode } from './shell.ts'
+import { type Ask, parseShell, Shell, type ShellTask, type ShellTreeNode } from './shell.ts'
 
 // Mirrors Python's BASH.
 const BASH: [string, string][] = [
@@ -160,5 +160,96 @@ describe('the text a tree reads', () => {
     const errors = root.children.filter((node) => node.type === 'ERROR')
     expect(errors).toHaveLength(1)
     expect(root.offsets[errors[0]?.startIndex ?? -1]).toBe(command.lastIndexOf('fi'))
+  })
+})
+
+describe('Shell', () => {
+  function run(task: ShellTask, answer: (ask: Ask) => void) {
+    for (let ask = task.step(); ask !== null; ask = task.step()) answer(ask)
+    return task.finish()
+  }
+
+  function word(line: string): ShellTreeNode {
+    const command = parseShell(line).rootNode.child(0)
+    const node = command?.childForFieldName('argument')
+    if (node === null || node === undefined) throw new Error(`no argument in ${line}`)
+    return node
+  }
+
+  it('seeds a fresh generator from its own id source, a subshell too', () => {
+    const drawn: number[] = []
+    const source = (seed: number) => () => {
+      drawn.push(seed)
+      return seed
+    }
+    const first = Shell.create(source(12345))
+    const second = Shell.create(source(999))
+    expect(first.nextRandom()).not.toEqual(second.nextRandom())
+    expect(drawn).toEqual([12345, 999])
+    const child = first.subshell()
+    child.nextRandom()
+    expect(drawn).toEqual([12345, 999, 12345])
+    for (const shell of [first, second, child]) shell.close()
+  })
+
+  it('reads and writes its records with no gate', () => {
+    const shell = Shell.create(() => 7)
+    shell.seed('x', 'a b')
+    shell.seed('m', new Map([['k', 'v']]), true)
+    shell.setAttr('x', 'x', true)
+    expect(shell.get('x')).toEqual(['a b', 'x', null])
+    expect(shell.visible('m')).toEqual([new Map([['k', 'v']]), 'A', null])
+    expect(shell.exported()).toEqual([['x', 'a b']])
+    expect(shell.has('m') && !shell.has('y')).toBe(true)
+    shell.close()
+  })
+
+  it('expands a word on its variables, asking the host for a substitution', () => {
+    const shell = Shell.create(() => 7)
+    shell.seed('x', 'a b')
+    const asked: string[] = []
+    const task = shell.expand(word('echo $x$(c)'), 'fields', false)
+    const [result, diagnostics] = run(task, (ask) => {
+      if (ask[0] !== 'substitute') throw new Error(ask[0])
+      asked.push(ask[2])
+      ask[1].close()
+      const encoder = new TextEncoder()
+      task.answerSubstituted(encoder.encode('c d\n'), encoder.encode('w\n'), 0)
+    })
+    expect(asked).toEqual(['c'])
+    expect(result).toEqual(['ok', ['a', 'bc', 'd']])
+    expect(diagnostics).toEqual([new TextEncoder().encode('w\n')])
+    expect(shell.takeSubstituted()).toBe(0)
+  })
+
+  it('asks the gate before a write lands, and stops on a refusal', () => {
+    const shell = Shell.create(() => 7)
+    const gates: string[] = []
+    const allowed = shell.set('y', '1', { listens: true })
+    run(allowed, (ask) => {
+      if (ask[0] !== 'gate') throw new Error(ask[0])
+      gates.push(`${ask[1] ? 'post' : 'pre'} ${ask[2]} ${ask[3]}=${String(ask[4])}`)
+      ask[6].close()
+      allowed.answerGate(null)
+    })
+    expect(gates).toEqual(['pre set y=1', 'post set y=1'])
+    expect(shell.get('y')).toEqual(['1', '', null])
+    const refused = shell.set('z', '2', { listens: true })
+    const [result] = run(refused, () => {
+      refused.answerGate(['z', 1])
+    })
+    expect(result).toEqual(['denied', 'z', 1])
+    expect(shell.get('z')).toBeNull()
+  })
+
+  it('refuses a read while a task holds the shell', () => {
+    const shell = Shell.create(() => 7)
+    const task = shell.expand(word('echo $(c)'), 'text', false)
+    expect(task.step()?.[0]).toBe('substitute')
+    expect(() => shell.get('x')).toThrow('the shell is running a task')
+    task.answerFailed()
+    const [result] = run(task, () => undefined)
+    expect(result).toEqual(['unsupported', 'the host failed'])
+    expect(shell.get('x')).toBeNull()
   })
 })

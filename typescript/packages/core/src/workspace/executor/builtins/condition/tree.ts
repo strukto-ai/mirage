@@ -14,16 +14,15 @@
 
 import { shellVoice } from '../../../../shell/voice.ts'
 import { runWithAdmission } from '../../../../context/session_context.ts'
+import { PolicyDenied } from '../../../../policy/index.ts'
 import { RegexError } from '../../../../rs/errors.ts'
 import { posixRegex } from '../../../../rs/regex.ts'
 import { makeArray } from '../../../../shell/array.ts'
 import { byteView, textView, utf8Locale } from '../../../../shell/bytes.ts'
 import { ArithError, ReadonlyVariableError } from '../../../../shell/errors.ts'
-import type { ArithResult, ArithWrite } from '../../../../shell/types.ts'
 import { fnmatch } from '../../../../utils/fnmatch.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { assignElement } from '../../../session/elements.ts'
-import { randomReader, seedVar, sessionArith, visibleEnv } from '../../../session/state.ts'
+import { seedVar, sessionArith, visibleEnv } from '../../../session/state.ts'
 import { FILE_PAIR_BINARY, INT_COMPARATORS } from './constants.ts'
 import { CondError } from './errors.ts'
 import { applyFilePair, applyUnary } from './operators.ts'
@@ -134,47 +133,24 @@ async function evalCondBinary(
     // so each operand lands its assignments through the gated session view before
     // the next reads, RANDOM's seed included (`[[ RANDOM=42 -eq RANDOM ]]`
     // seeds, then draws).
-    const reader = randomReader(ctx.session)
+    const policies = ctx.namespace.registry.policies
     const values: bigint[] = []
     for (const operand of [node.left, node.right]) {
-      let error: ArithError | ReadonlyVariableError | null = null
-      let value = 0n
-      let writes: readonly ArithWrite[]
       try {
-        const result: ArithResult = sessionArith(ctx.session, operand, reader)
-        writes = result.writes
-        value = result.value
+        values.push(await sessionArith(ctx.session, operand, policies))
       } catch (exc) {
-        if (!(exc instanceof ArithError || exc instanceof ReadonlyVariableError)) throw exc
-        // bash bound what the operand assigned before it failed
-        // (`y='x=6,1/0'; [[ 0 -eq y ]]` leaves x at 6, and a RANDOM seed
-        // in it is drawn from); they land, and the reader settles, before
-        // the error reports.
-        error = exc
-        writes = exc.writes
-      }
-      try {
-        for (const write of writes) {
-          const status = await assignElement(
-            ctx.session,
-            ctx.view ?? null,
-            write.name,
-            write.key,
-            write.value,
-          )
-          if (status !== 'ok') throw new CondError(`${ctx.name}: ${write.name}: ${status}`)
+        if (exc instanceof PolicyDenied) {
+          throw new CondError(`${ctx.name}: ${exc.virtualPath}: denied`)
         }
-      } finally {
-        reader.settle()
+        if (!(exc instanceof ArithError || exc instanceof ReadonlyVariableError)) throw exc
+        // bash: `[[: 1/0: division by 0` or `R: readonly variable`, status 1,
+        // and the line goes on; in a subscript it ends the shell. What the
+        // operand assigned before it failed has landed (`y='x=6,1/0'; [[ 0
+        // -eq y ]]` leaves x at 6).
+        if (exc.inSubscript) throw exc.signal()
+        const lead = exc instanceof ArithError ? `${ctx.name}: ` : ''
+        throw new CondError(`${shellVoice()}${lead}${exc.message}`, 1, false)
       }
-      // bash: `[[: 1/0: division by 0` or `R: readonly variable`, status 1,
-      // and the line goes on; in a subscript it ends the shell.
-      if (error !== null) {
-        if (error.inSubscript) throw error.signal()
-        const lead = error instanceof ArithError ? `${ctx.name}: ` : ''
-        throw new CondError(`${shellVoice()}${lead}${error.message}`, 1, false)
-      }
-      values.push(value)
     }
     return compare(values[0] ?? 0n, values[1] ?? 0n)
   }

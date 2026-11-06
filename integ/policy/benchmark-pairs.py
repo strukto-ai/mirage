@@ -67,7 +67,10 @@ def metadata(root: Path) -> dict:
         native,
         root
         / "rust/target/wasm32-unknown-unknown/release/mirage_rs_wasm.wasm",
+        root
+        / "rust/target/wasm32-unknown-unknown/release/mirage_shell_wasm.wasm",
         root / "typescript/packages/core/dist/generated/mirage_rs.js",
+        root / "typescript/packages/core/dist/generated/mirage_shell.js",
         *root.glob("typescript/packages/core/dist/policy/**/*.js"),
         *root.glob("typescript/packages/core/dist/rs/*.js"),
     ]

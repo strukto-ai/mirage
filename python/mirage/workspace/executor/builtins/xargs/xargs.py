@@ -61,6 +61,7 @@ from mirage.shell.constants import (
     SIGPIPE_STATUS,
 )
 from mirage.shell.join import shell_join
+from mirage.shell.variable import ShellVar, VarAttr
 from mirage.utils.quote import shell_quote
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.script.script import read_script_bytes
@@ -68,7 +69,6 @@ from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.jobs import pump
 from mirage.workspace.lookup.lookup import execs
 from mirage.workspace.mount.registry import MountRegistry
-from mirage.workspace.session.session import vars_from_env
 from mirage.workspace.session.state import env_snapshot
 from mirage.workspace.types import ExecutionNode
 
@@ -1004,7 +1004,9 @@ async def _run_lines(
         child_evaluation = context.fork()
         child = child_evaluation.session
         if slot_var is not None:
-            child.vars = {**child.vars, **vars_from_env({slot_var: str(slot)})}
+            child.vars[slot_var] = ShellVar(
+                str(slot), frozenset({VarAttr.EXPORT})
+            )
         token = set_current_evaluation(child_evaluation)
         marked = set_program_invocation(child)
         try:

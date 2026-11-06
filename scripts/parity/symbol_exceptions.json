@@ -1,5 +1,5 @@
 {
- "baseline": 1669,
+ "baseline": 1664,
  "modules": {
   "server/app": {
    "python_only": {
@@ -203,8 +203,7 @@
     "units": "Validates character-value arrays returned by Rust; Python checks integer units while constructing a string.",
     "finalizer": "Closes Wasm slots for abandoned synchronous matcher objects; Python releases native streams by reference counting.",
     "matchers": "The compiled-pattern map behind globMatcher; Python's functools.lru_cache holds the same entries.",
-    "scratch": "One reused buffer for the code units a synchronous call copies into Wasm; Python's str.encode builds them natively.",
-    "spans": "Validates the Rust span result at the JavaScript boundary; Python validates pairs while reconstructing typed tuples."
+    "scratch": "One reused buffer for the code units a synchronous call copies into Wasm; Python's str.encode builds them natively."
    }
   },
   "rs/regex": {
@@ -221,16 +220,44 @@
   },
   "rs/shell": {
    "typescript_only": {
-    "RECYCLE_BYTES": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "Ask": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
+    "Finished": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
+    "Heard": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
+    "Item": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
+    "Managed": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
+    "RawValue": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
+    "SURROGATE": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
+    "Shell": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
+    "ShellFrame": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
+    "ShellRecord": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
+    "ShellTask": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
     "ShellTree": "Python's tree and node are mirage-rs's own PyO3 classes (mirage._rs.ShellTree and ShellNode); TypeScript wraps the wasm node table in classes of its own.",
     "ShellTreeNode": "Python's tree and node are mirage-rs's own PyO3 classes (mirage._rs.ShellTree and ShellNode); TypeScript wraps the wasm node table in classes of its own.",
     "WORDS": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "asRecord": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
     "bytesAt": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "decodeItem": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
+    "drawId": "The id sources the shell module imports, one per shell; Python hands the PyO3 class a callable, which mirage-rs calls itself.",
+    "encodeItem": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
+    "engine": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
     "exports": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
     "fields": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "idSource": "The id sources the shell module imports, one per shell; Python hands the PyO3 class a callable, which mirage-rs calls itself.",
+    "idSources": "The id sources the shell module imports, one per shell; Python hands the PyO3 class a callable, which mirage-rs calls itself.",
     "instance": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "kept": "Frees the shells, tasks and trees the wasm module holds once their wrapper is collected; Python releases the PyO3 objects by reference counting.",
     "kinds": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
-    "trees": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle."
+    "nextSource": "The id sources the shell module imports, one per shell; Python hands the PyO3 class a callable, which mirage-rs calls itself.",
+    "putBytes": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
+    "putWide": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
+    "putWord": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
+    "room": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
+    "scratch": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode.",
+    "shells": "Frees the shells, tasks and trees the wasm module holds once their wrapper is collected; Python releases the PyO3 objects by reference counting.",
+    "tasks": "Frees the shells, tasks and trees the wasm module holds once their wrapper is collected; Python releases the PyO3 objects by reference counting.",
+    "texts": "Python's shell and task are mirage-rs's own PyO3 classes (mirage._rs.Shell and ShellTask, rust/python/src/session.rs); TypeScript reaches the shell module's one engine export through this glue.",
+    "trees": "The wasm instance loader and its node table's layout; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, read or recycle.",
+    "used": "The wasm engine ABI's item codec (rust/shell-wasm/src/codec.rs); Python passes native objects to the PyO3 classes, so it has nothing to encode."
    }
   },
   "rs/stream": {
@@ -252,7 +279,8 @@
     "synchronous": "Shares the current embedded Wasm instance between synchronous utilities and asynchronous command streams.",
     "movables": "The matcher streams each instance holds, which close with it when it retires; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
     "retire": "Drops a grown or trapped instance and closes the matcher streams still on it; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has no instance to compile, size or recycle.",
-    "moduleSource": "TypeScript accepts a lazy Node Wasm loader alongside bundled bytes or a precompiled module; Python loads its native extension."
+    "moduleSource": "TypeScript accepts a lazy Node Wasm loader alongside bundled bytes or a precompiled module; Python loads its native extension.",
+    "compileSync": "Compiles a module synchronously, which the shell module's loader shares; the wasm instance loader; Python imports mirage-rs as a native PyO3 module, so it has nothing to compile."
    }
   },
   "fuse/constants": {
@@ -1280,10 +1308,26 @@
     "SIZE_KEYS": "Python's tomllib hands each [daemon] value back typed, so a size key takes an int or a string; TypeScript's reader returns every value as text and checks only the numeric keys."
    }
   },
-  "workspace/session/budget": {
+  "rs/session": {
+   "python_only": {
+    "Managed": "TypeScript declares the record shapes beside the Shell class in rs/shell, whose Python twin is the PyO3 module (mirage/_rs.pyi).",
+    "Record": "TypeScript declares the record shapes beside the Shell class in rs/shell, whose Python twin is the PyO3 module (mirage/_rs.pyi).",
+    "_LETTERS": "Python caches the attribute set each letter cluster spells (_attrs); TypeScript builds it with attrsFromLetters.",
+    "_attrs": "Python caches the attribute set each letter cluster spells with functools.lru_cache; TypeScript builds it with attrsFromLetters."
+   }
+  },
+  "workspace/session/session": {
+   "python_only": {
+    "_Records": "Python's live read-only Mapping over one kind of record (session.arrays, session.assocs); TypeScript's getters build the record each call.",
+    "_Readonly": "Python's live Set of the readonly names (session.readonly_vars); TypeScript's getter builds the set each call."
+   },
    "typescript_only": {
-    "recordBytes": "TypeScript caches each variable record's bytes in a WeakMap keyed by the record; Python's records are slotted and may hold a list, so they cannot be weak keys, and Python measures a record as it sums.",
-    "varBytes": "The WeakMap behind recordBytes; see there."
+    "drawFrom": "A closure over the session's id source for the shell to draw seeds from; Python hands the shell the source's bound method."
+   }
+  },
+  "workspace/session/state": {
+   "typescript_only": {
+    "liveRecord": "A Proxy reading the shell on each access, TypeScript's twin of Python's Mapping views (_VisibleEnv and its kin)."
    }
   },
   "server/routers/templates": {

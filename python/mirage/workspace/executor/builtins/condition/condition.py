@@ -27,7 +27,6 @@ from mirage.shell.errors import ExitSignal
 from mirage.shell.types import ShellBuiltin as SB
 from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec, word_text
-from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.condition.errors import (
     CondError,
     CondRefused,
@@ -43,7 +42,6 @@ from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.files import Files
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.state import session_view
 from mirage.workspace.types import ExecutionNode
 
 
@@ -53,7 +51,6 @@ async def handle_test(
     args: list[str | PathSpec] | CondNode,
     session: SessionState,
     name: str = "test",
-    view: SessionView | None = None,
     admit: AdmitTest | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Evaluate test/[ (flat argv) or [[ (condition tree).
@@ -71,8 +68,6 @@ async def handle_test(
             test/[, a CondNode tree for [[.
         session (SessionState): session for cwd, env, and BASH_REMATCH.
         name (str): invocation name for diagnostics: "test", "[", "[[".
-        view (SessionView | None): the gated session view, for
-            an assignment inside a numeric operand.
         admit (AdmitTest | None): admits the words of a test by its
             own name; None where the command was admitted already.
     """
@@ -81,7 +76,6 @@ async def handle_test(
         namespace=namespace,
         session=session,
         name=name,
-        view=view,
         admit=admit,
         links=link_view(
             Files(
@@ -187,9 +181,4 @@ async def test_builtin(call: BuiltinCall) -> Result:
         test_args,
         call.context.session,
         name=test_name,
-        view=session_view(
-            call.context.session,
-            call.namespace.registry.policies,
-            diagnostics=call.context.frame.diagnostics,
-        ),
     )

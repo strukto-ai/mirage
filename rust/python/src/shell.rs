@@ -151,9 +151,9 @@ impl ShellHeredoc {
 /// One node of a `ShellTree`, read through the tree it keeps alive.
 #[pyclass(module = "mirage._rs", frozen)]
 pub struct ShellNode {
-    tree: Arc<Tree>,
-    serial: u64,
-    index: u32,
+    pub(crate) tree: Arc<Tree>,
+    pub(crate) serial: u64,
+    pub(crate) index: u32,
 }
 
 impl ShellNode {
@@ -161,7 +161,7 @@ impl ShellNode {
         &self.tree.nodes[self.index as usize]
     }
 
-    fn at(&self, index: u32) -> ShellNode {
+    pub(crate) fn at(&self, index: u32) -> ShellNode {
         ShellNode {
             tree: Arc::clone(&self.tree),
             serial: self.serial,

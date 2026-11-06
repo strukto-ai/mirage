@@ -14,7 +14,8 @@
 
 import type { EvaluationContext } from '../evaluation.ts'
 import { sessionAccess } from '../../context/session_context.ts'
-import type { NamespaceLinks, SessionView } from '../../view/types.ts'
+import type { Policies } from '../../policy/index.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
 import { scopesPaths } from '../../policy/match/reads.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { PathSpec, wordText } from '../../types.ts'
@@ -113,10 +114,10 @@ export async function expandArgv(
   callStack: CallStack | null,
   registry: MountRegistry,
   links: NamespaceLinks | null = null,
-  view?: SessionView,
+  policies: Policies | null = null,
 ): Promise<Argv> {
   const session = context.session
-  let expanded = await expandWords(parts, context, executeFn, callStack, view)
+  let expanded = await expandWords(parts, context, executeFn, callStack, policies)
   if (expanded.length === 0) return new Argv('', [], [])
   // `set -f` turns pathname expansion off, which is the same word for
   // word as every glob character having been quoted.

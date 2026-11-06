@@ -47,7 +47,7 @@ import { shellQuote } from '../../../../utils/quote.ts'
 import type { EvaluationContext } from '../../../evaluation.ts'
 import { execs } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
-import { varsFromEnv } from '../../../session/session.ts'
+import { VarAttr } from '../../../../shell/variable.ts'
 import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { pump } from '../../jobs.ts'
@@ -995,7 +995,7 @@ async function* runLines(
     const childEvaluation = context.fork()
     const child = childEvaluation.session
     if (slotVar !== null) {
-      child.vars = { ...child.vars, ...varsFromEnv({ [slotVar]: String(slot) }) }
+      child.vars.set(slotVar, { value: String(slot), attrs: new Set([VarAttr.Export]) })
     }
     try {
       await runWithEvaluation(childEvaluation, () =>

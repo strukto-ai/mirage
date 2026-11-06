@@ -1,7 +1,9 @@
+from collections.abc import Callable
 from typing import Any
 
 import pytest
 
+from mirage._rs import Shell, ShellTask
 from mirage.rs.shell import parse_shell
 
 BASH = [
@@ -156,3 +158,92 @@ def test_offsets_point_back_into_the_line_as_typed(command: str) -> None:
     root = parse_shell(command).root_node
     (error,) = (node for node in root.children if node.type == "ERROR")
     assert root.offsets[error.start_byte] == command.encode().rindex(b"fi")
+
+
+def _run(task: ShellTask, answer: Callable[[tuple[Any, ...]], None]) -> Any:
+    while (ask := task.step()) is not None:
+        answer(ask)
+    return task.finish()
+
+
+def _word(line: str) -> Any:
+    return parse_shell(line).root_node.child(0).child_by_field_name("argument")
+
+
+def test_a_shell_reads_and_writes_its_records_with_no_gate() -> None:
+    shell = Shell(lambda: 7)
+    shell.seed("x", "a b")
+    shell.seed("m", {"k": "v"}, True)
+    shell.set_attr("x", "x", True)
+    assert shell.get("x") == ("a b", "x", None)
+    assert shell.visible("m") == ({"k": "v"}, "A", None)
+    assert shell.exported() == [("x", "a b")]
+    assert "m" in shell and "y" not in shell
+
+
+def test_an_expansion_asks_the_host_for_a_substitution() -> None:
+    shell = Shell(lambda: 7)
+    shell.seed("x", "a b")
+    asked: list[str] = []
+    task = shell.expand(_word("echo $x$(c)"), "fields", False)
+
+    def answer(ask: tuple[Any, ...]) -> None:
+        assert ask[0] == "substitute"
+        asked.append(ask[2])
+        task.answer_substituted(b"c d\n", b"w\n", 0)
+
+    result, diagnostics = _run(task, answer)
+    assert asked == ["c"]
+    assert result == ("ok", ["a", "bc", "d"])
+    assert diagnostics == [b"w\n"]
+    assert shell.take_substituted() == 0
+
+
+def test_a_write_asks_the_gate_and_stops_on_a_refusal() -> None:
+    shell = Shell(lambda: 7)
+    gates: list[str] = []
+    allowed = shell.set("y", "1", listens=True)
+
+    def allow(ask: tuple[Any, ...]) -> None:
+        assert ask[0] == "gate"
+        gates.append(
+            f"{'post' if ask[1] else 'pre'} {ask[2]} {ask[3]}={ask[4]}"
+        )
+        allowed.answer_gate(None)
+
+    _run(allowed, allow)
+    assert gates == ["pre set y=1", "post set y=1"]
+    assert shell.get("y") == ("1", "", None)
+    refused = shell.set("z", "2", listens=True)
+    result, _ = _run(refused, lambda ask: refused.answer_gate(("z", 1)))
+    assert result == ("denied", "z", 1)
+    assert shell.get("z") is None
+
+
+def test_a_running_task_holds_the_shell() -> None:
+    shell = Shell(lambda: 7)
+    task = shell.expand(_word("echo $(c)"), "text", False)
+    assert task.step()[0] == "substitute"
+    with pytest.raises(RuntimeError, match="the shell is running a task"):
+        shell.get("x")
+    task.answer_failed()
+    result, _ = _run(task, lambda ask: None)
+    assert result == ("unsupported", "the host failed")
+    assert shell.get("x") is None
+
+
+def test_a_fresh_generator_seeds_from_its_shells_id_source() -> None:
+    drawn: list[int] = []
+
+    def source(seed: int) -> Callable[[], int]:
+        def draw() -> int:
+            drawn.append(seed)
+            return seed
+
+        return draw
+
+    first, second = Shell(source(12345)), Shell(source(999))
+    assert first.next_random() != second.next_random()
+    assert drawn == [12345, 999]
+    first.subshell().next_random()
+    assert drawn == [12345, 999, 12345]

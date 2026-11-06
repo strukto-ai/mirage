@@ -133,10 +133,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "declare -A QAD=([c]=3 [a]=1 [b]=2); echo \"${QAD[@]}\"; echo \"${!QAD[@]}\"",
+      "command": "declare -A QAD=([c]=3 [a]=1 [b]=2); echo \"${QAD[@]}\"; echo \"${!QAD[@]}\"; (declare -A pzk=([x y]=z [a b]=c); echo \"${pzk[x y]}\" \"${pzk[a b]}\" ${#pzk[@]})",
       "expect": {
         "exit": 0,
-        "stdout": "1 2 3\na b c\n",
+        "stdout": "1 2 3\na b c\nz c 2\n",
         "stderr": ""
       }
     },

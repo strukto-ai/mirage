@@ -154,43 +154,6 @@ def array_extent(arr: ShellArray) -> int:
     return next(reversed(arr.elements)) + 1 if arr.elements else 0
 
 
-def array_values(arr: ShellArray) -> list[str]:
-    """Return the assigned values in index order.
-
-    Args:
-        arr (ShellArray): the array.
-    """
-    return list(arr.elements.values())
-
-
-def array_indices(arr: ShellArray) -> list[int]:
-    """Return the assigned indices in order.
-
-    Args:
-        arr (ShellArray): the array.
-    """
-    return list(arr.elements)
-
-
-def array_count(arr: ShellArray) -> int:
-    """Return the number of assigned elements, which is ``${#arr[@]}``.
-
-    Args:
-        arr (ShellArray): the array.
-    """
-    return len(arr.elements)
-
-
-def array_has(arr: ShellArray, idx: int) -> bool:
-    """Report whether ``idx`` holds an assigned element.
-
-    Args:
-        arr (ShellArray): the array.
-        idx (int): a non-negative index.
-    """
-    return idx in arr.elements
-
-
 def array_get(arr: ShellArray, idx: int) -> str:
     """Return the element at ``idx``, or the empty string for an index
     that holds none.
@@ -233,34 +196,6 @@ def array_with(arr: ShellArray, idx: int, value: str) -> ShellArray:
     updated = arr.copy()
     array_set(updated, idx, value)
     return updated
-
-
-def array_slice(arr: ShellArray, offset: int, length: int | None) -> list[str]:
-    """Take the assigned elements from index ``offset`` on, in order.
-
-    bash slices an indexed array by *subscript*, not by position among
-    the assigned values: for ``a=([1]=b [3]=d [9]=j)``, ``${a[@]:2}`` is
-    ``d j`` because it keeps every index >= 2. ``length`` then caps how
-    many of those are taken. A negative offset counts back from the
-    extent and yields nothing if it is still negative.
-
-    Args:
-        arr (ShellArray): the array.
-        offset (int): the first subscript to keep, or a negative count
-            back from the extent.
-        length (int | None): how many elements to take; a negative value
-            drops that many from the end.
-    """
-    if offset < 0:
-        offset += array_extent(arr)
-        if offset < 0:
-            return []
-    picked = [v for i, v in arr.elements.items() if i >= offset]
-    if length is None:
-        return picked
-    if length < 0:
-        return picked[: max(0, len(picked) + length)]
-    return picked[:length]
 
 
 def array_unset(arr: ShellArray, idx: int) -> None:

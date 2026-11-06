@@ -229,7 +229,7 @@ async def execute_declaration(
                 traced.append(key.removesuffix("+"))
                 continue
             expanded = await expand_node(
-                child, context, execute_fn, cs, view=view
+                child, context, execute_fn, cs, registry.policies
             )
             operands.append(expanded)
             traced.append(expanded)
@@ -248,7 +248,7 @@ async def execute_declaration(
             # a variable_name, not a word, and a quoted assignment
             # (`export 'FOO=bar'`) as a plain string operand.
             expanded = await expand_node(
-                child, context, execute_fn, cs, view=view
+                child, context, execute_fn, cs, registry.policies
             )
             if not expanded and child.type in (
                 NT.SIMPLE_EXPANSION,
@@ -309,7 +309,9 @@ async def execute_declaration(
         # only expands and stages. The flags pass through so -p, the bare
         # listing and bad options work.
         attr = VarAttr.READONLY if keyword == "readonly" else VarAttr.EXPORT
-        return await mark_names([*flag_words, *operands], session, view, attr)
+        return await mark_names(
+            [*flag_words, *operands], session, view, attr, registry.policies
+        )
     refused = _declare_option_refusal(cmd_word, flag_chars, plus_chars)
     if refused is not None:
         return refused
@@ -356,8 +358,8 @@ async def execute_declaration(
                 raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
             fresh = (
                 "g" not in flag_chars
-                and session._local_vars is not None
-                and bare not in session._local_vars
+                and session.vars.shell.in_function()
+                and not session.vars.shell.is_local(bare)
             )
             held_var = session.vars.get(bare)
             if (
@@ -412,5 +414,7 @@ async def execute_declaration(
         global_scope="g" in flag_chars,
         inherit="I" in flag_chars,
     )
-    result = await handle_local(operands, session, view, decl)
+    result = await handle_local(
+        operands, session, view, decl, registry.policies
+    )
     return _merge_conversion_errors(result, conversion_errors)

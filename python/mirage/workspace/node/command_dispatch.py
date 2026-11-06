@@ -56,6 +56,7 @@ from mirage.policy import (
     render_deny,
     resolve_producer,
 )
+from mirage.policy.policies import post_session_gate, pre_session_gate
 from mirage.policy.types import Claimant, HandOff, SessionContext
 from mirage.runtime.types import DispatchFn, OutputFn, RunResult
 from mirage.shell.bytes import decode_text, encode_text
@@ -84,7 +85,7 @@ from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.types import AliasExpansion, TSNodeLike
 from mirage.shell.types import NodeType as NT
-from mirage.shell.variable import TempEnv, VarAttr
+from mirage.shell.variable import ShellVar, VarAttr
 from mirage.shell.voice import shell_voice
 from mirage.shell.xtrace import trace_command
 from mirage.types import PathSpec, Producer, word_text
@@ -124,7 +125,7 @@ from mirage.workspace.executor.command.command import (
 )
 from mirage.workspace.executor.command.external import run_external
 from mirage.workspace.executor.command.handler import argument_list_too_long
-from mirage.workspace.expand import expand_node
+from mirage.workspace.expand import expand_assignment
 from mirage.workspace.expand.argv import Argv, expand_argv
 from mirage.workspace.expand.globs import expand_boundary_globs
 from mirage.workspace.expand.types import ExecuteFn
@@ -152,11 +153,8 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.session.budget import check_env, entry_bytes
 from mirage.workspace.session.state import (
     ensure_var_visible,
-    gate_rendering,
-    post_session_gate,
-    pre_session_gate,
+    env_is_readonly,
     seed_var,
-    session_view,
     set_attr,
 )
 from mirage.workspace.types import ExecutionNode
@@ -354,9 +352,6 @@ async def execute_command(
                 scope.release()
 
     prefix_assignments: list[tuple[str, str]] = []
-    view = session_view(
-        session, registry.policies, diagnostics=context.frame.diagnostics
-    )
     # A readonly name before a command is refused before its value
     # expands, on the shell's own stderr, and the command runs without
     # it; with no command it is a plain assignment, refused once its
@@ -367,7 +362,7 @@ async def execute_command(
         if "=" not in atext:
             continue
         key, _, raw_val = atext.partition("=")
-        if name and view.is_readonly(key, False):
+        if name and env_is_readonly(session, key, False):
             refused += encode_text(
                 f"{shell_voice()}{key}: readonly variable\n"
             )
@@ -376,8 +371,12 @@ async def execute_command(
         if val_nodes:
             v = await _own_words(
                 node,
-                expand_node(
-                    val_nodes[0], context, execute_fn, call_stack, view=view
+                expand_assignment(
+                    val_nodes[0],
+                    context,
+                    execute_fn,
+                    call_stack,
+                    registry.policies,
                 ),
             )
         else:
@@ -416,10 +415,9 @@ async def execute_command(
                 encode_text(f"{shell_voice()}{k}: readonly variable\n")
             )
 
-    async def judge_landed(olds: Mapping[str, Any]) -> None:
+    async def judge_landed(renderings: Mapping[str, str | None]) -> None:
         # `post_session` asks about each prefix write once it landed.
         for k, v in prefix_assignments:
-            old = olds.get(k)
             await post_session_gate(
                 registry.policies,
                 SessionContext(
@@ -428,7 +426,7 @@ async def execute_command(
                     value=v,
                     session_id=session.session_id,
                 ),
-                None if old is None else gate_rendering(old.value),
+                renderings.get(k),
             )
 
     def restore(saved: Mapping[str, Any]) -> None:
@@ -442,10 +440,13 @@ async def execute_command(
 
     if prefix_assignments and not name:
         olds = {k: session.vars.get(k) for k, _ in prefix_assignments}
+        renderings = {
+            k: session.vars.shell.rendered(k) for k, _ in prefix_assignments
+        }
         for k, v in prefix_assignments:
             seed_var(session, k, v)
         try:
-            await judge_landed(olds)
+            await judge_landed(renderings)
         except PolicyDenied as exc:
             restore(olds)
             return _write_refused(exc, name)
@@ -473,9 +474,18 @@ async def execute_command(
 
         return await runner(assigned_only, None, "", ())
 
-    saved_env_overrides = TempEnv()
+    saved_env_overrides: dict[str, ShellVar | None] = {}
+    saved_renderings: dict[str, str | None] = {}
+    # A function's prefix is its temporary environment, a scope the
+    # shell keeps under the function's locals: `unset` inside reveals
+    # the caller's value and `export` keeps the name.
+    temp: int | None = None
 
     async def seed_prefix(command: str) -> None:
+        nonlocal temp
+        shell = session.vars.shell
+        if command in session.functions:
+            temp = shell.open_temp()
         # Seeded once the command's words are expanded, since bash
         # expands them with the values from before the assignment:
         # `x=new echo $x` prints the old x and `IFS=, cmd $v` splits on
@@ -489,7 +499,11 @@ async def execute_command(
                 0 if old is None else entry_bytes(k, old.value),
                 entry_bytes(k, v),
             )
-            saved_env_overrides.setdefault(k, session.vars.get(k))
+            if k not in saved_env_overrides:
+                saved_env_overrides[k] = session.vars.get(k)
+                saved_renderings[k] = shell.rendered(k)
+            if temp is not None:
+                shell.save_temp(temp, k)
             # Exported for the duration, which is the whole point of the
             # form: `TOKEN=x printenv TOKEN` prints `x` because bash puts
             # a prefix assignment in the *command's environment*, not
@@ -500,14 +514,9 @@ async def execute_command(
             # neither the value nor the attribute outlives the command.
             seed_var(session, k, v)
             set_attr(session, k, VarAttr.EXPORT)
-        if command in session.functions:
-            # A function runs with the prefix as its temporary
-            # environment, a scope under its own locals: `unset` inside
-            # reveals the caller's value and `export` keeps the name.
-            session._local_frames.append(saved_env_overrides)
         # Judged before the command reads them; on a refusal the
         # restore below puts the old values back.
-        await judge_landed(saved_env_overrides)
+        await judge_landed(saved_renderings)
 
     if refused and sink is not None:
         await sink.emit(Channel.STDERR, refused)
@@ -557,13 +566,21 @@ async def execute_command(
             ),
         )
     finally:
-        frames = session._local_frames
-        if frames and frames[-1] is saved_env_overrides:
-            frames.pop()
+        saved = saved_env_overrides
+        if temp is not None:
+            # The scope closes now and puts back what it saved, which a
+            # name `export` let outlive the call no longer is; a run
+            # still settling keeps the prefix until it settles.
+            shell = session.vars.shell
+            running = {k: session.vars.get(k) for k in saved}
+            shell.close_temp(temp)
+            saved = {k: session.vars.get(k) for k in saved}
+            if settling is not None:
+                restore(running)
         if settling is not None:
-            settling.callbacks.append(partial(restore, saved_env_overrides))
-        else:
-            restore(saved_env_overrides)
+            settling.callbacks.append(partial(restore, saved))
+        elif temp is None:
+            restore(saved)
 
 
 def _unmet(
@@ -677,11 +694,7 @@ async def _run_command_body(
             call_stack,
             registry,
             namespace,
-            view=session_view(
-                session,
-                registry.policies,
-                diagnostics=context.frame.diagnostics,
-            ),
+            registry.policies,
         ),
     )
     if expanded is not None:

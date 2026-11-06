@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedirectResult } from '../../../../context/session_context.ts'
+import type { Policies } from '../../../../policy/index.ts'
 import type { ParseScope } from '../../../../shell/parse/scope.ts'
 import { VarAttr } from '../../../../shell/variable.ts'
 import type { SessionView } from '../../../../view/types.ts'
@@ -27,15 +28,17 @@ import type { DeclarationOperand } from './types.ts'
  * set, not every shell variable: `X=hello` is absent and `export Y=world` is
  * present, which is what bash prints. `-f` marks functions instead, for a
  * nested shell to inherit; bash accepts `-a` / `-A` although its usage line
- * names only `-fn` (`markNames`).
+ * names only `-fn` (`markNames`). `policies` are what a subscript's
+ * assignments clear.
  */
 export async function handleExport(
   assignments: readonly DeclarationOperand[],
   session: SessionState,
   state: SessionView | null = null,
   parser?: ParseScope,
+  policies: Policies | null = null,
 ): Promise<RedirectResult> {
-  return markNames(assignments, session, state, VarAttr.Export, parser)
+  return markNames(assignments, session, state, VarAttr.Export, parser, policies)
 }
 
 /** The `export` arm. */
@@ -45,5 +48,6 @@ export async function exportBuiltin(call: BuiltinCall): Promise<RedirectResult> 
     call.context.session,
     sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
     call.parser,
+    call.registry.policies,
   )
 }

@@ -28,8 +28,7 @@ import { isoTimestamp } from '../../../../utils/dates.ts'
 import { CycleError, dottedSpelling, resolvePath } from '../../../../utils/path.ts'
 import { rstripSlash } from '../../../../utils/slash.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
-import { elementIsSet } from '../../../session/elements.ts'
-import { namerefTarget } from '../../../session/state.ts'
+import { elementIsSet, namerefTarget } from '../../../session/state.ts'
 import { followPaths } from '../links/links.ts'
 import { scopePath, toScope } from '../scope.ts'
 import { absPath } from '../shared.ts'
@@ -115,7 +114,7 @@ export async function applyUnary(
   if (op === '-z') return text === ''
   if (op === '-v') {
     try {
-      return await elementIsSet(ctx.session, text, ctx.view ?? null)
+      return await elementIsSet(ctx.session, text, ctx.namespace.registry.policies)
     } catch (err) {
       // bash aborts the line on `[[ -v a[1/0] ]]` with `1/0: division by
       // 0`, a test's grammar error being the only other thing that ends it.

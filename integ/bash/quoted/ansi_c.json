@@ -518,10 +518,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo $'a\\ud800b\\U0000DFFFc' | wc -c",
+      "command": "LC_ALL=C.UTF-8\necho $'a\\ud800b\\U0000DFFFc' | wc -c\nunset LC_ALL\necho $'a\\ud800b\\U0000DFFFc|\\u00e9|\\U1F600|\\u41|\\U7FFFFFFF|\\U80000000|\\UFFFFFFFF|\\U00000041|z'",
       "expect": {
         "exit": 0,
-        "stdout": "10\n",
+        "stdout": "10\na\\uD800b\\uDFFFc|\\u00E9|\\U0001F600|A|\\U7FFFFFFF|||A|z\n",
         "stderr": ""
       }
     },
@@ -588,10 +588,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "x=$'\\xc3'$'\\xa9'; [ \"$x\" = é ] && echo same; echo ${#x}; y=$'\\xc3'; y+=$'\\xa9'; echo ${#y}; printf x > /data/sp$'\\xc3'$'\\xa9'; cat /data/spé; echo; ls /data | grep -c '^spé$'; rm /data/spé",
+      "command": "x=$'\\xc3'$'\\xa9'; [ \"$x\" = é ] && echo same; echo ${#x}; y=$'\\xc3'; y+=$'\\xa9'; echo ${#y}; printf x > /data/sp$'\\xc3'$'\\xa9'; cat /data/spé; echo; ls /data | grep -c '^spé$'; rm /data/spé; (LC_ALL=C.UTF-8; z=😀🦊; echo ${#x} ${#y} ${z:1:1} ${#z} ${z: -1}); (z=😀🦊; echo ${#z} ${z:4:4})",
       "expect": {
         "exit": 0,
-        "stdout": "same\n1\n1\nx\n1\n",
+        "stdout": "same\n2\n2\nx\n1\n1 1 🦊 2 🦊\n8 🦊\n",
         "stderr": ""
       }
     }
