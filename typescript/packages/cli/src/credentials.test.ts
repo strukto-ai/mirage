@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { existsSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -20,12 +20,10 @@ import {
   LOGIN_MAX_AGE_SECONDS,
   LoginError,
   freshToken,
-  readContexts,
   readLogin,
   removeLogin,
   renewBy,
   tokenClaims,
-  updateContexts,
   writeLogin,
   type Login,
 } from './credentials.ts'
@@ -135,32 +133,3 @@ describe('the stored login', () => {
     expect(renewBy(kept)).toBe(kept.logged_in_at + LOGIN_MAX_AGE_SECONDS)
   })
 })
-
-describe('the contexts lock', () => {
-  let dir: string
-
-  beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'mirage-lock-'))
-    vi.stubEnv('MIRAGE_HOME', dir)
-    vi.stubEnv('MIRAGE_CONTEXT', undefined)
-  })
-
-  afterEach(() => {
-    vi.unstubAllEnvs()
-    rmSync(dir, { recursive: true, force: true })
-  })
-
-  it('removes a stale lock and lands the change', async () => {
-    const lock = join(dir, 'contexts.json.lock')
-    writeFileSync(lock, '')
-    const old = Date.now() / 1000 - 60
-    utimesSync(lock, old, old)
-    await updateContexts((c) => {
-      c.contexts.dev = { url: 'https://d', team: null, workspace: null }
-    })
-    expect(Object.hasOwn(readContexts().contexts, 'dev')).toBe(true)
-    expect(existsSync(lock)).toBe(false)
-    expect(existsSync(`${lock}.break`)).toBe(false)
-  })
-})
-

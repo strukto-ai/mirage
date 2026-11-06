@@ -30,24 +30,27 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import typer
 
-from mirage.cli.constants import HOSTED, HOSTED_URL, LOCAL, LOGINS_DIR
+from mirage.cli.constants import HOSTED, HOSTED_URL, LOCAL
 from mirage.cli.credentials import (
     Context,
     ContextError,
-    Contexts,
     Login,
     LoginError,
     check_name,
+    context_names,
     current_name,
     ends_at,
     json_body,
     login_path,
-    read_contexts,
+    read_context,
+    read_current,
     read_login,
+    remove_context,
     remove_login,
     renew_by,
     token_claims,
-    update_contexts,
+    write_context,
+    write_current,
     write_login,
 )
 from mirage.cli.output import emit, fail, format_table
@@ -387,25 +390,23 @@ def save_context(name: str, url: str, login: Login | None) -> None:
         login (Login | None): the login, when the server has one.
     """
     team = team_of(url, login.access_token) if login else None
-    table = read_daemon_table(mirage_home())
-
-    def change(contexts: Contexts) -> None:
-        kept = contexts.contexts.get(name)
-        stored = url
-        if name == LOCAL:
-            contexts.contexts[LOCAL] = Context()
-            if url == local_url(table, contexts):
-                stored = ""
-        contexts.contexts[name] = Context(
+    kept = read_context(name)
+    stored = url
+    if name == LOCAL:
+        write_context(LOCAL, Context())
+        if url == local_url(read_daemon_table(mirage_home())):
+            stored = ""
+    write_context(
+        name,
+        Context(
             url=stored,
             team=team,
             workspace=kept.workspace
             if kept is not None and kept.url == stored
             else None,
-        )
-        contexts.current = name
-
-    update_contexts(change)
+        ),
+    )
+    write_current(name)
 
 
 def login_cmd(
@@ -461,8 +462,8 @@ def whoami_cmd() -> None:
     """Print the current context: its server, team, user and
     workspace, and when to log in again."""
     url = load_daemon_settings().url.rstrip("/")
-    contexts = read_contexts()
-    name = current_name(contexts)
+    name = current_name()
+    context = read_context(name)
     login = read_login(login_path(name))
     if login is not None and login.url != url:
         login = None
@@ -477,7 +478,7 @@ def whoami_cmd() -> None:
         {
             "context": name,
             "url": url,
-            "team": contexts.contexts[name].team,
+            "team": context.team if context else None,
             "user": token_claims(login.access_token).get("sub")
             if login
             else None,
@@ -493,19 +494,20 @@ def whoami_cmd() -> None:
 @context_app.command("list")
 def list_cmd() -> None:
     """List the contexts; the current one is marked."""
-    contexts = read_contexts()
-    current = current_name(contexts)
+    current = current_name()
     table = read_daemon_table(mirage_home())
-    rows = [
-        {
-            "name": name,
-            "url": entry.url or local_url(table, contexts),
-            "team": entry.team,
-            "workspace": entry.workspace,
-            "current": name == current,
-        }
-        for name, entry in sorted(contexts.contexts.items())
-    ]
+    rows = []
+    for name in context_names():
+        entry = read_context(name) or Context()
+        rows.append(
+            {
+                "name": name,
+                "url": entry.url or local_url(table),
+                "team": entry.team,
+                "workspace": entry.workspace,
+                "current": name == current,
+            }
+        )
     emit(
         rows,
         human=lambda items: format_table(
@@ -527,15 +529,9 @@ def list_cmd() -> None:
 @context_app.command("use")
 def use_cmd(name: str = typer.Argument(..., help="Context name.")) -> None:
     """Make a context the current one."""
-
-    def change(contexts: Contexts) -> None:
-        if name not in contexts.contexts:
-            raise ContextError(
-                f"no context {name!r}; run `mirage context list`"
-            )
-        contexts.current = name
-
-    update_contexts(change)
+    if read_context(name) is None:
+        raise ContextError(f"no context {name!r}; run `mirage context list`")
+    write_current(name)
     header("now current", name)
     emit({"current": name}, human=lambda d: f"Using context {name}.")
 
@@ -547,16 +543,9 @@ def delete_cmd(
     """Forget a context and its login; ``local`` stays."""
     if name == LOCAL:
         raise ContextError("the local context cannot be deleted")
-
-    def change(contexts: Contexts) -> None:
-        if name not in contexts.contexts:
-            raise ContextError(
-                f"no context {name!r}; run `mirage context list`"
-            )
-        del contexts.contexts[name]
-        if contexts.current == name:
-            contexts.current = LOCAL
-
-    update_contexts(change)
-    (mirage_home() / LOGINS_DIR / f"{name}.json").unlink(missing_ok=True)
+    if read_context(name) is None:
+        raise ContextError(f"no context {name!r}; run `mirage context list`")
+    if read_current() == name:
+        write_current(LOCAL)
+    remove_context(name)
     emit({"deleted": name}, human=lambda d: f"Deleted context {name}.")

@@ -12,13 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const CONTEXTS_FILE = 'contexts.json'
+export const CONTEXTS_DIR = 'contexts'
+export const CURRENT_FILE = 'current_context'
 export const LOGINS_DIR = 'logins'
 export const LOCAL = 'local'
 export const HOSTED = 'strukto'
 export const HOSTED_URL = 'https://api.strukto.ai'
 export const DEFAULT_PORT = 8765
-export const LOCK_STALE_SECONDS = 10
-export const LOCK_RETRY_SECONDS = 0.01
-export const LOCK_WAIT_SECONDS = 10
 export const CONTEXT_NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/

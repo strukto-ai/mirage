@@ -15,12 +15,9 @@
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
-import { rmSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
-import { join } from 'node:path'
 import type { Command } from 'commander'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import {
   AUTHORIZATION_SERVER_PATH,
   PROTECTED_RESOURCE_PATH,
@@ -28,34 +25,31 @@ import {
 
 import { readDaemonTable } from '@struktoai/mirage-server/daemon_config'
 import { mirageHome } from '@struktoai/mirage-server/paths'
-import { HOSTED, HOSTED_URL, LOCAL, LOGINS_DIR } from './constants.ts'
+import { HOSTED, HOSTED_URL, LOCAL } from './constants.ts'
 import {
   ContextError,
   LoginError,
   checkName,
+  contextNames,
   currentName,
   emptyContext,
   endsAt,
   jsonBody,
   loginPath,
-  readContexts,
+  readContext,
+  readCurrent,
   readLogin,
+  removeContext,
   removeLogin,
   renewBy,
   tokenClaims,
-  updateContexts,
+  writeContext,
+  writeCurrent,
   writeLogin,
-  type Context,
   type Login,
 } from './credentials.ts'
 import { emit, fail, formatTable } from './output.ts'
-import {
-  currentWorkspace,
-  header,
-  isLocalUrl,
-  loadDaemonSettings,
-  localUrl,
-} from './settings.ts'
+import { currentWorkspace, header, isLocalUrl, loadDaemonSettings, localUrl } from './settings.ts'
 
 const CALLBACK_PATH = '/callback'
 const CALLBACK_TIMEOUT_SECONDS = 300
@@ -306,20 +300,18 @@ async function teamOf(url: string, token: string): Promise<string | null> {
 async function saveContext(name: string, url: string, login: Login | null): Promise<void> {
   const team = login !== null ? await teamOf(url, login.access_token) : null
   const table = readDaemonTable(mirageHome(process.env))
-  await updateContexts((contexts) => {
-    const kept = Object.hasOwn(contexts.contexts, name) ? contexts.contexts[name] : undefined
-    let stored = url
-    if (name === LOCAL) {
-      contexts.contexts[LOCAL] = { url: '', team: null, workspace: null }
-      if (url === localUrl(table, contexts)) stored = ''
-    }
-    contexts.contexts[name] = {
-      url: stored,
-      team,
-      workspace: kept?.url === stored ? kept.workspace : null,
-    }
-    contexts.current = name
+  const kept = readContext(name)
+  let stored = url
+  if (name === LOCAL) {
+    writeContext(LOCAL, emptyContext())
+    if (url === localUrl(table)) stored = ''
+  }
+  writeContext(name, {
+    url: stored,
+    team,
+    workspace: kept?.url === stored ? kept.workspace : null,
   })
+  writeCurrent(name)
 }
 
 export function registerLoginCommands(program: Command): void {
@@ -372,8 +364,7 @@ export function registerLoginCommands(program: Command): void {
     )
     .action(() => {
       const url = rstripSlash(loadDaemonSettings().url)
-      const contexts = readContexts()
-      const name = currentName(contexts)
+      const name = currentName()
       const stored = readLogin(loginPath(name))
       const login = stored?.url === url ? stored : null
       const account = login !== null ? tokenClaims(login.access_token).sub : undefined
@@ -381,7 +372,7 @@ export function registerLoginCommands(program: Command): void {
         {
           context: name,
           url,
-          team: contexts.contexts[name]?.team ?? null,
+          team: readContext(name)?.team ?? null,
           user: typeof account === 'string' ? account : null,
           workspace: currentWorkspace(),
           renew_by:
@@ -412,21 +403,18 @@ export function registerContextCommands(program: Command): void {
     .command('list')
     .description('List the contexts; the current one is marked.')
     .action(() => {
-      const contexts = readContexts()
-      const current = currentName(contexts)
+      const current = currentName()
       const table = readDaemonTable(mirageHome(process.env))
-      const rows: ContextRow[] = Object.keys(contexts.contexts)
-        .sort(compareCodePoints)
-        .map((name) => {
-          const entry = contexts.contexts[name] ?? emptyContext()
-          return {
-            name,
-            url: entry.url !== '' ? entry.url : localUrl(table, contexts),
-            team: entry.team,
-            workspace: entry.workspace,
-            current: name === current,
-          }
-        })
+      const rows: ContextRow[] = contextNames().map((name) => {
+        const entry = readContext(name) ?? emptyContext()
+        return {
+          name,
+          url: entry.url !== '' ? entry.url : localUrl(table),
+          team: entry.team,
+          workspace: entry.workspace,
+          current: name === current,
+        }
+      })
       emit(rows, (items) =>
         formatTable(
           ['', 'NAME', 'URL', 'TEAM', 'WORKSPACE'],
@@ -439,13 +427,11 @@ export function registerContextCommands(program: Command): void {
     .command('use')
     .argument('<name>', 'Context name')
     .description('Make a context the current one.')
-    .action(async (name: string) => {
-      await updateContexts((contexts) => {
-        if (!Object.hasOwn(contexts.contexts, name)) {
-          throw new ContextError(`no context '${name}'; run \`mirage context list\``)
-        }
-        contexts.current = name
-      })
+    .action((name: string) => {
+      if (readContext(name) === null) {
+        throw new ContextError(`no context '${name}'; run \`mirage context list\``)
+      }
+      writeCurrent(name)
       header('now current', name)
       emit({ current: name }, () => `Using context ${name}.`)
     })
@@ -454,20 +440,13 @@ export function registerContextCommands(program: Command): void {
     .command('delete')
     .argument('<name>', 'Context name')
     .description('Forget a context and its login; `local` stays.')
-    .action(async (name: string) => {
+    .action((name: string) => {
       if (name === LOCAL) throw new ContextError('the local context cannot be deleted')
-      await updateContexts((contexts) => {
-        if (!Object.hasOwn(contexts.contexts, name)) {
-          throw new ContextError(`no context '${name}'; run \`mirage context list\``)
-        }
-        const kept = Object.create(null) as Record<string, Context>
-        for (const [n, entry] of Object.entries(contexts.contexts)) {
-          if (n !== name) kept[n] = entry
-        }
-        contexts.contexts = kept
-        if (contexts.current === name) contexts.current = LOCAL
-      })
-      rmSync(join(mirageHome(process.env), LOGINS_DIR, `${name}.json`), { force: true })
+      if (readContext(name) === null) {
+        throw new ContextError(`no context '${name}'; run \`mirage context list\``)
+      }
+      if (readCurrent() === name) writeCurrent(LOCAL)
+      removeContext(name)
       emit({ deleted: name }, () => `Deleted context ${name}.`)
     })
 }

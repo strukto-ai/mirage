@@ -352,7 +352,7 @@ export function registerWorkspaceCommands(program: Command): void {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       await handleResponse(await c.request('GET', `/v1/workspaces/${encodeURIComponent(id)}`))
-      await useWorkspace(c.settings.context, id)
+      useWorkspace(c.settings.context, id)
       header(`using ${id}`, c.settings.context)
       emit({ workspace: id }, () => `Using workspace ${id}.`)
     })

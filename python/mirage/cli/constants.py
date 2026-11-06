@@ -13,13 +13,11 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import re
 
-CONTEXTS_FILE = "contexts.json"
+CONTEXTS_DIR = "contexts"
+CURRENT_FILE = "current_context"
 LOGINS_DIR = "logins"
 LOCAL = "local"
 HOSTED = "strukto"
 HOSTED_URL = "https://api.strukto.ai"
 DEFAULT_PORT = 8765
-LOCK_STALE_SECONDS = 10.0
-LOCK_RETRY_SECONDS = 0.01
-LOCK_WAIT_SECONDS = 10.0
 CONTEXT_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")

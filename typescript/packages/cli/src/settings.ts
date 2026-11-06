@@ -58,10 +58,9 @@ import {
   ContextError,
   currentName,
   loginPath,
-  readContexts,
+  readContext,
   readLogin,
-  updateContexts,
-  type Contexts,
+  writeContext,
   type Login,
 } from './credentials.ts'
 import { ENV_DAEMON_URL, ENV_TOKEN, ENV_WORKSPACE } from './env.ts'
@@ -73,14 +72,9 @@ export const DEFAULT_DAEMON_URL = 'http://127.0.0.1:8765'
 
 /**
  * The `local` context's URL: the one it logged in to, else config.toml's
- * `url` (until that key goes), else this machine at the port a spawned
- * daemon listens on.
+ * `url`, else this machine at the port a spawned daemon listens on.
  */
-export function localUrl(
-  table: Record<string, string>,
-  contexts: Contexts,
-  env: Env = process.env,
-): string {
+export function localUrl(table: Record<string, string>, env: Env = process.env): string {
   const fromEnv = env[ENV_DAEMON_PORT]
   const port =
     fromEnv !== undefined && fromEnv !== ''
@@ -88,7 +82,7 @@ export function localUrl(
       : table.port !== undefined && table.port !== ''
         ? table.port
         : String(DEFAULT_PORT)
-  const own = contexts.contexts[LOCAL]?.url ?? ''
+  const own = readContext(LOCAL, env)?.url ?? ''
   if (own !== '') return own
   if (table.url !== undefined && table.url !== '') return table.url
   return `http://127.0.0.1:${port}`
@@ -98,8 +92,7 @@ export function localUrl(
 export function currentWorkspace(env: Env = process.env): string | null {
   const fromEnv = env[ENV_WORKSPACE]
   if (fromEnv !== undefined && fromEnv !== '') return fromEnv
-  const contexts = readContexts(env)
-  return contexts.contexts[currentName(contexts, env)]?.workspace ?? null
+  return readContext(currentName(env), env)?.workspace ?? null
 }
 
 /** The workspace to act on: `-w`, else `$MIRAGE_WORKSPACE`, else the current context's. */
@@ -118,20 +111,17 @@ export function resolveWorkspace(given: string | undefined): string {
  */
 export function header(action: string, name?: string): void {
   if (!process.stderr.isTTY) return
-  const contexts = readContexts()
-  const used = name ?? currentName(contexts)
-  const team = contexts.contexts[used]?.team ?? null
+  const used = name ?? currentName()
+  const team = readContext(used)?.team ?? null
   const parts = [used, ...(team !== null && team !== '' ? [`team ${team}`] : []), action]
   process.stderr.write(parts.join(' · ') + '\n')
 }
 
 /** Make a workspace the current one of context `name`, as the command chose it. */
-export async function useWorkspace(name: string, workspaceId: string): Promise<void> {
-  await updateContexts((contexts) => {
-    const entry = Object.hasOwn(contexts.contexts, name) ? contexts.contexts[name] : undefined
-    if (entry === undefined) throw new ContextError(`no context '${name}'`)
-    entry.workspace = workspaceId
-  })
+export function useWorkspace(name: string, workspaceId: string): void {
+  const context = readContext(name)
+  if (context === null) throw new ContextError(`no context '${name}'`)
+  writeContext(name, { ...context, workspace: workspaceId })
 }
 
 /**
@@ -184,12 +174,12 @@ export function loadDaemonSettings(
         ? parseDaemonTable(readFileSync(options.configPath, 'utf-8'))
         : {}
       : readDaemonTable(mirageHome(env))
-  const contexts = readContexts(env)
-  const name = currentName(contexts, env)
+  const name = currentName(env)
   const local = name === LOCAL
+  const context = readContext(name, env)
   const settings: DaemonSettings = {
     context: name,
-    url: local ? localUrl(table, contexts, env) : (contexts.contexts[name]?.url ?? ''),
+    url: local || context === null ? localUrl(table, env) : context.url,
     authToken: local ? (table.auth_token ?? '') : '',
     idleGraceSeconds: Number(table.idle_grace_seconds ?? '30'),
   }

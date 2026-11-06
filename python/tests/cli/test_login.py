@@ -32,13 +32,12 @@ from mirage.cli import login as login_module
 from mirage.cli.credentials import (
     Context,
     ContextError,
-    Contexts,
     Login,
     LoginError,
     login_path,
-    read_contexts,
+    read_current,
     read_login,
-    write_contexts,
+    write_context,
     write_login,
 )
 from mirage.cli.login import browser_login, metadata_url, token_login
@@ -343,14 +342,8 @@ def test_login_to_a_server_without_one_says_so(browser, tmp_path, monkeypatch):
 
 
 def test_switch_run_once_elsewhere_and_forget(home, monkeypatch):
-    write_contexts(
-        Contexts(
-            contexts={
-                "dev": Context(
-                    url="https://dev.example", team="acme", workspace="w1"
-                )
-            }
-        )
+    write_context(
+        "dev", Context(url="https://dev.example", team="acme", workspace="w1")
     )
     write_login(
         Login(
@@ -371,16 +364,17 @@ def test_switch_run_once_elsewhere_and_forget(home, monkeypatch):
         "renew_by": None,
     }
     monkeypatch.setenv("MIRAGE_CONTEXT", "")
-    assert read_contexts().current == "local"
+    assert read_current() == "local"
     assert runner.invoke(app, ["context", "use", "dev"]).exit_code == 0
-    assert read_contexts().current == "dev"
+    assert read_current() == "dev"
     refused = runner.invoke(app, ["context", "use", "nope"])
     assert isinstance(refused.exception, ContextError)
     local = runner.invoke(app, ["context", "delete", "local"])
     assert isinstance(local.exception, ContextError)
     assert runner.invoke(app, ["context", "delete", "dev"]).exit_code == 0
-    assert read_contexts().current == "local"
+    assert read_current() == "local"
     assert not (home / "logins" / "dev.json").exists()
+    assert not (home / "contexts" / "dev.json").exists()
 
 
 def test_daemon_config_holds_the_daemon_settings(home):

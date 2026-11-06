@@ -19,11 +19,10 @@ from typer.testing import CliRunner
 
 from mirage.cli.credentials import (
     Context,
-    Contexts,
     Login,
     login_path,
-    read_contexts,
-    write_contexts,
+    write_context,
+    write_current,
     write_login,
 )
 from mirage.cli.main import app
@@ -348,25 +347,20 @@ def test_local_follows_the_daemon_port_after_its_own_url_and_config(
     home,
     monkeypatch,
 ):
-    contexts = read_contexts()
-    assert local_url({}, contexts) == "http://127.0.0.1:8765"
-    assert local_url({"port": 9100}, contexts) == "http://127.0.0.1:9100"
+    assert local_url({}) == "http://127.0.0.1:8765"
+    assert local_url({"port": 9100}) == "http://127.0.0.1:9100"
     monkeypatch.setenv("MIRAGE_DAEMON_PORT", "9200")
-    assert local_url({"port": 9100}, contexts) == "http://127.0.0.1:9200"
+    assert local_url({"port": 9100}) == "http://127.0.0.1:9200"
     table = {"url": "http://127.0.0.1:9300"}
-    assert local_url(table, contexts) == "http://127.0.0.1:9300"
-    contexts.contexts["local"].url = "http://127.0.0.1:9400"
-    assert local_url(table, contexts) == "http://127.0.0.1:9400"
+    assert local_url(table) == "http://127.0.0.1:9300"
+    write_context("local", Context(url="http://127.0.0.1:9400"))
+    assert local_url(table) == "http://127.0.0.1:9400"
 
 
 def test_a_remote_context_gets_its_login_never_config_tokens(home):
     (home / "config.toml").write_text('[daemon]\nauth_token = "local-only"\n')
-    write_contexts(
-        Contexts(
-            current="dev",
-            contexts={"dev": Context(url="https://dev.example", team="acme")},
-        )
-    )
+    write_context("dev", Context(url="https://dev.example", team="acme"))
+    write_current("dev")
     assert load_daemon_settings().auth_token == ""
     write_login(
         Login(
@@ -388,7 +382,7 @@ def test_a_remote_context_gets_its_login_never_config_tokens(home):
 def test_the_workspace_is_the_flag_then_env_then_the_context(
     home, monkeypatch
 ):
-    write_contexts(Contexts(contexts={"local": Context(workspace="kept")}))
+    write_context("local", Context(workspace="kept"))
     assert resolve_workspace(None) == "kept"
     monkeypatch.setenv("MIRAGE_WORKSPACE", "env")
     assert resolve_workspace(None) == "env"
