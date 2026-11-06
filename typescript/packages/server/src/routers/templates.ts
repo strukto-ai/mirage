@@ -87,7 +87,9 @@ export function registerTemplatesRoutes(
 ): void {
   const { resources, registry } = deps
   app.get('/v1/templates', (_req, reply) =>
-    stored(registry, reply, async () => (await resources.listTemplates()).map(present)),
+    stored(registry, reply, async () => ({
+      items: (await resources.listTemplates()).map(present),
+    })),
   )
 
   // A whole workspace config, checked as a create checks one, and kept as

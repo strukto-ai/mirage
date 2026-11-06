@@ -42,7 +42,9 @@ describe('templates router', () => {
       payload: { name: 'base', config: RAM },
     })
     expect(again.statusCode).toBe(409)
-    expect((await app.inject({ method: 'GET', url: '/v1/templates' })).json()).toEqual([saved])
+    expect((await app.inject({ method: 'GET', url: '/v1/templates' })).json()).toEqual({
+      items: [saved],
+    })
     expect((await app.inject({ method: 'GET', url: '/v1/templates/base' })).json()).toEqual(saved)
     expect((await app.inject({ method: 'DELETE', url: '/v1/templates/base' })).statusCode).toBe(204)
     expect((await app.inject({ method: 'GET', url: '/v1/templates/base' })).statusCode).toBe(404)
@@ -86,10 +88,10 @@ describe('templates router', () => {
       payload: { name: 'unpinned', config: { ...RAM, workspace_id: null } },
     })
     expect(unpinned.statusCode).toBe(201)
-    const listed = (await app.inject({ method: 'GET', url: '/v1/templates' })).json<
-      { name: string }[]
-    >()
-    expect(listed.map((t) => t.name)).toEqual(['unpinned'])
+    const listed = (await app.inject({ method: 'GET', url: '/v1/templates' })).json<{
+      items: { name: string }[]
+    }>()
+    expect(listed.items.map((t) => t.name)).toEqual(['unpinned'])
     await app.close()
   })
 

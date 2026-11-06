@@ -27,8 +27,6 @@ from mirage.cli.output import emit, fail, format_table, handle_response
 from mirage.cli.settings import header
 from mirage.utils.yaml import dump_yaml, parse_yaml
 
-TEMPLATE_KEYS = frozenset({"name", "description", "config"})
-
 app = typer.Typer(
     no_args_is_help=True,
     help="Saved workspace configs: create, list, get, delete, restore.",
@@ -65,10 +63,12 @@ def as_yaml(obj: Any) -> str:
 
 
 def read_template(path: Path) -> dict[str, Any]:
-    """A template file: ``{name, description?, config}`` as ``get``
-    prints it, or a bare workspace config. Saved as written, with no
-    ``${NAME}`` read from the environment; a relative ``script`` or code
-    path is rebased onto the file's folder, as ``workspace create`` does.
+    """A template file: a mapping with ``config``, as either server's
+    ``get`` prints it, or a bare workspace config. Only ``description``
+    and ``config`` are read; the fields a server fills in are dropped.
+    Saved as written, with no ``${NAME}`` read from the environment; a
+    relative ``script`` or code path is rebased onto the file's folder,
+    as ``workspace create`` does.
 
     Args:
         path (Path): the YAML or JSON file.
@@ -88,7 +88,7 @@ def read_template(path: Path) -> dict[str, Any]:
         fail(f"{path} must hold a mapping", 2)
     description = None
     config = doc
-    if "config" in doc and set(doc) <= TEMPLATE_KEYS:
+    if "config" in doc:
         description = doc.get("description")
         config = doc["config"]
     if description is not None and not isinstance(description, str):
@@ -148,7 +148,10 @@ def list_cmd(output: Output | None = OUTPUT) -> None:
     with make_client() as client:
         client.ensure_running()
         r = client.request("GET", "/v1/templates")
-    show(handle_response(r), output, _format_list)
+    listed = handle_response(r)
+    if not isinstance(listed, dict):
+        fail("the server answered no template list", 1)
+    show(listed["items"], output, _format_list)
 
 
 @app.command("get")

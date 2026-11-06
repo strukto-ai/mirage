@@ -17,7 +17,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from mirage.resources.errors import ResourceError
 from mirage.resources.types import Template, TemplateInput
-from mirage.server.schemas import CreateTemplateRequest, TemplateResponse
+from mirage.server.schemas import (
+    CreateTemplateRequest,
+    TemplateList,
+    TemplateResponse,
+)
 
 STATUS = {"not_found": 404, "conflict": 409, "invalid": 400}
 
@@ -68,14 +72,14 @@ def present(template: Template) -> TemplateResponse:
     )
 
 
-@router.get("", response_model=list[TemplateResponse])
-async def list_templates(request: Request) -> list[TemplateResponse]:
+@router.get("", response_model=TemplateList)
+async def list_templates(request: Request) -> TemplateList:
     """The saved templates, by name."""
     try:
         templates = await request.app.state.resources.list_templates()
     except ResourceError as e:
         raise store_refusal(e) from e
-    return [present(t) for t in templates]
+    return TemplateList(items=[present(t) for t in templates])
 
 
 @router.post("", response_model=TemplateResponse, status_code=201)

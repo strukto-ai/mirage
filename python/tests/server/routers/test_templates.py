@@ -62,7 +62,7 @@ async def test_a_template_is_saved_listed_deleted_and_restored(client):
         "/v1/templates", json={"name": "base", "config": RAM}
     )
     assert r.status_code == 409
-    assert (await client.get("/v1/templates")).json() == [saved]
+    assert (await client.get("/v1/templates")).json() == {"items": [saved]}
     assert (await client.get("/v1/templates/base")).json() == saved
     assert (await client.delete("/v1/templates/base")).status_code == 204
     assert (await client.get("/v1/templates/base")).status_code == 404
@@ -86,7 +86,8 @@ async def test_a_template_is_checked_when_saved(client):
     unpinned = {"name": "unpinned", "config": {**RAM, "workspace_id": None}}
     r = await client.post("/v1/templates", json=unpinned)
     assert r.status_code == 201
-    names = [t["name"] for t in (await client.get("/v1/templates")).json()]
+    listed = (await client.get("/v1/templates")).json()["items"]
+    names = [t["name"] for t in listed]
     assert names == ["unpinned"]
 
 

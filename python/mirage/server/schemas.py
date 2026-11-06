@@ -100,6 +100,10 @@ class TemplateResponse(BaseModel):
     config: dict[str, Any]
 
 
+class TemplateList(BaseModel):
+    items: list[TemplateResponse]
+
+
 class CloneWorkspaceRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

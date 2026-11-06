@@ -19,8 +19,6 @@ import { makeClient } from './client.ts'
 import { header } from './settings.ts'
 import { emit, fail, formatTable, handleResponse, type Formatter } from './output.ts'
 
-const TEMPLATE_KEYS = new Set(['name', 'description', 'config'])
-
 interface Template {
   name: string
   description: string | null
@@ -48,8 +46,9 @@ async function show<T>(obj: T, out: Output | undefined, human: Formatter<T>): Pr
 }
 
 /**
- * A template file: `{name, description?, config}` as `get` prints it, or a
- * bare workspace config. Saved as written, with no `${NAME}` read from the
+ * A template file: a mapping with `config`, as either server's `get` prints
+ * it, or a bare workspace config. Only `description` and `config` are read;
+ * the fields a server fills in are dropped. Saved as written, with no `${NAME}` read from the
  * environment; a relative `script` or code path is rebased onto the file's
  * folder, as `workspace create` does.
  */
@@ -70,7 +69,7 @@ async function readTemplate(
   const found = doc as Record<string, unknown>
   let description: unknown = null
   let config: unknown = found
-  if ('config' in found && Object.keys(found).every((k) => TEMPLATE_KEYS.has(k))) {
+  if ('config' in found) {
     description = found.description ?? null
     config = found.config
   }
@@ -128,7 +127,7 @@ export function registerTemplateCommands(program: Command): void {
     .description('List the saved templates.')
     .option('-o, --output <format>', 'Print as yaml or json', output)
     .action(async (opts: { output?: Output }) => {
-      const items = (await call('GET', '/v1/templates')) as Template[]
+      const { items } = (await call('GET', '/v1/templates')) as { items: Template[] }
       await show(items, opts.output, (rows) =>
         formatTable(
           ['NAME', 'DESCRIPTION'],

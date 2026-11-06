@@ -53,7 +53,7 @@ class _Client:
     def request(self, method: str, path: str, **kwargs: Any) -> _Response:
         self.calls.append((method, path, kwargs.get("json")))
         if path == "/v1/templates" and method == "GET":
-            return _Response(200, [SAVED])
+            return _Response(200, {"items": [SAVED]})
         return _Response(201 if method == "POST" else 200, SAVED)
 
 
@@ -96,13 +96,23 @@ def test_get_as_yaml_is_a_file_create_reads_back(client, tmp_path):
     assert client.calls[-1][2] == {**SAVED, "name": "copy"}
 
 
-def test_a_config_that_names_a_config_key_among_others_is_a_config(
+def test_a_console_template_reads_back_without_the_server_fields(
     client, tmp_path
 ):
-    path = tmp_path / "ws.yaml"
-    path.write_text('{"mounts": {}, "config": {"x": 1}}')
-    assert _invoke("create", "t", "-f", str(path)).exit_code == 0
-    assert client.calls[-1][2]["config"] == {"mounts": {}, "config": {"x": 1}}
+    console = {
+        **SAVED,
+        "id": "tpl_1",
+        "builtin": False,
+        "secrets": [],
+        "policies": [],
+        "created_by": "usr_1",
+        "created_at": 1,
+        "workspace_count": 0,
+    }
+    path = tmp_path / "t.yaml"
+    path.write_text(yaml.safe_dump(console))
+    assert _invoke("create", "copy", "-f", str(path)).exit_code == 0
+    assert client.calls[-1][2] == {**SAVED, "name": "copy"}
 
 
 def test_list_prints_json_or_yaml(client):
