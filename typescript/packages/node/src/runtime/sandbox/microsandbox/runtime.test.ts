@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it, vi } from 'vitest'
+import { type ByteSource } from '@struktoai/mirage-core/io/types'
 import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '../../../workspace.ts'
@@ -23,6 +24,11 @@ import * as program from '../program.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
+
+async function* piped(): AsyncIterable<Uint8Array> {
+  await Promise.resolve()
+  yield ENC.encode('input')
+}
 
 describe('MicrosandboxRuntime', () => {
   it.each([
@@ -93,7 +99,12 @@ describe('MicrosandboxRuntime', () => {
     )
   })
 
-  it('maps process requests to the msb contract', async () => {
+  it.each<[string, ByteSource | null, string[]]>([
+    ['bytes', ENC.encode('input'), []],
+    ['empty bytes', new Uint8Array(), []],
+    ['a pipe', piped(), []],
+    ['no stdin', null, ['--stream']],
+  ])('maps process requests with %s to the msb contract', async (_label, input, stream) => {
     vi.spyOn(crypto, 'randomUUID').mockReturnValue('r-u-n-i-d')
     const invoke = vi.spyOn(program, 'runProgram').mockImplementation((_exe, _hint, args) => {
       if (args[0] === 'status')
@@ -113,7 +124,6 @@ describe('MicrosandboxRuntime', () => {
         config: { sandbox: 'box', env: { MARK: 'config' } },
       })
       const words = ['python3', 'a b', '$(literal)', '', '--flag'] as const
-      const input = ENC.encode('input')
       const result = await runtime.execute(
         [],
         words,
@@ -131,6 +141,7 @@ describe('MicrosandboxRuntime', () => {
             'exec',
             'box',
             '--quiet',
+            ...stream,
             '-w',
             '/',
             '-e',

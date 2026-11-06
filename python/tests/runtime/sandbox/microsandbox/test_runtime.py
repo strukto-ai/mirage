@@ -89,8 +89,16 @@ async def test_status_failure_preserves_cli_error(monkeypatch):
 SANDBOX = os.environ.get("MIRAGE_INTEG_MICROSANDBOX_SANDBOX")
 
 
+async def _piped():
+    yield b"input"
+
+
 @pytest.mark.asyncio
-async def test_process_maps_the_msb_cli_contract(monkeypatch):
+@pytest.mark.parametrize(
+    ("stdin", "stream"),
+    [(b"input", []), (b"", []), (_piped(), []), (None, ["--stream"])],
+)
+async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
     monkeypatch.setattr(
         "mirage.runtime.sandbox.base.uuid.uuid4",
         lambda: SimpleNamespace(hex="run"),
@@ -116,7 +124,7 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch):
         Context(
             cwd=PathSpec.from_str_path("/work"),
             env={"MARK": "request"},
-            stdin=b"input",
+            stdin=stdin,
         ),
         kind="process",
     )
@@ -127,6 +135,7 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch):
                 "exec",
                 "box",
                 "--quiet",
+                *stream,
                 "-w",
                 "/",
                 "-e",
@@ -141,7 +150,7 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch):
                 "/work",
                 *words,
             ],
-            b"input",
+            stdin,
         ),
     ]
     assert (result.stdout, result.stderr, result.exit_code) == (
