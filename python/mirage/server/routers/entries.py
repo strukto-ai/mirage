@@ -174,9 +174,7 @@ def removed_by(given: JsonValue) -> set[str]:
     """
     if not isinstance(given, dict):
         return set()
-    return {
-        k for k, v in given.items() if v is None or isinstance(v, dict)
-    }
+    return {k for k, v in given.items() if v is None or isinstance(v, dict)}
 
 
 def entry_router(kind: EntryKind) -> APIRouter:
@@ -221,7 +219,9 @@ def entry_router(kind: EntryKind) -> APIRouter:
         try:
             body = await json_body(request)
             type = required_string(body, "type")
-            checked = check_values(kind, type, body.get("fields"), types_of(kind))
+            checked = check_values(
+                kind, type, body.get("fields"), types_of(kind)
+            )
             name = check_name(kind, required_string(body, "name"))
             if kind == "store" and name in {STRUKTO, *known_sources()}:
                 raise Refused(

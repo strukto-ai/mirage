@@ -142,9 +142,7 @@ def model_fields(model: type[BaseModel]) -> list[Field]:
         kind = kind_of(info.annotation)
         if kind is None:
             continue
-        default = (
-            None if info.default is PydanticUndefined else info.default
-        )
+        default = None if info.default is PydanticUndefined else info.default
         out.append(
             described(
                 name,

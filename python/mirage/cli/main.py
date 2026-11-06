@@ -18,6 +18,7 @@ import typer
 
 from mirage.cli import api as api_module
 from mirage.cli import config as config_module
+from mirage.cli import connections as connections_module
 from mirage.cli import context as context_module
 from mirage.cli import daemon as daemon_module
 from mirage.cli import login as login_module
@@ -59,7 +60,8 @@ def root(
 app.add_typer(workspace_module.app, name="workspace")
 app.add_typer(session_module.app, name="session")
 app.add_typer(shell_module.app, name="shell")
-app.add_typer(vfs_module.app, name="vfs")
+for kind_name, kind_app in connections_module.APPS.items():
+    app.add_typer(kind_app, name=kind_name)
 app.command("glob")(vfs_module.glob_cmd)
 app.command(
     "api",

@@ -101,9 +101,7 @@ async def test_put_keeps_a_sealed_field_left_out_and_null_removes_it(
     assert (await store.reveal_entry("vfs", "github")).sealed == {
         "token": "ghp_x"
     }
-    r = await client.put(
-        "/v1/vfs/github", json={"fields": {"token": "ghp_y"}}
-    )
+    r = await client.put("/v1/vfs/github", json={"fields": {"token": "ghp_y"}})
     assert (await store.reveal_entry("vfs", "github")).sealed == {
         "token": "ghp_y"
     }
@@ -216,8 +214,12 @@ async def test_delete_wipes_and_is_refused_while_a_template_uses_it(
 ):
     await client.post("/v1/vfs", json=GITHUB)
     config = {
-        "mounts": {"/gh": {"vfs": "github", "config": {"from": "strukto",
-                                                        "ref": "github"}}}
+        "mounts": {
+            "/gh": {
+                "vfs": "github",
+                "config": {"from": "strukto", "ref": "github"},
+            }
+        }
     }
     await store.put_template(TemplateInput(name="agent", config=config))
     assert (await client.get("/v1/vfs")).json()["items"][0]["used_by"] == 1
@@ -229,9 +231,7 @@ async def test_delete_wipes_and_is_refused_while_a_template_uses_it(
     assert (await client.get("/v1/vfs/github")).status_code == 404
     assert (await client.delete("/v1/vfs/github")).status_code == 404
     await client.post("/v1/vfs", json={**GITHUB, "fields": {"token": "n"}})
-    assert (await store.reveal_entry("vfs", "github")).sealed == {
-        "token": "n"
-    }
+    assert (await store.reveal_entry("vfs", "github")).sealed == {"token": "n"}
 
 
 @pytest.mark.asyncio
