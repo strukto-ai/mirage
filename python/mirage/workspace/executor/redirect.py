@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
 import logging
+import posixpath
 from collections.abc import Awaitable, Callable
 from contextlib import aclosing
 from enum import Enum, auto
 from functools import partial
 
+from mirage.commands.builtin.utils.paths import walk_spelling
 from mirage.context import reset_redirect_paths, set_redirect_paths
 from mirage.context.session_context import (
     RedirectGuard,
@@ -240,7 +242,7 @@ class PipeRecorder(Recorder):
         try:
             await self.dispatch(
                 "append" if file.append else "write",
-                file.scope,
+                file.where,
                 data=source,
             )
         finally:
@@ -259,12 +261,12 @@ class PipeRecorder(Recorder):
             if not offset:
                 async with sole_stream(self.dispatch, file) as sole:
                     if sole:
-                        await self.dispatch("write", file.scope, data=source)
+                        await self.dispatch("write", file.where, data=source)
                         return
             async with aclosing(rechunk(source, MEMORY_LIMIT)) as parts:
                 async for part in parts:
                     await self.dispatch(
-                        "pwrite", file.scope, data=part, offset=offset
+                        "pwrite", file.where, data=part, offset=offset
                     )
                     offset += len(part)
         finally:
@@ -383,6 +385,8 @@ class PipeRecorder(Recorder):
             if channel not in self.bound:
                 return False
             if not data:
+                return True
+            if self.bound[channel].lost:
                 return True
             file, writer = self._writer(channel)
             if id(writer) not in self.broken:
@@ -1051,7 +1055,8 @@ async def _handle_redirect(
         and target.source is None
         and not target.pipe
     ):
-        recorder.output_file = _followed(target.scope, follow)
+        landed = _followed(target.scope, follow)
+        recorder.output_file = landed
         if (
             command is not None
             and target.opened
@@ -1061,6 +1066,8 @@ async def _handle_redirect(
                 or not _one_file(errs.scope, target.scope, follow)
             )
         ):
+            target.landed = PathSpec.from_str_path(landed)
+            recorder.output_file = target
             recorder.stream_to(target)
             if errs is target:
                 recorder.stream_to(target, Channel.STDERR)
@@ -1101,7 +1108,7 @@ async def _handle_redirect(
                 "streamed": (
                     *outer.streamed,
                     *(
-                        (file.scope.virtual, partial(recorder.hold, file))
+                        (file, partial(recorder.hold, file))
                         for file in {
                             id(f): f for f in recorder.bound.values()
                         }.values()
@@ -1395,8 +1402,9 @@ async def _handle_redirect(
 
 
 def _followed(scope: PathSpec, follow: Callable[[str], str] | None) -> str:
-    """The file a target names once its links are resolved; a loop of
-    links names itself.
+    """The file a target names once its links are resolved, walked as
+    typed, links before ``..``, as its open walked it; a loop of links
+    names itself.
 
     Args:
         scope (PathSpec): the target.
@@ -1405,7 +1413,7 @@ def _followed(scope: PathSpec, follow: Callable[[str], str] | None) -> str:
     if follow is None:
         return scope.virtual
     try:
-        return follow(scope.virtual)
+        return posixpath.normpath(follow(walk_spelling(scope, follow)))
     except CycleError:
         return scope.virtual
 

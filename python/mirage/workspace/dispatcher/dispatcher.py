@@ -96,6 +96,7 @@ from mirage.policy.constants import METADATA_OPS
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.types import EntryGate
 from mirage.shell.bytes import encode_text
+from mirage.shell.descriptors import FileDescription
 from mirage.types import (
     DEFAULT_READ_TTL,
     CacheFacts,
@@ -163,6 +164,7 @@ from mirage.workspace.dispatcher.constants import (
     SERIAL_WRITE_OPS,
     SETATTR_KEYS,
     STAMP_WRITE_OPS,
+    UNLINKING_OPS,
     XATTR_OPS,
 )
 from mirage.workspace.dispatcher.reader import sees
@@ -1005,10 +1007,19 @@ class Dispatcher:
         try:
             if caller is None:
                 caller = current_caller()
+            moved = None
             if caller.streamed:
-                await self._hand_over(caller.streamed, path, kwargs)
+                await self._hand_over(caller.streamed, name, path, kwargs)
+                if name in UNLINKING_OPS:
+                    dst = kwargs.get("dst")
+                    moved = (
+                        self._spelled(path, last=False),
+                        None
+                        if dst is None
+                        else self._spelled(dst, last=False),
+                    )
             if self._admit_write is None or name not in POLICY_WRITE_OPS:
-                return await run_with_system_clock(
+                answer = await run_with_system_clock(
                     system_clock,
                     run_with_egress(
                         network,
@@ -1024,61 +1035,130 @@ class Dispatcher:
                         op=True,
                     ),
                 )
-            async with self._admit_write(caller) as held:
-                return await run_with_system_clock(
-                    system_clock,
-                    run_with_egress(
-                        network,
-                        policies,
-                        run_with_memory(
-                            memory,
-                            self._bound(name, path, held, report, kwargs),
-                            body=self._namespace.registry.body_limit,
+            else:
+                async with self._admit_write(caller) as held:
+                    answer = await run_with_system_clock(
+                        system_clock,
+                        run_with_egress(
+                            network,
+                            policies,
+                            run_with_memory(
+                                memory,
+                                self._bound(name, path, held, report, kwargs),
+                                body=self._namespace.registry.body_limit,
+                            ),
+                            None
+                            if caller.session is None
+                            else caller.session.session_id,
+                            op=True,
                         ),
-                        None
-                        if caller.session is None
-                        else caller.session.session_id,
-                        op=True,
-                    ),
-                )
+                    )
+            if moved is not None:
+                self._carry(caller.streamed, *moved)
+            return answer
         finally:
             if name in ("write", "append", "pwrite"):
                 await close_quietly(kwargs.get("data"))
 
     async def _hand_over(
         self,
-        streamed: tuple[tuple[str, Callable[[], Awaitable[None]]], ...],
+        streamed: tuple[
+            tuple[FileDescription, Callable[[], Awaitable[None]]], ...
+        ],
+        name: str,
         path: PathSpec,
         kwargs: dict[str, Any],
     ) -> None:
         """Have a redirect that writes a file this op reaches, by any
-        spelling, commit what its command wrote so far, so the op finds
-        what a descriptor's writes would have left there (``{ seq 3; wc
-        -l < f; } > f``).
+        spelling or, for a rename or removal, through a directory above
+        it, commit what its command wrote so far, so the op finds what a
+        descriptor's writes would have left there (``{ seq 3; wc -l < f;
+        } > f``).
 
         Args:
-            streamed (tuple[tuple[str, Callable[[], Awaitable[None]]], ...]):
-                the caller's streamed files, each with its hold.
+            streamed (tuple[tuple[FileDescription,
+                Callable[[], Awaitable[None]]], ...]): the caller's
+                streamed descriptions, each with its hold.
+            name (str): the op.
             path (PathSpec): the op's path.
             kwargs (dict[str, Any]): its arguments, a destination among
                 them.
         """
         reached = {
-            self._followed(p.virtual)
+            self._spelled(p)
             for p in (
                 path,
                 *(v for v in kwargs.values() if isinstance(v, PathSpec)),
             )
         }
-        for target, hold in streamed:
-            if self._followed(target) in reached:
+        for file, hold in streamed:
+            target = self._followed(file.where.virtual)
+            if target in reached or (
+                name in UNLINKING_OPS
+                and owner_prefix(reached, target) is not None
+            ):
                 await hold()
+
+    def _carry(
+        self,
+        streamed: tuple[
+            tuple[FileDescription, Callable[[], Awaitable[None]]], ...
+        ],
+        src: str,
+        to: str | None,
+    ) -> None:
+        """Move each streamed description along a rename of its file or
+        a directory above it; lose it to a removal of either or to a file
+        renamed over it, as a descriptor keeps writing an unlinked file.
+        The op's names are walked before it runs, as the kernel walks
+        them, a final link itself: a rename can change the links that
+        spelled them.
+        shortcut: only the line's own ops are seen, so a change from
+        another session or through FUSE leaves the old name bound; carry
+        a backend's file identity once every VFS reports one.
+
+        Args:
+            streamed (tuple[tuple[FileDescription,
+                Callable[[], Awaitable[None]]], ...]): the caller's
+                streamed descriptions.
+            src (str): what the op renamed or removed.
+            to (str | None): where a rename put it, None for a removal.
+        """
+        for file, _ in streamed:
+            at = file.where.virtual
+            if owner_prefix((src,), at) is not None:
+                if to is None:
+                    file.lost = True
+                else:
+                    file.landed = PathSpec.from_str_path(to + at[len(src) :])
+            elif to is not None and owner_prefix((to,), at) is not None:
+                file.lost = True
 
     def _followed(self, virtual: str) -> str:
         try:
             return self._namespace.follow(virtual)
         except CycleError:
             return virtual
+
+    def _spelled(self, path: PathSpec, last: bool = True) -> str:
+        """Where a path leads walked as typed, links before ``..``, its
+        final link followed only when ``last``; a loop of links leaves
+        it as typed.
+
+        Args:
+            path (PathSpec): the path as the caller named it.
+            last (bool): whether to follow a link at the final name.
+        """
+        spelled = walk_spelling(path, self._namespace.follow)
+        try:
+            walked = (
+                self._namespace.follow(spelled)
+                if last
+                else self._namespace.follow_parent(spelled)
+            )
+        except CycleError:
+            walked = spelled
+        return posixpath.normpath(walked)
 
     async def _bound(
         self,

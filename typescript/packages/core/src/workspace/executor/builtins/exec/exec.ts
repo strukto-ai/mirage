@@ -455,9 +455,13 @@ function stdoutToStderr(node: TSNodeLike): boolean {
  * The regular file a statement of a shell's own loop writes its stdout to:
  * where `exec` bound the shell's stdout while that binding stands (`exec
  * >g`), as `divertStatement` sends it, else where the loop's sink writes
- * (`Recorder.outputFile`). Mirrors Python's diverted_file.
+ * (`Recorder.outputFile`), a streamed redirect's description shared as it is.
+ * Mirrors Python's diverted_file.
  */
-export function divertedFile(session: SessionState, sink: JobConsole | null): string | null {
+export function divertedFile(
+  session: SessionState,
+  sink: JobConsole | null,
+): string | FileDescription | null {
   if (session.execStdout !== null) {
     const file = session.descriptors.get(FD_STDOUT)?.file ?? null
     return file?.source !== null || file.pipe ? null : file.scope.virtual

@@ -61,7 +61,8 @@ import { getText, literalWord } from '../../shell/helpers.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { RedirectKind, type Redirect } from '../../shell/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { CycleError, endsAtDot } from '../../utils/path.ts'
+import { walkSpelling } from '../../commands/builtin/utils/paths.ts'
+import { CycleError, endsAtDot, posixNormpath } from '../../utils/path.ts'
 import { ownerPrefix } from '../../utils/slash.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { DEV_PREFIX } from '../mount/registry.ts'
@@ -187,7 +188,7 @@ export class PipeRecorder extends Recorder {
         // The write is the redirect's own, so it waits on no hold of its file.
         await runWithCaller({ ...currentCaller(), streamed: [] }, async () => {
           if (offset === null) {
-            await this.dispatch(file.append ? 'append' : 'write', file.scope, [source])
+            await this.dispatch(file.append ? 'append' : 'write', file.where, [source])
             return
           }
           // What comes once an op reached the file lands at the
@@ -198,7 +199,7 @@ export class PipeRecorder extends Recorder {
           if (
             offset === 0 &&
             (await soleStream(this.dispatch, file, async (sole) => {
-              if (sole) await this.dispatch('write', file.scope, [source])
+              if (sole) await this.dispatch('write', file.where, [source])
               return sole
             }))
           ) {
@@ -206,7 +207,7 @@ export class PipeRecorder extends Recorder {
           }
           let at = offset
           for await (const part of rechunk(source, MEMORY_LIMIT)) {
-            await this.dispatch('pwrite', file.scope, [part, at])
+            await this.dispatch('pwrite', file.where, [part, at])
             at += part.length
           }
         })
@@ -322,6 +323,7 @@ export class PipeRecorder extends Recorder {
       const bound = this.bound.get(channel)
       if (bound === undefined) return false
       if (data.byteLength === 0) return true
+      if (bound.lost) return true
       const [file, writer] = this.writerFor(channel, bound)
       if (!this.broken.has(writer)) {
         try {
@@ -856,7 +858,8 @@ async function runRedirects(
     opened.source === null &&
     !opened.pipe
   ) {
-    recorder.outputFile = followed(opened.scope, follow)
+    const landed = followed(opened.scope, follow)
+    recorder.outputFile = landed
     if (
       command !== null &&
       opened.opened &&
@@ -864,6 +867,8 @@ async function runRedirects(
         !(errs instanceof FileDescription) ||
         !oneFile(errs.scope, opened.scope, follow))
     ) {
+      opened.landed = PathSpec.fromStrPath(landed)
+      recorder.outputFile = opened
       recorder.streamTo(opened)
       if (errs === opened) recorder.streamTo(opened, Channel.STDERR)
     }
@@ -871,7 +876,7 @@ async function runRedirects(
   const streamed: Caller['streamed'] = [
     ...currentCaller().streamed,
     ...[...new Set(recorder.bound.values())].map(
-      (file) => [file.scope.virtual, () => recorder.hold(file)] as const,
+      (file) => [file, () => recorder.hold(file)] as const,
     ),
   ]
   let unwound: Unwinding | null = null
@@ -1137,11 +1142,14 @@ async function runRedirects(
   return [stdout, io, new ExecutionNode({ command: 'redirect', exitCode: io.exitCode, refused })]
 }
 
-/** The file a target names once its links are resolved; a loop of links names itself. */
+/**
+ * The file a target names once its links are resolved, walked as typed, links
+ * before `..`, as its open walked it; a loop of links names itself.
+ */
 function followed(scope: PathSpec, follow: ((path: string) => string) | null): string {
   if (follow === null) return scope.virtual
   try {
-    return follow(scope.virtual)
+    return posixNormpath(follow(walkSpelling(scope, follow)))
   } catch (error) {
     if (error instanceof CycleError) return scope.virtual
     throw error

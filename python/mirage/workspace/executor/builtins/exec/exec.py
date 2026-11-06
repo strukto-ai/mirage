@@ -621,11 +621,12 @@ def _stdout_to_stderr(node: TSNodeLike) -> bool:
 
 def diverted_file(
     session: SessionState, sink: JobConsole | None
-) -> str | None:
+) -> str | FileDescription | None:
     """The regular file a statement of a shell's own loop writes its
     stdout to: where ``exec`` bound the shell's stdout while that binding
     stands (``exec >g``), as ``divert_statement`` sends it, else where
-    the loop's sink writes (``Recorder.output_file``).
+    the loop's sink writes (``Recorder.output_file``), a streamed
+    redirect's description shared as it is.
 
     Args:
         session (SessionState): the shell.

@@ -19,7 +19,7 @@ import { DEFAULT_UMASK, getCurrentEvaluation } from '../../context/session_conte
 import type { DispatchFn } from '../../runtime/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
 import { isFsError } from '../../errors/fs.ts'
-import { rechunk, sliceStream } from '../../io/stream.ts'
+import { drain, rechunk, sliceStream } from '../../io/stream.ts'
 import { MEMORY_LIMIT } from '../../io/spool.ts'
 import type { SessionState } from '../session/session.ts'
 import { hasAborted, makeAbortError } from '../../utils/abort.ts'
@@ -112,6 +112,10 @@ export async function writeDescription(
   replace = false,
   kept = false,
 ): Promise<void> {
+  if (file.lost) {
+    await drain(data)
+    return
+  }
   if (file.emit !== null) {
     for await (const part of chunks(data)) await file.emit(part)
     return
@@ -124,7 +128,7 @@ export async function writeDescription(
     const writer = getCurrentEvaluation()?.frame.abortSignal ?? undefined
     if (!kept && hasAborted(writer)) throw makeAbortError(writer)
     if (file.source === null && (!file.opened || file.append || (replace && file.offset === 0))) {
-      file.offset += await createCounted(dispatch, session, file.scope, data, file.append)
+      file.offset += await createCounted(dispatch, session, file.where, data, file.append)
       file.opened = true
       return
     }
@@ -136,14 +140,14 @@ export async function writeDescription(
       return
     }
     if (!file.opened) {
-      await createFile(dispatch, session, file.scope, new Uint8Array(), file.append)
+      await createFile(dispatch, session, file.where, new Uint8Array(), file.append)
       file.opened = true
     }
     const start = file.offset + (file.source?.lines.position ?? 0)
     let offset = start
     try {
       for await (const part of rechunk(data, MEMORY_LIMIT)) {
-        await dispatch('pwrite', file.scope, [part, offset])
+        await dispatch('pwrite', file.where, [part, offset])
         offset += part.byteLength
       }
     } finally {
@@ -151,7 +155,7 @@ export async function writeDescription(
         file.offset = offset
         if (file.source !== null) {
           const content = (
-            await dispatch('read', file.scope, [], { stream: true })
+            await dispatch('read', file.where, [], { stream: true })
           )[0] as ByteSource
           file.source.lines = await file.source.lines.reopen(sliceStream(content, offset))
         }
@@ -179,9 +183,9 @@ async function firstWrite(
   return soleStream(dispatch, file, async (sole) => {
     if (!sole) return false
     try {
-      file.offset = await createCounted(dispatch, session, file.scope, data)
+      file.offset = await createCounted(dispatch, session, file.where, data)
     } catch (err) {
-      file.offset = (await sizeOf(dispatch, file.scope)) ?? 0
+      file.offset = (await sizeOf(dispatch, file.where)) ?? 0
       throw err
     }
     return true
@@ -207,17 +211,17 @@ export async function soleStream<T>(
 ): Promise<T> {
   const report = new OpReport()
   try {
-    await dispatch('stat', file.scope, [], { admit_only: true }, report)
+    await dispatch('stat', file.where, [], { admit_only: true }, report)
   } catch (err) {
     if (!isFsError(err)) throw err
     console.debug(`write target ${file.scope.rawPath} has no store: ${String(err)}`)
     return write(false)
   }
-  const store = report.store ?? file.scope.virtual
+  const store = report.store ?? file.where.virtual
   if (streaming.has(store)) return write(false)
   streaming.add(store)
   try {
-    return await write((await sizeOf(dispatch, file.scope)) === 0)
+    return await write((await sizeOf(dispatch, file.where)) === 0)
   } finally {
     streaming.delete(store)
   }

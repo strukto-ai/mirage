@@ -157,6 +157,7 @@ import {
   SERIAL_WRITE_OPS,
   SETATTR_KEYS,
   STAMP_WRITE_OPS,
+  UNLINKING_OPS,
   XATTR_OPS,
 } from './constants.ts'
 import { sees } from './reader.ts'
@@ -797,7 +798,7 @@ export class Dispatcher {
   dispatch: CallerDispatchFn = async (name, path, args, kwargs, report, caller) => {
     try {
       const streamed = (caller ?? this.caller ?? currentCaller()).streamed
-      if (streamed.length > 0) await this.handOver(streamed, path, args, kwargs)
+      if (streamed.length > 0) await this.handOver(streamed, name, path, args, kwargs)
       if (caller !== undefined && caller !== this.caller) {
         const view = this.forCaller(caller)
         const run = (): ReturnType<DispatchFn> => view.dispatch(name, path, args, kwargs, report)
@@ -847,8 +848,17 @@ export class Dispatcher {
           this.access?.sessionId ?? this.caller?.session?.sessionId ?? null,
           true,
         )
-      if (this.admitWrite === null || !POLICY_WRITE_OPS.has(name)) return await run()
-      return await this.admitWrite(run)
+      const dst = args?.[0] instanceof PathSpec ? args[0] : null
+      const moved =
+        streamed.length > 0 && UNLINKING_OPS.has(name)
+          ? ([this.spelled(path, false), dst === null ? null : this.spelled(dst, false)] as const)
+          : null
+      const answer =
+        this.admitWrite === null || !POLICY_WRITE_OPS.has(name)
+          ? await run()
+          : await this.admitWrite(run)
+      if (moved !== null) this.carry(streamed, ...moved)
+      return answer
     } catch (error) {
       if (error instanceof ResponseTooLargeError) {
         Object.assign(error, { virtualPath: path.virtual })
@@ -868,12 +878,14 @@ export class Dispatcher {
   }
 
   /**
-   * Have a redirect that writes a file this op reaches, by any spelling,
-   * commit what its command wrote so far, so the op finds what a
-   * descriptor's writes would have left there (`{ seq 3; wc -l < f; } > f`).
+   * Have a redirect that writes a file this op reaches, by any spelling or,
+   * for a rename or removal, through a directory above it, commit what its
+   * command wrote so far, so the op finds what a descriptor's writes would
+   * have left there (`{ seq 3; wc -l < f; } > f`).
    */
   private async handOver(
     streamed: Caller['streamed'],
+    name: string,
     path: PathSpec,
     args: readonly unknown[] | undefined,
     kwargs: Record<string, unknown> | undefined,
@@ -881,9 +893,50 @@ export class Dispatcher {
     const reached = new Set(
       [path, ...(args ?? []), ...Object.values(kwargs ?? {})]
         .filter((p): p is PathSpec => p instanceof PathSpec)
-        .map((p) => this.followed(p.virtual)),
+        .map((p) => this.spelled(p)),
     )
-    for (const [target, hold] of streamed) if (reached.has(this.followed(target))) await hold()
+    for (const [file, hold] of streamed) {
+      const target = this.followed(file.where.virtual)
+      if (reached.has(target) || (UNLINKING_OPS.has(name) && ownerPrefix(reached, target) !== null))
+        await hold()
+    }
+  }
+
+  /**
+   * Move each streamed description along a rename of its file or a directory
+   * above it; lose it to a removal of either or to a file renamed over it, as
+   * a descriptor keeps writing an unlinked file. The op's names are walked
+   * before it runs, as the kernel walks them, a final link itself: a rename
+   * can change the links that spelled them.
+   * shortcut: only the line's own ops are seen, so a change from another
+   * session or through FUSE leaves the old name bound; carry a backend's file
+   * identity once every VFS reports one.
+   */
+  private carry(streamed: Caller['streamed'], src: string, to: string | null): void {
+    for (const [file] of streamed) {
+      const at = file.where.virtual
+      if (ownerPrefix([src], at) !== null) {
+        if (to === null) file.lost = true
+        else file.landed = PathSpec.fromStrPath(to + at.slice(src.length))
+      } else if (to !== null && ownerPrefix([to], at) !== null) {
+        file.lost = true
+      }
+    }
+  }
+
+  /**
+   * Where a path leads walked as typed, links before `..`, its final link
+   * followed only when `last`; a loop of links leaves it as typed.
+   */
+  private spelled(path: PathSpec, last = true): string {
+    const spelled = walkSpelling(path, (p) => this.namespace.follow(p))
+    let walked = spelled
+    try {
+      walked = last ? this.namespace.follow(spelled) : this.namespace.followParent(spelled)
+    } catch (error) {
+      if (!(error instanceof CycleError)) throw error
+    }
+    return posixNormpath(walked)
   }
 
   private followed(virtual: string): string {
