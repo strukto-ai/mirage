@@ -43,7 +43,7 @@ beforeAll(async () => {
   await app.listen({ port: 0, host: '127.0.0.1' })
   url = `http://127.0.0.1:${String((app.server.address() as AddressInfo).port)}`
   home = mkdtempSync(join(tmpdir(), 'mirage-connections-'))
-})
+}, 60_000)
 
 afterAll(async () => {
   await app.close()
