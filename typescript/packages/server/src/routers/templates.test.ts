@@ -80,7 +80,16 @@ describe('templates router', () => {
       payload: { name: 'pinned', config: { ...RAM, workspace_id: 'one' } },
     })
     expect(pinned.statusCode).toBe(400)
-    expect((await app.inject({ method: 'GET', url: '/v1/templates' })).json()).toEqual([])
+    const unpinned = await app.inject({
+      method: 'POST',
+      url: '/v1/templates',
+      payload: { name: 'unpinned', config: { ...RAM, workspace_id: null } },
+    })
+    expect(unpinned.statusCode).toBe(201)
+    const listed = (await app.inject({ method: 'GET', url: '/v1/templates' })).json<
+      { name: string }[]
+    >()
+    expect(listed.map((t) => t.name)).toEqual(['unpinned'])
     await app.close()
   })
 
