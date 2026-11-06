@@ -29,7 +29,7 @@ import type { VfsCall } from '../vfs/types.ts'
 import { registerSecrets } from '../secrets/registry.ts'
 import { CTX_ENV, DEFAULT_ASK_REASON, DEFAULT_DENY_REASON } from './constants.ts'
 import { Policies } from './policies.ts'
-import { ScriptPolicy, programSource, scriptAction, scriptContext } from './script.ts'
+import { ScriptPolicy, checkProgram, programSource, scriptAction, scriptContext } from './script.ts'
 import {
   CommandWord,
   VALIDITY,
@@ -940,6 +940,31 @@ describe('programSource', () => {
     expect(programSource(source, 'preCommand')).toMatch(
       /print\(_mirage_json\.dumps\(await pre_command\(/,
     )
+  })
+})
+
+describe('checkProgram', () => {
+  it('passes a program that defines each function and parses', async () => {
+    await expect(checkProgram(SOURCE, ['preCommand', 'preVfs'])).resolves.toBeUndefined()
+    await expect(checkProgram(SOURCE, [])).resolves.toBeUndefined()
+  })
+
+  it('refuses a program that defines no function for the method', async () => {
+    await expect(
+      checkProgram('def pre_command(ctx):\n    return None\n', ['preCommand', 'preVfs']),
+    ).rejects.toThrow('script defines no pre_vfs(ctx)')
+  })
+
+  it('refuses a program monty cannot parse, naming the line', async () => {
+    await expect(
+      checkProgram(
+        'def pre_command(ctx):\n    if ctx["command"] == "rm"\n        return None\n',
+        [],
+      ),
+    ).rejects.toThrow('script has an error at line 2: Expected `:`, found newline')
+    await expect(
+      checkProgram('    def pre_command(ctx):\n        return None\n', ['preCommand']),
+    ).rejects.toThrow('script has an error at line 1: Unexpected indentation')
   })
 })
 
