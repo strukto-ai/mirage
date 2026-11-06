@@ -340,6 +340,9 @@ UNSETS = typer.Option([], "--unset", help="Remove a field.")
 FILE = typer.Option(
     None, "--file", "-f", help="The entry as YAML or JSON; - for stdin."
 )
+ID_HELP = (
+    "The entry's ID, or its name: a name is unique, so it works as an ID."
+)
 
 
 def kind_app(kind: Kind) -> typer.Typer:
@@ -386,7 +389,8 @@ def kind_app(kind: Kind) -> typer.Typer:
 
     @app.command("get")
     def get_cmd(
-        name: str = typer.Argument(...), output: Output | None = OUTPUT
+        name: str = typer.Argument(..., metavar="ID", help=ID_HELP),
+        output: Output | None = OUTPUT,
     ) -> None:
         """Show an entry; a sealed field shows by name only."""
         with make_client() as client:
@@ -435,7 +439,7 @@ def kind_app(kind: Kind) -> typer.Typer:
 
     @app.command("update")
     def update_cmd(
-        name: str = typer.Argument(..., help="The entry's name."),
+        name: str = typer.Argument(..., metavar="ID", help=ID_HELP),
         sets: list[str] = SETS,
         secrets: list[str] = SECRETS,
         unsets: list[str] = UNSETS,
@@ -472,7 +476,9 @@ def kind_app(kind: Kind) -> typer.Typer:
         )
 
     @app.command("delete")
-    def delete_cmd(name: str = typer.Argument(...)) -> None:
+    def delete_cmd(
+        name: str = typer.Argument(..., metavar="ID", help=ID_HELP),
+    ) -> None:
         """Delete an entry and wipe its sealed values; there is no
         restore. Refused while a saved template uses it."""
         with make_client() as client:
