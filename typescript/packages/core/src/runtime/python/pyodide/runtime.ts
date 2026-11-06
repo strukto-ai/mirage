@@ -213,6 +213,7 @@ export function stripDeniedImports(code: string, denyPackages: ReadonlySet<strin
 }
 
 export class PyodideRuntime extends PythonRuntime<undefined> {
+  static override readonly configKeys: readonly string[] = KEYS
   readonly name = 'pyodide'
   protected override readonly versionSuffix = ' (pyodide)'
   // The WASM guest's filesystem is the workspace-backed Emscripten FS,
@@ -272,7 +273,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
     private readonly sync?: SyncVFS,
     private readonly interruptBuffer?: SharedArrayBuffer,
   ) {
-    super(options, KEYS)
+    super(options, PyodideRuntime.configKeys)
     const config = this.config as PyodideConfig
     const { maxConcurrency = 1 } = config
     if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1)

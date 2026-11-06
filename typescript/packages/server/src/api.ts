@@ -26,6 +26,7 @@ import { registerPoliciesRoutes } from './routers/policies.ts'
 import { registerSessionsRoutes } from './routers/sessions.ts'
 import { registerShellRoutes } from './routers/shell.ts'
 import { registerTemplatesRoutes } from './routers/templates.ts'
+import { registerEntryRoutes, ROUTES as ENTRY_ROUTES } from './routers/entries.ts'
 import { registerToolsRoutes } from './routers/tools.ts'
 import { registerVfsRoutes } from './routers/vfs.ts'
 import { registerWorkspacesRoutes } from './routers/workspaces.ts'
@@ -63,6 +64,9 @@ export function registerApi(app: RouteApp, deps: ApiDeps): McpEndpoint {
   if (deps.resources !== undefined) {
     registerTemplatesRoutes(app, { resources: deps.resources, registry })
     registerPoliciesRoutes(app, { resources: deps.resources, registry })
+    for (const kind of Object.keys(ENTRY_ROUTES) as (keyof typeof ENTRY_ROUTES)[]) {
+      registerEntryRoutes(app, kind, { resources: deps.resources, registry })
+    }
   }
   registerSessionsRoutes(app, { registry, loadProfile: (profile) => host.loadProfile(profile) })
   registerDocumentsRoutes(app, { registry })

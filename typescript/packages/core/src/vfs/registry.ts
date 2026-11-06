@@ -291,6 +291,67 @@ export const DIRECT_REGISTRY: Readonly<Record<string, VFSFactory>> = {
   },
 }
 
+/** Loads the schema a VFS's config is parsed with. */
+export type ConfigSchemaLoader = () => Promise<z.ZodType>
+
+/**
+ * The config schema each entry of {@link REGISTRY} and
+ * {@link DIRECT_REGISTRY} parses its config with, by name, loaded on
+ * first use as the factory loads it. Python reads the same off each
+ * registry entry's config class; a factory here hides its schema, so the
+ * schemas sit beside it, and the node package's `registry.test.ts` holds every factory that
+ * parses a config to an entry here.
+ */
+export const CONFIG_SCHEMAS: Readonly<Record<string, ConfigSchemaLoader>> = {
+  chroma: async () => (await import('./chroma/config.ts')).ChromaConfig,
+  dify: async () => (await import('./dify/config.ts')).DifyConfig,
+  qdrant: async () => (await import('./qdrant/config.ts')).QdrantConfig,
+  trello: async () => (await import('../core/trello/config.ts')).TrelloConfig,
+  wandb: async () => (await import('../core/wandb/config.ts')).WandbConfig,
+  linear: async () => (await import('../core/linear/config.ts')).LinearConfig,
+  langfuse: async () => (await import('./langfuse/config.ts')).LangfuseConfig,
+  github: async () => (await import('../core/github/config.ts')).GitHubConfig,
+  gcal: async () => (await import('./gcal/config.ts')).GCalConfig,
+  gdocs: async () => (await import('./gdocs/config.ts')).GDocsConfig,
+  gsheets: async () => (await import('./gsheets/config.ts')).GSheetsConfig,
+  gslides: async () => (await import('./gslides/config.ts')).GSlidesConfig,
+  gdrive: async () => (await import('./gdrive/config.ts')).GoogleDriveConfig,
+  onedrive: async () => (await import('../accessor/onedrive.ts')).OneDriveConfig,
+  sharepoint: async () => (await import('../accessor/sharepoint.ts')).SharePointConfig,
+  airtable: async () => (await import('../core/airtable/config.ts')).AirtableConfig,
+  mem0: async () => (await import('./mem0/config.ts')).Mem0Config,
+  box: async () => (await import('./box/config.ts')).BoxConfig,
+  gmail: async () => (await import('./gmail/config.ts')).GmailConfig,
+  slack: async () => (await import('./slack/config.ts')).SlackConfig,
+  discord: async () => (await import('./discord/config.ts')).DiscordConfig,
+  notion: async () => (await import('../core/notion/config.ts')).NotionConfig,
+  jaeger: async () => (await import('./jaeger/config.ts')).JaegerConfig,
+  databricks_volume: async () =>
+    (await import('./databricks_volume/config.ts')).DatabricksVolumeConfig,
+  tidb_filesystem: async () => (await import('./tidb_filesystem/config.ts')).TiDBFilesystemConfig,
+  dropbox: async () => (await import('./direct/dropbox.ts')).DropboxConfig,
+  s3: async () => (await import('./direct/s3.ts')).S3Config,
+  gcs: async () => (await import('./gcs/config.ts')).GCSConfig,
+  oci: async () => (await import('./oci/config.ts')).OCIConfig,
+  r2: async () => (await import('./r2/config.ts')).R2Config,
+  supabase: async () => (await import('./supabase/config.ts')).SupabaseConfig,
+  minio: async () => (await import('./minio/config.ts')).MinIOConfig,
+  ceph: async () => (await import('./ceph/config.ts')).CephConfig,
+  seaweedfs: async () => (await import('./seaweedfs/config.ts')).SeaweedFSConfig,
+  wasabi: async () => (await import('./wasabi/config.ts')).WasabiConfig,
+  backblaze: async () => (await import('./backblaze/config.ts')).BackblazeConfig,
+  digitalocean: async () => (await import('./digitalocean/config.ts')).DigitalOceanConfig,
+  tencent: async () => (await import('./tencent/config.ts')).TencentConfig,
+  aliyun: async () => (await import('./aliyun/config.ts')).AliyunConfig,
+  scaleway: async () => (await import('./scaleway/config.ts')).ScalewayConfig,
+  qingstor: async () => (await import('./qingstor/config.ts')).QingStorConfig,
+  postgres: async () => (await import('./postgres/config.ts')).PostgresConfig,
+  hf_datasets: async () => (await import('./hf_buckets/config.ts')).HfRepoConfig,
+  hf_models: async () => (await import('./hf_buckets/config.ts')).HfRepoConfig,
+  hf_spaces: async () => (await import('./hf_buckets/config.ts')).HfRepoConfig,
+  email: async () => (await import('../core/email/config.ts')).EmailConfig,
+}
+
 const CUSTOM: Record<string, VFSFactory> = {}
 
 /**

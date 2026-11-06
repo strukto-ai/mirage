@@ -94,7 +94,9 @@ def _parse_mount_modes(mounts: list[str]) -> dict[str, str]:
 
 def _session_path(workspace_id: str, session_id: str | None = None) -> str:
     base = f"/v1/workspaces/{quote(workspace_id, safe='')}/sessions"
-    return base if session_id is None else f"{base}/{quote(session_id, safe='')}"
+    return (
+        base if session_id is None else f"{base}/{quote(session_id, safe='')}"
+    )
 
 
 @app.command("create")

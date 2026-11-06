@@ -75,6 +75,7 @@ from mirage.server.resources.config import (
 from mirage.server.routers import (
     asks,
     documents,
+    entries,
     health,
     oauth,
     sessions,
@@ -471,6 +472,8 @@ def build_app(
     app.include_router(workspaces.router)
     app.include_router(templates.router)
     app.include_router(policy_routes.router)
+    for router in entries.ROUTERS:
+        app.include_router(router)
     app.include_router(documents.router)
     app.include_router(sessions.router)
     app.include_router(asks.router)

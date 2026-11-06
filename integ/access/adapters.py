@@ -55,6 +55,10 @@ CLI_GROUPS = (
     "daemon",
     "context",
     "template",
+    "policy",
+    "vfs",
+    "cli",
+    "runtime",
 )
 # A group inside a group: its commands are three words.
 NESTED_GROUPS = (("daemon", "config"),)

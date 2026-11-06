@@ -16,7 +16,7 @@ import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { emit, fail, handleResponse } from './output.ts'
 import { WORKSPACE_FLAGS, WORKSPACE_HELP } from './vfs.ts'
-import { resolveWorkspace } from './context.ts'
+import { resolveWorkspace } from './settings.ts'
 import { loadProfileArgument } from './workspace.ts'
 
 const MODES = new Set(['read', 'write', 'exec', 'r', 'rw', 'rwx'])

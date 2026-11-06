@@ -53,12 +53,13 @@ export class AppleContainerRuntime
   extends RemoteSandbox<AppleContainerConfig>
   implements PipeTransport
 {
+  static override readonly configKeys: readonly string[] = APPLE_CONTAINER_CONFIG_KEYS
   readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'apple_container'
   private readonly probes = new Map<string, Promise<void>>()
 
   constructor(options: RuntimeOptions<AppleContainerConfig> = {}) {
-    super(options, APPLE_CONTAINER_CONFIG_KEYS)
+    super(options, AppleContainerRuntime.configKeys)
     validateAppleContainerConfig(this.config)
   }
 

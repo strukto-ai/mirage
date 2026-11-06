@@ -51,6 +51,9 @@ import { MontyExecution } from './execution.ts'
  * reads runs on the shared pool make and must not wait behind them.
  */
 export class MontyRuntime extends PythonRuntime<MontyExecution> {
+  static override readonly configKeys: readonly string[] = [
+    'maxMemory',
+  ] satisfies (keyof MontyConfig)[]
   readonly name = 'monty'
   protected override readonly versionSuffix = ' (monty)'
   // The interpreter is an in-process guest with no host syscalls: its
@@ -68,7 +71,7 @@ export class MontyRuntime extends PythonRuntime<MontyExecution> {
   private readonly maxMemory: number | null
 
   constructor(options: RuntimeOptions<MontyConfig> = {}) {
-    super(options, ['maxMemory'] satisfies (keyof MontyConfig)[])
+    super(options, MontyRuntime.configKeys)
     this.maxMemory = memoryLimit(this.config.maxMemory)
   }
 

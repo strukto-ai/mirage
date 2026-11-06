@@ -141,6 +141,18 @@ export function checkRuntimeOptions(name: string, options: Record<string, unknow
  * cross-language hint for Python-only names) and on unknown options.
  */
 export function buildRuntime(name: string, options: Record<string, unknown> = {}): Runtime {
+  const cls = runtimeClass(name)
+  checkRuntimeOptions(name, options)
+  return new cls(options as RuntimeOptions<never>)
+}
+
+/**
+ * The runtime class a name resolves to. Mirrors Python's `runtime_class`.
+ *
+ * Throws:
+ *   Error: unknown name, with a hint for one another package registers.
+ */
+export function runtimeClass(name: string): new (options?: RuntimeOptions<never>) => Runtime {
   const cls = NAMED[name]
   if (cls === undefined) {
     const hint = RUNTIME_HINTS[name]
@@ -150,8 +162,7 @@ export function buildRuntime(name: string, options: Record<string, unknown> = {}
       .join(', ')
     throw new Error(`unknown runtime: '${name}' (expected one of ${known})`)
   }
-  checkRuntimeOptions(name, options)
-  return new cls(options as RuntimeOptions<never>)
+  return cls
 }
 
 /**
