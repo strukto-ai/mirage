@@ -943,10 +943,20 @@ async def _restore_sessions(
         session.vars = fields.vars
         session.functions = fields.functions
         # A restored function runs as a parse of its own, as one loaded
-        # from storage does: the sites of what it replaced are gone.
-        session._function_sites.clear()
+        # from storage does: the sites of what it replaced are gone, but
+        # for the alias view each one's definition saw.
+        session._function_sites = dict(fields._function_sites)
         session.readonly_functions = fields.readonly_functions
         session.exported_functions = fields.exported_functions
+        # The rest of the shell as the snapshot left it.
+        session.aliases = fields.aliases
+        session.shell_options = fields.shell_options
+        session.shopts = fields.shopts
+        session.umask = fields.umask
+        session.logical_cwd = fields.logical_cwd
+        session.exit_trap = fields.exit_trap
+        session.err_trap = fields.err_trap
+        session.return_trap = fields.return_trap
         # The caps are narrowing, which a checkout keeps: the table's
         # narrow the session's further and never lift one it holds.
         session.mount_modes = stricter_modes(

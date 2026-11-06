@@ -628,6 +628,60 @@ def test_session_profile_round_trips_and_is_omitted_when_none():
     assert original.fork().profile == "admin"
 
 
+def test_what_the_shell_keeps_between_lines_round_trips():
+    fresh = SessionState(session_id="a").to_dict()
+    for key in (
+        "aliases",
+        "shell_options",
+        "shopts",
+        "umask",
+        "logical_cwd",
+        "exit_trap",
+    ):
+        assert key not in fresh
+    original = SessionState(
+        session_id="rt",
+        shell_options={"pipefail": True},
+        aliases={"ll": "ls -l"},
+        shopts={"nullglob": True},
+        umask=0o077,
+        logical_cwd="/link",
+        exit_trap="echo bye",
+        err_trap="",
+    )
+    restored = SessionState.from_dict(original.to_dict())
+    assert restored.aliases == {"ll": "ls -l"}
+    assert restored.shell_options == {"pipefail": True}
+    assert restored.shopts == {"nullglob": True}
+    assert restored.umask == 0o077
+    assert restored.logical_cwd == "/link"
+    assert (restored.exit_trap, restored.err_trap, restored.return_trap) == (
+        "echo bye",
+        "",
+        None,
+    )
+
+
+def test_sessions_loaded_from_one_record_share_no_tables():
+    record = SessionState(
+        session_id="s",
+        aliases={"ll": "ls -l"},
+        shell_options={"pipefail": True},
+        shopts={"nullglob": True},
+    ).to_dict()
+    a = SessionState.from_dict(record)
+    b = SessionState.from_dict(record)
+    a.aliases["x"] = "y"
+    a.shell_options["errexit"] = True
+    a.shopts["dotglob"] = True
+    assert (b.aliases, b.shell_options, b.shopts) == (
+        {"ll": "ls -l"},
+        {"pipefail": True},
+        {"nullglob": True},
+    )
+    assert record["aliases"] == {"ll": "ls -l"}
+
+
 def test_function_sources_and_readonly_metadata_round_trip_without_tree_ownership():
     source = "f() { echo a; }"
     parent = SessionState(

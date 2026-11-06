@@ -4116,6 +4116,112 @@
       ]
     },
     {
+      "id": "shell_settings_and_function_aliases_survive_checkout_and_load",
+      "settings": {
+        "mode": "write",
+        "mounts": {}
+      },
+      "steps": [
+        {
+          "op": "exec",
+          "command": "shopt -s expand_aliases nullglob && set -o pipefail && umask 077",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "alias a='echo 1'",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "f() { a; }",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "alias a='echo 2'",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "exec",
+          "command": "f; a; set -o | grep pipefail; shopt nullglob; umask",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "1\n2\npipefail       \ton\nnullglob       \ton\n0077\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "snapshot"
+        },
+        {
+          "op": "exec",
+          "command": "unalias a; unset -f f; set +o pipefail; shopt -u nullglob; umask 022",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "checkout"
+        },
+        {
+          "op": "exec",
+          "command": "f; a; set -o | grep pipefail; shopt nullglob; umask",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "1\n2\npipefail       \ton\nnullglob       \ton\n0077\n",
+              "stderr": ""
+            }
+          }
+        },
+        {
+          "op": "load"
+        },
+        {
+          "op": "exec",
+          "command": "f; a; set -o | grep pipefail; shopt nullglob; umask",
+          "expect": {
+            "value": {
+              "exit_code": 0,
+              "stdout": "1\n2\npipefail       \ton\nnullglob       \ton\n0077\n",
+              "stderr": ""
+            }
+          }
+        }
+      ]
+    },
+    {
       "id": "a_load_keeps_every_session_profile",
       "settings": {
         "mode": "write",

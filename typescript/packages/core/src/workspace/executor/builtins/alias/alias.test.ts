@@ -97,6 +97,9 @@ describe('alias', () => {
   // Checkout restores the table but not where the live definitions were
   // made, so a restored body runs as a parse of its own and reads the
   // aliases as they are, even after the same text was defined again.
+  // Checkout restores the aliases and each definition's alias view, not the
+  // live sites: a restored body runs the aliases its definition saw, even
+  // after the same text was defined again under others.
   it('does not read the replaced site after a checkout', async () => {
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
     for (const line of ['shopt -s expand_aliases', "alias a='echo 1'", 'f() { a; }'])
@@ -105,7 +108,7 @@ describe('alias', () => {
     for (const line of ["alias a='echo 2'", 'f() { a; }', "alias a='echo 3'"]) await ws.shell(line)
     await applyStateDict(ws, state)
     const io = await ws.shell('f')
-    expect([stdoutStr(io), io.exitCode]).toEqual(['3\n', 0])
+    expect([stdoutStr(io), io.exitCode]).toEqual(['1\n', 0])
   })
 })
 
