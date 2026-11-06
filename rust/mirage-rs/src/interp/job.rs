@@ -110,7 +110,13 @@ mod tests {
         let word = (0..tree.nodes.len())
             .find(|&n| tree.kind(n) == "simple_expansion")
             .unwrap();
-        Job::start(Running::Expand(expand(shell, tree, word, Mode::Fields, false)))
+        Job::start(Running::Expand(expand(
+            shell,
+            tree,
+            word,
+            Mode::Fields,
+            false,
+        )))
     }
 
     #[test]
@@ -143,7 +149,10 @@ mod tests {
         assert_eq!(job.slice().len(), SLICE);
         let last = job.slice();
         assert_eq!(last.len(), 5);
-        assert_eq!(last[4].0, vec![(format!("{}", SLICE * 2 + 4).into_bytes(), false)]);
+        assert_eq!(
+            last[4].0,
+            vec![(format!("{}", SLICE * 2 + 4).into_bytes(), false)]
+        );
         assert!(!job.more());
         assert!(job.answer(Answer::Resumed).is_none());
     }
