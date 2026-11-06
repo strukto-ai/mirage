@@ -550,11 +550,11 @@
   }
  },
  "login": {
-  "description": "mirage login, whoami and logout per deployment, with a CLI home of its own and no token. dev and token publish no login (404); jwt publishes the issuer and client, and its browser is a user already signed in. On jwt the login then drives the CLI and SSH through ssh-proxy, refreshes an ended access token, and ends 30 days after sign-in. token takes a pasted token the server accepts.",
+  "description": "mirage login URL, whoami and logout per deployment, with a CLI home of its own and no token; the deployment is on this machine, so the login is the local context's. dev and token publish no login (404); jwt publishes the issuer and client, and its browser is a user already signed in. On jwt the login then drives the CLI and SSH through ssh-proxy, refreshes an ended access token, and ends 30 days after sign-in. token takes a pasted token the server accepts.",
   "dev": {
    "resource": 404,
    "login": "{url} publishes no login: a local daemon needs none, and a server with a shared token takes `mirage login --token`",
-   "whoami": 1,
+   "whoami": null,
    "logout": "Not logged in."
   },
   "token": {
@@ -631,12 +631,17 @@
   "config_token_masked": "***",
   "config_unset": "1",
   "config_unknown_key": "2",
+  "config_moved": "warns warns warns warns",
   "config_port_moves": "answers",
   "allowed_hosts_env_wins": "200",
   "config_malformed": "2",
   "remote_never_spawns": "1 not started",
   "remote_gets_no_token_file": "no token sent",
   "shell_exit_status": "3 3",
+  "workspace_use": "current\n",
+  "context_list": "local *spare",
+  "context_once": "0 *local spare",
+  "context_delete": "*local",
   "api_sends_fields": "api\n",
   "api_keeps_the_route_query": "1",
   "api_takes_only_a_route": "2",

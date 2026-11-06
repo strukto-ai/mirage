@@ -61,7 +61,7 @@ export function renewBy(login: Login): number {
 }
 
 /** The current context's login file. */
-export function currentLoginPath(env: Record<string, string | undefined> = process.env): string {
+function currentLoginPath(env: Record<string, string | undefined> = process.env): string {
   return loginPath(currentName(readContexts(env), env), env)
 }
 

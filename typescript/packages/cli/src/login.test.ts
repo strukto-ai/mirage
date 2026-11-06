@@ -276,43 +276,45 @@ describe('mirage login', () => {
     vi.spyOn(process, 'stdin', 'get').mockReturnValue(
       Readable.from([Buffer.from('good\n')]) as unknown as typeof process.stdin,
     )
-    const done = await run(['login', '--token', '-'])
+    const done = await run(['login', clerk.url, '--token', '-'])
     expect(done.exitCode).toBe(0)
     expect(readLogin()?.access_token).toBe('good')
     vi.spyOn(process, 'stdin', 'get').mockReturnValue(
       Readable.from([]) as unknown as typeof process.stdin,
     )
-    const empty = await run(['login', '--token', '-'])
+    const empty = await run(['login', clerk.url, '--token', '-'])
     expect(empty.exitCode).toBe(1)
     expect(empty.stderr).toContain('no token on stdin')
   })
 
   it('logs in, says who, and logs out', async () => {
-    const done = await run(['login'])
+    const done = await run(['login', clerk.url])
     expect(done.exitCode).toBe(0)
     expect(done.stdout).toContain(`Logged in to ${clerk.url} as user_alice.`)
     expect(readLogin()?.refresh_token).toBe('r1')
     const who = await run(['whoami'])
     expect(who.exitCode).toBe(0)
-    expect((JSON.parse(who.stdout) as { account: string }).account).toBe('user_alice')
+    expect(JSON.parse(who.stdout)).toMatchObject({ context: 'local', user: 'user_alice' })
     const out = await run(['logout'])
     expect(out.stdout).toBe(`Logged out of ${clerk.url}.\n`)
     expect(readLogin()).toBeNull()
-    expect((await run(['whoami'])).exitCode).toBe(1)
+    const after = await run(['whoami'])
+    expect(after.exitCode).toBe(0)
+    expect((JSON.parse(after.stdout) as { user: string | null }).user).toBeNull()
   })
 
   it('whoami ignores a login for another server', async () => {
     writeLogin({ ...(await tokenLogin(clerk.url, 'good')), url: 'https://elsewhere.test' })
     const who = await run(['whoami'])
-    expect(who.exitCode).toBe(1)
-    expect(who.stderr).toContain(`not logged in to ${clerk.url}`)
+    expect(who.exitCode).toBe(0)
+    expect((JSON.parse(who.stdout) as { user: string | null }).user).toBeNull()
   })
 
   it('says so on a server without a login', async () => {
     const quiet = await new FakeClerk({ publishes: false }).start()
     vi.stubEnv('MIRAGE_DAEMON_URL', quiet.url)
     try {
-      const done = await run(['login'])
+      const done = await run(['login', quiet.url])
       expect(done.exitCode).toBe(0)
       expect(done.stdout).toContain('publishes no login')
     } finally {

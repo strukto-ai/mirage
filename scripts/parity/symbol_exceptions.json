@@ -502,7 +502,8 @@
     "_document_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "skill_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "vfs_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
-    "history_cmd": "Typer commands are module functions; commander registers the same action inline in registerWorkspaceCommands."
+    "history_cmd": "Typer commands are module functions; commander registers the same action inline in registerWorkspaceCommands.",
+    "use_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
    }
   },
   "server/auth/middleware": {
@@ -1275,6 +1276,31 @@
   "server/resources/files": {
    "python_only": {
     "PlainLoader": "PyYAML drops a resolver by subclassing its loader; the TypeScript yaml package filters its tags in the parse options."
+   }
+  },
+  "cli/context": {
+   "python_only": {
+    "app": "The Typer group of the context verbs; commander builds the same group in registerContextCommands.",
+    "list_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "use_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "delete_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
+   },
+   "typescript_only": {
+    "registerContextCommands": "Commander builds the context group in one function; Typer declares it as the module's app.",
+    "ContextRow": "The shape of a `context list` row, which Python leaves as a dict.",
+    "Env": "An environment map passed to the readers, so tests need no process.env; Python reads os.environ.",
+    "emptyContext": "A fresh Context record; Python's Context dataclass has these defaults."
+   }
+  },
+  "cli/config": {
+   "python_only": {
+    "moved": "The old `mirage config` group, a second Typer app over the same verbs; commander registers it with registerConfigCommands(program, true).",
+    "moved_cmd": "The callback that warns `mirage config` moved; commander warns from a preAction hook in registerConfigCommands."
+   }
+  },
+  "cli/main": {
+   "python_only": {
+    "root": "The Typer callback that takes the root --context option; commander takes it with a preAction hook in buildProgram."
    }
   }
  }
