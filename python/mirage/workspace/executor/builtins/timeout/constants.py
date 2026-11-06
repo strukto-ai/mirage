@@ -12,25 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from mirage.shell.constants import SIGKILL
+
 # The other names GNU timeout 9.7 takes for -s, by the number
 # `timeout -v -s NAME` then reports sending. bash refuses them all.
 SIGNAL_ALIASES: dict[str, int] = {"EXIT": 0, "IOT": 6, "CLD": 17, "POLL": 29}
 
 # Where `timeout -v` names a number otherwise than bash does.
 TIMEOUT_NAMES: dict[int, str] = {0: "EXIT", 29: "POLL"}
-
-
-SIGKILL = 9
-SIGCHLD = 17
-SIGSTOP = 19
-
-# Signals whose default action leaves a process running: the command
-# carries on past the deadline.
-CONTINUE_SIGNALS = frozenset({0, SIGCHLD, 18, 23, 28})
-
-# The job-control stops. timeout sends CONT after them unless run with
-# --foreground, so there only the command stays stopped.
-STOP_SIGNALS = frozenset({SIGSTOP, 20, 21, 22})
 
 # What timeout says, exiting 125, when its session already holds
 # `processes.max` and the command cannot start.

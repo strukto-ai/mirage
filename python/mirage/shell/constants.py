@@ -432,14 +432,10 @@ GRAMMAR_BUILTINS: frozenset[ShellBuiltin] = frozenset(
     b for b, g in BUILTIN_GROUP.items() if GROUP_TIER[g] is BuiltinTier.GRAMMAR
 )
 
-INTERPRETER_BUILTINS: frozenset[ShellBuiltin] = frozenset(
-    b for b, g in BUILTIN_GROUP.items() if g is BuiltinGroup.INTERPRETERS
-)
-
 # The commands that start a shell of their own, a process whose own
 # programs a signal it ignores still reaches.
 NESTED_SHELLS: frozenset[ShellBuiltin] = frozenset(
-    {ShellBuiltin.BASH, ShellBuiltin.SH}
+    b for b, g in BUILTIN_GROUP.items() if g is BuiltinGroup.NESTED_SHELLS
 )
 
 # What every bash ignores, interactive or not: a QUIT stops the program a
@@ -520,3 +516,12 @@ SIGNAL_DESCRIPTIONS: dict[int, str] = {
 # PIPE end it silently, TERM as "Terminated" alone in the foreground.
 UNREPORTED_SIGNALS = frozenset({2, 13})
 SIGTERM = 15
+SIGKILL = 9
+SIGCHLD = 17
+SIGSTOP = 19
+
+# Signals whose default action leaves a process running.
+CONTINUE_SIGNALS = frozenset({0, SIGCHLD, 18, 23, 28})
+
+# The job-control stops.
+STOP_SIGNALS = frozenset({SIGSTOP, 20, 21, 22})

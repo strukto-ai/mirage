@@ -75,6 +75,25 @@ export function signalNumber(spec: string): number | null {
 }
 
 /**
+ * What `kill -l` prints for one operand: a number's name (one of 128 plus a
+ * signal names that signal, as a `$?` does), empty for a number naming
+ * nothing (32 and 33), a name's number; null for a word that names no
+ * signal. Mirrors Python's listed_signal.
+ */
+export function listedSignal(word: string): string | null {
+  // eslint-disable-next-line no-control-regex
+  const number = /^[\x00-\x7f]*$/.test(word) ? NUMBER.exec(word) : null
+  if (number === null) {
+    const value = signalNumber(word)
+    return value === null ? null : String(value)
+  }
+  let value = Number(number[1])
+  if (value > 128 && value <= 128 + SIGRTMAX) value -= 128
+  else if (value > SIGRTMAX) return null
+  return value === 0 ? 'EXIT' : (signalName(value) ?? '')
+}
+
+/**
  * How bash's report line names a signal that ended a command, null for one
  * whose default never ends a process. Mirrors Python's signal_description.
  */
@@ -115,6 +134,15 @@ function processStatus(code: number, signal: number | null): string {
 }
 
 /**
+ * Whether bash's report of a job lists its processes: a signal other than
+ * INT, PIPE and TERM ended its last one (null for an exit). Mirrors Python's
+ * signal_reported.
+ */
+export function signalReported(signal: number | null): boolean {
+  return signal !== null && !UNREPORTED_SIGNALS.has(signal) && signal !== SIGTERM
+}
+
+/**
  * bash's report of a job a signal ended, one line per process: the first
  * after the shell's voice, the rest indented after a `|`, each status the
  * process before gave left blank. Empty unless a signal ended the last
@@ -129,8 +157,8 @@ export function signalReport(
   foreground: boolean,
 ): string {
   const signal = processes[processes.length - 1]?.[2] ?? null
-  if (signal === null || UNREPORTED_SIGNALS.has(signal)) return ''
   if (signal === SIGTERM) return foreground ? 'Terminated\n' : ''
+  if (!signalReported(signal)) return ''
   const lines: string[] = []
   let before: string | null = null
   for (const [pid, code, ended, command] of processes) {

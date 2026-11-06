@@ -109,6 +109,7 @@ import { type StatusWriter, ExecutionNode } from '../types.ts'
 import { newStatusWriter } from '../abort.ts'
 import { failureResult, isControlFlowError, placementRefused } from './failure.ts'
 import { ended, isUnwinding } from '../executor/control.ts'
+import { startShell } from '../executor/jobs.ts'
 import { finishShell, inheritTraps } from '../executor/traps.ts'
 import { expandingAliases } from '../executor/builtins/alias/index.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
@@ -848,33 +849,24 @@ async function runPreparedLine(
                   ? abort.signal
                   : AbortSignal.any([innerOpts.signal, abort.signal])
               const done: IOResult[] = []
-              let process: ProcessHandle
-              try {
-                process = (innerOpts.jobTable ?? env.jobTable).processes.start({
-                  sessionId: session.sessionId,
-                  command: cmd,
-                  cwd: PathSpec.fromStrPath(session.cwd),
-                  parentPid: session.processId,
-                  cancel: () => {
-                    abort.abort()
-                  },
-                  limit: session.processes.max,
-                  started: (forked) => {
-                    session.processId = forked.info.pid
-                    innerContext.frame.shell = forked
-                  },
-                  ignores: SHELL_IGNORED_SIGNALS,
-                  run: async () => {
-                    const io = await substitute()
-                    done.push(io)
-                    return io.exitCode
-                  },
-                })
-              } catch (error) {
-                if ((error as { code?: unknown }).code === 'EAGAIN')
-                  throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
-                throw error
-              }
+              const process = startShell(
+                (innerOpts.jobTable ?? env.jobTable).processes,
+                session,
+                cmd,
+                async () => {
+                  const io = await substitute()
+                  done.push(io)
+                  return io.exitCode
+                },
+                session.processId,
+                () => {
+                  abort.abort()
+                },
+                (forked) => {
+                  session.processId = forked.info.pid
+                  innerContext.frame.shell = forked
+                },
+              )
               const code = await process.reap(opts.signal ?? null)
               const io = done[0] ?? new IOResult({ exitCode: code })
               await waits.join(rest)

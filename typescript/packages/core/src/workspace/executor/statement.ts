@@ -190,9 +190,7 @@ export function forks(
   if (command?.type !== NT.COMMAND) return command?.type === NT.SUBSHELL
   const found = invoked(command, words)
   if (found === null) return false
-  const [rest, functions] = found
-  const name = rest[0]
-  if (name === undefined) return false
+  const [name, functions] = found
   return (
     name === null ||
     (!BASH_BUILTINS.has(name) && !(functions && session.functions[name] !== undefined))
@@ -200,32 +198,36 @@ export function forks(
 }
 
 /**
- * The words a command runs once `command` and its options are read off, and
- * whether a function may answer its name (`command X` masks functions); null
- * for `command -v`, which is the builtin. Mirrors Python's _invoked.
+ * The word a command runs once `command` and its options are read off, and
+ * whether a function may answer it (`command X` masks functions); null for
+ * `command -v`, which is the builtin, and for no word left to run. Words past
+ * that one are never spelled. Mirrors Python's _invoked.
  */
 function invoked(
   command: TSNodeLike,
   words: readonly string[] | null,
-): [(string | null)[], boolean] | null {
-  let rest: (string | null)[] =
+): [string | null, boolean] | null {
+  const spelledWords: Iterator<string | null> =
     words !== null
-      ? [...words]
-      : getParts(command)
-          .filter((part) => part.type !== NT.VARIABLE_ASSIGNMENT)
-          .map(spelled)
+      ? words[Symbol.iterator]()
+      : (function* () {
+          for (const part of getParts(command)) {
+            if (part.type !== NT.VARIABLE_ASSIGNMENT) yield spelled(part)
+          }
+        })()
   let functions = true
-  while (rest[0] === 'command') {
-    rest = rest.slice(1)
+  let head = spelledWords.next()
+  while (head.done !== true && head.value === 'command') {
     functions = false
-    while (rest[0] !== undefined && (rest[0] ?? '').startsWith('-')) {
-      const option = rest[0] ?? ''
-      rest = rest.slice(1)
+    head = spelledWords.next()
+    while (head.done !== true && (head.value ?? '').startsWith('-')) {
+      const option = head.value ?? ''
+      head = spelledWords.next()
       if (option === '--') break
       if (option.includes('v') || option.includes('V')) return null
     }
   }
-  return [rest, functions]
+  return head.done === true ? null : [head.value, functions]
 }
 
 /**
@@ -235,9 +237,15 @@ function invoked(
  */
 export function nestedShell(node: TSNodeLike, session: SessionState): boolean {
   const command = node.type === NT.REDIRECTED_STATEMENT ? getRedirects(node)[0] : node
-  if (command?.type !== NT.COMMAND || !forks(command, session)) return false
-  const head = invoked(command, null)?.[0][0] ?? null
-  return head !== null && NESTED_SHELLS.has(head)
+  if (command?.type !== NT.COMMAND) return false
+  const found = invoked(command, null)
+  if (found === null) return false
+  const [name, functions] = found
+  return (
+    name !== null &&
+    NESTED_SHELLS.has(name) &&
+    !(functions && session.functions[name] !== undefined)
+  )
 }
 
 /**
@@ -525,12 +533,14 @@ export async function statementOutput(
 }
 
 /**
- * Bash's line for a write its descriptor refused, in the name of what wrote:
- * a builtin speaks in the shell's voice (`bash: line 1: echo: write error:
- * ...`), a program in its own, and so does a program `exec` ran (`program`),
- * whatever its name. Mirrors Python's write_error_line.
+ * Bash's line for a write its descriptor refused, in the name of what wrote,
+ * its command's first word: a builtin speaks in the shell's voice (`bash: line
+ * 1: echo: write error: ...`), a program in its own, and so does a program
+ * `exec` ran (`program`), whatever its name. Mirrors Python's write_error_line.
  */
-export function writeErrorLine(name: string, program = false): Uint8Array {
+export function writeErrorLine(command: string, program = false): Uint8Array {
+  const first = command.trim().split(/\s+/)[0] ?? ''
+  const name = first === '' ? 'bash' : first
   const voice = BASH_BUILTINS.has(name) && !program ? shellVoice() : ''
   return encodeText(`${voice}${name}: write error: Bad file descriptor\n`)
 }

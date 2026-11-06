@@ -116,7 +116,7 @@ from mirage.observe.context import (
 from mirage.observe.record import OpRecord
 from mirage.runtime.python.host.host_io import host_io, with_host_io
 from mirage.shell.bytes import encode_text
-from mirage.shell.constants import INTERPRETER_BUILTINS, NOT_FOUND_STATUS
+from mirage.shell.constants import NOT_FOUND_STATUS
 from mirage.shell.voice import shell_voice
 from mirage.types import (
     FileChangeKind,
@@ -155,6 +155,7 @@ from mirage.workspace.executor.command.handler import (
     mount_voice,
     run_handler,
 )
+from mirage.workspace.lookup.constants import INTERPRETER_NAMES
 from mirage.workspace.mount.constants import HANDED, STORED_OPS
 from mirage.workspace.mount.listing import (
     beyond_window,
@@ -1485,7 +1486,7 @@ class MountEntry:
                     vfs=ctx.vfs,
                     eager=not paths
                     and ctx.stdin is None
-                    and cmd_name not in INTERPRETER_BUILTINS,
+                    and cmd_name not in INTERPRETER_NAMES,
                 )
         finally:
             reset_caller(token)

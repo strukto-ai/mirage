@@ -37,11 +37,16 @@ import { encodeText } from '../../../../shell/bytes.ts'
 import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
 import {
+  CONTINUE_SIGNALS,
   NOT_FOUND_STATUS,
   SHELL_IGNORED_SIGNALS,
+  SIGCHLD,
+  SIGKILL,
   SIGNALS,
   SIGRTMAX,
   SIGRTMIN,
+  SIGSTOP,
+  STOP_SIGNALS,
   TIMEOUT_STATUS,
 } from '../../../../shell/constants.ts'
 import { STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
@@ -54,17 +59,7 @@ import { execs } from '../../../lookup/lookup.ts'
 import type { MountRegistry } from '../../../mount/registry.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
-import {
-  CONTINUE_SIGNALS,
-  FORK_FAILED,
-  SELF_KILLING_SIGNALS,
-  SIGCHLD,
-  SIGKILL,
-  SIGNAL_ALIASES,
-  SIGSTOP,
-  STOP_SIGNALS,
-  TIMEOUT_NAMES,
-} from './constants.ts'
+import { FORK_FAILED, SELF_KILLING_SIGNALS, SIGNAL_ALIASES, TIMEOUT_NAMES } from './constants.ts'
 
 const UNIT_SECONDS: Readonly<Record<string, number>> = Object.freeze({
   '': 1,

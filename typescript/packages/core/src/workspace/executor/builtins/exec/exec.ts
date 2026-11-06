@@ -559,10 +559,8 @@ export async function divertStatement(
     }
   }
   if (failed) {
-    const first = command.trim().split(/\s+/)[0]
-    const name = first === undefined || first === '' ? 'bash' : first
     io.exitCode = 1
-    const line = writeErrorLine(name)
+    const line = writeErrorLine(command)
     await routed(dispatch, session, Channel.STDERR, line, rest)
   } else if (unwritable && io.exitCode === 0 && stdoutToStderr(statement)) {
     io.exitCode = 1

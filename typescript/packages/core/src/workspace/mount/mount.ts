@@ -77,7 +77,7 @@ import {
 } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { encodeText } from '../../shell/bytes.ts'
-import { INTERPRETER_BUILTINS, NOT_FOUND_STATUS } from '../../shell/constants.ts'
+import { NOT_FOUND_STATUS } from '../../shell/constants.ts'
 import type { DirListing } from '../../types.ts'
 import {
   DEFAULT_READ_SPEC,
@@ -121,6 +121,7 @@ import {
   mountVoice,
   runHandler,
 } from '../executor/command/handler.ts'
+import { INTERPRETER_NAMES } from '../lookup/constants.ts'
 import { HANDED, STORED_OPS } from './constants.ts'
 import {
   beyondWindow,
@@ -2131,7 +2132,7 @@ export class MountEntry {
       // Deferred, so a handler that throws before it returns a promise is
       // still the runner's to word and to drop the caches after.
       (runCtx) => Promise.resolve().then(() => cmd.fn(accessor, paths, texts, runCtx)),
-      paths.length === 0 && (ctx.stdin ?? null) === null && !INTERPRETER_BUILTINS.has(cmdName),
+      paths.length === 0 && (ctx.stdin ?? null) === null && !INTERPRETER_NAMES.has(cmdName),
     )
   }
 

@@ -72,6 +72,7 @@ from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.alias import expanding_aliases
 from mirage.workspace.executor.control import UNWINDING, ended
+from mirage.workspace.executor.jobs import start_shell
 from mirage.workspace.executor.statement import (
     StatusSnapshot,
     record_status,
@@ -416,21 +417,14 @@ async def recurse(
                 session.process_id = process.info.pid
                 context.frame.shell = process
 
-            try:
-                process = opts["job_table"].processes.start(
-                    session_id=session.session_id,
-                    command=cmd,
-                    cwd=PathSpec.from_str_path(session.cwd),
-                    parent_pid=session.process_id,
-                    run=run,
-                    limit=session.processes.max,
-                    started=started,
-                    ignores=SHELL_IGNORED_SIGNALS,
-                )
-            except BlockingIOError as exc:
-                raise ExitSignal(
-                    FORK_FAILED_STATUS, stderr=FORK_FAILED
-                ) from exc
+            process = start_shell(
+                opts["job_table"].processes,
+                session,
+                cmd,
+                run,
+                session.process_id,
+                started,
+            )
             code = await process.reap()
             io = done[0] if done else IOResult(exit_code=code)
             await waits.join(rest)

@@ -712,8 +712,7 @@ class RandomReader:
         if name == LINENO:
             return str(self.session.line_number)
         if name == BASHPID:
-            session = self.session
-            return str(session.process_id or session.shell_pid or 0)
+            return str(self.session.bash_pid)
         if not self._special(name):
             return None
         if self.seeded is None:

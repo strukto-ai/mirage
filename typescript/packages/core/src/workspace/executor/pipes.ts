@@ -24,24 +24,17 @@ import type { ProcessHandle } from '../../process/handle.ts'
 import type { ProcessTable } from '../../process/table.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { isAborting } from '../../errors/fs.ts'
-import { encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { type JobConsole, JobOutput } from '../../shell/console/index.ts'
 import { PipeConsole } from '../../shell/console/pipe.ts'
 import { Channel } from '../../shell/console/types.ts'
-import {
-  FORK_FAILED,
-  FORK_FAILED_STATUS,
-  SHELL_IGNORED_SIGNALS,
-  SIGPIPE_STATUS,
-} from '../../shell/constants.ts'
+import { SIGPIPE_STATUS } from '../../shell/constants.ts'
 import { Recorder } from '../../shell/descriptors.ts'
 import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
 import { simpleCommand } from '../../shell/node_kind.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { NodeType as NT } from '../../shell/types.ts'
-import { PathSpec } from '../../types.ts'
 import { abortable, makeAbortError, mergeSignals } from '../../utils/abort.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { concat } from '../../utils/bytes.ts'
@@ -53,7 +46,7 @@ import { divertStatement, divertedFile } from './builtins/exec/index.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, ended, isUnwinding } from './control.ts'
-import { handleBackground, pump, reportReaped, runProgram } from './jobs.ts'
+import { handleBackground, pump, reportReaped, runProgram, startShell } from './jobs.ts'
 import {
   answerClosed,
   asWritten,
@@ -68,7 +61,6 @@ import {
   recording,
   recordJobs,
   recordStatus,
-  reportedCommand,
   statementOutput,
   statementStdin,
   writerForks,
@@ -212,28 +204,19 @@ export async function handlePipe(
     const isolated = () =>
       asyncContextIsolatesTasks ? runWithEvaluation(childEvaluation, run) : run()
     if (processes === undefined) return isolated()
-    let process: ProcessHandle
-    try {
-      process = processes.start({
-        sessionId: session.sessionId,
-        command: cmd.text,
-        cwd: PathSpec.fromStrPath(child.cwd),
-        parentPid: session.processId,
-        cancel: () => {
-          stopped.abort()
-        },
-        run: async () => {
-          await isolated()
-          return ios[i]?.exitCode ?? 0
-        },
-        limit: session.processes.max,
-        ignores: SHELL_IGNORED_SIGNALS,
-      })
-    } catch (error) {
-      if ((error as { code?: unknown }).code === 'EAGAIN')
-        throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
-      throw error
-    }
+    const process = startShell(
+      processes,
+      session,
+      cmd.text,
+      async () => {
+        await isolated()
+        return ios[i]?.exitCode ?? 0
+      },
+      session.processId,
+      () => {
+        stopped.abort()
+      },
+    )
     child.processId = process.info.pid
     stages[i] = process
     childEvaluation.frame.shell = shellStage(cmd, session) ? null : process
@@ -283,12 +266,10 @@ export async function handlePipe(
   // `${PIPESTATUS[@]}`: the raw per-segment statuses, before pipefail
   // rewrites the pipeline's own.
   session.pipeStatusPending = ios.map((io) => io.exitCode)
-  const waited: [number, number, number | null, string][] = []
+  const waited: [ProcessHandle, number, TSNodeLike][] = []
   commands.forEach((cmd, i) => {
     const stage = stages[i]
-    if (stage !== null && stage !== undefined) {
-      waited.push([stage.info.pid, ios[i]?.exitCode ?? 0, stage.endedBy, reportedCommand(cmd)])
-    }
+    if (stage !== null && stage !== undefined) waited.push([stage, ios[i]?.exitCode ?? 0, cmd])
   })
   if (waited.length > 0) reportReaped(context.frame, waited)
   if (session.shellOptions.pipefail === true) {

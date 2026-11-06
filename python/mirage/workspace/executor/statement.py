@@ -243,10 +243,9 @@ def forks(
     if command is None or command.type != NT.COMMAND:
         return command is not None and command.type == NT.SUBSHELL
     invoked = _invoked(command, words)
-    if invoked is None or not invoked[0]:
+    if invoked is None:
         return False
-    rest, functions = invoked
-    name = rest[0]
+    name, functions = invoked
     return name is None or (
         name not in BASH_BUILTINS
         and not (functions and name in session.functions)
@@ -255,35 +254,42 @@ def forks(
 
 def _invoked(
     command: TSNodeLike, words: Sequence[str] | None
-) -> tuple[list[str | None], bool] | None:
-    """The words a command runs once ``command`` and its options are read
-    off, and whether a function may answer its name (``command X`` masks
-    functions); None for ``command -v``, which is the builtin.
+) -> tuple[str | None, bool] | None:
+    """The word a command runs once ``command`` and its options are read
+    off, and whether a function may answer it (``command X`` masks
+    functions); None for ``command -v``, which is the builtin, and for
+    no word left to run. Words past that one are never spelled.
 
     Args:
         command (TSNodeLike): the command.
         words (Sequence[str] | None): what its words expanded to, its name
             first, once they have.
     """
-    rest: list[str | None] = (
-        list(words)
-        if words is not None
-        else [
-            _spelled(part)
-            for part in get_parts(command)
-            if part.type != NT.VARIABLE_ASSIGNMENT
-        ]
+    spelled = (
+        (word,)
+        for word in (
+            words
+            if words is not None
+            else (
+                _spelled(part)
+                for part in get_parts(command)
+                if part.type != NT.VARIABLE_ASSIGNMENT
+            )
+        )
     )
     functions = True
-    while rest and rest[0] == "command":
-        rest, functions = rest[1:], False
-        while rest and (rest[0] or "").startswith("-"):
-            option = rest.pop(0) or ""
+    head = next(spelled, None)
+    while head is not None and head[0] == "command":
+        functions = False
+        head = next(spelled, None)
+        while head is not None and (head[0] or "").startswith("-"):
+            option = head[0] or ""
+            head = next(spelled, None)
             if option == "--":
                 break
             if "v" in option or "V" in option:
                 return None
-    return rest, functions
+    return None if head is None else (head[0], functions)
 
 
 def nested_shell(node: TSNodeLike, session: SessionState) -> bool:
@@ -300,14 +306,15 @@ def nested_shell(node: TSNodeLike, session: SessionState) -> bool:
         if node.type == NT.REDIRECTED_STATEMENT
         else node
     )
-    if (
-        command is None
-        or command.type != NT.COMMAND
-        or not forks(command, session)
-    ):
+    if command is None or command.type != NT.COMMAND:
         return False
     invoked = _invoked(command, None)
-    return invoked is not None and invoked[0][0] in NESTED_SHELLS
+    if invoked is None:
+        return False
+    name, functions = invoked
+    return name in NESTED_SHELLS and not (
+        functions and name in session.functions
+    )
 
 
 def redirected_body(node: TSNodeLike) -> bool:
@@ -671,16 +678,19 @@ async def statement_output(
     return written
 
 
-def write_error_line(name: str, program: bool = False) -> bytes:
+def write_error_line(command: str, program: bool = False) -> bytes:
     """Bash's line for a write its descriptor refused, in the name of
-    what wrote: a builtin speaks in the shell's voice (``bash: line 1:
-    echo: write error: ...``), a program in its own.
+    what wrote, its command's first word: a builtin speaks in the
+    shell's voice (``bash: line 1: echo: write error: ...``), a program
+    in its own.
 
     Args:
-        name (str): the writer, the first word of its command.
+        command (str): the writer's command.
         program (bool): the writer is a program ``exec`` ran, which
             speaks in its own voice whatever its name.
     """
+    words = command.split()
+    name = words[0] if words else "bash"
     voice = shell_voice() if name in BASH_BUILTINS and not program else ""
     return encode_text(f"{voice}{name}: write error: Bad file descriptor\n")
 

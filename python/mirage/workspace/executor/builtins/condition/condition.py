@@ -16,6 +16,7 @@ from mirage.commands.builtin.utils.links import link_view
 from mirage.context import (
     program_invocation,
     reset_admission,
+    session_voice,
     set_admission,
 )
 from mirage.io import IOResult
@@ -114,8 +115,8 @@ async def handle_test(
         # The builtin's own diagnostic is in bash's voice; the program
         # (`find -exec test`) keeps its bare one.
         message = err.message
-        if message.startswith(f"{name}: ") and not program_invocation(session):
-            message = f"{shell_voice()}{message}"
+        if message.startswith(f"{name}: "):
+            message = f"{session_voice(session)}{message}"
         stderr = encode_text(message + "\n")
         if name == "[[" and err.fatal:
             # A bad [[ ]] operator is a bash PARSE error: the whole

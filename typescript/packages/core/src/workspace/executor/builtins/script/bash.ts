@@ -23,27 +23,19 @@ import {
 import { yieldBytes } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
-import type { ProcessHandle } from '../../../../process/handle.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
 import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
-import {
-  FORK_FAILED,
-  FORK_FAILED_STATUS,
-  SET_OPTION_NAMES,
-  SHELL_IGNORED_SIGNALS,
-} from '../../../../shell/constants.ts'
+import { SET_OPTION_NAMES } from '../../../../shell/constants.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
 import type { JobTable } from '../../../../shell/job_table/index.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
-import { PathSpec } from '../../../../types.ts'
 import { EvaluationContext } from '../../../evaluation.ts'
 import { setPositionalParams } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { ended } from '../../control.ts'
-import { reportReaped } from '../../jobs.ts'
-import { reportedCommand } from '../../statement.ts'
+import { reportReaped, startShell } from '../../jobs.ts'
 import { clearTraps, finishShell } from '../../traps.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 import { BASH_LONG_OPTIONS, BASH_START_FLAGS, BASH_UNSUPPORTED_LONG_OPTIONS } from './constants.ts'
@@ -301,37 +293,28 @@ async function inProcess(
   const outer = context.frame.abortSignal
   const stops = outer === null ? abort.signal : AbortSignal.any([outer, abort.signal])
   let ran: IOResult | undefined
-  let process: ProcessHandle
-  try {
-    process = jobTable.processes.start({
-      sessionId: session.sessionId,
-      command: label,
-      cwd: PathSpec.fromStrPath(session.cwd),
-      parentPid,
-      cancel: () => {
-        abort.abort()
-      },
-      limit: session.processes.max,
-      started: (forked) => {
-        session.processId = session.shellPid = forked.info.pid
-        context.frame.shell = forked
-      },
-      ignores: SHELL_IGNORED_SIGNALS,
-      run: async () => {
-        ran = await run(stops)
-        return ran.exitCode
-      },
-    })
-  } catch (error) {
-    if ((error as { code?: unknown }).code === 'EAGAIN')
-      throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
-    throw error
-  }
+  const process = startShell(
+    jobTable.processes,
+    session,
+    label,
+    async () => {
+      ran = await run(stops)
+      return ran.exitCode
+    },
+    parentPid,
+    () => {
+      abort.abort()
+    },
+    (forked) => {
+      session.processId = session.shellPid = forked.info.pid
+      context.frame.shell = forked
+    },
+  )
   const code = await process.reap(outer)
   // A program that runs it (`xargs sh -c`) is its parent, not the shell.
   const node = caller.session.lineNode
   if (node !== null && !isProgramInvocation(caller.session)) {
-    reportReaped(caller.frame, [[process.info.pid, code, process.endedBy, reportedCommand(node)]])
+    reportReaped(caller.frame, [[process, code, node]])
   }
   return ran ?? new IOResult({ exitCode: code })
 }

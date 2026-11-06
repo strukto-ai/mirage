@@ -1276,12 +1276,9 @@ function redirectErrorLine(scope: PathSpec, err: unknown): Uint8Array {
  * the command, or the program an `exec` in it replaced the shell with.
  */
 function closedWriteLine(command: TSNodeLike, unwound: Unwinding | null = null): Uint8Array {
-  const words = getText(command)
-    .split(/\s+/)
-    .filter((w) => w !== '')
   if (unwound instanceof ExitSignal && unwound.replaced !== null)
     return writeErrorLine(unwound.replaced, true)
-  return writeErrorLine(words[0] ?? 'redirect')
+  return writeErrorLine(getText(command))
 }
 
 /** Shell-attributed IOResult for a redirect target that cannot be opened. */

@@ -20,8 +20,8 @@ import {
   type Caller,
   currentCaller,
   getCurrentEvaluation,
-  isProgramInvocation,
   runWithCaller,
+  sessionVoice,
 } from '../../context/session_context.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { holdInputs, type SharedInput } from '../../io/async_line_iterator.ts'
@@ -32,7 +32,9 @@ import { IOResult } from '../../io/types.ts'
 import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
 import { type Decisions, isPending } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
-import type { ProcessInfo, ProcessState } from '../../process/types.ts'
+import type { ProcessHandle } from '../../process/handle.ts'
+import type { ProcessTable } from '../../process/table.ts'
+import type { ProcessInfo, ProcessRunner, ProcessState } from '../../process/types.ts'
 import type { ProcessView } from '../../process/view.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { concat } from '../../utils/bytes.ts'
@@ -40,15 +42,25 @@ import { CallStack } from '../../shell/call_stack.ts'
 import { Channel, JobConsole, JobOutput, type OwnedStream, Tee } from '../../shell/console/index.ts'
 import { PipeConsole } from '../../shell/console/pipe.ts'
 import {
+  CONTINUE_SIGNALS,
   FD_BOTH,
   FD_CLOSE,
   FORK_FAILED,
   FORK_FAILED_STATUS,
   NOT_FOUND_STATUS,
-  SIGRTMAX,
+  SHELL_IGNORED_SIGNALS,
+  SIGSTOP,
+  SIGTERM,
+  STOP_SIGNALS,
   TIMEOUT_STATUS,
 } from '../../shell/constants.ts'
-import { signalName, signalNumber, signalReport, signalTable } from '../../shell/signals.ts'
+import {
+  listedSignal,
+  signalNumber,
+  signalReport,
+  signalReported,
+  signalTable,
+} from '../../shell/signals.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
 import { ENDING_SIGNALS, STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
@@ -80,6 +92,7 @@ import {
   forks,
   nestedShell,
   recordStatus,
+  reportedCommand,
   statementStdin,
 } from './statement.ts'
 import { inheritTraps } from './traps.ts'
@@ -257,8 +270,9 @@ function forked(node: TSNodeLike | null, session: SessionState): boolean {
  * (`sleep 3`) runs where a signal the shell ignores still stops it, whole, as
  * bash forks each with that signal back at its default: QUIT, which every
  * shell ignores, and INT, which a background job's does. The statement ends
- * with 128 plus the signal, and the shell goes on. Mirrors Python's
- * run_program.
+ * with 128 plus the signal, and the shell goes on. A native program's signal
+ * (`programSignaled`) counts for the statement that ran it only. Mirrors
+ * Python's run_program.
  */
 export async function runProgram(
   node: TSNodeLike,
@@ -267,6 +281,7 @@ export async function runProgram(
   jobTable: JobTable | null = null,
   sink: JobConsole | null = null,
 ): Promise<RedirectResult> {
+  currentCaller().process?.programSignaled(null)
   const shell = context.frame.shell
   if (shell === null || !forked(node, context.session)) return run()
   const outer = context.frame.abortSignal
@@ -361,16 +376,56 @@ export function reportJobs(context: EvaluationContext, jobTable: JobTable | null
 /**
  * Queue bash's report of a child its shell waited for that a signal ended
  * (`signalReport`), empty when it prints none, to follow the reaping
- * command's stderr with those of the shell's jobs. Each process is its pid,
- * status, the signal that ended it and command. Mirrors Python's
+ * command's stderr with those of the shell's jobs. Each entry is a process
+ * of the child, its status and the command it ran. Mirrors Python's
  * report_reaped.
  */
 export function reportReaped(
   frame: ExecutionFrame,
-  processes: readonly (readonly [number, number, number | null, string])[],
+  reaped: readonly (readonly [ProcessHandle, number, TSNodeLike])[],
 ): void {
-  if (!frame.substitution)
-    frame.reports.push(encodeText(signalReport(shellVoice(), processes, true)))
+  if (frame.substitution) return
+  const listed = signalReported(reaped[reaped.length - 1]?.[0].endedBy ?? null)
+  const processes = reaped.map(
+    ([process, code, node]) =>
+      [process.info.pid, code, process.endedBy, listed ? reportedCommand(node) : ''] as const,
+  )
+  frame.reports.push(encodeText(signalReport(shellVoice(), processes, true)))
+}
+
+/**
+ * Start a shell the running one forks (a subshell, a pipeline stage, a
+ * command substitution, a nested shell): a process in its session's
+ * directory that ignores the signals every shell does. A fork past the
+ * session's process limit fails as bash's does. Mirrors Python's
+ * start_shell.
+ */
+export function startShell(
+  processes: ProcessTable,
+  session: SessionState,
+  command: string,
+  run: ProcessRunner,
+  parentPid: number | null,
+  cancel: () => void,
+  started?: (process: ProcessHandle) => void,
+): ProcessHandle {
+  try {
+    return processes.start({
+      sessionId: session.sessionId,
+      command,
+      cwd: PathSpec.fromStrPath(session.cwd),
+      run,
+      cancel,
+      parentPid,
+      limit: session.processes.max,
+      ...(started === undefined ? {} : { started }),
+      ignores: SHELL_IGNORED_SIGNALS,
+    })
+  } catch (error) {
+    if ((error as { code?: unknown }).code === 'EAGAIN')
+      throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
+    throw error
+  }
 }
 
 export async function handleBackground(
@@ -1126,16 +1181,13 @@ export async function handleFg(
 // ignore them, and the terminal stops a non-interactive bash's asynchronous
 // commands ignore; kill answers for them as for the probe (0). Mirrors
 // Python's _KEPT_SIGNALS.
-const KEPT_SIGNALS: ReadonlySet<number> = new Set([0, 17, 18, 20, 21, 22, 23, 28])
-
-// STOP, which suspends a process; a managed runner cannot be suspended.
-const SIGSTOP = 19
+const KEPT_SIGNALS: ReadonlySet<number> = new Set(
+  [...CONTINUE_SIGNALS, ...STOP_SIGNALS].filter((signal) => signal !== SIGSTOP),
+)
 
 // The largest PID operand kill and ps read as a number: the bound both hosts
 // hold exactly (bash's own is intmax_t).
 const MAX_PID_OPERAND = Number.MAX_SAFE_INTEGER
-
-const LISTED_NUMBER = /^\s*\+?([0-9]+)$/
 
 /**
  * `kill -l`: the signal table, or each operand's name for a number (a `$?`
@@ -1153,22 +1205,9 @@ function killList(cmdStr: string, operands: string[], voice: string): RedirectRe
   const lines: string[] = []
   const errors: string[] = []
   for (const word of words) {
-    // eslint-disable-next-line no-control-regex
-    const number = /^[\x00-\x7f]*$/.test(word) ? LISTED_NUMBER.exec(word) : null
-    if (number === null) {
-      const value = signalNumber(word)
-      if (value === null) errors.push(`${voice}kill: ${word}: invalid signal specification`)
-      else lines.push(String(value))
-      continue
-    }
-    let value = Number(number[1])
-    if (value > 128 && value <= 128 + SIGRTMAX) value -= 128
-    else if (value > SIGRTMAX) {
-      errors.push(`${voice}kill: ${word}: invalid signal specification`)
-      continue
-    }
-    const name = value === 0 ? 'EXIT' : signalName(value)
-    if (name !== null) lines.push(name)
+    const line = listedSignal(word)
+    if (line === null) errors.push(`${voice}kill: ${word}: invalid signal specification`)
+    else if (line !== '') lines.push(line)
   }
   const code = errors.length > 0 ? 1 : 0
   const err = encodeText(errors.map((line) => `${line}\n`).join(''))
@@ -1227,11 +1266,11 @@ export async function handleKill(
 ): Promise<RedirectResult> {
   const cmdStr = parts.join(' ')
   const sid = sessionOf(session)
-  let signal = 15
+  let signal = SIGTERM
   let words = parts.slice(1)
   let sawSignal = false
   // The program (`xargs kill`) keeps its bare voice.
-  const voice = session !== null && isProgramInvocation(session) ? '' : shellVoice()
+  const voice = session === null ? shellVoice() : sessionVoice(session)
   if (words[0] === '-l' || words[0] === '-L') return killList(cmdStr, words.slice(1), voice)
   while (words.length > 0) {
     const word = words[0] ?? ''

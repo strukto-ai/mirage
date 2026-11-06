@@ -747,8 +747,7 @@ async def divert_statement(
             failed = failed or channel == Channel.STDOUT
             unwritable = unwritable or channel == Channel.STDERR
     if failed:
-        words = command.split()
-        line = write_error_line(words[0] if words else "bash")
+        line = write_error_line(command)
         io.exit_code = 1
         await _routed(dispatch, session, Channel.STDERR, line, rest)
     elif unwritable and io.exit_code == 0 and _stdout_to_stderr(statement):

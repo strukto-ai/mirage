@@ -17,7 +17,6 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.commands.builtin.utils.strtol import atoi
-from mirage.context import current_caller
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, line_buffer
 from mirage.io.stream import async_chain
@@ -105,9 +104,6 @@ async def execute_body(
         if cmd.type == NT.COMMENT:
             continue
         armed = err_trap_armed(session)
-        runner = current_caller().process
-        if runner is not None:
-            runner.program_signaled(None)
 
         async def statement() -> tuple[
             ByteSource | None, IOResult, ExecutionNode
@@ -133,10 +129,8 @@ async def execute_body(
                 # A write an `exec` in the body sent where no write goes
                 # (`exec 1<f`) fails the statement that made it.
                 sink.refused = False
-                words = (last_exec.command or "").split()
                 await sink.emit(
-                    Channel.STDERR,
-                    write_error_line(words[0] if words else "bash"),
+                    Channel.STDERR, write_error_line(last_exec.command or "")
                 )
                 io.exit_code = 1
                 record_status(session, 1)

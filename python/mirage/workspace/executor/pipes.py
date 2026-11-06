@@ -38,9 +38,6 @@ from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.console.types import Channel
 from mirage.shell.constants import (
-    FORK_FAILED,
-    FORK_FAILED_STATUS,
-    SHELL_IGNORED_SIGNALS,
     SIGPIPE_STATUS,
 )
 from mirage.shell.descriptors import Recorder
@@ -49,7 +46,6 @@ from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.node_kind import simple_command
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
-from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.exec import (
     divert_statement,
@@ -61,6 +57,7 @@ from mirage.workspace.executor.jobs import (
     pump,
     report_reaped,
     run_program,
+    start_shell,
 )
 from mirage.workspace.executor.statement import (
     answer_closed,
@@ -76,7 +73,6 @@ from mirage.workspace.executor.statement import (
     record_jobs,
     record_status,
     recording,
-    reported_command,
     statement_output,
     statement_stdin,
     writer_forks,
@@ -245,20 +241,13 @@ async def handle_pipe(
             if processes is None:
                 tasks.append(asyncio.create_task(run_segment(i, cmd)))
                 continue
-            try:
-                process = processes.start(
-                    session_id=session.session_id,
-                    command=decode_text(cmd.text or b""),
-                    cwd=PathSpec.from_str_path(session.cwd),
-                    parent_pid=session.process_id,
-                    run=partial(run_segment, i, cmd),
-                    limit=session.processes.max,
-                    ignores=SHELL_IGNORED_SIGNALS,
-                )
-            except BlockingIOError as exc:
-                raise ExitSignal(
-                    FORK_FAILED_STATUS, stderr=FORK_FAILED
-                ) from exc
+            process = start_shell(
+                processes,
+                session,
+                decode_text(cmd.text or b""),
+                partial(run_segment, i, cmd),
+                session.process_id,
+            )
             children[i].session.process_id = process.info.pid
             stages[i] = process
             children[i].frame.shell = (
@@ -303,7 +292,7 @@ async def handle_pipe(
     # rewrites the pipeline's own.
     session._pipe_status_pending = tuple(io.exit_code for io in ios)
     waited = [
-        (stage.info.pid, io.exit_code, stage.ended_by, reported_command(cmd))
+        (stage, io.exit_code, cmd)
         for stage, io, cmd in zip(stages, ios, commands)
         if stage is not None
     ]

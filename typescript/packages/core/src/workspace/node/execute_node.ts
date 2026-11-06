@@ -38,12 +38,7 @@ import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
-import {
-  FORK_FAILED,
-  FORK_FAILED_STATUS,
-  SHELL_IGNORED_SIGNALS,
-  SIGPIPE_STATUS,
-} from '../../shell/constants.ts'
+import { SIGPIPE_STATUS } from '../../shell/constants.ts'
 import { ArithError, ExitSignal, PipeClosed, ReadonlyVariableError } from '../../shell/errors.ts'
 import {
   commandRedirects,
@@ -70,7 +65,6 @@ import { NodeKind, nodeKind, pipelineTransparent } from '../../shell/node_kind.t
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { NodeType as NT, type PipelineStages, Redirect, RedirectKind } from '../../shell/types.ts'
-import { PathSpec } from '../../types.ts'
 import { makeAbortError, mergeSignals } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
 import type { SessionView } from '../../view/types.ts'
@@ -95,7 +89,7 @@ import {
   LoopSignal,
   trailed,
 } from '../executor/control.ts'
-import { drained, reportJobs, reportReaped, tell } from '../executor/jobs.ts'
+import { drained, reportJobs, reportReaped, startShell, tell } from '../executor/jobs.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
 import { handleRedirect } from '../executor/redirect.ts'
 import {
@@ -105,7 +99,6 @@ import {
   nestedShell,
   recordStatus,
   redirectedBody,
-  reportedCommand,
 } from '../executor/statement.ts'
 import { endShell } from '../executor/traps.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
@@ -1411,28 +1404,19 @@ async function executeNodeBody(
       const code = await run()
       return subshellRan ?? result(getText(node), { exitCode: code })
     }
-    let process: ProcessHandle
-    try {
-      process = subTable.processes.start({
-        sessionId: session.sessionId,
-        command: node.text,
-        cwd: PathSpec.fromStrPath(session.cwd),
-        parentPid: session.processId,
-        cancel: () => {
-          abort.abort()
-        },
-        limit: session.processes.max,
-        started: forked,
-        ignores: SHELL_IGNORED_SIGNALS,
-        run,
-      })
-    } catch (error) {
-      if ((error as { code?: unknown }).code === 'EAGAIN')
-        throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
-      throw error
-    }
+    const process = startShell(
+      subTable.processes,
+      session,
+      node.text,
+      run,
+      session.processId,
+      () => {
+        abort.abort()
+      },
+      forked,
+    )
     const code = await process.reap(mergeSignals(deps.signal, context.frame.abortSignal) ?? null)
-    reportReaped(context.frame, [[process.info.pid, code, process.endedBy, reportedCommand(node)]])
+    reportReaped(context.frame, [[process, code, node]])
     return subshellRan ?? result(getText(node), { exitCode: code })
   }
 

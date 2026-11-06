@@ -53,9 +53,6 @@ from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import (
-    FORK_FAILED,
-    FORK_FAILED_STATUS,
-    SHELL_IGNORED_SIGNALS,
     SIGPIPE_STATUS,
 )
 from mirage.shell.errors import ArithError, ExitSignal, ReadonlyVariableError
@@ -117,6 +114,7 @@ from mirage.workspace.executor.jobs import (
     drained,
     report_jobs,
     report_reaped,
+    start_shell,
     tell,
 )
 from mirage.workspace.executor.pipes import (
@@ -132,7 +130,6 @@ from mirage.workspace.executor.statement import (
     nested_shell,
     record_status,
     redirected_body,
-    reported_command,
 )
 from mirage.workspace.executor.traps import end_shell
 from mirage.workspace.expand import (
@@ -1506,31 +1503,16 @@ async def _execute_node(
             forked(owner)
             await run_subshell()
             return results[0]
-        try:
-            process = sub_table.processes.start(
-                session_id=session.session_id,
-                command=get_text(node),
-                cwd=PathSpec.from_str_path(session.cwd),
-                parent_pid=session.process_id,
-                run=run_subshell,
-                limit=session.processes.max,
-                started=forked,
-                ignores=SHELL_IGNORED_SIGNALS,
-            )
-        except BlockingIOError as exc:
-            raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
-        code = await process.reap()
-        report_reaped(
-            context.frame,
-            [
-                (
-                    process.info.pid,
-                    code,
-                    process.ended_by,
-                    reported_command(node),
-                )
-            ],
+        process = start_shell(
+            sub_table.processes,
+            session,
+            get_text(node),
+            run_subshell,
+            session.process_id,
+            forked,
         )
+        code = await process.reap()
+        report_reaped(context.frame, [(process, code, node)])
         if results:
             return results[0]
         return result(get_text(node), exit_code=code)

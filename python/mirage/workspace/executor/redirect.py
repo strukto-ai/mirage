@@ -1594,8 +1594,7 @@ def _closed_write_line(
     """
     if isinstance(unwound, ExitSignal) and unwound.replaced is not None:
         return write_error_line(unwound.replaced, program=True)
-    words = get_text(command).split()
-    return write_error_line(words[0] if words else "redirect")
+    return write_error_line(get_text(command))
 
 
 def _redirect_failure(

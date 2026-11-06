@@ -529,7 +529,7 @@ export class RandomReader {
   /** The dynamic value of a name, null for a name that has none. */
   readonly read = (name: string): string | null => {
     if (name === LINENO) return String(this.session.lineNumber)
-    if (name === BASHPID) return String(this.session.processId ?? this.session.shellPid ?? 0)
+    if (name === BASHPID) return String(this.session.bashPid)
     if (!this.special(name)) return null
     if (this.seeded === null) {
       const value = nextRandom(this.session, visibleEnv(this.session)[name])

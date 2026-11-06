@@ -822,12 +822,6 @@ export class SessionState {
   }
 
   /**
-   * What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
-   * sets it to the script it is running, or to the name given after
-   * `-c`. An empty name is a name, so it is not folded into the default:
-   * GNU `bash -c 'echo "[$0]"' ""` prints `[]`.
-   */
-  /**
    * The line of the command running, `$LINENO`: its row in the text that
    * spelled it, numbered on from where that text's parse starts (`lineRow`).
    */
@@ -835,6 +829,20 @@ export class SessionState {
     return this.lineRow + (this.lineNode === null ? 0 : sourceRow(this.lineNode)) + 1
   }
 
+  /**
+   * The process running the command, `$BASHPID`: the subshell, stage or
+   * substitution it runs in, else the shell itself. Mirrors Python's bash_pid.
+   */
+  get bashPid(): number {
+    return this.processId ?? this.shellPid ?? 0
+  }
+
+  /**
+   * What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
+   * sets it to the script it is running, or to the name given after
+   * `-c`. An empty name is a name, so it is not folded into the default:
+   * GNU `bash -c 'echo "[$0]"' ""` prints `[]`.
+   */
   get argv0(): string {
     return this.scriptName ?? SHELL_ARGV0
   }

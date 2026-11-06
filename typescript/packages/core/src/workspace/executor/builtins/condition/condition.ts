@@ -15,7 +15,11 @@
 import { shellVoice } from '../../../../shell/voice.ts'
 import { linkView } from '../../../../commands/builtin/utils/links.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { isProgramInvocation, runWithAdmission } from '../../../../context/session_context.ts'
+import {
+  isProgramInvocation,
+  runWithAdmission,
+  sessionVoice,
+} from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
@@ -99,8 +103,8 @@ export async function handleTest(
     if (!(exc instanceof CondError)) throw exc
     // The builtin's own diagnostic is in bash's voice; the program
     // (`find -exec test`) keeps its bare one.
-    const own = exc.message.startsWith(`${name}: `) && !isProgramInvocation(session)
-    const stderr = encodeText(`${own ? shellVoice() : ''}${exc.message}\n`)
+    const own = exc.message.startsWith(`${name}: `)
+    const stderr = encodeText(`${own ? sessionVoice(session) : ''}${exc.message}\n`)
     if (name === '[[' && exc.fatal) {
       // A bad [[ ]] operator is a bash PARSE error: the whole input
       // line dies, not just this command.

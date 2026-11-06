@@ -91,6 +91,27 @@ def signal_number(spec: str) -> int | None:
     return None
 
 
+def listed_signal(word: str) -> str | None:
+    """What ``kill -l`` prints for one operand: a number's name (one of
+    128 plus a signal names that signal, as a ``$?`` does), empty for a
+    number naming nothing (32 and 33), a name's number; None for a word
+    that names no signal.
+
+    Args:
+        word (str): the operand as typed.
+    """
+    number = _NUMBER.fullmatch(word) if word.isascii() else None
+    if number is None:
+        value = signal_number(word)
+        return None if value is None else str(value)
+    value = int(number.group(1))
+    if 128 < value <= 128 + SIGRTMAX:
+        value -= 128
+    elif value > SIGRTMAX:
+        return None
+    return "EXIT" if value == 0 else signal_name(value) or ""
+
+
 def signal_description(number: int) -> str | None:
     """How bash's report line names a signal that ended a command, None
     for one whose default never ends a process.
@@ -136,6 +157,21 @@ def _process_status(code: int, signal: int | None) -> str:
     return "Done" if code == 0 else f"Exit {code}"
 
 
+def signal_reported(signal: int | None) -> bool:
+    """Whether bash's report of a job lists its processes: a signal
+    other than INT, PIPE and TERM ended its last one.
+
+    Args:
+        signal (int | None): the signal that ended the last process,
+            None for an exit.
+    """
+    return (
+        signal is not None
+        and signal not in UNREPORTED_SIGNALS
+        and signal != SIGTERM
+    )
+
+
 def signal_report(
     voice: str,
     processes: Sequence[tuple[int, int, int | None, str]],
@@ -155,10 +191,10 @@ def signal_report(
         foreground (bool): the shell waited for the job as it ran.
     """
     signal = processes[-1][2]
-    if signal is None or signal in UNREPORTED_SIGNALS:
-        return ""
     if signal == SIGTERM:
         return "Terminated\n" if foreground else ""
+    if not signal_reported(signal):
+        return ""
     lines = []
     before = None
     for pid, code, ended, command in processes:

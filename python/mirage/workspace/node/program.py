@@ -213,9 +213,6 @@ async def _statement(
         call_stack (CallStack | None): the program's frames.
         recorder (StatementRecorder): where it writes as it runs.
     """
-    runner = current_caller().process
-    if runner is not None:
-        runner.program_signaled(None)
     with recording(recorder):
         stdout, io, ran = await recurse(
             child, context, stdin, call_stack, sink=recorder

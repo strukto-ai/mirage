@@ -90,7 +90,6 @@ async function statement(
   callStack: CallStack | null,
   recorder: StatementRecorder,
 ): Promise<RedirectResult> {
-  currentCaller().process?.programSignaled(null)
   return drained(
     await recording(recorder, () => recurse(child, context, stdin, callStack, { sink: recorder })),
   )

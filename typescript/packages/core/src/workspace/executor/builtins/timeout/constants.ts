@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { SIGKILL } from '../../../../shell/constants.ts'
+
 // The other names GNU timeout 9.7 takes for -s, by the number
 // `timeout -v -s NAME` then reports sending. bash refuses them all.
 export const SIGNAL_ALIASES: ReadonlyMap<string, number> = new Map([
@@ -26,18 +28,6 @@ export const TIMEOUT_NAMES: ReadonlyMap<number, string> = new Map([
   [0, 'EXIT'],
   [29, 'POLL'],
 ])
-
-export const SIGKILL = 9
-export const SIGCHLD = 17
-export const SIGSTOP = 19
-
-// Signals whose default action leaves a process running: the command
-// carries on past the deadline.
-export const CONTINUE_SIGNALS: ReadonlySet<number> = new Set([0, SIGCHLD, 18, 23, 28])
-
-// The job-control stops. timeout sends CONT after them unless run with
-// --foreground, so there only the command stays stopped.
-export const STOP_SIGNALS: ReadonlySet<number> = new Set([SIGSTOP, 20, 21, 22])
 
 // What timeout says, exiting 125, when its session already holds
 // `processes.max` and the command cannot start.

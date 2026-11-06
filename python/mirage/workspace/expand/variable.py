@@ -336,7 +336,7 @@ def _lookup_var(
     if var == LINENO:
         return str(session.line_number)
     if var == BASHPID:
-        return str(session.process_id or session.shell_pid or 0)
+        return str(session.bash_pid)
     arrays = visible_arrays(session)
     if var in arrays:
         return array_get(arrays[var], 0)
@@ -1322,7 +1322,7 @@ async def _expand_braces(
             val = str(session.line_number)
             var_in_env = True
         if not var_in_env and p.var_name == BASHPID:
-            val = str(session.process_id or session.shell_pid or 0)
+            val = str(session.bash_pid)
             var_in_env = True
         if not var_in_env and p.var_name in env:
             val = env[p.var_name]

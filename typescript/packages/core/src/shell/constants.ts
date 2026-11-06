@@ -433,16 +433,11 @@ export const GRAMMAR_BUILTINS: ReadonlySet<ShellBuiltin> = new Set<ShellBuiltin>
   [...BUILTIN_GROUP].filter(([, g]) => GROUP_TIER.get(g) === BuiltinTier.GRAMMAR).map(([b]) => b),
 )
 
-export const INTERPRETER_BUILTINS: ReadonlySet<string> = new Set<string>(
-  [...BUILTIN_GROUP].filter(([, g]) => g === BuiltinGroup.INTERPRETERS).map(([b]) => b),
-)
-
 // The commands that start a shell of their own, a process whose own programs
 // a signal it ignores still reaches. Mirrors Python's NESTED_SHELLS.
-export const NESTED_SHELLS: ReadonlySet<string> = new Set<string>([
-  ShellBuiltin.BASH,
-  ShellBuiltin.SH,
-])
+export const NESTED_SHELLS: ReadonlySet<string> = new Set<string>(
+  [...BUILTIN_GROUP].filter(([, g]) => g === BuiltinGroup.NESTED_SHELLS).map(([b]) => b),
+)
 
 // What every bash ignores, interactive or not: a QUIT stops the program a
 // shell runs right now, never the shell. Mirrors Python's
@@ -523,3 +518,12 @@ export const SIGNAL_DESCRIPTIONS: ReadonlyMap<number, string> = new Map([
 // PIPE end it silently, TERM as "Terminated" alone in the foreground.
 export const UNREPORTED_SIGNALS: ReadonlySet<number> = new Set([2, 13])
 export const SIGTERM = 15
+export const SIGKILL = 9
+export const SIGCHLD = 17
+export const SIGSTOP = 19
+
+// Signals whose default action leaves a process running.
+export const CONTINUE_SIGNALS: ReadonlySet<number> = new Set([0, SIGCHLD, 18, 23, 28])
+
+// The job-control stops.
+export const STOP_SIGNALS: ReadonlySet<number> = new Set([SIGSTOP, 20, 21, 22])

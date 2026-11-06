@@ -189,7 +189,7 @@ export function lookupVar(
     if (drawn !== null) return String(drawn)
   }
   if (name === LINENO) return String(session.lineNumber)
-  if (name === BASHPID) return String(session.processId ?? session.shellPid ?? 0)
+  if (name === BASHPID) return String(session.bashPid)
   // A name reference resolves to its target before the store is read.
   name = deref(session, name) || name
   const fromArray = visibleArrays(session)[name]
@@ -1191,7 +1191,7 @@ async function expandBracesIn(
       varInEnv = true
     }
     if (!varInEnv && p.varName === BASHPID) {
-      val = String(session.processId ?? session.shellPid ?? 0)
+      val = String(session.bashPid)
       varInEnv = true
     }
     if (!varInEnv && p.varName in env) {

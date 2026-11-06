@@ -44,7 +44,7 @@ export function mergeSignals(
   a: AbortSignal | null | undefined,
   b: AbortSignal | null | undefined,
 ): AbortSignal | undefined {
-  if (a != null && b != null) return AbortSignal.any([a, b])
+  if (a != null && b != null && a !== b) return AbortSignal.any([a, b])
   return a ?? b ?? undefined
 }
 

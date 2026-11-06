@@ -28,8 +28,8 @@ from mirage.context import (
     bind_caller,
     current_caller,
     get_current_evaluation,
-    program_invocation,
     reset_caller,
+    session_voice,
 )
 from mirage.errors.types import CommandTimeoutError
 from mirage.io import IOResult
@@ -40,7 +40,9 @@ from mirage.io.types import ByteSource
 from mirage.policy.builtin.output_cap import LINE_NAME
 from mirage.policy.decisions import Decisions, is_pending
 from mirage.policy.types import HandOff
-from mirage.process.types import ProcessInfo, ProcessState
+from mirage.process.handle import ProcessHandle
+from mirage.process.table import ProcessTable
+from mirage.process.types import ProcessInfo, ProcessRunner, ProcessState
 from mirage.process.view import ProcessView
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
@@ -53,12 +55,16 @@ from mirage.shell.console import (
 )
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.constants import (
+    CONTINUE_SIGNALS,
     FD_BOTH,
     FD_CLOSE,
     FORK_FAILED,
     FORK_FAILED_STATUS,
     NOT_FOUND_STATUS,
-    SIGRTMAX,
+    SHELL_IGNORED_SIGNALS,
+    SIGSTOP,
+    SIGTERM,
+    STOP_SIGNALS,
     TIMEOUT_STATUS,
 )
 from mirage.shell.errors import ExitSignal, ReturnSignal
@@ -72,9 +78,10 @@ from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.names import command_invocations
 from mirage.shell.parse.program import retain_programs
 from mirage.shell.signals import (
-    signal_name,
+    listed_signal,
     signal_number,
     signal_report,
+    signal_reported,
     signal_table,
 )
 from mirage.shell.types import NodeType as NT
@@ -94,6 +101,7 @@ from mirage.workspace.executor.statement import (
     forks,
     nested_shell,
     record_status,
+    reported_command,
     statement_stdin,
 )
 from mirage.workspace.executor.traps import inherit_traps
@@ -356,7 +364,7 @@ def report_jobs(
 
 def report_reaped(
     frame: ExecutionFrame,
-    processes: Sequence[tuple[int, int, int | None, str]],
+    reaped: Sequence[tuple[ProcessHandle, int, TSNodeLike]],
 ) -> None:
     """Queue bash's report of a child its shell waited for that a signal
     ended (``signal_report``), empty when it prints none, to follow the
@@ -364,14 +372,61 @@ def report_reaped(
 
     Args:
         frame (ExecutionFrame): the evaluation of the reaping command.
-        processes (Sequence[tuple[int, int, int | None, str]]): each
-            process of the child: pid, status, the signal that ended it
-            and command.
+        reaped (Sequence[tuple[ProcessHandle, int, TSNodeLike]]): each
+            process of the child, its status and the command it ran.
     """
-    if not frame.substitution:
-        frame.reports.append(
-            encode_text(signal_report(shell_voice(), processes, True))
+    if frame.substitution:
+        return
+    listed = signal_reported(reaped[-1][0].ended_by)
+    processes = [
+        (
+            process.info.pid,
+            code,
+            process.ended_by,
+            reported_command(node) if listed else "",
         )
+        for process, code, node in reaped
+    ]
+    frame.reports.append(
+        encode_text(signal_report(shell_voice(), processes, True))
+    )
+
+
+def start_shell(
+    processes: ProcessTable,
+    session: SessionState,
+    command: str,
+    run: ProcessRunner,
+    parent_pid: int | None,
+    started: Callable[[ProcessHandle], None] | None = None,
+) -> ProcessHandle:
+    """Start a shell the running one forks (a subshell, a pipeline stage,
+    a command substitution, a nested shell): a process in its session's
+    directory that ignores the signals every shell does. A fork past the
+    session's process limit fails as bash's does.
+
+    Args:
+        processes (ProcessTable): where the process starts.
+        session (SessionState): the forked shell's session.
+        command (str): how ``ps`` shows it.
+        run (ProcessRunner): the shell's run.
+        parent_pid (int | None): the process that forks it.
+        started (Callable[[ProcessHandle], None] | None): called with the
+            process before it runs.
+    """
+    try:
+        return processes.start(
+            session_id=session.session_id,
+            command=command,
+            cwd=PathSpec.from_str_path(session.cwd),
+            run=run,
+            parent_pid=parent_pid,
+            limit=session.processes.max,
+            started=started,
+            ignores=SHELL_IGNORED_SIGNALS,
+        )
+    except BlockingIOError as exc:
+        raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
 
 
 async def run_program(
@@ -390,6 +445,8 @@ async def run_program(
     QUIT, which every shell ignores, and INT, which a background job's
     does. The statement ends with 128 plus the signal, and the shell
     goes on, telling of the jobs a signal ended as it reaped the child.
+    A native program's signal (``program_signaled``) counts for the
+    statement that ran it only.
 
     Args:
         node (TSNodeLike): the statement.
@@ -399,6 +456,9 @@ async def run_program(
             their reports to the node running the statement.
         sink (JobConsole | None): where the statement writes as it runs.
     """
+    runner = current_caller().process
+    if runner is not None:
+        runner.program_signaled(None)
     shell = context.frame.shell
     if shell is None or not _forked(node, context.session):
         return await run()
@@ -1264,16 +1324,11 @@ async def handle_fg(
 # Signals a running process takes and goes on: those whose default is to
 # ignore them, and the terminal stops a non-interactive bash's
 # asynchronous commands ignore; kill answers for them as for the probe (0).
-_KEPT_SIGNALS = frozenset({0, 17, 18, 20, 21, 22, 23, 28})
-
-# STOP, which suspends a process; a managed runner cannot be suspended.
-_SIGSTOP = 19
+_KEPT_SIGNALS = (CONTINUE_SIGNALS | STOP_SIGNALS) - {SIGSTOP}
 
 # The largest PID operand kill and ps read as a number: the bound both hosts
 # hold exactly (bash's own is intmax_t).
 _MAX_PID_OPERAND = 2**53 - 1
-
-_LISTED_NUMBER = re.compile(r"\s*\+?([0-9]+)")
 
 
 def _kill_list(
@@ -1295,25 +1350,11 @@ def _kill_list(
     lines: list[str] = []
     errors: list[str] = []
     for word in words:
-        number = _LISTED_NUMBER.fullmatch(word) if word.isascii() else None
-        if number is None:
-            value = signal_number(word)
-            if value is None:
-                errors.append(
-                    f"{voice}kill: {word}: invalid signal specification"
-                )
-            else:
-                lines.append(str(value))
-            continue
-        value = int(number.group(1))
-        if 128 < value <= 128 + SIGRTMAX:
-            value -= 128
-        elif value > SIGRTMAX:
+        line = listed_signal(word)
+        if line is None:
             errors.append(f"{voice}kill: {word}: invalid signal specification")
-            continue
-        name = "EXIT" if value == 0 else signal_name(value)
-        if name is not None:
-            lines.append(name)
+        elif line:
+            lines.append(line)
     code = 1 if errors else 0
     out = encode_text("".join(f"{line}\n" for line in lines))
     err = encode_text("".join(f"{line}\n" for line in errors))
@@ -1394,14 +1435,10 @@ async def handle_kill(
     """
     cmd_str = " ".join(parts)
     sid = _session_of(session)
-    signal = 15
+    signal = SIGTERM
     words = parts[1:]
     saw_signal = False
-    voice = (
-        ""
-        if session is not None and program_invocation(session)
-        else f"{shell_voice()}"
-    )
+    voice = shell_voice() if session is None else session_voice(session)
     if words[:1] in (["-l"], ["-L"]):
         return _kill_list(cmd_str, words[1:], voice)
     while words:
@@ -1434,7 +1471,7 @@ async def handle_kill(
                 f"{voice}kill: {spec}: invalid signal specification\n",
                 1,
             )
-        if number == _SIGSTOP:
+        if number == SIGSTOP:
             return _job_result(
                 cmd_str, f"mirage: kill: {spec}: not supported\n", 1
             )

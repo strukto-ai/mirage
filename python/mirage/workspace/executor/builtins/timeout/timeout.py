@@ -54,25 +54,25 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.constants import (
+    CONTINUE_SIGNALS,
     NOT_FOUND_STATUS,
     SHELL_IGNORED_SIGNALS,
+    SIGCHLD,
+    SIGKILL,
     SIGNALS,
     SIGRTMAX,
     SIGRTMIN,
+    SIGSTOP,
+    STOP_SIGNALS,
     TIMEOUT_STATUS,
 )
 from mirage.shell.join import shell_join
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.timeout.constants import (
-    CONTINUE_SIGNALS,
     FORK_FAILED,
     SELF_KILLING_SIGNALS,
-    SIGCHLD,
-    SIGKILL,
     SIGNAL_ALIASES,
-    SIGSTOP,
-    STOP_SIGNALS,
     TIMEOUT_NAMES,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
@@ -559,7 +559,12 @@ async def _deadline(
             await _stop(processes, process, SIGKILL, foreground)
         say(SIGKILL)
         return await _ended(console, held, said, 137)
-    if signal in CONTINUE_SIGNALS or signal in STOP_SIGNALS:
+    ignored = signal in process.ignores
+    if signal in CONTINUE_SIGNALS or signal in STOP_SIGNALS or ignored:
+        if ignored:
+            # A shell that ignores the signal lives on past the program
+            # it stops; timeout waits for it, and -k's KILL ends the wait.
+            await _stop(processes, process, signal, foreground)
         done, _ = await asyncio.wait(
             {task}, timeout=kill_after if kill_after else None
         )
@@ -570,16 +575,6 @@ async def _deadline(
         code = task.result() if preserve else TIMEOUT_STATUS
         return await _ended(console, held, said, code, finished=True)
     await _stop(processes, process, signal, foreground)
-    if not task.done():
-        # A shell that ignores the signal lives on past the program it
-        # stopped; timeout waits for it, and -k's KILL ends the wait.
-        done, _ = await asyncio.wait(
-            {task}, timeout=kill_after if kill_after else None
-        )
-        if task not in done:
-            await _stop(processes, process, SIGKILL, foreground)
-            say(SIGKILL)
-            return await _ended(console, held, said, 137)
     if signal in SELF_KILLING_SIGNALS and (
         not foreground or signal == SIGKILL
     ):

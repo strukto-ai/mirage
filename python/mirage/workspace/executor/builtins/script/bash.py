@@ -34,16 +34,10 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole, JobOutput
-from mirage.shell.constants import (
-    FORK_FAILED,
-    FORK_FAILED_STATUS,
-    SET_OPTION_NAMES,
-    SHELL_IGNORED_SIGNALS,
-)
+from mirage.shell.constants import SET_OPTION_NAMES
 from mirage.shell.errors import ExitSignal
 from mirage.shell.job_table import JobTable
 from mirage.shell.options import parse_option_word
-from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.script.constants import (
     BASH_LONG_OPTIONS,
@@ -57,8 +51,7 @@ from mirage.workspace.executor.builtins.script.script import (
 from mirage.workspace.executor.builtins.script.types import BashArgs
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.control import ended
-from mirage.workspace.executor.jobs import report_reaped
-from mirage.workspace.executor.statement import reported_command
+from mirage.workspace.executor.jobs import report_reaped, start_shell
 from mirage.workspace.executor.traps import clear_traps, finish_shell
 from mirage.workspace.session.state import set_positional_params
 from mirage.workspace.types import ExecutionNode
@@ -330,34 +323,14 @@ async def _in_process(
         session.process_id = session.shell_pid = process.info.pid
         context.frame.shell = process
 
-    try:
-        process = job_table.processes.start(
-            session_id=session.session_id,
-            command=label,
-            cwd=PathSpec.from_str_path(session.cwd),
-            run=runner,
-            parent_pid=parent_pid,
-            limit=session.processes.max,
-            started=started,
-            ignores=SHELL_IGNORED_SIGNALS,
-        )
-    except BlockingIOError as exc:
-        raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
+    process = start_shell(
+        job_table.processes, session, label, runner, parent_pid, started
+    )
     code = await process.reap()
     # A program that runs it (`xargs sh -c`) is its parent, not the shell.
     node = caller.session._line_node
     if node is not None and not program_invocation(caller.session):
-        report_reaped(
-            caller.frame,
-            [
-                (
-                    process.info.pid,
-                    code,
-                    process.ended_by,
-                    reported_command(node),
-                )
-            ],
-        )
+        report_reaped(caller.frame, [(process, code, node)])
     return ran[0] if ran else IOResult(exit_code=code)
 
 

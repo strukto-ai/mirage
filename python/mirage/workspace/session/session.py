@@ -889,6 +889,12 @@ class SessionState:
         return self._line_row + (0 if node is None else source_row(node)) + 1
 
     @property
+    def bash_pid(self) -> int:
+        """The process running the command, ``$BASHPID``: the subshell,
+        stage or substitution it runs in, else the shell itself."""
+        return self.process_id or self.shell_pid or 0
+
+    @property
     def env(self) -> Mapping[str, str]:
         """The scalar variables, by name.
 
