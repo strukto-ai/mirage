@@ -30,8 +30,8 @@ Set `api_key` in the config, or `DAYTONA_API_KEY`.
 ## Usage
 
 `captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
-every program Mirage does not have itself. Name `python3` to run it in the
-sandbox too.
+every program Mirage does not have itself. Name `python3` and `python` to run
+them in the sandbox too.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -40,7 +40,7 @@ sandbox too.
     from mirage.runtime.sandbox.daytona import DaytonaRuntime
 
     runtime = DaytonaRuntime(
-        captures=["python3", "@external"],
+        captures=["python3", "python", "@external"],
         config={"sandbox_id": "sandbox-id"},
     )
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
@@ -52,7 +52,7 @@ sandbox too.
     import { DaytonaRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const runtime = new DaytonaRuntime({
-      captures: ['python3', '@external'],
+      captures: ['python3', 'python', '@external'],
       config: { sandboxId: 'sandbox-id' },
     })
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
@@ -64,7 +64,7 @@ sandbox too.
     mode: exec
     runtimes:
       - name: daytona
-        captures: ["python3", "@external"]
+        captures: ["python3", "python", "@external"]
         config:
           sandbox_id: ${DAYTONA_SANDBOX_ID}
     mounts:

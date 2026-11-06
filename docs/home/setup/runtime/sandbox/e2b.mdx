@@ -31,8 +31,8 @@ in the config, or `E2B_API_KEY`.
 ## Usage
 
 `captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
-every program Mirage does not have itself. Name `python3` to run it in the
-sandbox too.
+every program Mirage does not have itself. Name `python3` and `python` to run
+them in the sandbox too.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -41,7 +41,7 @@ sandbox too.
     from mirage.runtime.sandbox.e2b import E2BRuntime
 
     runtime = E2BRuntime(
-        captures=["python3", "@external"],
+        captures=["python3", "python", "@external"],
         config={"sandbox_id": "sandbox-id", "mount_type": "ssh"},
     )
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
@@ -53,7 +53,7 @@ sandbox too.
     import { E2BRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const runtime = new E2BRuntime({
-      captures: ['python3', '@external'],
+      captures: ['python3', 'python', '@external'],
       config: { sandboxId: 'sandbox-id', mountType: 'ssh' },
     })
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
@@ -70,7 +70,7 @@ sandbox too.
     mode: exec
     runtimes:
       - name: e2b
-        captures: ["python3", "@external"]
+        captures: ["python3", "python", "@external"]
         config:
           sandbox_id: ${E2B_SANDBOX_ID}
           mount_type: ssh
