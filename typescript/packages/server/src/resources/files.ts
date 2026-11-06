@@ -25,7 +25,7 @@ import type {
   ResourceRecords,
   Sealer,
 } from '@struktoai/mirage-core/resources/types'
-import { parse, stringify } from 'yaml'
+import { parse } from 'yaml'
 import { resourcesRootPath } from '../paths.ts'
 
 /** The folder under the root that holds sealed values, apart from the records. */
@@ -48,6 +48,28 @@ async function unlinkIfPresent(path: string): Promise<boolean> {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false
     throw err
   }
+}
+
+/**
+ * A record as both hosts write it: JSON, which is also YAML, so each reads
+ * back the same values whatever its YAML rules.
+ */
+function dump(record: Fields): string {
+  return `${JSON.stringify(record, null, 2)}\n`
+}
+
+/** A record read back: JSON as written, or YAML 1.1, Python's rules, when edited by hand. */
+function parseRecord(path: string, text: string): Fields {
+  let record: unknown
+  try {
+    record = text.trimStart().startsWith('{') ? JSON.parse(text) : parse(text, { version: '1.1' })
+  } catch (e) {
+    throw new ResourceError('invalid', `${path} is malformed: ${(e as Error).message}`)
+  }
+  if (record === null || typeof record !== 'object' || Array.isArray(record)) {
+    throw new ResourceError('invalid', `${path} is not a mapping`)
+  }
+  return record as Fields
 }
 
 /**
@@ -88,15 +110,11 @@ class FileRecords implements ResourceRecords {
   async read(folder: string, name: string): Promise<Fields | null> {
     const path = this.path(folder, name)
     const text = await readOrNull(path)
-    if (text === null) return null
-    const record: unknown = parse(text)
-    if (record === null || typeof record !== 'object' || Array.isArray(record))
-      throw new ResourceError('invalid', `${path} is not a mapping`)
-    return record as Fields
+    return text === null ? null : parseRecord(path, text)
   }
 
   async write(folder: string, name: string, record: Fields): Promise<void> {
-    await writeWhole(this.path(folder, name), stringify(record), 0o644, 0o755)
+    await writeWhole(this.path(folder, name), dump(record), 0o644, 0o755)
   }
 
   remove(folder: string, name: string): Promise<boolean> {
@@ -130,11 +148,7 @@ class FileSealer implements Sealer {
   async read(kind: EntryKind, name: string): Promise<Fields> {
     const path = this.path(kind, name)
     const text = await readOrNull(path)
-    if (text === null) return {}
-    const values: unknown = JSON.parse(text)
-    if (values === null || typeof values !== 'object' || Array.isArray(values))
-      throw new ResourceError('invalid', `${path} is not an object`)
-    return values as Fields
+    return text === null ? {} : parseRecord(path, text)
   }
 
   async write(kind: EntryKind, name: string, values: Fields): Promise<void> {
@@ -142,7 +156,7 @@ class FileSealer implements Sealer {
       await this.wipe(kind, name)
       return
     }
-    await writeWhole(this.path(kind, name), JSON.stringify(values), 0o600, 0o700)
+    await writeWhole(this.path(kind, name), dump(values), 0o600, 0o700)
   }
 
   async wipe(kind: EntryKind, name: string): Promise<void> {

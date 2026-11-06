@@ -1,0 +1,113 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+
+from fastapi import APIRouter, HTTPException, Request, Response
+
+from mirage.resources.errors import ResourceError
+from mirage.resources.types import Template, TemplateInput
+from mirage.server.schemas import CreateTemplateRequest, TemplateResponse
+
+router = APIRouter(prefix="/v1/templates")
+
+STATUS = {"not_found": 404, "conflict": 409, "invalid": 400}
+
+
+def store_refusal(e: ResourceError) -> HTTPException:
+    """The answer for a store's refusal: 404, 409 or 400 by its code.
+
+    Args:
+        e (ResourceError): what the store raised.
+    """
+    return HTTPException(status_code=STATUS[e.code], detail=str(e))
+
+
+def present(template: Template) -> TemplateResponse:
+    return TemplateResponse(
+        name=template.name,
+        description=template.description,
+        config=template.config,
+    )
+
+
+@router.get("", response_model=list[TemplateResponse])
+async def list_templates(request: Request) -> list[TemplateResponse]:
+    """The saved templates, by name."""
+    return [
+        present(t) for t in await request.app.state.resources.list_templates()
+    ]
+
+
+@router.post("", response_model=TemplateResponse, status_code=201)
+async def create_template(
+    req: CreateTemplateRequest, request: Request
+) -> TemplateResponse:
+    """Save a template: a whole workspace config, checked as a create
+    checks one, and kept as written. A name already saved is a 409.
+
+    Args:
+        req (CreateTemplateRequest): the name, description and config.
+        request (Request): the HTTP request, for the app's store.
+    """
+    resources = request.app.state.resources
+    written = (await request.json())["config"]
+    try:
+        await resources.get_template(req.name)
+    except ResourceError as e:
+        if e.code != "not_found":
+            raise store_refusal(e) from e
+    else:
+        raise HTTPException(
+            status_code=409, detail=f"template {req.name} already exists"
+        )
+    try:
+        saved = await resources.put_template(
+            TemplateInput(
+                name=req.name, description=req.description, config=written
+            )
+        )
+    except ResourceError as e:
+        raise store_refusal(e) from e
+    return present(saved)
+
+
+@router.get("/{ref}", response_model=TemplateResponse)
+async def get_template(ref: str, request: Request) -> TemplateResponse:
+    try:
+        return present(await request.app.state.resources.get_template(ref))
+    except ResourceError as e:
+        raise store_refusal(e) from e
+
+
+@router.delete("/{ref}", status_code=204)
+async def delete_template(ref: str, request: Request) -> Response:
+    """Delete a template; ``restore`` brings it back.
+
+    Args:
+        ref (str): the template's name.
+        request (Request): the HTTP request, for the app's store.
+    """
+    try:
+        await request.app.state.resources.delete_template(ref)
+    except ResourceError as e:
+        raise store_refusal(e) from e
+    return Response(status_code=204)
+
+
+@router.post("/{ref}/restore", response_model=TemplateResponse)
+async def restore_template(ref: str, request: Request) -> TemplateResponse:
+    try:
+        return present(await request.app.state.resources.restore_template(ref))
+    except ResourceError as e:
+        raise store_refusal(e) from e

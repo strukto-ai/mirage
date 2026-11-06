@@ -262,43 +262,59 @@ export function registerWorkspaceCommands(program: Command): void {
   }
 
   ws.command('create')
-    .description('Create a workspace; daemon auto-spawns if not running.')
-    .argument('<config>', 'YAML/JSON workspace config')
+    .description(
+      'Create a workspace from a config file or a saved template; daemon auto-spawns if not running.',
+    )
+    .argument('[config]', 'YAML/JSON workspace config')
+    .option('--template <name>', 'Create from this saved template')
+    .option('-w, --workspace <id>', 'Explicit workspace id')
     .option('--id <id>', 'Explicit workspace id')
     .option('--explain', "Say what the server's policies make of it; create nothing")
-    .action(async (configPath: string, opts: { id?: string; explain?: boolean }) => {
-      // Checked and env-interpolated here (the user's shell env is the
-      // source of truth, and a missing var must fail before the round
-      // trip), but sent in the file's own spelling: the daemon runs the
-      // same check, and it speaks snake_case like the Python one.
-      const { checkWorkspaceConfigFile } = await import('@struktoai/mirage-node/config')
-      let cfg: unknown
-      try {
-        cfg = checkWorkspaceConfigFile(configPath)
-      } catch (err: unknown) {
-        fail(err instanceof Error ? err.message : String(err), 2)
-      }
-      const body: { config: unknown; id?: string } = { config: cfg }
-      if (opts.id !== undefined) body.id = opts.id
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: true })
-      const explain = opts.explain === true
-      const r = await c.request(
-        'POST',
-        explain ? '/v1/workspaces?explain=true' : '/v1/workspaces',
-        {
-          body: JSON.stringify(body),
-        },
-      )
-      if (explain) {
-        emit(
-          (await handleResponse(r)) as Parameters<typeof formatWorkspaceExplanation>[0],
-          formatWorkspaceExplanation,
+    .action(
+      async (
+        configPath: string | undefined,
+        opts: { template?: string; workspace?: string; id?: string; explain?: boolean },
+      ) => {
+        if ((configPath === undefined) === (opts.template === undefined)) {
+          fail('give a config file or --template NAME, not both', 2)
+        }
+        const body: { config?: unknown; template?: string; id?: string } = {}
+        if (opts.template !== undefined) {
+          body.template = opts.template
+        } else if (configPath !== undefined) {
+          // Checked and env-interpolated here (the user's shell env is the
+          // source of truth, and a missing var must fail before the round
+          // trip), but sent in the file's own spelling: the daemon runs the
+          // same check, and it speaks snake_case like the Python one.
+          const { checkWorkspaceConfigFile } = await import('@struktoai/mirage-node/config')
+          try {
+            body.config = checkWorkspaceConfigFile(configPath)
+          } catch (err: unknown) {
+            fail(err instanceof Error ? err.message : String(err), 2)
+          }
+        }
+        const id = opts.workspace ?? opts.id
+        if (id !== undefined) body.id = id
+        const c = makeClient()
+        await c.ensureRunning({ allowSpawn: true })
+        const explain = opts.explain === true
+        const r = await c.request(
+          'POST',
+          explain ? '/v1/workspaces?explain=true' : '/v1/workspaces',
+          {
+            body: JSON.stringify(body),
+          },
         )
-        return
-      }
-      emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
-    })
+        if (explain) {
+          emit(
+            (await handleResponse(r)) as Parameters<typeof formatWorkspaceExplanation>[0],
+            formatWorkspaceExplanation,
+          )
+          return
+        }
+        emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
+      },
+    )
 
   ws.command('list')
     .description('List active workspaces.')

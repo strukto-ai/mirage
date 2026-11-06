@@ -31,6 +31,19 @@ The shell command prints `ready`. Replace RAM using a [VFS setup guide](/home/se
 YAML defaults `mode` to `write`; direct Python and TypeScript `Workspace`
 constructors default to `read`.
 
+### From a template
+
+A config saved on the server as a template creates workspaces without the
+file. The template's `config` is the same document as `workspace.yaml`:
+
+```bash
+mirage api /v1/templates --name ram-only --config '{"mounts": {"/data": {"vfs": "ram"}}}'
+mirage workspace create --template ram-only -w config-demo
+```
+
+Each workspace gets a copy of the config, so editing the template later does
+not change it. See [From a template](/home/access/cli#from-a-template).
+
 ## Workspace settings
 
 | Key | Purpose |

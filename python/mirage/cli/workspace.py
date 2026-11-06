@@ -237,11 +237,14 @@ def _format_asks(items: list[dict[str, Any]]) -> str:
 
 @app.command("create")
 def create_cmd(
-    config_path: Path = typer.Argument(
-        ..., exists=True, readable=True, help="YAML/JSON workspace config."
+    config_path: Path | None = typer.Argument(
+        None, exists=True, readable=True, help="YAML/JSON workspace config."
+    ),
+    template: str | None = typer.Option(
+        None, "--template", help="Create from this saved template."
     ),
     workspace_id: str | None = typer.Option(
-        None, "--id", help="Explicit workspace id."
+        None, "--workspace", "-w", "--id", help="Explicit workspace id."
     ),
     explain: bool = typer.Option(
         False,
@@ -249,12 +252,19 @@ def create_cmd(
         help="Say what the server's policies make of it; create nothing.",
     ),
 ) -> None:
-    """Create a workspace; daemon auto-spawns if not running.
+    """Create a workspace from a config file or a saved template; daemon
+    auto-spawns if not running.
 
     ``--explain`` asks the server's policies about the config without
     creating anything.
     """
-    body: dict[str, Any] = {"config": resolve_config(config_path)}
+    if (config_path is None) == (template is None):
+        fail("give a config file or --template NAME, not both", 2)
+    body: dict[str, Any] = (
+        {"template": template}
+        if config_path is None
+        else {"config": resolve_config(config_path)}
+    )
     if workspace_id:
         body["id"] = workspace_id
     with make_client() as client:

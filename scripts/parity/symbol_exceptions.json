@@ -1255,6 +1255,21 @@
     "recordBytes": "TypeScript caches each variable record's bytes in a WeakMap keyed by the record; Python's records are slotted and may hold a list, so they cannot be weak keys, and Python measures a record as it sums.",
     "varBytes": "The WeakMap behind recordBytes; see there."
    }
+  },
+  "server/routers/templates": {
+   "python_only": {
+    "create_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "delete_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "get_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "list_templates": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "restore_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "router": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp."
+   },
+   "typescript_only": {
+    "RefParams": "Fastify types a route's path params with an interface; FastAPI reads them from the handler's signature.",
+    "registerTemplatesRoutes": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "stored": "Each FastAPI handler maps a store refusal in its own try; the TypeScript routes share one wrapper because a refusal answers through the reply."
+   }
   }
  }
 }

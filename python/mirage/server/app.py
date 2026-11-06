@@ -80,6 +80,7 @@ from mirage.server.routers import (
     sessions,
     shell,
     ssh,
+    templates,
     tools,
     vfs,
     workspaces,
@@ -467,6 +468,7 @@ def build_app(
     )
     app.state.ssh = None
     app.include_router(workspaces.router)
+    app.include_router(templates.router)
     app.include_router(documents.router)
     app.include_router(sessions.router)
     app.include_router(asks.router)

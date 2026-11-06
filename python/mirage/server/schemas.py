@@ -64,10 +64,40 @@ class WorkspaceDetail(BaseModel):
 
 
 class CreateWorkspaceRequest(BaseModel):
+    """A workspace to create: from ``config``, or from the saved
+    ``template`` of that name, never both."""
+
     model_config = ConfigDict(extra="forbid")
 
-    config: WorkspaceConfig
+    config: WorkspaceConfig | None = None
+    template: str | None = None
     id: str | None = None
+
+
+def check_config(written: dict[str, Any]) -> WorkspaceConfig:
+    """A workspace config checked as a create checks one.
+
+    Args:
+        written (dict[str, Any]): the config as written.
+
+    Raises:
+        ValidationError: naming what is wrong.
+    """
+    return WorkspaceConfig.model_validate(written)
+
+
+class CreateTemplateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str | None = None
+    config: WorkspaceConfig
+
+
+class TemplateResponse(BaseModel):
+    name: str
+    description: str | None
+    config: dict[str, Any]
 
 
 class CloneWorkspaceRequest(BaseModel):

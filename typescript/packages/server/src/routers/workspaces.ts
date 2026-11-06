@@ -19,6 +19,8 @@ import { runWithNetwork } from '@struktoai/mirage-core/io/network'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
+import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
+import { ResourceError } from '@struktoai/mirage-core/resources/errors'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import { resolveSourcesFor } from '@struktoai/mirage-core/secrets/sources'
 import type { JsonValue } from '@struktoai/mirage-core/types'
@@ -32,7 +34,7 @@ import { SharedStorageError, WritePolicyError } from '@struktoai/mirage-core/wor
 import type { Mount } from '@struktoai/mirage-core/workspace/mount/spec'
 import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import { loadWorkspaceConfig, type WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
+import type { WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { RouteApp, RouteReply, RouteRequest, ServerHost } from '../routes.ts'
 import { Buffer } from 'node:buffer'
@@ -44,12 +46,14 @@ import { refused } from '../metrics.ts'
 import { MAX_REQUEST_PART, MAX_SNAPSHOT_PART, MultipartError, partEvents } from '../multipart.ts'
 import { Claim, type WorkspaceRegistry } from '../registry.ts'
 import {
+  checkConfig,
   SnapshotWorkspaceRequest,
   type CloneWorkspaceRequest,
   type CreateWorkspaceRequest,
   type LoadWorkspaceRequest,
 } from '../schemas.ts'
 import { makeBrief, makeDetail } from '../summary.ts'
+import { storeRefusal } from './templates.ts'
 import { queryFlag } from './vfs.ts'
 
 export interface WorkspaceRoutesDeps {
@@ -57,6 +61,42 @@ export interface WorkspaceRoutesDeps {
   host: ServerHost
   /** The S3-like store a snapshot request may name a key in. */
   snapshotStore: S3Config | undefined
+  /** Where a create finds the template it names; undefined keeps none. */
+  resources?: ResourceStore | undefined
+}
+
+/**
+ * The config a create builds, checked and as written: the body's own, or a
+ * copy of the named template's, so a later edit of the template leaves the
+ * workspace as it is. Answers a refusal for both or neither, an unknown
+ * template, or a config that fails its check.
+ */
+async function configOf(
+  body: CreateWorkspaceRequest,
+  resources: ResourceStore | undefined,
+): Promise<
+  | { cfg: WorkspaceConfigRaw; written: Record<string, JsonValue> }
+  | { status: number; detail: string }
+> {
+  const given = body.config ?? undefined
+  let written: unknown = given
+  if (body.template !== undefined) {
+    if (given !== undefined) return { status: 400, detail: 'give a template or a config, not both' }
+    if (resources === undefined) return { status: 400, detail: 'this server keeps no templates' }
+    try {
+      written = (await resources.getTemplate(body.template)).config
+    } catch (e) {
+      if (e instanceof ResourceError) return storeRefusal(e)
+      throw e
+    }
+  } else if (given === undefined) {
+    return { status: 400, detail: 'give a template or a config' }
+  }
+  try {
+    return { cfg: checkConfig(written), written: written as Record<string, JsonValue> }
+  } catch (e) {
+    return { status: 400, detail: (e as Error).message }
+  }
 }
 
 interface WorkspaceIdParams {
@@ -313,32 +353,10 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       req: RouteRequest<{ Body: CreateWorkspaceRequest; Querystring: { explain?: string } }>,
       reply: RouteReply,
     ) => {
-      const body = req.body
-      const config: unknown = body.config
-      if (config === null || typeof config !== 'object' || Array.isArray(config)) {
-        return reply.status(400).send({ detail: 'config must be a mapping' })
-      }
-      let cfg: WorkspaceConfigRaw
-      try {
-        // Taken as written, as the Python server takes it: the caller's
-        // CLI expanded its `${VAR}` in the caller's env, and the server's
-        // env is not a tenant's to read. The policies judge, and the build
-        // uses, the same document.
-        cfg = loadWorkspaceConfig(config as Record<string, unknown>, null)
-        for (const entry of cfg.runtimes ?? []) {
-          if (typeof entry === 'string') continue
-          const runtimeConfig = entry.config
-          if (
-            runtimeConfig !== null &&
-            typeof runtimeConfig === 'object' &&
-            Object.hasOwn(runtimeConfig, 'initModule')
-          ) {
-            throw new Error('runtime initModule is only allowed in operator-owned configuration')
-          }
-        }
-      } catch (e) {
-        return reply.status(400).send({ detail: (e as Error).message })
-      }
+      // The policies judge, and the build uses, the same document.
+      const chosen = await configOf(req.body, deps.resources)
+      if ('detail' in chosen) return reply.status(chosen.status).send({ detail: chosen.detail })
+      const { cfg, written: config } = chosen
       // The server's policies judge the config as written before any of it
       // is built; explain answers what they say without creating anything.
       let explain: boolean
@@ -348,8 +366,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
         return reply.status(400).send({ detail: (e as Error).message })
       }
       if (explain) {
-        const written = config as Record<string, JsonValue>
-        return explanationToDict(await deps.registry.explanation(written, req.account))
+        return explanationToDict(await deps.registry.explanation(config, req.account))
       }
       // The registry id and the state-store scope must be the same identity,
       // so resolve it before construction: explicit REST id, then the
@@ -361,7 +378,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       // anything else, or by one being deleted, is refused. Creates of one
       // id run one at a time, so a second of the same config answers what
       // the first built, and one of another config is refused at once.
-      const wid = body.id ?? cfg.workspaceId ?? newWorkspaceId()
+      const wid = req.body.id ?? cfg.workspaceId ?? newWorkspaceId()
       const bad = refuseId(reply, wid, deps.host.reservedIds)
       if (bad !== null) return bad
       const digest = configDigest(config)

@@ -49,6 +49,10 @@
       "types": "./dist/env.d.ts",
       "import": "./dist/env.js"
     },
+    "./resources/files": {
+      "types": "./dist/resources/files.d.ts",
+      "import": "./dist/resources/files.js"
+    },
     "./daemon_config": {
       "types": "./dist/daemon_config.d.ts",
       "import": "./dist/daemon_config.js"
