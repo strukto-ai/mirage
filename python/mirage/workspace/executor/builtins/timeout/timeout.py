@@ -575,11 +575,13 @@ async def _stop(process: ProcessHandle, signal: int, foreground: bool) -> None:
     # timeout signals its own process group unless --foreground, so the
     # jobs the command started end with it, or, when their shells ignore
     # the signal, the programs they run right now do; the command itself
-    # gets it either way.
+    # gets it either way. The group hears it before the command stops, as
+    # a stop reaches children first, so a native program that ends with
+    # the command already knows the signal.
     ignored = signal in IGNORED_SIGNALS
-    process.terminate(signal, children=not foreground and not ignored)
     if ignored and not foreground:
         process.signal_children(signal)
+    process.terminate(signal, children=not foreground and not ignored)
     await _cancel(process.task)
 
 

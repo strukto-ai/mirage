@@ -388,11 +388,13 @@ export async function handleTimeout(
   // timeout signals its own process group unless --foreground, so the jobs
   // the command started end with it, or, when their shells ignore the
   // signal, the programs they run right now do; the command itself gets it
-  // either way.
+  // either way. The group hears it before the command stops, as a stop
+  // reaches children first, so a native program that ends with the command
+  // already knows the signal.
   const send = (number: number): void => {
     const ignored = IGNORED_SIGNALS.has(number)
-    process.terminate(number, !foreground && !ignored)
     if (ignored && !foreground) process.signalChildren(number)
+    process.terminate(number, !foreground && !ignored)
   }
   const watch = supervise(run, abort.signal, send, sink, held, seconds, lineSignal, {
     signal,
