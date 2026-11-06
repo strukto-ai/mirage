@@ -184,6 +184,16 @@ def test_each_context_is_its_own_file_readable_by_its_owner(home):
     assert read_context("dev") == Context(url="https://dev.example")
 
 
+@pytest.mark.parametrize(
+    "text", ['{"url": "", "extra": 1}', '["https://dev.example"]']
+)
+def test_a_context_file_with_an_unknown_shape_is_refused(home, text):
+    (home / "contexts").mkdir()
+    (home / "contexts" / "dev.json").write_text(text)
+    with pytest.raises(ContextError, match="malformed"):
+        read_context("dev")
+
+
 def test_a_name_must_be_safe_as_a_file_name(home):
     assert check_name("dev.example-1") == "dev.example-1"
     for bad in ("../up", "Dev"):

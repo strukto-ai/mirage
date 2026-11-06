@@ -326,13 +326,34 @@ class RecordResourceStore(ResourceStore):
         async with self._lock:
             return await self._save_template(template, replace=True)
 
+    async def _move_template(
+        self, template: Template, source: str, target: str
+    ) -> None:
+        """Write a template into ``target`` and remove it from ``source``
+        as one step a cancel does not split: a split would leave it both
+        live and deleted.
+
+        Args:
+            template (Template): the template.
+            source (str): the folder it leaves.
+            target (str): the folder it goes to.
+        """
+
+        async def move() -> None:
+            await self._records.write(target, template.name, asdict(template))
+            await self._records.remove(source, template.name)
+
+        moving = asyncio.ensure_future(move())
+        try:
+            await asyncio.shield(moving)
+        except asyncio.CancelledError:
+            await settle(moving)
+            raise
+
     async def delete_template(self, name: str) -> None:
         async with self._lock:
             template = await self._live_template(name)
-            await self._records.write(
-                DELETED_TEMPLATES, name, asdict(template)
-            )
-            await self._records.remove(TEMPLATE, name)
+            await self._move_template(template, TEMPLATE, DELETED_TEMPLATES)
 
     async def restore_template(self, name: str) -> Template:
         async with self._lock:
@@ -345,6 +366,5 @@ class RecordResourceStore(ResourceStore):
                 raise ResourceError(
                     "conflict", f"a template named {name} exists again"
                 )
-            await self._records.write(TEMPLATE, name, asdict(template))
-            await self._records.remove(DELETED_TEMPLATES, name)
+            await self._move_template(template, DELETED_TEMPLATES, TEMPLATE)
             return template

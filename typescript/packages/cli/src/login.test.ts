@@ -16,6 +16,7 @@ import { createHash } from 'node:crypto'
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -337,6 +338,7 @@ describe('mirage login', () => {
   it('says so on a server without a login', async () => {
     const quiet = await new FakeClerk({ publishes: false }).start()
     vi.stubEnv('MIRAGE_DAEMON_URL', quiet.url)
+    writeLogin({ ...(await tokenLogin(clerk.url, 'good')), url: quiet.url }, loginPath('local'))
     try {
       const done = await run(['login', quiet.url])
       expect(done.exitCode).toBe(0)
@@ -344,7 +346,7 @@ describe('mirage login', () => {
     } finally {
       await quiet.stop()
     }
-    expect(readLogin()).toBeNull()
+    expect(existsSync(loginPath('local'))).toBe(false)
   })
 })
 
@@ -435,6 +437,14 @@ describe('contexts', () => {
     expect(statSync(join(dir, 'contexts', 'dev.json')).mode & 0o777).toBe(0o600)
     expect(statSync(join(dir, 'current_context')).mode & 0o777).toBe(0o600)
     expect(readContext('dev')).toEqual({ url: 'https://dev.example', team: null, workspace: null })
+  })
+
+  it('refuses a context file of an unknown shape', () => {
+    mkdirSync(join(dir, 'contexts'))
+    for (const text of ['{"url": "", "extra": 1}', '["https://dev.example"]']) {
+      writeFileSync(join(dir, 'contexts', 'dev.json'), text)
+      expect(() => readContext('dev')).toThrow(/malformed/)
+    }
   })
 
   it('refuses a name that is no safe file name', () => {

@@ -92,11 +92,21 @@ export function checkName(name: string): string {
 export function readContext(name: string, env: Env = process.env): Context | null {
   const path = contextPath(name, env)
   if (!existsSync(path)) return name === LOCAL ? emptyContext() : null
+  let raw: unknown
   try {
-    return { ...emptyContext(), ...(JSON.parse(readFileSync(path, 'utf-8')) as Partial<Context>) }
+    raw = JSON.parse(readFileSync(path, 'utf-8'))
   } catch (e) {
     throw new ContextError(`malformed ${path}: ${(e as Error).message}`)
   }
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ContextError(`malformed ${path}: not a JSON object`)
+  }
+  const empty = emptyContext()
+  const unknown = Object.keys(raw)
+    .filter((k) => !Object.hasOwn(empty, k))
+    .sort(compareCodePoints)
+  if (unknown.length > 0) throw new ContextError(`malformed ${path}: unknown ${unknown.join(', ')}`)
+  return { ...empty, ...(raw as Partial<Context>) }
 }
 
 /** Store a context whole, readable by this user only. */
