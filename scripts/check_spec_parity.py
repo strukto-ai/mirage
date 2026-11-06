@@ -14,6 +14,7 @@
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,13 @@ TYPESCRIPT_VFS_COMMANDS = [
 EXCEPTIONS = ROOT / "scripts" / "parity" / "parity_exceptions.json"
 HTTP_SPEC = ROOT / "docs" / "openapi.yaml"
 HTTP_DAEMON = SPEC / "python" / "openapi.json"
+HTTP_TYPESCRIPT = SPEC / "typescript" / "node" / "http_routes.json"
+HTTP_PROTOCOL_ROUTES = {
+    "GET /v1/workspaces/{}/mcp": "MCP streamable HTTP, documented on the MCP page",
+    "POST /v1/workspaces/{}/mcp": "MCP streamable HTTP, documented on the MCP page",
+    "DELETE /v1/workspaces/{}/mcp": "MCP streamable HTTP, documented on the MCP page",
+    "POST /v1/workspaces/{}/rpc": "JSON-RPC, documented on the RPC page",
+}
 
 BY_VFS = "_meta.by_vfs"
 BY_VFS_KEYS = "_meta.by_vfs.keys"
@@ -800,6 +808,47 @@ def check_http_api() -> list[str]:
     return failures
 
 
+def route_shape(route: str) -> str:
+    """A ``METHOD /path`` with every path parameter written ``{}``, so
+    ``:wsId`` and ``{workspace_id}`` compare equal.
+
+    Args:
+        route (str): ``METHOD /path`` in OpenAPI or Fastify form.
+    """
+    method, path = route.split(" ", 1)
+    path = re.sub(r"\{[^}]*\}|:[A-Za-z_][A-Za-z0-9_]*", "{}", path)
+    return f"{method} {path}"
+
+
+def check_http_typescript() -> list[str]:
+    """The routes the TypeScript server registers that the committed
+    OpenAPI document lacks, and the daemon operations it does not
+    register."""
+    if not HTTP_TYPESCRIPT.exists():
+        raise SystemExit(
+            f"{HTTP_TYPESCRIPT} is missing; run "
+            "typescript/scripts/gen-specs.ts first"
+        )
+    served = {route_shape(r) for r in json.loads(HTTP_TYPESCRIPT.read_text())}
+    spec = yaml.safe_load(HTTP_SPEC.read_text())
+    written = {
+        route_shape(key)
+        for key, op in http_operations(spec).items()
+        if "daemon" in op["hosts"]
+    }
+    name = HTTP_SPEC.relative_to(ROOT)
+    failures = [
+        f"{key} is served by the TypeScript server but missing from {name}"
+        for key in sorted(served - written - set(HTTP_PROTOCOL_ROUTES))
+    ]
+    failures += [
+        f"{key} is in {name} with x-hosts daemon, but the TypeScript server "
+        "does not serve it"
+        for key in sorted(written - served)
+    ]
+    return failures
+
+
 def main() -> int:
     exceptions = json.loads(EXCEPTIONS.read_text())
     expansions: dict[str, list[str]] = exceptions["vfs_expansions"]["python"]
@@ -844,6 +893,7 @@ def main() -> int:
 
     trees = load_vfs_trees()
     failures.extend(check_http_api())
+    failures.extend(check_http_typescript())
     failures.extend(check_cli_specs(trees))
     failures.extend(check_shell_specs(trees))
     failures.extend(check_mcp_config(trees))

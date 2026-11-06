@@ -96,6 +96,9 @@ importers:
       '@struktoai/mirage-node':
         specifier: workspace:*
         version: link:packages/node
+      '@struktoai/mirage-server':
+        specifier: workspace:*
+        version: link:packages/server
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.17
