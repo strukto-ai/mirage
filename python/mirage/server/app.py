@@ -32,6 +32,8 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from mirage.concurrency.limiter import run_blocking
 from mirage.policy.base import Policy
 from mirage.resources.base import ResourceStore
+from mirage.resources.constants import STRUKTO
+from mirage.secrets.registry import register_secrets
 from mirage.server.auth import (
     AuthConfig,
     AuthMiddleware,
@@ -72,6 +74,7 @@ from mirage.server.resources.config import (
     build_resource_store,
     resolve_resource_store,
 )
+from mirage.server.resources.strukto import StruktoSourceConfig, fetch_strukto
 from mirage.server.routers import (
     asks,
     documents,
@@ -418,6 +421,7 @@ def build_app(
         FastAPI: configured app with all routers mounted.
     """
     validate_daemon_table(read_daemon_table(mirage_home()))
+    register_secrets(STRUKTO, StruktoSourceConfig, fetch_strukto)
     app = FastAPI(title="Mirage daemon", version="0.1", lifespan=_lifespan)
     hosts = resolve_allowed_hosts(allowed_hosts)
     app.add_middleware(HostHeaderMiddleware, allowed_hosts=hosts)

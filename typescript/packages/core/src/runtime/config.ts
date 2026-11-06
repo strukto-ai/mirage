@@ -74,7 +74,18 @@ export interface HomeConfig extends RuntimeConfig {
   home?: string
 }
 
-export const HOME_CONFIG_KEYS: readonly string[] = ['home']
+/** One key a runtime's config takes, as a saved runtime's form describes it. */
+export interface ConfigField {
+  readonly type: 'string' | 'number' | 'boolean' | 'list' | 'map'
+  readonly required?: boolean
+  readonly options?: readonly string[]
+  readonly default?: string | number | boolean
+}
+
+/** The keys a runtime's config takes, camelCase, each with its shape. */
+export type ConfigFields = Readonly<Record<string, ConfigField>>
+
+export const HOME_CONFIG_FIELDS: ConfigFields = { home: { type: 'string' } }
 
 /**
  * Where a runtime's engine is: the config's `home`, else `envVar`'s value,

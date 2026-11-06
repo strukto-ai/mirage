@@ -158,9 +158,11 @@ async function readSecret(
 
 /**
  * An entry from a YAML or JSON file: `name`, `type`, `fields` (or `config`, as
- * `get -o yaml` writes it) and `secrets`, the sealed fields to read.
+ * `get -o yaml` writes it) and `secrets` (or `sealed`, as `get -o yaml` writes
+ * it), the sealed fields to read. An update passes `readSealed` false: it keeps
+ * the sealed fields it is not given.
  */
-async function loadDraft(path: string): Promise<Draft> {
+async function loadDraft(path: string, readSealed = true): Promise<Draft> {
   const { parse } = await import('yaml')
   let data: unknown
   try {
@@ -173,7 +175,7 @@ async function loadDraft(path: string): Promise<Draft> {
   }
   const d = data as Record<string, unknown>
   const fields = d.fields ?? d.config ?? {}
-  const secrets = d.secrets ?? []
+  const secrets = d.secrets ?? (readSealed ? (d.sealed ?? []) : [])
   if (typeof fields !== 'object' || Array.isArray(fields)) {
     fail(`${path}: fields must be a mapping`, 2)
   }
@@ -365,7 +367,7 @@ function registerKindCommands(program: Command, kind: Kind): void {
   const group = program
     .command(kind.name)
     .description(
-      `Saved ${kind.noun} connections: a type, its settings and its credentials, kept by the daemon or the console.`,
+      `Saved ${kind.noun} connections: a type, its settings and its credentials, kept by the daemon or the hosted API.`,
     )
   const entryPath = (name: string): string => `${kind.route}/${encodeURIComponent(name)}`
 
@@ -460,10 +462,8 @@ function registerKindCommands(program: Command, kind: Kind): void {
       config?: Record<string, unknown>
       sealed?: string[]
     }
-    let draft =
-      opts.file !== undefined
-        ? await loadDraft(opts.file)
-        : { ...emptyDraft(), fields: { ...(current.config ?? {}) } }
+    let draft = opts.file !== undefined ? await loadDraft(opts.file, false) : emptyDraft()
+    draft.fields = { ...(current.config ?? {}), ...draft.fields }
     const sealed = new Set(current.sealed ?? [])
     draft = applyFlags(draft, opts.set, opts.secret, opts.unset)
     for (const key of opts.unset) if (sealed.has(key)) draft.fields[key] = null

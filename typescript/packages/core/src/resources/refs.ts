@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
-import { STRUKTO } from './values.ts'
+import { STRUKTO } from './constants.ts'
+import type { Template } from './types.ts'
 
-/** The `{from: strukto, ref}` entries a config names, each once, in order. Mirrors the console's `secretRefs`. */
-function secretRefs(config: unknown): string[] {
+/** The saved entries a config names through `{from: strukto, ref}`, each once, in order. */
+export function secretRefs(config: unknown): string[] {
   const found: string[] = []
   const walk = (v: unknown): void => {
     if (Array.isArray(v)) {
@@ -35,14 +35,10 @@ function secretRefs(config: unknown): string[] {
   return found
 }
 
-/**
- * The saved templates whose config names each entry, by the entry's name.
- * The daemon keeps no live workspace to count, so a saved template is what
- * refers to an entry.
- */
-export async function uses(store: ResourceStore): Promise<Map<string, string[]>> {
+/** The templates whose config names each entry, by the entry's name. */
+export function usesOf(templates: readonly Template[]): Map<string, string[]> {
   const out = new Map<string, string[]>()
-  for (const template of await store.listTemplates()) {
+  for (const template of templates) {
     for (const ref of secretRefs(template.config)) {
       const names = out.get(ref)
       if (names === undefined) out.set(ref, [template.name])

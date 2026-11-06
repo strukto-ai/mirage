@@ -18,8 +18,8 @@ import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/runti
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
-import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
-import { MICROSANDBOX_CONFIG_KEYS, type MicrosandboxConfig } from './config.ts'
+import type { ConfigFields, RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
+import { MICROSANDBOX_CONFIG_FIELDS, type MicrosandboxConfig } from './config.ts'
 import { notRunningHint } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { RUNNING_STATE, MICROSANDBOX_HINT, INSPECT_TIMEOUT_SECONDS } from './constants.ts'
 import { execArgs, openProgramPipe, reportedState, runProgram } from '../program.ts'
@@ -34,12 +34,12 @@ export class MicrosandboxRuntime
   extends RemoteSandbox<MicrosandboxConfig>
   implements PipeTransport
 {
-  static override readonly configKeys: readonly string[] = MICROSANDBOX_CONFIG_KEYS
+  static override readonly configFields: ConfigFields = MICROSANDBOX_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'microsandbox'
 
   constructor(options: RuntimeOptions<MicrosandboxConfig> | Record<string, unknown> = {}) {
-    super(options, MicrosandboxRuntime.configKeys)
+    super(options, MicrosandboxRuntime.configFields)
     requireId('microsandbox', 'sandbox', this.config.sandbox)
   }
 

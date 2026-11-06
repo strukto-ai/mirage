@@ -187,7 +187,13 @@ async def test_delete_wipes_and_is_refused_while_a_template_uses_it(
         "mounts": {
             "/gh": {
                 "vfs": "github",
-                "config": {"from": "strukto", "ref": "github"},
+                "config": {
+                    "token": {
+                        "from": "strukto",
+                        "ref": "github",
+                        "key": "token",
+                    }
+                },
             }
         }
     }
@@ -245,6 +251,34 @@ async def test_types_are_read_off_the_config_schemas(client):
     runtimes = (await client.get("/v1/runtimes/types")).json()
     key = {f["name"]: f for f in runtimes["daytona"]}["api_key"]
     assert key["secret"] is True
+    ssh = {f["name"]: f for f in runtimes["ssh"]}
+    assert ssh["host"]["type"] == "string"
+    assert ssh["host"]["required"] is True
+    assert ssh["port"]["type"] == "number"
+    assert ssh["port"]["required"] is False
+    assert ssh["timeout"]["default"] == 30
+    assert ssh["mount_type"]["options"] == ["ssh", "fuse", "both"]
+    assert ssh["private_key"]["secret"] is True
+    assert "env" not in ssh
+
+
+@pytest.mark.asyncio
+async def test_a_runtime_is_checked_against_its_field_types(client):
+    made = await client.post(
+        "/v1/runtimes",
+        json={
+            "name": "box",
+            "type": "ssh",
+            "fields": {"host": "h", "port": 2222},
+        },
+    )
+    assert made.status_code == 201, made.text
+    assert made.json()["config"] == {"host": "h", "port": 2222}
+    hostless = await client.post(
+        "/v1/runtimes",
+        json={"name": "box2", "type": "ssh", "fields": {"port": 22}},
+    )
+    assert hostless.status_code == 400
 
 
 @pytest.mark.asyncio

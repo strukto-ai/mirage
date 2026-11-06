@@ -18,15 +18,13 @@ from dataclasses import dataclass
 from typing import TypeGuard
 from urllib.parse import urlparse
 
+from mirage.resources.constants import STRUKTO
 from mirage.resources.errors import ResourceError
 from mirage.resources.types import EntryKind, Fields
 from mirage.server.resources.types import Field, TypeTable
 from mirage.types import JsonValue
 
 MAX_BYTES = 16 * 1024
-
-# The source the console declares for a team's own entries.
-STRUKTO = "strukto"
 
 POINTER_KEYS = frozenset({"from", "ref", "key"})
 
@@ -172,8 +170,7 @@ def check_values(
 ) -> Checked:
     """A body's fields checked against the type's, split into the plain
     and the sealed. Empty values are left out; ``kept`` names the sealed
-    fields an edit keeps, which count as given. Mirrors the console's
-    ``checkValues``.
+    fields an edit keeps, which count as given.
 
     Args:
         kind (EntryKind): the entry's kind.

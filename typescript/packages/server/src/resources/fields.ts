@@ -153,24 +153,24 @@ function cliTypes(): TypeTable {
   return Object.fromEntries(Object.entries(out).sort(([a], [b]) => compareCodePoints(a, b)))
 }
 
-/**
- * Every registered runtime, with its config's keys. TypeScript keeps a
- * runtime's config as a key list, so each is a string field; Python reads
- * the types off its config dataclass.
- */
+/** Every registered runtime, with the fields its config takes, a map field left out as a form cannot write one. */
 function runtimeTypes(): TypeTable {
   const out: TypeTable = {}
   for (const name of knownRuntimes()) {
-    const cls = runtimeClass(name) as unknown as { configKeys?: readonly string[] }
-    out[name] = (cls.configKeys ?? []).map((camel) => {
-      const field = camel.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
-      return {
-        name: field,
-        type: 'string',
-        secret: SECRET_CONFIG_FIELDS.has(field),
-        required: false,
-      }
-    })
+    const fields: Field[] = []
+    for (const [camel, field] of Object.entries(runtimeClass(name).configFields)) {
+      if (field.type === 'map') continue
+      const snake = camel.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
+      fields.push({
+        name: snake,
+        type: field.type,
+        secret: SECRET_CONFIG_FIELDS.has(snake),
+        required: field.required ?? false,
+        ...(field.options !== undefined ? { options: [...field.options] } : {}),
+        ...(field.default !== undefined ? { default: field.default } : {}),
+      })
+    }
+    out[name] = fields
   }
   return out
 }

@@ -65,7 +65,7 @@ describe('policies router', () => {
     await app.close()
   })
 
-  it('checks a policy as the console does', async () => {
+  it('checks a policy name and source', async () => {
     const app = appWithStore()
     const post = (payload: Record<string, unknown>) =>
       app.inject({ method: 'POST', url: '/v1/policies', payload })

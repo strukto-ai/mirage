@@ -19,9 +19,9 @@ import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { RunResult } from '@struktoai/mirage-core/runtime/types'
-import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
+import type { ConfigFields, RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type DaytonaSdk } from './sdk.ts'
-import { DAYTONA_CONFIG_KEYS, type DaytonaConfig } from './config.ts'
+import { DAYTONA_CONFIG_FIELDS, type DaytonaConfig } from './config.ts'
 import type { Daytona, Sandbox } from '@daytonaio/sdk'
 
 const ENC = new TextEncoder()
@@ -38,13 +38,13 @@ const ENC = new TextEncoder()
  * never touches the sandbox.
  */
 export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
-  static override readonly configKeys: readonly string[] = DAYTONA_CONFIG_KEYS
+  static override readonly configFields: ConfigFields = DAYTONA_CONFIG_FIELDS
   readonly name = 'daytona'
   private client: Daytona | null = null
   private sandbox: Sandbox | null = null
 
   constructor(options: RuntimeOptions<DaytonaConfig> = {}) {
-    super(options, DaytonaRuntime.configKeys)
+    super(options, DaytonaRuntime.configFields)
     requireId('daytona', 'sandboxId', this.config.sandboxId)
   }
 

@@ -25,6 +25,7 @@ from mirage.resources.constants import (
     NOUN,
 )
 from mirage.resources.errors import ResourceError
+from mirage.resources.refs import uses_of
 from mirage.resources.types import (
     Entry,
     EntryInput,
@@ -159,59 +160,75 @@ class RecordResourceStore(ResourceStore):
             await self._sealer.write(kind, name, kept)
             raise
 
-    async def put_entry(self, kind: EntryKind, input: EntryInput) -> Entry:
+    async def create_entry(self, kind: EntryKind, input: EntryInput) -> Entry:
         async with self._lock:
             check_name(kind, input.name)
-            both = [
-                key
-                for key, value in input.sealed.items()
-                if value is not None and key in input.fields
-            ]
-            if both:
-                raise ResourceError(
-                    "invalid", f"{both[0]} is given both plain and sealed"
-                )
             for other in ENTRY_KINDS:
-                if (
-                    other != kind
-                    and await self._records.read(other, input.name) is not None
-                ):
+                if await self._records.read(other, input.name) is not None:
                     raise ResourceError(
-                        "conflict",
-                        f"{input.name} is already a {NOUN[other]}",
+                        "conflict", f"{input.name} already exists"
                     )
-            kept: Fields = {}
-            if await self._records.read(kind, input.name) is not None:
-                kept = await self._sealer.read(kind, input.name)
-            sealed = {k: v for k, v in kept.items() if k not in input.fields}
-            for key, value in input.sealed.items():
-                if value is None:
-                    sealed.pop(key, None)
-                else:
-                    sealed[key] = value
-            record: Fields = {
-                "name": input.name,
-                "type": input.type,
-                "fields": input.fields,
-            }
-            save = asyncio.ensure_future(
-                self._save_entry(kind, input.name, record, sealed, kept)
+            return await self._save(kind, input)
+
+    async def update_entry(self, kind: EntryKind, input: EntryInput) -> Entry:
+        async with self._lock:
+            await self._entry_record(kind, input.name)
+            return await self._save(kind, input)
+
+    async def _save(self, kind: EntryKind, input: EntryInput) -> Entry:
+        """Save an entry whose name the caller checked, keeping a sealed
+        value the input leaves out and removing one it gives as None.
+
+        Args:
+            kind (EntryKind): the entry's kind.
+            input (EntryInput): the entry to save.
+        """
+        both = [
+            key
+            for key, value in input.sealed.items()
+            if value is not None and key in input.fields
+        ]
+        if both:
+            raise ResourceError(
+                "invalid", f"{both[0]} is given both plain and sealed"
             )
-            try:
-                await asyncio.shield(save)
-            except asyncio.CancelledError:
-                await settle(save)
-                raise
-            return Entry(
-                name=input.name,
-                type=input.type,
-                fields=input.fields,
-                sealed=sorted(sealed),
-            )
+        kept: Fields = {}
+        if await self._records.read(kind, input.name) is not None:
+            kept = await self._sealer.read(kind, input.name)
+        sealed = {k: v for k, v in kept.items() if k not in input.fields}
+        for key, value in input.sealed.items():
+            if value is None:
+                sealed.pop(key, None)
+            else:
+                sealed[key] = value
+        record: Fields = {
+            "name": input.name,
+            "type": input.type,
+            "fields": input.fields,
+        }
+        save = asyncio.ensure_future(
+            self._save_entry(kind, input.name, record, sealed, kept)
+        )
+        try:
+            await asyncio.shield(save)
+        except asyncio.CancelledError:
+            await settle(save)
+            raise
+        return Entry(
+            name=input.name,
+            type=input.type,
+            fields=input.fields,
+            sealed=sorted(sealed),
+        )
 
     async def delete_entry(self, kind: EntryKind, name: str) -> None:
         async with self._lock:
             await self._entry_record(kind, name)
+            used_by = uses_of(await self._templates()).get(name, [])
+            if used_by:
+                raise ResourceError(
+                    "conflict", f"{name} is used by {', '.join(used_by)}"
+                )
             delete = asyncio.ensure_future(self._delete_entry(kind, name))
             try:
                 await asyncio.shield(delete)
@@ -261,15 +278,25 @@ class RecordResourceStore(ResourceStore):
         async with self._lock:
             return await self._policy_of(name)
 
-    async def put_policy(self, policy: Policy) -> Policy:
+    async def create_policy(self, policy: Policy) -> Policy:
         async with self._lock:
             check_name(POLICY, policy.name)
-            await self._records.write(
-                POLICY,
-                policy.name,
-                {"name": policy.name, "source": policy.source},
-            )
-            return Policy(name=policy.name, source=policy.source)
+            if await self._records.read(POLICY, policy.name) is not None:
+                raise ResourceError(
+                    "conflict", f"{policy.name} already exists"
+                )
+            return await self._write_policy(policy)
+
+    async def update_policy(self, policy: Policy) -> Policy:
+        async with self._lock:
+            await self._policy_of(policy.name)
+            return await self._write_policy(policy)
+
+    async def _write_policy(self, policy: Policy) -> Policy:
+        await self._records.write(
+            POLICY, policy.name, {"name": policy.name, "source": policy.source}
+        )
+        return Policy(name=policy.name, source=policy.source)
 
     async def delete_policy(self, name: str) -> None:
         async with self._lock:
@@ -288,12 +315,15 @@ class RecordResourceStore(ResourceStore):
             raise not_found(TEMPLATE, name)
         return template
 
+    async def _templates(self) -> list[Template]:
+        return [
+            await self._live_template(name)
+            for name in await self._sorted_names(TEMPLATE)
+        ]
+
     async def list_templates(self) -> list[Template]:
         async with self._lock:
-            return [
-                await self._live_template(name)
-                for name in await self._sorted_names(TEMPLATE)
-            ]
+            return await self._templates()
 
     async def get_template(self, name: str) -> Template:
         async with self._lock:

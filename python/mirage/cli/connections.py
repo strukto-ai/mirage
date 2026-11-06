@@ -142,13 +142,15 @@ def read_secret(key: str, path: str | None, name: str) -> str:
     return one_line(line)
 
 
-def load_draft(path: str) -> Draft:
+def load_draft(path: str, read_sealed: bool = True) -> Draft:
     """An entry from a YAML or JSON file: ``name``, ``type``, ``fields``
-    (or ``config``, as ``get -o yaml`` writes it) and ``secrets``, the
-    sealed fields to read.
+    (or ``config``, as ``get -o yaml`` writes it) and ``secrets`` (or
+    ``sealed``, as ``get -o yaml`` writes it), the sealed fields to read.
 
     Args:
         path (str): the file, or ``-`` for stdin.
+        read_sealed (bool): whether ``sealed`` names fields to read; an
+            update keeps the sealed fields it is not given instead.
     """
     try:
         data = parse_yaml(read_file(path))
@@ -157,7 +159,9 @@ def load_draft(path: str) -> Draft:
     if not isinstance(data, dict):
         fail(f"{path} must hold a mapping", exit_code=2)
     fields = data.get("fields", data.get("config", {}))
-    secrets = data.get("secrets", [])
+    secrets = data.get(
+        "secrets", data.get("sealed", []) if read_sealed else []
+    )
     if not isinstance(fields, dict):
         fail(f"{path}: fields must be a mapping", exit_code=2)
     if not isinstance(secrets, list) or not all(
@@ -353,7 +357,7 @@ def kind_app(kind: Kind) -> typer.Typer:
     """
     app = typer.Typer(
         help=f"Saved {kind.noun} connections: a type, its settings and "
-        "its credentials, kept by the daemon or the console.",
+        "its credentials, kept by the daemon or the hosted API.",
         no_args_is_help=True,
     )
 
@@ -453,10 +457,12 @@ def kind_app(kind: Kind) -> typer.Typer:
             current = handle_response(client.request("GET", entry_path(name)))
             if not isinstance(current, dict):
                 fail(f"{kind.noun} {name}: unexpected answer", exit_code=2)
-            if file is not None:
-                draft = load_draft(file)
-            else:
-                draft = Draft(fields=dict(current.get("config", {})))
+            draft = (
+                load_draft(file, read_sealed=False)
+                if file is not None
+                else Draft()
+            )
+            draft.fields = {**current.get("config", {}), **draft.fields}
             sealed = set(current.get("sealed", []))
             draft = apply_flags(draft, sets, secrets, unsets)
             for key in unsets:

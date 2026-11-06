@@ -43,17 +43,41 @@ class ResourceStore(ABC):
     async def get_entry(self, kind: EntryKind, name: str) -> Entry: ...
 
     @abstractmethod
-    async def put_entry(self, kind: EntryKind, input: EntryInput) -> Entry:
-        """Create or replace an entry. Its name is unique across the four
-        entry kinds.
+    async def create_entry(self, kind: EntryKind, input: EntryInput) -> Entry:
+        """Save a new entry. Its name is unique across the entry kinds.
 
         Args:
             kind (EntryKind): the entry's kind.
             input (EntryInput): the entry to save.
+
+        Raises:
+            ResourceError: ``conflict`` when any entry has the name.
         """
 
     @abstractmethod
-    async def delete_entry(self, kind: EntryKind, name: str) -> None: ...
+    async def update_entry(self, kind: EntryKind, input: EntryInput) -> Entry:
+        """Replace an entry, keeping a sealed value the input leaves out
+        and removing one it gives as None.
+
+        Args:
+            kind (EntryKind): the entry's kind.
+            input (EntryInput): the entry's new fields.
+
+        Raises:
+            ResourceError: ``not_found`` when it does not exist.
+        """
+
+    @abstractmethod
+    async def delete_entry(self, kind: EntryKind, name: str) -> None:
+        """Delete an entry and wipe its sealed values.
+
+        Args:
+            kind (EntryKind): the entry's kind.
+            name (str): its name.
+
+        Raises:
+            ResourceError: ``conflict`` while a saved template names it.
+        """
 
     @abstractmethod
     async def reveal_entry(
@@ -67,7 +91,26 @@ class ResourceStore(ABC):
     async def get_policy(self, name: str) -> Policy: ...
 
     @abstractmethod
-    async def put_policy(self, policy: Policy) -> Policy: ...
+    async def create_policy(self, policy: Policy) -> Policy:
+        """Save a new policy.
+
+        Args:
+            policy (Policy): the policy to save.
+
+        Raises:
+            ResourceError: ``conflict`` when one has the name.
+        """
+
+    @abstractmethod
+    async def update_policy(self, policy: Policy) -> Policy:
+        """Replace a policy's source.
+
+        Args:
+            policy (Policy): the policy's name and new source.
+
+        Raises:
+            ResourceError: ``not_found`` when it does not exist.
+        """
 
     @abstractmethod
     async def delete_policy(self, name: str) -> None: ...

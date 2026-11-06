@@ -453,7 +453,7 @@ Returns HTTP 201 Created with the restored workspace.
 
 ## Saved policies
 
-A saved policy is a Python program kept by name, as the console keeps one. Its
+A saved policy is a Python program kept by name, as the hosted API keeps one. Its
 name ends in `.py`, such as `guard.py`, and its source is at most 64 KB. The
 local daemon keeps them under `~/.mirage/resources`, as `resource_store` sets.
 A server of many [accounts](#accounts) answers HTTP 501 on these routes.
@@ -502,10 +502,17 @@ Returns HTTP 204 No Content.
 
 `/v1/vfs`, `/v1/clis` and `/v1/runtimes` keep VFS, CLI and runtime
 entries: a type, its fields, and the fields its config schema
-marks secret, which are sealed. The routes and bodies are the console's, so a
+marks secret, which are sealed. The routes and bodies are the hosted API's, so a
 client works against either. An entry answers only under its own kind's
 route, and a name is taken once across the three kinds. On a server that
 requires accounts these routes answer HTTP 501 Not Implemented.
+
+A workspace config, or a template's, uses a saved field as
+`{from: strukto, ref: NAME, key: FIELD}` wherever a secret pointer may go,
+such as `token: {from: strukto, ref: github, key: token}`. The server reads
+the entries those pointers name when it creates the workspace, sealed fields
+included, and keeps the values only in the workspace's memory. A name that is
+not saved returns HTTP 400, and a server that requires accounts returns HTTP 501.
 
 Routes that return an entry yield this object:
 
@@ -535,7 +542,7 @@ required only when the block is used.
 
 <Badge color="green">POST</Badge> `/v1/vfs`
 
-<ParamField body="name" type="string" required>1-63 of `a-z 0-9 . _ -`, starting with a letter or digit.</ParamField>
+<ParamField body="name" type="string" required>1-63 of `a-z 0-9 . _ -`, starting with a letter or digit. `types` is refused, since it names the types route.</ParamField>
 <ParamField body="type" type="string" required>One of the types.</ParamField>
 <ParamField body="fields" type="object" required>The fields, each checked against the type.</ParamField>
 

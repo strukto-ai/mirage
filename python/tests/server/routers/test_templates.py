@@ -21,7 +21,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from mirage.resources.memory import memory_resource_store
-from mirage.resources.types import TemplateInput
+from mirage.resources.types import EntryInput, TemplateInput
 from mirage.server import build_app
 from mirage.server.resources.files import files_resource_store
 
@@ -105,6 +105,44 @@ async def test_a_workspace_is_created_from_a_copy_of_a_template(app, client):
     r = await client.get("/v1/workspaces/from-t")
     assert [m["prefix"] for m in r.json()["mounts"]] == ["/"]
     await client.delete("/v1/workspaces/from-t")
+
+
+def _named(ref: str) -> dict:
+    root = {"from": "strukto", "ref": ref, "key": "root"}
+    return {
+        "mounts": {
+            "/": {"vfs": "ram", "mode": "WRITE"},
+            "/host": {"vfs": "disk", "config": {"root": root}},
+        }
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_template_builds_from_a_saved_connection(
+    app, client, tmp_path
+):
+    (tmp_path / "hi.txt").write_text("hello\n")
+    await app.state.resources.create_entry(
+        "vfs",
+        EntryInput(
+            name="box", type="disk", fields={}, sealed={"root": str(tmp_path)}
+        ),
+    )
+    await client.post(
+        "/v1/templates", json={"name": "boxed", "config": _named("box")}
+    )
+    r = await client.post(
+        "/v1/workspaces", json={"id": "boxed", "template": "boxed"}
+    )
+    assert r.status_code == 201, r.text
+    ran = await client.post(
+        "/v1/workspaces/boxed/shell", json={"command": "cat /host/hi.txt"}
+    )
+    assert ran.json()["stdout"] == "hello\n"
+    await client.delete("/v1/workspaces/boxed")
+    r = await client.post("/v1/workspaces", json={"config": _named("gone")})
+    assert r.status_code == 400
+    assert r.json()["detail"] == "gone is not saved as a VFS, CLI or runtime"
 
 
 @pytest.mark.asyncio

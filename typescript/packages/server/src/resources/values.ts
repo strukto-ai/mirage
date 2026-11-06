@@ -12,15 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { STRUKTO } from '@struktoai/mirage-core/resources/constants'
 import { ResourceError } from '@struktoai/mirage-core/resources/errors'
 import type { EntryKind, Fields } from '@struktoai/mirage-core/resources/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Field, TypeTable } from './types.ts'
 
 const MAX_BYTES = 16 * 1024
-
-/** The source the console declares for a team's own entries. */
-export const STRUKTO = 'strukto'
 
 /** An entry's values split as they are kept: `config` plain, `sealed` write-only. */
 export interface Checked {
@@ -66,7 +64,7 @@ export function storesOf(config: Fields): string[] {
 }
 
 function fieldsOf(kind: EntryKind, type: string, types: TypeTable): Field[] {
-  const fields = types[type]
+  const fields = Object.hasOwn(types, type) ? types[type] : undefined
   if (fields === undefined)
     throw invalid(`type must be a ${kind}: ${Object.keys(types).join(', ')}`)
   return fields
@@ -127,7 +125,7 @@ function checkRules(kind: EntryKind, type: string, config: Fields): void {
 /**
  * A body's fields checked against the type's, split into the plain and the
  * sealed. Empty values are left out; `kept` names the sealed fields an edit
- * keeps, which count as given. Mirrors the console's `checkValues`.
+ * keeps, which count as given.
  */
 export function checkValues(
   kind: EntryKind,

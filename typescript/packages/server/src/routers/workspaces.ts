@@ -21,6 +21,7 @@ import { PolicyDenied } from '@struktoai/mirage-core/policy/errors'
 import { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { ResourceError } from '@struktoai/mirage-core/resources/errors'
+import { secretRefs } from '@struktoai/mirage-core/resources/refs'
 import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
 import { resolveSourcesFor } from '@struktoai/mirage-core/secrets/sources'
 import type { JsonValue } from '@struktoai/mirage-core/types'
@@ -52,6 +53,7 @@ import {
   type CreateWorkspaceRequest,
   type LoadWorkspaceRequest,
 } from '../schemas.ts'
+import { withEntries } from '../resources/strukto.ts'
 import { makeBrief, makeDetail } from '../summary.ts'
 import { NO_WORKSPACE_ID, requireOneAccount, storeRefusal } from './templates.ts'
 import { queryFlag } from './vfs.ts'
@@ -357,6 +359,32 @@ function configDigest(config: unknown): string {
   return createHash('sha256').update(canonical).digest('hex')
 }
 
+/**
+ * The config a create builds, with the saved entries its pointers name
+ * declared for it: after the digest and the policies, which judge the
+ * config as written and never see a sealed value. Answers 501 on a server of
+ * many accounts and 400 for a name that is not saved.
+ */
+async function withSaved(
+  deps: WorkspaceRoutesDeps,
+  written: Record<string, JsonValue>,
+  cfg: WorkspaceConfigRaw,
+): Promise<{ cfg: WorkspaceConfigRaw } | { status: number; detail: string }> {
+  const refs = secretRefs(written)
+  if (refs.length === 0) return { cfg }
+  const refused = requireOneAccount(deps.registry)
+  if (refused !== null) return refused
+  if (deps.resources === undefined) {
+    return { status: 400, detail: 'this server keeps no saved connections' }
+  }
+  try {
+    return { cfg: await withEntries(deps.resources, cfg, refs) }
+  } catch (e) {
+    if (!(e instanceof ResourceError)) throw e
+    return storeRefusal(e)
+  }
+}
+
 export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDeps): void {
   app.post<{ Body: CreateWorkspaceRequest; Querystring: { explain?: string } }>(
     '/v1/workspaces',
@@ -406,6 +434,8 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
         }
         const refusal = await admit(deps, req, reply, config)
         if (refusal !== null) return refusal
+        const saved = await withSaved(deps, config, cfg)
+        if ('detail' in saved) return answer(reply, saved.status, { detail: saved.detail })
         return claimed(deps, req, reply, wid, async () => {
           let args: Awaited<ReturnType<ServerHost['workspaceArgs']>>
           try {
@@ -413,7 +443,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
             // config names, go out under the network the workspace will be
             // held to.
             args = await runWithNetwork(deps.registry.ruleFor(cfg.network), () =>
-              deps.host.workspaceArgs(cfg),
+              deps.host.workspaceArgs(saved.cfg),
             )
           } catch (e) {
             if (

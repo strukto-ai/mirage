@@ -19,11 +19,14 @@ from mirage.resources.types import EntryKind, ResourceKind
 
 ENTRY_KINDS: tuple[EntryKind, ...] = ("vfs", "cli", "runtime", "store")
 
-# The one scope a local daemon serves; the console builds a store per team.
+# The one scope a local daemon serves; a hosted server keeps one per team.
 DEFAULT_SCOPE = "local"
 
-# A name the console accepts, which is also safe as a file name.
+# A saved config's name, which is also safe as a file name.
 NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}")
+
+# The source a config names a saved entry through: {from: strukto, ref}.
+STRUKTO = "strukto"
 
 # The folder deleted templates wait in until restored.
 DELETED_TEMPLATES = ".deleted/template"

@@ -20,7 +20,7 @@ export enum ResourceStoreBackend {
 
 export type FieldType = 'string' | 'number' | 'boolean' | 'list'
 
-/** One field of a type's config, as a config file writes it and as the console's `/types` answers it. */
+/** One field of a type's config, as a config file writes it and as a `/types` route answers it. */
 export interface Field {
   /** `token`, `base_url`; a block's field is `auth.token`. */
   name: string

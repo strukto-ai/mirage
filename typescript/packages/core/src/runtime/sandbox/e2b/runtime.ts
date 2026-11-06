@@ -20,13 +20,13 @@ import { RemoteSandbox } from '../base.ts'
 import { PIPE_TRANSPORT, type PipeTransport } from '../mixin.ts'
 import { registerRuntime } from '../../table.ts'
 import type { OutputFn, PipeWriter, RunResult, SandboxPipe } from '../../types.ts'
-import type { RuntimeOptions } from '../../config.ts'
+import type { ConfigFields, RuntimeOptions } from '../../config.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { requireId } from '../config.ts'
 import { EXEC_ID, stopSignal, wrapLine } from '../constants.ts'
 import { CLOSED_INPUT, PTY_MARK, PTY_RAW } from './constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
-import { E2B_CONFIG_KEYS, type E2BConfig } from './config.ts'
+import { E2B_CONFIG_FIELDS, type E2BConfig } from './config.ts'
 import type { CommandResult, Sandbox } from 'e2b'
 
 const ENC = new TextEncoder()
@@ -105,14 +105,14 @@ class PtyWriter implements PipeWriter {
  * workspace over a PTY, since E2B's exec decodes output as text.
  */
 export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTransport {
-  static override readonly configKeys: readonly string[] = E2B_CONFIG_KEYS
+  static override readonly configFields: ConfigFields = E2B_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'e2b'
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
 
   constructor(options: RuntimeOptions<E2BConfig> = {}) {
-    super(options, E2BRuntime.configKeys)
+    super(options, E2BRuntime.configFields)
     requireId('e2b', 'sandboxId', this.config.sandboxId)
   }
 

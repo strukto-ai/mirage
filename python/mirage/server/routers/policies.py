@@ -22,10 +22,10 @@ from mirage.resources.errors import ResourceError
 from mirage.resources.types import Policy
 from mirage.server.routers.templates import store_refusal
 
-# A file name mirage reads as Python, as the console names a policy.
+# A policy's name: a file name mirage reads as Python.
 POLICY_NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,59}\.py")
 
-# A policy is a script, not a project; the console takes 64 KiB.
+# A policy is a script, not a project, so its source is at most 64 KiB.
 MAX_SOURCE = 64 * 1024
 
 
@@ -78,7 +78,7 @@ router = APIRouter(
 
 
 def check_source(source: str) -> str:
-    """Refuse a source over the console's limit.
+    """Refuse a source over 64 KiB.
 
     Args:
         source (str): the policy's program.
@@ -124,18 +124,8 @@ async def create_policy(
             detail="policy name must end in .py, such as guard.py",
         )
     source = check_source(req.source)
-    resources = request.app.state.resources
     try:
-        await resources.get_policy(req.name)
-    except ResourceError as e:
-        if e.code != "not_found":
-            raise store_refusal(e) from e
-    else:
-        raise HTTPException(
-            status_code=409, detail=f"{req.name} already exists"
-        )
-    try:
-        saved = await resources.put_policy(
+        saved = await request.app.state.resources.create_policy(
             Policy(name=req.name, source=source)
         )
     except ResourceError as e:
@@ -163,10 +153,10 @@ async def update_policy(
         request (Request): the HTTP request, for the app's store.
     """
     source = check_source(req.source)
-    resources = request.app.state.resources
     try:
-        await resources.get_policy(ref)
-        saved = await resources.put_policy(Policy(name=ref, source=source))
+        saved = await request.app.state.resources.update_policy(
+            Policy(name=ref, source=source)
+        )
     except ResourceError as e:
         raise store_refusal(e) from e
     return present(saved)

@@ -161,24 +161,10 @@ function command(vfs: Command, call: VfsCall): void {
     })
 }
 
-/** A `glob` command under `parent`: every path a pattern matches. */
-function globCommand(parent: Command, name: string, hidden: boolean): Command {
-  return parent
-    .command(name, { hidden })
-    .description('Every path a pattern matches, as the session sees them.')
-    .argument('<pattern>', 'Pathname pattern such as /**/*.py')
-    .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
-    .option('-s, --session <id>', 'Session id')
-    .action(async (pattern: string, opts: Target) => {
-      emit(await answer(await post(opts, 'glob', { pattern })), lines)
-    })
-}
-
-/** `mirage workspace vfs <call>` for each `session.vfs` call, and `glob`. */
+/** `mirage workspace vfs <call>` for each `session.vfs` call. */
 export function registerVfsCommands(parent: Command): void {
   const vfs = parent
     .command('vfs')
     .description("The session's VFS calls, one command per call, as POSIX names them.")
   for (const call of VFS_CALLS) command(vfs, call)
-  globCommand(vfs, 'glob', false)
 }

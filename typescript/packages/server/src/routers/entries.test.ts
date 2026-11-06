@@ -16,6 +16,7 @@ import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { memoryResourceStore } from '@struktoai/mirage-core/resources/memory'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildApp } from '../app.ts'
+import type { TypeTable as Types } from '../resources/types.ts'
 
 const GITHUB = {
   name: 'github',
@@ -53,8 +54,6 @@ interface Answer {
   sealed?: string[]
   items: Item[]
 }
-
-type Types = Record<string, { name: string; secret: boolean; group?: string }[]>
 
 async function call(app: App, method: string, url: string, payload?: unknown) {
   const r = await app.inject({
@@ -166,7 +165,12 @@ describe('entries router', () => {
     const { app, store } = setup()
     await call(app, 'POST', '/v1/vfs', GITHUB)
     const config = {
-      mounts: { '/gh': { vfs: 'github', config: { from: 'strukto', ref: 'github' } } },
+      mounts: {
+        '/gh': {
+          vfs: 'github',
+          config: { token: { from: 'strukto', ref: 'github', key: 'token' } },
+        },
+      },
     }
     await store.putTemplate({ name: 'agent', config })
     expect((await call(app, 'GET', '/v1/vfs')).body.items[0]?.used_by).toBe(1)
@@ -204,6 +208,30 @@ describe('entries router', () => {
     const runtimes = await types(app, '/v1/runtimes/types')
     const key = runtimes.daytona?.find((f) => f.name === 'api_key')
     expect(key?.secret).toBe(true)
+    const ssh = Object.fromEntries((runtimes.ssh ?? []).map((f) => [f.name, f]))
+    expect(ssh.host).toMatchObject({ type: 'string', required: true })
+    expect(ssh.port).toMatchObject({ type: 'number', required: false })
+    expect(ssh.timeout?.default).toBe(30)
+    expect(ssh.mount_type?.options).toEqual(['ssh', 'fuse', 'both'])
+    expect(ssh.private_key?.secret).toBe(true)
+    expect(ssh.env).toBeUndefined()
+  })
+
+  it('checks a runtime against its field types', async () => {
+    const { app } = setup()
+    const made = await call(app, 'POST', '/v1/runtimes', {
+      name: 'box',
+      type: 'ssh',
+      fields: { host: 'h', port: 2222 },
+    })
+    expect(made.status).toBe(201)
+    expect(made.body.config).toEqual({ host: 'h', port: 2222 })
+    const hostless = await call(app, 'POST', '/v1/runtimes', {
+      name: 'box2',
+      type: 'ssh',
+      fields: { port: 22 },
+    })
+    expect(hostless.status).toBe(400)
   })
 
   it('answers a runtime with its captures', async () => {

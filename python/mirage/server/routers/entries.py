@@ -20,11 +20,11 @@ from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 
 from mirage.resources.base import ResourceStore
-from mirage.resources.constants import ENTRY_KINDS, NAME, NOUN
+from mirage.resources.constants import NAME, NOUN
 from mirage.resources.errors import ResourceError
+from mirage.resources.refs import uses_of
 from mirage.resources.types import Entry, EntryInput, EntryKind, Fields
 from mirage.server.resources.fields import types_of
-from mirage.server.resources.refs import uses
 from mirage.server.resources.values import check_values, stores_of
 from mirage.server.routers.templates import (
     require_one_account,
@@ -32,20 +32,22 @@ from mirage.server.routers.templates import (
 )
 from mirage.types import JsonValue
 
-# Each kind's route, as the console names it.
+# Each kind's route.
 ROUTES: dict[EntryKind, str] = {
     "vfs": "/v1/vfs",
     "cli": "/v1/clis",
     "runtime": "/v1/runtimes",
 }
 
-# A name the console reads as an id, which it refuses as a name.
+# The route that lists a kind's types, which no entry can be named.
+TYPES_ROUTE = "types"
+
+# A name that reads as an id, which no entry may take.
 ID_PREFIX = re.compile(r"(ws|sec|pol|key|tpl|team|usr)_")
 
 
 class Refused(Exception):
-    """A request the console answers with a 4xx and extra keys beside
-    ``detail``."""
+    """A request answered with a 4xx and extra keys beside ``detail``."""
 
     def __init__(self, status: int, detail: str, **extra: JsonValue) -> None:
         super().__init__(detail)
@@ -62,8 +64,8 @@ class Refused(Exception):
 def present(
     kind: EntryKind, entry: Entry, used_by: int | None = None
 ) -> dict[str, Any]:
-    """An entry as the console answers it. The daemon keeps no id,
-    creator or times, so the id is the name and the rest are null.
+    """An entry as a route answers it. The daemon keeps no id, creator
+    or times, so the id is the name and the rest are null.
 
     Args:
         kind (EntryKind): the entry's kind.
@@ -102,6 +104,10 @@ def check_name(kind: EntryKind, name: str) -> str:
             f"{NOUN[kind]} name must be 1-63 of a-z 0-9 . _ -, start with "
             "a letter or digit, and not look like an id",
         )
+    if name == TYPES_ROUTE:
+        raise Refused(
+            400, f"{TYPES_ROUTE} names the types route; pick another"
+        )
     return name
 
 
@@ -118,8 +124,7 @@ async def json_body(request: Request) -> dict[str, JsonValue]:
 async def entry_named(
     store: ResourceStore, kind: EntryKind, ref: str
 ) -> Entry:
-    """The entry of ``kind`` named ``ref``, refused as the console
-    refuses a missing one.
+    """The entry of ``kind`` named ``ref``; a missing one is a 404.
 
     Args:
         store (ResourceStore): the saved configs.
@@ -151,18 +156,6 @@ async def require_stores(store: ResourceStore, config: Fields) -> None:
         )
 
 
-async def exists(store: ResourceStore, name: str) -> bool:
-    for kind in ENTRY_KINDS:
-        try:
-            await store.get_entry(kind, name)
-        except ResourceError as e:
-            if e.code != "not_found":
-                raise
-            continue
-        return True
-    return False
-
-
 def removed_by(given: JsonValue) -> set[str]:
     """The fields an edit removes: given as null, or now pointing at a
     store, whose sealed value would be read instead.
@@ -176,8 +169,8 @@ def removed_by(given: JsonValue) -> set[str]:
 
 
 def entry_router(kind: EntryKind) -> APIRouter:
-    """The routes of one kind of entry, as the console serves them: the
-    route sets the kind, so an entry answers only under its own. Sealed
+    """The routes of one kind of entry. The route sets the kind, so an
+    entry answers only under its own. Sealed
     fields are write-only; no route answers with one.
 
     Args:
@@ -194,7 +187,7 @@ def entry_router(kind: EntryKind) -> APIRouter:
         store: ResourceStore = request.app.state.resources
         try:
             entries = await store.list_entries(kind)
-            used = await uses(store)
+            used = uses_of(await store.list_templates())
         except ResourceError as e:
             raise store_refusal(e) from e
         text = (q or "").strip().lower()
@@ -207,7 +200,7 @@ def entry_router(kind: EntryKind) -> APIRouter:
             ]
         }
 
-    @router.get("/types")
+    @router.get(f"/{TYPES_ROUTE}")
     async def list_types() -> dict[str, Any]:
         return dict(types_of(kind))
 
@@ -222,9 +215,7 @@ def entry_router(kind: EntryKind) -> APIRouter:
             )
             name = check_name(kind, required_string(body, "name"))
             await require_stores(store, checked.config)
-            if await exists(store, name):
-                raise Refused(409, f"{name} already exists")
-            saved = await store.put_entry(
+            saved = await store.create_entry(
                 kind,
                 EntryInput(
                     name=name,
@@ -269,7 +260,7 @@ def entry_router(kind: EntryKind) -> APIRouter:
             await require_stores(store, checked.config)
             sealed: dict[str, JsonValue | None] = {k: None for k in removed}
             sealed.update(checked.sealed)
-            saved = await store.put_entry(
+            saved = await store.update_entry(
                 kind,
                 EntryInput(
                     name=current.name,
@@ -289,11 +280,6 @@ def entry_router(kind: EntryKind) -> APIRouter:
         store: ResourceStore = request.app.state.resources
         try:
             current = await entry_named(store, kind, ref)
-            used_by = (await uses(store)).get(current.name, [])
-            if used_by:
-                raise Refused(
-                    409, f"{current.name} is used by {', '.join(used_by)}"
-                )
             await store.delete_entry(kind, current.name)
         except Refused as e:
             return e.answer()

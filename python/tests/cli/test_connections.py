@@ -211,6 +211,37 @@ def test_a_file_names_the_secrets_to_read(daemon, store, tmp_path: Path):
     assert [i["name"] for i in listed["items"]] == ["gh"]
 
 
+def test_an_export_reads_back_and_a_file_update_keeps_the_rest(
+    daemon, store, tmp_path: Path
+):
+    run(
+        "vfs",
+        "create",
+        "gh",
+        "--type",
+        "github",
+        "--set",
+        "owner=o",
+        "--set",
+        "repo=r",
+        "--secret",
+        "token",
+        stdin="t1\n",
+    )
+    exported = tmp_path / "gh.yaml"
+    exported.write_text(run("vfs", "get", "gh", "-o", "yaml").output)
+    r = run("vfs", "create", "copy", "-f", str(exported), stdin="t2\n")
+    assert r.exit_code == 0, r.output
+    assert sealed(store, "vfs", "copy") == {"token": "t2"}
+    change = tmp_path / "change.yaml"
+    change.write_text(yaml.safe_dump({"fields": {"repo": "r2"}}))
+    r = run("vfs", "update", "gh", "-f", str(change))
+    assert r.exit_code == 0, r.output
+    got = json.loads(run("vfs", "get", "gh", "-o", "json").output)
+    assert got["config"] == {"owner": "o", "repo": "r2"}
+    assert sealed(store, "vfs", "gh") == {"token": "t1"}
+
+
 def test_types_and_delete(daemon, store):
     r = run("vfs", "types", "github", "-o", "json")
     assert r.exit_code == 0, r.output

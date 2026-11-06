@@ -148,6 +148,27 @@ describe('mirage vfs against a daemon', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  it('reads an export back, and a file update keeps the fields it leaves out', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-export-'))
+    expect(
+      (await run(['vfs', 'create', 'exported', ...GH, '--secret', 'token'], 't1\n')).code,
+    ).toBe(0)
+    const exported = join(dir, 'gh.yaml')
+    writeFileSync(exported, (await run(['vfs', 'get', 'exported', '-o', 'yaml'])).out)
+    const copied = await run(['vfs', 'create', 'exported-copy', '-f', exported], 't2\n')
+    expect(copied.code).toBe(0)
+    expect((await store.revealEntry('vfs', 'exported-copy')).sealed).toEqual({ token: 't2' })
+    const change = join(dir, 'change.yaml')
+    writeFileSync(change, 'fields:\n  repo: r2\n')
+    expect((await run(['vfs', 'update', 'exported', '-f', change])).code).toBe(0)
+    const got = JSON.parse((await run(['vfs', 'get', 'exported', '-o', 'json'])).out) as {
+      config: unknown
+    }
+    expect(got.config).toEqual({ owner: 'o', repo: 'r2' })
+    expect((await store.revealEntry('vfs', 'exported')).sealed).toEqual({ token: 't1' })
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('lists types and deletes', async () => {
     const types = await run(['vfs', 'types', 'github', '-o', 'json'])
     const token = (JSON.parse(types.out) as { name: string; secret: boolean }[]).find(

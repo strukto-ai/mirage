@@ -25,7 +25,7 @@ from mirage.server.resources.files import files_resource_store
 @pytest.mark.asyncio
 async def test_sealed_values_live_apart_in_owner_only_files(tmp_path):
     store = files_resource_store(tmp_path)
-    await store.put_entry(
+    await store.create_entry(
         "cli", EntryInput("gh", "gh", {"a": 1}, {"token": "secret-x"})
     )
     sealed = tmp_path / ".sealed" / "cli" / "gh.json"

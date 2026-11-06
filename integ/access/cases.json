@@ -194,7 +194,7 @@
     {"id": "sets_a_mode", "input": {"call": "setattr", "path": "/b/copied.txt", "mode": 420}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": {}},
     {"id": "makes_a_subdirectory", "input": {"call": "mkdir", "path": "/b/sub"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": null},
     {"id": "removes_the_subdirectory", "input": {"call": "rmdir", "path": "/b/sub"}, "accesses": ["inapp", "http", "cli", "mcp", "mcp_stdio", "rpc", "rpc_stdio"], "expect": null},
-    {"id": "globs_the_directory", "input": {"call": "glob", "pattern": "/b/*"}, "accesses": ["inapp", "http", "cli", "rpc", "rpc_stdio"], "expect": ["/b/copied.txt", "/b/empty", "/b/link"]}
+    {"id": "globs_the_directory", "input": {"call": "glob", "pattern": "/b/*"}, "accesses": ["inapp", "http", "rpc", "rpc_stdio"], "expect": ["/b/copied.txt", "/b/empty", "/b/link"]}
    ]
   },
   {

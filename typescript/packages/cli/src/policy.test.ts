@@ -18,6 +18,10 @@ import { Command } from 'commander'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const seen: { method: string; path: string; body: unknown }[] = []
+
+function json(status: number, value: unknown): Promise<Response> {
+  return Promise.resolve(new Response(JSON.stringify(value), { status }))
+}
 const saved = new Map<string, string>()
 
 vi.mock('./client.ts', () => ({
@@ -27,8 +31,6 @@ vi.mock('./client.ts', () => ({
       const body = init.body === undefined ? undefined : (JSON.parse(init.body) as unknown)
       seen.push({ method, path, body })
       const name = decodeURIComponent(path.replace(/^\/v1\/policies\/?/, ''))
-      const json = (status: number, value: unknown) =>
-        Promise.resolve(new Response(JSON.stringify(value), { status }))
       if (method === 'GET' && name === '') {
         return json(200, { items: [...saved.keys()].sort().map((n) => ({ name: n })) })
       }
