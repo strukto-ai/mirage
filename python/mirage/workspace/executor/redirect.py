@@ -240,7 +240,7 @@ class PipeRecorder(Recorder):
         try:
             await self.dispatch(
                 "append" if file.append else "write",
-                file.scope,
+                file.where,
                 data=source,
             )
         finally:
@@ -259,12 +259,12 @@ class PipeRecorder(Recorder):
             if not offset:
                 async with sole_stream(self.dispatch, file) as sole:
                     if sole:
-                        await self.dispatch("write", file.scope, data=source)
+                        await self.dispatch("write", file.where, data=source)
                         return
             async with aclosing(rechunk(source, MEMORY_LIMIT)) as parts:
                 async for part in parts:
                     await self.dispatch(
-                        "pwrite", file.scope, data=part, offset=offset
+                        "pwrite", file.where, data=part, offset=offset
                     )
                     offset += len(part)
         finally:
@@ -383,6 +383,8 @@ class PipeRecorder(Recorder):
             if channel not in self.bound:
                 return False
             if not data:
+                return True
+            if self.bound[channel].lost:
                 return True
             file, writer = self._writer(channel)
             if id(writer) not in self.broken:
@@ -1051,7 +1053,8 @@ async def _handle_redirect(
         and target.source is None
         and not target.pipe
     ):
-        recorder.output_file = _followed(target.scope, follow)
+        landed = _followed(target.scope, follow)
+        recorder.output_file = landed
         if (
             command is not None
             and target.opened
@@ -1061,6 +1064,8 @@ async def _handle_redirect(
                 or not _one_file(errs.scope, target.scope, follow)
             )
         ):
+            target.landed = PathSpec.from_str_path(landed)
+            recorder.output = target
             recorder.stream_to(target)
             if errs is target:
                 recorder.stream_to(target, Channel.STDERR)
@@ -1101,7 +1106,7 @@ async def _handle_redirect(
                 "streamed": (
                     *outer.streamed,
                     *(
-                        (file.scope.virtual, partial(recorder.hold, file))
+                        (file, partial(recorder.hold, file))
                         for file in {
                             id(f): f for f in recorder.bound.values()
                         }.values()

@@ -171,6 +171,116 @@ describe('handleRedirect > / >>', () => {
     },
   )
 
+  it.each<[string, Record<string, string | null>]>([
+    [
+      '{ echo a; mv /data/lnk2 /data/lnk; echo b; } > /data/lnk',
+      { '/data/open': 'a\nb\n', '/data/other': 'keep\n' },
+    ],
+    [
+      '{ echo a; ln -sfn other /data/lnk; echo b; } > /data/lnk',
+      { '/data/open': 'a\nb\n', '/data/other': 'keep\n' },
+    ],
+    [
+      '{ echo A; ln -s open /data/x; mv /data/x /data/lnk; echo C; } > /data/lnk',
+      { '/data/open': 'A\nC\n' },
+    ],
+    [
+      '{ echo AAAA; rm /data/lnk; echo C; } > /data/lnk',
+      { '/data/open': 'AAAA\nC\n', '/data/lnk': null },
+    ],
+    ['{ echo AAAA; rm /data/f; echo C; } > /data/f', { '/data/f': null }],
+    [
+      '{ echo AAAA; mv /data/f /data/g; echo C; } > /data/f',
+      { '/data/f': null, '/data/g': 'AAAA\nC\n' },
+    ],
+    [
+      '{ echo A; mv /data/f /data/g; mv /data/g /data/h; echo B; } > /data/f',
+      { '/data/f': null, '/data/h': 'A\nB\n' },
+    ],
+    [
+      '{ echo A; mv /data/other /data/open; echo C; } > /data/lnk',
+      { '/data/open': 'keep\n', '/data/other': null },
+    ],
+    ['{ echo A; rm /data/f; ls /nonexist; echo C; } > /data/f 2>&1', { '/data/f': null }],
+    [
+      '{ echo A; mv /data/f /data/g; wc -l < /data/g; echo B; } > /data/f',
+      { '/data/f': null, '/data/g': 'A\n1\nB\n' },
+    ],
+    [
+      '{ echo A; mv /data/f /data/g; date +x; echo B; } > /data/f',
+      { '/data/f': null, '/data/g': 'A\nx\nB\n' },
+    ],
+    [
+      '{ echo A; mv /data/f /data/g; echo B; } >> /data/f',
+      { '/data/f': null, '/data/g': 'z\nA\nB\n' },
+    ],
+    [
+      '{ echo A; mv /data/s /data/s2; echo C; } > /data/s/f',
+      { '/data/s/f': null, '/data/s2/f': 'A\nC\n' },
+    ],
+    ['{ echo A; rm -r /data/s; echo C; } > /data/s/f', { '/data/s/f': null }],
+    ['{ echo AAAA; rm /data/f; echo new > /data/f; echo C; } > /data/f', { '/data/f': 'new\n' }],
+    ['{ echo AAAA; mv /data/other /data/f; echo C; } > /data/f', { '/data/f': 'keep\n' }],
+    ['{ echo AAAA; mv /data/f /e/g; echo C; } > /data/f', { '/data/f': null, '/e/g': 'AAAA\n' }],
+    ['{ echo AAAA; cp /data/other /data/f; echo C; } > /data/f', { '/data/f': 'keep\nC\n' }],
+  ])('a streamed redirect writes the file it opened: %s', async (line, files) => {
+    const ws = new Workspace({ '/': new RAMVFS(), '/e/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell(
+        'mkdir -p /data/s; echo keep > /data/other; echo o > /data/open;' +
+          ' ln -s open /data/lnk; ln -s other /data/lnk2; echo z > /data/f',
+      )
+      const io = await ws.shell(line)
+      expect(io.exitCode).toBe(0)
+      expect(io.stderrText).toBe('')
+      for (const [path, content] of Object.entries(files)) {
+        const read = await ws.shell(`cat ${path}`)
+        if (content === null) expect(read.exitCode, path).toBe(1)
+        else expect(read.stdoutText, path).toBe(content)
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each<[string, number, string, string, string]>([
+    [
+      '{ echo x; mv /data/f /data/g; cat /data/g; } > /data/f',
+      1,
+      'cat: /data/g: input file is output file\n',
+      '/data/g',
+      'x\n',
+    ],
+    [
+      '{ echo A; rm /data/f; echo new > /data/f; cat /data/f; } > /data/f',
+      0,
+      '',
+      '/data/f',
+      'new\n',
+    ],
+    [
+      '{ echo A; mv /data/f /data/nope/g; echo C; } > /data/f',
+      0,
+      "mv: cannot move '/data/f' to '/data/nope/g': No such file or directory\n",
+      '/data/f',
+      'A\nC\n',
+    ],
+  ])(
+    'a streamed redirect is judged by the file it writes: %s',
+    async (line, status, stderr, path, content) => {
+      const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+      try {
+        await ws.shell('mkdir -p /data; echo z > /data/f')
+        const io = await ws.shell(line)
+        expect(io.exitCode).toBe(status)
+        expect(io.stderrText).toBe(stderr)
+        expect((await ws.shell(`cat ${path}`)).stdoutText).toBe(content)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
   // A read before the first byte leaves the file empty, so what comes after
   // still lands as one stream, not as blocks a store would rewrite the file
   // for one after another.

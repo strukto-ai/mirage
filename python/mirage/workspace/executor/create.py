@@ -19,7 +19,7 @@ from mirage.context import DEFAULT_UMASK
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.cooperative import chunks
 from mirage.io.spool import MEMORY_LIMIT
-from mirage.io.stream import rechunk, slice_stream
+from mirage.io.stream import drain, rechunk, slice_stream
 from mirage.io.types import ByteSource, OpReport
 from mirage.runtime.types import DispatchFn
 from mirage.shell.descriptors import FileDescription
@@ -149,6 +149,9 @@ async def write_description(
         replace (bool): the write is the file's whole content from its
             start, so it lands as one replacement.
     """
+    if file.lost:
+        await drain(data)
+        return
     if file.emit is not None:
         async with aclosing(chunks(data)) as source:
             async for part in source:
@@ -159,7 +162,7 @@ async def write_description(
             not file.opened or file.append or (replace and not file.offset)
         ):
             file.offset += await create_counted(
-                dispatch, session, file.scope, data, append=file.append
+                dispatch, session, file.where, data, append=file.append
             )
             file.opened = True
             return
@@ -171,7 +174,7 @@ async def write_description(
             return
         if not file.opened:
             await create_file(
-                dispatch, session, file.scope, b"", append=file.append
+                dispatch, session, file.where, b"", append=file.append
             )
             file.opened = True
         start = offset = file.offset + (
@@ -181,7 +184,7 @@ async def write_description(
             async with aclosing(rechunk(data, MEMORY_LIMIT)) as source:
                 async for part in source:
                     await dispatch(
-                        "pwrite", file.scope, data=part, offset=offset
+                        "pwrite", file.where, data=part, offset=offset
                     )
                     offset += len(part)
         finally:
@@ -189,7 +192,7 @@ async def write_description(
                 file.offset = offset
                 if file.source is not None:
                     content, _ = await dispatch(
-                        "read", file.scope, stream=True
+                        "read", file.where, stream=True
                     )
                     file.source.lines = await file.source.lines.reopen(
                         slice_stream(content, offset)
@@ -218,10 +221,10 @@ async def _first_write(
             return False
         try:
             file.offset = await create_counted(
-                dispatch, session, file.scope, data
+                dispatch, session, file.where, data
             )
         except BaseException:
-            file.offset = await _size_of(dispatch, file.scope) or 0
+            file.offset = await _size_of(dispatch, file.where) or 0
             raise
         return True
 
@@ -248,19 +251,19 @@ async def sole_stream(
     """
     report = OpReport()
     try:
-        await dispatch("stat", file.scope, admit_only=True, report=report)
+        await dispatch("stat", file.where, admit_only=True, report=report)
     except FS_ERRORS as exc:
         logger.debug(
             "write target %s has no store: %s", file.scope.raw_path, exc
         )
         yield False
         return
-    store = report.store or file.scope.virtual
+    store = report.store or file.where.virtual
     if _streaming.setdefault(store, id(file)) != id(file):
         yield False
         return
     try:
-        yield await _size_of(dispatch, file.scope) == 0
+        yield await _size_of(dispatch, file.where) == 0
     finally:
         del _streaming[store]
 

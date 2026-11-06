@@ -625,7 +625,7 @@ def diverted_file(
     """The regular file a statement of a shell's own loop writes its
     stdout to: where ``exec`` bound the shell's stdout while that binding
     stands (``exec >g``), as ``divert_statement`` sends it, else where
-    the loop's sink writes (``Recorder.output_file``).
+    the loop's sink writes (``Recorder.output_target``).
 
     Args:
         session (SessionState): the shell.
@@ -637,7 +637,7 @@ def diverted_file(
         if file is None or file.source is not None or file.pipe:
             return None
         return file.scope.virtual
-    return sink.output_file if isinstance(sink, Recorder) else None
+    return sink.output_target if isinstance(sink, Recorder) else None
 
 
 async def divert_statement(

@@ -878,7 +878,7 @@ async def _run_argv(
                 invocation=admitted.ctx if admitted is not None else None,
                 declared=None,
                 output_file=(
-                    output.output_file
+                    output.output_target
                     if isinstance(output, Recorder)
                     else None
                 ),

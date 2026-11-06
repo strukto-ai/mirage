@@ -148,6 +148,141 @@ async def test_an_op_on_a_streamed_file_finds_what_was_written(
     assert await _out(ws, "cat /data/f") == content
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,files",
+    [
+        (
+            "{ echo a; mv /data/lnk2 /data/lnk; echo b; } > /data/lnk",
+            {"/data/open": "a\nb\n", "/data/other": "keep\n"},
+        ),
+        (
+            "{ echo a; ln -sfn other /data/lnk; echo b; } > /data/lnk",
+            {"/data/open": "a\nb\n", "/data/other": "keep\n"},
+        ),
+        (
+            "{ echo A; ln -s open /data/x; mv /data/x /data/lnk; echo C; }"
+            " > /data/lnk",
+            {"/data/open": "A\nC\n"},
+        ),
+        (
+            "{ echo AAAA; rm /data/lnk; echo C; } > /data/lnk",
+            {"/data/open": "AAAA\nC\n", "/data/lnk": None},
+        ),
+        ("{ echo AAAA; rm /data/f; echo C; } > /data/f", {"/data/f": None}),
+        (
+            "{ echo AAAA; mv /data/f /data/g; echo C; } > /data/f",
+            {"/data/f": None, "/data/g": "AAAA\nC\n"},
+        ),
+        (
+            "{ echo A; mv /data/f /data/g; mv /data/g /data/h; echo B; }"
+            " > /data/f",
+            {"/data/f": None, "/data/h": "A\nB\n"},
+        ),
+        (
+            "{ echo A; mv /data/other /data/open; echo C; } > /data/lnk",
+            {"/data/open": "keep\n", "/data/other": None},
+        ),
+        (
+            "{ echo A; rm /data/f; ls /nonexist; echo C; } > /data/f 2>&1",
+            {"/data/f": None},
+        ),
+        (
+            "{ echo A; mv /data/f /data/g; wc -l < /data/g; echo B; }"
+            " > /data/f",
+            {"/data/f": None, "/data/g": "A\n1\nB\n"},
+        ),
+        (
+            "{ echo A; mv /data/f /data/g; date +x; echo B; } > /data/f",
+            {"/data/f": None, "/data/g": "A\nx\nB\n"},
+        ),
+        (
+            "{ echo A; mv /data/f /data/g; echo B; } >> /data/f",
+            {"/data/f": None, "/data/g": "z\nA\nB\n"},
+        ),
+        (
+            "{ echo A; mv /data/s /data/s2; echo C; } > /data/s/f",
+            {"/data/s/f": None, "/data/s2/f": "A\nC\n"},
+        ),
+        (
+            "{ echo A; rm -r /data/s; echo C; } > /data/s/f",
+            {"/data/s/f": None},
+        ),
+        (
+            "{ echo AAAA; rm /data/f; echo new > /data/f; echo C; } > /data/f",
+            {"/data/f": "new\n"},
+        ),
+        (
+            "{ echo AAAA; mv /data/other /data/f; echo C; } > /data/f",
+            {"/data/f": "keep\n"},
+        ),
+        (
+            "{ echo AAAA; mv /data/f /e/g; echo C; } > /data/f",
+            {"/data/f": None, "/e/g": "AAAA\n"},
+        ),
+        (
+            "{ echo AAAA; cp /data/other /data/f; echo C; } > /data/f",
+            {"/data/f": "keep\nC\n"},
+        ),
+    ],
+)
+async def test_a_streamed_redirect_writes_the_file_it_opened(line, files):
+    ws = Workspace({"/": RAMVFS(), "/e/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell(
+        "mkdir -p /data/s; echo keep > /data/other; echo o > /data/open;"
+        " ln -s open /data/lnk; ln -s other /data/lnk2; echo z > /data/f"
+    )
+    io = await ws.shell(line)
+    assert io.exit_code == 0
+    assert await io.stderr_str() == ""
+    for path, content in files.items():
+        read = await ws.shell(f"cat {path}")
+        if content is None:
+            assert read.exit_code == 1, path
+        else:
+            assert await read.stdout_str() == content, path
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,status,stderr,path,content",
+    [
+        (
+            "{ echo x; mv /data/f /data/g; cat /data/g; } > /data/f",
+            1,
+            "cat: /data/g: input file is output file\n",
+            "/data/g",
+            "x\n",
+        ),
+        (
+            "{ echo A; rm /data/f; echo new > /data/f; cat /data/f; }"
+            " > /data/f",
+            0,
+            "",
+            "/data/f",
+            "new\n",
+        ),
+        (
+            "{ echo A; mv /data/f /data/nope/g; echo C; } > /data/f",
+            0,
+            "mv: cannot move '/data/f' to '/data/nope/g':"
+            " No such file or directory\n",
+            "/data/f",
+            "A\nC\n",
+        ),
+    ],
+)
+async def test_a_streamed_redirect_is_judged_by_the_file_it_writes(
+    line, status, stderr, path, content
+):
+    ws = await _workspace()
+    await ws.shell("echo z > /data/f")
+    io = await ws.shell(line)
+    assert io.exit_code == status
+    assert await io.stderr_str() == stderr
+    assert await _out(ws, f"cat {path}") == content
+
+
 # A read before the first byte leaves the file empty, so what comes after
 # still lands as one stream, not as blocks a store would rewrite the file
 # for one after another.

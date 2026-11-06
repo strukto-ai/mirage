@@ -95,6 +95,15 @@ class FileInput(SharedInput):
 
 @dataclass
 class FileDescription:
+    """An open file description: the name it was opened by (``scope``),
+    which its errors name, and the file it writes.
+
+    A streamed redirect's description is bound (``landed``) to the file
+    its open reached, links followed, as a descriptor holds an inode: a
+    rename carries it along, and a removal or another file renamed over
+    it leaves it ``lost``, its writes going nowhere.
+    """
+
     scope: PathSpec
     append: bool = False
     opened: bool = False
@@ -105,6 +114,13 @@ class FileDescription:
     writing: asyncio.Lock = field(
         default_factory=asyncio.Lock, compare=False, repr=False
     )
+    landed: PathSpec | None = None
+    lost: bool = False
+
+    @property
+    def where(self) -> PathSpec:
+        """The file the description writes."""
+        return self.scope if self.landed is None else self.landed
 
 
 class StreamOwner:
@@ -133,7 +149,8 @@ class Recorder(JobConsole, StreamOwner):
     to that level, so it lands among the bytes written around it.
     ``output_file`` is the regular file the level's stdout writes, if
     one does, which a command writing to the level may not read as its
-    input (``cat f >> f``).
+    input (``cat f >> f``); ``output`` is the description a streamed
+    redirect writes it through, which a rename the line makes moves.
     """
 
     def __init__(self) -> None:
@@ -143,6 +160,16 @@ class Recorder(JobConsole, StreamOwner):
         self.writing = asyncio.Lock()
         self.pending = 0
         self.output_file: str | None = None
+        self.output: FileDescription | None = None
+
+    @property
+    def output_target(self) -> str | None:
+        """The file the level's stdout writes as a command starts: a
+        streamed description's file wherever the line moved it, none
+        once the line removed it."""
+        if self.output is None:
+            return self.output_file
+        return None if self.output.lost else self.output.where.virtual
 
     @property
     def busy(self) -> bool:

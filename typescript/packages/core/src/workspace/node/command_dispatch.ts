@@ -804,7 +804,7 @@ async function runArgv(
         command: argv.name,
         invocation: gated?.ctx ?? null,
         declared: null,
-        outputFile: output instanceof Recorder ? output.outputFile : null,
+        outputFile: output instanceof Recorder ? output.outputTarget : null,
       },
       () =>
         commandRecords((records) => {
