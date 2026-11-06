@@ -347,6 +347,16 @@ export class SessionManager extends SessionOwner {
         // restart and the next flush would erase the grant from the
         // store.
         dflt.decisions = stored.decisions
+        // The rest of the shell as the last line left it, so a restart
+        // keeps its aliases, options, mask, traps and spelled cwd.
+        dflt.aliases = stored.aliases
+        dflt.shellOptions = stored.shellOptions
+        dflt.shopts = stored.shopts
+        dflt.umask = stored.umask
+        dflt.logicalCwd = stored.logicalCwd
+        dflt.exitTrap = stored.exitTrap
+        dflt.errTrap = stored.errTrap
+        dflt.returnTrap = stored.returnTrap
         dflt.generation = stored.generation
         // Hydrated sessions start clean: baseline what the store
         // holds so the next flush skips them.

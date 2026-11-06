@@ -18,6 +18,7 @@ from types import MappingProxyType
 from typing import Any
 
 from mirage.cache.versions import VersionHistory
+from mirage.context.session_context import DEFAULT_UMASK
 from mirage.io.async_line_iterator import SharedInput, release_inputs
 from mirage.io.network import NetworkSetting
 from mirage.policy.builtin.output_cap import command_limits_to_json
@@ -341,7 +342,7 @@ class SessionState:
     aliases: dict[str, str] = field(default_factory=dict)
     # The file-creation mask. bash's default for a fresh shell, and
     # exactly what mirage's 644/755 defaults for a new entry are.
-    umask: int = 0o022
+    umask: int = DEFAULT_UMASK
     mount_modes: dict[str, MountMode] | None = None
     # What exists for this session: the profile's hides, shows, hidden
     # variables, process scope and allow list, compiled once. The views
@@ -620,6 +621,25 @@ class SessionState:
             data["readonly_functions"] = sorted(self.readonly_functions)
         if self.exported_functions:
             data["exported_functions"] = sorted(self.exported_functions)
+        # The rest of what a shell keeps between lines, each only when it
+        # differs from a fresh shell's, so a host that forgets its memory
+        # brings the session back as it was left.
+        if self.aliases:
+            data["aliases"] = dict(self.aliases)
+        if self.shell_options:
+            data["shell_options"] = dict(self.shell_options)
+        if self.shopts:
+            data["shopts"] = dict(self.shopts)
+        if self.umask != DEFAULT_UMASK:
+            data["umask"] = self.umask
+        if self.logical_cwd is not None:
+            data["logical_cwd"] = self.logical_cwd
+        if self.exit_trap is not None:
+            data["exit_trap"] = self.exit_trap
+        if self.err_trap is not None:
+            data["err_trap"] = self.err_trap
+        if self.return_trap is not None:
+            data["return_trap"] = self.return_trap
         if self.mount_modes is not None:
             data["mount_modes"] = {
                 prefix: mode.value for prefix, mode in self.mount_modes.items()

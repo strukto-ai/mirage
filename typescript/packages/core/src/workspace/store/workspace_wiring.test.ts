@@ -229,6 +229,25 @@ describe('Workspace on a WorkspaceStateStore', () => {
     expect(denied.exitCode).not.toBe(0)
   })
 
+  it('a workspace on the same store finds the shell as the last one left it', async () => {
+    const store = new RAMWorkspaceStateStore()
+    const ram = new RAMVFS()
+    const wsA = mkWs(store, 'kept', ram)
+    const set = await wsA.shell(
+      "mkdir -p /data/real && ln -s /data/real /data/link && cd /data/link && alias ll='ls -l' && set -o pipefail && shopt -s nullglob && umask 077 && trap 'echo bye' EXIT",
+    )
+    expect(set.exitCode).toBe(0)
+    await wsA.flushSessions()
+
+    const wsB = mkWs(store, 'kept', ram)
+    const result = await wsB.shell(
+      'alias ll; set -o | grep pipefail; shopt nullglob; umask; pwd; trap -p EXIT',
+    )
+    expect(result.stdoutText).toBe(
+      "alias ll='ls -l'\npipefail       \ton\nnullglob       \ton\n0077\n/data/link\ntrap -- 'echo bye' EXIT\n",
+    )
+  })
+
   it('different workspace ids are isolated', async () => {
     const store = new RAMWorkspaceStateStore()
     const wsA = mkWs(store, 'a')

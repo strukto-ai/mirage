@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VersionHistory } from '../../cache/versions.ts'
+import { DEFAULT_UMASK } from '../../context/session_context.ts'
 import { releaseInputs, type SharedInput } from '../../io/async_line_iterator.ts'
 import type { NetworkSetting } from '../../io/network.ts'
 import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/output_cap.ts'
@@ -496,7 +497,7 @@ export class SessionState {
   readonly terminal: StreamOwner = Symbol('terminal')
   lineOpen = false
   // File-creation mask. bash's default for a fresh shell.
-  umask = 0o022
+  umask = DEFAULT_UMASK
   // `exec` redirect-only state: where the shell's own stdout, stderr and
   // stdin point after a bare `exec > file`. Null is the terminal; `""`
   // is a closed descriptor whose writes drop. `execStdin` is the one
@@ -943,6 +944,17 @@ export class SessionState {
       data.readonly_functions = [...this.readonlyFunctions].sort(compareCodePoints)
     if (this.exportedFunctions.size > 0)
       data.exported_functions = [...this.exportedFunctions].sort(compareCodePoints)
+    // The rest of what a shell keeps between lines, each only when it
+    // differs from a fresh shell's, so a host that forgets its memory
+    // brings the session back as it was left.
+    if (Object.keys(this.aliases).length > 0) data.aliases = { ...this.aliases }
+    if (Object.keys(this.shellOptions).length > 0) data.shell_options = { ...this.shellOptions }
+    if (Object.keys(this.shopts).length > 0) data.shopts = { ...this.shopts }
+    if (this.umask !== DEFAULT_UMASK) data.umask = this.umask
+    if (this.logicalCwd !== undefined) data.logical_cwd = this.logicalCwd
+    if (this.exitTrap !== null) data.exit_trap = this.exitTrap
+    if (this.errTrap !== null) data.err_trap = this.errTrap
+    if (this.returnTrap !== null) data.return_trap = this.returnTrap
     if (this.mountModes !== null) {
       data.mount_modes = Object.fromEntries(this.mountModes)
     }
@@ -1007,6 +1019,14 @@ export class SessionState {
     functions?: Record<string, string>
     readonly_functions?: string[]
     exported_functions?: string[]
+    aliases?: Record<string, string>
+    shell_options?: Record<string, boolean>
+    shopts?: Record<string, boolean>
+    umask?: number
+    logical_cwd?: string | null
+    exit_trap?: string | null
+    err_trap?: string | null
+    return_trap?: string | null
   }): SessionState {
     const commands = data.commands != null ? commandsFromDict(data.commands) : null
     const processes = parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS)
@@ -1019,6 +1039,7 @@ export class SessionState {
       ...(data.functions === undefined ? {} : { functions: data.functions }),
       readonlyFunctions: new Set(data.readonly_functions ?? []),
       exportedFunctions: new Set(data.exported_functions ?? []),
+      ...(data.shell_options != null ? { shellOptions: { ...data.shell_options } } : {}),
       ...(data.cwd !== undefined ? { cwd: data.cwd } : {}),
       // No `var_attrs` at all means the payload is a bare process
       // environment -- an embedder's record, or one another writer
@@ -1065,6 +1086,13 @@ export class SessionState {
     // variable it had unset stays unset rather than being seeded again; a
     // bare environment starts a new shell. The constructor seeded a copy.
     if (data.var_attrs !== undefined && vars !== undefined) session.vars = vars
+    if (data.aliases != null) session.aliases = { ...data.aliases }
+    if (data.shopts != null) session.shopts = { ...data.shopts }
+    if (data.umask != null) session.umask = data.umask
+    if (data.logical_cwd != null) session.logicalCwd = data.logical_cwd
+    session.exitTrap = data.exit_trap ?? null
+    session.errTrap = data.err_trap ?? null
+    session.returnTrap = data.return_trap ?? null
     return session
   }
 }

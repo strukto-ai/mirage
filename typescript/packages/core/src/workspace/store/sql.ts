@@ -41,9 +41,9 @@ export interface SqlWorkspaceStateStoreOptions extends WorkspaceStateStoreOverri
  *
  * So a workspace whose host forgets its memory (a Durable Object woken
  * again, a process restarted on the same file) keeps its sessions' cwd,
- * exported env and functions, and its links. Observer events and jobs are
- * per-process planes and stay in memory. Mirrors Python's
- * `SqlWorkspaceStateStore`.
+ * variables, functions, aliases, options, umask and traps, and its links.
+ * Observer events and jobs are per-process planes and stay in memory.
+ * Mirrors Python's `SqlWorkspaceStateStore`.
  */
 export class SqlWorkspaceStateStore extends WorkspaceStateStore {
   private readonly scope: string
