@@ -13,7 +13,6 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-import asyncio
 import json
 import os
 import uuid
@@ -22,6 +21,7 @@ from pathlib import Path
 import aiofiles
 import yaml
 
+from mirage.concurrency.limiter import run_blocking
 from mirage.resources.base import ResourceStore
 from mirage.resources.constants import DEFAULT_SCOPE
 from mirage.resources.errors import ResourceError
@@ -49,6 +49,39 @@ def unlink_if_present(path: Path) -> bool:
     except FileNotFoundError:
         return False
     return True
+
+
+def dump(record: Fields) -> str:
+    """A record as both hosts write it: JSON, which is also YAML, so each
+    reads back the same values whatever its YAML rules.
+
+    Args:
+        record (Fields): the record.
+    """
+    return json.dumps(record, indent=2, ensure_ascii=False) + "\n"
+
+
+def parse_record(path: Path, text: str) -> Fields:
+    """A record read back: JSON as written, or YAML when edited by hand.
+
+    Args:
+        path (Path): the file, for the error.
+        text (str): its content.
+
+    Raises:
+        ResourceError: ``invalid`` when it is not a mapping.
+    """
+    try:
+        record = (
+            json.loads(text)
+            if text.lstrip().startswith("{")
+            else yaml.safe_load(text)
+        )
+    except (ValueError, yaml.YAMLError) as e:
+        raise ResourceError("invalid", f"{path} is malformed: {e}") from e
+    if not isinstance(record, dict):
+        raise ResourceError("invalid", f"{path} is not a mapping")
+    return record
 
 
 def write_whole(path: Path, text: str, mode: int, dir_mode: int) -> None:
@@ -91,25 +124,19 @@ class FileRecords:
         text = await read_or_none(path)
         if text is None:
             return None
-        record = yaml.safe_load(text)
-        if not isinstance(record, dict):
-            raise ResourceError("invalid", f"{path} is not a mapping")
-        return record
+        return parse_record(path, text)
 
     async def write(self, folder: str, name: str, record: Fields) -> None:
-        text = yaml.safe_dump(record, sort_keys=False, allow_unicode=True)
-        await asyncio.to_thread(
-            write_whole, self._path(folder, name), text, 0o644, 0o755
+        await run_blocking(
+            write_whole, self._path(folder, name), dump(record), 0o644, 0o755
         )
 
     async def remove(self, folder: str, name: str) -> bool:
-        return await asyncio.to_thread(
-            unlink_if_present, self._path(folder, name)
-        )
+        return await run_blocking(unlink_if_present, self._path(folder, name))
 
     async def names(self, folder: str) -> list[str]:
         try:
-            files = await asyncio.to_thread(os.listdir, self._root / folder)
+            files = await run_blocking(os.listdir, self._root / folder)
         except FileNotFoundError:
             return []
         return [f.removesuffix(".yaml") for f in files if f.endswith(".yaml")]
@@ -130,25 +157,22 @@ class FileSealer:
         text = await read_or_none(path)
         if text is None:
             return {}
-        values = json.loads(text)
-        if not isinstance(values, dict):
-            raise ResourceError("invalid", f"{path} is not an object")
-        return values
+        return parse_record(path, text)
 
     async def write(self, kind: EntryKind, name: str, values: Fields) -> None:
         if not values:
             await self.wipe(kind, name)
             return
-        await asyncio.to_thread(
+        await run_blocking(
             write_whole,
             self._path(kind, name),
-            json.dumps(values),
+            dump(values),
             0o600,
             0o700,
         )
 
     async def wipe(self, kind: EntryKind, name: str) -> None:
-        await asyncio.to_thread(unlink_if_present, self._path(kind, name))
+        await run_blocking(unlink_if_present, self._path(kind, name))
 
 
 def files_resource_store(root: Path | None = None) -> ResourceStore:

@@ -40,6 +40,7 @@ from mirage.io.network import NetworkRule, run_with_network
 from mirage.policy.base import Policy
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.profile import SessionProfile
+from mirage.resources.errors import ResourceError
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.sources import resolve_config_secrets, resolve_sources_for
 from mirage.server.clone import (
@@ -56,6 +57,7 @@ from mirage.server.multipart import (
     part_events,
 )
 from mirage.server.registry import Claim, WorkspaceEntry
+from mirage.server.routers.templates import store_refusal
 from mirage.server.routers.vfs import require_entry
 from mirage.server.schemas import (
     CancelLinesResponse,
@@ -68,6 +70,7 @@ from mirage.server.schemas import (
     SnapshotWorkspaceResponse,
     WorkspaceBrief,
     WorkspaceDetail,
+    check_config,
 )
 from mirage.server.summary import make_brief, make_detail
 from mirage.types import Ceilings
@@ -331,6 +334,42 @@ def config_digest(config: WorkspaceConfig) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+async def _config_of(
+    req: CreateWorkspaceRequest, request: Request
+) -> tuple[WorkspaceConfig, dict[str, Any]]:
+    """The config a create builds, checked and as written: the body's own,
+    or a copy of the named template's, so a later edit of the template
+    leaves the workspace as it is.
+
+    Args:
+        req (CreateWorkspaceRequest): the create's body.
+        request (Request): the HTTP request, for its JSON and the store.
+
+    Raises:
+        HTTPException: 400 for both or neither, 404 for an unknown
+            template.
+    """
+    if req.template is None:
+        if req.config is None:
+            raise HTTPException(
+                status_code=400, detail="give a template or a config"
+            )
+        return req.config, (await request.json())["config"]
+    if req.config is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="give a template or a config, not both",
+        )
+    try:
+        template = await request.app.state.resources.get_template(req.template)
+    except ResourceError as e:
+        raise store_refusal(e) from e
+    try:
+        return check_config(template.config), template.config
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 @router.post("", response_model=WorkspaceDetail, status_code=201)
 async def create_workspace(
     req: CreateWorkspaceRequest,
@@ -349,7 +388,8 @@ async def create_workspace(
     ``explain`` answers what they say without creating anything.
 
     Args:
-        req (CreateWorkspaceRequest): the config and an optional id.
+        req (CreateWorkspaceRequest): the config or a template's name,
+            and an optional id.
         request (Request): the HTTP request, for the app's registry.
         response (Response): the response, whose status a held id sets.
         explain (bool): answer what the server's policies say instead.
@@ -359,11 +399,11 @@ async def create_workspace(
             workspace, or the explanation.
     """
     registry = request.app.state.registry
-    written = (await request.json())["config"]
+    config, written = await _config_of(req, request)
     if explain:
         said = await registry.explanation(written, request.state.account)
         return JSONResponse(content=explanation_to_dict(said))
-    digest = config_digest(req.config)
+    digest = config_digest(config)
     # The registry id and the state-store scope must be the same identity,
     # so resolve it before construction: explicit REST id, then the
     # config's workspace_id, then a fresh mint. A held id is answered or
@@ -375,7 +415,7 @@ async def create_workspace(
     wid = (
         req.id
         if req.id is not None
-        else req.config.workspace_id or new_workspace_id()
+        else config.workspace_id or new_workspace_id()
     )
     _refuse_id(wid)
     async with registry.creating(wid, digest) as admitted:
@@ -402,8 +442,8 @@ async def create_workspace(
             try:
                 runner = await WorkspaceRunner.build(
                     _construct(
-                        req.config,
-                        registry.rule_for(req.config.network),
+                        config,
+                        registry.rule_for(config.network),
                         wid,
                         str(request.app.state.state_root),
                         registry.max_sessions,
@@ -426,7 +466,7 @@ async def create_workspace(
                 for prefix, (
                     backend,
                     mountpoint,
-                ) in req.config.kernel_mounts().items():
+                ) in config.kernel_mounts().items():
                     await run_blocking(
                         runner.ws.add_fuse_mount,
                         prefix,

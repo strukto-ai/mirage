@@ -253,6 +253,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.addContentTypeParser(/^multipart\//, (_req, _payload, done) => {
     done(null)
   })
+  const resources = options.resourceStore ?? buildResourceStore(resolveResourceStore())
   const mcp = registerApi(fastifyRoutes(app), {
     registry,
     host,
@@ -260,6 +261,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     startedAt,
     exit: exitFn,
     snapshotStore: options.snapshotStore,
+    resources,
   })
   const ssh: SSHEndpoint = {
     config: options.sshConfig ?? resolveSSHConfig(),
@@ -304,6 +306,5 @@ export function buildApp(options: BuildAppOptions = {}) {
       }
     }
   })
-  const resources = options.resourceStore ?? buildResourceStore(resolveResourceStore())
   return Object.assign(app, { registry, jobs, pidFile, ssh, mcp, resources })
 }

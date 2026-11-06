@@ -37,7 +37,6 @@ from mirage.resources.types import (
     Template,
     TemplateInput,
 )
-from mirage.types import JsonValue
 
 POLICY: ResourceKind = "policy"
 TEMPLATE: ResourceKind = "template"
@@ -103,6 +102,7 @@ class RecordResourceStore(ResourceStore):
         self._lock = asyncio.Lock()
 
     async def _entry_record(self, kind: EntryKind, name: str) -> Fields:
+        check_name(kind, name)
         record = await self._records.read(kind, name)
         if record is None:
             raise not_found(kind, name)
@@ -118,7 +118,8 @@ class RecordResourceStore(ResourceStore):
         )
 
     async def _sorted_names(self, folder: str) -> list[str]:
-        return sorted(await self._records.names(folder))
+        names = await self._records.names(folder)
+        return sorted(n for n in names if NAME.fullmatch(n) is not None)
 
     async def list_entries(self, kind: EntryKind) -> list[Entry]:
         async with self._lock:
@@ -152,27 +153,26 @@ class RecordResourceStore(ResourceStore):
                         "conflict",
                         f"{input.name} is already a {NOUN[other]}",
                     )
-            sealed: dict[str, JsonValue] = {}
+            kept: Fields = {}
             if await self._records.read(kind, input.name) is not None:
                 kept = await self._sealer.read(kind, input.name)
-                sealed = {
-                    k: v for k, v in kept.items() if k not in input.fields
-                }
+            sealed = {k: v for k, v in kept.items() if k not in input.fields}
             for key, value in input.sealed.items():
                 if value is None:
                     sealed.pop(key, None)
                 else:
                     sealed[key] = value
             await self._sealer.write(kind, input.name, sealed)
-            await self._records.write(
-                kind,
-                input.name,
-                {
-                    "name": input.name,
-                    "type": input.type,
-                    "fields": input.fields,
-                },
-            )
+            record: Fields = {
+                "name": input.name,
+                "type": input.type,
+                "fields": input.fields,
+            }
+            try:
+                await self._records.write(kind, input.name, record)
+            except BaseException:
+                await self._sealer.write(kind, input.name, kept)
+                raise
             return Entry(
                 name=input.name,
                 type=input.type,
@@ -197,6 +197,7 @@ class RecordResourceStore(ResourceStore):
             )
 
     async def _policy_of(self, name: str) -> Policy:
+        check_name(POLICY, name)
         record = await self._records.read(POLICY, name)
         if record is None:
             raise not_found(POLICY, name)
@@ -227,10 +228,12 @@ class RecordResourceStore(ResourceStore):
 
     async def delete_policy(self, name: str) -> None:
         async with self._lock:
+            check_name(POLICY, name)
             if not await self._records.remove(POLICY, name):
                 raise not_found(POLICY, name)
 
     async def _template_in(self, folder: str, name: str) -> Template | None:
+        check_name(TEMPLATE, name)
         record = await self._records.read(folder, name)
         return None if record is None else template_of(name, record)
 

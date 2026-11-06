@@ -100,6 +100,7 @@ export class RecordResourceStore implements ResourceStore {
   }
 
   private async entryRecord(kind: EntryKind, name: string): Promise<Fields> {
+    checkName(kind, name)
     const record = await this.records.read(kind, name)
     if (record === null) throw notFound(kind, name)
     return record
@@ -116,7 +117,7 @@ export class RecordResourceStore implements ResourceStore {
   }
 
   private async sortedNames(folder: string): Promise<string[]> {
-    return (await this.records.names(folder)).sort(compareCodePoints)
+    return (await this.records.names(folder)).filter((n) => NAME.test(n)).sort(compareCodePoints)
   }
 
   listEntries(kind: EntryKind): Promise<Entry[]> {
@@ -144,21 +145,28 @@ export class RecordResourceStore implements ResourceStore {
           throw new ResourceError('conflict', `${input.name} is already a ${NOUN[other]}`)
         }
       }
-      const exists = (await this.records.read(kind, input.name)) !== null
-      const removed = new Set(given.filter(([, value]) => value === null).map(([key]) => key))
-      const sealed: Fields = {}
-      if (exists) {
-        for (const [key, value] of Object.entries(await this.sealer.read(kind, input.name))) {
-          if (!Object.hasOwn(input.fields, key) && !removed.has(key)) sealed[key] = value
-        }
+      const kept =
+        (await this.records.read(kind, input.name)) === null
+          ? {}
+          : await this.sealer.read(kind, input.name)
+      const values = new Map(Object.entries(kept))
+      for (const key of Object.keys(input.fields)) values.delete(key)
+      for (const [key, value] of given) {
+        if (value === null) values.delete(key)
+        else values.set(key, value)
       }
-      for (const [key, value] of given) if (value !== null) sealed[key] = value
+      const sealed: Fields = Object.fromEntries(values)
       await this.sealer.write(kind, input.name, sealed)
-      await this.records.write(kind, input.name, {
-        name: input.name,
-        type: input.type,
-        fields: input.fields,
-      })
+      try {
+        await this.records.write(kind, input.name, {
+          name: input.name,
+          type: input.type,
+          fields: input.fields,
+        })
+      } catch (e) {
+        await this.sealer.write(kind, input.name, kept)
+        throw e
+      }
       return {
         name: input.name,
         type: input.type,
@@ -184,6 +192,7 @@ export class RecordResourceStore implements ResourceStore {
   }
 
   private async policyOf(name: string): Promise<Policy> {
+    checkName(POLICY, name)
     const record = await this.records.read(POLICY, name)
     if (record === null) throw notFound(POLICY, name)
     return { name, source: stringOf(POLICY, name, record, 'source') }
@@ -211,11 +220,13 @@ export class RecordResourceStore implements ResourceStore {
 
   deletePolicy(name: string): Promise<void> {
     return this.serial(async () => {
+      checkName(POLICY, name)
       if (!(await this.records.remove(POLICY, name))) throw notFound(POLICY, name)
     })
   }
 
   private async templateIn(folder: string, name: string): Promise<Template | null> {
+    checkName(TEMPLATE, name)
     const record = await this.records.read(folder, name)
     return record === null ? null : templateOf(name, record)
   }

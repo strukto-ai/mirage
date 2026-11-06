@@ -196,7 +196,8 @@ a `workspace_id`.
 
 | Command | Does |
 | --- | --- |
-| `mirage workspace create CONFIG [--id ID]` | Create a workspace from a YAML or JSON config. |
+| `mirage workspace create CONFIG [-w ID]` | Create a workspace from a YAML or JSON config. `--id` is another name for `-w`. |
+| `mirage workspace create --template NAME [-w ID]` | Create a workspace from a saved [template](#from-a-template). |
 | `mirage workspace create CONFIG --explain` | Show what the [server policies](/home/access/http#server-policies) say of the config, and create nothing. |
 | `mirage workspace list` | List workspaces. |
 | `mirage workspace get ID [--verbose]` | Show mounts and sessions. |
@@ -213,6 +214,34 @@ a `workspace_id`.
 | `mirage workspace load --key KEY [CONFIG] [--id ID]` | Restore one from the server's snapshot store. |
 | `mirage workspace vfs-md ID [--session S] [--path PATH] [--profile P]` | Print the VFS.md, or expose it as a live file at `PATH`. |
 | `mirage workspace skill-md ID [--session S] [--path PATH] [--profile P]` | The same for SKILL.md. |
+
+### From a template
+
+A template is a saved workspace config. Save one through the server's
+`/v1/templates` route, with a body of `name`, an optional `description`, and
+`config`, a whole workspace config:
+
+```yaml template.yaml
+name: ram-only
+description: One writable RAM mount
+config:
+  mounts:
+    /data:
+      vfs: ram
+```
+
+```bash
+mirage api /v1/templates --input template.yaml
+mirage workspace create --template ram-only -w demo
+```
+
+The server checks the config when it saves the template, as a create would.
+A workspace gets a copy of the template's config, so a later change to the
+template leaves it as it is. Give a config file or `--template`, not both.
+`mirage api /v1/templates` lists templates, and `-X DELETE` on
+`/v1/templates/NAME` deletes one; `POST /v1/templates/NAME/restore` brings it
+back. The local daemon keeps templates under `~/.mirage/resources`, as
+`resource_store` sets.
 
 ### Asks
 
@@ -349,6 +378,7 @@ goes nowhere but its own server.
 | `forwarded_allow_ips` | `MIRAGE_FORWARDED_ALLOW_IPS` | none; the proxies whose `X-Forwarded-For` names the client |
 | `graceful_timeout` | `MIRAGE_GRACEFUL_TIMEOUT` | `0`; seconds running lines get to finish on shutdown |
 | `policy_file` | `MIRAGE_POLICY_FILE` | none; see [Server policies](/home/access/http#server-policies) |
+| `resource_store` | `MIRAGE_RESOURCE_STORE` | `files`, under `~/.mirage/resources`; `memory` keeps saved templates only until the daemon stops |
 | `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#set-up) |
 | `jwt_*` | `MIRAGE_JWT_*` | see [Configure authentication](/home/access/http#configure-authentication) |
 | `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [Log in](#log-in) |
