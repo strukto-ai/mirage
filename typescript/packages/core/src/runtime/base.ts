@@ -53,6 +53,11 @@ import type {
  * (config_cls in Python).
  */
 export abstract class Runtime<E = unknown> {
+  /**
+   * The keys its config takes, camelCase: what a saved runtime's fields
+   * are. Python reads the same off its `config_cls` dataclass.
+   */
+  static readonly configKeys: readonly string[] = []
   abstract readonly name: string
   readonly captures: readonly string[]
   /**

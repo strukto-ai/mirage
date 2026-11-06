@@ -74,6 +74,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   extends Runtime<undefined>
   implements LineExecutorMixin<undefined>, ProcessExecutorMixin<undefined>
 {
+  static override readonly configKeys: readonly string[] = BASE_CONFIG_KEYS
   // Lines execute on the provider's machine and act on that machine's
   // world (its filesystem, its network); the workspace gate never sees
   // those effects, however well isolated the sandbox itself is.

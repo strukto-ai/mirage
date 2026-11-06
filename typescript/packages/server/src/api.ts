@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
+import { ENTRY_KINDS } from '@struktoai/mirage-core/resources/constants'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import type { AuthConfig } from './auth/config.ts'
 import { registerMcpRoutes, type McpEndpoint } from './mcp/http.ts'
@@ -25,6 +26,7 @@ import { registerOAuthRoutes } from './routers/oauth.ts'
 import { registerSessionsRoutes } from './routers/sessions.ts'
 import { registerShellRoutes } from './routers/shell.ts'
 import { registerTemplatesRoutes } from './routers/templates.ts'
+import { registerEntryRoutes } from './routers/entries.ts'
 import { registerToolsRoutes } from './routers/tools.ts'
 import { registerVfsRoutes } from './routers/vfs.ts'
 import { registerWorkspacesRoutes } from './routers/workspaces.ts'
@@ -59,8 +61,12 @@ export function registerApi(app: RouteApp, deps: ApiDeps): McpEndpoint {
     snapshotStore: deps.snapshotStore,
     resources: deps.resources,
   })
-  if (deps.resources !== undefined)
+  if (deps.resources !== undefined) {
     registerTemplatesRoutes(app, { resources: deps.resources, registry })
+    for (const kind of ENTRY_KINDS) {
+      registerEntryRoutes(app, kind, { resources: deps.resources, registry })
+    }
+  }
   registerSessionsRoutes(app, { registry, loadProfile: (profile) => host.loadProfile(profile) })
   registerDocumentsRoutes(app, { registry })
   registerAsksRoutes(app, { registry })

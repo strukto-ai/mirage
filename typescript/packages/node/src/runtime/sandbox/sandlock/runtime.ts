@@ -37,6 +37,7 @@ export class SandlockRuntime
   extends Runtime<undefined>
   implements LineExecutorMixin<undefined>, ProcessExecutorMixin<undefined>
 {
+  static override readonly configKeys: readonly string[] = SANDLOCK_CONFIG_KEYS
   readonly name = 'sandlock'
   readonly [LINE_EXECUTOR] = true as const
   readonly [PROCESS_EXECUTOR] = true as const
@@ -45,7 +46,7 @@ export class SandlockRuntime
   private closed = false
 
   constructor(options: RuntimeOptions<SandlockConfig> = {}) {
-    super(options, [EXTERNAL_COMMANDS], SANDLOCK_CONFIG_KEYS)
+    super(options, [EXTERNAL_COMMANDS], SandlockRuntime.configKeys)
     if (this.config.mountType != null)
       throw new Error('sandlock: mountType needs a remote pipe transport')
   }

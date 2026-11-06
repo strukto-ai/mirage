@@ -18,6 +18,8 @@ import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { type BaseVFS, VFS_BRAND } from '@struktoai/mirage-core/vfs/base'
 import {
   buildVfsFrom,
+  CONFIG_SCHEMAS as CORE_CONFIG_SCHEMAS,
+  type ConfigSchemaLoader,
   DIRECT_REGISTRY,
   REGISTRY as CORE_REGISTRY,
   type VFSFactory,
@@ -104,6 +106,17 @@ const REGISTRY: Record<string, VFSFactory> = {
 }
 
 export type { VFSFactory }
+
+/** The config schema each Node VFS parses its config with, by name. */
+export const CONFIG_SCHEMAS: Readonly<Record<string, ConfigSchemaLoader>> = {
+  ...CORE_CONFIG_SCHEMAS,
+  gridfs: async () => (await import('./gridfs/config.ts')).GridFSConfig,
+  hf_buckets: async () => (await import('@struktoai/mirage-core/vfs/hf_buckets/config')).HfBucketsConfig,
+  mongodb: async () => (await import('@struktoai/mirage-core/vfs/mongodb/config')).MongoDBConfig,
+  lancedb: async () => (await import('@struktoai/mirage-core/vfs/lancedb/config')).LanceDBConfig,
+  ssh: async () => (await import('./ssh/config.ts')).SSHConfig,
+  nextcloud: async () => (await import('./nextcloud/config.ts')).NextcloudConfig,
+}
 
 const CUSTOM: Record<string, VFSFactory> = {}
 

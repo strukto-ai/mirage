@@ -16,7 +16,7 @@
 // instance makes every ZodObject here structurally unrelated to core's
 // (see VFS/secrets.ts), which still type-checks but takes minutes
 // and defeats the registry's nominal ZodType pairing.
-import { z } from '@struktoai/mirage-core/vfs/secrets'
+import { secretStr, z } from '@struktoai/mirage-core/vfs/secrets'
 
 /**
  * AWS Secrets Manager source config: the five AWS credential fields
@@ -64,9 +64,9 @@ export const AWSSMConfig = z.preprocess(
   normalizeAwsSmKeys,
   z.strictObject({
     region: z.string().optional(),
-    awsAccessKeyId: z.string().optional(),
-    awsSecretAccessKey: z.string().optional(),
-    awsSessionToken: z.string().optional(),
+    awsAccessKeyId: secretStr().optional(),
+    awsSecretAccessKey: secretStr().optional(),
+    awsSessionToken: secretStr().optional(),
     awsProfile: z.string().optional(),
   }),
 )
@@ -100,6 +100,6 @@ export type EnvConfig = z.infer<typeof EnvConfig>
  * settings.
  */
 export const OnePasswordConfig = z.strictObject({
-  token: z.string().optional(),
+  token: secretStr().optional(),
 })
 export type OnePasswordConfig = z.infer<typeof OnePasswordConfig>

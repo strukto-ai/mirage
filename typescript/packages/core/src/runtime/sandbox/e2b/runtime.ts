@@ -105,13 +105,14 @@ class PtyWriter implements PipeWriter {
  * workspace over a PTY, since E2B's exec decodes output as text.
  */
 export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTransport {
+  static override readonly configKeys: readonly string[] = E2B_CONFIG_KEYS
   readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'e2b'
   private sdk: E2bSdk | null = null
   private sandbox: Sandbox | null = null
 
   constructor(options: RuntimeOptions<E2BConfig> = {}) {
-    super(options, E2B_CONFIG_KEYS)
+    super(options, E2BRuntime.configKeys)
     requireId('e2b', 'sandboxId', this.config.sandboxId)
   }
 

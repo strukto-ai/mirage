@@ -34,11 +34,12 @@ export class MicrosandboxRuntime
   extends RemoteSandbox<MicrosandboxConfig>
   implements PipeTransport
 {
+  static override readonly configKeys: readonly string[] = MICROSANDBOX_CONFIG_KEYS
   readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'microsandbox'
 
   constructor(options: RuntimeOptions<MicrosandboxConfig> | Record<string, unknown> = {}) {
-    super(options, MICROSANDBOX_CONFIG_KEYS)
+    super(options, MicrosandboxRuntime.configKeys)
     requireId('microsandbox', 'sandbox', this.config.sandbox)
   }
 

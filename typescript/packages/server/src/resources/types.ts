@@ -17,3 +17,24 @@ export enum ResourceStoreBackend {
   Files = 'files',
   Memory = 'memory',
 }
+
+export type FieldType = 'string' | 'number' | 'boolean' | 'list'
+
+/** One field of a type's config, as a config file writes it and as the console's `/types` answers it. */
+export interface Field {
+  /** `token`, `base_url`; a block's field is `auth.token`. */
+  name: string
+  type: FieldType
+  /** Marked secret by Mirage: kept sealed, never shown. */
+  secret: boolean
+  /** Mirage refuses the config without it (within its block, for a block's field). */
+  required: boolean
+  options?: string[]
+  description?: string
+  default?: string | number | boolean
+  /** The optional block it belongs to, needed only when the block is used. */
+  group?: string
+}
+
+/** Each type of a kind with its fields, by type name. */
+export type TypeTable = Record<string, Field[]>
