@@ -344,6 +344,21 @@ impl Var {
     }
 }
 
+/// Whether two records save alike: the same attributes, pointer and
+/// saved value.
+fn saves_alike(a: &Var, b: &Var) -> bool {
+    a.attrs == b.attrs && a.managed == b.managed && saved_value(a) == saved_value(b)
+}
+
+/// The value a record saves. A managed one saves its pointer in place of
+/// the text a host fetched into it, so a fetch changes nothing saved;
+/// only an array it came to hold is.
+fn saved_value(var: &Var) -> Option<&Value> {
+    var.value
+        .as_ref()
+        .filter(|value| var.managed.is_none() || value.is_array())
+}
+
 /// The bytes one name and its value hold.
 pub fn entry_bytes(name: &str, value: Option<&Value>) -> usize {
     name.len() + value.map_or(0, Value::held)
@@ -436,10 +451,10 @@ impl Store {
         }
     }
 
-    /// Whether this store holds the records `other` holds, value for
-    /// value. A fork that has written nothing shares them outright, and
-    /// a write undone (`TMP=x true`) puts back the record it replaced, so
-    /// a host holding a fork of what it saved tells whether to save again
+    /// Whether this store saves as `other` does, record for record. A
+    /// fork that has written nothing shares the records outright, and a
+    /// write undone (`TMP=x true`) puts back the record it replaced, so a
+    /// host holding a fork of what it saved tells whether to save again
     /// without reading the records out.
     pub fn same_records(&self, other: &Store) -> bool {
         Arc::ptr_eq(&self.vars, &other.vars)
@@ -448,7 +463,7 @@ impl Store {
                     other
                         .vars
                         .get(name)
-                        .is_some_and(|theirs| Arc::ptr_eq(var, theirs) || var == theirs)
+                        .is_some_and(|theirs| Arc::ptr_eq(var, theirs) || saves_alike(var, theirs))
                 })
     }
 
@@ -1578,6 +1593,38 @@ mod tests {
         store.set_attr("x", Some(EXPORT), true);
         assert!(!store.same_records(&saved));
         assert!(saved.same_records(&saved.fork()));
+    }
+
+    #[test]
+    fn a_fetched_secret_saves_as_its_pointer() {
+        let mut store = store();
+        let pointer = Managed {
+            source: "aws-sm".into(),
+            reference: "prod".into(),
+            key: String::new(),
+            eager: false,
+        };
+        let managed = |value: Option<Value>, reference: &str| {
+            Arc::new(Var {
+                value,
+                managed: Some(Box::new(Managed {
+                    reference: reference.into(),
+                    ..pointer.clone()
+                })),
+                ..Var::default()
+            })
+        };
+        store.place("TOKEN", Some(managed(None, "prod")));
+        let saved = store.fork();
+        store.place(
+            "TOKEN",
+            Some(managed(Some(Value::Scalar(b"s3cret".to_vec())), "prod")),
+        );
+        assert!(store.same_records(&saved));
+        store.place("TOKEN", Some(managed(None, "dev")));
+        assert!(!store.same_records(&saved));
+        store.land("TOKEN", Value::Scalar(b"mine".to_vec()), false);
+        assert!(!store.same_records(&saved));
     }
 
     #[test]

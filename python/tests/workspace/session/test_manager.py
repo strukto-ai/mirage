@@ -31,7 +31,7 @@ from mirage.policy.types import (
     Scope,
 )
 from mirage.runtime.types import ScriptSource
-from mirage.shell.variable import ShellVar
+from mirage.shell.variable import ShellVar, with_value
 from mirage.types import (
     HiddenPaths,
     HiddenVars,
@@ -521,6 +521,17 @@ def test_flush_skips_clean_sessions():
     seed_var(mgr.get("default"), "K", "w")
     _run(mgr.flush())
     assert store.cas_calls == 3
+    # Fetching a secret fills a value the record never saves, its pointer
+    # standing in for it, so the fetch writes nothing either.
+    session = mgr.get("default")
+    session.vars["TOKEN"] = vars_from_entries(
+        {"TOKEN": {"from": "aws-sm", "ref": "prod"}}
+    )["TOKEN"]
+    _run(mgr.flush())
+    assert store.cas_calls == 4
+    session.vars["TOKEN"] = with_value(session.vars["TOKEN"], "s3cret")
+    _run(mgr.flush())
+    assert store.cas_calls == 4
 
 
 def test_flush_bumps_generation():

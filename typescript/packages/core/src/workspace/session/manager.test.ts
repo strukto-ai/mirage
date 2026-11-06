@@ -25,7 +25,7 @@ import { compileProfile } from './resolve.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { SessionState, varsFromEntries } from './session.ts'
 import type { RecordFields } from '../record/types.ts'
-import { VarAttr, type ShellVar } from '../../shell/variable.ts'
+import { VarAttr, withValue, type ShellVar } from '../../shell/variable.ts'
 
 /** An empty compiled profile with the given parts filled in. */
 function compiled(
@@ -400,6 +400,20 @@ describe('SessionManager dirty flush + CAS', () => {
     seedVar(m.get('default'), 'K', 'w')
     await m.flush()
     expect(store.casCalls).toBe(3)
+    // Fetching a secret fills a value the record never saves, its pointer
+    // standing in for it, so the fetch writes nothing either.
+    const session = m.get('default')
+    const pointer: ShellVar = {
+      value: null,
+      attrs: new Set([VarAttr.Export]),
+      managed: { source: 'aws-sm', ref: 'prod', key: '', eager: false },
+    }
+    session.vars.set('TOKEN', pointer)
+    await m.flush()
+    expect(store.casCalls).toBe(4)
+    session.vars.set('TOKEN', withValue(pointer, 's3cret'))
+    await m.flush()
+    expect(store.casCalls).toBe(4)
   })
 
   it('flush bumps the generation', async () => {
