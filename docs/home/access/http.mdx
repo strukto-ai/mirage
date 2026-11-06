@@ -511,8 +511,10 @@ Implemented.
 
 A workspace config, or a template's, uses a saved field as
 `{from: strukto, ref: NAME, key: FIELD}` wherever a secret pointer may go,
-such as `token: {from: strukto, ref: github, key: token}`. The server reads
-the entries those pointers name when it creates the workspace. A pointer at a
+such as `token: {from: strukto, ref: github, key: token}`, and as a managed
+`env` entry, such as `GITHUB_TOKEN: {from: strukto, ref: github, key: token, readonly: true}`.
+The server reads the entries those pointers name when it creates the
+workspace. A pointer at a
 plain field becomes the field's value, its type kept, so a list stays a list;
 a secret field's value is kept only in the workspace's memory. A name that is
 not saved returns HTTP 400, and a server that requires accounts returns HTTP 501.

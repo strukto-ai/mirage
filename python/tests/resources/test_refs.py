@@ -15,7 +15,7 @@
 from mirage.resources.refs import secret_refs
 
 
-def test_only_a_keyed_pointer_names_a_saved_entry():
+def test_a_keyed_pointer_and_a_managed_env_entry_name_a_saved_entry():
     config = {
         "mounts": {
             "/gh": {
@@ -31,5 +31,9 @@ def test_only_a_keyed_pointer_names_a_saved_entry():
                 "config": {"env": {"from": "strukto", "ref": "x"}},
             }
         ],
+        "env": {
+            "TOKEN": {"from": "strukto", "ref": "ci", "readonly": True},
+            "PLAIN": {"value": "v", "readonly": True},
+        },
     }
-    assert secret_refs(config) == ["gh"]
+    assert secret_refs(config) == ["gh", "ci"]

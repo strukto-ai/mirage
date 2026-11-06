@@ -159,6 +159,34 @@ describe('templates router', () => {
     await app.close()
   })
 
+  it('reads a saved field into a managed env entry', async () => {
+    const app = appWithStore()
+    await app.resources.createEntry('vfs', {
+      name: 'gh',
+      type: 'github',
+      fields: { owner: 'o' },
+      sealed: { token: 't' },
+    })
+    const managed = (key: string) => ({ from: 'strukto', ref: 'gh', key, readonly: true })
+    const config = {
+      mounts: { '/': { vfs: 'ram', mode: 'write' } },
+      env: { TOKEN: managed('token'), OWNER: managed('owner') },
+    }
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: { id: 'envd', config },
+    })
+    expect(r.statusCode).toBe(201)
+    const ran = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/envd/shell',
+      payload: { command: 'echo $TOKEN $OWNER' },
+    })
+    expect(ran.json<{ stdout: string }>().stdout).toBe('t o\n')
+    await app.close()
+  })
+
   it('creates from one known template or a config', async () => {
     const app = appWithStore()
     const unknown = await app.inject({

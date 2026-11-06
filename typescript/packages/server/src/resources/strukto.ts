@@ -24,20 +24,20 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { checkConfig } from '../schemas.ts'
 
-/** The `strukto` secrets source's config: the sealed fields of each saved entry a workspace's config names. */
+/** The `strukto` secrets source's config: the fields of each saved entry a workspace's config names, the sealed ones opened. */
 export const StruktoSourceConfig = z.object({
   entries: z.record(z.string(), z.record(z.string(), z.string())),
 })
 export type StruktoSourceConfig = z.infer<typeof StruktoSourceConfig>
 
-/** The sealed fields of the saved entry `ref`, as a workspace was handed them. */
+/** The fields of the saved entry `ref`, as a workspace was handed them. */
 export function fetchStrukto(config: StruktoSourceConfig, ref: string): Promise<ResolvedSecret> {
   const fields = Object.hasOwn(config.entries, ref) ? config.entries[ref] : undefined
   if (fields === undefined) return Promise.reject(new SecretsError(`no saved entry named '${ref}'`))
   return Promise.resolve({ fields })
 }
 
-/** A sealed value as a secret's field holds it: a string as it is, anything else as JSON. */
+/** A saved value as a secret's field holds it: a string as it is, anything else as JSON. */
 function flat(value: JsonValue): string {
   return typeof value === 'string' ? value : JSON.stringify(value)
 }
@@ -59,10 +59,10 @@ function inline(value: unknown, plain: ReadonlyMap<string, Fields>): unknown {
 /**
  * The config to build, with the saved entries its `{from: strukto, ref,
  * key}` pointers name filled in. A pointer at a plain field becomes the
- * field's value, so a list stays a list; one at a sealed field reads it from
- * the `strukto` source, declared here with the sealed fields opened, as
- * mirage reads any secret's. A saved field never points at a store, since a
- * save refuses one. Throws a ResourceError for a name not saved as a VFS, CLI
+ * field's value, so a list stays a list; one at a sealed field, and a managed
+ * `env` entry at any field, reads it from the `strukto` source, declared here
+ * with each entry's fields and the sealed ones opened, as mirage reads any
+ * secret's. A saved field never points at a store, since a save refuses one. Throws a ResourceError for a name not saved as a VFS, CLI
  * or runtime, or a saved value its field cannot take.
  */
 export async function withEntries(
@@ -75,7 +75,7 @@ export async function withEntries(
     for (const entry of await store.listEntries(kind)) kinds.set(entry.name, kind)
   }
   const plain = new Map<string, Fields>()
-  const sealed: Record<string, Record<string, string>> = {}
+  const opened: Record<string, Record<string, string>> = {}
   for (const ref of refs) {
     const kind = kinds.get(ref)
     if (kind === undefined) {
@@ -83,7 +83,8 @@ export async function withEntries(
     }
     const entry = await store.revealEntry(kind, ref)
     plain.set(ref, entry.fields)
-    sealed[ref] = Object.fromEntries(Object.entries(entry.sealed).map(([k, v]) => [k, flat(v)]))
+    const every = { ...entry.fields, ...entry.sealed }
+    opened[ref] = Object.fromEntries(Object.entries(every).map(([k, v]) => [k, flat(v)]))
   }
   let cfg: WorkspaceConfigRaw
   try {
@@ -95,7 +96,7 @@ export async function withEntries(
     ...cfg,
     secrets: {
       ...(cfg.secrets ?? {}),
-      [STRUKTO]: { source: STRUKTO, config: { entries: sealed } },
+      [STRUKTO]: { source: STRUKTO, config: { entries: opened } },
     },
   }
 }

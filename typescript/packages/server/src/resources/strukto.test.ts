@@ -40,7 +40,7 @@ describe('withEntries', () => {
     expect(mount?.config.password).toEqual(password)
     expect(cfg.secrets?.strukto).toEqual({
       source: 'strukto',
-      config: { entries: { db: { password: 'pw' } } },
+      config: { entries: { db: { schemas: '["public","analytics"]', password: 'pw' } } },
     })
   })
 })
