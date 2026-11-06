@@ -19,7 +19,8 @@ import type { EntryKind } from '@struktoai/mirage-core/resources/types'
 import { SECRET_CONFIG_FIELDS } from '@struktoai/mirage-core/runtime/constants'
 import { knownRuntimes, runtimeClass } from '@struktoai/mirage-core/runtime/table'
 import { BOOTSTRAP_SOURCES } from '@struktoai/mirage-core/secrets/config'
-import { knownSources, sourceFor } from '@struktoai/mirage-core/secrets/registry'
+import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
+import { knownSources, type SourceEntry, sourceFor } from '@struktoai/mirage-core/secrets/registry'
 import { normalizedKey } from '@struktoai/mirage-core/utils/normalize'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { FIELD_NORMALIZERS, z } from '@struktoai/mirage-core/vfs/secrets'
@@ -180,13 +181,21 @@ function runtimeTypes(): TypeTable {
 /**
  * Every registered secrets source that reads a store, with its fields: the
  * environment and dotenv sources read the daemon's own files, so there is
- * nothing to save for them.
+ * nothing to save for them, and a source whose optional dependency is not
+ * installed is left out, as Python leaves out one it cannot import.
  */
 function storeTypes(): TypeTable {
   const out: TypeTable = {}
   for (const name of knownSources()) {
     if (BOOTSTRAP_SOURCES.includes(name)) continue
-    out[name] = modelFields(sourceFor(name).configModel)
+    let entry: SourceEntry
+    try {
+      entry = sourceFor(name)
+    } catch (e) {
+      if (e instanceof SecretsError) continue
+      throw e
+    }
+    out[name] = modelFields(entry.configModel)
   }
   return out
 }

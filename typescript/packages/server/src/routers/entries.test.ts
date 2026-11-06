@@ -14,6 +14,9 @@
 
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { memoryResourceStore } from '@struktoai/mirage-core/resources/memory'
+import { SecretsError } from '@struktoai/mirage-core/secrets/errors'
+import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
+import { z } from '@struktoai/mirage-core/vfs/secrets'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildApp } from '../app.ts'
 
@@ -223,6 +226,21 @@ describe('entries router', () => {
     expect(key?.secret).toBe(true)
     const stores = await types(app, '/v1/stores/types')
     expect(stores.env).toBeUndefined()
+    expect(stores['aws-sm']).toBeDefined()
+  })
+
+  it('leaves out a store whose optional dependency is missing', async () => {
+    registerSecrets(
+      'needs-peer',
+      z.strictObject({ token: z.string() }),
+      () => Promise.reject(new Error('never fetched')),
+      () => {
+        throw new SecretsError("the 'needs-peer' source needs its optional dependency")
+      },
+    )
+    const { app } = setup()
+    const stores = await types(app, '/v1/stores/types')
+    expect(stores['needs-peer']).toBeUndefined()
     expect(stores['aws-sm']).toBeDefined()
   })
 
