@@ -13,7 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+import logging
 import stat
+import traceback
 
 import pytest
 
@@ -60,6 +62,23 @@ async def test_a_hand_edited_file_reads_as_yaml_or_refuses(tmp_path):
     with pytest.raises(ResourceError) as broken:
         await store.get_policy("b.py")
     assert broken.value.code == "invalid"
+
+
+@pytest.mark.asyncio
+async def test_a_malformed_sealed_file_is_never_quoted(tmp_path, caplog):
+    caplog.set_level(logging.DEBUG)
+    store = files_resource_store(tmp_path)
+    await store.create_entry(
+        "cli", EntryInput("gh", "gh", {}, {"token": "secret-x"})
+    )
+    sealed = tmp_path / ".sealed" / "cli" / "gh.json"
+    sealed.write_text("token: [secret-x\n")
+    with pytest.raises(ResourceError) as broken:
+        await store.reveal_entry("cli", "gh")
+    assert broken.value.code == "invalid"
+    assert "secret-x" not in "".join(traceback.format_exception(broken.value))
+    assert "secret-x" not in caplog.text
+    assert str(sealed) not in caplog.text
 
 
 @pytest.mark.asyncio

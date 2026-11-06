@@ -64,7 +64,11 @@ function dump(record: Fields): string {
   return `${JSON.stringify(record, null, 2)}\n`
 }
 
-/** A record read back: JSON as written, else YAML 1.1, Python's rules, for a file edited by hand. */
+/**
+ * A record read back: JSON as written, else YAML 1.1, Python's rules, for a
+ * file edited by hand. The error never quotes the file, since a sealed one
+ * holds secrets and the parser's message quotes the line it stopped at.
+ */
 function parseRecord(path: string, text: string): Fields {
   let record: unknown
   try {
@@ -76,8 +80,8 @@ function parseRecord(path: string, text: string): Fields {
         customTags: (tags) =>
           tags.filter((t) => (typeof t === 'string' ? t !== 'timestamp' : t.tag !== TIMESTAMP)),
       })
-    } catch (e) {
-      throw new ResourceError('invalid', `${path} is malformed: ${(e as Error).message}`)
+    } catch {
+      throw new ResourceError('invalid', `${path} is malformed`)
     }
   }
   if (record === null || typeof record !== 'object' || Array.isArray(record)) {

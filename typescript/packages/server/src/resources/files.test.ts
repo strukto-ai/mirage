@@ -59,6 +59,22 @@ describe('filesResourceStore', () => {
     await expect(store.getPolicy('b.py')).rejects.toMatchObject({ code: 'invalid' })
   })
 
+  it('never quotes a malformed sealed file', async () => {
+    const dir = root()
+    const store = filesResourceStore(dir)
+    await store.createEntry('cli', {
+      name: 'gh',
+      type: 'gh',
+      fields: {},
+      sealed: { token: 'secret-x' },
+    })
+    writeFileSync(join(dir, '.sealed', 'cli', 'gh.json'), 'token: [secret-x\n')
+    await expect(store.revealEntry('cli', 'gh')).rejects.toMatchObject({
+      code: 'invalid',
+      message: expect.not.stringContaining('secret-x') as string,
+    })
+  })
+
   it('writes records owner only', async () => {
     const dir = root()
     await filesResourceStore(dir).putTemplate({ name: 't', config: { env: { TOKEN: 'x' } } })
