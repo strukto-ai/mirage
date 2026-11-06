@@ -35,6 +35,7 @@ from mirage.commands.spec.shell import SHELL_SPECS
 from mirage.commands.spec.synopsis import SHELL_SYNOPSES, SYNOPSES
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.core.mcp.config import MCPAuth, MCPConfig
+from mirage.server.app import build_app
 from mirage.types import LineFacts
 from mirage.vfs.base import BaseVFS
 from mirage.vfs.registry import REGISTRY, resolve_class
@@ -537,6 +538,14 @@ def _emit_vfs_names(registry: dict[str, list[Command]]) -> None:
     print(f"emitted {len(payload['registry'])} registry names to {path}")
 
 
+def _emit_http_api() -> None:
+    path = OUT.parent / "openapi.json"
+    path.write_text(
+        json.dumps(build_app().openapi(), indent=2, sort_keys=True) + "\n"
+    )
+    print(f"emitted the daemon's OpenAPI document to {path}")
+
+
 def main() -> None:
     failed = _walk_pkg(mirage.commands.builtin)
     if failed:
@@ -556,6 +565,7 @@ def main() -> None:
     print(f"emitted {len(SPECS)} specs to {OUT}")
     _emit_vfs_commands(registry)
     _emit_vfs_names(registry)
+    _emit_http_api()
 
 
 if __name__ == "__main__":

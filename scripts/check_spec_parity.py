@@ -18,6 +18,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = Path(os.environ.get("MIRAGE_SPEC_DIR", ROOT / ".cache" / "spec"))
 PYTHON = SPEC / "python" / "general"
@@ -31,6 +33,8 @@ TYPESCRIPT_VFS_COMMANDS = [
     SPEC / "typescript" / "browser" / "vfs_commands",
 ]
 EXCEPTIONS = ROOT / "scripts" / "parity" / "parity_exceptions.json"
+HTTP_SPEC = ROOT / "docs" / "openapi.yaml"
+HTTP_DAEMON = SPEC / "python" / "openapi.json"
 
 BY_VFS = "_meta.by_vfs"
 BY_VFS_KEYS = "_meta.by_vfs.keys"
@@ -709,6 +713,93 @@ def compare_variants(variants: list[dict[str, Any]]) -> list[str]:
     return failures
 
 
+def required_body(doc: dict[str, Any], op: dict[str, Any]) -> list[str]:
+    """The required top-level fields of an operation's request body.
+
+    Args:
+        doc (dict[str, Any]): the OpenAPI document holding the operation.
+        op (dict[str, Any]): the operation object.
+    """
+    body = op.get("requestBody")
+    if not body:
+        return []
+    media: dict[str, Any] = next(iter(body.get("content", {}).values()), {})
+    schema = media.get("schema", {})
+    ref = schema.get("$ref")
+    if ref:
+        schema = doc["components"]["schemas"][ref.rsplit("/", 1)[-1]]
+    return sorted(schema.get("required", []))
+
+
+def http_operations(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Each operation's success codes, required body fields and hosts,
+    keyed by ``METHOD /path``.
+
+    Args:
+        doc (dict[str, Any]): an OpenAPI document.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    for path, ops in doc.get("paths", {}).items():
+        for method, op in ops.items():
+            codes = op.get("responses", {})
+            out[f"{method.upper()} {path}"] = {
+                "success": sorted(c for c in codes if c.startswith("2")),
+                "body": required_body(doc, op),
+                "hosts": op.get("x-hosts", ["daemon"]),
+            }
+    return out
+
+
+def check_http_api() -> list[str]:
+    """The structural differences between the routes the Python daemon
+    serves and the committed OpenAPI document: missing or extra
+    operations, success codes and required body fields."""
+    if not HTTP_DAEMON.exists():
+        raise SystemExit(
+            f"{HTTP_DAEMON} is missing; run scripts/gen_specs.py first"
+        )
+    daemon = json.loads(HTTP_DAEMON.read_text())
+    spec = yaml.safe_load(HTTP_SPEC.read_text())
+    served = http_operations(daemon)
+    written = http_operations(spec)
+    name = HTTP_SPEC.relative_to(ROOT)
+    failures: list[str] = []
+    for key in sorted(set(served) - set(written)):
+        method, path = key.split(" ", 1)
+        block = yaml.safe_dump(
+            {path: {method.lower(): daemon["paths"][path][method.lower()]}},
+            sort_keys=False,
+            width=88,
+        )
+        failures.append(
+            f"{key} is served by the daemon but missing from {name}; "
+            f"add it under paths, with a summary, tags and x-hosts:\n{block}"
+        )
+    for key in sorted(set(written) - set(served)):
+        if "daemon" in written[key]["hosts"]:
+            failures.append(
+                f"{key} is in {name} with x-hosts daemon, but the daemon "
+                "does not serve it"
+            )
+    for path, ops in spec.get("paths", {}).items():
+        for method, op in ops.items():
+            absent = [
+                f for f in ("summary", "tags", "x-hosts") if not op.get(f)
+            ]
+            if absent:
+                failures.append(
+                    f"{method.upper()} {path} in {name} has no {', '.join(absent)}"
+                )
+    for key in sorted(set(served) & set(written)):
+        for field in ("success", "body"):
+            if served[key][field] != written[key][field]:
+                failures.append(
+                    f"{key}: {field} is {served[key][field]} on the daemon "
+                    f"but {written[key][field]} in {name}"
+                )
+    return failures
+
+
 def main() -> int:
     exceptions = json.loads(EXCEPTIONS.read_text())
     expansions: dict[str, list[str]] = exceptions["vfs_expansions"]["python"]
@@ -752,6 +843,7 @@ def main() -> int:
         failures.append(f"commands only in typescript: {only_ts}")
 
     trees = load_vfs_trees()
+    failures.extend(check_http_api())
     failures.extend(check_cli_specs(trees))
     failures.extend(check_shell_specs(trees))
     failures.extend(check_mcp_config(trees))
