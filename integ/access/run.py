@@ -774,25 +774,47 @@ async def server_checks(server: Server, report: Report) -> None:
             f"{server.key} server.templates", codes, want["templates"][d.name]
         )
         policy = f"/v1/policies/{name}.py"
-        entry = f"/v1/vfs/{name}"
+        source = {"source": "pass\n"}
         codes = [
             (
                 await http.post(
                     "/v1/policies",
-                    json={"name": f"{name}.py", "source": "pass\n"},
+                    json={"name": f"{name}.py", **source},
                     headers=auth,
                 )
             ).status_code,
+            (await http.get("/v1/policies", headers=auth)).status_code,
             (await http.get(policy, headers=auth)).status_code,
+            (await http.put(policy, json=source, headers=auth)).status_code,
             (await http.delete(policy, headers=auth)).status_code,
-            (await http.get("/v1/vfs", headers=auth)).status_code,
-            (await http.get(entry, headers=auth)).status_code,
-            (await http.get("/v1/stores", headers=auth)).status_code,
         ]
         report.check(
-            f"{server.key} server.saved_connections",
-            codes,
-            want["saved_connections"][d.name],
+            f"{server.key} server.policies", codes, want["policies"][d.name]
+        )
+        for route in ("/v1/vfs", "/v1/clis", "/v1/runtimes"):
+            entry = f"{route}/{name}"
+            unknown = {"name": name, "type": "nope", "fields": {}}
+            codes = [
+                (await http.get(route, headers=auth)).status_code,
+                (await http.get(f"{route}/types", headers=auth)).status_code,
+                (
+                    await http.post(route, json=unknown, headers=auth)
+                ).status_code,
+                (await http.get(entry, headers=auth)).status_code,
+                (
+                    await http.put(entry, json={"fields": {}}, headers=auth)
+                ).status_code,
+                (await http.delete(entry, headers=auth)).status_code,
+            ]
+            report.check(
+                f"{server.key} server.entries {route}",
+                codes,
+                want["entries"][d.name],
+            )
+        report.check(
+            f"{server.key} server.no_secret_stores",
+            (await http.get("/v1/stores", headers=auth)).status_code,
+            404,
         )
         stop = await http.post("/v1/shutdown", headers=auth)
         report.check(
@@ -1091,7 +1113,9 @@ async def lifecycle(
 
     await cli("workspace", "create", str(config), "--id", "i")
     tty_code, _, _ = await cli("shell", "-w", "i", "-c", "exit 3", tty=True)
-    piped_code, _, _ = await cli("shell", "-w", "i", "-c", "exit 3")
+    piped_code, _, _ = await cli(
+        "workspace", "shell", "-w", "i", "-c", "exit 3"
+    )
     got["shell_exit_status"] = f"{tty_code} {piped_code}"
     await cli("workspace", "use", "i")
     _, out, _ = await cli("shell", "-c", "echo current")
@@ -1289,6 +1313,7 @@ def python_commands() -> set[str]:
         return [
             leaf
             for name, sub in subs.items()
+            if not sub.hidden
             for leaf in walk(sub, [*words, name])
         ]
 
