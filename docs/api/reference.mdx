@@ -387,7 +387,7 @@ The workspace's id.
 **Query**
 
 <ParamField query="session_id" type="string">
-The session the call acts as; the default session when absent.
+Only this session's records; every session's when absent.
 </ParamField>
 <ParamField query="since" type="integer | null">
 </ParamField>
@@ -849,20 +849,9 @@ Up to 64 MiB, read as it arrives.
 
 **Responses**
 
-`200` The line's result, or with stream=true an NDJSON stream of output records ending in a status record
+`200` The line's result; with explain=true, its explanation; with stream=true, an NDJSON stream ending in a status record
 
-`application/json` `ShellResult`
-
-<ResponseField name="kind" type="string" required>
-</ResponseField>
-<ResponseField name="exit_code" type="integer" required>
-</ResponseField>
-<ResponseField name="stdout" type="string" required>
-</ResponseField>
-<ResponseField name="stderr" type="string" required>
-</ResponseField>
-<ResponseField name="refusal" type="object | null">
-</ResponseField>
+`application/json` `ShellResult | ShellExplanation`
 
 `application/x-ndjson` `string`
 
@@ -908,14 +897,15 @@ Return what the call would do without running it.
 
 <ParamField body="path" type="string" required>
 </ParamField>
-<ParamField body="data" type="string" required>
+<ParamField body="data" type="string (base64)" required>
+The bytes, base64-encoded.
 </ParamField>
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `null`
+`application/json` `null | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -962,9 +952,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `null`
+`application/json` `null | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1011,9 +1001,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `boolean`
+`application/json` `boolean | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1064,9 +1054,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `string`
+`application/json` `string | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1113,9 +1103,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `boolean`
+`application/json` `boolean | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1162,9 +1152,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `boolean`
+`application/json` `boolean | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1211,9 +1201,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `string[]`
+`application/json` `string[] | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1262,9 +1252,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `string[]`
+`application/json` `string[] | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1311,9 +1301,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `null`
+`application/json` `null | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1357,16 +1347,17 @@ Return what the call would do without running it.
 
 <ParamField body="path" type="string" required>
 </ParamField>
-<ParamField body="data" type="string" required>
+<ParamField body="data" type="string (base64)" required>
+The bytes, base64-encoded.
 </ParamField>
 <ParamField body="offset" type="integer" required>
 </ParamField>
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `null`
+`application/json` `null | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1422,9 +1413,9 @@ Answer the bytes themselves as application/octet-stream.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `string`
+`application/json` `string | VfsExplanation`
 
 `application/octet-stream` `string`
 
@@ -1473,9 +1464,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `string[]`
+`application/json` `string[] | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1522,9 +1513,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `string`
+`application/json` `string | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1575,9 +1566,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `null`
+`application/json` `null | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1626,9 +1617,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `null`
+`application/json` `null | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1675,9 +1666,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `null`
+`application/json` `null | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1736,9 +1727,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `object`
+`application/json` `object | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1784,7 +1775,8 @@ Return what the call would do without running it.
 </ParamField>
 <ParamField body="name" type="string" required>
 </ParamField>
-<ParamField body="value" type="string" required>
+<ParamField body="value" type="string (base64)" required>
+The bytes, base64-encoded.
 </ParamField>
 <ParamField body="create" type="boolean">
 </ParamField>
@@ -1795,9 +1787,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `null`
+`application/json` `null | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1846,9 +1838,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `object`
+`application/json` `object | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1897,9 +1889,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `null`
+`application/json` `null | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1948,9 +1940,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `null`
+`application/json` `null | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -1997,9 +1989,9 @@ Return what the call would do without running it.
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `null`
+`application/json` `null | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -2043,14 +2035,15 @@ Return what the call would do without running it.
 
 <ParamField body="path" type="string" required>
 </ParamField>
-<ParamField body="data" type="string" required>
+<ParamField body="data" type="string (base64)" required>
+The bytes, base64-encoded.
 </ParamField>
 
 **Responses**
 
-`200` What the call returns
+`200` What the call returns; with explain=true, its explanation
 
-`application/json` `null`
+`application/json` `null | VfsExplanation`
 
 `401` The token is missing or wrong
 
@@ -3218,7 +3211,7 @@ The workspace's id.
 **Query**
 
 <ParamField query="session_id" type="string">
-The session the call acts as; the default session when absent.
+Only this session's records; every session's when absent.
 </ParamField>
 <ParamField query="all" type="boolean">
 </ParamField>

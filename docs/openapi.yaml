@@ -172,7 +172,12 @@ paths:
       operationId: workspace_history_v1_workspaces__workspace_id__history_get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
-        - $ref: '#/components/parameters/sessionId'
+        - name: session_id
+          in: query
+          required: false
+          description: Only this session's records; every session's when absent.
+          schema:
+            type: string
         - name: since
           in: query
           required: false
@@ -1310,7 +1315,12 @@ paths:
       operationId: list_asks_v1_workspaces__workspace_id__asks_get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
-        - $ref: '#/components/parameters/sessionId'
+        - name: session_id
+          in: query
+          required: false
+          description: Only this session's records; every session's when absent.
+          schema:
+            type: string
         - name: all
           in: query
           required: false
@@ -1411,19 +1421,22 @@ paths:
             default: false
         - name: stream
           in: query
-          description: Stream stdout, stderr and the final status as NDJSON. Cannot be combined with explain.
+          description: Stream stdout, stderr and the final status as NDJSON. Cannot be combined
+            with explain.
           required: false
           schema:
             type: boolean
             default: false
       responses:
         '200':
-          description: The line's result, or with stream=true an NDJSON stream of output records
-            ending in a status record
+          description: The line's result; with explain=true, its explanation; with stream=true,
+            an NDJSON stream ending in a status record
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ShellResult'
+                anyOf:
+                  - $ref: '#/components/schemas/ShellResult'
+                  - $ref: '#/components/schemas/ShellExplanation'
             application/x-ndjson:
               schema:
                 type: string
@@ -1844,12 +1857,14 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: string
-                description: The bytes, base64.
+                anyOf:
+                  - type: string
+                    description: The bytes, base64.
+                  - $ref: '#/components/schemas/VfsExplanation'
             application/octet-stream:
               schema:
                 type: string
@@ -1911,11 +1926,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: 'null'
+                anyOf:
+                  - type: 'null'
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -1946,6 +1963,7 @@ paths:
                 data:
                   type: string
                   contentEncoding: base64
+                  description: The bytes, base64-encoded.
               required:
                 - path
                 - data
@@ -1966,11 +1984,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: 'null'
+                anyOf:
+                  - type: 'null'
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2001,6 +2021,7 @@ paths:
                 data:
                   type: string
                   contentEncoding: base64
+                  description: The bytes, base64-encoded.
               required:
                 - path
                 - data
@@ -2021,11 +2042,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: 'null'
+                anyOf:
+                  - type: 'null'
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2056,6 +2079,7 @@ paths:
                 data:
                   type: string
                   contentEncoding: base64
+                  description: The bytes, base64-encoded.
                 offset:
                   type: integer
               required:
@@ -2079,12 +2103,14 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: object
-                description: A FileStat.
+                anyOf:
+                  - type: object
+                    description: A FileStat.
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2133,14 +2159,16 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: string
-                description: Full paths.
+                anyOf:
+                  - type: array
+                    items:
+                      type: string
+                    description: Full paths.
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2187,11 +2215,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: boolean
+                anyOf:
+                  - type: boolean
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2238,11 +2268,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: boolean
+                anyOf:
+                  - type: boolean
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2289,11 +2321,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: boolean
+                anyOf:
+                  - type: boolean
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2340,14 +2374,16 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: string
-                description: File names only.
+                anyOf:
+                  - type: array
+                    items:
+                      type: string
+                    description: File names only.
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2394,11 +2430,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: 'null'
+                anyOf:
+                  - type: 'null'
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2445,11 +2483,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: 'null'
+                anyOf:
+                  - type: 'null'
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2496,11 +2536,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: 'null'
+                anyOf:
+                  - type: 'null'
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2547,11 +2589,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: 'null'
+                anyOf:
+                  - type: 'null'
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2598,11 +2642,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: 'null'
+                anyOf:
+                  - type: 'null'
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2652,11 +2698,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: 'null'
+                anyOf:
+                  - type: 'null'
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2706,12 +2754,14 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: string
-                description: The link's target.
+                anyOf:
+                  - type: string
+                    description: The link's target.
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2758,12 +2808,15 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: object
-                description: The fields the backend could not keep, which Mirage stores instead.
+                anyOf:
+                  - type: object
+                    description: The fields the backend could not keep, which Mirage stores
+                      instead.
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2824,12 +2877,14 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: string
-                description: The bytes, base64.
+                anyOf:
+                  - type: string
+                    description: The bytes, base64.
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2881,13 +2936,15 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  type: string
+                anyOf:
+                  - type: array
+                    items:
+                      type: string
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2936,11 +2993,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: 'null'
+                anyOf:
+                  - type: 'null'
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -2973,6 +3032,7 @@ paths:
                 value:
                   type: string
                   contentEncoding: base64
+                  description: The bytes, base64-encoded.
                 create:
                   type: boolean
                 replace:
@@ -3000,11 +3060,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: 'null'
+                anyOf:
+                  - type: 'null'
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -3056,11 +3118,13 @@ paths:
             default: false
       responses:
         '200':
-          description: What the call returns
+          description: What the call returns; with explain=true, its explanation
           content:
             application/json:
               schema:
-                type: 'null'
+                anyOf:
+                  - type: 'null'
+                  - $ref: '#/components/schemas/VfsExplanation'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -5211,6 +5275,65 @@ components:
           type: object
           description: Configuration overrides for the restored workspace, including credentials
             redacted from the snapshot.
+    Explanation:
+      type: object
+      description: What a call would do, without doing it (explain=true).
+      properties:
+        type:
+          type: string
+          description: line, command or vfs.
+        outcome:
+          type: string
+          enum:
+            - ALLOW
+            - DENY
+            - ASK
+        reason:
+          type: string
+          description: Why, in the deciding policy's words.
+        source:
+          type: string
+          description: Where in the profile the deciding rule is written.
+        answers:
+          type: array
+          items:
+            type: object
+          description: Every policy's answer.
+        refusal:
+          anyOf:
+            - type: object
+            - type: 'null'
+      required:
+        - outcome
+    ShellExplanation:
+      allOf:
+        - $ref: '#/components/schemas/Explanation'
+        - type: object
+          properties:
+            line:
+              type: string
+            exit_code:
+              type: integer
+              description: What the line is refused with, 0 when it runs.
+            stderr:
+              type: string
+            node:
+              type: object
+              description: The parsed line and each command's explanation.
+    VfsExplanation:
+      allOf:
+        - $ref: '#/components/schemas/Explanation'
+        - type: object
+          properties:
+            call:
+              type: string
+            paths:
+              type: array
+              items:
+                type: string
+            error:
+              type: string
+              description: The errno name the call would raise, empty when it runs.
   securitySchemes:
     bearerAuth:
       type: http
@@ -5231,6 +5354,10 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+        text/plain:
+          schema:
+            type: string
+            description: The Python daemon answers Unauthorized as plain text.
     '403':
       description: A policy or mount mode refused the call
       content:

@@ -128,6 +128,9 @@ def type_of(schema: dict[str, Any]) -> str:
         return f"{type_of(schema.get('items', {}))}[]"
     if isinstance(kind, list):
         return " | ".join(kind)
+    encoding = schema.get("contentEncoding")
+    if encoding:
+        return f"{kind} ({encoding})"
     return str(kind or "any")
 
 
