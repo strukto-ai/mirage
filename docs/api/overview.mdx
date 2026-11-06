@@ -5,7 +5,7 @@ icon: book-open
 ---
 
 The Mirage HTTP API serves workspaces over JSON at `/v1`. The local daemon
-(Python or TypeScript) and the hosted console answer the same routes with the
+(Python or TypeScript) and the hosted API answer the same routes with the
 same bodies, so a client written against one works against the other.
 
 <Note>
@@ -19,7 +19,7 @@ it runs the same workspaces in process, with no server. See
 | Host | Base URL | Routes |
 | --- | --- | --- |
 | Local daemon | `http://127.0.0.1:8765` by default | Every route in the [reference](/api/reference) |
-| Hosted console | Your console URL | Rows marked **daemon and console** in the reference, plus the console's own account routes |
+| Hosted API | Your hosted API URL | Rows marked **daemon and hosted** in the reference, plus the hosted API's own account routes |
 
 The `mirage` CLI starts a daemon on the first command that needs one. To run
 one from code, see [Launch a server](/home/access/http#launch-a-server).

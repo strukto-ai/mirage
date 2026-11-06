@@ -57,7 +57,7 @@ export const Operation = ({ resource, method, path, summary, hosts, children }) 
   <div data-op={`${method} ${path} ${summary} ${resource}`} data-resource={resource}>
     <Accordion
       title={`${method} ${path}`}
-      description={hosts && hosts.includes("console") ? `${summary} · daemon and console` : summary}
+      description={hosts && hosts.includes("hosted") ? `${summary} · daemon and hosted` : summary}
     >
       {children}
     </Accordion>

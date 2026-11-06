@@ -32,6 +32,10 @@ TAG_ORDER = (
     "Documents",
     "Snapshots",
     "Templates",
+    "Saved VFS",
+    "Saved CLIs",
+    "Saved runtimes",
+    "Policies",
     "Asks",
     "Server",
     "Auth",
@@ -53,7 +57,7 @@ Routes are under `/v1` and take and return JSON. Send
 [OpenAPI document](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml)
 is the contract both servers are checked against.
 
-Rows marked **daemon and console** are also served by the hosted console.
+Rows marked **daemon and hosted** are also served by the hosted API.
 An error answers `{detail, errno?, refusal?}`; `429` adds `Retry-After`.
 """
 

@@ -14,12 +14,12 @@ Routes are under `/v1` and take and return JSON. Send
 [OpenAPI document](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml)
 is the contract both servers are checked against.
 
-Rows marked **daemon and console** are also served by the hosted console.
+Rows marked **daemon and hosted** are also served by the hosted API.
 An error answers `{detail, errno?, refusal?}`; `429` adds `Retry-After`.
 
 <ApiExplorer>
 
-<Operation resource="Workspaces" method="GET" path="/v1/workspaces" summary="List workspaces" hosts="daemon · console">
+<Operation resource="Workspaces" method="GET" path="/v1/workspaces" summary="List workspaces" hosts="daemon · hosted">
 
 [Open page](/api/operations/workspaces/list-workspaces)
 
@@ -46,7 +46,7 @@ An error answers `{detail, errno?, refusal?}`; `429` adds `Retry-After`.
 
 </Operation>
 
-<Operation resource="Workspaces" method="POST" path="/v1/workspaces" summary="Create a workspace" hosts="daemon · console">
+<Operation resource="Workspaces" method="POST" path="/v1/workspaces" summary="Create a workspace" hosts="daemon · hosted">
 
 [Open page](/api/operations/workspaces/create-a-workspace)
 
@@ -140,7 +140,7 @@ Return what the call would do without running it.
 
 </Operation>
 
-<Operation resource="Workspaces" method="GET" path="/v1/workspaces/{workspace_id}" summary="Get a workspace" hosts="daemon · console">
+<Operation resource="Workspaces" method="GET" path="/v1/workspaces/{workspace_id}" summary="Get a workspace" hosts="daemon · hosted">
 
 [Open page](/api/operations/workspaces/get-a-workspace)
 
@@ -193,7 +193,7 @@ The workspace's id.
 
 </Operation>
 
-<Operation resource="Workspaces" method="DELETE" path="/v1/workspaces/{workspace_id}" summary="Delete a workspace" hosts="daemon · console">
+<Operation resource="Workspaces" method="DELETE" path="/v1/workspaces/{workspace_id}" summary="Delete a workspace" hosts="daemon · hosted">
 
 [Open page](/api/operations/workspaces/delete-a-workspace)
 
@@ -229,7 +229,7 @@ The workspace's id.
 
 </Operation>
 
-<Operation resource="Workspaces" method="POST" path="/v1/workspaces/{workspace_id}/cancel" summary="Cancel a workspace's lines" hosts="daemon · console">
+<Operation resource="Workspaces" method="POST" path="/v1/workspaces/{workspace_id}/cancel" summary="Cancel a workspace's lines" hosts="daemon · hosted">
 
 [Open page](/api/operations/workspaces/cancel-a-workspaces-lines)
 
@@ -533,7 +533,7 @@ The workspace's id.
 
 </Operation>
 
-<Operation resource="Sessions" method="GET" path="/v1/workspaces/{workspace_id}/sessions" summary="List sessions" hosts="daemon · console">
+<Operation resource="Sessions" method="GET" path="/v1/workspaces/{workspace_id}/sessions" summary="List sessions" hosts="daemon · hosted">
 
 [Open page](/api/operations/sessions/list-sessions)
 
@@ -569,7 +569,7 @@ The workspace's id.
 
 </Operation>
 
-<Operation resource="Sessions" method="POST" path="/v1/workspaces/{workspace_id}/sessions" summary="Create a session" hosts="daemon · console">
+<Operation resource="Sessions" method="POST" path="/v1/workspaces/{workspace_id}/sessions" summary="Create a session" hosts="daemon · hosted">
 
 [Open page](/api/operations/sessions/create-a-session)
 
@@ -773,7 +773,7 @@ The workspace's id.
 
 </Operation>
 
-<Operation resource="Shell" method="POST" path="/v1/workspaces/{workspace_id}/glob" summary="Match paths" hosts="daemon · console">
+<Operation resource="Shell" method="POST" path="/v1/workspaces/{workspace_id}/glob" summary="Match paths" hosts="daemon · hosted">
 
 [Open page](/api/operations/shell/match-paths)
 
@@ -821,7 +821,7 @@ A pathname pattern, such as /src/**/*.py.
 
 </Operation>
 
-<Operation resource="Shell" method="POST" path="/v1/workspaces/{workspace_id}/shell" summary="Run a shell line" hosts="daemon · console">
+<Operation resource="Shell" method="POST" path="/v1/workspaces/{workspace_id}/shell" summary="Run a shell line" hosts="daemon · hosted">
 
 [Open page](/api/operations/shell/run-a-shell-line)
 
@@ -3682,7 +3682,7 @@ The workspace's id.
 
 </Operation>
 
-<Operation resource="Templates" method="GET" path="/v1/templates" summary="List templates" hosts="daemon · console">
+<Operation resource="Templates" method="GET" path="/v1/templates" summary="List templates" hosts="daemon · hosted">
 
 [Open page](/api/operations/templates/list-templates)
 
@@ -3705,9 +3705,11 @@ The saved templates, by name.
 
 `429` Past a rate limit, or a new session past max_sessions
 
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
 </Operation>
 
-<Operation resource="Templates" method="POST" path="/v1/templates" summary="Create a template" hosts="daemon · console">
+<Operation resource="Templates" method="POST" path="/v1/templates" summary="Create a template" hosts="daemon · hosted">
 
 [Open page](/api/operations/templates/create-a-template)
 
@@ -3747,9 +3749,11 @@ checks one, and kept as written. A name already saved is a 409.
 
 `429` Past a rate limit, or a new session past max_sessions
 
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
 </Operation>
 
-<Operation resource="Templates" method="GET" path="/v1/templates/{ref}" summary="Get a template" hosts="daemon · console">
+<Operation resource="Templates" method="GET" path="/v1/templates/{ref}" summary="Get a template" hosts="daemon · hosted">
 
 [Open page](/api/operations/templates/get-a-template)
 
@@ -3784,9 +3788,11 @@ checks one, and kept as written. A name already saved is a 409.
 
 `429` Past a rate limit, or a new session past max_sessions
 
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
 </Operation>
 
-<Operation resource="Templates" method="DELETE" path="/v1/templates/{ref}" summary="Delete a template" hosts="daemon · console">
+<Operation resource="Templates" method="DELETE" path="/v1/templates/{ref}" summary="Delete a template" hosts="daemon · hosted">
 
 [Open page](/api/operations/templates/delete-a-template)
 
@@ -3814,9 +3820,11 @@ Delete a template; `restore` brings it back.
 
 `429` Past a rate limit, or a new session past max_sessions
 
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
 </Operation>
 
-<Operation resource="Templates" method="POST" path="/v1/templates/{ref}/restore" summary="Restore a template" hosts="daemon · console">
+<Operation resource="Templates" method="POST" path="/v1/templates/{ref}/restore" summary="Restore a template" hosts="daemon · hosted">
 
 [Open page](/api/operations/templates/restore-a-template)
 
@@ -3850,6 +3858,1076 @@ Delete a template; `restore` brings it back.
 </ResponseField>
 
 `429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved VFS" method="GET" path="/v1/vfs" summary="List VFS configs" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-vfs/list-vfs-configs)
+
+The saved VFS configs: a mount's type and fields, kept by name for templates to use.
+
+**Query**
+
+<ParamField query="type" type="string | null">
+Only entries of this type, such as s3.
+</ParamField>
+<ParamField query="q" type="string | null">
+Only entries whose name contains this text, ignoring case.
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `SavedEntryList`
+
+<ResponseField name="items" type="SavedEntry[]" required>
+</ResponseField>
+
+`401` The token is missing or wrong
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved VFS" method="POST" path="/v1/vfs" summary="Create a VFS config" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-vfs/create-a-vfs-config)
+
+Save a VFS config. Its fields are checked against the type's; secret fields are sealed, and a string field may point at a saved store's secret instead. A name already saved is a 409.
+
+**Body** `application/json`
+
+<ParamField body="name" type="string" required>
+1 to 63 of a-z 0-9 . _ -, starting with a letter or digit. Not `types`, and not shaped like an id.
+</ParamField>
+<ParamField body="type" type="string" required>
+One of the types its kind's `/types` route lists, such as `GET /v1/vfs/types`.
+</ParamField>
+<ParamField body="fields" type="object">
+The type's config. Secret fields are sealed; a string field may point at a saved store instead.
+</ParamField>
+
+**Responses**
+
+`201` Created
+
+`application/json` `SavedEntry`
+
+<ResponseField name="id" type="string" required>
+The entry's id; the daemon uses its name.
+</ResponseField>
+<ResponseField name="name" type="string" required>
+</ResponseField>
+<ResponseField name="kind" type="string" required>
+</ResponseField>
+<ResponseField name="type" type="string" required>
+The VFS, CLI or runtime type, such as s3.
+</ResponseField>
+<ResponseField name="builtin" type="boolean" required>
+</ResponseField>
+<ResponseField name="config" type="object" required>
+The plain fields. Sealed fields are never answered.
+</ResponseField>
+<ResponseField name="captures" type="any[]">
+A runtime's captures; runtimes only.
+</ResponseField>
+<ResponseField name="created_by" type="string | null">
+</ResponseField>
+<ResponseField name="created_at" type="string | null">
+</ResponseField>
+<ResponseField name="updated_at" type="string | null">
+</ResponseField>
+<ResponseField name="used_by" type="integer">
+How many templates name the entry; in a list only.
+</ResponseField>
+
+`400` Bad request: malformed, a host not allowed, or a browser page from another origin
+
+`401` The token is missing or wrong
+
+`409` The id or name is taken, the workspace is busy, or a file changed since it was read
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved VFS" method="GET" path="/v1/vfs/types" summary="List VFS config types" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-vfs/list-vfs-config-types)
+
+Every type a VFS config can be, with the fields its config takes.
+
+**Responses**
+
+`200` OK
+
+`application/json` `TypeTable`
+
+`401` The token is missing or wrong
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved VFS" method="GET" path="/v1/vfs/{ref}" summary="Get a VFS config" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-vfs/get-a-vfs-config)
+
+One saved VFS config, with its sealed fields named but not answered.
+
+**Path**
+
+<ParamField path="ref" type="string" required>
+The VFS config's name.
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `SavedEntryDetail`
+
+<ResponseField name="id" type="string" required>
+The entry's id; the daemon uses its name.
+</ResponseField>
+<ResponseField name="name" type="string" required>
+</ResponseField>
+<ResponseField name="kind" type="string" required>
+</ResponseField>
+<ResponseField name="type" type="string" required>
+The VFS, CLI or runtime type, such as s3.
+</ResponseField>
+<ResponseField name="builtin" type="boolean" required>
+</ResponseField>
+<ResponseField name="config" type="object" required>
+The plain fields. Sealed fields are never answered.
+</ResponseField>
+<ResponseField name="captures" type="any[]">
+A runtime's captures; runtimes only.
+</ResponseField>
+<ResponseField name="created_by" type="string | null">
+</ResponseField>
+<ResponseField name="created_at" type="string | null">
+</ResponseField>
+<ResponseField name="updated_at" type="string | null">
+</ResponseField>
+<ResponseField name="used_by" type="integer">
+How many templates name the entry; in a list only.
+</ResponseField>
+<ResponseField name="sealed" type="string[]" required>
+The sealed fields, by name.
+</ResponseField>
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved VFS" method="PUT" path="/v1/vfs/{ref}" summary="Update a VFS config" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-vfs/update-a-vfs-config)
+
+Change a VFS config's fields. Its name and type stay; a sealed field left out keeps its value.
+
+**Path**
+
+<ParamField path="ref" type="string" required>
+The VFS config's name.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="fields" type="object">
+The fields to set. A sealed field left out keeps its value; null removes a field.
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `SavedEntry`
+
+<ResponseField name="id" type="string" required>
+The entry's id; the daemon uses its name.
+</ResponseField>
+<ResponseField name="name" type="string" required>
+</ResponseField>
+<ResponseField name="kind" type="string" required>
+</ResponseField>
+<ResponseField name="type" type="string" required>
+The VFS, CLI or runtime type, such as s3.
+</ResponseField>
+<ResponseField name="builtin" type="boolean" required>
+</ResponseField>
+<ResponseField name="config" type="object" required>
+The plain fields. Sealed fields are never answered.
+</ResponseField>
+<ResponseField name="captures" type="any[]">
+A runtime's captures; runtimes only.
+</ResponseField>
+<ResponseField name="created_by" type="string | null">
+</ResponseField>
+<ResponseField name="created_at" type="string | null">
+</ResponseField>
+<ResponseField name="updated_at" type="string | null">
+</ResponseField>
+<ResponseField name="used_by" type="integer">
+How many templates name the entry; in a list only.
+</ResponseField>
+
+`400` Bad request: malformed, a host not allowed, or a browser page from another origin
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved VFS" method="DELETE" path="/v1/vfs/{ref}" summary="Delete a VFS config" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-vfs/delete-a-vfs-config)
+
+Delete a saved VFS config.
+
+**Path**
+
+<ParamField path="ref" type="string" required>
+The VFS config's name.
+</ParamField>
+
+**Responses**
+
+`204` No content
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved CLIs" method="GET" path="/v1/clis" summary="List CLI configs" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-clis/list-cli-configs)
+
+The saved CLI configs: a CLI install's type and fields, kept by name for templates to use.
+
+**Query**
+
+<ParamField query="type" type="string | null">
+Only entries of this type, such as s3.
+</ParamField>
+<ParamField query="q" type="string | null">
+Only entries whose name contains this text, ignoring case.
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `SavedEntryList`
+
+<ResponseField name="items" type="SavedEntry[]" required>
+</ResponseField>
+
+`401` The token is missing or wrong
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved CLIs" method="POST" path="/v1/clis" summary="Create a CLI config" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-clis/create-a-cli-config)
+
+Save a CLI config. Its fields are checked against the type's; secret fields are sealed, and a string field may point at a saved store's secret instead. A name already saved is a 409.
+
+**Body** `application/json`
+
+<ParamField body="name" type="string" required>
+1 to 63 of a-z 0-9 . _ -, starting with a letter or digit. Not `types`, and not shaped like an id.
+</ParamField>
+<ParamField body="type" type="string" required>
+One of the types its kind's `/types` route lists, such as `GET /v1/vfs/types`.
+</ParamField>
+<ParamField body="fields" type="object">
+The type's config. Secret fields are sealed; a string field may point at a saved store instead.
+</ParamField>
+
+**Responses**
+
+`201` Created
+
+`application/json` `SavedEntry`
+
+<ResponseField name="id" type="string" required>
+The entry's id; the daemon uses its name.
+</ResponseField>
+<ResponseField name="name" type="string" required>
+</ResponseField>
+<ResponseField name="kind" type="string" required>
+</ResponseField>
+<ResponseField name="type" type="string" required>
+The VFS, CLI or runtime type, such as s3.
+</ResponseField>
+<ResponseField name="builtin" type="boolean" required>
+</ResponseField>
+<ResponseField name="config" type="object" required>
+The plain fields. Sealed fields are never answered.
+</ResponseField>
+<ResponseField name="captures" type="any[]">
+A runtime's captures; runtimes only.
+</ResponseField>
+<ResponseField name="created_by" type="string | null">
+</ResponseField>
+<ResponseField name="created_at" type="string | null">
+</ResponseField>
+<ResponseField name="updated_at" type="string | null">
+</ResponseField>
+<ResponseField name="used_by" type="integer">
+How many templates name the entry; in a list only.
+</ResponseField>
+
+`400` Bad request: malformed, a host not allowed, or a browser page from another origin
+
+`401` The token is missing or wrong
+
+`409` The id or name is taken, the workspace is busy, or a file changed since it was read
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved CLIs" method="GET" path="/v1/clis/types" summary="List CLI config types" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-clis/list-cli-config-types)
+
+Every type a CLI config can be, with the fields its config takes.
+
+**Responses**
+
+`200` OK
+
+`application/json` `TypeTable`
+
+`401` The token is missing or wrong
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved CLIs" method="GET" path="/v1/clis/{ref}" summary="Get a CLI config" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-clis/get-a-cli-config)
+
+One saved CLI config, with its sealed fields named but not answered.
+
+**Path**
+
+<ParamField path="ref" type="string" required>
+The CLI config's name.
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `SavedEntryDetail`
+
+<ResponseField name="id" type="string" required>
+The entry's id; the daemon uses its name.
+</ResponseField>
+<ResponseField name="name" type="string" required>
+</ResponseField>
+<ResponseField name="kind" type="string" required>
+</ResponseField>
+<ResponseField name="type" type="string" required>
+The VFS, CLI or runtime type, such as s3.
+</ResponseField>
+<ResponseField name="builtin" type="boolean" required>
+</ResponseField>
+<ResponseField name="config" type="object" required>
+The plain fields. Sealed fields are never answered.
+</ResponseField>
+<ResponseField name="captures" type="any[]">
+A runtime's captures; runtimes only.
+</ResponseField>
+<ResponseField name="created_by" type="string | null">
+</ResponseField>
+<ResponseField name="created_at" type="string | null">
+</ResponseField>
+<ResponseField name="updated_at" type="string | null">
+</ResponseField>
+<ResponseField name="used_by" type="integer">
+How many templates name the entry; in a list only.
+</ResponseField>
+<ResponseField name="sealed" type="string[]" required>
+The sealed fields, by name.
+</ResponseField>
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved CLIs" method="PUT" path="/v1/clis/{ref}" summary="Update a CLI config" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-clis/update-a-cli-config)
+
+Change a CLI config's fields. Its name and type stay; a sealed field left out keeps its value.
+
+**Path**
+
+<ParamField path="ref" type="string" required>
+The CLI config's name.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="fields" type="object">
+The fields to set. A sealed field left out keeps its value; null removes a field.
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `SavedEntry`
+
+<ResponseField name="id" type="string" required>
+The entry's id; the daemon uses its name.
+</ResponseField>
+<ResponseField name="name" type="string" required>
+</ResponseField>
+<ResponseField name="kind" type="string" required>
+</ResponseField>
+<ResponseField name="type" type="string" required>
+The VFS, CLI or runtime type, such as s3.
+</ResponseField>
+<ResponseField name="builtin" type="boolean" required>
+</ResponseField>
+<ResponseField name="config" type="object" required>
+The plain fields. Sealed fields are never answered.
+</ResponseField>
+<ResponseField name="captures" type="any[]">
+A runtime's captures; runtimes only.
+</ResponseField>
+<ResponseField name="created_by" type="string | null">
+</ResponseField>
+<ResponseField name="created_at" type="string | null">
+</ResponseField>
+<ResponseField name="updated_at" type="string | null">
+</ResponseField>
+<ResponseField name="used_by" type="integer">
+How many templates name the entry; in a list only.
+</ResponseField>
+
+`400` Bad request: malformed, a host not allowed, or a browser page from another origin
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved CLIs" method="DELETE" path="/v1/clis/{ref}" summary="Delete a CLI config" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-clis/delete-a-cli-config)
+
+Delete a saved CLI config.
+
+**Path**
+
+<ParamField path="ref" type="string" required>
+The CLI config's name.
+</ParamField>
+
+**Responses**
+
+`204` No content
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved runtimes" method="GET" path="/v1/runtimes" summary="List runtime configs" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-runtimes/list-runtime-configs)
+
+The saved runtime configs: a runtime's type and fields, kept by name for templates to use.
+
+**Query**
+
+<ParamField query="type" type="string | null">
+Only entries of this type, such as s3.
+</ParamField>
+<ParamField query="q" type="string | null">
+Only entries whose name contains this text, ignoring case.
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `SavedEntryList`
+
+<ResponseField name="items" type="SavedEntry[]" required>
+</ResponseField>
+
+`401` The token is missing or wrong
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved runtimes" method="POST" path="/v1/runtimes" summary="Create a runtime config" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-runtimes/create-a-runtime-config)
+
+Save a runtime config. Its fields are checked against the type's; secret fields are sealed, and a string field may point at a saved store's secret instead. A name already saved is a 409.
+
+**Body** `application/json`
+
+<ParamField body="name" type="string" required>
+1 to 63 of a-z 0-9 . _ -, starting with a letter or digit. Not `types`, and not shaped like an id.
+</ParamField>
+<ParamField body="type" type="string" required>
+One of the types its kind's `/types` route lists, such as `GET /v1/vfs/types`.
+</ParamField>
+<ParamField body="fields" type="object">
+The type's config. Secret fields are sealed; a string field may point at a saved store instead.
+</ParamField>
+
+**Responses**
+
+`201` Created
+
+`application/json` `SavedEntry`
+
+<ResponseField name="id" type="string" required>
+The entry's id; the daemon uses its name.
+</ResponseField>
+<ResponseField name="name" type="string" required>
+</ResponseField>
+<ResponseField name="kind" type="string" required>
+</ResponseField>
+<ResponseField name="type" type="string" required>
+The VFS, CLI or runtime type, such as s3.
+</ResponseField>
+<ResponseField name="builtin" type="boolean" required>
+</ResponseField>
+<ResponseField name="config" type="object" required>
+The plain fields. Sealed fields are never answered.
+</ResponseField>
+<ResponseField name="captures" type="any[]">
+A runtime's captures; runtimes only.
+</ResponseField>
+<ResponseField name="created_by" type="string | null">
+</ResponseField>
+<ResponseField name="created_at" type="string | null">
+</ResponseField>
+<ResponseField name="updated_at" type="string | null">
+</ResponseField>
+<ResponseField name="used_by" type="integer">
+How many templates name the entry; in a list only.
+</ResponseField>
+
+`400` Bad request: malformed, a host not allowed, or a browser page from another origin
+
+`401` The token is missing or wrong
+
+`409` The id or name is taken, the workspace is busy, or a file changed since it was read
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved runtimes" method="GET" path="/v1/runtimes/types" summary="List runtime config types" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-runtimes/list-runtime-config-types)
+
+Every type a runtime config can be, with the fields its config takes.
+
+**Responses**
+
+`200` OK
+
+`application/json` `TypeTable`
+
+`401` The token is missing or wrong
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved runtimes" method="GET" path="/v1/runtimes/{ref}" summary="Get a runtime config" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-runtimes/get-a-runtime-config)
+
+One saved runtime config, with its sealed fields named but not answered.
+
+**Path**
+
+<ParamField path="ref" type="string" required>
+The runtime config's name.
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `SavedEntryDetail`
+
+<ResponseField name="id" type="string" required>
+The entry's id; the daemon uses its name.
+</ResponseField>
+<ResponseField name="name" type="string" required>
+</ResponseField>
+<ResponseField name="kind" type="string" required>
+</ResponseField>
+<ResponseField name="type" type="string" required>
+The VFS, CLI or runtime type, such as s3.
+</ResponseField>
+<ResponseField name="builtin" type="boolean" required>
+</ResponseField>
+<ResponseField name="config" type="object" required>
+The plain fields. Sealed fields are never answered.
+</ResponseField>
+<ResponseField name="captures" type="any[]">
+A runtime's captures; runtimes only.
+</ResponseField>
+<ResponseField name="created_by" type="string | null">
+</ResponseField>
+<ResponseField name="created_at" type="string | null">
+</ResponseField>
+<ResponseField name="updated_at" type="string | null">
+</ResponseField>
+<ResponseField name="used_by" type="integer">
+How many templates name the entry; in a list only.
+</ResponseField>
+<ResponseField name="sealed" type="string[]" required>
+The sealed fields, by name.
+</ResponseField>
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved runtimes" method="PUT" path="/v1/runtimes/{ref}" summary="Update a runtime config" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-runtimes/update-a-runtime-config)
+
+Change a runtime config's fields. Its name and type stay; a sealed field left out keeps its value.
+
+**Path**
+
+<ParamField path="ref" type="string" required>
+The runtime config's name.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="fields" type="object">
+The fields to set. A sealed field left out keeps its value; null removes a field.
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `SavedEntry`
+
+<ResponseField name="id" type="string" required>
+The entry's id; the daemon uses its name.
+</ResponseField>
+<ResponseField name="name" type="string" required>
+</ResponseField>
+<ResponseField name="kind" type="string" required>
+</ResponseField>
+<ResponseField name="type" type="string" required>
+The VFS, CLI or runtime type, such as s3.
+</ResponseField>
+<ResponseField name="builtin" type="boolean" required>
+</ResponseField>
+<ResponseField name="config" type="object" required>
+The plain fields. Sealed fields are never answered.
+</ResponseField>
+<ResponseField name="captures" type="any[]">
+A runtime's captures; runtimes only.
+</ResponseField>
+<ResponseField name="created_by" type="string | null">
+</ResponseField>
+<ResponseField name="created_at" type="string | null">
+</ResponseField>
+<ResponseField name="updated_at" type="string | null">
+</ResponseField>
+<ResponseField name="used_by" type="integer">
+How many templates name the entry; in a list only.
+</ResponseField>
+
+`400` Bad request: malformed, a host not allowed, or a browser page from another origin
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Saved runtimes" method="DELETE" path="/v1/runtimes/{ref}" summary="Delete a runtime config" hosts="daemon · hosted">
+
+[Open page](/api/operations/saved-runtimes/delete-a-runtime-config)
+
+Delete a saved runtime config.
+
+**Path**
+
+<ParamField path="ref" type="string" required>
+The runtime config's name.
+</ParamField>
+
+**Responses**
+
+`204` No content
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Policies" method="GET" path="/v1/policies" summary="List policies" hosts="daemon · hosted">
+
+[Open page](/api/operations/policies/list-policies)
+
+The saved policies' names, sorted. Get one for its source.
+
+**Responses**
+
+`200` OK
+
+`application/json` `PolicyList`
+
+<ResponseField name="items" type="PolicyName[]" required>
+</ResponseField>
+
+`401` The token is missing or wrong
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Policies" method="POST" path="/v1/policies" summary="Create a policy" hosts="daemon · hosted">
+
+[Open page](/api/operations/policies/create-a-policy)
+
+Save a policy program, by name. A name already saved is a 409.
+
+**Body** `application/json`
+
+<ParamField body="name" type="string" required>
+Ends in .py, such as guard.py.
+</ParamField>
+<ParamField body="source" type="string" required>
+The policy's Python program, up to 64 KiB.
+</ParamField>
+
+**Responses**
+
+`201` Created
+
+`application/json` `PolicyResponse`
+
+<ResponseField name="name" type="string" required>
+</ResponseField>
+<ResponseField name="source" type="string" required>
+</ResponseField>
+
+`400` Bad request: malformed, a host not allowed, or a browser page from another origin
+
+`401` The token is missing or wrong
+
+`409` The id or name is taken, the workspace is busy, or a file changed since it was read
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Policies" method="GET" path="/v1/policies/{ref}" summary="Get a policy" hosts="daemon · hosted">
+
+[Open page](/api/operations/policies/get-a-policy)
+
+One saved policy, with its source.
+
+**Path**
+
+<ParamField path="ref" type="string" required>
+The policy's name, such as guard.py.
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `PolicyResponse`
+
+<ResponseField name="name" type="string" required>
+</ResponseField>
+<ResponseField name="source" type="string" required>
+</ResponseField>
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Policies" method="PUT" path="/v1/policies/{ref}" summary="Update a policy" hosts="daemon · hosted">
+
+[Open page](/api/operations/policies/update-a-policy)
+
+Replace a saved policy's source.
+
+**Path**
+
+<ParamField path="ref" type="string" required>
+The policy's name, such as guard.py.
+</ParamField>
+
+**Body** `application/json`
+
+<ParamField body="source" type="string" required>
+The new program, up to 64 KiB.
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `PolicyResponse`
+
+<ResponseField name="name" type="string" required>
+</ResponseField>
+<ResponseField name="source" type="string" required>
+</ResponseField>
+
+`400` Bad request: malformed, a host not allowed, or a browser page from another origin
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
+
+</Operation>
+
+<Operation resource="Policies" method="DELETE" path="/v1/policies/{ref}" summary="Delete a policy" hosts="daemon · hosted">
+
+[Open page](/api/operations/policies/delete-a-policy)
+
+Delete a saved policy.
+
+**Path**
+
+<ParamField path="ref" type="string" required>
+The policy's name, such as guard.py.
+</ParamField>
+
+**Responses**
+
+`204` No content
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`501` The server requires accounts; saved configs are kept only on a server of one account
 
 </Operation>
 

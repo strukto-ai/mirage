@@ -78,7 +78,7 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-        - console
+        - hosted
     get:
       summary: List workspaces
       operationId: list_workspaces_v1_workspaces_get
@@ -100,7 +100,7 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-        - console
+        - hosted
   /v1/workspaces/{workspace_id}:
     get:
       summary: Get a workspace
@@ -136,7 +136,7 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-        - console
+        - hosted
     delete:
       summary: Delete a workspace
       operationId: delete_workspace_v1_workspaces__workspace_id__delete
@@ -165,7 +165,7 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-        - console
+        - hosted
   /v1/workspaces/{workspace_id}/history:
     get:
       summary: Read a workspace's history
@@ -294,7 +294,7 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-        - console
+        - hosted
   /v1/workspaces/{workspace_id}/kill:
     post:
       summary: Kill a workspace's jobs
@@ -620,12 +620,14 @@ paths:
           $ref: '#/components/responses/401'
         '429':
           $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
       description: The saved templates, by name.
       tags:
         - Templates
       x-hosts:
         - daemon
-        - console
+        - hosted
     post:
       summary: Create a template
       operationId: create_template_v1_templates_post
@@ -652,6 +654,8 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
       description: 'Save a template: a whole workspace config, checked as a create
 
         checks one, and kept as written. A name already saved is a 409.'
@@ -659,7 +663,7 @@ paths:
         - Templates
       x-hosts:
         - daemon
-        - console
+        - hosted
   /v1/templates/{ref}:
     get:
       summary: Get a template
@@ -689,11 +693,13 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
       tags:
         - Templates
       x-hosts:
         - daemon
-        - console
+        - hosted
     delete:
       summary: Delete a template
       operationId: delete_template_v1_templates__ref__delete
@@ -718,12 +724,14 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
       description: Delete a template; `restore` brings it back.
       tags:
         - Templates
       x-hosts:
         - daemon
-        - console
+        - hosted
   /v1/templates/{ref}/restore:
     post:
       summary: Restore a template
@@ -753,11 +761,13 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
       tags:
         - Templates
       x-hosts:
         - daemon
-        - console
+        - hosted
   /v1/workspaces/{workspace_id}/vfs-md:
     get:
       summary: Read the workspace's VFS.md
@@ -1129,7 +1139,7 @@ paths:
         - Sessions
       x-hosts:
         - daemon
-        - console
+        - hosted
     get:
       summary: List sessions
       operationId: list_sessions_v1_workspaces__workspace_id__sessions_get
@@ -1161,7 +1171,7 @@ paths:
         - Sessions
       x-hosts:
         - daemon
-        - console
+        - hosted
   /v1/workspaces/{workspace_id}/sessions/{session_id}:
     delete:
       summary: Delete a session
@@ -1458,7 +1468,7 @@ paths:
         - Shell
       x-hosts:
         - daemon
-        - console
+        - hosted
       requestBody:
         required: true
         content:
@@ -3195,7 +3205,7 @@ paths:
         - Shell
       x-hosts:
         - daemon
-        - console
+        - hosted
       requestBody:
         required: true
         content:
@@ -3349,6 +3359,794 @@ paths:
       x-hosts:
         - daemon
       security: []
+  /v1/vfs:
+    get:
+      operationId: list_entries_v1_vfs_get
+      parameters:
+        - in: query
+          name: type
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+          description: Only entries of this type, such as s3.
+        - in: query
+          name: q
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+          description: Only entries whose name contains this text, ignoring case.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntryList'
+        '401':
+          $ref: '#/components/responses/401'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: List VFS configs
+      description: 'The saved VFS configs: a mount''s type and fields, kept by name for templates
+        to use.'
+      tags:
+        - Saved VFS
+      x-hosts: &id002
+        - daemon
+        - hosted
+    post:
+      operationId: create_entry_v1_vfs_post
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntry'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Create a VFS config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSavedEntryRequest'
+      description: Save a VFS config. Its fields are checked against the type's; secret fields
+        are sealed, and a string field may point at a saved store's secret instead. A name
+        already saved is a 409.
+      tags:
+        - Saved VFS
+      x-hosts: *id002
+  /v1/vfs/types:
+    get:
+      operationId: list_types_v1_vfs_types_get
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TypeTable'
+        '401':
+          $ref: '#/components/responses/401'
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: List VFS config types
+      description: Every type a VFS config can be, with the fields its config takes.
+      tags:
+        - Saved VFS
+      x-hosts: *id002
+  /v1/vfs/{ref}:
+    get:
+      operationId: get_entry_v1_vfs__ref__get
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The VFS config's name.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntryDetail'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Get a VFS config
+      description: One saved VFS config, with its sealed fields named but not answered.
+      tags:
+        - Saved VFS
+      x-hosts: *id002
+    put:
+      operationId: update_entry_v1_vfs__ref__put
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The VFS config's name.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntry'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Update a VFS config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSavedEntryRequest'
+      description: Change a VFS config's fields. Its name and type stay; a sealed field left
+        out keeps its value.
+      tags:
+        - Saved VFS
+      x-hosts: *id002
+    delete:
+      operationId: delete_entry_v1_vfs__ref__delete
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The VFS config's name.
+      responses:
+        '204':
+          description: No content
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Delete a VFS config
+      description: Delete a saved VFS config.
+      tags:
+        - Saved VFS
+      x-hosts: *id002
+  /v1/clis:
+    get:
+      operationId: list_entries_v1_clis_get
+      parameters:
+        - in: query
+          name: type
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+          description: Only entries of this type, such as s3.
+        - in: query
+          name: q
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+          description: Only entries whose name contains this text, ignoring case.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntryList'
+        '401':
+          $ref: '#/components/responses/401'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: List CLI configs
+      description: 'The saved CLI configs: a CLI install''s type and fields, kept by name
+        for templates to use.'
+      tags:
+        - Saved CLIs
+      x-hosts: *id002
+    post:
+      operationId: create_entry_v1_clis_post
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntry'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Create a CLI config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSavedEntryRequest'
+      description: Save a CLI config. Its fields are checked against the type's; secret fields
+        are sealed, and a string field may point at a saved store's secret instead. A name
+        already saved is a 409.
+      tags:
+        - Saved CLIs
+      x-hosts: *id002
+  /v1/clis/types:
+    get:
+      operationId: list_types_v1_clis_types_get
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TypeTable'
+        '401':
+          $ref: '#/components/responses/401'
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: List CLI config types
+      description: Every type a CLI config can be, with the fields its config takes.
+      tags:
+        - Saved CLIs
+      x-hosts: *id002
+  /v1/clis/{ref}:
+    get:
+      operationId: get_entry_v1_clis__ref__get
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The CLI config's name.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntryDetail'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Get a CLI config
+      description: One saved CLI config, with its sealed fields named but not answered.
+      tags:
+        - Saved CLIs
+      x-hosts: *id002
+    put:
+      operationId: update_entry_v1_clis__ref__put
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The CLI config's name.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntry'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Update a CLI config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSavedEntryRequest'
+      description: Change a CLI config's fields. Its name and type stay; a sealed field left
+        out keeps its value.
+      tags:
+        - Saved CLIs
+      x-hosts: *id002
+    delete:
+      operationId: delete_entry_v1_clis__ref__delete
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The CLI config's name.
+      responses:
+        '204':
+          description: No content
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Delete a CLI config
+      description: Delete a saved CLI config.
+      tags:
+        - Saved CLIs
+      x-hosts: *id002
+  /v1/runtimes:
+    get:
+      operationId: list_entries_v1_runtimes_get
+      parameters:
+        - in: query
+          name: type
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+          description: Only entries of this type, such as s3.
+        - in: query
+          name: q
+          required: false
+          schema:
+            anyOf:
+              - type: string
+              - type: 'null'
+          description: Only entries whose name contains this text, ignoring case.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntryList'
+        '401':
+          $ref: '#/components/responses/401'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: List runtime configs
+      description: 'The saved runtime configs: a runtime''s type and fields, kept by name
+        for templates to use.'
+      tags:
+        - Saved runtimes
+      x-hosts: *id002
+    post:
+      operationId: create_entry_v1_runtimes_post
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntry'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '409':
+          $ref: '#/components/responses/409'
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Create a runtime config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSavedEntryRequest'
+      description: Save a runtime config. Its fields are checked against the type's; secret
+        fields are sealed, and a string field may point at a saved store's secret instead.
+        A name already saved is a 409.
+      tags:
+        - Saved runtimes
+      x-hosts: *id002
+  /v1/runtimes/types:
+    get:
+      operationId: list_types_v1_runtimes_types_get
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TypeTable'
+        '401':
+          $ref: '#/components/responses/401'
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: List runtime config types
+      description: Every type a runtime config can be, with the fields its config takes.
+      tags:
+        - Saved runtimes
+      x-hosts: *id002
+  /v1/runtimes/{ref}:
+    get:
+      operationId: get_entry_v1_runtimes__ref__get
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The runtime config's name.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntryDetail'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Get a runtime config
+      description: One saved runtime config, with its sealed fields named but not answered.
+      tags:
+        - Saved runtimes
+      x-hosts: *id002
+    put:
+      operationId: update_entry_v1_runtimes__ref__put
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The runtime config's name.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SavedEntry'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Update a runtime config
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSavedEntryRequest'
+      description: Change a runtime config's fields. Its name and type stay; a sealed field
+        left out keeps its value.
+      tags:
+        - Saved runtimes
+      x-hosts: *id002
+    delete:
+      operationId: delete_entry_v1_runtimes__ref__delete
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The runtime config's name.
+      responses:
+        '204':
+          description: No content
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Delete a runtime config
+      description: Delete a saved runtime config.
+      tags:
+        - Saved runtimes
+      x-hosts: *id002
+  /v1/policies:
+    get:
+      operationId: list_policies_v1_policies_get
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyList'
+        '401':
+          $ref: '#/components/responses/401'
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: List policies
+      description: The saved policies' names, sorted. Get one for its source.
+      tags:
+        - Policies
+      x-hosts: *id002
+    post:
+      operationId: create_policy_v1_policies_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePolicyRequest'
+        required: true
+      responses:
+        '201':
+          description: Created
+          content: &id003
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyResponse'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '409':
+          $ref: '#/components/responses/409'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Create a policy
+      description: Save a policy program, by name. A name already saved is a 409.
+      tags:
+        - Policies
+      x-hosts: *id002
+  /v1/policies/{ref}:
+    get:
+      operationId: get_policy_v1_policies__ref__get
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The policy's name, such as guard.py.
+      responses:
+        '200': &id004
+          description: OK
+          content: *id003
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Get a policy
+      description: One saved policy, with its source.
+      tags:
+        - Policies
+      x-hosts: *id002
+    put:
+      operationId: update_policy_v1_policies__ref__put
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The policy's name, such as guard.py.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdatePolicyRequest'
+        required: true
+      responses:
+        '200': *id004
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Update a policy
+      description: Replace a saved policy's source.
+      tags:
+        - Policies
+      x-hosts: *id002
+    delete:
+      operationId: delete_policy_v1_policies__ref__delete
+      parameters:
+        - in: path
+          name: ref
+          required: true
+          schema:
+            type: string
+          description: The policy's name, such as guard.py.
+      responses:
+        '204':
+          description: No content
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+          description: Validation Error
+        '429':
+          $ref: '#/components/responses/429'
+        '501':
+          $ref: '#/components/responses/501'
+      summary: Delete a policy
+      description: Delete a saved policy.
+      tags:
+        - Policies
+      x-hosts: *id002
 components:
   schemas:
     AnswerAskRequest:
@@ -5334,6 +6132,224 @@ components:
             error:
               type: string
               description: The errno name the call would raise, empty when it runs.
+    SecretPointer:
+      type: object
+      properties:
+        from:
+          type: string
+          description: The saved store holding the secret.
+        ref:
+          type: string
+          description: The secret's name in that store.
+        key:
+          type: string
+          description: A key inside the secret, when it holds several.
+      required:
+        - from
+    FieldValue:
+      description: A field's value, or a pointer to a saved store's secret for a string field.
+      anyOf:
+        - type: string
+        - type: number
+        - type: boolean
+        - type: array
+          items: {}
+        - $ref: '#/components/schemas/SecretPointer'
+    TypeField:
+      type: object
+      properties:
+        name:
+          type: string
+          description: The field's key in `fields`.
+        type:
+          type: string
+          enum:
+            - string
+            - number
+            - boolean
+            - list
+            - object
+        secret:
+          type: boolean
+          description: 'Kept sealed: write-only, never answered.'
+        required:
+          type: boolean
+        options:
+          type: array
+          items:
+            type: string
+          description: The values the field takes, when it is a choice.
+        description:
+          type: string
+        default:
+          anyOf:
+            - type: string
+            - type: number
+            - type: boolean
+        group:
+          type: string
+          description: The section a form shows the field under.
+      required:
+        - name
+        - type
+        - secret
+        - required
+    TypeTable:
+      type: object
+      description: Each type by name, with the fields its config takes.
+      additionalProperties:
+        type: array
+        items:
+          $ref: '#/components/schemas/TypeField'
+    SavedEntry:
+      type: object
+      properties:
+        id:
+          type: string
+          description: The entry's id; the daemon uses its name.
+        name:
+          type: string
+        kind:
+          type: string
+          enum:
+            - vfs
+            - cli
+            - runtime
+        type:
+          type: string
+          description: The VFS, CLI or runtime type, such as s3.
+        builtin:
+          type: boolean
+        config:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/FieldValue'
+          description: The plain fields. Sealed fields are never answered.
+        captures:
+          type: array
+          items: {}
+          description: A runtime's captures; runtimes only.
+        created_by:
+          type:
+            - string
+            - 'null'
+        created_at:
+          type:
+            - string
+            - 'null'
+        updated_at:
+          type:
+            - string
+            - 'null'
+        used_by:
+          type: integer
+          description: How many templates name the entry; in a list only.
+      required:
+        - id
+        - name
+        - kind
+        - type
+        - builtin
+        - config
+    SavedEntryDetail:
+      allOf:
+        - $ref: '#/components/schemas/SavedEntry'
+        - type: object
+          properties:
+            sealed:
+              type: array
+              items:
+                type: string
+              description: The sealed fields, by name.
+          required:
+            - sealed
+    SavedEntryList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SavedEntry'
+      required:
+        - items
+    CreateSavedEntryRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          description: 1 to 63 of a-z 0-9 . _ -, starting with a letter or digit. Not `types`,
+            and not shaped like an id.
+        type:
+          type: string
+          description: One of the types its kind's `/types` route lists, such as `GET /v1/vfs/types`.
+        fields:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/FieldValue'
+          description: The type's config. Secret fields are sealed; a string field may point
+            at a saved store instead.
+      required:
+        - name
+        - type
+    UpdateSavedEntryRequest:
+      type: object
+      properties:
+        fields:
+          type: object
+          additionalProperties:
+            anyOf:
+              - $ref: '#/components/schemas/FieldValue'
+              - type: 'null'
+          description: The fields to set. A sealed field left out keeps its value; null removes
+            a field.
+    CreatePolicyRequest:
+      additionalProperties: false
+      properties:
+        name:
+          type: string
+          description: Ends in .py, such as guard.py.
+        source:
+          type: string
+          description: The policy's Python program, up to 64 KiB.
+      required:
+        - name
+        - source
+      type: object
+    UpdatePolicyRequest:
+      additionalProperties: false
+      properties:
+        source:
+          type: string
+          description: The new program, up to 64 KiB.
+      required:
+        - source
+      type: object
+    PolicyResponse:
+      properties:
+        name:
+          type: string
+        source:
+          type: string
+      required:
+        - name
+        - source
+      type: object
+    PolicyName:
+      properties:
+        name:
+          type: string
+      required:
+        - name
+      type: object
+    PolicyList:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/PolicyName'
+          type: array
+      required:
+        - items
+      type: object
   securitySchemes:
     bearerAuth:
       type: http
@@ -5389,6 +6405,13 @@ components:
           schema:
             type: integer
             minimum: 0
+    '501':
+      description: The server requires accounts; saved configs are kept only on a server of
+        one account
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
     '503':
       description: The server is at max_workspaces, or shutting down
       content:
