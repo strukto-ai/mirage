@@ -55,13 +55,13 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.constants import NOT_FOUND_STATUS, TIMEOUT_STATUS
+from mirage.shell.job_table.constants import IGNORED_SIGNALS
 from mirage.shell.join import shell_join
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.timeout.constants import (
     CONTINUE_SIGNALS,
     FORK_FAILED,
-    JOB_IGNORED_SIGNALS,
     SELF_KILLING_SIGNALS,
     SIGCHLD,
     SIGKILL,
@@ -576,7 +576,7 @@ async def _stop(process: ProcessHandle, signal: int, foreground: bool) -> None:
     # jobs the command started end with it, or, when their shells ignore
     # the signal, the programs they run right now do; the command itself
     # gets it either way.
-    ignored = signal in JOB_IGNORED_SIGNALS
+    ignored = signal in IGNORED_SIGNALS
     process.terminate(signal, children=not foreground and not ignored)
     if ignored and not foreground:
         process.interrupt_children(signal)

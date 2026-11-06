@@ -153,6 +153,7 @@ describe('handleRedirect > / >>', () => {
       'grep: /data/f: input file is also the output\n',
     ],
     ['( echo A; cat /data/f ) > /data/f', 1, 'A\n', 'cat: /data/f: input file is output file\n'],
+    ['( echo A; exec > /data/g; cat /data/f ) > /data/f', 0, 'A\n', ''],
   ])(
     'an op on a streamed file finds what was written: %s',
     async (line, status, content, stderr) => {
@@ -168,6 +169,24 @@ describe('handleRedirect > / >>', () => {
       }
     },
   )
+
+  // A read before the first byte leaves the file empty, so what comes after
+  // still lands as one stream, not as blocks a store would rewrite the file
+  // for one after another.
+  it('a read of an empty target keeps its one stream', async () => {
+    const pwrite = vi.spyOn(RAMVFS.prototype, 'pwrite')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('mkdir -p /data')
+      const io = await ws.shell('{ wc -c < /data/f > /dev/null; seq 1 300000; } > /data/f')
+      expect(io.exitCode).toBe(0)
+      expect(pwrite).not.toHaveBeenCalled()
+      expect((await ws.shell('wc -l < /data/f')).stdoutText.trim()).toBe('300000')
+    } finally {
+      pwrite.mockRestore()
+      await ws.close()
+    }
+  })
 
   it('cat and grep refuse their own output file as GNU does', async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })

@@ -91,7 +91,11 @@ from mirage.workspace.executor.control import (
     take_stderr,
     take_stdout,
 )
-from mirage.workspace.executor.create import create_file, write_description
+from mirage.workspace.executor.create import (
+    create_file,
+    size_of,
+    write_description,
+)
 from mirage.workspace.executor.jobs import drained, pump
 from mirage.workspace.mount.registry import DEV_PREFIX
 from mirage.workspace.session.session import SessionState
@@ -246,9 +250,14 @@ class PipeRecorder(Recorder):
         self, file: FileDescription, offset: int, source: ByteSource
     ) -> None:
         # What comes once an op reached the file lands at the description's
-        # offset, as a descriptor's write does, a block at a time.
+        # offset, as a descriptor's write does, a block at a time; into a
+        # file still empty as one stream, which a store that rewrites the
+        # file on each pwrite would otherwise copy block after block.
         token = bind_caller(current_caller().changed({"streamed": ()}))
         try:
+            if not offset and await size_of(self.dispatch, file.scope) == 0:
+                await self.dispatch("write", file.scope, data=source)
+                return
             async with aclosing(rechunk(source, MEMORY_LIMIT)) as parts:
                 async for part in parts:
                     await self.dispatch(

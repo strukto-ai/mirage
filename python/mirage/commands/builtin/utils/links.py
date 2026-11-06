@@ -398,19 +398,19 @@ def own_output(ctx: Context) -> Callable[[PathSpec], bool]:
     Args:
         ctx (Context): the invocation's context.
     """
-    output = current_caller().output_file
     links = links_of(ctx)
 
-    def writes(path: PathSpec) -> bool:
-        if output is None:
-            return False
+    def real(path: str) -> str | None:
         try:
-            real = (
-                path.virtual if links is None else links.resolve(path.virtual)
-            )
+            return path if links is None else links.resolve(path)
         except CycleError:
-            return False
-        return real == output
+            return None
+
+    output = current_caller().output_file
+    target = None if output is None else real(output)
+
+    def writes(path: PathSpec) -> bool:
+        return target is not None and real(path.virtual) == target
 
     return writes
 

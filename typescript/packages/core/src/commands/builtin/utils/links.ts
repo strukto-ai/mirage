@@ -296,17 +296,18 @@ export function mountRoot(ctx: Context): string {
  * them after that, as its stream is pulled. Mirrors Python's own_output.
  */
 export function ownOutput(ctx: Context): (path: PathSpec) => boolean {
-  const output = currentCaller().outputFile
   const links = linksOf(ctx)
-  return (path) => {
-    if (output === null) return false
+  const real = (path: string): string | null => {
     try {
-      return (links === undefined ? path.virtual : links.resolve(path.virtual)) === output
+      return links === undefined ? path : links.resolve(path)
     } catch (error) {
-      if (error instanceof CycleError) return false
+      if (error instanceof CycleError) return null
       throw error
     }
   }
+  const output = currentCaller().outputFile
+  const target = output === null ? null : real(output)
+  return (path) => target !== null && real(path.virtual) === target
 }
 
 /**

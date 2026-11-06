@@ -62,7 +62,10 @@ from mirage.shell.constants import (
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
 from mirage.shell.job_table import Job, JobStatus, JobTable
-from mirage.shell.job_table.constants import STOP_WAIT_SECONDS
+from mirage.shell.job_table.constants import (
+    ENDING_SIGNALS,
+    STOP_WAIT_SECONDS,
+)
 from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.names import command_invocations
 from mirage.shell.parse.program import retain_programs
@@ -386,15 +389,19 @@ async def handle_background(
         if left.type == NT.REDIRECTED_STATEMENT
         else left
     )
-    # How a job takes an INT, which its shell ignores: one program ignores
-    # it too, a builtin or a function its shell runs (`f &`) ends with it,
-    # and a shell that runs commands of its own (`{ sleep 3; echo x; } &`)
-    # loses only the program it runs right now (`run_program`).
+    # How a job takes an INT or a QUIT, which its shell ignores: one
+    # program ignores it too, and a shell that runs commands of its own
+    # (`{ sleep 3; echo x; } &`) loses only the program it runs right now
+    # (`run_program`). A builtin or a function its shell runs (`f &`) ends
+    # with that program on INT, as bash's shell does of an INT its child
+    # died of.
     one_command = command is not None and command.type == NT.COMMAND
     ends = one_command and not forks(command, session)
 
     async def _run_bg(job: Job) -> tuple[IOResult, ExecutionNode]:
-        child_evaluation.frame.job = None if one_command else job.process
+        child_evaluation.frame.job = (
+            None if one_command and not ends else job.process
+        )
         # Background jobs don't receive stdin, matching real shell
         # behavior where bg processes get /dev/null. This prevents
         # race conditions when stdin is an async iterator.
@@ -503,7 +510,7 @@ async def handle_background(
         async def taking_interrupts() -> tuple[IOResult, ExecutionNode]:
             if not ends or job.process is None:
                 return await run_job()
-            ran, signal = await job.process.program(run_job)
+            ran, signal = await job.process.program(run_job, ENDING_SIGNALS)
             if signal is None:
                 assert ran is not None
                 return ran

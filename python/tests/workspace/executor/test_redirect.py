@@ -28,6 +28,7 @@ from mirage.io.types import ByteSource
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.descriptors import FileDescription, Recorder
 from mirage.types import FileStat, PathSpec
+from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.redirect import JobRoute, PipeRecorder
 from mirage.workspace.session.session import SessionState
@@ -132,6 +133,7 @@ async def test_output_goes_into_its_file_as_it_is_written(line, monkeypatch):
             "A\n",
             "cat: /data/f: input file is output file\n",
         ),
+        ("( echo A; exec > /data/g; cat /data/f ) > /data/f", 0, "A\n", ""),
     ],
 )
 async def test_an_op_on_a_streamed_file_finds_what_was_written(
@@ -143,6 +145,28 @@ async def test_an_op_on_a_streamed_file_finds_what_was_written(
     assert io.exit_code == status
     assert await io.stderr_str() == stderr
     assert await _out(ws, "cat /data/f") == content
+
+
+# A read before the first byte leaves the file empty, so what comes after
+# still lands as one stream, not as blocks a store would rewrite the file
+# for one after another.
+@pytest.mark.asyncio
+async def test_a_read_of_an_empty_target_keeps_its_one_stream(monkeypatch):
+    ops: list[str] = []
+    dispatch = Dispatcher.dispatch
+
+    async def spy(self, name, path, /, **kwargs):
+        ops.append(name)
+        return await dispatch(self, name, path, **kwargs)
+
+    monkeypatch.setattr(Dispatcher, "dispatch", spy)
+    ws = await _workspace()
+    io = await ws.shell(
+        "{ wc -c < /data/f > /dev/null; seq 1 300000; } > /data/f"
+    )
+    assert io.exit_code == 0
+    assert "pwrite" not in ops
+    assert (await _out(ws, "wc -l < /data/f")).strip() == "300000"
 
 
 @pytest.mark.asyncio

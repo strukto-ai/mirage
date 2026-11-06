@@ -44,7 +44,7 @@ import { childContext, type EvaluationContext } from '../evaluation.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
-import { divertStatement } from './builtins/exec/index.ts'
+import { divertStatement, divertedFile } from './builtins/exec/index.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, ended, isUnwinding } from './control.ts'
@@ -520,7 +520,7 @@ export async function handleSubshell(
     }
     i += 1
     const recorder = new Recorder()
-    if (sink instanceof Recorder) recorder.outputFile = sink.outputFile
+    recorder.outputFile = divertedFile(session, sink)
     const leave = recordJobs(session, recorder)
     let io: IOResult
     try {

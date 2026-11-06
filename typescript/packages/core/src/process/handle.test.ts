@@ -95,6 +95,24 @@ describe('ProcessHandle', () => {
     expect([...seen, handle.interrupted]).toEqual([2, 2, null])
   })
 
+  // A program that takes only some signals runs on through the others.
+  it('runs a program on through a signal it does not take', async () => {
+    const handle = new ProcessHandle(info(), () => Promise.resolve(0), ignore, ignore)
+    let finish = (): void => undefined
+    const ran = handle.program(
+      () =>
+        new Promise<number>((resolve) => {
+          finish = () => {
+            resolve(7)
+          }
+        }),
+      new Set([2]),
+    )
+    handle.interrupt(3)
+    finish()
+    expect(await ran).toEqual([7, null])
+  })
+
   it('terminate asks once and the runner exits 137', async () => {
     const abort = new AbortController()
     let started = ignore

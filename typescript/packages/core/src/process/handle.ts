@@ -33,6 +33,7 @@ export class ProcessHandle {
   private readonly nativeRuns = new Map<string, Record<string, JsonValue>>()
   // The programs `program` runs, each with the signal `interrupt` sent it.
   private readonly programs = new Map<AbortController, number | null>()
+  private readonly takes = new Map<AbortController, ReadonlySet<number> | null>()
   private completion!: Promise<ProcessInfo>
 
   constructor(
@@ -135,12 +136,17 @@ export class ProcessHandle {
    * Run one program of the runner's shell where `interrupt` reaches it, as
    * bash's background job runs each program as a child that takes the INT
    * the job itself ignores. The program stops when the signal it is handed
-   * aborts. Resolves to what it returned, or the signal `interrupt` stopped
-   * it with. Mirrors Python's program.
+   * aborts. `takes` are the signals that stop it, every one when null.
+   * Resolves to what it returned, or the signal `interrupt` stopped it with.
+   * Mirrors Python's program.
    */
-  async program<T>(run: (stop: AbortSignal) => Promise<T>): Promise<[T, null] | [null, number]> {
+  async program<T>(
+    run: (stop: AbortSignal) => Promise<T>,
+    takes: ReadonlySet<number> | null = null,
+  ): Promise<[T, null] | [null, number]> {
     const stop = new AbortController()
     this.programs.set(stop, null)
+    this.takes.set(stop, takes)
     try {
       return [await run(stop.signal), null]
     } catch (error) {
@@ -149,6 +155,7 @@ export class ProcessHandle {
       return [null, signal]
     } finally {
       this.programs.delete(stop)
+      this.takes.delete(stop)
     }
   }
 
@@ -159,7 +166,8 @@ export class ProcessHandle {
    */
   interrupt(signal: number): void {
     for (const [stop, sent] of this.programs) {
-      if (sent !== null) continue
+      const takes = this.takes.get(stop) ?? null
+      if (sent !== null || (takes !== null && !takes.has(signal))) continue
       this.programs.set(stop, signal)
       stop.abort(new SignalStop(signal))
     }

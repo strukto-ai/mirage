@@ -3095,6 +3095,22 @@ describe('handleTimeout', () => {
     }
   })
 
+  // Every bash shell ignores QUIT, a job's and a function job's alike, so
+  // timeout's QUIT ends only the program each job runs right now.
+  it('a QUIT ends the program a job runs and every job goes on', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const io = await ws.shell(
+        "timeout -s QUIT 0.1 sh -c '{ sleep 30; echo $? > /a; } & " +
+          "f() { sleep 30; echo $? > /d; }; f & sleep 30'; " +
+          'sleep 0.3; cat /a /d',
+      )
+      expect(decode(io.stdout).split('\n')).toEqual(['131', '131', ''])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('cannot start the command once its session holds processes.max', async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { processes: { max: 1 } })
     try {

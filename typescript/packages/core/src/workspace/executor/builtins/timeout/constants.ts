@@ -86,8 +86,3 @@ export const FORK_FAILED = 'timeout: fork system call failed: Resource temporari
 // What timeout cannot ignore when it signals its own process group, so it
 // dies of them too: KILL, and the two glibc reserves for itself.
 export const SELF_KILLING_SIGNALS: ReadonlySet<number> = new Set([SIGKILL, 32, 33])
-
-// What a background job's shell ignores, as bash starts each with job
-// control off: the jobs a command started outlive timeout's INT, though the
-// program one runs right now does not.
-export const JOB_IGNORED_SIGNALS: ReadonlySet<number> = new Set([2])

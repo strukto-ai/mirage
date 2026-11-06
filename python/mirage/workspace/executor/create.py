@@ -234,21 +234,21 @@ async def _first_write(
     if _streaming.setdefault(store, id(file)) != id(file):
         return False
     try:
-        if await _size_of(dispatch, file.scope) != 0:
+        if await size_of(dispatch, file.scope) != 0:
             return False
         try:
             file.offset = await create_counted(
                 dispatch, session, file.scope, data
             )
         except BaseException:
-            file.offset = await _size_of(dispatch, file.scope) or 0
+            file.offset = await size_of(dispatch, file.scope) or 0
             raise
         return True
     finally:
         del _streaming[store]
 
 
-async def _size_of(dispatch: DispatchFn, scope: PathSpec) -> int | None:
+async def size_of(dispatch: DispatchFn, scope: PathSpec) -> int | None:
     """The size of the file a description opened, None when unknown.
 
     Args:

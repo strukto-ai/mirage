@@ -64,6 +64,7 @@ class ProcessHandle:
         self._cancel_children = cancel_children
         self._interrupt_children = interrupt_children
         self._programs: dict[asyncio.Task[Any], int | None] = {}
+        self._takes: dict[asyncio.Task[Any], frozenset[int] | None] = {}
         self._signal: int | None = None
         self._program_code: int | None = None
         self._runs: dict[str, dict[str, JsonValue]] = {}
@@ -160,7 +161,9 @@ class ProcessHandle:
             self._program_code = code
 
     async def program(
-        self, run: Callable[[], Coroutine[Any, Any, T]]
+        self,
+        run: Callable[[], Coroutine[Any, Any, T]],
+        takes: frozenset[int] | None = None,
     ) -> tuple[T, None] | tuple[None, int]:
         """Run one program of the runner's shell where ``interrupt``
         reaches it, as bash's background job runs each program as a
@@ -169,6 +172,8 @@ class ProcessHandle:
         Args:
             run (Callable[[], Coroutine[Any, Any, T]]): the program, to
                 its end.
+            takes (frozenset[int] | None): the signals that stop it,
+                every one when None.
 
         Returns:
             tuple[T, None] | tuple[None, int]: what it returned, or the
@@ -181,6 +186,7 @@ class ProcessHandle:
         )
         with self._lock:
             self._programs[task] = None
+            self._takes[task] = takes
         try:
             return await task, None
         except asyncio.CancelledError:
@@ -194,6 +200,7 @@ class ProcessHandle:
         finally:
             with self._lock:
                 self._programs.pop(task, None)
+                self._takes.pop(task, None)
 
     def interrupt(self, signal: int) -> None:
         """Deliver a signal the runner's shell ignores, as bash's
@@ -205,7 +212,12 @@ class ProcessHandle:
         """
         with self._lock:
             running = [
-                task for task, sent in self._programs.items() if sent is None
+                task
+                for task, sent in self._programs.items()
+                if sent is None
+                and (
+                    (takes := self._takes.get(task)) is None or signal in takes
+                )
             ]
             for task in running:
                 self._programs[task] = signal

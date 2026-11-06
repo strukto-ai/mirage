@@ -208,8 +208,8 @@ async function firstWrite(
   }
 }
 
-/** The size of the file a description opened, null when unknown. Mirrors Python's _size. */
-async function sizeOf(dispatch: DispatchFn, scope: PathSpec): Promise<number | null> {
+/** The size of the file a description opened, null when unknown. Mirrors Python's size_of. */
+export async function sizeOf(dispatch: DispatchFn, scope: PathSpec): Promise<number | null> {
   let stat: unknown
   try {
     ;[stat] = await dispatch('stat', scope)

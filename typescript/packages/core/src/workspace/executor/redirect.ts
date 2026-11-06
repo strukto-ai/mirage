@@ -80,7 +80,7 @@ import {
 import { toScope } from './builtins/scope.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
-import { createFile, writeDescription } from './create.ts'
+import { createFile, sizeOf, writeDescription } from './create.ts'
 import { drained, pump } from './jobs.ts'
 
 // What these return streams into a redirect's file as it is read; a file one
@@ -192,7 +192,13 @@ export class PipeRecorder extends Recorder {
           }
           // What comes once an op reached the file lands at the
           // description's offset, as a descriptor's write does, a block at
-          // a time.
+          // a time; into a file still empty as one stream, which a store
+          // that rewrites the file on each pwrite would otherwise copy block
+          // after block.
+          if (offset === 0 && (await sizeOf(this.dispatch, file.scope)) === 0) {
+            await this.dispatch('write', file.scope, [source])
+            return
+          }
           let at = offset
           for await (const part of rechunk(source, MEMORY_LIMIT)) {
             await this.dispatch('pwrite', file.scope, [part, at])

@@ -140,6 +140,28 @@ async def test_an_interrupted_program_names_its_signal_until_it_ends():
     assert ((await handle.join()).exit_code, seen) == (2, [2, None])
 
 
+# A program that takes only some signals runs on through the others.
+@pytest.mark.asyncio
+async def test_a_program_runs_on_through_a_signal_it_does_not_take():
+    started = asyncio.Event()
+
+    async def program() -> int:
+        started.set()
+        await asyncio.sleep(0.05)
+        return 7
+
+    async def run() -> int:
+        outcome = await handle.program(program, frozenset({2}))
+        assert outcome == (7, None)
+        return 0
+
+    handle = ProcessHandle(_info(), run, lambda _pid: None)
+    handle.start()
+    await started.wait()
+    handle.interrupt(3)
+    assert (await handle.join()).exit_code == 0
+
+
 # A stop stands for the signal a kill named: the runner reads it from the
 # caller it runs as, and its status is 128 plus it, as bash reports a
 # child that signal ended.

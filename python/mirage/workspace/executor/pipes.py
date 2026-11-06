@@ -49,7 +49,10 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext, child_context
-from mirage.workspace.executor.builtins.exec import divert_statement
+from mirage.workspace.executor.builtins.exec import (
+    divert_statement,
+    diverted_file,
+)
 from mirage.workspace.executor.control import UNWINDING, carried, ended
 from mirage.workspace.executor.jobs import handle_background, pump, run_program
 from mirage.workspace.executor.statement import (
@@ -538,8 +541,7 @@ async def handle_subshell(
             continue
         i += 1
         recorder = Recorder()
-        if isinstance(sink, Recorder):
-            recorder.output_file = sink.output_file
+        recorder.output_file = diverted_file(session, sink)
         leave = record_jobs(session, recorder)
 
         async def statement() -> tuple[

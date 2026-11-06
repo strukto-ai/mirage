@@ -45,7 +45,7 @@ import {
 } from '../../shell/constants.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
-import { STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
+import { ENDING_SIGNALS, STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
 import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
 import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
 import { commandInvocations } from '../../shell/parse/names.ts'
@@ -294,10 +294,11 @@ export async function handleBackground(
   const releaseProgram = retainPrograms([left])
   const childEvaluation = childContext(context)
   const bgSession = childEvaluation.session
-  // How a job takes an INT, which its shell ignores: one program ignores it
-  // too, a builtin or a function its shell runs (`f &`) ends with it, and a
-  // shell that runs commands of its own (`{ sleep 3; echo x; } &`) loses
-  // only the program it runs right now (`runProgram`).
+  // How a job takes an INT or a QUIT, which its shell ignores: one program
+  // ignores it too, and a shell that runs commands of its own (`{ sleep 3;
+  // echo x; } &`) loses only the program it runs right now (`runProgram`). A
+  // builtin or a function its shell runs (`f &`) ends with that program on
+  // INT, as bash's shell does of an INT its child died of.
   const command = left.type === NT.REDIRECTED_STATEMENT ? getRedirects(left)[0] : left
   const oneCommand = command !== null && command.type === NT.COMMAND
   const ends = oneCommand && !forks(command, session)
@@ -356,7 +357,7 @@ export async function handleBackground(
   childEvaluation.frame.abortSignal = stopped
   const cmdStrInner = left.text
   const runBg = async (job: Job): Promise<[IOResult, ExecutionNode]> => {
-    childEvaluation.frame.job = oneCommand ? null : job.process
+    childEvaluation.frame.job = oneCommand && !ends ? null : job.process
     // What the job writes stays in its console and goes where its shell
     // writes as it is written: the terminal, or the substitution or pipe
     // it was started in.
@@ -430,7 +431,7 @@ export async function handleBackground(
       const [ran, signal] = await job.process.program((stop) => {
         childEvaluation.frame.abortSignal = AbortSignal.any([stopped, stop])
         return run(stop)
-      })
+      }, ENDING_SIGNALS)
       if (signal === null) return ran
       const code = 128 + signal
       return [

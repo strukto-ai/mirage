@@ -15,6 +15,7 @@
 from mirage.workspace.executor.builtins.exec.constants import CLOSED
 from mirage.workspace.executor.builtins.exec.exec import (
     divert_statement,
+    diverted_file,
     handle_exec_command,
     install_exec_redirects,
 )
@@ -22,6 +23,7 @@ from mirage.workspace.executor.builtins.exec.exec import (
 __all__ = [
     "CLOSED",
     "divert_statement",
+    "diverted_file",
     "handle_exec_command",
     "install_exec_redirects",
 ]

@@ -37,7 +37,7 @@ import { encodeText } from '../../../../shell/bytes.ts'
 import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
 import { NOT_FOUND_STATUS, TIMEOUT_STATUS } from '../../../../shell/constants.ts'
-import { STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
+import { IGNORED_SIGNALS, STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { abortable, atDeadline, runCancellable, SignalStop } from '../../../../utils/abort.ts'
 import { PathSpec } from '../../../../types.ts'
@@ -50,7 +50,6 @@ import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 import {
   CONTINUE_SIGNALS,
   FORK_FAILED,
-  JOB_IGNORED_SIGNALS,
   SELF_KILLING_SIGNALS,
   SIGCHLD,
   SIGKILL,
@@ -391,7 +390,7 @@ export async function handleTimeout(
   // signal, the programs they run right now do; the command itself gets it
   // either way.
   const send = (number: number): void => {
-    const ignored = JOB_IGNORED_SIGNALS.has(number)
+    const ignored = IGNORED_SIGNALS.has(number)
     process.terminate(number, !foreground && !ignored)
     if (ignored && !foreground) process.interruptChildren(number)
   }
