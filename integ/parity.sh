@@ -125,7 +125,7 @@ probe() {
   echo "cwd.wc_disp=$($cli shell --json -w pw -c '(cd /data && wc -l f.txt)' </dev/null | sout)"
 
   # ── sessions: default session persists cwd; -s session is isolated ──
-  $cli session create pw --id s2 </dev/null >/dev/null
+  $cli workspace session create -w pw -s s2 </dev/null >/dev/null
   $cli shell -w pw -c 'cd /data' </dev/null >/dev/null
   echo "session.default_pwd=$($cli shell --json -w pw -c 'pwd' </dev/null | sout)"
   echo "session.s2_pwd=$($cli shell --json -w pw -s s2 -c 'pwd' </dev/null | sout)"
@@ -152,11 +152,11 @@ probe() {
   $cli workspace create "$MODES_YAML" --id gw >/dev/null </dev/null
   $cli shell -w gw -c 'echo hello > /data/a.txt' </dev/null >/dev/null
   $cli shell -w gw -c 'echo aside > /side/s.txt' </dev/null >/dev/null
-  $cli session create gw --id reader -m /data:read </dev/null >/dev/null
-  $cli session create gw --id writer -m /data:rw </dev/null >/dev/null
-  $cli session create gw --id lister -m /data </dev/null >/dev/null
-  $cli session create gw --id capped -m /ro:write </dev/null >/dev/null
-  $cli session create gw --id blind -p blind </dev/null >/dev/null
+  $cli workspace session create -w gw -s reader -m /data:read </dev/null >/dev/null
+  $cli workspace session create -w gw -s writer -m /data:rw </dev/null >/dev/null
+  $cli workspace session create -w gw -s lister -m /data </dev/null >/dev/null
+  $cli workspace session create -w gw -s capped -m /ro:write </dev/null >/dev/null
+  $cli workspace session create -w gw -s blind -p blind </dev/null >/dev/null
   echo "mode.reader_cat=$($cli shell --json -w gw -s reader -c 'cat /data/a.txt' </dev/null | sout)"
   echo "mode.reader_rm_err=$($cli shell --json -w gw -s reader -c 'rm /data/a.txt' </dev/null | serr)"
   echo "mode.reader_redirect=$($cli shell --json -w gw -s reader -c 'echo leak > /data/new.txt' </dev/null | verdict)"
@@ -170,8 +170,8 @@ probe() {
   # ── session modes: the exec gate is per session on an EXEC mount ──
   $cli workspace delete gx >/dev/null 2>&1 </dev/null || true
   $cli workspace create "$EXEC_YAML" --id gx >/dev/null </dev/null
-  $cli session create gx --id noexec -m /data:write </dev/null >/dev/null
-  $cli session create gx --id withexec -m /data:rwx </dev/null >/dev/null
+  $cli workspace session create -w gx -s noexec -m /data:write </dev/null >/dev/null
+  $cli workspace session create -w gx -s withexec -m /data:rwx </dev/null >/dev/null
   echo "mode.exec_denied_err=$($cli shell --json -w gx -s noexec -c 'python3 -c "print(1)"' </dev/null | serr)"
   echo "mode.exec_allowed=$($cli shell --json -w gx -s withexec -c 'python3 -c "print(1)"' </dev/null | sout)"
   $cli workspace delete gx >/dev/null 2>&1 </dev/null || true

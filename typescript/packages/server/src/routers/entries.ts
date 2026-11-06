@@ -21,7 +21,7 @@ import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { WorkspaceRegistry } from '../registry.ts'
 import { typesOf } from '../resources/fields.ts'
 import { checkValues, storesOf } from '../resources/values.ts'
-import type { RouteApp, RouteReply } from '../routes.ts'
+import type { RouteApp, RouteReply, ServerHost } from '../routes.ts'
 import { requireOneAccount, storeRefusal } from './templates.ts'
 
 /** Each kind's route. */
@@ -162,9 +162,9 @@ async function answered<T>(
 export function registerEntryRoutes(
   app: RouteApp,
   kind: keyof typeof ROUTES,
-  deps: { resources: ResourceStore; registry: WorkspaceRegistry },
+  deps: { resources: ResourceStore; registry: WorkspaceRegistry; host: ServerHost },
 ): void {
-  const { resources, registry } = deps
+  const { resources, registry, host } = deps
   const route = ROUTES[kind]
 
   app.get<{ Querystring: ListQuery }>(route, (req, reply) =>
@@ -182,14 +182,14 @@ export function registerEntryRoutes(
   )
 
   app.get(`${route}/${TYPES_ROUTE}`, (_req, reply) =>
-    answered(registry, reply, () => typesOf(kind)),
+    answered(registry, reply, () => typesOf(kind, host)),
   )
 
   app.post(route, (req, reply) =>
     answered(registry, reply, async () => {
       const body = jsonBody(req.body)
       const type = requiredString(body, 'type')
-      const checked = checkValues(kind, type, body.fields, await typesOf(kind))
+      const checked = checkValues(kind, type, body.fields, await typesOf(kind, host))
       const name = checkName(kind, requiredString(body, 'name'))
       await requireStores(resources, checked.config)
       const saved = await resources.createEntry(kind, {
@@ -216,7 +216,7 @@ export function registerEntryRoutes(
       const given = body.fields
       const removed = removedBy(given)
       const kept = new Set(current.sealed.filter((k) => !removed.has(k)))
-      const checked = checkValues(kind, current.type, given, await typesOf(kind), kept)
+      const checked = checkValues(kind, current.type, given, await typesOf(kind, host), kept)
       await requireStores(resources, checked.config)
       const sealed: Record<string, JsonValue | null> = Object.fromEntries(
         [...removed].map((k) => [k, null]),

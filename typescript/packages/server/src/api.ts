@@ -65,7 +65,7 @@ export function registerApi(app: RouteApp, deps: ApiDeps): McpEndpoint {
     registerTemplatesRoutes(app, { resources: deps.resources, registry })
     registerPoliciesRoutes(app, { resources: deps.resources, registry })
     for (const kind of Object.keys(ENTRY_ROUTES) as (keyof typeof ENTRY_ROUTES)[]) {
-      registerEntryRoutes(app, kind, { resources: deps.resources, registry })
+      registerEntryRoutes(app, kind, { resources: deps.resources, registry, host })
     }
   }
   registerSessionsRoutes(app, { registry, loadProfile: (profile) => host.loadProfile(profile) })
