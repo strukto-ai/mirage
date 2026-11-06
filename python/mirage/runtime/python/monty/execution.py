@@ -17,9 +17,11 @@ import asyncio
 import concurrent.futures
 import logging
 import os
+import re
 import signal
 import threading
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from mirage.concurrency.limiter import owned_task
@@ -29,6 +31,7 @@ from mirage.runtime.python.execution import main_filename
 from mirage.runtime.python.monty.constants import (
     DEFAULT_PROG,
     LIMITS,
+    MISSING_PACKAGE_HINT,
     POOL_WORKERS,
 )
 from mirage.runtime.python.monty.fs import MontyFs
@@ -104,6 +107,60 @@ class _SharedPool:
 
 
 _shared_pool = _SharedPool()
+
+# Where a monty traceback places its error: the frame's line.
+_ERROR_LINE = re.compile(r", line (\d+)")
+
+
+@dataclass(frozen=True, slots=True)
+class CompileError:
+    """Why monty refuses a program, and the program's own line it names.
+
+    Args:
+        line (int | None): the program's line, None when monty names none.
+        message (str): monty's message.
+    """
+
+    line: int | None
+    message: str
+
+
+async def compile_error(code: str) -> CompileError | None:
+    """Why monty would refuse a program before running any of it, or
+    None when it would run it: fed after a ``raise SystemExit``, the
+    program is parsed and compiled whole on the shared pool, and the exit
+    stops the feed before the program's first line. So a syntax error, or
+    syntax monty does not support, is found, and nothing the program does
+    at its top level happens. Mirrors the TypeScript ``compileError``.
+
+    Args:
+        code (str): the program.
+
+    Raises:
+        ImportError: the ``monty`` extra is not installed.
+    """
+    if pydantic_monty is None:
+        raise ImportError(MISSING_PACKAGE_HINT)
+    pool = await _shared_pool.acquire()
+    try:
+        async with pool.checkout(limits=LIMITS) as session:
+            try:
+                await session.feed_run(f"raise SystemExit\n{code}")
+            except (
+                pydantic_monty.MontySyntaxError,
+                pydantic_monty.MontyRuntimeError,
+            ) as exc:
+                if isinstance(exc.exception(), SystemExit):
+                    return None
+                # One line above the program's own: the exit's.
+                found = _ERROR_LINE.search(exc.display(format="traceback"))
+                return CompileError(
+                    line=None if found is None else int(found.group(1)) - 1,
+                    message=exc.display(format="msg"),
+                )
+        return None
+    finally:
+        await _shared_pool.release()
 
 
 class MontyExecution:
