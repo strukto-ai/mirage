@@ -24,6 +24,13 @@ interface RefParams {
   ref: string
 }
 
+/**
+ * Every workspace made from a template would claim one id, which a worker
+ * proxy cannot see without reading the template; the create names it.
+ */
+export const NO_WORKSPACE_ID =
+  "a template's config cannot set workspace_id; give the id when you create from it"
+
 /** The fields a saved template takes, as the Python server's model forbids any other. */
 const TEMPLATE_FIELDS: ReadonlySet<string> = new Set(['name', 'description', 'config'])
 
@@ -101,7 +108,9 @@ export function registerTemplatesRoutes(
       return reply.status(400).send({ detail: 'description must be a string' })
     }
     try {
-      checkConfig(body.config)
+      if (checkConfig(body.config).workspaceId !== undefined) {
+        return reply.status(400).send({ detail: NO_WORKSPACE_ID })
+      }
     } catch (e) {
       return reply.status(400).send({ detail: (e as Error).message })
     }

@@ -58,6 +58,7 @@ from mirage.server.multipart import (
 )
 from mirage.server.registry import Claim, WorkspaceEntry
 from mirage.server.routers.templates import (
+    NO_WORKSPACE_ID,
     require_one_account,
     store_refusal,
 )
@@ -369,9 +370,12 @@ async def _config_of(
     except ResourceError as e:
         raise store_refusal(e) from e
     try:
-        return check_config(template.config), template.config
+        config = check_config(template.config)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    if config.workspace_id is not None:
+        raise HTTPException(status_code=400, detail=NO_WORKSPACE_ID)
+    return config, template.config
 
 
 @router.post("", response_model=WorkspaceDetail, status_code=201)
