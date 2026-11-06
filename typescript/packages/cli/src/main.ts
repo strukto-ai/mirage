@@ -27,6 +27,7 @@ import { registerToolCommands } from './tools.ts'
 import { registerVfsCommands } from './vfs.ts'
 import { registerContextCommands, registerLoginCommands } from './login.ts'
 import { registerMcpCommand } from './mcp.ts'
+import { registerPolicyCommands } from './policy.ts'
 import { registerRpcCommand } from './rpc.ts'
 import { registerCodexExecCommand, registerSshProxyCommand } from './ssh.ts'
 import { registerSessionCommands } from './session.ts'
@@ -70,6 +71,7 @@ export function buildProgram(): Command {
   registerSessionCommands(ws)
   registerToolCommands(ws)
   registerShellCommand(program)
+  registerPolicyCommands(program)
   registerApiCommand(program)
   registerMcpCommand(program)
   registerRpcCommand(program)
