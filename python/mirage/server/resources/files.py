@@ -14,6 +14,7 @@
 
 
 import json
+import logging
 import os
 import uuid
 from pathlib import Path
@@ -28,6 +29,8 @@ from mirage.resources.errors import ResourceError
 from mirage.resources.store import RecordResourceStore
 from mirage.resources.types import EntryKind, Fields
 from mirage.server.paths import resources_root_path
+
+logger = logging.getLogger(__name__)
 
 # The folder under the root that holds sealed values, apart from the
 # records.
@@ -62,7 +65,8 @@ def dump(record: Fields) -> str:
 
 
 def parse_record(path: Path, text: str) -> Fields:
-    """A record read back: JSON as written, or YAML when edited by hand.
+    """A record read back: JSON as written, else YAML, for a file edited
+    by hand.
 
     Args:
         path (Path): the file, for the error.
@@ -72,13 +76,13 @@ def parse_record(path: Path, text: str) -> Fields:
         ResourceError: ``invalid`` when it is not a mapping.
     """
     try:
-        record = (
-            json.loads(text)
-            if text.lstrip().startswith("{")
-            else yaml.safe_load(text)
-        )
-    except (ValueError, yaml.YAMLError) as e:
-        raise ResourceError("invalid", f"{path} is malformed: {e}") from e
+        record = json.loads(text)
+    except ValueError:
+        logger.debug("%s is not JSON; reading it as YAML", path)
+        try:
+            record = yaml.safe_load(text)
+        except yaml.YAMLError as e:
+            raise ResourceError("invalid", f"{path} is malformed: {e}") from e
     if not isinstance(record, dict):
         raise ResourceError("invalid", f"{path} is not a mapping")
     return record

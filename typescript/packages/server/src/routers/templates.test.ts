@@ -12,9 +12,13 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { memoryResourceStore } from '@struktoai/mirage-core/resources/memory'
 import { describe, expect, it } from 'vitest'
 import { buildApp } from '../app.ts'
+import { filesResourceStore } from '../resources/files.ts'
 
 const RAM = { mounts: { '/': { vfs: 'ram', mode: 'write' } } }
 const TWO = {
@@ -118,6 +122,34 @@ describe('templates router', () => {
     })
     expect(explained.statusCode).toBe(200)
     expect(explained.json()).toMatchObject({ outcome: 'allow' })
+    await app.close()
+  })
+
+  it('keeps no templates on a server of many accounts', async () => {
+    const app = appWithStore()
+    app.registry.accountsRequired = true
+    expect((await app.inject({ method: 'GET', url: '/v1/templates' })).statusCode).toBe(501)
+    const save = await app.inject({
+      method: 'POST',
+      url: '/v1/templates',
+      payload: { name: 't', config: RAM },
+    })
+    expect(save.statusCode).toBe(501)
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: { template: 't' },
+    })
+    expect(create.statusCode).toBe(501)
+    await app.close()
+  })
+
+  it('answers a broken record in the list as a bad request', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-templates-'))
+    mkdirSync(join(dir, 'template'))
+    writeFileSync(join(dir, 'template', 'bad.yaml'), 'config: [\n')
+    const app = buildApp({ idleGraceSeconds: 10, resourceStore: filesResourceStore(dir) })
+    expect((await app.inject({ method: 'GET', url: '/v1/templates' })).statusCode).toBe(400)
     await app.close()
   })
 })

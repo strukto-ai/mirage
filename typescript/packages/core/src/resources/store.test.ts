@@ -117,4 +117,14 @@ describe('RecordResourceStore', () => {
       }
     },
   )
+
+  it('saves one of two creates of one template', async () => {
+    const s = store()
+    const results = await Promise.allSettled([
+      s.createTemplate({ name: 't', config: { a: 1 } }),
+      s.createTemplate({ name: 't', config: { a: 2 } }),
+    ])
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'rejected'])
+    expect((await s.getTemplate('t')).config).toEqual({ a: 1 })
+  })
 })

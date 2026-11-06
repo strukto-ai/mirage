@@ -59,7 +59,8 @@ export function registerApi(app: RouteApp, deps: ApiDeps): McpEndpoint {
     snapshotStore: deps.snapshotStore,
     resources: deps.resources,
   })
-  if (deps.resources !== undefined) registerTemplatesRoutes(app, { resources: deps.resources })
+  if (deps.resources !== undefined)
+    registerTemplatesRoutes(app, { resources: deps.resources, registry })
   registerSessionsRoutes(app, { registry, loadProfile: (profile) => host.loadProfile(profile) })
   registerDocumentsRoutes(app, { registry })
   registerAsksRoutes(app, { registry })

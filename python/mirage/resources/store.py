@@ -16,6 +16,7 @@
 import asyncio
 from dataclasses import asdict
 
+from mirage.concurrency.limiter import settle
 from mirage.resources.base import ResourceStore
 from mirage.resources.constants import (
     DELETED_TEMPLATES,
@@ -132,6 +133,32 @@ class RecordResourceStore(ResourceStore):
         async with self._lock:
             return await self._entry_of(kind, name)
 
+    async def _save_entry(
+        self,
+        kind: EntryKind,
+        name: str,
+        record: Fields,
+        sealed: Fields,
+        kept: Fields,
+    ) -> None:
+        """Write an entry's sealed values, then its record; if the record
+        cannot be written, put the old sealed values back. Run whole, never
+        cancelled halfway.
+
+        Args:
+            kind (EntryKind): the entry's kind.
+            name (str): its name.
+            record (Fields): its plain record.
+            sealed (Fields): its new sealed values.
+            kept (Fields): its sealed values before the save.
+        """
+        await self._sealer.write(kind, name, sealed)
+        try:
+            await self._records.write(kind, name, record)
+        except Exception:
+            await self._sealer.write(kind, name, kept)
+            raise
+
     async def put_entry(self, kind: EntryKind, input: EntryInput) -> Entry:
         async with self._lock:
             check_name(kind, input.name)
@@ -162,16 +189,18 @@ class RecordResourceStore(ResourceStore):
                     sealed.pop(key, None)
                 else:
                     sealed[key] = value
-            await self._sealer.write(kind, input.name, sealed)
             record: Fields = {
                 "name": input.name,
                 "type": input.type,
                 "fields": input.fields,
             }
+            save = asyncio.ensure_future(
+                self._save_entry(kind, input.name, record, sealed, kept)
+            )
             try:
-                await self._records.write(kind, input.name, record)
-            except BaseException:
-                await self._sealer.write(kind, input.name, kept)
+                await asyncio.shield(save)
+            except asyncio.CancelledError:
+                await settle(save)
                 raise
             return Entry(
                 name=input.name,
@@ -254,16 +283,32 @@ class RecordResourceStore(ResourceStore):
         async with self._lock:
             return await self._live_template(name)
 
+    async def _save_template(
+        self, template: TemplateInput, replace: bool
+    ) -> Template:
+        check_name(TEMPLATE, template.name)
+        if (
+            not replace
+            and await self._records.read(TEMPLATE, template.name) is not None
+        ):
+            raise ResourceError(
+                "conflict", f"template {template.name} already exists"
+            )
+        saved = Template(
+            name=template.name,
+            description=template.description or None,
+            config=template.config,
+        )
+        await self._records.write(TEMPLATE, saved.name, asdict(saved))
+        return saved
+
+    async def create_template(self, template: TemplateInput) -> Template:
+        async with self._lock:
+            return await self._save_template(template, replace=False)
+
     async def put_template(self, template: TemplateInput) -> Template:
         async with self._lock:
-            check_name(TEMPLATE, template.name)
-            saved = Template(
-                name=template.name,
-                description=template.description or None,
-                config=template.config,
-            )
-            await self._records.write(TEMPLATE, saved.name, asdict(saved))
-            return saved
+            return await self._save_template(template, replace=True)
 
     async def delete_template(self, name: str) -> None:
         async with self._lock:

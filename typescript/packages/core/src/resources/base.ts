@@ -46,6 +46,8 @@ export interface ResourceStore {
 
   listTemplates(): Promise<Template[]>
   getTemplate(name: string): Promise<Template>
+  /** Save a new template; a conflict when a live one has the name. */
+  createTemplate(template: TemplateInput): Promise<Template>
   putTemplate(template: TemplateInput): Promise<Template>
   deleteTemplate(name: string): Promise<void>
   /** Bring back the template last deleted under `name`; a conflict while a live one has it. */
