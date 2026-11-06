@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Iterator, Mapping
+import dataclasses
+from collections.abc import Iterator, Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from mirage.commands.spec.compile import compile_spec
@@ -27,9 +28,11 @@ from mirage.workspace.lookup.constants import (
     INTERPRETER_NAMES,
     KEYWORDS,
     NAMESPACE_COMMANDS,
+    PROGRAM_WRAPPERS,
     ROUTED_COMMANDS,
     SHELL_NAMES,
     SHELL_ONLY_BUILTINS,
+    wrapped_program_at,
 )
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.session import SessionState
@@ -92,6 +95,61 @@ def _is_native(runtime: RuntimeIdentity | None, name: str) -> bool:
     return not (
         isinstance(runtime, LanguageRuntime) and name in runtime.commands
     )
+
+
+def wrapper_routing(
+    name: str,
+    args: Sequence[str],
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> RouteDecision[RuntimeIdentity] | None:
+    """The line's placement with a wrapper bound where the program it
+    runs is, None when that changes nothing.
+
+    A wrapper no runtime captures by name (``PROGRAM_WRAPPERS``) whose
+    program a runtime captures by name and runs natively goes with it,
+    wrapper included: ``nice gcc x.c`` runs where gcc does, and ``nice
+    nohup gcc`` follows each wrapper in turn. Any other program leaves
+    the wrapper where it was.
+
+    Args:
+        name (str): expanded command name.
+        args (Sequence[str]): its words, argv[0] excluded.
+        routing (RouteDecision | None): the line's placement.
+    """
+    if routing is None:
+        return None
+    bindings = routing.bindings
+    program = _wrapped(name, args, bindings)
+    if program is None:
+        return None
+    return dataclasses.replace(
+        routing, bindings={**bindings, name: bindings[program]}
+    )
+
+
+def _wrapped(
+    name: str,
+    args: Sequence[str],
+    bindings: Mapping[str, RuntimeIdentity | None],
+) -> str | None:
+    """The program a wrapper runs that a runtime captures by name and
+    runs natively, nested wrappers followed; None when there is none.
+
+    Args:
+        name (str): the wrapper's name.
+        args (Sequence[str]): its words, argv[0] excluded.
+        bindings (Mapping[str, RuntimeIdentity | None]): the line's
+            command bindings.
+    """
+    if name not in PROGRAM_WRAPPERS or name in bindings:
+        return None
+    at = wrapped_program_at(name, args)
+    if at is None:
+        return None
+    inner = args[at]
+    if _is_native(bindings.get(inner), inner):
+        return inner
+    return _wrapped(inner, args[at + 1 :], bindings)
 
 
 def _layers(

@@ -436,6 +436,52 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_wrapper_runs_where_the_program_it_runs_is_captured",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "captures": [
+              "@external"
+            ]
+          },
+          {
+            "name": "echobox",
+            "captures": [
+              "gcc"
+            ]
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "nice -n 5 gcc x.c",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nice -n 5 gcc x.c\n"
+          }
+        },
+        {
+          "command": "nice nohup gcc x.c",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nice nohup gcc x.c\n"
+          }
+        },
+        {
+          "command": "nice make",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"nice\",\"make\"]\n"
+          }
+        }
+      ]
     }
   ]
 }

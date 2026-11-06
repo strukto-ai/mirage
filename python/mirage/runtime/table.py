@@ -216,6 +216,30 @@ def bind_commands(entries: list[Runtime[Any]]) -> dict[str, Runtime[Any]]:
     return bindings
 
 
+def shadowed_captures(
+    entries: list[Runtime[Any]],
+) -> list[tuple[str, str, str]]:
+    """Each capture an entry declares that an earlier entry already
+    takes, so it never wins (``bind_commands``: first capturer wins).
+
+    Args:
+        entries (list[Runtime]): runtime instances in precedence order.
+
+    Returns:
+        list[tuple[str, str, str]]: the capture, the runtime that wins
+        it and the runtime it is shadowed on, in list order.
+    """
+    winners: dict[str, str] = {}
+    shadowed: list[tuple[str, str, str]] = []
+    for entry in entries:
+        for capture in dict.fromkeys(entry.captures):
+            if capture in winners:
+                shadowed.append((capture, winners[capture], entry.name))
+            else:
+                winners[capture] = entry.name
+    return shadowed
+
+
 def whole_line_runtime(
     bindings: Mapping[str, RuntimeIdentity | None],
 ) -> LineExecutorMixin[Any] | None:

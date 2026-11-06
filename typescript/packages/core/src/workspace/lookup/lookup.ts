@@ -26,9 +26,11 @@ import {
   INTERPRETER_NAMES,
   KEYWORDS,
   NAMESPACE_COMMANDS,
+  PROGRAM_WRAPPERS,
   ROUTED_COMMANDS,
   SHELL_NAMES,
   SHELL_ONLY_BUILTINS,
+  wrappedProgramAt,
 } from './constants.ts'
 import { Consumer } from './types.ts'
 import { shellQuote } from '../../utils/quote.ts'
@@ -75,6 +77,53 @@ function isNative(runtime: Runtime | null | undefined, name: string): boolean {
   if (runtime == null || !(isLineExecutor(runtime) || isProcessExecutor(runtime))) return false
   if (!(runtime instanceof LanguageRuntime)) return true
   return !(runtime.constructor as typeof LanguageRuntime).commands.includes(name)
+}
+
+/**
+ * The line's placement with a wrapper bound where the program it runs is,
+ * null when that changes nothing.
+ *
+ * A wrapper no runtime captures by name (`PROGRAM_WRAPPERS`) whose program a
+ * runtime captures by name and runs natively goes with it, wrapper
+ * included: `nice gcc x.c` runs where gcc does, and `nice nohup gcc` follows
+ * each wrapper in turn. Any other program leaves the wrapper where it was.
+ * Mirrors Python's `wrapper_routing`.
+ */
+export function wrapperRouting(
+  name: string,
+  args: readonly string[],
+  routing: RouteDecision<Runtime> | undefined,
+): RouteDecision<Runtime> | null {
+  if (routing === undefined) return null
+  const program = wrapped(name, args, routing.bindings)
+  if (program === null) return null
+  return {
+    ...routing,
+    bindings: Object.assign(
+      Object.create(null) as Record<string, Runtime | null>,
+      routing.bindings,
+      {
+        [name]: routing.bindings[program] ?? null,
+      },
+    ),
+  }
+}
+
+/**
+ * The program a wrapper runs that a runtime captures by name and runs
+ * natively, nested wrappers followed; null when there is none.
+ */
+function wrapped(
+  name: string,
+  args: readonly string[],
+  bindings: Readonly<Record<string, Runtime | null | undefined>>,
+): string | null {
+  if (!PROGRAM_WRAPPERS.has(name) || Object.hasOwn(bindings, name)) return null
+  const at = wrappedProgramAt(name, args)
+  if (at === null) return null
+  const inner = args[at] ?? ''
+  if (isNative(Object.hasOwn(bindings, inner) ? bindings[inner] : null, inner)) return inner
+  return wrapped(inner, args.slice(at + 1), bindings)
 }
 
 /**

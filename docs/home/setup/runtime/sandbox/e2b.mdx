@@ -95,8 +95,8 @@ Mirage, so the sandbox must see the mounts there. `mount_type` picks how:
 
 ### ssh
 
-- The template needs only `sshfs`. No Mirage, keys or open port in the
-  sandbox.
+- The template needs only `sshfs` ([below](#a-template-for-ssh)). No
+  Mirage, keys or open port in the sandbox.
 - `ssh` and `both` do not work in browsers.
 - Each file call is a round trip to the workspace, about 150 ms for a small
   file from a laptop; with `both`, keep bulk data on the sandbox's own
@@ -109,6 +109,38 @@ Mirage, so the sandbox must see the mounts there. `mount_type` picks how:
 - If the sandbox restarts, Mirage mounts the paths again. A line caught
   mid-restart exits 126 without running.
 - The root mount and `/dev` are not served.
+
+#### A template for ssh
+
+Build a template from E2B's base image with `sshfs`, create a sandbox from
+it, and pass its ID as `sandbox_id` with `mount_type: ssh`, as in
+[Usage](#usage):
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from e2b import AsyncSandbox, Template
+
+    Template.build(Template().from_base_image().apt_install("sshfs"), "mirage-sshfs")
+    sandbox = await AsyncSandbox.create("mirage-sshfs")
+    print(sandbox.sandbox_id)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { Sandbox, Template } from 'e2b'
+
+    await Template.build(Template().fromBaseImage().aptInstall('sshfs'), 'mirage-sshfs')
+    const sandbox = await Sandbox.create('mirage-sshfs')
+    console.log(sandbox.sandboxId)
+    ```
+  </Tab>
+</Tabs>
+
+Keep the base image's user: Mirage creates mountpoints such as `/data`
+with `sudo`. To skip the build, run `sudo apt-get install -y sshfs` in a
+sandbox from the default template. Without `sshfs`, a line fails with
+`e2b: serving the workspace into a sandbox needs sshfs there`.
 
 ### fuse
 
@@ -154,9 +186,6 @@ mirage workspace create /tmp/sandbox.yaml
 - Closing the workspace leaves the sandbox running.
 - Commands run concurrently, each with its own input and output. Without
   piped input, stdin starts closed.
-- On the default template, install `sshfs` with
-  `sudo apt-get install -y sshfs`.
-- Templates, sizing, networking and lifecycle stay E2B settings. E2B applies
-  its own command timeout, 60 seconds by default, to every command.
+- Templates, sizing, networking and lifecycle stay E2B settings.
 - A Mirage [timeout](/home/setup/runtime/sandbox#timeouts) tries to kill the command; its child
   processes may survive.

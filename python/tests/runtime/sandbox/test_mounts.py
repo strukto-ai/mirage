@@ -319,6 +319,28 @@ async def test_ssh_serves_every_prefix_the_session_sees():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "cwd, ran", [("/notes", False), ("/data", True), ("/", True)]
+)
+async def test_ssh_refuses_a_line_from_a_cwd_it_cannot_see(cwd, ran):
+    sandbox = FakeSandbox("ssh")
+    ws = workspace(sandbox)
+    assert (await ws.shell("mkdir -p /notes")).exit_code == 0
+    result = await ws.shell(f"cd {cwd} && python3 job.py")
+    said = (result.exit_code, await result.stderr_str())
+    if ran:
+        assert said == (0, "")
+    else:
+        assert said == (
+            126,
+            "fake: the sandbox cannot see the working directory /notes; "
+            "cd into a mount first\n",
+        )
+        assert (sandbox.commands, sandbox.pipes) == ([], [])
+    await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_second_session_is_refused_rather_than_shown_the_first_view():
     sandbox = FakeSandbox("ssh")
     ws = workspace(sandbox)

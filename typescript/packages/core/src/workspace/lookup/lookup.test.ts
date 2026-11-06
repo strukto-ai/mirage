@@ -21,11 +21,17 @@ import { ParsedArgs } from '../../commands/spec/parser.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { headAllowed } from '../../policy/match/allow.ts'
+import type { ShellNode } from '../../policy/types.ts'
 import { SCANS } from '../../rs/scan.ts'
 import * as stream from '../../rs/stream.ts'
-import { Runtime } from '../../runtime/base.ts'
+import { Runtime, type RuntimeEntry } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
-import { PROCESS_EXECUTOR, type ProcessExecutorMixin } from '../../runtime/mixin.ts'
+import {
+  LINE_EXECUTOR,
+  type LineExecutorMixin,
+  PROCESS_EXECUTOR,
+  type ProcessExecutorMixin,
+} from '../../runtime/mixin.ts'
 import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { Follow, LineFacts, MountMode, PathSpec, wordText } from '../../types.ts'
@@ -908,5 +914,89 @@ describe('reading a line once', () => {
     expect(() => {
       ;(facts as { writes: boolean }).writes = false
     }).toThrow(TypeError)
+  })
+})
+
+class Box extends Runtime implements LineExecutorMixin {
+  readonly [LINE_EXECUTOR] = true as const
+  override readonly reach = 'remote'
+
+  constructor(
+    readonly name: string,
+    ...captures: string[]
+  ) {
+    super({ captures })
+  }
+
+  runLine(): Promise<RunResult> {
+    return Promise.resolve({
+      stdout: new TextEncoder().encode(`${this.name}\n`),
+      stderr: null,
+      exitCode: 0,
+    })
+  }
+}
+
+class Monty extends PythonRuntime {
+  readonly name = 'monty'
+
+  interpret(): Promise<RunResult> {
+    return Promise.resolve({
+      stdout: new TextEncoder().encode('monty\n'),
+      stderr: null,
+      exitCode: 0,
+    })
+  }
+}
+
+function runtimesOf(node: ShellNode): string[] {
+  return node.children.flatMap((child) =>
+    'command' in child ? [child.runtime, ...child.children.flatMap(runtimesOf)] : runtimesOf(child),
+  )
+}
+
+describe('a wrapper runs where the program it runs is captured', () => {
+  it.each([
+    [true, 'nice gcc x.c', 'docker'],
+    [true, 'nice -n -5 gcc x.c', 'docker'],
+    [true, 'nice -- gcc x.c', 'docker'],
+    [true, 'nohup gcc x.c', 'docker'],
+    [true, 'nice nohup gcc x.c', 'docker'],
+    [true, 'stdbuf -o L gcc x.c', 'docker'],
+    [true, 'ionice -c2 gcc x.c', 'docker'],
+    [true, 'setsid -w gcc x.c', 'docker'],
+    [false, 'nice gcc x.c', 'docker'],
+    [true, 'nice make', 'e2b'],
+    [true, 'nice python3 -c 1', 'e2b'],
+    [true, 'nice', 'e2b'],
+    [true, 'sudo gcc x.c', 'e2b'],
+  ] as [boolean, string, string][])('%s %s runs on %s', async (external, line, runs) => {
+    const entries: RuntimeEntry[] = [new Box('docker', 'gcc'), new Monty(), 'workspace']
+    if (external) entries.unshift(new Box('e2b', '@external'))
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: entries })
+    try {
+      const io = await ws.shell(line)
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, `${runs}\n`])
+      const said = await ws.explain(line)
+      expect(runtimesOf(said.node)[0]).toBe(runs === 'e2b' ? '' : runs)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('runs a wrapper a runtime captures there', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        runtimes: [new Box('niced', 'nice'), new Box('docker', 'gcc'), 'workspace'],
+      },
+    )
+    try {
+      const io = await ws.shell('nice gcc x.c')
+      expect(new TextDecoder().decode(io.stdout)).toBe('niced\n')
+    } finally {
+      await ws.close()
+    }
   })
 })

@@ -387,6 +387,27 @@ describe('SandboxMounts', () => {
     expect(sandbox.table.size).toBe(0)
   })
 
+  it.each([
+    ['/notes', false],
+    ['/data', true],
+    ['/', true],
+  ])('refuses a line from a cwd the sandbox cannot see: %s', async (cwd, ran) => {
+    const sandbox = new FakeSandbox('ssh')
+    const ws = workspace(sandbox)
+    expect((await ws.shell('mkdir -p /notes')).exitCode).toBe(0)
+    const result = await ws.shell(`cd ${cwd} && python3 job.py`)
+    const said = [result.exitCode, DEC.decode(result.stderr)]
+    if (ran) expect(said).toEqual([0, ''])
+    else {
+      expect(said).toEqual([
+        126,
+        'fake: the sandbox cannot see the working directory /notes; cd into a mount first\n',
+      ])
+      expect([sandbox.commands, sandbox.pipes]).toEqual([[], []])
+    }
+    await ws.close()
+  })
+
   it('refuses a second session rather than show it the first view', async () => {
     const sandbox = new FakeSandbox('ssh')
     const ws = workspace(sandbox)

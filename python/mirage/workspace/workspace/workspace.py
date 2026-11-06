@@ -838,7 +838,7 @@ class Workspace:
                 line,
                 judged,
                 judged if whole_line else verdicts,
-                lambda command: (
+                lambda command, args: (
                     whole.name if isinstance(whole, Runtime) else ""
                 ),
                 whole_line,
@@ -867,7 +867,11 @@ class Workspace:
         if isinstance(placed, (Deny, Pending)):
             refused = placement_refused(placed, line)
             said = explained_line(
-                line, judged, verdicts, lambda command: "", aliases=aliases
+                line,
+                judged,
+                verdicts,
+                lambda command, args: "",
+                aliases=aliases,
             )
             return dataclasses.replace(
                 said,
@@ -887,7 +891,9 @@ class Workspace:
             line,
             judged,
             judged if whole_line else verdicts,
-            lambda command: self._router.runtime_for(command, placed),
+            lambda command, args: self._router.runtime_for(
+                command, args, placed
+            ),
             whole_line,
             aliases,
         )

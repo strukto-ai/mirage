@@ -227,6 +227,27 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
 }
 
 /**
+ * Each capture an entry declares that an earlier entry already takes, so it
+ * never wins (`bindCommands`: first capturer wins), as the capture, the
+ * runtime that wins it and the runtime it is shadowed on, in list order.
+ * Mirrors Python's `shadowed_captures`.
+ *
+ * @param entries runtime instances in precedence order.
+ */
+export function shadowedCaptures(entries: readonly Runtime[]): [string, string, string][] {
+  const winners = new Map<string, string>()
+  const shadowed: [string, string, string][] = []
+  for (const entry of entries) {
+    for (const capture of new Set(entry.captures)) {
+      const winner = winners.get(capture)
+      if (winner !== undefined) shadowed.push([capture, winner, entry.name])
+      else winners.set(capture, entry.name)
+    }
+  }
+  return shadowed
+}
+
+/**
  * The runtime that runs this entire line, if any.
  *
  * Only an explicit WHOLE_LINE capture claims a whole line. Named captures

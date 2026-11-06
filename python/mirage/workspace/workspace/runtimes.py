@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 from typing import Any
 
 from mirage.runtime.base import Runtime
@@ -24,9 +25,12 @@ from mirage.runtime.table import (
     bind_commands,
     build_runtime,
     is_sandbox,
+    shadowed_captures,
 )
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.workspace.mount import MountRegistry
+
+logger = logging.getLogger(__name__)
 
 
 class Runtimes:
@@ -183,6 +187,13 @@ class Runtimes:
     def _install(
         self, entries: list[Runtime[Any]], bindings: dict[str, Runtime[Any]]
     ) -> None:
+        for capture, winner, shadowed in shadowed_captures(entries):
+            logger.warning(
+                "runtime %r never runs %r: %r, listed before it, takes it",
+                shadowed,
+                capture,
+                winner,
+            )
         self._entries = entries
         self._registry.runtime_entries = entries
         self._registry.runtime_bindings = bindings

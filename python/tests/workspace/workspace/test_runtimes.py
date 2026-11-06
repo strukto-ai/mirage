@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 
 import pytest
 
@@ -229,5 +230,23 @@ async def test_a_python3_captured_on_an_added_sandbox_wins():
     try:
         ws.add_runtime(Box("box", "python3"))
         assert await python3(ws) == (0, b"box\n", b"")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_capture_that_never_wins_is_logged(caplog):
+    caplog.set_level(logging.WARNING, logger="mirage.workspace.workspace")
+    ws = workspace(Engine("a"), Engine("b"))
+    try:
+        ws.add_runtime(Box("box", "python3"))
+        said = [r.getMessage() for r in caplog.records]
+        assert said == [
+            "runtime 'b' never runs 'python3': 'a', listed before it, takes it",
+            "runtime 'b' never runs 'python': 'a', listed before it, takes it",
+            "runtime 'a' never runs 'python3': 'box', listed before it, takes it",
+            "runtime 'b' never runs 'python3': 'box', listed before it, takes it",
+            "runtime 'b' never runs 'python': 'a', listed before it, takes it",
+        ]
     finally:
         await ws.close()

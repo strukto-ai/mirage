@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { endOptionsAfterProgram } from './constants.ts'
+import { endOptionsAfterProgram, wrappedProgramAt } from './constants.ts'
 
 const rewrite = (words: string[]): string[] => endOptionsAfterProgram('python3', words)
 
@@ -120,4 +120,29 @@ describe('endOptionsAfterProgram', () => {
       'z',
     ])
   })
+})
+
+describe('wrappedProgramAt', () => {
+  it.each([
+    ['nice', ['gcc', 'x.c'], 0],
+    ['nice', ['-n', '-5', 'gcc'], 2],
+    ['nice', ['-n5', 'gcc'], 1],
+    ['nice', ['-10', 'gcc'], 1],
+    ['nice', ['--adjustment=3', 'gcc'], 1],
+    ['nice', ['--adj', '3', 'gcc'], 2],
+    ['nice', ['--', 'gcc'], 1],
+    ['nice', ['-n', '5'], null],
+    ['nice', [], null],
+    ['nohup', ['--', 'gcc'], 1],
+    ['stdbuf', ['-oL', '-e', '0', 'gcc'], 3],
+    ['stdbuf', ['--output', 'L', 'gcc'], 2],
+    ['ionice', ['-tc3', 'gcc'], 1],
+    ['ionice', ['-c', '2', '-n0', 'gcc'], 3],
+    ['setsid', ['-fw', 'gcc'], 1],
+  ] as [string, string[], number | null][])(
+    'finds the program %s runs in %j',
+    (name, words, at) => {
+      expect(wrappedProgramAt(name, words)).toBe(at)
+    },
+  )
 })

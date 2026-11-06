@@ -126,6 +126,7 @@ from mirage.workspace.lookup import (
     lookup,
     runtime_refused,
 )
+from mirage.workspace.lookup.lookup import wrapper_routing
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
@@ -1070,6 +1071,13 @@ async def _route_argv(
 
     routing = context.frame.routing
     consumer = lookup(name, session, registry, routing)
+    wrapped = (
+        wrapper_routing(name, argv.args, routing)
+        if consumer in (Consumer.EXTERNAL, Consumer.UNKNOWN)
+        else None
+    )
+    if wrapped is not None:
+        routing, consumer = wrapped, Consumer.EXTERNAL
     if consumer is Consumer.EXTERNAL:
         assert routing is not None
         return await run_external(

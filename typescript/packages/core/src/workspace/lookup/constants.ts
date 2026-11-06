@@ -285,6 +285,63 @@ function clusterWords(word: string, valueSpellings: readonly string[]): number {
   return 1
 }
 
+// The standard programs that run their first operand as a program, each
+// with the short and long options that take a value, from the GNU coreutils
+// (nice, nohup, stdbuf) and util-linux (ionice, setsid) manuals. A program
+// such a wrapper runs that a runtime captures by name takes the wrapper's
+// line with it (`nice gcc x.c` runs where gcc does). sudo is left out: some
+// of its options change whether a command runs at all (-e, -l, -v, -k).
+export const PROGRAM_WRAPPERS: ReadonlyMap<
+  string,
+  readonly [readonly string[], readonly string[]]
+> = new Map([
+  ['nice', [['-n'], ['--adjustment']]],
+  ['nohup', [[], []]],
+  [
+    'stdbuf',
+    [
+      ['-i', '-o', '-e'],
+      ['--input', '--output', '--error'],
+    ],
+  ],
+  [
+    'ionice',
+    [
+      ['-c', '-n', '-p', '-P', '-u'],
+      ['--class', '--classdata', '--pid', '--pgid', '--uid'],
+    ],
+  ],
+  ['setsid', [[], []]],
+])
+
+/**
+ * Where the program a wrapper runs stands in its words, null when they
+ * name none: the first word past the wrapper's options, as getopt reads
+ * them (a value attached or in the next word, a long option by any prefix
+ * of its name, `--` ending them). Mirrors Python's `wrapped_program_at`.
+ *
+ * Args:
+ *   name: a `PROGRAM_WRAPPERS` name.
+ *   words: the wrapper's words, argv[0] excluded.
+ */
+export function wrappedProgramAt(name: string, words: readonly string[]): number | null {
+  const [short, long] = PROGRAM_WRAPPERS.get(name) ?? [[], []]
+  let i = 0
+  while (i < words.length) {
+    const word = words[i] ?? ''
+    if (word === '--') return i + 1 < words.length ? i + 1 : null
+    if (!word.startsWith('-') || word === '-') return i
+    if (word.startsWith('--')) {
+      const option = word.split('=', 1)[0] ?? word
+      const takes = !word.includes('=') && long.some((o) => o.startsWith(option))
+      i += takes ? 2 : 1
+    } else {
+      i += clusterWords(word, short)
+    }
+  }
+  return null
+}
+
 /**
  * Insert POSIX's `--` after a program-carrying option's value.
  *

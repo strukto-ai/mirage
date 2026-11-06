@@ -15,9 +15,18 @@
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import type { WorkspaceBinding } from '../../runtime/binding.ts'
 import { LanguageRuntime } from '../../runtime/language.ts'
-import { bindCommands, buildRuntime, DEFAULT_ENTRIES, isSandbox } from '../../runtime/table.ts'
+import {
+  bindCommands,
+  buildRuntime,
+  DEFAULT_ENTRIES,
+  isSandbox,
+  shadowedCaptures,
+} from '../../runtime/table.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+
+/** Where a capture that never wins is reported; set `warn` to receive it. */
+export const logger: { warn?: (message: string) => void } = {}
 
 /**
  * The workspace's ordered runtime world; the first capturer binds each
@@ -113,6 +122,11 @@ export class Runtimes {
   }
 
   private install(entries: readonly Runtime[], bindings: Record<string, Runtime>): void {
+    for (const [capture, winner, shadowed] of shadowedCaptures(entries)) {
+      logger.warn?.(
+        `runtime '${shadowed}' never runs '${capture}': '${winner}', listed before it, takes it`,
+      )
+    }
     this.entries = entries
     this.registry.runtimeEntries = entries
     this.registry.runtimeBindings = bindings

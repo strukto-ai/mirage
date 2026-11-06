@@ -18,10 +18,10 @@ from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.policy.match.allow import head_allowed
-from mirage.policy.types import AdmissionRules
+from mirage.policy.types import AdmissionRules, CommandExplanation
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
-from mirage.runtime.mixin import ProcessExecutorMixin
+from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import Program, RunResult
 from mirage.types import MountMode
@@ -364,3 +364,81 @@ def test_program_note_names_the_runtime_a_capture_runs_on():
         "gcc runs on the workspace's sandbox runtime."
     )
     assert program_note("native-tool", session, ws._registry) is None
+
+
+class _Box(Runtime, LineExecutorMixin):
+    """A line runtime that answers its own name."""
+
+    reach = "remote"
+
+    def __init__(self, name: str, *captures: str) -> None:
+        super().__init__(captures=captures)
+        self.name = name
+
+    async def run_line(self, engine, paths, texts, ctx):
+        return RunResult(
+            stdout=f"{self.name}\n".encode(), stderr=None, exit_code=0
+        )
+
+
+class _Monty(PythonRuntime):
+    name = "monty"
+
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+        return RunResult(stdout=b"monty\n", stderr=None, exit_code=0)
+
+
+def _commands(node) -> list[str]:
+    found = [node.runtime] if isinstance(node, CommandExplanation) else []
+    for child in getattr(node, "children", ()) or ():
+        found += _commands(child)
+    return found
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "external, line, runs",
+    [
+        (True, "nice gcc x.c", "docker"),
+        (True, "nice -n -5 gcc x.c", "docker"),
+        (True, "nice -- gcc x.c", "docker"),
+        (True, "nohup gcc x.c", "docker"),
+        (True, "nice nohup gcc x.c", "docker"),
+        (True, "stdbuf -o L gcc x.c", "docker"),
+        (True, "ionice -c2 gcc x.c", "docker"),
+        (True, "setsid -w gcc x.c", "docker"),
+        (False, "nice gcc x.c", "docker"),
+        (True, "nice make", "e2b"),
+        (True, "nice python3 -c 1", "e2b"),
+        (True, "nice", "e2b"),
+        (True, "sudo gcc x.c", "e2b"),
+    ],
+)
+async def test_a_wrapper_runs_where_the_program_it_runs_is_captured(
+    external, line, runs
+):
+    entries = [_Box("docker", "gcc"), _Monty(), "workspace"]
+    if external:
+        entries.insert(0, _Box("e2b", "@external"))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=entries)
+    try:
+        io = await ws.shell(line)
+        assert (io.exit_code, await io.stdout_str()) == (0, f"{runs}\n")
+        said = await ws.explain(line)
+        assert _commands(said.node)[0] == ("" if runs == "e2b" else runs)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_wrapper_a_runtime_captures_runs_there():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[_Box("niced", "nice"), _Box("docker", "gcc"), "workspace"],
+    )
+    try:
+        io = await ws.shell("nice gcc x.c")
+        assert await io.stdout_str() == "niced\n"
+    finally:
+        await ws.close()

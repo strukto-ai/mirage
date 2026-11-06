@@ -341,6 +341,51 @@ def end_options_after_program(name: str, words: list[str]) -> list[str]:
     return words
 
 
+# The standard programs that run their first operand as a program, each
+# with the short and long options that take a value, from the GNU coreutils
+# (nice, nohup, stdbuf) and util-linux (ionice, setsid) manuals. A program
+# such a wrapper runs that a runtime captures by name takes the wrapper's
+# line with it (`nice gcc x.c` runs where gcc does). sudo is left out: some
+# of its options change whether a command runs at all (-e, -l, -v, -k).
+PROGRAM_WRAPPERS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "nice": (("-n",), ("--adjustment",)),
+    "nohup": ((), ()),
+    "stdbuf": (("-i", "-o", "-e"), ("--input", "--output", "--error")),
+    "ionice": (
+        ("-c", "-n", "-p", "-P", "-u"),
+        ("--class", "--classdata", "--pid", "--pgid", "--uid"),
+    ),
+    "setsid": ((), ()),
+}
+
+
+def wrapped_program_at(name: str, words: Sequence[str]) -> int | None:
+    """Where the program a wrapper runs stands in its words, None when
+    they name none: the first word past the wrapper's options, as
+    getopt reads them (a value attached or in the next word, a long
+    option by any prefix of its name, ``--`` ending them).
+
+    Args:
+        name (str): a ``PROGRAM_WRAPPERS`` name.
+        words (Sequence[str]): the wrapper's words, argv[0] excluded.
+    """
+    short, long = PROGRAM_WRAPPERS[name]
+    i = 0
+    while i < len(words):
+        word = words[i]
+        if word == "--":
+            return i + 1 if i + 1 < len(words) else None
+        if not word.startswith("-") or word == "-":
+            return i
+        if word.startswith("--"):
+            option = word.split("=", 1)[0]
+            takes = "=" not in word and any(o.startswith(option) for o in long)
+            i += 2 if takes else 1
+        else:
+            i += _cluster_words(word, short)
+    return None
+
+
 # Commands the router must not resolve the last component for, even
 # under a trailing slash, because none of them acts on the link's
 # target and each says so in its own words. GNU tar strips the slash

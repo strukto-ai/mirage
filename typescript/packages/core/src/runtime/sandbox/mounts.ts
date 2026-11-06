@@ -92,8 +92,8 @@ export function mountTable(text: string): Map<string, [string, string]> {
   return table
 }
 
-/** The mountpoints a sandbox could hold of `prefixes`. */
-function mountPaths(prefixes: Iterable<string>): Set<string> {
+/** The mountpoints a sandbox could hold of `prefixes`. Mirrors Python's `mount_paths`. */
+export function mountPaths(prefixes: Iterable<string>): Set<string> {
   const paths = new Set<string>()
   for (const prefix of prefixes) paths.add(rstripSlash(prefix))
   paths.delete('')

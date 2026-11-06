@@ -22,6 +22,7 @@ import {
   knownRuntimes,
   registerRuntime,
   runtimeBindingsFor,
+  shadowedCaptures,
 } from './table.ts'
 import { WorkspaceRuntime } from './workspace.ts'
 import { MontyRuntime } from './python/monty/index.ts'
@@ -220,5 +221,32 @@ describe('registerRuntime', () => {
     registerRuntime('fake-replaced', FakeRuntime)
     registerRuntime('fake-replaced', Other)
     expect(buildRuntime('fake-replaced')).toBeInstanceOf(Other)
+  })
+})
+
+class Named extends Runtime {
+  constructor(
+    readonly name: string,
+    ...captures: string[]
+  ) {
+    super({ captures })
+  }
+}
+
+describe('shadowedCaptures', () => {
+  it('names each capture an earlier entry wins', () => {
+    const entries = [
+      new Named('e2b', '@external', 'gcc'),
+      new Named('docker', 'gcc', '@external', 'make'),
+      new Named('box', '@line'),
+      new Named('other', '@line'),
+      new WorkspaceRuntime(),
+    ]
+    expect(shadowedCaptures(entries)).toEqual([
+      ['gcc', 'e2b', 'docker'],
+      ['@external', 'e2b', 'docker'],
+      ['@line', 'box', 'other'],
+    ])
+    expect(shadowedCaptures([new Named('a', 'x'), new Named('b', 'y')])).toEqual([])
   })
 })

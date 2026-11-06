@@ -20,6 +20,7 @@ import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { Program, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { logger } from './runtimes.ts'
 import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()
@@ -222,6 +223,27 @@ describe('addRuntime', () => {
       ws.addRuntime(new Box('box', 'python3'))
       expect(await python3(ws)).toEqual([0, 'box\n', ''])
     } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('shadowed captures', () => {
+  it('logs a capture that never wins', async () => {
+    const said: string[] = []
+    logger.warn = (message) => said.push(message)
+    const ws = workspace(new Engine('a'), new Engine('b'))
+    try {
+      ws.addRuntime(new Box('box', 'python3'))
+      expect(said).toEqual([
+        "runtime 'b' never runs 'python3': 'a', listed before it, takes it",
+        "runtime 'b' never runs 'python': 'a', listed before it, takes it",
+        "runtime 'a' never runs 'python3': 'box', listed before it, takes it",
+        "runtime 'b' never runs 'python3': 'box', listed before it, takes it",
+        "runtime 'b' never runs 'python': 'a', listed before it, takes it",
+      ])
+    } finally {
+      delete logger.warn
       await ws.close()
     }
   })

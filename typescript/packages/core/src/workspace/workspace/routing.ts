@@ -33,6 +33,7 @@ import {
   runtimeBindingsFor,
   wholeLineRuntime,
 } from '../../runtime/table.ts'
+import { wrapperRouting } from '../lookup/lookup.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Judged, Walked } from '../node/explain.ts'
@@ -172,12 +173,14 @@ export class Router {
 
   /**
    * The runtime entry that serves a command under a decision: the `@line`
-   * runtime when one takes the line, empty when the workspace runs it
+   * runtime when one takes the line, where the program a wrapper runs is for
+   * that wrapper (`wrapperRouting`), empty when the workspace runs it
    * itself. Mirrors Python's `Router.runtime_for`.
    */
-  runtimeFor(command: string, decision: RouteDecision<Runtime>): string {
-    const whole = wholeLineRuntime(decision.bindings)
+  runtimeFor(command: string, args: readonly string[], placed: RouteDecision<Runtime>): string {
+    const whole = wholeLineRuntime(placed.bindings)
     if (whole !== null) return whole.name
+    const decision = wrapperRouting(command, args, placed) ?? placed
     const serving = Object.hasOwn(decision.bindings, command)
       ? (decision.bindings[command] ?? null)
       : decision.fallback
