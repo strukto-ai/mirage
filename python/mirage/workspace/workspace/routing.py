@@ -31,7 +31,7 @@ from mirage.policy.types import (
     RouteContext,
 )
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import WHOLE_LINE
+from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import (
     bind_commands,
@@ -44,6 +44,7 @@ from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
 from mirage.view.types import FileView, SessionView
 from mirage.workspace.lookup.lookup import routed_consumer
+from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.node.explain import Judged, Walked
 from mirage.workspace.session import SessionState
@@ -239,7 +240,8 @@ class Router:
         """The runtime entry that serves a command under a decision: the
         ``@line`` runtime when one takes the line, where the program a
         wrapper runs is for that wrapper as its run places it
-        (``routed_consumer``), empty when the workspace runs it itself.
+        (``routed_consumer``), the ``@external`` runtime for a program
+        no name binds, empty when the workspace runs it itself.
 
         Args:
             one (Judged): the command's judgment and the session it was
@@ -250,12 +252,15 @@ class Router:
         if isinstance(whole, Runtime):
             return whole.name
         command = one.judgment.command
+        fallback = decision.fallback
         if one.ctx is not None and one.session is not None:
-            _, routed = routed_consumer(
+            consumer, routed = routed_consumer(
                 command, one.ctx.argv, one.session, self._registry, decision
             )
             decision = routed or decision
-        serving = decision.bindings.get(command, decision.fallback)
+            if consumer is Consumer.EXTERNAL:
+                fallback = decision.bindings.get(EXTERNAL_COMMANDS)
+        serving = decision.bindings.get(command, fallback)
         if serving is None or isinstance(serving, WorkspaceRuntime):
             return ""
         return serving.name

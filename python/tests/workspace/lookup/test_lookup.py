@@ -408,6 +408,7 @@ def _commands(node) -> list[str]:
         (True, "ionice -c2 gcc x.c", "docker"),
         (True, "setsid -w gcc x.c", "docker"),
         (False, "nice gcc x.c", "docker"),
+        (True, "make -j2", "e2b"),
         (True, "nice make", "e2b"),
         (True, "nice python3 -c 1", "e2b"),
         (True, "nice", "e2b"),
@@ -425,7 +426,7 @@ async def test_a_wrapper_runs_where_the_program_it_runs_is_captured(
         io = await ws.shell(line)
         assert (io.exit_code, await io.stdout_str()) == (0, f"{runs}\n")
         said = await ws.explain(line)
-        assert _commands(said.node)[0] == ("" if runs == "e2b" else runs)
+        assert _commands(said.node)[0] == runs
     finally:
         await ws.close()
 

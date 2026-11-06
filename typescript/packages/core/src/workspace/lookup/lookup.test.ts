@@ -966,6 +966,7 @@ describe('a wrapper runs where the program it runs is captured', () => {
     [true, 'ionice -c2 gcc x.c', 'docker'],
     [true, 'setsid -w gcc x.c', 'docker'],
     [false, 'nice gcc x.c', 'docker'],
+    [true, 'make -j2', 'e2b'],
     [true, 'nice make', 'e2b'],
     [true, 'nice python3 -c 1', 'e2b'],
     [true, 'nice', 'e2b'],
@@ -978,7 +979,7 @@ describe('a wrapper runs where the program it runs is captured', () => {
       const io = await ws.shell(line)
       expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, `${runs}\n`])
       const said = await ws.explain(line)
-      expect(runtimesOf(said.node)[0]).toBe(runs === 'e2b' ? '' : runs)
+      expect(runtimesOf(said.node)[0]).toBe(runs)
     } finally {
       await ws.close()
     }

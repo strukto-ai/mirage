@@ -26,7 +26,7 @@ import type {
 import { opQuestion } from '../../policy/decisions.ts'
 import { agreed, settled } from '../../policy/policies.ts'
 import type { Runtime } from '../../runtime/base.ts'
-import { WHOLE_LINE } from '../../runtime/constants.ts'
+import { EXTERNAL_COMMANDS, WHOLE_LINE } from '../../runtime/constants.ts'
 import {
   bindCommands,
   catchAll,
@@ -34,6 +34,7 @@ import {
   wholeLineRuntime,
 } from '../../runtime/table.ts'
 import { routedConsumer } from '../lookup/lookup.ts'
+import { Consumer } from '../lookup/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import type { Judged, Walked } from '../node/explain.ts'
@@ -174,20 +175,34 @@ export class Router {
   /**
    * The runtime entry that serves a command under a decision: the `@line`
    * runtime when one takes the line, where the program a wrapper runs is for
-   * that wrapper as its run places it (`routedConsumer`), empty when the
-   * workspace runs it itself. Mirrors Python's `Router.runtime_for`.
+   * that wrapper as its run places it (`routedConsumer`), the `@external`
+   * runtime for a program no name binds, empty when the workspace runs it
+   * itself. Mirrors Python's `Router.runtime_for`.
    */
   runtimeFor(one: Judged, placed: RouteDecision<Runtime>): string {
     const whole = wholeLineRuntime(placed.bindings)
     if (whole !== null) return whole.name
     const command = one.judgment.command
-    const decision =
-      one.ctx !== undefined && one.session !== undefined
-        ? (routedConsumer(command, one.ctx.argv, one.session, this.registry, placed)[1] ?? placed)
-        : placed
+    let decision = placed
+    let fallback = placed.fallback
+    if (one.ctx !== undefined && one.session !== undefined) {
+      const [consumer, routed] = routedConsumer(
+        command,
+        one.ctx.argv,
+        one.session,
+        this.registry,
+        placed,
+      )
+      decision = routed ?? placed
+      if (consumer === Consumer.EXTERNAL) {
+        fallback = Object.hasOwn(decision.bindings, EXTERNAL_COMMANDS)
+          ? (decision.bindings[EXTERNAL_COMMANDS] ?? null)
+          : null
+      }
+    }
     const serving = Object.hasOwn(decision.bindings, command)
       ? (decision.bindings[command] ?? null)
-      : decision.fallback
+      : fallback
     if (serving === null || serving instanceof WorkspaceRuntime) return ''
     return serving.name
   }
