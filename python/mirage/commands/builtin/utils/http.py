@@ -54,8 +54,8 @@ MISSING_HTTPX = "httpx is required for curl/wget: pip install 'mirage[http]'"
 class HttpResponse:
     status: int
     reason: str
-    # Whole for every redirect hop; the final hop's arrives as it is read
-    # when the request asked for a stream.
+    # Empty for every redirect hop, which is let go unread; the final
+    # hop's arrives as it is read when the request asked for a stream.
     body: ByteSource
     # The URL this hop was asked for and the method the client sent for
     # it: a redirect can move both (a POST becomes a GET on 301, 302 and
@@ -96,13 +96,6 @@ def _hop(resp: Any, body: ByteSource) -> HttpResponse:
         url=str(resp.url),
         headers=tuple(resp.headers.multi_items()),
         method=resp.request.method,
-    )
-
-
-def _response(resp: Any, body: ByteSource) -> HttpResponse:
-    return replace(
-        _hop(resp, body),
-        history=tuple(_hop(r, r.content) for r in resp.history),
     )
 
 
@@ -184,36 +177,51 @@ async def http_request(
             )
 
         event_hooks = {"request": [send_cookies], "response": [keep_cookies]}
+    # Redirects are followed by hand: httpx reads every hop's body whole
+    # before following it, and no hop's body is ever shown.
     client = httpx.AsyncClient(
         timeout=timeout,
-        follow_redirects=follow_redirects,
+        follow_redirects=False,
         verify=verify,
         event_hooks=event_hooks,
     )
     handed = False
+    history: list[HttpResponse] = []
     try:
-        try:
-            resp = await client.send(
-                client.build_request(
-                    method,
-                    url,
-                    headers=_with_default_ua(headers),
-                    content=data,
-                    data=form_data,
-                ),
-                stream=stream,
-            )
-        # A timeout is a transport error too, so it is told apart first:
-        # curl answers it with its own code (28), not the connect one.
-        except httpx.TimeoutException as exc:
-            raise _timeout(url, started) from exc
-        except httpx.TransportError as exc:
-            raise HttpConnectError(host, port) from exc
+        request = client.build_request(
+            method,
+            url,
+            headers=_with_default_ua(headers),
+            content=data,
+            data=form_data,
+        )
+        while True:
+            try:
+                resp = await client.send(request, stream=True)
+                follows = follow_redirects and resp.next_request is not None
+                if not stream and not follows:
+                    await resp.aread()
+            # A timeout is a transport error too, so it is told apart first:
+            # curl answers it with its own code (28), not the connect one.
+            except httpx.TimeoutException as exc:
+                raise _timeout(url, started) from exc
+            except httpx.TransportError as exc:
+                raise HttpConnectError(host, port) from exc
+            if not follows:
+                break
+            await resp.aclose()
+            history.append(_hop(resp, b""))
+            if len(history) > client.max_redirects:
+                raise httpx.TooManyRedirects(
+                    "Exceeded maximum allowed redirects.",
+                    request=resp.next_request,
+                )
+            request = resp.next_request
         if not stream:
-            return _response(resp, resp.content)
+            return replace(_hop(resp, resp.content), history=tuple(history))
         body = await prime_stream(_streamed(client, resp, url, started))
         handed = True
-        return _response(resp, body)
+        return replace(_hop(resp, body), history=tuple(history))
     finally:
         if not handed:
             await client.aclose()

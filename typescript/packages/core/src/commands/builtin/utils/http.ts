@@ -32,8 +32,8 @@ const DEFAULT_PORTS: Record<string, number> = { 'http:': 80, 'https:': 443 }
 export interface HttpResponse {
   status: number
   reason: string
-  // Whole for every redirect hop; the final hop's arrives as it is read when
-  // the request asked for a stream.
+  // Empty for every redirect hop, which is let go unread; the final hop's
+  // arrives as it is read when the request asked for a stream.
   body: ByteSource
   // The URL this hop was asked for and the method the client sent for it:
   // a redirect can move both (a POST becomes a GET on 301, 302 and 303, in
@@ -271,24 +271,27 @@ async function doFetch(url: string, options: HttpRequestOptions): Promise<HttpRe
         handed = true
         return { ...hop(resp, current, method, body), history }
       }
-      let buf: ArrayBuffer
-      try {
-        // The deadline can fire while the body is still arriving, so the
-        // body is read under the same failures, as httpx reads it inside
-        // the request the python twin wraps.
-        buf = await resp.arrayBuffer()
-      } catch (err) {
-        throw failure(err, caller, current, started)
-      }
-      const answer = hop(resp, current, method, new Uint8Array(buf))
       if (next === null) {
-        return { ...answer, history }
+        let buf: ArrayBuffer
+        try {
+          // The deadline can fire while the body is still arriving, so the
+          // body is read under the same failures, as httpx reads it inside
+          // the request the python twin wraps.
+          buf = await resp.arrayBuffer()
+        } catch (err) {
+          throw failure(err, caller, current, started)
+        }
+        return { ...hop(resp, current, method, new Uint8Array(buf)), history }
       }
+      // No hop's body is ever shown, so it is let go unread.
+      await resp.body?.cancel().catch((err: unknown) => {
+        console.debug('body cancel failed:', err)
+      })
       if (history.length >= MAX_REDIRECTS) {
         const { host, port } = endpoint(current)
         throw new HttpConnectError(host, port)
       }
-      history.push(answer)
+      history.push(hop(resp, current, method, new Uint8Array()))
       if (!next.sameOrigin) {
         // Credentials stay with the host they were typed for, as the native
         // follow and curl (without --location-trusted) both keep them: the

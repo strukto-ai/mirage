@@ -182,9 +182,7 @@ describe('redirect history', () => {
     expect(resp.history.map((h) => [h.status, h.url, new Map(h.headers).get('location')])).toEqual([
       [302, 'http://x.test/redirect', '/hello'],
     ])
-    expect(new TextDecoder().decode(await materialize(resp.history[0]?.body ?? null))).toBe(
-      '302: Found',
-    )
+    expect(await materialize(resp.history[0]?.body ?? null)).toEqual(new Uint8Array())
     expect(urlsCalled(mock)).toEqual(['http://x.test/redirect', 'http://x.test/hello'])
     // Every hop is asked for by hand, so the platform never hides one.
     expect(mock.mock.calls.map((call) => call[1]?.redirect)).toEqual(['manual', 'manual'])
@@ -244,6 +242,35 @@ describe('redirect history', () => {
     })
     expect(resp.url).toBe('http://other.test/hello')
     expect(away.mock.calls[1]?.[1]?.headers).not.toHaveProperty('Authorization')
+  })
+
+  it('lets a redirect body go unread', async () => {
+    let pulled = 0
+    let cancelled = false
+    const big = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled === 64) {
+          controller.close()
+          return
+        }
+        pulled += 1
+        controller.enqueue(new Uint8Array(1 << 20))
+      },
+      cancel() {
+        cancelled = true
+      },
+    })
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(new Response(big, { status: 302, headers: { Location: '/end' } }))
+        .mockResolvedValueOnce(new Response('ok', { status: 200 })),
+    )
+    const resp = await httpRequest('http://x.test/big', { followRedirects: true, stream: true })
+    expect(new TextDecoder().decode(await materialize(resp.body))).toBe('ok')
+    expect(pulled).toBeLessThanOrEqual(1)
+    expect(cancelled).toBe(true)
   })
 
   it('returns the redirect itself when not following', async () => {
