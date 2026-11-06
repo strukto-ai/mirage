@@ -104,8 +104,12 @@ class MicrosandboxRuntime(RemoteSandbox, PipeTransportMixin):
     ) -> RunResult:
         # Released msb can still auto-start a guest stopped after this probe.
         await self.connect()
+        # Piped stdin skips --stream: msb fails more runs that close it early.
+        head = (
+            self._head() if stdin is not None else (*self._head(), "--stream")
+        )
         return await self._microsandbox(
-            exec_args(self._head(), ("--",), env, cwd, argv),
+            exec_args(head, ("--",), env, cwd, argv),
             stdin=stdin,
             output=output,
             errors=errors,

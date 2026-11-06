@@ -129,6 +129,8 @@ restart, commands exit 126 until it is mounted again.
 - Closing the runtime leaves the sandbox running.
 - A [timeout](/home/setup/runtime/sandbox#timeouts) cancels the CLI call and
   stops that run's processes in the sandbox.
+- A program's output reaches Mirage as it prints, except when Mirage pipes
+  input into the program: then the output arrives when the program ends.
 - Commands share the sandbox's files and processes. Use one sandbox per tenant.
 - Environment values are passed as CLI arguments. Avoid secrets on hosts shared
   with untrusted users.

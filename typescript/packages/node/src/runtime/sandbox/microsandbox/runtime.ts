@@ -108,7 +108,9 @@ export class MicrosandboxRuntime
     signal?.throwIfAborted()
     await this.connect(signal)
     signal?.throwIfAborted()
-    const args = execArgs(this.head(), ['--'], env, cwd, argv)
+    // Piped stdin skips --stream: msb fails more runs that close it early.
+    const head = stdin === null ? [...this.head(), '--stream'] : this.head()
+    const args = execArgs(head, ['--'], env, cwd, argv)
     return this.microsandbox(args, stdin, output, signal, errors)
   }
 
