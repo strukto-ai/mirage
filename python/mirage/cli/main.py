@@ -60,9 +60,10 @@ def root(
 app.add_typer(workspace_module.app, name="workspace")
 app.add_typer(session_module.app, name="session")
 app.add_typer(shell_module.app, name="shell")
+workspace_module.app.add_typer(vfs_module.app, name="vfs")
+workspace_module.app.command("glob")(vfs_module.glob_cmd)
 for kind_name, kind_app in connections_module.APPS.items():
     app.add_typer(kind_app, name=kind_name)
-app.command("glob")(vfs_module.glob_cmd)
 app.command(
     "api",
     context_settings={

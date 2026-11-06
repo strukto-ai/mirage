@@ -37,13 +37,37 @@ afterEach(async () => {
   open = null
 })
 
+interface Item {
+  name: string
+  used_by?: number
+}
+
+interface Answer {
+  detail: string
+  missing?: string[]
+  id?: string
+  kind?: string
+  builtin?: boolean
+  config: Record<string, unknown>
+  captures?: unknown[]
+  sealed?: string[]
+  items: Item[]
+}
+
+type Types = Record<string, { name: string; secret: boolean; group?: string }[]>
+
 async function call(app: App, method: string, url: string, payload?: unknown) {
   const r = await app.inject({
     method: method as 'GET',
     url,
     ...(payload !== undefined ? { payload: payload as Record<string, unknown> } : {}),
   })
-  return { status: r.statusCode, body: r.body === '' ? null : r.json(), text: r.body }
+  const body = (r.body === '' ? {} : r.json<Answer>()) as Answer
+  return { status: r.statusCode, body, text: r.body }
+}
+
+async function types(app: App, url: string): Promise<Types> {
+  return (await app.inject({ method: 'GET', url })).json<Types>()
 }
 
 describe('entries router', () => {
@@ -58,9 +82,9 @@ describe('entries router', () => {
     expect(got.body.sealed).toEqual(['token'])
     expect(got.text).not.toContain('ghp_x')
     const listed = await call(app, 'GET', '/v1/vfs')
-    expect(listed.body.items.map((i: { name: string }) => i.name)).toEqual(['github'])
-    expect(listed.body.items[0].used_by).toBe(0)
-    expect(listed.body.items[0].sealed).toBeUndefined()
+    expect(listed.body.items.map((i) => i.name)).toEqual(['github'])
+    expect(listed.body.items[0]?.used_by).toBe(0)
+    expect(listed.body.items[0]).not.toHaveProperty('sealed')
     expect((await store.revealEntry('vfs', 'github')).sealed).toEqual({ token: 'ghp_x' })
   })
 
@@ -158,9 +182,11 @@ describe('entries router', () => {
   it('wipes on delete, refused while a template uses the entry', async () => {
     const { app, store } = setup()
     await call(app, 'POST', '/v1/vfs', GITHUB)
-    const config = { mounts: { '/gh': { vfs: 'github', config: { from: 'strukto', ref: 'github' } } } }
+    const config = {
+      mounts: { '/gh': { vfs: 'github', config: { from: 'strukto', ref: 'github' } } },
+    }
     await store.putTemplate({ name: 'agent', config })
-    expect((await call(app, 'GET', '/v1/vfs')).body.items[0].used_by).toBe(1)
+    expect((await call(app, 'GET', '/v1/vfs')).body.items[0]?.used_by).toBe(1)
     const refused = await call(app, 'DELETE', '/v1/vfs/github')
     expect(refused).toMatchObject({ status: 409, body: { detail: 'github is used by agent' } })
     await store.deleteTemplate('agent')
@@ -176,7 +202,7 @@ describe('entries router', () => {
     await call(app, 'POST', '/v1/vfs', { ...GITHUB, name: 'work-gh' })
     await call(app, 'POST', '/v1/vfs', { name: 'notes', type: 'notion', fields: { api_key: 'k' } })
     const names = async (query: string) =>
-      (await call(app, 'GET', `/v1/vfs${query}`)).body.items.map((i: { name: string }) => i.name)
+      (await call(app, 'GET', `/v1/vfs${query}`)).body.items.map((i) => i.name)
     expect(await names('')).toEqual(['github', 'notes', 'work-gh'])
     expect(await names('?type=github')).toEqual(['github', 'work-gh'])
     expect(await names('?q=GH')).toEqual(['work-gh'])
@@ -184,18 +210,18 @@ describe('entries router', () => {
 
   it('reads types off the config schemas', async () => {
     const { app } = setup()
-    const vfs = (await call(app, 'GET', '/v1/vfs/types')).body
-    const token = vfs.github.find((f: { name: string }) => f.name === 'token')
+    const vfs = await types(app, '/v1/vfs/types')
+    const token = vfs.github?.find((f) => f.name === 'token')
     expect(token).toMatchObject({ name: 'token', type: 'string', secret: true, required: true })
     expect(vfs.ram).toBeUndefined()
-    const clis = (await call(app, 'GET', '/v1/clis/types')).body
+    const clis = await types(app, '/v1/clis/types')
     expect(clis.git).toBeUndefined()
-    const auth = clis.mcp.find((f: { name: string }) => f.name === 'auth.type')
+    const auth = clis.mcp?.find((f) => f.name === 'auth.type')
     expect(auth).toMatchObject({ group: 'auth', options: ['bearer', 'header'] })
-    const runtimes = (await call(app, 'GET', '/v1/runtimes/types')).body
-    const key = runtimes.daytona.find((f: { name: string }) => f.name === 'api_key')
-    expect(key.secret).toBe(true)
-    const stores = (await call(app, 'GET', '/v1/stores/types')).body
+    const runtimes = await types(app, '/v1/runtimes/types')
+    const key = runtimes.daytona?.find((f) => f.name === 'api_key')
+    expect(key?.secret).toBe(true)
+    const stores = await types(app, '/v1/stores/types')
     expect(stores.env).toBeUndefined()
     expect(stores['aws-sm']).toBeDefined()
   })

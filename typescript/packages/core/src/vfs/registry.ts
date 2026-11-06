@@ -326,7 +326,8 @@ export const CONFIG_SCHEMAS: Readonly<Record<string, ConfigSchemaLoader>> = {
   discord: async () => (await import('./discord/config.ts')).DiscordConfig,
   notion: async () => (await import('../core/notion/config.ts')).NotionConfig,
   jaeger: async () => (await import('./jaeger/config.ts')).JaegerConfig,
-  databricks_volume: async () => (await import('./databricks_volume/config.ts')).DatabricksVolumeConfig,
+  databricks_volume: async () =>
+    (await import('./databricks_volume/config.ts')).DatabricksVolumeConfig,
   tidb_filesystem: async () => (await import('./tidb_filesystem/config.ts')).TiDBFilesystemConfig,
   dropbox: async () => (await import('./direct/dropbox.ts')).DropboxConfig,
   s3: async () => (await import('./direct/s3.ts')).S3Config,

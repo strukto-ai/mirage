@@ -17,10 +17,10 @@ import type { EntryKind, Fields } from '@struktoai/mirage-core/resources/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Field, TypeTable } from './types.ts'
 
-export const MAX_BYTES = 16 * 1024
+const MAX_BYTES = 16 * 1024
 
 /** An AWS region as its endpoints name it: `us-east-1`, `ap-southeast-2`. */
-export const AWS_REGION = /^[a-z]{2}(-[a-z]+)+-\d{1,2}$/
+const AWS_REGION = /^[a-z]{2}(-[a-z]+)+-\d{1,2}$/
 
 /** The source the console declares for a team's own entries. */
 export const STRUKTO = 'strukto'
@@ -51,29 +51,33 @@ export function isPointer(v: unknown): v is StorePointer {
   const o = v as Record<string, unknown>
   return (
     Object.keys(o).every((k) => k === 'from' || k === 'ref' || k === 'key') &&
-    typeof o['from'] === 'string' &&
-    o['from'] !== '' &&
-    typeof o['key'] === 'string' &&
-    o['key'] !== '' &&
-    (o['ref'] === undefined || o['ref'] === null || typeof o['ref'] === 'string')
+    typeof o.from === 'string' &&
+    o.from !== '' &&
+    typeof o.key === 'string' &&
+    o.key !== '' &&
+    (o.ref === undefined || o.ref === null || typeof o.ref === 'string')
   )
 }
 
 /** The stores an entry's fields point at, each once, in order. */
 export function storesOf(config: Fields): string[] {
-  return [
-    ...new Set(
-      Object.values(config)
-        .filter(isPointer)
-        .map((p) => p.from),
-    ),
-  ]
+  const found: string[] = []
+  for (const value of Object.values(config)) {
+    if (isPointer(value) && !found.includes(value.from)) found.push(value.from)
+  }
+  return found
 }
 
-export function fieldsOf(kind: EntryKind, type: string, types: TypeTable): Field[] {
+function fieldsOf(kind: EntryKind, type: string, types: TypeTable): Field[] {
   const fields = types[type]
-  if (fields === undefined) throw invalid(`type must be a ${kind}: ${Object.keys(types).join(', ')}`)
+  if (fields === undefined)
+    throw invalid(`type must be a ${kind}: ${Object.keys(types).join(', ')}`)
   return fields
+}
+
+/** A value as an option names it: JavaScript's `String` of a scalar. */
+function textOf(value: JsonValue): string {
+  return typeof value === 'object' ? JSON.stringify(value) : String(value)
 }
 
 /**
@@ -103,19 +107,24 @@ export function valueOf(kind: EntryKind, field: Field, raw: unknown, at: string)
   } else {
     value = raw as JsonValue
   }
-  if (field.options !== undefined && !field.options.includes(String(value))) {
+  if (field.options !== undefined && !field.options.includes(textOf(value))) {
     throw bad(`one of ${field.options.join(', ')}`)
   }
   return value
 }
 
 /** The checks a type needs beyond its fields' types. */
-export function checkRules(kind: EntryKind, type: string, config: Fields): void {
-  const region = config['region']
-  if (kind === 'store' && type === 'aws-sm' && typeof region === 'string' && !AWS_REGION.test(region)) {
+function checkRules(kind: EntryKind, type: string, config: Fields): void {
+  const region = config.region
+  if (
+    kind === 'store' &&
+    type === 'aws-sm' &&
+    typeof region === 'string' &&
+    !AWS_REGION.test(region)
+  ) {
     throw invalid('region must be an AWS region, such as us-east-1')
   }
-  const url = config['url']
+  const url = config.url
   if (kind === 'cli' && type === 'mcp' && typeof url === 'string') {
     let parsed: URL | undefined
     try {
@@ -149,7 +158,9 @@ export function checkValues(
     if (raw === null || raw === undefined || raw === '') continue
     const field = fields.find((f) => f.name === name)
     if (field === undefined) {
-      throw invalid(`${type} has no field ${name}; it takes ${fields.map((f) => f.name).join(', ')}`)
+      throw invalid(
+        `${type} has no field ${name}; it takes ${fields.map((f) => f.name).join(', ')}`,
+      )
     }
     const value = valueOf(kind, field, raw, name)
     if (field.secret && !isPointer(value)) sealed[name] = value

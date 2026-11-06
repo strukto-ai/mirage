@@ -17,14 +17,17 @@ import { ENTRY_KINDS } from '@struktoai/mirage-core/resources/constants'
 import { isPointer, storesOf, STRUKTO } from './values.ts'
 
 /** The `{from: strukto, ref}` entries a config names, each once, in order. Mirrors the console's `secretRefs`. */
-export function secretRefs(config: unknown): string[] {
+function secretRefs(config: unknown): string[] {
   const found: string[] = []
   const walk = (v: unknown): void => {
-    if (Array.isArray(v)) return v.forEach(walk)
+    if (Array.isArray(v)) {
+      v.forEach(walk)
+      return
+    }
     if (v === null || typeof v !== 'object') return
     const o = v as Record<string, unknown>
-    if (o['from'] === STRUKTO && typeof o['ref'] === 'string') {
-      if (!found.includes(o['ref'])) found.push(o['ref'])
+    if (o.from === STRUKTO && typeof o.ref === 'string') {
+      if (!found.includes(o.ref)) found.push(o.ref)
       return
     }
     Object.values(o).forEach(walk)
@@ -34,10 +37,13 @@ export function secretRefs(config: unknown): string[] {
 }
 
 /** The stores a config's `{from: <store>, ref, key}` pointers name, each once, in order. Mirrors the console's `storeRefs`. */
-export function storeRefs(config: unknown): string[] {
+function storeRefs(config: unknown): string[] {
   const found: string[] = []
   const walk = (v: unknown): void => {
-    if (Array.isArray(v)) return v.forEach(walk)
+    if (Array.isArray(v)) {
+      v.forEach(walk)
+      return
+    }
     if (v === null || typeof v !== 'object') return
     if (isPointer(v)) {
       if (v.from !== STRUKTO && !found.includes(v.from)) found.push(v.from)

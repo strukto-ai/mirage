@@ -111,7 +111,8 @@ export type { VFSFactory }
 export const CONFIG_SCHEMAS: Readonly<Record<string, ConfigSchemaLoader>> = {
   ...CORE_CONFIG_SCHEMAS,
   gridfs: async () => (await import('./gridfs/config.ts')).GridFSConfig,
-  hf_buckets: async () => (await import('@struktoai/mirage-core/vfs/hf_buckets/config')).HfBucketsConfig,
+  hf_buckets: async () =>
+    (await import('@struktoai/mirage-core/vfs/hf_buckets/config')).HfBucketsConfig,
   mongodb: async () => (await import('@struktoai/mirage-core/vfs/mongodb/config')).MongoDBConfig,
   lancedb: async () => (await import('@struktoai/mirage-core/vfs/lancedb/config')).LanceDBConfig,
   ssh: async () => (await import('./ssh/config.ts')).SSHConfig,

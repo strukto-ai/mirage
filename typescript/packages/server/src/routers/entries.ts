@@ -26,7 +26,7 @@ import type { RouteApp, RouteReply } from '../routes.ts'
 import { requireOneAccount, storeRefusal } from './templates.ts'
 
 /** Each kind's route, as the console names it. */
-export const ROUTES: Readonly<Record<EntryKind, string>> = {
+const ROUTES: Readonly<Record<EntryKind, string>> = {
   vfs: '/v1/vfs',
   cli: '/v1/clis',
   runtime: '/v1/runtimes',
@@ -34,10 +34,10 @@ export const ROUTES: Readonly<Record<EntryKind, string>> = {
 }
 
 /** A name the console reads as an id, which it refuses as a name. */
-export const ID_PREFIX = /^(ws|sec|pol|key|tpl|team|usr)_/
+const ID_PREFIX = /^(ws|sec|pol|key|tpl|team|usr)_/
 
 /** A request the console answers with a 4xx and extra keys beside `detail`. */
-export class Refused extends Error {
+class Refused extends Error {
   constructor(
     readonly status: number,
     detail: string,
@@ -60,11 +60,7 @@ interface ListQuery {
  * An entry as the console answers it. The daemon keeps no id, creator or
  * times, so the id is the name and the rest are null.
  */
-export function present(
-  kind: EntryKind,
-  entry: Entry,
-  usedBy?: number,
-): Record<string, JsonValue> {
+function present(kind: EntryKind, entry: Entry, usedBy?: number): Record<string, JsonValue> {
   return {
     id: entry.name,
     name: entry.name,
@@ -80,7 +76,7 @@ export function present(
   }
 }
 
-export function requiredString(body: Record<string, unknown>, key: string): string {
+function requiredString(body: Record<string, unknown>, key: string): string {
   const value = body[key]
   if (value !== undefined && value !== null && typeof value !== 'string') {
     throw new Refused(400, `${key} must be a string`)
@@ -89,7 +85,7 @@ export function requiredString(body: Record<string, unknown>, key: string): stri
   return value
 }
 
-export function checkName(kind: EntryKind, name: string): string {
+function checkName(kind: EntryKind, name: string): string {
   if (!NAME.test(name) || ID_PREFIX.test(name)) {
     throw new Refused(
       400,
@@ -107,7 +103,7 @@ function jsonBody(body: unknown): Record<string, unknown> {
 }
 
 /** The entry of `kind` named `ref`, refused as the console refuses a missing one. */
-export async function entryNamed(store: ResourceStore, kind: EntryKind, ref: string): Promise<Entry> {
+async function entryNamed(store: ResourceStore, kind: EntryKind, ref: string): Promise<Entry> {
   try {
     return await store.getEntry(kind, ref)
   } catch (e) {
@@ -119,7 +115,7 @@ export async function entryNamed(store: ResourceStore, kind: EntryKind, ref: str
 }
 
 /** Refuse fields pointing at a store that is not saved. */
-export async function requireStores(store: ResourceStore, config: Fields): Promise<void> {
+async function requireStores(store: ResourceStore, config: Fields): Promise<void> {
   const saved = new Set((await store.listEntries('store')).map((e) => e.name))
   const missing = storesOf(config).filter((s) => !saved.has(s))
   if (missing.length > 0) {
@@ -127,7 +123,7 @@ export async function requireStores(store: ResourceStore, config: Fields): Promi
   }
 }
 
-export async function exists(store: ResourceStore, name: string): Promise<boolean> {
+async function exists(store: ResourceStore, name: string): Promise<boolean> {
   for (const kind of ENTRY_KINDS) {
     try {
       await store.getEntry(kind, name)
@@ -140,7 +136,7 @@ export async function exists(store: ResourceStore, name: string): Promise<boolea
 }
 
 /** The fields an edit removes: given as null, or now pointing at a store, whose sealed value would be read instead. */
-export function removedBy(given: unknown): Set<string> {
+function removedBy(given: unknown): Set<string> {
   if (given === null || typeof given !== 'object' || Array.isArray(given)) return new Set()
   return new Set(
     Object.entries(given as Record<string, unknown>)
@@ -200,10 +196,13 @@ export function registerEntryRoutes(
     answered(registry, reply, async () => {
       const body = jsonBody(req.body)
       const type = requiredString(body, 'type')
-      const checked = checkValues(kind, type, body['fields'], await typesOf(kind))
+      const checked = checkValues(kind, type, body.fields, await typesOf(kind))
       const name = checkName(kind, requiredString(body, 'name'))
       if (kind === 'store' && (name === STRUKTO || knownSources().includes(name))) {
-        throw new Refused(400, `${name} is a name Mirage gives a source; name the store another way`)
+        throw new Refused(
+          400,
+          `${name} is a name Mirage gives a source; name the store another way`,
+        )
       }
       await requireStores(resources, checked.config)
       if (await exists(resources, name)) throw new Refused(409, `${name} already exists`)
@@ -228,7 +227,7 @@ export function registerEntryRoutes(
     answered(registry, reply, async () => {
       const body = jsonBody(req.body)
       const current = await entryNamed(resources, kind, req.params.ref)
-      const given = body['fields']
+      const given = body.fields
       const removed = removedBy(given)
       const kept = new Set(current.sealed.filter((k) => !removed.has(k)))
       const checked = checkValues(kind, current.type, given, await typesOf(kind), kept)
@@ -257,7 +256,8 @@ export function registerEntryRoutes(
               .map(([name]) => name)
           : []
       const usedBy = [...pointing, ...((await uses(resources)).get(current.name) ?? [])]
-      if (usedBy.length > 0) throw new Refused(409, `${current.name} is used by ${usedBy.join(', ')}`)
+      if (usedBy.length > 0)
+        throw new Refused(409, `${current.name} is used by ${usedBy.join(', ')}`)
       await resources.deleteEntry(kind, current.name)
       return reply.status(204).send()
     }),

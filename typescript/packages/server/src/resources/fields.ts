@@ -29,9 +29,11 @@ import type { Field, FieldType, TypeTable } from './types.ts'
 type Schema = z.ZodType
 
 function def(s: Schema): Record<string, unknown> {
-  return ((s as unknown as { def?: Record<string, unknown> }).def ??
+  return (
+    (s as unknown as { def?: Record<string, unknown> }).def ??
     (s as unknown as { _zod?: { def?: Record<string, unknown> } })._zod?.def ??
-    {}) as Record<string, unknown>
+    {}
+  )
 }
 
 /** The schema under its optional, nullable and default wrappers, and the default they give. */
@@ -44,15 +46,15 @@ function unwrap(s: Schema): { inner: Schema; fallback: unknown } {
       continue
     }
     if (at instanceof z.ZodDefault) {
-      const d = def(at)['defaultValue']
+      const d = def(at).defaultValue
       fallback = typeof d === 'function' ? (d as () => unknown)() : d
     }
     const pipe = def(at)
-    if (pipe['type'] === 'pipe' && pipe['out'] !== undefined) {
-      at = pipe['out'] as Schema
+    if (pipe.type === 'pipe' && pipe.out !== undefined) {
+      at = pipe.out as Schema
       continue
     }
-    const inner = def(at)['innerType'] as Schema | undefined
+    const inner = def(at).innerType as Schema | undefined
     if (inner === undefined) return { inner: at, fallback }
     at = inner
   }
@@ -79,7 +81,7 @@ function kindOf(inner: Schema): { type: FieldType; options?: string[] } | null {
     return { type: 'string', options: (inner.options as unknown[]).map(String) }
   }
   if (inner instanceof z.ZodLiteral) {
-    const values = [...(def(inner)['values'] as unknown[])]
+    const values = [...(def(inner).values as unknown[])]
     return {
       type: values.every((v) => typeof v === 'number') ? 'number' : 'string',
       options: values.map(String),
@@ -90,7 +92,7 @@ function kindOf(inner: Schema): { type: FieldType; options?: string[] } | null {
   }
   if (
     inner instanceof z.ZodUnion &&
-    (def(inner)['options'] as Schema[]).some((o) => unwrap(o).inner instanceof z.ZodString)
+    (def(inner).options as Schema[]).some((o) => unwrap(o).inner instanceof z.ZodString)
   ) {
     return { type: 'string' }
   }
@@ -102,7 +104,7 @@ function kindOf(inner: Schema): { type: FieldType; options?: string[] } | null {
  * nested block's fields as `block.field` in its `group`, and only the
  * fields a config can hold. Mirrors Python's `model_fields`.
  */
-export function schemaFields(schema: Schema, group?: string): Field[] {
+function modelFields(schema: Schema, group?: string): Field[] {
   const object = unwrap(schema).inner
   if (!(object instanceof z.ZodObject)) return []
   const out: Field[] = []
@@ -110,17 +112,17 @@ export function schemaFields(schema: Schema, group?: string): Field[] {
     const { inner, fallback } = unwrap(raw)
     const name = configName(camel, object)
     if (inner instanceof z.ZodObject) {
-      for (const f of schemaFields(inner, name)) out.push({ ...f, name: `${name}.${f.name}` })
+      for (const f of modelFields(inner, name)) out.push({ ...f, name: `${name}.${f.name}` })
       continue
     }
     const kind = kindOf(inner)
     if (kind === null) continue
-    const description = raw.description ?? inner.description ?? meta(inner)['description']
-    const given = meta(raw)['default'] ?? meta(inner)['default'] ?? fallback
+    const description = raw.description ?? inner.description ?? meta(inner).description
+    const given = meta(raw).default ?? meta(inner).default ?? fallback
     out.push({
       name,
       type: kind.type,
-      secret: meta(inner)['mirageSecret'] === true,
+      secret: meta(inner).mirageSecret === true,
       required: !raw.safeParse(undefined).success,
       ...(kind.options !== undefined ? { options: kind.options } : {}),
       ...(typeof description === 'string' && description !== '' ? { description } : {}),
@@ -134,25 +136,23 @@ export function schemaFields(schema: Schema, group?: string): Field[] {
 }
 
 /** Every registered VFS that parses a config, with its fields. */
-export async function vfsTypes(): Promise<TypeTable> {
+async function vfsTypes(): Promise<TypeTable> {
   const out: TypeTable = {}
   for (const name of knownVfsNames()) {
     const load = CONFIG_SCHEMAS[name]
-    if (load !== undefined) out[name] = schemaFields(await load())
+    if (load !== undefined) out[name] = modelFields(await load())
   }
   return out
 }
 
 /** Every registered CLI that takes a config, and `mcp`, with its fields. */
-export function cliTypes(): TypeTable {
-  const out: TypeTable = { [MCP_CLI]: schemaFields(MCPConfig) }
+function cliTypes(): TypeTable {
+  const out: TypeTable = { [MCP_CLI]: modelFields(MCPConfig) }
   for (const name of knownCliNames()) {
     const model = cliSpecFor(name).configModel
-    if (model instanceof z.ZodObject) out[name] = schemaFields(model)
+    if (model instanceof z.ZodObject) out[name] = modelFields(model)
   }
-  return Object.fromEntries(
-    Object.entries(out).sort(([a], [b]) => compareCodePoints(a, b)),
-  )
+  return Object.fromEntries(Object.entries(out).sort(([a], [b]) => compareCodePoints(a, b)))
 }
 
 /**
@@ -160,13 +160,18 @@ export function cliTypes(): TypeTable {
  * runtime's config as a key list, so each is a string field; Python reads
  * the types off its config dataclass.
  */
-export function runtimeTypes(): TypeTable {
+function runtimeTypes(): TypeTable {
   const out: TypeTable = {}
   for (const name of knownRuntimes()) {
     const cls = runtimeClass(name) as unknown as { configKeys?: readonly string[] }
     out[name] = (cls.configKeys ?? []).map((camel) => {
       const field = camel.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
-      return { name: field, type: 'string', secret: SECRET_CONFIG_FIELDS.has(field), required: false }
+      return {
+        name: field,
+        type: 'string',
+        secret: SECRET_CONFIG_FIELDS.has(field),
+        required: false,
+      }
     })
   }
   return out
@@ -177,11 +182,11 @@ export function runtimeTypes(): TypeTable {
  * environment and dotenv sources read the daemon's own files, so there is
  * nothing to save for them.
  */
-export function storeTypes(): TypeTable {
+function storeTypes(): TypeTable {
   const out: TypeTable = {}
   for (const name of knownSources()) {
     if (BOOTSTRAP_SOURCES.includes(name)) continue
-    out[name] = schemaFields(sourceFor(name).configModel)
+    out[name] = modelFields(sourceFor(name).configModel)
   }
   return out
 }

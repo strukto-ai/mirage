@@ -27,6 +27,7 @@ import { registerDaemonCommands } from './daemon.ts'
 import { registerShellCommand } from './shell.ts'
 import { registerToolCommands } from './tools.ts'
 import { registerVfsCommands } from './vfs.ts'
+import { registerConnectionCommands } from './connections.ts'
 import { registerLoginCommands } from './login.ts'
 import { registerMcpCommand } from './mcp.ts'
 import { registerRpcCommand } from './rpc.ts'
@@ -65,7 +66,9 @@ export function buildProgram(): Command {
   registerWorkspaceCommands(program)
   registerSessionCommands(program)
   registerShellCommand(program)
-  registerVfsCommands(program)
+  const workspace = program.commands.find((c) => c.name() === 'workspace')
+  if (workspace !== undefined) registerVfsCommands(workspace)
+  registerConnectionCommands(program)
   registerApiCommand(program)
   registerToolCommands(program)
   registerMcpCommand(program)
