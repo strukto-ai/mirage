@@ -2,10 +2,13 @@ openapi: 3.1.0
 info:
   title: Mirage API
   version: '0.1'
+servers:
+  - url: http://127.0.0.1:8765
+    description: A local daemon on its default port
 paths:
   /v1/workspaces:
     post:
-      summary: Create Workspace
+      summary: Create a workspace
       operationId: create_workspace_v1_workspaces_post
       parameters:
         - name: explain
@@ -56,7 +59,7 @@ paths:
         - daemon
         - console
     get:
-      summary: List Workspaces
+      summary: List workspaces
       operationId: list_workspaces_v1_workspaces_get
       responses:
         '200':
@@ -75,7 +78,7 @@ paths:
         - console
   /v1/workspaces/{workspace_id}:
     get:
-      summary: Get Workspace
+      summary: Get a workspace
       operationId: get_workspace_v1_workspaces__workspace_id__get
       parameters:
         - name: workspace_id
@@ -110,7 +113,7 @@ paths:
         - daemon
         - console
     delete:
-      summary: Delete Workspace
+      summary: Delete a workspace
       operationId: delete_workspace_v1_workspaces__workspace_id__delete
       parameters:
         - name: workspace_id
@@ -139,7 +142,7 @@ paths:
         - console
   /v1/workspaces/{workspace_id}/history:
     get:
-      summary: Workspace History
+      summary: Read a workspace's history
       operationId: workspace_history_v1_workspaces__workspace_id__history_get
       parameters:
         - name: workspace_id
@@ -211,7 +214,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/close:
     post:
-      summary: Close Workspace
+      summary: Close a workspace
       operationId: close_workspace_v1_workspaces__workspace_id__close_post
       parameters:
         - name: workspace_id
@@ -240,7 +243,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/cancel:
     post:
-      summary: Cancel Workspace Lines
+      summary: Cancel a workspace's lines
       operationId: cancel_workspace_lines_v1_workspaces__workspace_id__cancel_post
       parameters:
         - name: workspace_id
@@ -270,7 +273,7 @@ paths:
         - console
   /v1/workspaces/{workspace_id}/kill:
     post:
-      summary: Kill Workspace Jobs
+      summary: Kill a workspace's jobs
       operationId: kill_workspace_jobs_v1_workspaces__workspace_id__kill_post
       parameters:
         - name: workspace_id
@@ -299,7 +302,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/profiles/{name}:
     put:
-      summary: Set Profile
+      summary: Set a profile
       operationId: set_profile_v1_workspaces__workspace_id__profiles__name__put
       parameters:
         - name: workspace_id
@@ -348,7 +351,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/clis/{name}:
     put:
-      summary: Set Cli
+      summary: Install an MCP CLI
       operationId: set_cli_v1_workspaces__workspace_id__clis__name__put
       parameters:
         - name: workspace_id
@@ -398,7 +401,7 @@ paths:
       x-hosts:
         - daemon
     delete:
-      summary: Delete Cli
+      summary: Remove an MCP CLI
       operationId: delete_cli_v1_workspaces__workspace_id__clis__name__delete
       parameters:
         - name: workspace_id
@@ -436,7 +439,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/clone:
     post:
-      summary: Clone Workspace
+      summary: Clone a workspace
       operationId: clone_workspace_v1_workspaces__workspace_id__clone_post
       parameters:
         - name: workspace_id
@@ -470,7 +473,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/snapshot:
     get:
-      summary: Download Snapshot
+      summary: Download a snapshot
       operationId: download_snapshot_v1_workspaces__workspace_id__snapshot_get
       parameters:
         - name: workspace_id
@@ -496,7 +499,7 @@ paths:
       x-hosts:
         - daemon
     post:
-      summary: Snapshot Workspace
+      summary: Snapshot a workspace
       operationId: snapshot_workspace_v1_workspaces__workspace_id__snapshot_post
       parameters:
         - name: workspace_id
@@ -530,7 +533,7 @@ paths:
         - daemon
   /v1/workspaces/load:
     post:
-      summary: Load Workspace
+      summary: Load a snapshot
       operationId: load_workspace_v1_workspaces_load_post
       responses:
         '201':
@@ -545,7 +548,7 @@ paths:
         - daemon
   /v1/templates:
     get:
-      summary: List Templates
+      summary: List templates
       operationId: list_templates_v1_templates_get
       responses:
         '200':
@@ -564,7 +567,7 @@ paths:
         - daemon
         - console
     post:
-      summary: Create Template
+      summary: Create a template
       operationId: create_template_v1_templates_post
       requestBody:
         content:
@@ -595,7 +598,7 @@ paths:
         - console
   /v1/templates/{ref}:
     get:
-      summary: Get Template
+      summary: Get a template
       operationId: get_template_v1_templates__ref__get
       parameters:
         - name: ref
@@ -623,7 +626,7 @@ paths:
         - daemon
         - console
     delete:
-      summary: Delete Template
+      summary: Delete a template
       operationId: delete_template_v1_templates__ref__delete
       parameters:
         - name: ref
@@ -649,7 +652,7 @@ paths:
         - console
   /v1/templates/{ref}/restore:
     post:
-      summary: Restore Template
+      summary: Restore a template
       operationId: restore_template_v1_templates__ref__restore_post
       parameters:
         - name: ref
@@ -1042,7 +1045,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/sessions:
     post:
-      summary: Create Session
+      summary: Create a session
       operationId: create_session_v1_workspaces__workspace_id__sessions_post
       parameters:
         - name: workspace_id
@@ -1076,7 +1079,7 @@ paths:
         - daemon
         - console
     get:
-      summary: List Sessions
+      summary: List sessions
       operationId: list_sessions_v1_workspaces__workspace_id__sessions_get
       parameters:
         - name: workspace_id
@@ -1108,7 +1111,7 @@ paths:
         - console
   /v1/workspaces/{workspace_id}/sessions/{session_id}:
     delete:
-      summary: Delete Session
+      summary: Delete a session
       operationId: delete_session_v1_workspaces__workspace_id__sessions__session_id__delete
       parameters:
         - name: workspace_id
@@ -1141,7 +1144,7 @@ paths:
       x-hosts:
         - daemon
     patch:
-      summary: Update Session
+      summary: Change a session's profile
       operationId: update_session_v1_workspaces__workspace_id__sessions__session_id__patch
       parameters:
         - name: workspace_id
@@ -1182,7 +1185,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/sessions/{session_id}/cancel:
     post:
-      summary: Cancel Session Lines
+      summary: Cancel a session's lines
       operationId: cancel_session_lines_v1_workspaces__workspace_id__sessions__session_id__cancel_post
       parameters:
         - name: workspace_id
@@ -1220,7 +1223,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/sessions/{session_id}/kill:
     post:
-      summary: Kill Session Jobs
+      summary: Kill a session's jobs
       operationId: kill_session_jobs_v1_workspaces__workspace_id__sessions__session_id__kill_post
       parameters:
         - name: workspace_id
@@ -1255,7 +1258,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/asks:
     get:
-      summary: List Asks
+      summary: List asks
       operationId: list_asks_v1_workspaces__workspace_id__asks_get
       parameters:
         - name: workspace_id
@@ -1305,7 +1308,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/asks/{ask_id}:
     post:
-      summary: Answer Ask
+      summary: Answer an ask
       operationId: answer_ask_v1_workspaces__workspace_id__asks__ask_id__post
       parameters:
         - name: workspace_id
@@ -1352,7 +1355,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/shell:
     post:
-      summary: Shell
+      summary: Run a shell line
       operationId: shell_v1_workspaces__workspace_id__shell_post
       parameters:
         - name: workspace_id
@@ -1396,13 +1399,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPValidationError'
       tags:
-        - Workspaces
+        - Shell
       x-hosts:
         - daemon
         - console
   /v1/workspaces/{workspace_id}/tools/shell:
     post:
-      summary: Tool shell
+      summary: Shell tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_shell_post
       parameters:
         - name: workspace_id
@@ -1438,7 +1441,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/tools/read:
     post:
-      summary: Tool read
+      summary: Read tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_read_post
       parameters:
         - name: workspace_id
@@ -1474,7 +1477,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/tools/write:
     post:
-      summary: Tool write
+      summary: Write tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_write_post
       parameters:
         - name: workspace_id
@@ -1510,7 +1513,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/tools/edit:
     post:
-      summary: Tool edit
+      summary: Edit tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_edit_post
       parameters:
         - name: workspace_id
@@ -1546,7 +1549,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/tools/ls:
     post:
-      summary: Tool ls
+      summary: Ls tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_ls_post
       parameters:
         - name: workspace_id
@@ -1582,7 +1585,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/tools/grep:
     post:
-      summary: Tool grep
+      summary: Grep tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_grep_post
       parameters:
         - name: workspace_id
@@ -1618,7 +1621,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/tools/glob:
     post:
-      summary: Tool glob
+      summary: Glob tool
       operationId: endpoint_v1_workspaces__workspace_id__tools_glob_post
       parameters:
         - name: workspace_id
@@ -2620,7 +2623,7 @@ paths:
         - daemon
   /v1/workspaces/{workspace_id}/glob:
     post:
-      summary: Glob
+      summary: Match paths
       operationId: glob_v1_workspaces__workspace_id__glob_post
       parameters:
         - name: workspace_id
@@ -2653,7 +2656,7 @@ paths:
 
         sees them.'
       tags:
-        - Workspaces
+        - Shell
       x-hosts:
         - daemon
         - console
@@ -2701,7 +2704,7 @@ paths:
         - daemon
   /v1/health:
     get:
-      summary: Health
+      summary: Check health
       operationId: health_v1_health_get
       responses:
         '200':
@@ -2716,7 +2719,7 @@ paths:
         - daemon
   /v1/ready:
     get:
-      summary: Ready
+      summary: Check readiness
       operationId: ready_v1_ready_get
       responses:
         '200':
@@ -2735,7 +2738,7 @@ paths:
         - daemon
   /v1/shutdown:
     post:
-      summary: Shutdown
+      summary: Shut down the server
       operationId: shutdown_v1_shutdown_post
       responses:
         '200':
@@ -2760,7 +2763,7 @@ paths:
         - daemon
   /.well-known/oauth-protected-resource:
     get:
-      summary: Protected Resource
+      summary: Read OAuth protected-resource metadata
       operationId: protected_resource__well_known_oauth_protected_resource_get
       responses:
         '200':
