@@ -456,7 +456,8 @@ Returns HTTP 201 Created with the restored workspace.
 A saved policy is a Python program kept by name, as the hosted API keeps one. Its
 name ends in `.py`, such as `guard.py`, and its source is at most 64 KB. The
 local daemon keeps them under `~/.mirage/resources`, as `resource_store` sets.
-A server of many [accounts](#accounts) answers HTTP 501 on these routes.
+`{id}` takes a policy's ID or its name; on the local daemon a policy's ID is
+its name. A server of many [accounts](#accounts) answers HTTP 501 on these routes.
 
 ### Create a policy
 
@@ -480,21 +481,21 @@ Returns the names, sorted; get one for its source:
 
 ### Get a policy
 
-<Badge color="blue">GET</Badge> `/v1/policies/{name}`
+<Badge color="blue">GET</Badge> `/v1/policies/{id}`
 
 Returns `{"name", "source"}`.
 
 ### Update a policy
 
-<Badge color="orange">PUT</Badge> `/v1/policies/{name}`
+<Badge color="orange">PUT</Badge> `/v1/policies/{id}`
 
 <ParamField body="source" type="string" required>The new program.</ParamField>
 
-Returns `{"name", "source"}`. A name not saved returns HTTP 404 Not Found.
+Returns `{"name", "source"}`. An ID or name not saved returns HTTP 404 Not Found.
 
 ### Delete a policy
 
-<Badge color="red">DELETE</Badge> `/v1/policies/{name}`
+<Badge color="red">DELETE</Badge> `/v1/policies/{id}`
 
 Returns HTTP 204 No Content.
 

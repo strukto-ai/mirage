@@ -19,7 +19,9 @@ import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { Command } from 'commander'
 import { afterEach, describe, expect, it } from 'vitest'
+import { registerTemplateCommands } from './template.ts'
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'bin', 'mirage.js')
 const SAVED = {
@@ -80,6 +82,16 @@ async function template(
 }
 
 describe('mirage template', () => {
+  it('names a saved template by its ID, and a new one by its name', () => {
+    const program = new Command()
+    registerTemplateCommands(program)
+    const template = program.commands.find((c) => c.name() === 'template')
+    const first = (name: string) =>
+      template?.commands.find((c) => c.name() === name)?.registeredArguments[0]?.name()
+    expect(['get', 'delete', 'restore'].map(first)).toEqual(['id', 'id', 'id'])
+    expect(first('create')).toBe('name')
+  })
+
   it('lists the items of the answer', async () => {
     const { url } = await fakeServer()
     const listed = await template(url, 'list')

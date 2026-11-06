@@ -224,7 +224,7 @@ a `workspace_id`.
 
 A template is a saved workspace config. `-f` takes a workspace config, or a
 file with `name`, an optional `description`, and `config`, as
-`mirage template get NAME -o yaml` prints one:
+`mirage template get ID -o yaml` prints one:
 
 ```bash
 mirage template create ram-only -f workspace.yaml --description "One RAM mount"
@@ -235,9 +235,9 @@ mirage workspace create --template ram-only -w demo
 | --- | --- |
 | `mirage template create NAME -f FILE [--description TEXT]` | Save a config as a template. |
 | `mirage template list` | List templates. |
-| `mirage template get NAME [-o yaml]` | Print one; `-o yaml` is a file `create -f` reads back. |
-| `mirage template delete NAME` | Delete one. |
-| `mirage template restore NAME` | Bring a deleted one back. |
+| `mirage template get ID [-o yaml]` | Print one; `-o yaml` is a file `create -f` reads back. |
+| `mirage template delete ID` | Delete one. |
+| `mirage template restore ID` | Bring a deleted one back. |
 
 The file is saved as written: `${NAME}` is not read from the environment. The
 server checks the config when it saves the template, as a create would. A
@@ -245,22 +245,25 @@ workspace gets a copy of the template's config, so a later change to the
 template leaves it as it is, and a template's config cannot set
 `workspace_id`: `-w` names the workspace. Give a config file or `--template`,
 not both. The local daemon keeps templates under `~/.mirage/resources`, as
-`resource_store` sets.
+`resource_store` sets. `get`, `delete` and `restore` take the template's ID or
+its name: a name is unique, so it works as an ID. On the local daemon a
+template's ID is its name.
 
 ### Saved policies
 
 `mirage policy` keeps Python programs by name on the daemon, or on the
 hosted API, through the [`/v1/policies`](/home/access/http#saved-policies)
 routes. A name ends in `.py`. `--source @FILE` reads a file; any other value
-is the program itself.
+is the program itself. `get`, `update` and `delete` take the policy's ID or
+its name, which works as an ID; on the local daemon the two are the same.
 
 | Command | Does |
 | --- | --- |
 | `mirage policy create NAME --source @FILE\|TEXT` | Save a new policy. A name already saved exits 2. |
 | `mirage policy list` | List the saved names. |
-| `mirage policy get NAME [-o yaml]` | Show one; in a terminal, its source. |
-| `mirage policy update NAME --source @FILE\|TEXT` | Replace its source. |
-| `mirage policy delete NAME` | Delete it. |
+| `mirage policy get ID [-o yaml]` | Show one; in a terminal, its source. |
+| `mirage policy update ID --source @FILE\|TEXT` | Replace its source. |
+| `mirage policy delete ID` | Delete it. |
 
 ```bash
 mirage policy create guard.py --source @guard.py

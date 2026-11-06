@@ -18,7 +18,16 @@ import { Writable } from 'node:stream'
 import type { Command } from 'commander'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { type DaemonClient, makeClient } from './client.ts'
-import { emit, fail, formatTable, handleResponse, outputOf, show, type Output } from './output.ts'
+import {
+  emit,
+  fail,
+  formatTable,
+  handleResponse,
+  ID_HELP,
+  outputOf,
+  show,
+  type Output,
+} from './output.ts'
 
 /** One kind of saved connection: its command, route and noun. */
 interface Kind {
@@ -32,8 +41,6 @@ const KINDS: readonly Kind[] = [
   { name: 'cli', route: '/v1/clis', noun: 'CLI' },
   { name: 'runtime', route: '/v1/runtimes', noun: 'runtime' },
 ]
-
-const ID_HELP = "The entry's ID, or its name: a name is unique, so it works as an ID."
 
 const NO_ARGV_SECRET = (key: string): string =>
   `a secret never comes from the command line: use --secret ${key} to be prompted ` +

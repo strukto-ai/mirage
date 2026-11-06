@@ -17,7 +17,16 @@ import { dirname, resolve } from 'node:path'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { header } from './settings.ts'
-import { emit, fail, formatTable, handleResponse, outputOf, show, type Output } from './output.ts'
+import {
+  emit,
+  fail,
+  formatTable,
+  handleResponse,
+  ID_HELP,
+  outputOf,
+  show,
+  type Output,
+} from './output.ts'
 
 interface Template {
   name: string
@@ -123,7 +132,7 @@ export function registerTemplateCommands(program: Command): void {
   template
     .command('get')
     .description('Print a template; `-o yaml` is a file `create -f` reads.')
-    .argument('<name>', 'Template name')
+    .argument('<id>', ID_HELP)
     .option('-o, --output <format>', 'yaml: a file create -f and update -f read.', outputOf)
     .action(async (name: string, opts: { output?: Output }) => {
       const found = (await call('GET', templatePath(name))) as Template
@@ -134,7 +143,7 @@ export function registerTemplateCommands(program: Command): void {
   template
     .command('delete')
     .description('Delete a template; `restore` brings it back.')
-    .argument('<name>', 'Template name')
+    .argument('<id>', ID_HELP)
     .action(async (name: string) => {
       await call('DELETE', templatePath(name))
       header(`deleted template ${name}`)
@@ -144,7 +153,7 @@ export function registerTemplateCommands(program: Command): void {
   template
     .command('restore')
     .description('Bring back a deleted template.')
-    .argument('<name>', 'Template name')
+    .argument('<id>', ID_HELP)
     .action(async (name: string) => {
       const restored = (await call('POST', `${templatePath(name)}/restore`)) as Template
       header(`restored template ${name}`)

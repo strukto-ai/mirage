@@ -120,3 +120,12 @@ def test_a_missing_source_file_exits_2(daemon, tmp_path):
     code, out = run("create", "a.py", "--source", f"@{tmp_path}/none.py")
     assert code == 2
     assert daemon.calls == []
+
+
+@pytest.mark.parametrize("command", ["get", "update", "delete"])
+def test_a_saved_policy_is_named_by_id(command):
+    code, out = run(command, "--help")
+    assert code == 0
+    assert "ID" in out
+    assert "a name is unique" in out
+    assert "NAME" in run("create", "--help")[1]

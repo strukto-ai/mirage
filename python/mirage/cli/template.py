@@ -21,6 +21,7 @@ import yaml
 
 from mirage.cli.client import make_client
 from mirage.cli.output import (
+    ID_HELP,
     OUTPUT,
     Output,
     emit,
@@ -136,7 +137,7 @@ def list_cmd() -> None:
 
 @app.command("get")
 def get_cmd(
-    name: str = typer.Argument(..., help="Template name."),
+    name: str = typer.Argument(..., metavar="ID", help=ID_HELP),
     output: Output | None = OUTPUT,
 ) -> None:
     """Print a template; ``-o yaml`` is a file ``create -f`` reads."""
@@ -147,7 +148,9 @@ def get_cmd(
 
 
 @app.command("delete")
-def delete_cmd(name: str = typer.Argument(..., help="Template name.")) -> None:
+def delete_cmd(
+    name: str = typer.Argument(..., metavar="ID", help=ID_HELP),
+) -> None:
     """Delete a template; ``restore`` brings it back."""
     with make_client() as client:
         client.ensure_running()
@@ -159,7 +162,7 @@ def delete_cmd(name: str = typer.Argument(..., help="Template name.")) -> None:
 
 @app.command("restore")
 def restore_cmd(
-    name: str = typer.Argument(..., help="Template name."),
+    name: str = typer.Argument(..., metavar="ID", help=ID_HELP),
 ) -> None:
     """Bring back a deleted template."""
     with make_client() as client:

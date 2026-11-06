@@ -22,6 +22,7 @@ import typer
 
 from mirage.cli.client import make_client
 from mirage.cli.output import (
+    ID_HELP,
     OUTPUT,
     Output,
     emit,
@@ -109,7 +110,7 @@ def list_cmd() -> None:
 
 @app.command("get")
 def get_cmd(
-    name: str = NAME,
+    name: str = typer.Argument(..., metavar="ID", help=ID_HELP),
     output: Output | None = OUTPUT,
 ) -> None:
     """Show one policy; in a terminal, its source."""
@@ -117,14 +118,19 @@ def get_cmd(
 
 
 @app.command("update")
-def update_cmd(name: str = NAME, source: str = SOURCE) -> None:
+def update_cmd(
+    name: str = typer.Argument(..., metavar="ID", help=ID_HELP),
+    source: str = SOURCE,
+) -> None:
     """Replace a saved policy's source."""
     saved = call("PUT", ref(name), {"source": read_source(source)})
     emit(saved, human=lambda p: f"Updated policy {p['name']}.")
 
 
 @app.command("delete")
-def delete_cmd(name: str = NAME) -> None:
+def delete_cmd(
+    name: str = typer.Argument(..., metavar="ID", help=ID_HELP),
+) -> None:
     """Delete a saved policy."""
     call("DELETE", ref(name))
     typer.echo(f"Deleted policy {name}.")

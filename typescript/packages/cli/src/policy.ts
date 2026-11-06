@@ -14,7 +14,16 @@
 import { readFileSync } from 'node:fs'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
-import { emit, fail, formatTable, handleResponse, outputOf, show, type Output } from './output.ts'
+import {
+  emit,
+  fail,
+  formatTable,
+  handleResponse,
+  ID_HELP,
+  outputOf,
+  show,
+  type Output,
+} from './output.ts'
 
 interface PolicyBody {
   name: string
@@ -89,7 +98,7 @@ export function registerPolicyCommands(program: Command): void {
   policy
     .command('get')
     .description('Show one policy; in a terminal, its source.')
-    .argument('<name>', "The policy's name, such as guard.py.")
+    .argument('<id>', ID_HELP)
     .option('-o, --output <format>', 'yaml: a file create -f and update -f read.', outputOf)
     .action(async (name: string, opts: { output?: Output }) => {
       const got = (await call('GET', ref(name))) as PolicyBody
@@ -99,7 +108,7 @@ export function registerPolicyCommands(program: Command): void {
   policy
     .command('update')
     .description("Replace a saved policy's source.")
-    .argument('<name>', "The policy's name, such as guard.py.")
+    .argument('<id>', ID_HELP)
     .requiredOption('--source <source>', 'The program: @FILE reads a file, else the text.')
     .action(async (name: string, opts: { source: string }) => {
       const saved = (await call('PUT', ref(name), {
@@ -111,7 +120,7 @@ export function registerPolicyCommands(program: Command): void {
   policy
     .command('delete')
     .description('Delete a saved policy.')
-    .argument('<name>', "The policy's name, such as guard.py.")
+    .argument('<id>', ID_HELP)
     .action(async (name: string) => {
       await call('DELETE', ref(name))
       process.stdout.write(`Deleted policy ${name}.\n`)

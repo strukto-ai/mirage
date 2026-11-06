@@ -172,3 +172,12 @@ def test_get_yaml_keeps_ambiguous_strings_strings(client, monkeypatch):
     done = _invoke("get", "env", "-o", "yaml")
     assert done.exit_code == 0, done.output
     assert parse_yaml(done.output)["config"] == saved["config"]
+
+
+@pytest.mark.parametrize("command", ["get", "delete", "restore"])
+def test_a_template_is_named_by_id(command):
+    result = _invoke(command, "--help")
+    assert result.exit_code == 0
+    assert "ID" in result.output
+    assert "a name is unique" in result.output
+    assert "NAME" in _invoke("create", "--help").output
