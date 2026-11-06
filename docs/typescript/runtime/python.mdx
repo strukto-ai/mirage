@@ -226,8 +226,9 @@ uses `fuse` or none.
 
 `new Workspace(mounts, { runtimes: [...] })` takes names and runtime objects,
 and adds `workspace` when the list leaves it out. On a live workspace,
-`addRuntime` appends an entry (a remote sandbox goes ahead of Monty and
-QuickJS), `removeRuntime` takes one out, and `runtimes()` lists them:
+`addRuntime` appends an entry (a remote sandbox goes after the last sandbox
+listed, else ahead of Monty and QuickJS), `removeRuntime` takes one out, and
+`runtimes()` lists them:
 
 ```ts
 await ws.removeRuntime('monty')

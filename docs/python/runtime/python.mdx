@@ -52,7 +52,8 @@ Without it, `WasiRuntime(...)` raises `ImportError`.
 
 `Workspace(runtimes=[...])` takes names and runtime objects, and adds
 `workspace` when the list leaves it out. On a live workspace, `add_runtime`
-appends an entry (a remote sandbox goes ahead of Monty and QuickJS),
+appends an entry (a remote sandbox goes after the last sandbox listed, else
+ahead of Monty and QuickJS),
 `remove_runtime` takes one out, and `runtimes()` lists them:
 
 ```python
