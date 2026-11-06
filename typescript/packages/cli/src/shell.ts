@@ -16,7 +16,7 @@ import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { resolveWorkspace } from './settings.ts'
 import { emit, fail } from './output.ts'
-import { answer, post } from './vfs.ts'
+import { answer, post, WORKSPACE_FLAGS, WORKSPACE_HELP } from './vfs.ts'
 
 interface ExplainedNode {
   type: string
@@ -75,11 +75,11 @@ function explainedLines(node: ExplainedNode, depth: number, out: string[]): void
  * concurrently in either mode, and Ctrl-C cancels the request with exit130.
  * `--explain` runs nothing.
  */
-export function registerShellCommand(program: Command): void {
-  program
+export function registerShellCommand(parent: Command): void {
+  parent
     .command('shell')
     .description('Run a shell line in a workspace.')
-    .option('-w, --workspace <id>', 'Workspace id; the current workspace when left out')
+    .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
     .requiredOption('-c, --command <command>', 'Shell line to run')
     .option('-s, --session <id>', 'Session id')
     .option('--cwd <path>', 'Working directory for this line (a workspace path)')

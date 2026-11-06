@@ -22,7 +22,7 @@ import typer
 from mirage.cli.client import make_client
 from mirage.cli.output import emit, fail
 from mirage.cli.settings import resolve_workspace
-from mirage.cli.vfs import answer, post
+from mirage.cli.vfs import WORKSPACE, answer, post
 
 app = typer.Typer(
     invoke_without_command=True, help="Run a shell line in a workspace."
@@ -31,13 +31,7 @@ app = typer.Typer(
 
 @app.callback(invoke_without_command=True)
 def shell_cmd(
-    workspace_id: str | None = typer.Option(
-        None,
-        "--workspace_id",
-        "--workspace",
-        "-w",
-        help="Workspace id; the current workspace when left out.",
-    ),
+    workspace_id: str | None = WORKSPACE,
     command: str = typer.Option(
         ..., "--command", "-c", help="Shell line to run."
     ),

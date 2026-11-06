@@ -55,11 +55,12 @@ def root(
         os.environ[ENV_CONTEXT] = context
 
 
+workspace_module.app.add_typer(shell_module.app, name="shell")
+workspace_module.app.add_typer(vfs_module.app, name="vfs")
+workspace_module.app.add_typer(session_module.app, name="session")
+workspace_module.app.add_typer(tools_module.app, name="tools", hidden=True)
 app.add_typer(workspace_module.app, name="workspace")
-app.add_typer(session_module.app, name="session")
 app.add_typer(shell_module.app, name="shell")
-app.add_typer(vfs_module.app, name="vfs")
-app.command("glob")(vfs_module.glob_cmd)
 app.command(
     "api",
     context_settings={
@@ -67,7 +68,6 @@ app.command(
         "ignore_unknown_options": True,
     },
 )(api_module.api_cmd)
-app.add_typer(tools_module.app, name="tools")
 daemon_module.app.add_typer(config_module.app, name="config")
 app.add_typer(daemon_module.app, name="daemon")
 app.add_typer(login_module.context_app, name="context")

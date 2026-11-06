@@ -54,10 +54,10 @@ function toolCommand(program: Command, name: string, description: string): Comma
     .option('-s, --session <id>', 'Session id')
 }
 
-/** `mirage tools <tool>`: the session's agent tools, one verb each, run as MCP runs them. */
+/** `mirage workspace tools <tool>`: the session's agent tools, one verb each, run as MCP runs them. */
 export function registerToolCommands(parent: Command): void {
   const program = parent
-    .command('tools')
+    .command('tools', { hidden: true })
     .description("The session's agent tools, as MCP serves them.")
   toolCommand(program, 'shell', 'Run a command line and read its output as the agent does.')
     .argument('<command>', 'The command line to run')

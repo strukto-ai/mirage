@@ -64,12 +64,13 @@ export function buildProgram(): Command {
       const context = root.opts<{ context?: string }>().context
       if (context !== undefined && context !== '') process.env[ENV_CONTEXT] = context
     })
-  registerWorkspaceCommands(program)
-  registerSessionCommands(program)
+  const ws = registerWorkspaceCommands(program)
+  registerShellCommand(ws)
+  registerVfsCommands(ws)
+  registerSessionCommands(ws)
+  registerToolCommands(ws)
   registerShellCommand(program)
-  registerVfsCommands(program)
   registerApiCommand(program)
-  registerToolCommands(program)
   registerMcpCommand(program)
   registerRpcCommand(program)
   registerSshProxyCommand(program)
