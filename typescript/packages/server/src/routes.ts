@@ -17,6 +17,7 @@ import type { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { ResolvedSource } from '@struktoai/mirage-core/secrets/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
+import type { ConfigSchemaLoader } from '@struktoai/mirage-core/vfs/registry'
 import type { MountBackend } from '@struktoai/mirage-core/types'
 import type { WorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/base'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
@@ -122,7 +123,8 @@ export interface RouteApp {
 /**
  * What the routes need from the host they run on: its workspace class (each
  * host rebuilds a saved mount from its own VFS table), the mounts and options
- * a config names, its CLIs, a profile's policy files, the store the server
+ * a config names, the config schema of each VFS it builds, its CLIs, a
+ * profile's policy files, the store the server
  * keeps workspaces' state in, and the network watch a rule needs. Node
  * builds these from `@struktoai/mirage-node`; an edge runtime from core.
  */
@@ -134,6 +136,8 @@ export interface ServerHost {
     config: Record<string, unknown>,
     sources?: Readonly<Record<string, ResolvedSource>>,
   ): Promise<BaseVFS>
+  /** The config schema of each VFS this host builds, by name: a saved VFS's fields. */
+  readonly vfsSchemas: Readonly<Record<string, ConfigSchemaLoader>>
   buildCliEntries(
     clis: Readonly<Record<string, unknown>>,
     sources?: Readonly<Record<string, ResolvedSource>>,

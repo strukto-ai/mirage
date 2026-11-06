@@ -21,7 +21,7 @@ import { knownRuntimes, runtimeClass } from '@struktoai/mirage-core/runtime/tabl
 import { normalizedKey } from '@struktoai/mirage-core/utils/normalize'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { FIELD_NORMALIZERS, z } from '@struktoai/mirage-core/vfs/secrets'
-import { CONFIG_SCHEMAS, knownVfsNames } from '@struktoai/mirage-node/vfs/registry'
+import type { ServerHost } from '../routes.ts'
 import type { Field, FieldType, TypeTable } from './types.ts'
 
 type Schema = z.ZodType
@@ -133,11 +133,11 @@ function modelFields(schema: Schema, group?: string): Field[] {
   return out
 }
 
-/** Every registered VFS that parses a config, with its fields. */
-async function vfsTypes(): Promise<TypeTable> {
+/** Every VFS the host builds from a config schema, with its fields. */
+async function vfsTypes(schemas: ServerHost['vfsSchemas']): Promise<TypeTable> {
   const out: TypeTable = {}
-  for (const name of knownVfsNames()) {
-    const load = CONFIG_SCHEMAS[name]
+  for (const name of Object.keys(schemas).sort(compareCodePoints)) {
+    const load = schemas[name]
     if (load !== undefined) out[name] = modelFields(await load())
   }
   return out
@@ -175,9 +175,13 @@ function runtimeTypes(): TypeTable {
   return out
 }
 
-/** The types an entry of `kind` can be, each with its fields, read off mirage's registries and config schemas. */
-export async function typesOf(kind: EntryKind): Promise<TypeTable> {
-  if (kind === 'vfs') return vfsTypes()
+/**
+ * The types an entry of `kind` can be, each with its fields, read off
+ * mirage's registries and config schemas; a VFS's off the schemas of the
+ * ones `host` builds.
+ */
+export async function typesOf(kind: EntryKind, host: Pick<ServerHost, 'vfsSchemas'>): Promise<TypeTable> {
+  if (kind === 'vfs') return vfsTypes(host.vfsSchemas)
   if (kind === 'cli') return cliTypes()
   if (kind === 'runtime') return runtimeTypes()
   throw new Error(`${kind} entries have no types`)
