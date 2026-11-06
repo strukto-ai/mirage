@@ -23,9 +23,9 @@ import typer
 import yaml
 
 from mirage.cli.client import make_client
-from mirage.cli.context import header
 from mirage.cli.output import emit, fail, format_table, handle_response
-from mirage.utils.yaml import parse_yaml
+from mirage.cli.settings import header
+from mirage.utils.yaml import dump_yaml, parse_yaml
 
 TEMPLATE_KEYS = frozenset({"name", "description", "config"})
 
@@ -53,9 +53,7 @@ def show(obj: Any, output: Output | None, human: Callable[[Any], str]) -> None:
             ``emit``.
     """
     if output is Output.YAML:
-        typer.echo(
-            yaml.safe_dump(obj, sort_keys=False, allow_unicode=True), nl=False
-        )
+        typer.echo(dump_yaml(obj), nl=False)
     elif output is Output.JSON:
         typer.echo(json.dumps(obj, indent=2, ensure_ascii=False))
     else:
@@ -63,14 +61,14 @@ def show(obj: Any, output: Output | None, human: Callable[[Any], str]) -> None:
 
 
 def as_yaml(obj: Any) -> str:
-    text: str = yaml.safe_dump(obj, sort_keys=False, allow_unicode=True)
-    return text.rstrip()
+    return dump_yaml(obj).rstrip()
 
 
 def read_template(path: Path) -> dict[str, Any]:
     """A template file: ``{name, description?, config}`` as ``get``
     prints it, or a bare workspace config. Saved as written, with no
-    ``${NAME}`` read from the environment.
+    ``${NAME}`` read from the environment; a relative ``script`` or code
+    path is rebased onto the file's folder, as ``workspace create`` does.
 
     Args:
         path (Path): the YAML or JSON file.
@@ -78,15 +76,27 @@ def read_template(path: Path) -> dict[str, Any]:
     Returns:
         dict[str, Any]: its ``description`` and ``config``.
     """
+    from mirage.config import (  # noqa: PLC0415 - cold start
+        _absolutize_scripts,
+    )
+
     try:
         doc = parse_yaml(path.read_text(encoding="utf-8"))
     except (OSError, yaml.YAMLError) as e:
         fail(f"cannot read {path}: {e}", 2)
     if not isinstance(doc, dict):
         fail(f"{path} must hold a mapping", 2)
+    description = None
+    config = doc
     if "config" in doc and set(doc) <= TEMPLATE_KEYS:
-        return {"description": doc.get("description"), "config": doc["config"]}
-    return {"description": None, "config": doc}
+        description = doc.get("description")
+        config = doc["config"]
+    if description is not None and not isinstance(description, str):
+        fail(f"{path}: description must be a string", 2)
+    if not isinstance(config, dict):
+        fail(f"{path}: config must hold a mapping", 2)
+    _absolutize_scripts(config, path.resolve().parent)
+    return {"description": description, "config": config}
 
 
 def template_path(name: str) -> str:

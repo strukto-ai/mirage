@@ -26,8 +26,13 @@ from urllib.parse import urlparse
 
 import httpx
 
-from mirage.cli.context import login_command, login_path
-from mirage.cli.credentials import LoginError, fresh_token, read_login
+from mirage.cli.credentials import (
+    LoginError,
+    fresh_token,
+    login_command,
+    login_path,
+    read_login,
+)
 from mirage.cli.env import ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT
 from mirage.cli.settings import (
     DaemonSettings,

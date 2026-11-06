@@ -20,8 +20,8 @@ from urllib.parse import quote, urlencode
 import typer
 
 from mirage.cli.client import make_client
-from mirage.cli.context import resolve_workspace
 from mirage.cli.output import emit, fail
+from mirage.cli.settings import resolve_workspace
 from mirage.cli.vfs import answer, post
 
 app = typer.Typer(

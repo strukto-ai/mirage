@@ -23,7 +23,6 @@ import typer
 import yaml
 
 from mirage.cli.client import make_client
-from mirage.cli.context import header, use_workspace
 from mirage.cli.output import (
     emit,
     fail,
@@ -31,6 +30,7 @@ from mirage.cli.output import (
     format_table,
     handle_response,
 )
+from mirage.cli.settings import header, use_workspace
 from mirage.utils.yaml import parse_yaml
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspaces.")

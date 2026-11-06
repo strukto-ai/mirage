@@ -19,6 +19,7 @@ import yaml
 from typer.testing import CliRunner
 
 from mirage.cli import template as template_cli
+from mirage.utils.yaml import parse_yaml
 
 SAVED = {
     "name": "ram-only",
@@ -125,3 +126,40 @@ def test_a_file_that_is_not_a_mapping_is_refused(client, tmp_path):
     done = _invoke("create", "t", "-f", str(path))
     assert done.exit_code == 2
     assert client.calls == []
+
+
+def test_create_rebases_a_relative_script_onto_the_files_folder(
+    client, tmp_path
+):
+    folder = tmp_path / "deploy"
+    folder.mkdir()
+    path = folder / "ws.yaml"
+    path.write_text("clis:\n  tally:\n    script: ./tally.py\n")
+    done = _invoke("create", "tally", "-f", str(path))
+    assert done.exit_code == 0, done.output
+    sent = client.calls[0][2]["config"]["clis"]["tally"]["script"]
+    assert sent == str(folder.resolve() / "tally.py")
+
+
+def test_a_description_that_is_no_string_is_refused(client, tmp_path):
+    path = tmp_path / "t.yaml"
+    path.write_text("description: 123\nconfig:\n  mounts: {}\n")
+    done = _invoke("create", "t", "-f", str(path))
+    assert done.exit_code == 2
+    assert "description must be a string" in done.output
+    assert client.calls == []
+
+
+def test_get_yaml_keeps_ambiguous_strings_strings(client, monkeypatch):
+    saved = {
+        "name": "env",
+        "description": None,
+        "config": {"env": {"A": "1e3", "B": "off", "C": "0o17"}},
+    }
+    monkeypatch.setattr(
+        client, "request", lambda method, path, **kw: _Response(200, saved)
+    )
+    done = _invoke("get", "env", "-o", "yaml")
+    assert done.exit_code == 0, done.output
+    assert parse_yaml(done.output)["config"] == saved["config"]
+

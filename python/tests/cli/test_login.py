@@ -17,6 +17,7 @@ import hashlib
 import json
 import socket
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,9 +29,21 @@ import pytest
 from typer.testing import CliRunner
 
 from mirage.cli import login as login_module
-from mirage.cli.credentials import LoginError, read_login, write_login
+from mirage.cli.credentials import (
+    Context,
+    ContextError,
+    Contexts,
+    Login,
+    LoginError,
+    login_path,
+    read_contexts,
+    read_login,
+    write_contexts,
+    write_login,
+)
 from mirage.cli.login import browser_login, metadata_url, token_login
 from mirage.cli.main import app
+from mirage.cli.settings import load_daemon_settings
 from mirage.types import JsonValue
 
 CLIENT_ID = "client_cli"
@@ -327,3 +340,53 @@ def test_login_to_a_server_without_one_says_so(browser, tmp_path, monkeypatch):
     assert done.exit_code == 0
     assert "publishes no login" in done.output
     assert read_login() is None
+
+
+def test_switch_run_once_elsewhere_and_forget(home, monkeypatch):
+    write_contexts(
+        Contexts(
+            contexts={
+                "dev": Context(
+                    url="https://dev.example", team="acme", workspace="w1"
+                )
+            }
+        )
+    )
+    write_login(
+        Login(
+            url="https://dev.example",
+            access_token="from-login",
+            logged_in_at=time.time(),
+        ),
+        login_path("dev"),
+    )
+    runner = CliRunner()
+    once = runner.invoke(app, ["--context", "dev", "whoami"])
+    assert json.loads(once.stdout) | {"renew_by": None} == {
+        "context": "dev",
+        "url": "https://dev.example",
+        "team": "acme",
+        "user": None,
+        "workspace": "w1",
+        "renew_by": None,
+    }
+    monkeypatch.setenv("MIRAGE_CONTEXT", "")
+    assert read_contexts().current == "local"
+    assert runner.invoke(app, ["context", "use", "dev"]).exit_code == 0
+    assert read_contexts().current == "dev"
+    refused = runner.invoke(app, ["context", "use", "nope"])
+    assert isinstance(refused.exception, ContextError)
+    local = runner.invoke(app, ["context", "delete", "local"])
+    assert isinstance(local.exception, ContextError)
+    assert runner.invoke(app, ["context", "delete", "dev"]).exit_code == 0
+    assert read_contexts().current == "local"
+    assert not (home / "logins" / "dev.json").exists()
+
+
+def test_daemon_config_holds_the_daemon_settings(home):
+    runner = CliRunner()
+    done = runner.invoke(app, ["daemon", "config", "set", "port", "9100"])
+    assert done.exit_code == 0, done.output
+    assert "port = 9100" in (home / "config.toml").read_text()
+    assert load_daemon_settings().url == "http://127.0.0.1:9100"
+    assert runner.invoke(app, ["config", "list"]).exit_code == 2

@@ -23,8 +23,8 @@ import httpx
 import typer
 
 from mirage.cli.client import make_client
-from mirage.cli.context import resolve_workspace
 from mirage.cli.output import emit, handle_response
+from mirage.cli.settings import resolve_workspace
 from mirage.server.vfs_calls import (
     BYTES,
     FLAG,

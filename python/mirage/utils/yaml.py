@@ -53,3 +53,38 @@ def parse_yaml(text: str) -> Any:
         text (str): Workspace YAML or JSON document.
     """
     return yaml.load(text, Loader=_YamlLoader)
+
+
+OCTAL = re.compile(r"^0o[0-7]+$")
+
+
+class _YamlDumper(yaml.SafeDumper):
+    """Quote every string that either host's loader would read as
+    something else, so YAML written by one reads back the same on both.
+
+    The loader's resolvers, plus YAML 1.2's ``0o`` octal, which
+    TypeScript reads as a number.
+    """
+
+
+_YamlDumper.yaml_implicit_resolvers = {
+    first: list(resolvers)
+    for first, resolvers in _YamlLoader.yaml_implicit_resolvers.items()
+}
+_YamlDumper.add_implicit_resolver("tag:yaml.org,2002:int", OCTAL, ["0"])
+
+
+def dump_yaml(obj: Any) -> str:
+    """Write YAML that ``parse_yaml`` and TypeScript's loader both read
+    back as ``obj``.
+
+    Args:
+        obj (Any): plain data.
+
+    Returns:
+        str: the YAML document.
+    """
+    text: str = yaml.dump(
+        obj, Dumper=_YamlDumper, sort_keys=False, allow_unicode=True
+    )
+    return text

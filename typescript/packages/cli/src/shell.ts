@@ -14,7 +14,7 @@
 
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
-import { resolveWorkspace } from './context.ts'
+import { resolveWorkspace } from './settings.ts'
 import { emit, fail } from './output.ts'
 import { answer, post } from './vfs.ts'
 

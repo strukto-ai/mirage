@@ -12,11 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
-import { header } from './context.ts'
+import { header } from './settings.ts'
 import { emit, fail, formatTable, handleResponse, type Formatter } from './output.ts'
 
 const TEMPLATE_KEYS = new Set(['name', 'description', 'config'])
@@ -36,8 +36,8 @@ function output(value: string): Output {
 }
 
 async function asYaml(obj: unknown): Promise<string> {
-  const { stringify } = await import('yaml')
-  return stringify(obj)
+  const { dumpYaml } = await import('@struktoai/mirage-node/utils/yaml')
+  return dumpYaml(obj)
 }
 
 /** Print an answer as `-o` asks, else as `emit` does. */
@@ -50,12 +50,14 @@ async function show<T>(obj: T, out: Output | undefined, human: Formatter<T>): Pr
 /**
  * A template file: `{name, description?, config}` as `get` prints it, or a
  * bare workspace config. Saved as written, with no `${NAME}` read from the
- * environment.
+ * environment; a relative `script` or code path is rebased onto the file's
+ * folder, as `workspace create` does.
  */
 async function readTemplate(
   path: string,
 ): Promise<{ description: string | null; config: unknown }> {
   const { parse } = await import('yaml')
+  const { absolutizeScripts } = await import('@struktoai/mirage-node/config')
   let doc: unknown
   try {
     doc = parse(readFileSync(path, 'utf-8')) as unknown
@@ -66,14 +68,20 @@ async function readTemplate(
     fail(`${path} must hold a mapping`, 2)
   }
   const found = doc as Record<string, unknown>
+  let description: unknown = null
+  let config: unknown = found
   if ('config' in found && Object.keys(found).every((k) => TEMPLATE_KEYS.has(k))) {
-    const description = found.description
-    return {
-      description: typeof description === 'string' ? description : null,
-      config: found.config,
-    }
+    description = found.description ?? null
+    config = found.config
   }
-  return { description: null, config: found }
+  if (description !== null && typeof description !== 'string') {
+    fail(`${path}: description must be a string`, 2)
+  }
+  if (config === null || typeof config !== 'object' || Array.isArray(config)) {
+    fail(`${path}: config must hold a mapping`, 2)
+  }
+  absolutizeScripts(config as Record<string, unknown>, dirname(resolve(path)))
+  return { description, config }
 }
 
 function templatePath(name: string): string {
@@ -98,7 +106,10 @@ export function registerTemplateCommands(program: Command): void {
     .command('create')
     .description('Save a workspace config as a template.')
     .argument('<name>', 'Template name')
-    .requiredOption('-f, --file <file>', 'A workspace config, or a template as `get -o yaml` prints it')
+    .requiredOption(
+      '-f, --file <file>',
+      'A workspace config, or a template as `get -o yaml` prints it',
+    )
     .option('--description <text>', 'Say what the template is for')
     .action(async (name: string, opts: { file: string; description?: string }) => {
       const found = await readTemplate(opts.file)

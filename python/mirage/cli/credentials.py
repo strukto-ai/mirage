@@ -18,23 +18,37 @@ import json
 import logging
 import os
 import time
-from dataclasses import asdict, dataclass
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
+from typing import TypeVar
 
 import httpx
 
-from mirage.cli.context import (
-    current_name,
-    login_command,
-    login_path,
-    read_contexts,
+from mirage.cli.constants import (
+    CONTEXT_NAME,
+    CONTEXTS_FILE,
+    LOCAL,
+    LOCK_RETRY_SECONDS,
+    LOCK_STALE_SECONDS,
+    LOCK_WAIT_SECONDS,
+    LOGINS_DIR,
 )
+from mirage.cli.env import ENV_CONTEXT
+from mirage.server.paths import mirage_home
 from mirage.types import JsonValue
 
 LOGIN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 REFRESH_MARGIN_SECONDS = 60
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+class ContextError(RuntimeError):
+    """A context that does not exist, or one that cannot be changed."""
 
 
 class LoginError(RuntimeError):
@@ -65,6 +79,240 @@ class Login:
     expires_at: float | None = None
     client_id: str | None = None
     token_endpoint: str | None = None
+
+
+@dataclass
+class Context:
+    """One server the CLI talks to, with what it remembers there.
+
+    Args:
+        url (str): the server; empty for ``local``, whose URL follows
+            the daemon's port.
+        team (str | None): the team the login acts for, if the server
+            names one.
+        workspace (str | None): the workspace commands use when given
+            none.
+    """
+
+    url: str = ""
+    team: str | None = None
+    workspace: str | None = None
+
+
+@dataclass
+class Contexts:
+    """The contexts file: which context is current, and every context.
+
+    Args:
+        current (str): the current context's name.
+        contexts (dict[str, Context]): every context by name; ``local``
+            is always there.
+    """
+
+    current: str = LOCAL
+    contexts: dict[str, Context] = field(default_factory=dict)
+
+
+def contexts_path() -> Path:
+    return mirage_home() / CONTEXTS_FILE
+
+
+def login_path(name: str) -> Path:
+    """Where a context's login is kept.
+
+    Args:
+        name (str): the context.
+
+    Returns:
+        Path: its login file.
+    """
+    return mirage_home() / LOGINS_DIR / f"{name}.json"
+
+
+def login_command(url: str, name: str) -> str:
+    """The command that logs a context in again.
+
+    Args:
+        url (str): the context's server.
+        name (str): the context.
+
+    Returns:
+        str: ``mirage login URL --name NAME``.
+    """
+    return f"mirage login {url} --name {name}"
+
+
+def check_name(name: str) -> str:
+    """A context name, refused unless it is safe as a file name.
+
+    Args:
+        name (str): the name.
+
+    Returns:
+        str: the name.
+
+    Raises:
+        ContextError: it is not lowercase letters, digits, ``.``, ``_``
+            and ``-``.
+    """
+    if not CONTEXT_NAME.match(name):
+        raise ContextError(
+            f"invalid context name {name!r}: use lowercase letters, "
+            "digits, '.', '_' and '-'"
+        )
+    return name
+
+
+def read_contexts(path: Path | None = None) -> Contexts:
+    """Read the contexts file; with none, only ``local``.
+
+    Args:
+        path (Path | None): the file; defaults to ``contexts_path()``.
+
+    Returns:
+        Contexts: the contexts, ``local`` among them.
+    """
+    use = path if path is not None else contexts_path()
+    found = Contexts()
+    if use.exists():
+        try:
+            raw = json.loads(use.read_text())
+        except ValueError as e:
+            raise ContextError(f"malformed {use}: {e}") from e
+        found.current = str(raw.get("current", LOCAL))
+        found.contexts = {
+            name: Context(**entry)
+            for name, entry in raw.get("contexts", {}).items()
+        }
+    found.contexts.setdefault(LOCAL, Context())
+    return found
+
+
+def write_contexts(contexts: Contexts, path: Path | None = None) -> None:
+    """Store the contexts file whole, readable by this user only.
+
+    Args:
+        contexts (Contexts): the contexts.
+        path (Path | None): the file; defaults to ``contexts_path()``.
+    """
+    use = path if path is not None else contexts_path()
+    use.parent.mkdir(parents=True, exist_ok=True)
+    staged = use.with_name(f".{use.name}.{os.getpid()}")
+    fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(asdict(contexts), f, indent=2)
+        f.write("\n")
+    os.replace(staged, use)
+
+
+def _same_file(a: os.stat_result, b: os.stat_result) -> bool:
+    return (a.st_ino, a.st_mtime_ns) == (b.st_ino, b.st_mtime_ns)
+
+
+def _break_stale_lock(path: Path, seen: os.stat_result) -> None:
+    """Remove a stale lock, as one waiter at a time: the one that creates
+    the ``.break`` file, and only while the lock is still the file it saw,
+    so a lock another command just took is never removed.
+
+    Args:
+        path (Path): the lock.
+        seen (os.stat_result): the lock as the waiter found it, stale.
+    """
+    breaker = path.with_name(f"{path.name}.break")
+    try:
+        fd = os.open(breaker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        try:
+            age = time.time() - breaker.stat().st_mtime
+        except FileNotFoundError:
+            return
+        if age > LOCK_STALE_SECONDS:
+            breaker.unlink(missing_ok=True)
+        return
+    try:
+        try:
+            now = path.stat()
+        except FileNotFoundError:
+            return
+        if _same_file(now, seen):
+            path.unlink(missing_ok=True)
+    finally:
+        os.close(fd)
+        breaker.unlink(missing_ok=True)
+
+
+@contextmanager
+def contexts_lock() -> Iterator[None]:
+    """Hold the contexts file's lock, so one command at a time reads,
+    changes and writes it.
+
+    A lock older than ``LOCK_STALE_SECONDS`` was left by a command that
+    died, and is removed by one waiter (``_break_stale_lock``).
+
+    Raises:
+        ContextError: another command held it for ``LOCK_WAIT_SECONDS``.
+    """
+    path = contexts_path().with_name(f"{CONTEXTS_FILE}.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + LOCK_WAIT_SECONDS
+    while True:
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            break
+        except FileExistsError:
+            try:
+                seen = path.stat()
+            except FileNotFoundError:
+                continue
+            if time.time() - seen.st_mtime > LOCK_STALE_SECONDS:
+                _break_stale_lock(path, seen)
+                continue
+            if time.monotonic() > deadline:
+                raise ContextError(
+                    f"{path} is held by another mirage command"
+                ) from None
+            time.sleep(LOCK_RETRY_SECONDS)
+    try:
+        yield
+    finally:
+        os.close(fd)
+        path.unlink(missing_ok=True)
+
+
+def update_contexts(change: Callable[[Contexts], T]) -> T:
+    """Read, change and write the contexts file under its lock, so a
+    command running at the same time loses nothing.
+
+    Args:
+        change (Callable[[Contexts], T]): changes the contexts in place.
+
+    Returns:
+        T: what ``change`` returned.
+    """
+    with contexts_lock():
+        contexts = read_contexts()
+        result = change(contexts)
+        write_contexts(contexts)
+    return result
+
+
+def current_name(contexts: Contexts) -> str:
+    """The context this command uses: ``--context`` or
+    ``$MIRAGE_CONTEXT``, else the file's current one.
+
+    Args:
+        contexts (Contexts): the contexts.
+
+    Returns:
+        str: its name.
+
+    Raises:
+        ContextError: there is no context by that name.
+    """
+    name = os.environ.get(ENV_CONTEXT) or contexts.current
+    if name not in contexts.contexts:
+        raise ContextError(f"no context {name!r}; run `mirage context list`")
+    return name
 
 
 def renew_by(login: Login) -> float:

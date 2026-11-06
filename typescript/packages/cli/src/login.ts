@@ -15,9 +15,12 @@
 import { spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
+import { rmSync } from 'node:fs'
 import type { AddressInfo } from 'node:net'
+import { join } from 'node:path'
 import type { Command } from 'commander'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import {
   AUTHORIZATION_SERVER_PATH,
   PROTECTED_RESOURCE_PATH,
@@ -25,30 +28,34 @@ import {
 
 import { readDaemonTable } from '@struktoai/mirage-server/daemon_config'
 import { mirageHome } from '@struktoai/mirage-server/paths'
+import { HOSTED, HOSTED_URL, LOCAL, LOGINS_DIR } from './constants.ts'
 import {
+  ContextError,
+  LoginError,
   checkName,
   currentName,
-  currentWorkspace,
-  header,
-  localUrl,
-  loginPath,
-  readContexts,
-  updateContexts,
-} from './context.ts'
-import { HOSTED, HOSTED_URL, LOCAL } from './constants.ts'
-import {
-  LoginError,
+  emptyContext,
   endsAt,
   jsonBody,
+  loginPath,
+  readContexts,
   readLogin,
   removeLogin,
   renewBy,
   tokenClaims,
+  updateContexts,
   writeLogin,
+  type Context,
   type Login,
 } from './credentials.ts'
-import { emit, fail } from './output.ts'
-import { isLocalUrl, loadDaemonSettings } from './settings.ts'
+import { emit, fail, formatTable } from './output.ts'
+import {
+  currentWorkspace,
+  header,
+  isLocalUrl,
+  loadDaemonSettings,
+  localUrl,
+} from './settings.ts'
 
 const CALLBACK_PATH = '/callback'
 const CALLBACK_TIMEOUT_SECONDS = 300
@@ -385,5 +392,82 @@ export function registerLoginCommands(program: Command): void {
             .map(([k, v]) => `${k}: ${v ?? '-'}`)
             .join('\n'),
       )
+    })
+}
+
+interface ContextRow {
+  name: string
+  url: string
+  team: string | null
+  workspace: string | null
+  current: boolean
+}
+
+export function registerContextCommands(program: Command): void {
+  const context = program
+    .command('context')
+    .description('The servers the CLI talks to: list, switch, forget.')
+
+  context
+    .command('list')
+    .description('List the contexts; the current one is marked.')
+    .action(() => {
+      const contexts = readContexts()
+      const current = currentName(contexts)
+      const table = readDaemonTable(mirageHome(process.env))
+      const rows: ContextRow[] = Object.keys(contexts.contexts)
+        .sort(compareCodePoints)
+        .map((name) => {
+          const entry = contexts.contexts[name] ?? emptyContext()
+          return {
+            name,
+            url: entry.url !== '' ? entry.url : localUrl(table, contexts),
+            team: entry.team,
+            workspace: entry.workspace,
+            current: name === current,
+          }
+        })
+      emit(rows, (items) =>
+        formatTable(
+          ['', 'NAME', 'URL', 'TEAM', 'WORKSPACE'],
+          items.map((r) => [r.current ? '*' : '', r.name, r.url, r.team ?? '', r.workspace ?? '']),
+        ),
+      )
+    })
+
+  context
+    .command('use')
+    .argument('<name>', 'Context name')
+    .description('Make a context the current one.')
+    .action(async (name: string) => {
+      await updateContexts((contexts) => {
+        if (!Object.hasOwn(contexts.contexts, name)) {
+          throw new ContextError(`no context '${name}'; run \`mirage context list\``)
+        }
+        contexts.current = name
+      })
+      header('now current', name)
+      emit({ current: name }, () => `Using context ${name}.`)
+    })
+
+  context
+    .command('delete')
+    .argument('<name>', 'Context name')
+    .description('Forget a context and its login; `local` stays.')
+    .action(async (name: string) => {
+      if (name === LOCAL) throw new ContextError('the local context cannot be deleted')
+      await updateContexts((contexts) => {
+        if (!Object.hasOwn(contexts.contexts, name)) {
+          throw new ContextError(`no context '${name}'; run \`mirage context list\``)
+        }
+        const kept = Object.create(null) as Record<string, Context>
+        for (const [n, entry] of Object.entries(contexts.contexts)) {
+          if (n !== name) kept[n] = entry
+        }
+        contexts.contexts = kept
+        if (contexts.current === name) contexts.current = LOCAL
+      })
+      rmSync(join(mirageHome(process.env), LOGINS_DIR, `${name}.json`), { force: true })
+      emit({ deleted: name }, () => `Deleted context ${name}.`)
     })
 }
