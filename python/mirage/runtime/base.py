@@ -115,8 +115,9 @@ class Runtime(ABC, Generic[E]):
                 does not have fails loud; the dict form is a yaml
                 entry's ``config`` block.
         """
-        if captures is not None:
-            self.captures = expand_captures(captures)
+        self.captures = expand_captures(
+            self.captures if captures is None else captures
+        )
         self.config = self.config_cls.coerce(config)
 
     @property

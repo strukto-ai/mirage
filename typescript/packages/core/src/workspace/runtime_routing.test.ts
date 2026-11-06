@@ -819,7 +819,7 @@ describe('whole-line runtimes', () => {
     }
   })
 
-  it('a "*" capture claims any line and stdin arrives', async () => {
+  it('an "@line" capture claims any line and stdin arrives', async () => {
     const box = new LineBox()
     box.captures = ['@line']
     const ws = new Workspace(

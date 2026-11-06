@@ -140,7 +140,7 @@ export class Router {
 
   /**
    * The decision a policy's route places a line on. `workspace` keeps the
-   * line in Mirage: no line executor (a `*` capture) takes it, and each
+   * line in Mirage: no line executor (an `@line` capture) takes it, and each
    * command stays on its first other capturer. Any other name places it as
    * the runtime argument does. Mirrors Python's `Router._routed`.
    */

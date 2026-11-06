@@ -45,8 +45,8 @@ const NAMED: Record<string, new (options?: RuntimeOptions<never>) => Runtime> = 
 /**
  * The default world when no runtimes list is given: one python engine,
  * one js engine, and the builtin command engine, the same three as
- * Python's (pinned by integ/runtime/routing/defaults.json). Names, not
- * classes: `name` is an instance field, so `MontyRuntime.name` is the JS
+ * Python's (integ/runtime/routing/defaults.json pins the python engine).
+ * Names, not classes: `name` is an instance field, so `MontyRuntime.name` is the JS
  * function name, not the registry key.
  */
 export const DEFAULT_ENTRIES: readonly string[] = ['monty', 'quickjs', 'workspace']

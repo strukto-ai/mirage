@@ -101,9 +101,10 @@ def known_runtimes() -> list[str]:
 
 # The default world when no runtimes list is given: one python engine,
 # one js engine, and the builtin command engine, the same three as
-# TypeScript's (pinned by integ/runtime/routing/defaults.json). Defaults build
-# gracefully (a missing extra leaves the command reporting its install
-# hint per invocation); an explicitly listed name still fails loud.
+# TypeScript's (integ/runtime/routing/defaults.json pins the python
+# engine). Defaults build gracefully (a missing extra leaves the command
+# reporting its install hint per invocation); an explicitly listed name
+# still fails loud.
 # `local` is deliberately absent: a sandboxed default must never
 # silently escalate to host execution.
 DEFAULT_ENTRIES: tuple[str, ...] = (

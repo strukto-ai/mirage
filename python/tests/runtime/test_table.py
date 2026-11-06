@@ -149,6 +149,13 @@ def test_a_group_expands_to_the_interpreter_names_mirage_owns():
     assert mixed.captures == ("python3", "python", "pip", "@external")
 
 
+def test_a_group_in_a_class_default_expands_too():
+    class GroupDefault(FakeRuntime):
+        captures = ("@python", "pip")
+
+    assert GroupDefault().captures == ("python3", "python", "pip")
+
+
 def test_a_group_binds_both_names_to_the_runtime_that_took_it():
     fake = FakeRuntime(captures=["@python", "pip"])
     bindings = bind_commands([fake, PyEngine()])
@@ -163,7 +170,7 @@ def test_bind_commands_workspace_runtime_binds_nothing():
     assert bind_commands([WorkspaceRuntime()]) == {}
 
 
-def test_build_runtime_vfs_is_a_named_runtime():
+def test_build_runtime_workspace_is_a_named_runtime():
     assert isinstance(build_runtime("workspace"), WorkspaceRuntime)
 
 
@@ -208,20 +215,20 @@ def test_named_capture_does_not_take_the_whole_line():
     assert whole_line_runtime({"nvidia-smi": box}) is None
 
 
-def test_only_star_takes_the_whole_line():
+def test_only_a_line_capture_takes_the_whole_line():
     box, star = _LineRuntime(), _LineRuntime()
     bindings = {"nvidia-smi": box, "@line": star}
     assert whole_line_runtime(bindings) is star
 
 
-def test_whole_line_runtime_skips_stage_engines_and_vfs():
+def test_whole_line_runtime_skips_stage_engines_and_workspace():
     vfs = WorkspaceRuntime(captures=["grep"])
     monty_like = FakeRuntime()
     bindings = {"grep": vfs, "python3": monty_like}
     assert whole_line_runtime(bindings) is None
 
 
-def test_vfs_is_a_pure_routing_marker():
+def test_workspace_runtime_is_a_pure_routing_marker():
     # A line resolved to workspace runs on the workspace executor inline, so
     # the marker carries no line entry point and no interpreter entry point.
     vfs = WorkspaceRuntime()
@@ -231,11 +238,11 @@ def test_vfs_is_a_pure_routing_marker():
         asyncio.run(vfs.execute([], [], Context()))
 
 
-def test_vfs_marker_reach_is_vfs():
+def test_workspace_runtime_reach_is_workspace():
     assert WorkspaceRuntime.reach == "workspace"
 
 
-def test_default_world_reaches_only_the_vfs():
+def test_default_world_reaches_only_the_workspace():
     # The default world's sandbox story rests on every entry keeping
     # its effects behind the workspace gate; `local` (process reach)
     # is deliberately not a default entry.

@@ -85,7 +85,7 @@ async def relay(reader, writer, url):
 
 
 def run_line(runtime, line, stdin, env, cwd):
-    """Run one raw line on a sandbox runtime, as a ``*`` capture hands it."""
+    """Run one raw line on a sandbox runtime, as an ``@line`` capture hands it."""
     ctx = Context(
         flags={"c": line},
         stdin=stdin,

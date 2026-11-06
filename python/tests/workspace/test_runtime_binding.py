@@ -119,7 +119,7 @@ def test_config_entry_needs_a_name():
         _build_runtime_entries([{"home": "/x"}])
 
 
-def test_config_vfs_entry_takes_no_options():
+def test_config_workspace_entry_takes_no_options():
     with pytest.raises(TypeError, match="unexpected keyword argument"):
         _build_runtime_entries([{"name": "workspace", "home": "/x"}])
 
@@ -195,7 +195,7 @@ async def test_runtime_arg_unknown_name_fails_loud(runtime_arg_ws):
 
 
 @pytest.mark.asyncio
-async def test_runtime_arg_vfs_fails_loud(runtime_arg_ws):
+async def test_runtime_arg_workspace_fails_loud(runtime_arg_ws):
     with pytest.raises(ValueError, match="not a runtime you can select"):
         await runtime_arg_ws.shell("python3 -c 'x'", runtime="workspace")
 
@@ -227,7 +227,7 @@ async def test_runtime_arg_beats_the_route(routed_ws):
 
 
 @pytest.mark.asyncio
-async def test_vfs_explicit_captures_restrict_the_workspace():
+async def test_workspace_explicit_captures_restrict_the_workspace():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
@@ -246,7 +246,7 @@ async def test_vfs_explicit_captures_restrict_the_workspace():
         await ws.close()
 
 
-def test_config_vfs_entry_carries_captures():
+def test_config_workspace_entry_carries_captures():
     entries = _build_runtime_entries(
         [{"name": "workspace", "captures": ["grep", "cat"]}]
     )
@@ -271,7 +271,7 @@ async def test_empty_captures_serve_nothing():
 
 
 @pytest.mark.asyncio
-async def test_vfs_explicit_captures_restrict_under_routing():
+async def test_workspace_explicit_captures_restrict_under_routing():
     ws = Workspace(
         {"/": RAMVFS()},
         mode=MountMode.EXEC,
@@ -721,7 +721,7 @@ async def test_named_capture_keeps_pipeline_and_redirects_in_mirage():
 
 
 @pytest.mark.asyncio
-async def test_star_captures_any_line_and_stdin_arrives():
+async def test_line_capture_takes_any_line_and_stdin_arrives():
     box = LineBox()
     box.captures = ("@line",)
     ws = Workspace(
@@ -771,7 +771,7 @@ async def test_runtime_argument_places_the_whole_line():
 
 
 @pytest.mark.asyncio
-async def test_vfs_entry_is_a_pure_routing_marker():
+async def test_workspace_entry_is_a_pure_routing_marker():
     # A workspace-resolved line runs on the workspace executor inline; the
     # registry entry is a marker with no line entry point to call.
     ws = Workspace({"/ram": RAMVFS()}, mode=MountMode.EXEC)

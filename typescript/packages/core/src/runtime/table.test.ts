@@ -197,6 +197,18 @@ describe('bindCommands', () => {
     ])
   })
 
+  // Twin of test_a_group_in_a_class_default_expands_too.
+  it('a group in a default expands too', () => {
+    class GroupDefault extends Runtime {
+      readonly name = 'group-default'
+
+      constructor() {
+        super({}, ['@python', 'pip'])
+      }
+    }
+    expect(new GroupDefault().captures).toEqual(['python3', 'python', 'pip'])
+  })
+
   // Twin of test_a_group_binds_both_names_to_the_runtime_that_took_it.
   it('a group binds both names to the runtime that took it', () => {
     const fake = new Cap(['@python', 'pip'])
