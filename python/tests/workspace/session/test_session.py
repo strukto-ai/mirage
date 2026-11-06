@@ -662,6 +662,26 @@ def test_what_the_shell_keeps_between_lines_round_trips():
     )
 
 
+def test_sessions_loaded_from_one_record_share_no_tables():
+    record = SessionState(
+        session_id="s",
+        aliases={"ll": "ls -l"},
+        shell_options={"pipefail": True},
+        shopts={"nullglob": True},
+    ).to_dict()
+    a = SessionState.from_dict(record)
+    b = SessionState.from_dict(record)
+    a.aliases["x"] = "y"
+    a.shell_options["errexit"] = True
+    a.shopts["dotglob"] = True
+    assert (b.aliases, b.shell_options, b.shopts) == (
+        {"ll": "ls -l"},
+        {"pipefail": True},
+        {"nullglob": True},
+    )
+    assert record["aliases"] == {"ll": "ls -l"}
+
+
 def test_function_sources_and_readonly_metadata_round_trip_without_tree_ownership():
     source = "f() { echo a; }"
     parent = SessionState(

@@ -13,7 +13,6 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { VersionHistory } from '../../cache/versions.ts'
-import { DEFAULT_UMASK } from '../../context/session_context.ts'
 import { releaseInputs, type SharedInput } from '../../io/async_line_iterator.ts'
 import type { NetworkSetting } from '../../io/network.ts'
 import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/output_cap.ts'
@@ -55,6 +54,9 @@ import {
   type DecisionJSON,
   type ScriptJSON,
 } from './serialize.ts'
+
+// The file-creation mask a fresh shell starts with, as bash's.
+const FRESH_UMASK = 0o022
 
 /**
  * Read one entry of a session record, ignoring anything inherited from
@@ -497,7 +499,7 @@ export class SessionState {
   readonly terminal: StreamOwner = Symbol('terminal')
   lineOpen = false
   // File-creation mask. bash's default for a fresh shell.
-  umask = DEFAULT_UMASK
+  umask = FRESH_UMASK
   // `exec` redirect-only state: where the shell's own stdout, stderr and
   // stdin point after a bare `exec > file`. Null is the terminal; `""`
   // is a closed descriptor whose writes drop. `execStdin` is the one
@@ -948,9 +950,17 @@ export class SessionState {
     // differs from a fresh shell's, so a host that forgets its memory
     // brings the session back as it was left.
     if (Object.keys(this.aliases).length > 0) data.aliases = { ...this.aliases }
+    // Each function's body runs the aliases its definition saw, not the
+    // ones defined since, so the view goes with it.
+    const views = ownRecord<Record<string, string>>()
+    for (const [name, source] of Object.entries(this.functions)) {
+      const site = this.functionSites.get(name)
+      if (site?.aliases != null && site.source === source) views[name] = { ...site.aliases }
+    }
+    if (Object.keys(views).length > 0) data.function_aliases = views
     if (Object.keys(this.shellOptions).length > 0) data.shell_options = { ...this.shellOptions }
     if (Object.keys(this.shopts).length > 0) data.shopts = { ...this.shopts }
-    if (this.umask !== DEFAULT_UMASK) data.umask = this.umask
+    if (this.umask !== FRESH_UMASK) data.umask = this.umask
     if (this.logicalCwd !== undefined) data.logical_cwd = this.logicalCwd
     if (this.exitTrap !== null) data.exit_trap = this.exitTrap
     if (this.errTrap !== null) data.err_trap = this.errTrap
@@ -1020,6 +1030,7 @@ export class SessionState {
     readonly_functions?: string[]
     exported_functions?: string[]
     aliases?: Record<string, string>
+    function_aliases?: Record<string, Record<string, string>>
     shell_options?: Record<string, boolean>
     shopts?: Record<string, boolean>
     umask?: number
@@ -1087,6 +1098,13 @@ export class SessionState {
     // bare environment starts a new shell. The constructor seeded a copy.
     if (data.var_attrs !== undefined && vars !== undefined) session.vars = vars
     if (data.aliases != null) session.aliases = { ...data.aliases }
+    // A function's alias view comes back as its site; where on its line the
+    // definition stood went with the line.
+    for (const [name, view] of Object.entries(data.function_aliases ?? {})) {
+      const source = Object.hasOwn(session.functions, name) ? session.functions[name] : undefined
+      if (source === undefined) continue
+      session.functionSites.set(name, { source, mark: [0, 0], origin: null, aliases: { ...view } })
+    }
     if (data.shopts != null) session.shopts = { ...data.shopts }
     if (data.umask != null) session.umask = data.umask
     if (data.logical_cwd != null) session.logicalCwd = data.logical_cwd

@@ -329,7 +329,8 @@ export class SessionManager extends SessionOwner {
         setCwd(dflt, stored.cwd)
         dflt.vars = stored.vars
         dflt.functions = stored.functions
-        dflt.functionSites.clear()
+        // The sites the record keeps: each function's alias view.
+        dflt.functionSites = new Map(stored.functionSites)
         dflt.readonlyFunctions = stored.readonlyFunctions
         dflt.exportedFunctions = stored.exportedFunctions
         dflt.createdAt = stored.createdAt

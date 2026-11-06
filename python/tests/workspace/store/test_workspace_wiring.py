@@ -365,6 +365,27 @@ async def test_a_workspace_on_the_same_store_finds_the_shell_as_left():
 
 
 @pytest.mark.asyncio
+async def test_a_reloaded_function_runs_the_aliases_its_definition_saw():
+    store = RAMWorkspaceStateStore()
+    ram = RAMVFS()
+    ws_a = Workspace(
+        {"/data": ram}, mode=MountMode.EXEC, workspace_id="fn", store=store
+    )
+    await ws_a.shell("shopt -s expand_aliases")
+    await ws_a.shell("f() { echo old; }")
+    await ws_a.shell("alias echo='printf changed'")
+    assert (await ws_a.shell("f")).stdout == b"old\n"
+    await ws_a.flush_sessions()
+
+    ws_b = Workspace(
+        {"/data": ram}, mode=MountMode.EXEC, workspace_id="fn", store=store
+    )
+    assert (await ws_b.shell("f; echo now")).stdout == b"old\nchanged"
+    await ws_a.close()
+    await ws_b.close()
+
+
+@pytest.mark.asyncio
 async def test_different_workspace_ids_are_isolated():
     store = RAMWorkspaceStateStore()
     ws_a = Workspace(

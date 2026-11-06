@@ -379,7 +379,9 @@ class SessionManager(SessionOwner):
                     set_cwd(default, stored.cwd)
                     default.vars = stored.vars
                     default.functions = stored.functions
-                    default._function_sites.clear()
+                    # The sites the record keeps: each function's alias
+                    # view.
+                    default._function_sites = dict(stored._function_sites)
                     default.readonly_functions = stored.readonly_functions
                     default.exported_functions = stored.exported_functions
                     default.created_at = stored.created_at

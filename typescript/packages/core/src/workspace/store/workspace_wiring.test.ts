@@ -248,6 +248,20 @@ describe('Workspace on a WorkspaceStateStore', () => {
     )
   })
 
+  it('a reloaded function runs the aliases its definition saw', async () => {
+    const store = new RAMWorkspaceStateStore()
+    const ram = new RAMVFS()
+    const wsA = mkWs(store, 'fn', ram)
+    await wsA.shell('shopt -s expand_aliases')
+    await wsA.shell('f() { echo old; }')
+    await wsA.shell("alias echo='printf changed'")
+    expect((await wsA.shell('f')).stdoutText).toBe('old\n')
+    await wsA.flushSessions()
+
+    const wsB = mkWs(store, 'fn', ram)
+    expect((await wsB.shell('f; echo now')).stdoutText).toBe('old\nchanged')
+  })
+
   it('different workspace ids are isolated', async () => {
     const store = new RAMWorkspaceStateStore()
     const wsA = mkWs(store, 'a')

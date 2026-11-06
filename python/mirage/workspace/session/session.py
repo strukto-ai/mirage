@@ -18,7 +18,6 @@ from types import MappingProxyType
 from typing import Any
 
 from mirage.cache.versions import VersionHistory
-from mirage.context.session_context import DEFAULT_UMASK
 from mirage.io.async_line_iterator import SharedInput, release_inputs
 from mirage.io.network import NetworkSetting
 from mirage.policy.builtin.output_cap import command_limits_to_json
@@ -80,6 +79,9 @@ from mirage.workspace.session.serialize import (
     scripts_to_dict,
 )
 from mirage.workspace.types import StatusWriter
+
+# The file-creation mask a fresh shell starts with, as bash's.
+_FRESH_UMASK = 0o022
 
 
 def copy_state(value: Any) -> Any:
@@ -342,7 +344,7 @@ class SessionState:
     aliases: dict[str, str] = field(default_factory=dict)
     # The file-creation mask. bash's default for a fresh shell, and
     # exactly what mirage's 644/755 defaults for a new entry are.
-    umask: int = DEFAULT_UMASK
+    umask: int = _FRESH_UMASK
     mount_modes: dict[str, MountMode] | None = None
     # What exists for this session: the profile's hides, shows, hidden
     # variables, process scope and allow list, compiled once. The views
@@ -626,11 +628,21 @@ class SessionState:
         # brings the session back as it was left.
         if self.aliases:
             data["aliases"] = dict(self.aliases)
+        # Each function's body runs the aliases its definition saw, not
+        # the ones defined since, so the view goes with it.
+        views = {}
+        for name, source in self.functions.items():
+            site = self._function_sites.get(name)
+            if site is not None and site.aliases is not None:
+                if site.source == source:
+                    views[name] = dict(site.aliases)
+        if views:
+            data["function_aliases"] = views
         if self.shell_options:
             data["shell_options"] = dict(self.shell_options)
         if self.shopts:
             data["shopts"] = dict(self.shopts)
-        if self.umask != DEFAULT_UMASK:
+        if self.umask != _FRESH_UMASK:
             data["umask"] = self.umask
         if self.logical_cwd is not None:
             data["logical_cwd"] = self.logical_cwd
@@ -730,6 +742,11 @@ class SessionState:
         for marks in ("readonly_functions", "exported_functions"):
             if marks in data:
                 data = {**data, marks: set(data[marks])}
+        # A session's own copies, so two loaded from one record share none.
+        for table in ("aliases", "shell_options", "shopts"):
+            if data.get(table) is not None:
+                data = {**data, table: dict(data[table])}
+        views = data.get("function_aliases")
         modes = data.get("mount_modes")
         paths = data.get("hidden_paths")
         shown = data.get("shown_paths")
@@ -743,7 +760,13 @@ class SessionState:
         data = {
             key: value
             for key, value in data.items()
-            if key not in ("hidden_paths", "shown_paths", "hidden_vars")
+            if key
+            not in (
+                "hidden_paths",
+                "shown_paths",
+                "hidden_vars",
+                "function_aliases",
+            )
         }
         if modes is not None:
             data["mount_modes"] = {
@@ -813,6 +836,13 @@ class SessionState:
                 processes=data.get("processes", ProcessPermissions()).list,
             )
         session = cls(**data)
+        # A function's alias view comes back as its site; where on its line
+        # the definition stood went with the line.
+        for name, view in (views or {}).items():
+            if name in session.functions:
+                session._function_sites[name] = FunctionSite(
+                    session.functions[name], (0, 0), None, dict(view)
+                )
         if recorded is not None:
             # A recorded session comes back as it was written, so a
             # startup variable it had unset stays unset rather than being
