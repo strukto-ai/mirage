@@ -15,6 +15,7 @@
 import { LanguageRuntime } from '../language.ts'
 import type { Language } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
+import { JS_COMMANDS } from '../constants.ts'
 
 /**
  * The js tier: every runtime that interprets JavaScript source.
@@ -27,7 +28,7 @@ import type { RuntimeOptions } from '../config.ts'
 export abstract class JsRuntime<E = unknown> extends LanguageRuntime<E> {
   readonly language: Language = 'js'
   /** The tier's head words: the class-default captures of every js engine. */
-  static override readonly commands: readonly string[] = ['node', 'js'] as const
+  static override readonly commands: readonly string[] = JS_COMMANDS
 
   constructor(options: RuntimeOptions<object> = {}, configKeys: readonly string[] = []) {
     super(options, JsRuntime.commands, configKeys)

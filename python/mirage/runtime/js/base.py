@@ -14,6 +14,7 @@
 
 from typing import ClassVar
 
+from mirage.runtime.constants import JS_COMMANDS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import E
 from mirage.runtime.types import Language
@@ -31,5 +32,5 @@ class JsRuntime(LanguageRuntime[E]):
     language: ClassVar[Language] = "js"
     # The tier's head words: the class-default captures of every
     # JavaScript engine.
-    commands: ClassVar[tuple[str, ...]] = ("node", "js")
+    commands: ClassVar[tuple[str, ...]] = JS_COMMANDS
     captures = commands

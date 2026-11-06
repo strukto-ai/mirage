@@ -790,7 +790,7 @@ def test_stage_engines_carry_no_line_entry_point():
 
 class ResolverProbe(PythonRuntime):
     name = "resolver-probe"
-    captures = ("probe-run",)
+    captures = ("python3",)
     resolver: MountResolver | None = None
 
     def bind(self, binding: WorkspaceBinding) -> None:

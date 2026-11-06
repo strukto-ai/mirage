@@ -19,6 +19,8 @@ import pytest
 from mirage.commands.config import Context
 from mirage.runtime.base import Runtime
 from mirage.runtime.errors import UnsupportedExecutionError
+from mirage.runtime.js.base import JsRuntime
+from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python import LocalRuntime
 from mirage.runtime.python.base import PythonRuntime
@@ -43,6 +45,29 @@ class FakeRuntime(Runtime):
     captures = ("python3", "made-up")
 
     async def run(self, engine, paths, texts, ctx) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+class PyEngine(PythonRuntime):
+    name = "pyengine"
+
+    async def interpret(self, engine, program, ctx) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+class JsEngine(JsRuntime):
+    name = "jsengine"
+
+    async def interpret(self, engine, program, ctx) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+class DirectEngine(LanguageRuntime):
+    name = "direct"
+    language = "python"
+    captures = ("python3", "python")
+
+    async def interpret(self, engine, program, ctx) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
@@ -77,14 +102,61 @@ def test_bind_commands_first_capturer_wins():
     assert bindings["python"] is local
 
 
-@pytest.mark.parametrize("capture", ["*", "@all", "@lines"])
+@pytest.mark.parametrize("capture", ["*", "@all", "@lines", "@pyton"])
 def test_bind_commands_refuses_a_group_it_does_not_have(capture):
     with pytest.raises(ValueError) as refused:
         bind_commands([FakeRuntime(captures=[capture])])
     assert str(refused.value) == (
         f"{capture!r} is not a program or a group; the groups are"
-        " '@external' and '@line'"
+        " '@external', '@line', '@python' and '@js'"
     )
+
+
+@pytest.mark.parametrize(
+    "entry, capture",
+    [
+        (PyEngine, "node"),
+        (PyEngine, "gcc"),
+        (JsEngine, "python3"),
+        (PyEngine, "@js"),
+    ],
+)
+def test_bind_commands_refuses_a_capture_a_language_runtime_does_not_run(
+    entry, capture
+):
+    with pytest.raises(ValueError) as refused:
+        bind_commands([entry(captures=[capture])])
+    assert str(refused.value) == (
+        f"runtime {entry.name!r} does not run "
+        f"{('node' if capture == '@js' else capture)!r}"
+    )
+
+
+def test_bind_commands_lets_a_language_runtime_that_runs_processes_take_any_name():
+    local = LocalRuntime(captures=["python3", "node"])
+    assert bind_commands([local]) == {"python3": local, "node": local}
+
+
+def test_bind_commands_reads_the_tier_from_the_language_not_from_commands():
+    engine = DirectEngine()
+    assert bind_commands([engine]) == {"python3": engine, "python": engine}
+
+
+def test_a_group_expands_to_the_interpreter_names_mirage_owns():
+    assert PyEngine(captures=["@python"]).captures == ("python3", "python")
+    assert JsEngine(captures=["@js"]).captures == ("node", "js")
+    mixed = FakeRuntime(captures=["@python", "pip", "python3", "@external"])
+    assert mixed.captures == ("python3", "python", "pip", "@external")
+
+
+def test_a_group_binds_both_names_to_the_runtime_that_took_it():
+    fake = FakeRuntime(captures=["@python", "pip"])
+    bindings = bind_commands([fake, PyEngine()])
+    assert {n: bindings[n] for n in ("python3", "python", "pip")} == {
+        "python3": fake,
+        "python": fake,
+        "pip": fake,
+    }
 
 
 def test_bind_commands_workspace_runtime_binds_nothing():

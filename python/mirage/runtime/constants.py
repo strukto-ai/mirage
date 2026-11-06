@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Iterable
 from typing import Final
 
 from mirage.errors import FsCondition
@@ -40,6 +41,35 @@ EXTERNAL_COMMANDS: Final = "@external"
 
 # Capture the whole line, Mirage's own commands included (a line executor).
 WHOLE_LINE: Final = "@line"
+
+# The interpreter names Mirage owns, one set per language tier: the
+# class-default captures of every engine that runs the language.
+PYTHON_COMMANDS: Final = ("python3", "python")
+JS_COMMANDS: Final = ("node", "js")
+LANGUAGE_COMMANDS: Final = {"python": PYTHON_COMMANDS, "js": JS_COMMANDS}
+
+# Capture both names of a tier at once. A group names interpreters only:
+# a tool such as pip or npx reaches a sandbox through EXTERNAL_COMMANDS.
+PYTHON_GROUP: Final = "@python"
+JS_GROUP: Final = "@js"
+CAPTURE_GROUPS: Final = {PYTHON_GROUP: PYTHON_COMMANDS, JS_GROUP: JS_COMMANDS}
+
+
+def expand_captures(captures: Iterable[str]) -> tuple[str, ...]:
+    """A runtime's captures with each group spelled as its names.
+
+    Args:
+        captures (Iterable[str]): program names and groups, as a config
+            entry or a constructor lists them.
+    """
+    return tuple(
+        dict.fromkeys(
+            name
+            for capture in captures
+            for name in CAPTURE_GROUPS.get(capture, (capture,))
+        )
+    )
+
 
 # The most requests one runtime file adapter keeps in flight: classifying
 # an entry is a request of its own on a mount that keeps no listing

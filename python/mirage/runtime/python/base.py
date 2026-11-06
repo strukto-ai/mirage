@@ -15,6 +15,7 @@
 from typing import ClassVar
 
 from mirage.commands.config import Context
+from mirage.runtime.constants import PYTHON_COMMANDS
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import E
 from mirage.runtime.python.execution import PAYLOAD_ARGV0, STDIN_ARGV0
@@ -79,7 +80,7 @@ class PythonRuntime(LanguageRuntime[E]):
     language: ClassVar[Language] = "python"
     # The tier's head words: the class-default captures of every
     # python engine.
-    commands: ClassVar[tuple[str, ...]] = ("python3", "python")
+    commands: ClassVar[tuple[str, ...]] = PYTHON_COMMANDS
     captures = commands
     argv0_rules: ClassVar[Argv0Rules] = CPYTHON_ARGV0
     # Whether `python3 -m mod` can run at all. True for every engine

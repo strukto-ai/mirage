@@ -1061,7 +1061,7 @@ class ResolverProbe extends LanguageRuntime {
   readonly name = 'resolver-probe'
   resolver: MountResolver | null = null
   constructor() {
-    super({ captures: ['probe-run'] })
+    super({ captures: ['python3'] })
   }
   override bind(binding: WorkspaceBinding): void {
     super.bind(binding)

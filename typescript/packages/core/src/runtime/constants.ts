@@ -20,6 +20,37 @@ export const EXTERNAL_COMMANDS = '@external'
 /** Capture the whole line, Mirage's own commands included (a line executor). Mirrors Python's WHOLE_LINE. */
 export const WHOLE_LINE = '@line'
 
+/** The interpreter names Mirage owns for python: the class-default captures of every python engine. */
+export const PYTHON_COMMANDS: readonly string[] = ['python3', 'python']
+
+/** The interpreter names Mirage owns for js: the class-default captures of every js engine. */
+export const JS_COMMANDS: readonly string[] = ['node', 'js']
+
+/** The names a language runtime may capture, by language. */
+export const LANGUAGE_COMMANDS: Readonly<Record<'python' | 'js', readonly string[]>> = {
+  python: PYTHON_COMMANDS,
+  js: JS_COMMANDS,
+}
+
+/**
+ * Capture both names of a tier at once. A group names interpreters only: a
+ * tool such as pip or npx reaches a sandbox through `EXTERNAL_COMMANDS`.
+ */
+export const PYTHON_GROUP = '@python'
+
+/** Capture `node` and `js`; see `PYTHON_GROUP`. */
+export const JS_GROUP = '@js'
+
+const CAPTURE_GROUPS: ReadonlyMap<string, readonly string[]> = new Map([
+  [PYTHON_GROUP, PYTHON_COMMANDS],
+  [JS_GROUP, JS_COMMANDS],
+])
+
+/** A runtime's captures with each group spelled as its names. */
+export function expandCaptures(captures: readonly string[]): string[] {
+  return [...new Set(captures.flatMap((capture) => CAPTURE_GROUPS.get(capture) ?? [capture]))]
+}
+
 /**
  * The most requests one runtime file adapter keeps in flight.
  *

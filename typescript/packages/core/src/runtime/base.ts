@@ -19,6 +19,7 @@ import type { PathSpec } from '../types.ts'
 import { Activity } from '../utils/activity.ts'
 import { refusedRun, type WorkspaceBinding } from './binding.ts'
 import { coerceRuntimeConfig, type RuntimeConfig, type RuntimeOptions } from './config.ts'
+import { expandCaptures } from './constants.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import { isLineExecutor, isProcessExecutor } from './mixin.ts'
 import type {
@@ -83,8 +84,7 @@ export abstract class Runtime<E = unknown> {
     defaultCaptures: readonly string[] = [],
     configKeys: readonly string[] = [],
   ) {
-    this.captures =
-      options.captures !== undefined ? options.captures.slice() : defaultCaptures.slice()
+    this.captures = expandCaptures(options.captures ?? defaultCaptures)
     this.config = coerceRuntimeConfig(options.config, configKeys)
   }
 
