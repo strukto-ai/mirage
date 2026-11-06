@@ -29,6 +29,7 @@ import {
 import { buildFileCache } from '@struktoai/mirage-core/workspace/workspace/cache'
 import { DaytonaRuntime } from './runtime/sandbox/daytona/runtime.ts'
 import { SandlockRuntime } from './runtime/sandbox/sandlock/runtime.ts'
+import { SSHRuntime } from './runtime/sandbox/ssh/runtime.ts'
 import { DiskNamespaceStore } from './workspace/mount/namespace/disk.ts'
 import { RedisNamespaceStore } from './workspace/mount/namespace/redis.ts'
 import { DiskWorkspaceStateStore } from './workspace/store/disk.ts'
@@ -418,6 +419,28 @@ describe('configToWorkspaceArgs', () => {
       expect(e2b.config.apiKey).toBe('e2b_from_dotenv')
     } finally {
       rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("reads a pointer in the ssh runtime's private key", async () => {
+    vi.stubEnv('SSH_TEST_KEY', 'key-from-env')
+    try {
+      const args = await configToWorkspaceArgs(
+        loadWorkspaceConfig({
+          mounts: { '/data': { vfs: 'ram' } },
+          runtimes: [
+            {
+              name: 'ssh',
+              config: { host: 'box', private_key: { from: 'env', key: 'SSH_TEST_KEY' } },
+            },
+          ],
+        }),
+      )
+      const ssh = args.options.runtimes?.[0]
+      expect(ssh).toBeInstanceOf(SSHRuntime)
+      expect((ssh as SSHRuntime).config.privateKey).toBe('key-from-env')
+    } finally {
+      vi.unstubAllEnvs()
     }
   })
 

@@ -57,6 +57,7 @@ export class SSHAccessor extends Accessor {
       this.config.timeout ?? 30,
       this.config.password,
       this.config.passphrase,
+      this.config.privateKey,
     )
     return new Promise<SFTPWrapper>((resolveFn, rejectFn) => {
       c.on('ready', () => {

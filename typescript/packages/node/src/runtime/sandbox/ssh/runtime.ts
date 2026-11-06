@@ -73,6 +73,9 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
       this.config.username,
       this.config.identityFile,
       this.config.timeout ?? 30,
+      undefined,
+      undefined,
+      this.config.privateKey,
     )
     await new Promise<void>((resolveFn, rejectFn) => {
       client.on('ready', () => {

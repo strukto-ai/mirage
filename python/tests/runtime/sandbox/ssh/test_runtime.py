@@ -91,6 +91,22 @@ def test_connect_kwargs_map_the_config():
     assert kwargs["login_timeout"] == 5
 
 
+def test_a_private_key_is_offered_as_its_own_text_after_the_file():
+    runtime = SSHRuntime(
+        config={
+            "host": "box",
+            "identity_file": "~/.ssh/id_ed25519",
+            "private_key": "key-text",
+        }
+    )
+    assert runtime._connect_kwargs()["client_keys"] == [
+        str(Path("~/.ssh/id_ed25519").expanduser()),
+        b"key-text",
+    ]
+    only = SSHRuntime(config={"host": "box", "private_key": "key-text"})
+    assert only._connect_kwargs()["client_keys"] == [b"key-text"]
+
+
 def test_connect_kwargs_defaults_stay_out():
     kwargs = SSHRuntime(config={"host": "box"})._connect_kwargs()
     assert kwargs == {
@@ -182,6 +198,51 @@ async def test_real_ssh_stdin_always_reaches_eof(data):
             assert result.exit_code == 0
         finally:
             await runtime.close()
+
+
+@pytest.mark.asyncio
+async def test_real_ssh_logs_in_with_a_private_key_given_as_its_text(
+    monkeypatch, tmp_path
+):
+    # Only the generated key gets in: no agent, password or default key.
+    monkeypatch.delenv("SSH_AUTH_SOCK", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    host_key = asyncssh.generate_private_key("ssh-ed25519")
+    client_key = asyncssh.generate_private_key("ssh-ed25519")
+    authorized = asyncssh.import_authorized_keys(
+        client_key.export_public_key().decode()
+    )
+    async with asyncssh.listen(
+        "127.0.0.1",
+        0,
+        server_host_keys=[host_key],
+        authorized_client_keys=authorized,
+        process_factory=echo_input,
+        encoding=None,
+    ) as server:
+        config = {
+            "host": "127.0.0.1",
+            "port": server.get_port(),
+            "username": "test",
+        }
+        keyed = SSHRuntime(
+            config={
+                **config,
+                "private_key": client_key.export_private_key().decode(),
+            }
+        )
+        try:
+            result = await asyncio.wait_for(_line(keyed, "cat", b"in"), 5)
+            assert result.stdout == b"in".hex().encode()
+            assert result.exit_code == 0
+        finally:
+            await keyed.close()
+        keyless = SSHRuntime(config=config)
+        try:
+            with pytest.raises(asyncssh.PermissionDenied):
+                await asyncio.wait_for(keyless.connect(), 5)
+        finally:
+            await keyless.close()
 
 
 class HungOutput:

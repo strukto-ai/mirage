@@ -652,6 +652,34 @@ async def test_a_runtime_pointer_missing_its_field_names_the_runtime(
         )
 
 
+@pytest.mark.asyncio
+async def test_the_ssh_runtime_private_key_reads_a_pointer(monkeypatch):
+    monkeypatch.setenv("SSH_TEST_KEY", "key-from-env")
+    cfg = await resolve_secrets(
+        load_config(
+            {
+                "mounts": {"/data": {"vfs": "ram"}},
+                "runtimes": [
+                    {
+                        "name": "ssh",
+                        "config": {
+                            "host": "box",
+                            "private_key": {
+                                "from": "env",
+                                "key": "SSH_TEST_KEY",
+                            },
+                        },
+                    }
+                ],
+            },
+            env={},
+        )
+    )
+    ssh = cfg.to_workspace_kwargs()["runtimes"][0]
+    assert ssh.name == "ssh"
+    assert ssh.config.private_key == "key-from-env"
+
+
 def e2b_mount_type(mount_type):
     return load_config(
         {

@@ -36,8 +36,9 @@ ws = Workspace({"/remote": vfs}, mode=MountMode.WRITE)
 | <code style={{ whiteSpace: 'nowrap' }}>port</code> | SSH port; unset uses the client's default, `22` unless `~/.ssh/config` sets one for the host. |
 | <code style={{ whiteSpace: 'nowrap' }}>username</code> | Login user; unset uses the local user name unless `~/.ssh/config` sets one for the host. |
 | <code style={{ whiteSpace: 'nowrap' }}>identity_file</code> | Path to a private key; `~` is expanded. Unset tries the SSH agent and the default keys in `~/.ssh`. |
+| <code style={{ whiteSpace: 'nowrap' }}>private_key</code><br />secret | A private key's own text, such as one a credential pointer reads from a secret store; offered after `identity_file`'s. |
 | <code style={{ whiteSpace: 'nowrap' }}>password</code><br />secret | Password for password authentication; prefer `identity_file`. |
-| <code style={{ whiteSpace: 'nowrap' }}>passphrase</code><br />secret | Passphrase of an encrypted `identity_file`; ignored when `identity_file` is unset. |
+| <code style={{ whiteSpace: 'nowrap' }}>passphrase</code><br />secret | Passphrase of an encrypted `identity_file` or `private_key`; ignored when both are unset. |
 | <code style={{ whiteSpace: 'nowrap' }}>root</code><br />default `'/'` | Path on the remote that becomes the mount root. |
 | <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds to wait for the TCP connection, and again for authentication. |
 | <code style={{ whiteSpace: 'nowrap' }}>known_hosts</code> | Path to a `known_hosts` file the server's host key is checked against; unset disables host-key checking. |

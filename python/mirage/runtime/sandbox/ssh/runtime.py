@@ -68,6 +68,7 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
             config.username,
             config.identity_file,
             config.timeout,
+            config.private_key,
         )
         kwargs["known_hosts"] = None
         return kwargs

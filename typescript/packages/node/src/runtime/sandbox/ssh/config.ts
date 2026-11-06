@@ -33,6 +33,11 @@ export interface SSHRuntimeConfig extends SandboxConfig {
   username?: string
   /** Private key path (`~` expands). */
   identityFile?: string
+  /**
+   * A private key's own text, such as one a credential pointer reads from
+   * a secret store; offered after `identityFile`'s.
+   */
+  privateKey?: string
   /** Connect timeout in seconds; absent means 30. */
   timeout?: number
 }
@@ -44,5 +49,6 @@ export const SSH_RUNTIME_CONFIG_KEYS: readonly string[] = [
   'port',
   'username',
   'identityFile',
+  'privateKey',
   'timeout',
 ]
