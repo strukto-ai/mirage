@@ -271,8 +271,9 @@ def operation(
             schema = media.get("schema", {})
             lines += [f"`{kind}` `{attr(type_of(schema))}`", ""]
             found = shapes(doc, schema)
+            choice = any(k in resolve(doc, schema) for k in ("anyOf", "oneOf"))
             for name, shape in found:
-                if len(found) > 1:
+                if choice or len(found) > 1:
                     lines += [f"*{name}*", ""]
                 lines += fields(doc, shape, "ResponseField", "")
                 lines.append("")
