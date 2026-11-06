@@ -61,7 +61,11 @@ CLI_GROUPS = (
     "runtime",
 )
 # A group inside a group: its commands are three words.
-NESTED_GROUPS = (("daemon", "config"),)
+NESTED_GROUPS = (
+    ("daemon", "config"),
+    ("workspace", "session"),
+    ("workspace", "vfs"),
+)
 WAITED = "the line waited for all of its input"
 # A case line touches BEGUN as it starts; a cancel case's line then sleeps
 # CANCEL_SLEEP seconds and touches LEAKED. A session of WATCH's looks.
