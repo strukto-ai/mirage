@@ -180,7 +180,10 @@ function runtimeTypes(): TypeTable {
  * mirage's registries and config schemas; a VFS's off the schemas of the
  * ones `host` builds.
  */
-export async function typesOf(kind: EntryKind, host: Pick<ServerHost, 'vfsSchemas'>): Promise<TypeTable> {
+export async function typesOf(
+  kind: EntryKind,
+  host: Pick<ServerHost, 'vfsSchemas'>,
+): Promise<TypeTable> {
   if (kind === 'vfs') return vfsTypes(host.vfsSchemas)
   if (kind === 'cli') return cliTypes()
   if (kind === 'runtime') return runtimeTypes()
