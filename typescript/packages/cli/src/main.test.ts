@@ -34,6 +34,7 @@ describe('mirage CLI program', () => {
         'session',
         'shell',
         'ssh-proxy',
+        'template',
         'tools',
         'vfs',
         'whoami',
