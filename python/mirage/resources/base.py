@@ -79,6 +79,17 @@ class ResourceStore(ABC):
     async def get_template(self, name: str) -> Template: ...
 
     @abstractmethod
+    async def create_template(self, template: TemplateInput) -> Template:
+        """Save a new template.
+
+        Args:
+            template (TemplateInput): the template to save.
+
+        Raises:
+            ResourceError: ``conflict`` when a live one has the name.
+        """
+
+    @abstractmethod
     async def put_template(self, template: TemplateInput) -> Template: ...
 
     @abstractmethod

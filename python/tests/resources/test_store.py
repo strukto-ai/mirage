@@ -13,14 +13,27 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+import asyncio
+
 import pytest
 
 from mirage.resources.errors import ResourceError
 from mirage.resources.memory import MemoryRecords, MemorySealer
 from mirage.resources.store import RecordResourceStore
-from mirage.resources.types import EntryInput, Fields
+from mirage.resources.types import EntryInput, Fields, TemplateInput
 
 GITHUB = EntryInput("github", "github", {"owner": "x"}, {"token": "t1"})
+
+
+class SlowRecords(MemoryRecords):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+
+    async def write(self, folder: str, name: str, record: Fields) -> None:
+        self.started.set()
+        await asyncio.sleep(0.05)
+        await super().write(folder, name, record)
 
 
 class FailingRecords(MemoryRecords):
@@ -106,3 +119,29 @@ async def test_every_call_refuses_a_name_outside_the_rule(name):
         with pytest.raises(ResourceError) as refused:
             await call
         assert refused.value.code == "invalid"
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_put_saves_record_and_secret_together():
+    records = SlowRecords()
+    store = RecordResourceStore("t", records, MemorySealer())
+    put = asyncio.ensure_future(store.put_entry("vfs", GITHUB))
+    await records.started.wait()
+    put.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await put
+    saved = await store.reveal_entry("vfs", "github")
+    assert (saved.fields, saved.sealed) == ({"owner": "x"}, {"token": "t1"})
+
+
+@pytest.mark.asyncio
+async def test_two_creates_of_one_template_save_one():
+    store = RecordResourceStore("t", MemoryRecords(), MemorySealer())
+    results = await asyncio.gather(
+        store.create_template(TemplateInput(name="t", config={"a": 1})),
+        store.create_template(TemplateInput(name="t", config={"a": 2})),
+        return_exceptions=True,
+    )
+    refused = [r for r in results if isinstance(r, ResourceError)]
+    assert [r.code for r in refused] == ["conflict"]
+    assert (await store.get_template("t")).config == {"a": 1}

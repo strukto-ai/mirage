@@ -16,6 +16,7 @@ import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { ResourceError, type ResourceErrorCode } from '@struktoai/mirage-core/resources/errors'
 import type { Template } from '@struktoai/mirage-core/resources/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
+import type { WorkspaceRegistry } from '../registry.ts'
 import type { RouteApp, RouteReply } from '../routes.ts'
 import { checkConfig, type CreateTemplateRequest, type TemplateResponse } from '../schemas.ts'
 
@@ -38,8 +39,26 @@ function present(template: Template): TemplateResponse {
   return { name: template.name, description: template.description, config: template.config }
 }
 
+/**
+ * Refuse templates on a server of many accounts: its one store would let each
+ * account read and use the others'. Null when the server has one account.
+ */
+export function requireOneAccount(
+  registry: WorkspaceRegistry,
+): { status: number; detail: string } | null {
+  return registry.accountsRequired
+    ? { status: 501, detail: 'templates are kept only on a server of one account' }
+    : null
+}
+
 /** Run a store call; a refusal answers by its code, anything else propagates. */
-async function stored<T>(reply: RouteReply, run: () => Promise<T>): Promise<T | RouteReply> {
+async function stored<T>(
+  registry: WorkspaceRegistry,
+  reply: RouteReply,
+  run: () => Promise<T>,
+): Promise<T | RouteReply> {
+  const refused = requireOneAccount(registry)
+  if (refused !== null) return reply.status(refused.status).send({ detail: refused.detail })
   try {
     return await run()
   } catch (e) {
@@ -53,14 +72,19 @@ export function registerTemplatesRoutes(
   app: RouteApp,
   deps: {
     resources: ResourceStore
+    registry: WorkspaceRegistry
   },
 ): void {
-  const { resources } = deps
-  app.get('/v1/templates', async () => (await resources.listTemplates()).map(present))
+  const { resources, registry } = deps
+  app.get('/v1/templates', (_req, reply) =>
+    stored(registry, reply, async () => (await resources.listTemplates()).map(present)),
+  )
 
   // A whole workspace config, checked as a create checks one, and kept as
   // written. A name already saved is a 409.
   app.post<{ Body: CreateTemplateRequest }>('/v1/templates', async (req, reply) => {
+    const refused = requireOneAccount(registry)
+    if (refused !== null) return reply.status(refused.status).send({ detail: refused.detail })
     const body = req.body as Partial<CreateTemplateRequest> | null
     if (body === null || typeof body !== 'object' || typeof body.name !== 'string') {
       return reply.status(400).send({ detail: 'name must be a string' })
@@ -75,31 +99,29 @@ export function registerTemplatesRoutes(
       return reply.status(400).send({ detail: (e as Error).message })
     }
     const config = body.config as Record<string, JsonValue>
-    return stored(reply, async () => {
-      try {
-        await resources.getTemplate(name)
-        return reply.status(409).send({ detail: `template ${name} already exists` })
-      } catch (e) {
-        if (!(e instanceof ResourceError) || e.code !== 'not_found') throw e
-      }
-      const saved = await resources.putTemplate({ name, description: description ?? null, config })
+    return stored(registry, reply, async () => {
+      const saved = await resources.createTemplate({
+        name,
+        description: description ?? null,
+        config,
+      })
       return reply.status(201).send(present(saved))
     })
   })
 
   app.get<{ Params: RefParams }>('/v1/templates/:ref', (req, reply) =>
-    stored(reply, async () => present(await resources.getTemplate(req.params.ref))),
+    stored(registry, reply, async () => present(await resources.getTemplate(req.params.ref))),
   )
 
   // Deleted, not wiped: restore brings it back.
   app.delete<{ Params: RefParams }>('/v1/templates/:ref', (req, reply) =>
-    stored(reply, async () => {
+    stored(registry, reply, async () => {
       await resources.deleteTemplate(req.params.ref)
       return reply.status(204).send()
     }),
   )
 
   app.post<{ Params: RefParams }>('/v1/templates/:ref/restore', (req, reply) =>
-    stored(reply, async () => present(await resources.restoreTemplate(req.params.ref))),
+    stored(registry, reply, async () => present(await resources.restoreTemplate(req.params.ref))),
   )
 }

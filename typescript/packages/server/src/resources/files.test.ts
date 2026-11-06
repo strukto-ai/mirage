@@ -53,6 +53,8 @@ describe('filesResourceStore', () => {
     mkdirSync(join(dir, 'policy'))
     writeFileSync(join(dir, 'policy', 'a.py.yaml'), 'name: a.py\nsource: x\n')
     expect((await store.getPolicy('a.py')).source).toBe('x')
+    writeFileSync(join(dir, 'policy', 'c.py.yaml'), '{source: allow}\n')
+    expect((await store.getPolicy('c.py')).source).toBe('allow')
     writeFileSync(join(dir, 'policy', 'b.py.yaml'), 'source: [\n')
     await expect(store.getPolicy('b.py')).rejects.toMatchObject({ code: 'invalid' })
   })

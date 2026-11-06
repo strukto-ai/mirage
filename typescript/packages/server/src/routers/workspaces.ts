@@ -53,7 +53,7 @@ import {
   type LoadWorkspaceRequest,
 } from '../schemas.ts'
 import { makeBrief, makeDetail } from '../summary.ts'
-import { storeRefusal } from './templates.ts'
+import { requireOneAccount, storeRefusal } from './templates.ts'
 import { queryFlag } from './vfs.ts'
 
 export interface WorkspaceRoutesDeps {
@@ -69,11 +69,13 @@ export interface WorkspaceRoutesDeps {
  * The config a create builds, checked and as written: the body's own, or a
  * copy of the named template's, so a later edit of the template leaves the
  * workspace as it is. Answers a refusal for both or neither, an unknown
- * template, or a config that fails its check.
+ * template, a template on a server of many accounts, or a config that fails
+ * its check.
  */
 async function configOf(
   body: CreateWorkspaceRequest,
   resources: ResourceStore | undefined,
+  registry: WorkspaceRegistry,
 ): Promise<
   | { cfg: WorkspaceConfigRaw; written: Record<string, JsonValue> }
   | { status: number; detail: string }
@@ -83,6 +85,8 @@ async function configOf(
   if (body.template !== undefined) {
     if (given !== undefined) return { status: 400, detail: 'give a template or a config, not both' }
     if (resources === undefined) return { status: 400, detail: 'this server keeps no templates' }
+    const refused = requireOneAccount(registry)
+    if (refused !== null) return refused
     try {
       written = (await resources.getTemplate(body.template)).config
     } catch (e) {
@@ -354,7 +358,7 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       reply: RouteReply,
     ) => {
       // The policies judge, and the build uses, the same document.
-      const chosen = await configOf(req.body, deps.resources)
+      const chosen = await configOf(req.body, deps.resources, deps.registry)
       if ('detail' in chosen) return reply.status(chosen.status).send({ detail: chosen.detail })
       const { cfg, written: config } = chosen
       // The server's policies judge the config as written before any of it

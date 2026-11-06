@@ -23,6 +23,7 @@ from httpx import ASGITransport, AsyncClient
 from mirage.resources.memory import memory_resource_store
 from mirage.resources.types import TemplateInput
 from mirage.server import build_app
+from mirage.server.resources.files import files_resource_store
 
 RAM = {"mounts": {"/": {"vfs": "ram", "mode": "WRITE"}}}
 TWO = {
@@ -113,3 +114,26 @@ async def test_a_create_names_one_known_template_or_a_config(client):
     )
     assert r.status_code == 200
     assert r.json()["outcome"] == "allow"
+
+
+@pytest.mark.asyncio
+async def test_a_server_of_many_accounts_keeps_no_templates(app, client):
+    app.state.registry.accounts_required = True
+    assert (await client.get("/v1/templates")).status_code == 501
+    r = await client.post("/v1/templates", json={"name": "t", "config": RAM})
+    assert r.status_code == 501
+    r = await client.post("/v1/workspaces", json={"template": "t"})
+    assert r.status_code == 501
+
+
+@pytest.mark.asyncio
+async def test_a_broken_record_lists_as_a_bad_request(tmp_path):
+    (tmp_path / "template").mkdir()
+    (tmp_path / "template" / "bad.yaml").write_text("config: [\n")
+    app = build_app(
+        idle_grace_seconds=10.0, resource_store=files_resource_store(tmp_path)
+    )
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        assert (await c.get("/v1/templates")).status_code == 400

@@ -54,6 +54,8 @@ async def test_a_hand_edited_file_reads_as_yaml_or_refuses(tmp_path):
     (tmp_path / "policy").mkdir()
     (tmp_path / "policy" / "a.py.yaml").write_text("name: a.py\nsource: x\n")
     assert (await store.get_policy("a.py")).source == "x"
+    (tmp_path / "policy" / "c.py.yaml").write_text("{source: allow}\n")
+    assert (await store.get_policy("c.py")).source == "allow"
     (tmp_path / "policy" / "b.py.yaml").write_text("source: [\n")
     with pytest.raises(ResourceError) as broken:
         await store.get_policy("b.py")

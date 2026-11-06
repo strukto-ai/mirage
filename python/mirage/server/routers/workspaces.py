@@ -57,7 +57,10 @@ from mirage.server.multipart import (
     part_events,
 )
 from mirage.server.registry import Claim, WorkspaceEntry
-from mirage.server.routers.templates import store_refusal
+from mirage.server.routers.templates import (
+    require_one_account,
+    store_refusal,
+)
 from mirage.server.routers.vfs import require_entry
 from mirage.server.schemas import (
     CancelLinesResponse,
@@ -347,7 +350,7 @@ async def _config_of(
 
     Raises:
         HTTPException: 400 for both or neither, 404 for an unknown
-            template.
+            template, 501 for a template on a server of many accounts.
     """
     if req.template is None:
         if req.config is None:
@@ -360,6 +363,7 @@ async def _config_of(
             status_code=400,
             detail="give a template or a config, not both",
         )
+    require_one_account(request)
     try:
         template = await request.app.state.resources.get_template(req.template)
     except ResourceError as e:

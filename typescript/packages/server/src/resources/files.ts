@@ -58,13 +58,17 @@ function dump(record: Fields): string {
   return `${JSON.stringify(record, null, 2)}\n`
 }
 
-/** A record read back: JSON as written, or YAML 1.1, Python's rules, when edited by hand. */
+/** A record read back: JSON as written, else YAML 1.1, Python's rules, for a file edited by hand. */
 function parseRecord(path: string, text: string): Fields {
   let record: unknown
   try {
-    record = text.trimStart().startsWith('{') ? JSON.parse(text) : parse(text, { version: '1.1' })
-  } catch (e) {
-    throw new ResourceError('invalid', `${path} is malformed: ${(e as Error).message}`)
+    record = JSON.parse(text)
+  } catch {
+    try {
+      record = parse(text, { version: '1.1' })
+    } catch (e) {
+      throw new ResourceError('invalid', `${path} is malformed: ${(e as Error).message}`)
+    }
   }
   if (record === null || typeof record !== 'object' || Array.isArray(record)) {
     throw new ResourceError('invalid', `${path} is not a mapping`)

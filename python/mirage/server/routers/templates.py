@@ -13,15 +13,35 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from mirage.resources.errors import ResourceError
 from mirage.resources.types import Template, TemplateInput
 from mirage.server.schemas import CreateTemplateRequest, TemplateResponse
 
-router = APIRouter(prefix="/v1/templates")
-
 STATUS = {"not_found": 404, "conflict": 409, "invalid": 400}
+
+
+def require_one_account(request: Request) -> None:
+    """Refuse templates on a server of many accounts: its one store would
+    let each account read and use the others'.
+
+    Args:
+        request (Request): the HTTP request, for the app's registry.
+
+    Raises:
+        HTTPException: 501 while the server requires accounts.
+    """
+    if request.app.state.registry.accounts_required:
+        raise HTTPException(
+            status_code=501,
+            detail="templates are kept only on a server of one account",
+        )
+
+
+router = APIRouter(
+    prefix="/v1/templates", dependencies=[Depends(require_one_account)]
+)
 
 
 def store_refusal(e: ResourceError) -> HTTPException:
@@ -44,9 +64,11 @@ def present(template: Template) -> TemplateResponse:
 @router.get("", response_model=list[TemplateResponse])
 async def list_templates(request: Request) -> list[TemplateResponse]:
     """The saved templates, by name."""
-    return [
-        present(t) for t in await request.app.state.resources.list_templates()
-    ]
+    try:
+        templates = await request.app.state.resources.list_templates()
+    except ResourceError as e:
+        raise store_refusal(e) from e
+    return [present(t) for t in templates]
 
 
 @router.post("", response_model=TemplateResponse, status_code=201)
@@ -60,19 +82,9 @@ async def create_template(
         req (CreateTemplateRequest): the name, description and config.
         request (Request): the HTTP request, for the app's store.
     """
-    resources = request.app.state.resources
     written = (await request.json())["config"]
     try:
-        await resources.get_template(req.name)
-    except ResourceError as e:
-        if e.code != "not_found":
-            raise store_refusal(e) from e
-    else:
-        raise HTTPException(
-            status_code=409, detail=f"template {req.name} already exists"
-        )
-    try:
-        saved = await resources.put_template(
+        saved = await request.app.state.resources.create_template(
             TemplateInput(
                 name=req.name, description=req.description, config=written
             )

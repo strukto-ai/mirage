@@ -249,18 +249,27 @@ export class RecordResourceStore implements ResourceStore {
     return this.serial(() => this.liveTemplate(name))
   }
 
+  private async saveTemplate(input: TemplateInput, replace: boolean): Promise<Template> {
+    checkName(TEMPLATE, input.name)
+    if (!replace && (await this.records.read(TEMPLATE, input.name)) !== null) {
+      throw new ResourceError('conflict', `template ${input.name} already exists`)
+    }
+    const template: Template = {
+      name: input.name,
+      description:
+        input.description === undefined || input.description === '' ? null : input.description,
+      config: input.config,
+    }
+    await this.records.write(TEMPLATE, template.name, { ...template })
+    return template
+  }
+
+  createTemplate(input: TemplateInput): Promise<Template> {
+    return this.serial(() => this.saveTemplate(input, false))
+  }
+
   putTemplate(input: TemplateInput): Promise<Template> {
-    return this.serial(async () => {
-      checkName(TEMPLATE, input.name)
-      const template: Template = {
-        name: input.name,
-        description:
-          input.description === undefined || input.description === '' ? null : input.description,
-        config: input.config,
-      }
-      await this.records.write(TEMPLATE, template.name, { ...template })
-      return template
-    })
+    return this.serial(() => this.saveTemplate(input, true))
   }
 
   deleteTemplate(name: string): Promise<void> {
