@@ -11,6 +11,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import asyncio
+
 import pytest
 
 from mirage.commands.cli.types import CLI, CLIHandler
@@ -584,5 +586,129 @@ async def test_a_wrapper_the_allow_list_leaves_out_is_still_refused():
         ).exit_code == 0
         io = await ws.shell("cd /data && nice grep python f", session_id="s")
         assert io.exit_code == 126
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, code, said",
+    [
+        ("nice cd /data", 127, "nice: 'cd': No such file or directory\n"),
+        (
+            "nohup cd /data",
+            127,
+            "nohup: failed to run command 'cd': No such file or directory\n",
+        ),
+        (
+            "stdbuf -oL cd /data",
+            127,
+            "stdbuf: failed to run command 'cd': No such file or directory\n",
+        ),
+        (
+            "ionice -c3 cd /data",
+            127,
+            "ionice: failed to execute cd: No such file or directory\n",
+        ),
+        (
+            "setsid cd /data",
+            127,
+            "setsid: failed to execute cd: No such file or directory\n",
+        ),
+        (
+            "nice --bogus rm f",
+            125,
+            "nice: unrecognized option '--bogus'\n"
+            "Try 'nice --help' for more information.\n",
+        ),
+        (
+            "nice -x rm f",
+            125,
+            "nice: invalid option -- 'x'\n"
+            "Try 'nice --help' for more information.\n",
+        ),
+        ("nice -n abc rm f", 125, "nice: invalid adjustment 'abc'\n"),
+        (
+            "nohup -x rm f",
+            125,
+            "nohup: invalid option -- 'x'\n"
+            "Try 'nohup --help' for more information.\n",
+        ),
+        ("stdbuf -o abc rm f", 125, "stdbuf: invalid mode 'abc'\n"),
+        (
+            "stdbuf -o 1Q rm f",
+            125,
+            "stdbuf: invalid mode '1Q': Value too large for defined data type\n",
+        ),
+        (
+            "stdbuf rm f",
+            125,
+            "stdbuf: you must specify a buffering mode option\n"
+            "Try 'stdbuf --help' for more information.\n",
+        ),
+        (
+            "stdbuf -i L rm f",
+            125,
+            "stdbuf: line buffering stdin is meaningless\n"
+            "Try 'stdbuf --help' for more information.\n",
+        ),
+        ("ionice -c abc rm f", 1, "ionice: unknown scheduling class: 'abc'\n"),
+        (
+            "ionice -n 1x rm f",
+            1,
+            "ionice: invalid class data argument: '1x'\n",
+        ),
+        (
+            "setsid -x rm f",
+            1,
+            "setsid: invalid option -- 'x'\n"
+            "Try 'setsid --help' for more information.\n",
+        ),
+    ],
+)
+async def test_a_wrapper_mirage_runs_for_refuses_as_gnu_does(line, code, said):
+    ws = _mirage_workspace(_Box("e2b", "@external"))
+    try:
+        await ws.vfs.write("/data/f", b"kept\n")
+        io = await ws.shell(f"cd / && {line}")
+        assert (io.exit_code, await io.stderr_str()) == (code, said)
+        assert await (await ws.shell("pwd; cat /data/f")).stdout_str() == (
+            "/\nkept\n"
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "nice -n +3 cat /data/f",
+        "nice -10 cat /data/f",
+        "nice --adj 3 cat /data/f",
+        "stdbuf -o 1KB -e0 cat /data/f",
+        "ionice -c idle -n 0 cat /data/f",
+        "setsid -fw cat /data/f",
+    ],
+)
+async def test_a_wrapper_with_good_options_runs_its_program(line):
+    ws = _mirage_workspace(_Box("e2b", "@external"))
+    try:
+        await ws.vfs.write("/data/f", b"kept\n")
+        io = await ws.shell(line)
+        assert (io.exit_code, await io.stdout_str()) == (0, "kept\n")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_wrapped_program_streams_its_output():
+    ws = _mirage_workspace()
+    try:
+        await ws.vfs.write("/data/log", b"one\n")
+        io = await asyncio.wait_for(
+            ws.shell("nice tail -f /data/log | head -n 1"), 10
+        )
+        assert await io.stdout_str() == "one\n"
     finally:
         await ws.close()

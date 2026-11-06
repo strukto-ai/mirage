@@ -219,15 +219,11 @@ def bind_commands(entries: list[Runtime[Any]]) -> dict[str, Runtime[Any]]:
 def shadowed_captures(
     entries: list[Runtime[Any]],
 ) -> list[tuple[str, str, str]]:
-    """Each capture an entry declares that an earlier entry already
-    takes, so it never wins (``bind_commands``: first capturer wins).
+    """Each capture an earlier entry already takes, as (capture,
+    winner, shadowed), in list order.
 
     Args:
         entries (list[Runtime]): runtime instances in precedence order.
-
-    Returns:
-        list[tuple[str, str, str]]: the capture, the runtime that wins
-        it and the runtime it is shadowed on, in list order.
     """
     winners: dict[str, str] = {}
     shadowed: list[tuple[str, str, str]] = []

@@ -79,10 +79,8 @@ Mirage. Set `mount_type` in Python or YAML, or `mountType` in TypeScript:
 Add `mount_type: ssh` to the config (`mountType: 'ssh'` in TypeScript).
 Install `mirage-ai[ssh]` on a Python host or `ssh2` on a Node host. The
 guest needs `sshfs` and access to `/dev/fuse`, but no Mirage installation,
-SSH keys or open port. Install `sshfs` with `apt-get install sshfs`;
-without it, a line fails with
-`microsandbox: serving the workspace into a sandbox needs sshfs there`.
-In `ssh` and `both`, each runtime instance serves
+SSH keys or open port (`apt-get install sshfs`). In `ssh` and `both`, each
+runtime instance serves
 its first session only. If the guest restarts, Mirage mounts the paths
 again; a command caught mid-restart exits 126 without running.
 

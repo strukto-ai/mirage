@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { endOptionsAfterProgram, wrappedProgramAt } from './constants.ts'
+import { endOptionsAfterProgram, readWrapper } from './constants.ts'
 
 const rewrite = (words: string[]): string[] => endOptionsAfterProgram('python3', words)
 
@@ -122,7 +122,7 @@ describe('endOptionsAfterProgram', () => {
   })
 })
 
-describe('wrappedProgramAt', () => {
+describe('readWrapper', () => {
   it.each([
     ['nice', ['gcc', 'x.c'], 0],
     ['nice', ['-n', '-5', 'gcc'], 2],
@@ -146,7 +146,7 @@ describe('wrappedProgramAt', () => {
   ] as [string, string[], number | null][])(
     'finds the program %s runs in %j',
     (name, words, at) => {
-      expect(wrappedProgramAt(name, words)).toBe(at)
+      expect(readWrapper(name, words)[0]).toBe(at)
     },
   )
 })

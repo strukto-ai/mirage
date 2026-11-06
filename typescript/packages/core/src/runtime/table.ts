@@ -227,10 +227,8 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
 }
 
 /**
- * Each capture an entry declares that an earlier entry already takes, so it
- * never wins (`bindCommands`: first capturer wins), as the capture, the
- * runtime that wins it and the runtime it is shadowed on, in list order.
- * Mirrors Python's `shadowed_captures`.
+ * Each capture an earlier entry already takes, as [capture, winner,
+ * shadowed], in list order. Mirrors Python's `shadowed_captures`.
  *
  * @param entries runtime instances in precedence order.
  */

@@ -32,7 +32,7 @@ from mirage.workspace.lookup.constants import (
     ROUTED_COMMANDS,
     SHELL_NAMES,
     SHELL_ONLY_BUILTINS,
-    wrapped_program_at,
+    read_wrapper,
 )
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.session import SessionState
@@ -97,36 +97,6 @@ def _is_native(runtime: RuntimeIdentity | None, name: str) -> bool:
     )
 
 
-def wrapper_routing(
-    name: str,
-    args: Sequence[str],
-    routing: RouteDecision[RuntimeIdentity] | None,
-) -> RouteDecision[RuntimeIdentity] | None:
-    """The line's placement with a wrapper bound where the program it
-    runs is, None when that changes nothing.
-
-    A wrapper no runtime captures by name (``PROGRAM_WRAPPERS``) whose
-    program a runtime captures by name and runs natively goes with it,
-    wrapper included: ``nice gcc x.c`` runs where gcc does, and ``nice
-    nohup gcc`` follows each wrapper in turn. Any other program leaves
-    the wrapper where it was.
-
-    Args:
-        name (str): expanded command name.
-        args (Sequence[str]): its words, argv[0] excluded.
-        routing (RouteDecision | None): the line's placement.
-    """
-    if routing is None:
-        return None
-    bindings = routing.bindings
-    program = _wrapped(name, args, bindings)
-    if program is None:
-        return None
-    return dataclasses.replace(
-        routing, bindings={**bindings, name: bindings[program]}
-    )
-
-
 def routed_consumer(
     name: str,
     args: Sequence[str],
@@ -134,9 +104,8 @@ def routed_consumer(
     registry: "MountRegistry",
     routing: RouteDecision[RuntimeIdentity] | None,
 ) -> tuple[Consumer, RouteDecision[RuntimeIdentity] | None]:
-    """The layer a command runs from and the placement it runs under: a
-    wrapper nothing in Mirage owns goes where the program it runs is
-    (``wrapper_routing``), and anything else is ``lookup``'s answer.
+    """``lookup``'s answer, with a wrapper no Mirage layer owns bound to
+    the runtime that captures its program by name (``nice gcc``).
 
     Args:
         name (str): expanded command name.
@@ -146,11 +115,13 @@ def routed_consumer(
         routing (RouteDecision | None): the line's placement.
     """
     consumer = lookup(name, session, registry, routing)
-    if consumer in (Consumer.EXTERNAL, Consumer.UNKNOWN):
-        wrapped = wrapper_routing(name, args, routing)
-        if wrapped is not None:
-            return Consumer.EXTERNAL, wrapped
-    return consumer, routing
+    if routing is None or not _outside_mirage(consumer):
+        return consumer, routing
+    program = _wrapped(name, args, routing.bindings)
+    if program is None:
+        return consumer, routing
+    bindings = {**routing.bindings, name: routing.bindings[program]}
+    return Consumer.EXTERNAL, dataclasses.replace(routing, bindings=bindings)
 
 
 def mirage_program_at(
@@ -160,15 +131,9 @@ def mirage_program_at(
     registry: "MountRegistry",
     routing: RouteDecision[RuntimeIdentity] | None,
 ) -> int | None:
-    """Where in a wrapper's words the program Mirage runs for it stands,
-    None when it runs none.
-
-    A wrapper nothing in Mirage owns (``PROGRAM_WRAPPERS``) whose
-    program no runtime takes by name to run natively
-    (``wrapper_routing``) but Mirage runs itself, as a builtin, function,
-    CLI or mount command, or an interpreter bound to a language runtime,
-    runs that program in Mirage without the wrapper: ``nice grep x f``
-    runs ``grep x f``, and ``nice nohup grep`` follows each wrapper.
+    """Where a wrapper's program stands in its words when Mirage runs
+    that program itself, without the wrapper (``nice grep``); None
+    otherwise.
 
     Args:
         name (str): expanded command name.
@@ -187,7 +152,7 @@ def mirage_program_at(
         or _wrapped(name, args, bindings) is not None
     ):
         return None
-    at = wrapped_program_at(name, args)
+    at = read_wrapper(name, args)[0]
     if at is None:
         return None
     inner = args[at]
@@ -195,7 +160,7 @@ def mirage_program_at(
         deeper = mirage_program_at(
             inner, args[at + 1 :], session, registry, routing
         )
-        return None if deeper is None else at + 1 + deeper
+        return None if deeper is None else at
     if _outside_mirage(lookup(inner, session, registry, routing)):
         return None
     if inner in INTERPRETER_NAMES and not isinstance(
@@ -205,8 +170,35 @@ def mirage_program_at(
     return at
 
 
+def wrapper_refusal(
+    name: str,
+    args: Sequence[str],
+    session: SessionState,
+    registry: "MountRegistry",
+) -> tuple[int, str] | None:
+    """The status and stderr GNU's wrapper answers instead of running
+    its program: a bad option, or a word it cannot exec (``nice cd``).
+
+    Args:
+        name (str): a ``PROGRAM_WRAPPERS`` name.
+        args (Sequence[str]): its words, argv[0] excluded.
+        session (SessionState): shell session (function table).
+        registry (MountRegistry): mount registry (command registration).
+    """
+    grammar = PROGRAM_WRAPPERS[name]
+    at, error = read_wrapper(name, args)
+    if error is not None:
+        return grammar.status, error
+    if at is None:
+        return None
+    inner = args[at]
+    if inner not in PROGRAM_WRAPPERS and not execs(inner, session, registry):
+        return 127, grammar.missing.format(inner)
+    return None
+
+
 def _outside_mirage(consumer: Consumer) -> bool:
-    """Whether a consumer leaves the command to no layer of Mirage's own.
+    """Whether no Mirage layer runs the command.
 
     Args:
         consumer (Consumer): ``lookup``'s answer.
@@ -219,8 +211,8 @@ def _wrapped(
     args: Sequence[str],
     bindings: Mapping[str, RuntimeIdentity | None],
 ) -> str | None:
-    """The program a wrapper runs that a runtime captures by name and
-    runs natively, nested wrappers followed; None when there is none.
+    """The program a wrapper runs, nested wrappers followed, when a
+    runtime captures it by name and runs it natively.
 
     Args:
         name (str): the wrapper's name.
@@ -230,7 +222,7 @@ def _wrapped(
     """
     if name not in PROGRAM_WRAPPERS or name in bindings:
         return None
-    at = wrapped_program_at(name, args)
+    at = read_wrapper(name, args)[0]
     if at is None:
         return None
     inner = args[at]

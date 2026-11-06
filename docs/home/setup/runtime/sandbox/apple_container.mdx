@@ -83,10 +83,7 @@ for [Docker](/home/setup/runtime/sandbox/docker#connecting-the-workspace):
 `fuse` leaves them to a Mirage inside, and `both` mixes the two. `mount_type`
 serves one session, so it cannot be combined with `containers`.
 
-For `ssh`, add `sshfs` to the image (`apt-get install sshfs`; the sandbox
-image lacks it) and run with `--cap-add SYS_ADMIN` as above. Without `sshfs`,
-a line fails with
-`apple_container: serving the workspace into a sandbox needs sshfs there`.
+The default image lacks `sshfs`; add it with `apt-get install sshfs`.
 
 For `fuse`, write the same mounts at the same paths into `sandbox.yaml`, and
 start Mirage with it in the container:

@@ -236,10 +236,8 @@ class Router:
     def runtime_for(
         self, one: Judged, decision: RouteDecision[RuntimeIdentity]
     ) -> str:
-        """The runtime entry that serves a command under a decision: the
-        ``@line`` runtime when one takes the line, where the program a
-        wrapper runs is for that wrapper as its run places it
-        (``routed_consumer``), empty when the workspace runs it itself.
+        """The runtime entry that serves a command under a decision, as
+        its run places it; empty when the workspace runs it itself.
 
         Args:
             one (Judged): the command's judgment and the session it was

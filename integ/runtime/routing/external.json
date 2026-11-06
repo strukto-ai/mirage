@@ -530,6 +530,51 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_wrapper_refuses_a_shell_word_and_a_bad_option_as_gnu_does",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "f": "kept\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "nice cd /ram",
+          "expect": {
+            "exit": 127,
+            "stdout": "",
+            "stderr": "nice: 'cd': No such file or directory\n"
+          }
+        },
+        {
+          "command": "pwd",
+          "expect": {
+            "exit": 0,
+            "stdout": "/\n"
+          }
+        },
+        {
+          "command": "nice --bogus rm /ram/f",
+          "expect": {
+            "exit": 125,
+            "stdout": "",
+            "stderr": "nice: unrecognized option '--bogus'\nTry 'nice --help' for more information.\n"
+          }
+        },
+        {
+          "command": "cat /ram/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "kept\n"
+          }
+        }
+      ]
     }
   ]
 }

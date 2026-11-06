@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { runOutput } from '../../commands/builtin/general/interpreter.ts'
 import { guardIO } from '../../commands/builtin/utils/limit.ts'
 import type { RedirectResult } from '../../context/session_context.ts'
 import {
@@ -27,6 +28,7 @@ import {
   runWithRedirectPaths,
   sessionAccess,
 } from '../../context/session_context.ts'
+import { ensureStream } from '../../io/stream.ts'
 import { type ByteSource, type OutputState, IOResult, materialize } from '../../io/types.ts'
 import { commandRecords } from '../../observe/context.ts'
 import type { OpRecord } from '../../observe/record.ts'
@@ -42,10 +44,10 @@ import {
   resolveProducer,
 } from '../../policy/index.ts'
 import type { EntryGate } from '../../policy/types.ts'
-import type { DispatchFn } from '../../runtime/types.ts'
+import type { DispatchFn, OutputFn, RunResult } from '../../runtime/types.ts'
 import { decodeText, encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
-import { type JobConsole, Channel } from '../../shell/console/index.ts'
+import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
 import { ArithError, DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
 import {
@@ -102,7 +104,7 @@ import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { expandNode } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
-import { mirageProgramAt, routedConsumer } from '../lookup/lookup.ts'
+import { mirageProgramAt, routedConsumer, wrapperRefusal } from '../lookup/lookup.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { type SessionState, sessionEntry, setSessionEntry } from '../session/session.ts'
@@ -914,6 +916,59 @@ export function unsaid(lines: readonly string[], said: Uint8Array): string[] {
   return lines.filter((line) => !spoken.has(line.trim()))
 }
 
+/** A console that hands each chunk a line writes on as it comes. */
+class Relay extends JobConsole {
+  constructor(
+    private readonly output: OutputFn,
+    private readonly errors: OutputFn,
+  ) {
+    super()
+  }
+
+  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    await (channel === Channel.STDOUT ? this.output : this.errors)(data)
+  }
+}
+
+/**
+ * Run the program a wrapper runs, as a program, its output handed over as it
+ * runs. Mirrors Python's `_run_program`.
+ */
+function runProgram(
+  executeFn: ExecuteFn,
+  name: string,
+  line: string,
+  session: SessionState,
+  stdin: ByteSource | null,
+): RedirectResult {
+  const node = new ExecutionNode({ command: name })
+  const run = async (
+    output: OutputFn,
+    errors: OutputFn,
+    signal: AbortSignal,
+  ): Promise<RunResult> => {
+    const ran = await runAsProgram(session, () =>
+      executeFn(line, {
+        sessionId: session.sessionId,
+        signal,
+        sink: new Relay(output, errors),
+        ...(stdin !== null ? { stdin } : {}),
+      }),
+    )
+    if (ran.stdout !== null) {
+      for await (const chunk of ensureStream(ran.stdout)) await output(chunk)
+    }
+    const said = await ran.materializeStderr()
+    node.exitCode = ran.exitCode
+    return {
+      stdout: new Uint8Array(),
+      stderr: said.byteLength > 0 ? said : null,
+      exitCode: ran.exitCode,
+    }
+  }
+  const [stdout, io] = runOutput(run)
+  return [stdout, io, node]
+}
 async function routeArgv(
   recurse: (
     n: TSNodeLike,
@@ -982,13 +1037,19 @@ async function routeArgv(
     ]
   }
 
-  // A wrapper around Mirage's own program, run without it.
   const at = mirageProgramAt(name, argv.args, session, registry, context.frame.routing)
   if (at !== null) {
-    const io = await runAsProgram(session, () =>
-      executeFn(shellJoin(argv.args.slice(at)), { sessionId: session.sessionId, stdin }),
-    )
-    return [io.stdout, io, new ExecutionNode({ command: name, exitCode: io.exitCode })]
+    const refused = wrapperRefusal(name, argv.args, session, registry)
+    if (refused !== null) {
+      const [code, said] = refused
+      const err = encodeText(said)
+      return [
+        null,
+        new IOResult({ exitCode: code, stderr: err }),
+        new ExecutionNode({ command: name, exitCode: code, stderr: err }),
+      ]
+    }
+    return runProgram(executeFn, name, shellJoin(argv.args.slice(at)), session, stdin)
   }
 
   const [consumer, routing] = routedConsumer(

@@ -172,10 +172,9 @@ export class Router {
   }
 
   /**
-   * The runtime entry that serves a command under a decision: the `@line`
-   * runtime when one takes the line, where the program a wrapper runs is for
-   * that wrapper as its run places it (`routedConsumer`), empty when the
-   * workspace runs it itself. Mirrors Python's `Router.runtime_for`.
+   * The runtime entry that serves a command under a decision, as its run
+   * places it; empty when the workspace runs it itself. Mirrors Python's
+   * `Router.runtime_for`.
    */
   runtimeFor(one: Judged, placed: RouteDecision<Runtime>): string {
     const whole = wholeLineRuntime(placed.bindings)

@@ -266,9 +266,8 @@ class SandboxMounts:
     def enter(
         self, binding: WorkspaceBinding | None, cwd: str
     ) -> RunResult | None:
-        """Record the line for ``sync`` to end, before the runtime
-        connects, then refuse one from a cwd other than ``/`` that ssh
-        serves no mount for (126), so it answers with no sandbox reached.
+        """Record the line for ``sync``, then refuse a cwd other than
+        ``/`` that ssh serves no mount for (126), before connecting.
 
         Args:
             binding (WorkspaceBinding | None): the runtime's workspace.
@@ -312,8 +311,7 @@ class SandboxMounts:
         refused as a policy refuses it (126), one the sandbox cannot
         serve because another session or another sshfs holds it, or
         another mount covers it, fails (1), and one over a mount of the
-        sandbox's own that is gone is refused (126). ``enter`` recorded
-        the line first.
+        sandbox's own that is gone is refused (126).
 
         Args:
             binding (WorkspaceBinding | None): the runtime's workspace.

@@ -1146,3 +1146,70 @@ describe("a wrapper around Mirage's program", () => {
     }
   })
 })
+
+describe('a wrapper Mirage runs a program for', () => {
+  const tryHelp = (name: string): string => `Try '${name} --help' for more information.\n`
+
+  it.each([
+    ['nice cd /data', 127, "nice: 'cd': No such file or directory\n"],
+    ['nohup cd /data', 127, "nohup: failed to run command 'cd': No such file or directory\n"],
+    ['stdbuf -oL cd /data', 127, "stdbuf: failed to run command 'cd': No such file or directory\n"],
+    ['ionice -c3 cd /data', 127, 'ionice: failed to execute cd: No such file or directory\n'],
+    ['setsid cd /data', 127, 'setsid: failed to execute cd: No such file or directory\n'],
+    ['nice --bogus rm f', 125, `nice: unrecognized option '--bogus'\n${tryHelp('nice')}`],
+    ['nice -x rm f', 125, `nice: invalid option -- 'x'\n${tryHelp('nice')}`],
+    ['nice -n abc rm f', 125, "nice: invalid adjustment 'abc'\n"],
+    ['nohup -x rm f', 125, `nohup: invalid option -- 'x'\n${tryHelp('nohup')}`],
+    ['stdbuf -o abc rm f', 125, "stdbuf: invalid mode 'abc'\n"],
+    [
+      'stdbuf -o 1Q rm f',
+      125,
+      "stdbuf: invalid mode '1Q': Value too large for defined data type\n",
+    ],
+    ['stdbuf rm f', 125, `stdbuf: you must specify a buffering mode option\n${tryHelp('stdbuf')}`],
+    ['stdbuf -i L rm f', 125, `stdbuf: line buffering stdin is meaningless\n${tryHelp('stdbuf')}`],
+    ['ionice -c abc rm f', 1, "ionice: unknown scheduling class: 'abc'\n"],
+    ['ionice -n 1x rm f', 1, "ionice: invalid class data argument: '1x'\n"],
+    ['setsid -x rm f', 1, `setsid: invalid option -- 'x'\n${tryHelp('setsid')}`],
+  ] as [string, number, string][])('refuses %s as GNU does', async (line, code, said) => {
+    const ws = mirageWorkspace(new Box('e2b', '@external'))
+    try {
+      await ws.vfs.write('/data/f', 'kept\n')
+      const io = await ws.shell(`cd / && ${line}`)
+      expect([io.exitCode, new TextDecoder().decode(io.stderr)]).toEqual([code, said])
+      const after = await ws.shell('pwd; cat /data/f')
+      expect(new TextDecoder().decode(after.stdout)).toBe('/\nkept\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    'nice -n +3 cat /data/f',
+    'nice -10 cat /data/f',
+    'nice --adj 3 cat /data/f',
+    'stdbuf -o 1KB -e0 cat /data/f',
+    'ionice -c idle -n 0 cat /data/f',
+    'setsid -fw cat /data/f',
+  ])('runs %s with good options', async (line) => {
+    const ws = mirageWorkspace(new Box('e2b', '@external'))
+    try {
+      await ws.vfs.write('/data/f', 'kept\n')
+      const io = await ws.shell(line)
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'kept\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('streams the program output', async () => {
+    const ws = mirageWorkspace()
+    try {
+      await ws.vfs.write('/data/log', 'one\n')
+      const io = await ws.shell('nice tail -f /data/log | head -n 1')
+      expect(new TextDecoder().decode(io.stdout)).toBe('one\n')
+    } finally {
+      await ws.close()
+    }
+  }, 10000)
+})

@@ -112,9 +112,7 @@ Mirage, so the sandbox must see the mounts there. `mount_type` picks how:
 
 #### A template for ssh
 
-Build a template from E2B's base image with `sshfs`, create a sandbox from
-it, and pass its ID as `sandbox_id` with `mount_type: ssh`, as in
-[Usage](#usage):
+Build a template with `sshfs` and pass its sandbox ID as `sandbox_id`:
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -137,10 +135,9 @@ it, and pass its ID as `sandbox_id` with `mount_type: ssh`, as in
   </Tab>
 </Tabs>
 
-Keep the base image's user: Mirage creates mountpoints such as `/data`
-with `sudo`. To skip the build, run `sudo apt-get install -y sshfs` in a
-sandbox from the default template. Without `sshfs`, a line fails with
-`e2b: serving the workspace into a sandbox needs sshfs there`.
+Keep the base image's user, which has `sudo` for mountpoints such as
+`/data`. On the default template, run `sudo apt-get install -y sshfs`
+instead.
 
 ### fuse
 
