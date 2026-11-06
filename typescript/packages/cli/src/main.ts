@@ -25,6 +25,7 @@ import { registerDaemonCommands } from './daemon.ts'
 import { registerShellCommand } from './shell.ts'
 import { registerToolCommands } from './tools.ts'
 import { registerVfsCommands } from './vfs.ts'
+import { registerConnectionCommands } from './connections.ts'
 import { registerContextCommands, registerLoginCommands } from './login.ts'
 import { registerMcpCommand } from './mcp.ts'
 import { registerPolicyCommands } from './policy.ts'
@@ -72,6 +73,7 @@ export function buildProgram(): Command {
   registerToolCommands(ws)
   registerShellCommand(program)
   registerPolicyCommands(program)
+  registerConnectionCommands(program)
   registerApiCommand(program)
   registerMcpCommand(program)
   registerRpcCommand(program)

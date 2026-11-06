@@ -35,11 +35,12 @@ import { execArgs, openProgramPipe, reportedState, runProgram } from '../program
  * stderr.
  */
 export class DockerRuntime extends RemoteSandbox<DockerConfig> implements PipeTransport {
+  static override readonly configKeys: readonly string[] = DOCKER_CONFIG_KEYS
   readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'docker'
 
   constructor(options: RuntimeOptions<DockerConfig> = {}) {
-    super(options, DOCKER_CONFIG_KEYS)
+    super(options, DockerRuntime.configKeys)
     requireId('docker', 'container', this.config.container)
   }
 

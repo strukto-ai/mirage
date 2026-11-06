@@ -18,6 +18,7 @@ import typer
 
 from mirage.cli import api as api_module
 from mirage.cli import config as config_module
+from mirage.cli import connections as connections_module
 from mirage.cli import daemon as daemon_module
 from mirage.cli import login as login_module
 from mirage.cli import mcp as mcp_module
@@ -63,6 +64,8 @@ workspace_module.app.add_typer(tools_module.app, name="tools", hidden=True)
 app.add_typer(workspace_module.app, name="workspace")
 app.add_typer(shell_module.app, name="shell")
 app.add_typer(policy_module.app, name="policy")
+for kind_name, kind_app in connections_module.APPS.items():
+    app.add_typer(kind_app, name=kind_name)
 app.command(
     "api",
     context_settings={

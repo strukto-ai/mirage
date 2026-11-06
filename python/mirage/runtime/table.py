@@ -129,6 +129,20 @@ def build_runtime(name: str, **options: Any) -> Runtime[Any]:
         ValueError: unknown name, with a cross-language hint for
             TypeScript-only names.
     """
+    return runtime_class(name)(**options)
+
+
+def runtime_class(name: str) -> type[Runtime[Any]]:
+    """The runtime class a name resolves to, importing a sandbox's module
+    on first use.
+
+    Args:
+        name (str): a runtime name from NAMED or SANDBOX_MODULES.
+
+    Raises:
+        ValueError: unknown name, with a cross-language hint for
+            TypeScript-only names.
+    """
     cls = NAMED.get(name)
     if cls is None and name in SANDBOX_MODULES:
         module_path, attr = SANDBOX_MODULES[name].split(":")
@@ -140,7 +154,7 @@ def build_runtime(name: str, **options: Any) -> Runtime[Any]:
         raise ValueError(
             f"unknown runtime: {name!r} (expected one of {known})"
         )
-    return cls(**options)
+    return cls
 
 
 def runtime_bindings_for(

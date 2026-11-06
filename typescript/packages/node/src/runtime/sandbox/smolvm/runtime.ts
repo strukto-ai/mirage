@@ -40,11 +40,12 @@ import { execArgs, openProgramPipe, reportedState, runProgram } from '../program
  * provider in this family carries.
  */
 export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements PipeTransport {
+  static override readonly configKeys: readonly string[] = SMOLVM_CONFIG_KEYS
   readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'smolvm'
 
   constructor(options: RuntimeOptions<SmolvmConfig> = {}) {
-    super(options, SMOLVM_CONFIG_KEYS)
+    super(options, SmolvmRuntime.configKeys)
     requireId('smolvm', 'machine', this.config.machine)
   }
 

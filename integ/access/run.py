@@ -773,6 +773,27 @@ async def server_checks(server: Server, report: Report) -> None:
         report.check(
             f"{server.key} server.templates", codes, want["templates"][d.name]
         )
+        policy = f"/v1/policies/{name}.py"
+        entry = f"/v1/vfs/{name}"
+        codes = [
+            (
+                await http.post(
+                    "/v1/policies",
+                    json={"name": f"{name}.py", "source": "pass\n"},
+                    headers=auth,
+                )
+            ).status_code,
+            (await http.get(policy, headers=auth)).status_code,
+            (await http.delete(policy, headers=auth)).status_code,
+            (await http.get("/v1/vfs", headers=auth)).status_code,
+            (await http.get(entry, headers=auth)).status_code,
+            (await http.get("/v1/stores", headers=auth)).status_code,
+        ]
+        report.check(
+            f"{server.key} server.saved_connections",
+            codes,
+            want["saved_connections"][d.name],
+        )
         stop = await http.post("/v1/shutdown", headers=auth)
         report.check(
             f"{server.key} server.shutdown",
@@ -1108,6 +1129,51 @@ async def lifecycle(
     got["template_round_trip"] = " ".join(
         f"{t['name']}:{t['description']}" for t in saved
     ) + (" same config" if same else " configs differ")
+    rule = root / "guard.py"
+    rule.write_text("def check(call):\n    return None\n")
+    await cli("policy", "create", "guard.py", "--source", f"@{rule}")
+    await cli("policy", "update", "guard.py", "--source", "pass\n")
+    _, out, _ = await cli("policy", "get", "guard.py", "-o", "json")
+    source = json.loads(out)["source"].strip()
+    await cli("policy", "delete", "guard.py")
+    _, out, _ = await cli("policy", "list", "-o", "json")
+    got["policy_round_trip"] = f"{source} {len(json.loads(out))}"
+    await cli("vfs", "types", "github", "-o", "json")
+    await cli(
+        "vfs",
+        "create",
+        "gh",
+        "--type",
+        "github",
+        "--set",
+        "owner=o",
+        "--set",
+        "repo=r",
+        "--secret",
+        "token",
+        stdin=b"t\n",
+    )
+    await cli("vfs", "update", "gh", "--set", "repo=r2")
+    _, out, _ = await cli("vfs", "get", "gh", "-o", "json")
+    entry = json.loads(out)
+    await cli("vfs", "delete", "gh")
+    _, out, _ = await cli("vfs", "list", "-o", "json")
+    got["vfs_round_trip"] = (
+        f"{entry['config']['repo']} {','.join(entry['sealed'])} "
+        f"{len(json.loads(out)['items'])}"
+    )
+    refused = []
+    for kind in ("cli", "runtime"):
+        codes = [
+            (await cli(kind, "types", "-o", "json"))[0],
+            (await cli(kind, "list", "-o", "json"))[0],
+            (await cli(kind, "create", "nope"))[0],
+            (await cli(kind, "get", "nope"))[0],
+            (await cli(kind, "update", "nope", "--set", "a=b"))[0],
+            (await cli(kind, "delete", "nope"))[0],
+        ]
+        refused.append(f"{kind}:{''.join(map(str, codes))}")
+    got["entries_refuse_unknown"] = " ".join(refused)
     _, out, _ = await cli(
         "api", "/v1/workspaces/i/shell", "--command", "echo api"
     )

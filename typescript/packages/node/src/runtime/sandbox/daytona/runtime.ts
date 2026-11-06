@@ -38,12 +38,13 @@ const ENC = new TextEncoder()
  * never touches the sandbox.
  */
 export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
+  static override readonly configKeys: readonly string[] = DAYTONA_CONFIG_KEYS
   readonly name = 'daytona'
   private client: Daytona | null = null
   private sandbox: Sandbox | null = null
 
   constructor(options: RuntimeOptions<DaytonaConfig> = {}) {
-    super(options, DAYTONA_CONFIG_KEYS)
+    super(options, DaytonaRuntime.configKeys)
     requireId('daytona', 'sandboxId', this.config.sandboxId)
   }
 

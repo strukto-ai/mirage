@@ -112,6 +112,7 @@ export class LocalRuntime
   extends PythonRuntime<undefined>
   implements ProcessExecutorMixin<undefined>
 {
+  static override readonly configKeys: readonly string[] = LOCAL_CONFIG_KEYS
   readonly name = 'local'
   readonly [PROCESS_EXECUTOR] = true as const
   // Spawns the host interpreter: a real process with the user's own
@@ -125,7 +126,7 @@ export class LocalRuntime
   private closed = false
 
   constructor(options: RuntimeOptions = {}) {
-    super(options, LOCAL_CONFIG_KEYS)
+    super(options, LocalRuntime.configKeys)
     this.home = resolveHome(this.config as LocalConfig, LOCAL_HOME_ENV)
     // A configured path is read from the directory the entry is built in,
     // as Python's twin makes it absolute; a name is found on the PATH as

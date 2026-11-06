@@ -599,6 +599,11 @@
    "token": [201, 200, 200, 204, 200],
    "jwt": [501, 501, 501, 501, 501]
   },
+  "saved_connections": {
+   "dev": [201, 200, 204, 200, 404, 404],
+   "token": [201, 200, 204, 200, 404, 404],
+   "jwt": [501, 501, 501, 501, 501, 404]
+  },
   "shutdown": {
    "dev": 200,
    "token": 200,
@@ -642,6 +647,9 @@
   "context_once": "0 *local spare",
   "context_delete": "*local",
   "template_round_trip": "t1:ram t2:ram same config",
+  "policy_round_trip": "pass 0",
+  "vfs_round_trip": "r2 token 0",
+  "entries_refuse_unknown": "cli:002222 runtime:002222",
   "api_sends_fields": "api\n",
   "api_keeps_the_route_query": "1",
   "api_takes_only_a_route": "2",

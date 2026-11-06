@@ -63,6 +63,7 @@ const DEC = new TextDecoder()
  * directory on Node and a URL on a page. Mirrors Python's `QuickJsRuntime`.
  */
 export class QuickJsRuntime extends JsRuntime<WasmExecution> {
+  static override readonly configKeys: readonly string[] = HOME_CONFIG_KEYS
   readonly name = 'quickjs'
   // The engine is a WASI guest whose `std.open`/`os.readdir` wait on the
   // workspace bridge: guest I/O has no way around the gate.
@@ -70,7 +71,7 @@ export class QuickJsRuntime extends JsRuntime<WasmExecution> {
   override readonly filesystem = ['read', 'write', 'list', 'stat'] as const
 
   constructor(options: RuntimeOptions = {}) {
-    super(options, HOME_CONFIG_KEYS)
+    super(options, QuickJsRuntime.configKeys)
   }
 
   protected override async openEngine(): Promise<WasmExecution> {

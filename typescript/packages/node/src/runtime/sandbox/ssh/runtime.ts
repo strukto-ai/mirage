@@ -49,12 +49,13 @@ import type { Client, ClientChannel } from 'ssh2'
  * the network path as trusted.
  */
 export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeTransport {
+  static override readonly configKeys: readonly string[] = SSH_RUNTIME_CONFIG_KEYS
   readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'ssh'
   private client: Client | null = null
 
   constructor(options: RuntimeOptions<SSHRuntimeConfig> = {}) {
-    super(options, SSH_RUNTIME_CONFIG_KEYS)
+    super(options, SSHRuntime.configKeys)
     requireId('ssh', 'host', this.config.host)
   }
 

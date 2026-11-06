@@ -55,7 +55,7 @@ export interface HfBucketsConfig {
   keyPrefix?: string
 }
 
-const HfBucketsConfig = z.object({
+export const HfBucketsConfig = z.object({
   bucket: z.string().describe('Bucket id in `namespace/name` form.'),
   token: secretStr().optional().describe('Hugging Face access token.'),
   endpoint: z.string().optional().meta({
@@ -104,7 +104,7 @@ export interface HfRepoConfig {
   expandCommits?: boolean
 }
 
-const HfRepoConfig = z.object({
+export const HfRepoConfig = z.object({
   repoId: z
     .string()
     .describe(
