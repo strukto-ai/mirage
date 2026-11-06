@@ -559,7 +559,8 @@
   "server/schemas": {
    "python_only": {
     "CancelLinesResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",
-    "KillJobsResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal."
+    "KillJobsResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",
+    "TemplateList": "FastAPI declares the list answer as a response_model; the TypeScript route returns {items} inline."
    }
   },
   "workspace/snapshot/tar_io": {
