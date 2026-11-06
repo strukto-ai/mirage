@@ -1310,8 +1310,7 @@
   "cli/credentials": {
    "typescript_only": {
     "Env": "An environment map passed to the readers, so tests need no process.env; Python reads os.environ.",
-    "emptyContext": "A fresh Context record; Python's Context dataclass has these defaults.",
-    "statOrNull": "Node's statSync throws on a missing file; Python catches FileNotFoundError inline at each stat."
+    "emptyContext": "A fresh Context record; Python's Context dataclass has these defaults."
    }
   },
   "cli/settings": {

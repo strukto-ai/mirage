@@ -18,21 +18,16 @@ import json
 import logging
 import os
 import time
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import TypeVar
 
 import httpx
 
 from mirage.cli.constants import (
     CONTEXT_NAME,
-    CONTEXTS_FILE,
+    CONTEXTS_DIR,
+    CURRENT_FILE,
     LOCAL,
-    LOCK_RETRY_SECONDS,
-    LOCK_STALE_SECONDS,
-    LOCK_WAIT_SECONDS,
     LOGINS_DIR,
 )
 from mirage.cli.env import ENV_CONTEXT
@@ -43,8 +38,6 @@ LOGIN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 REFRESH_MARGIN_SECONDS = 60
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 
 class ContextError(RuntimeError):
@@ -99,22 +92,32 @@ class Context:
     workspace: str | None = None
 
 
-@dataclass
-class Contexts:
-    """The contexts file: which context is current, and every context.
+def _write_owner_only(path: Path, text: str) -> None:
+    """Replace ``path`` whole, readable by this user only.
 
     Args:
-        current (str): the current context's name.
-        contexts (dict[str, Context]): every context by name; ``local``
-            is always there.
+        path (Path): the file.
+        text (str): its new content.
     """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staged = path.with_name(f".{path.name}.{os.getpid()}")
+    fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(staged, path)
 
-    current: str = LOCAL
-    contexts: dict[str, Context] = field(default_factory=dict)
 
+def context_path(name: str) -> Path:
+    """Where a context is kept: one file each, so changing one never
+    touches another.
 
-def contexts_path() -> Path:
-    return mirage_home() / CONTEXTS_FILE
+    Args:
+        name (str): the context.
+
+    Returns:
+        Path: its file.
+    """
+    return mirage_home() / CONTEXTS_DIR / f"{name}.json"
 
 
 def login_path(name: str) -> Path:
@@ -163,145 +166,83 @@ def check_name(name: str) -> str:
     return name
 
 
-def read_contexts(path: Path | None = None) -> Contexts:
-    """Read the contexts file; with none, only ``local``.
+def read_context(name: str) -> Context | None:
+    """Read a context; ``local`` is there even with no file.
 
     Args:
-        path (Path | None): the file; defaults to ``contexts_path()``.
+        name (str): the context.
 
     Returns:
-        Contexts: the contexts, ``local`` among them.
+        Context | None: the context, or None when there is none.
     """
-    use = path if path is not None else contexts_path()
-    found = Contexts()
-    if use.exists():
-        try:
-            raw = json.loads(use.read_text())
-        except ValueError as e:
-            raise ContextError(f"malformed {use}: {e}") from e
-        found.current = str(raw.get("current", LOCAL))
-        found.contexts = {
-            name: Context(**entry)
-            for name, entry in raw.get("contexts", {}).items()
-        }
-    found.contexts.setdefault(LOCAL, Context())
-    return found
+    path = context_path(name)
+    if not path.exists():
+        return Context() if name == LOCAL else None
+    try:
+        raw = json.loads(path.read_text())
+    except ValueError as e:
+        raise ContextError(f"malformed {path}: {e}") from e
+    return Context(**raw)
 
 
-def write_contexts(contexts: Contexts, path: Path | None = None) -> None:
-    """Store the contexts file whole, readable by this user only.
+def write_context(name: str, context: Context) -> None:
+    """Store a context whole, readable by this user only.
 
     Args:
-        contexts (Contexts): the contexts.
-        path (Path | None): the file; defaults to ``contexts_path()``.
+        name (str): the context.
+        context (Context): what it holds.
     """
-    use = path if path is not None else contexts_path()
-    use.parent.mkdir(parents=True, exist_ok=True)
-    staged = use.with_name(f".{use.name}.{os.getpid()}")
-    fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(asdict(contexts), f, indent=2)
-        f.write("\n")
-    os.replace(staged, use)
+    _write_owner_only(
+        context_path(name), json.dumps(asdict(context), indent=2) + "\n"
+    )
 
 
-def _same_file(a: os.stat_result, b: os.stat_result) -> bool:
-    return (a.st_ino, a.st_mtime_ns) == (b.st_ino, b.st_mtime_ns)
-
-
-def _break_stale_lock(path: Path, seen: os.stat_result) -> None:
-    """Remove a stale lock, as one waiter at a time: the one that creates
-    the ``.break`` file, and only while the lock is still the file it saw,
-    so a lock another command just took is never removed.
+def remove_context(name: str) -> None:
+    """Forget a context and its login.
 
     Args:
-        path (Path): the lock.
-        seen (os.stat_result): the lock as the waiter found it, stale.
+        name (str): the context.
     """
-    breaker = path.with_name(f"{path.name}.break")
-    try:
-        fd = os.open(breaker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-    except FileExistsError:
-        try:
-            age = time.time() - breaker.stat().st_mtime
-        except FileNotFoundError:
-            return
-        if age > LOCK_STALE_SECONDS:
-            breaker.unlink(missing_ok=True)
-        return
-    try:
-        try:
-            now = path.stat()
-        except FileNotFoundError:
-            return
-        if _same_file(now, seen):
-            path.unlink(missing_ok=True)
-    finally:
-        os.close(fd)
-        breaker.unlink(missing_ok=True)
+    context_path(name).unlink(missing_ok=True)
+    login_path(name).unlink(missing_ok=True)
 
 
-@contextmanager
-def contexts_lock() -> Iterator[None]:
-    """Hold the contexts file's lock, so one command at a time reads,
-    changes and writes it.
-
-    A lock older than ``LOCK_STALE_SECONDS`` was left by a command that
-    died, and is removed by one waiter (``_break_stale_lock``).
-
-    Raises:
-        ContextError: another command held it for ``LOCK_WAIT_SECONDS``.
-    """
-    path = contexts_path().with_name(f"{CONTEXTS_FILE}.lock")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    deadline = time.monotonic() + LOCK_WAIT_SECONDS
-    while True:
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            break
-        except FileExistsError:
-            try:
-                seen = path.stat()
-            except FileNotFoundError:
-                continue
-            if time.time() - seen.st_mtime > LOCK_STALE_SECONDS:
-                _break_stale_lock(path, seen)
-                continue
-            if time.monotonic() > deadline:
-                raise ContextError(
-                    f"{path} is held by another mirage command"
-                ) from None
-            time.sleep(LOCK_RETRY_SECONDS)
-    try:
-        yield
-    finally:
-        os.close(fd)
-        path.unlink(missing_ok=True)
-
-
-def update_contexts(change: Callable[[Contexts], T]) -> T:
-    """Read, change and write the contexts file under its lock, so a
-    command running at the same time loses nothing.
-
-    Args:
-        change (Callable[[Contexts], T]): changes the contexts in place.
+def context_names() -> list[str]:
+    """Every context, ``local`` among them, sorted.
 
     Returns:
-        T: what ``change`` returned.
+        list[str]: their names.
     """
-    with contexts_lock():
-        contexts = read_contexts()
-        result = change(contexts)
-        write_contexts(contexts)
-    return result
+    folder = mirage_home() / CONTEXTS_DIR
+    found = (
+        {p.stem for p in folder.glob("*.json")} if folder.exists() else set()
+    )
+    return sorted(found | {LOCAL})
 
 
-def current_name(contexts: Contexts) -> str:
+def read_current() -> str:
+    """The saved current context, ``local`` when none is saved.
+
+    Returns:
+        str: its name.
+    """
+    path = mirage_home() / CURRENT_FILE
+    stored = path.read_text().strip() if path.exists() else ""
+    return stored or LOCAL
+
+
+def write_current(name: str) -> None:
+    """Make a context the current one.
+
+    Args:
+        name (str): the context.
+    """
+    _write_owner_only(mirage_home() / CURRENT_FILE, name + "\n")
+
+
+def current_name() -> str:
     """The context this command uses: ``--context`` or
-    ``$MIRAGE_CONTEXT``, else the file's current one.
-
-    Args:
-        contexts (Contexts): the contexts.
+    ``$MIRAGE_CONTEXT``, else the current one, else ``local``.
 
     Returns:
         str: its name.
@@ -309,8 +250,8 @@ def current_name(contexts: Contexts) -> str:
     Raises:
         ContextError: there is no context by that name.
     """
-    name = os.environ.get(ENV_CONTEXT) or contexts.current
-    if name not in contexts.contexts:
+    name = os.environ.get(ENV_CONTEXT) or read_current()
+    if read_context(name) is None:
         raise ContextError(f"no context {name!r}; run `mirage context list`")
     return name
 
@@ -333,7 +274,7 @@ def renew_by(login: Login) -> float:
 
 def current_login_path() -> Path:
     """The current context's login file."""
-    return login_path(current_name(read_contexts()))
+    return login_path(current_name())
 
 
 def read_login(path: Path | None = None) -> Login | None:
@@ -361,12 +302,7 @@ def write_login(login: Login, path: Path | None = None) -> None:
             context's.
     """
     use = path if path is not None else current_login_path()
-    use.parent.mkdir(parents=True, exist_ok=True)
-    staged = use.with_name(f".{use.name}.{os.getpid()}")
-    fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(asdict(login), f, indent=2)
-    os.replace(staged, use)
+    _write_owner_only(use, json.dumps(asdict(login), indent=2))
 
 
 def remove_login(path: Path | None = None) -> Login | None:

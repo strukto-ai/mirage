@@ -17,25 +17,16 @@ import {
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
-  statSync,
   writeSync,
 } from 'node:fs'
-import type { BigIntStats } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { setTimeout as sleep } from 'node:timers/promises'
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { mirageHome } from '@struktoai/mirage-server/paths'
-import {
-  CONTEXT_NAME,
-  CONTEXTS_FILE,
-  LOCAL,
-  LOCK_RETRY_SECONDS,
-  LOCK_STALE_SECONDS,
-  LOCK_WAIT_SECONDS,
-  LOGINS_DIR,
-} from './constants.ts'
+import { CONTEXT_NAME, CONTEXTS_DIR, CURRENT_FILE, LOCAL, LOGINS_DIR } from './constants.ts'
 import { ENV_CONTEXT } from './env.ts'
 
 type Env = Record<string, string | undefined>
@@ -55,12 +46,6 @@ export interface Context {
   workspace: string | null
 }
 
-/** The contexts file: which context is current, and every context; `local` is always there. */
-export interface Contexts {
-  current: string
-  contexts: Record<string, Context>
-}
-
 /** A context that does not exist, or one that cannot be changed. */
 export class ContextError extends Error {
   override readonly name = 'ContextError'
@@ -70,8 +55,22 @@ export function emptyContext(): Context {
   return { url: '', team: null, workspace: null }
 }
 
-function contextsPath(env: Env): string {
-  return join(mirageHome(env), CONTEXTS_FILE)
+/** Replace `path` whole, readable by this user only. */
+function writeOwnerOnly(path: string, text: string): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const staged = join(dirname(path), `.${basename(path)}.${String(process.pid)}`)
+  const fd = openSync(staged, 'w', 0o600)
+  try {
+    writeSync(fd, text)
+  } finally {
+    closeSync(fd)
+  }
+  renameSync(staged, path)
+}
+
+/** Where a context is kept: one file each, so changing one never touches another. */
+function contextPath(name: string, env: Env): string {
+  return join(mirageHome(env), CONTEXTS_DIR, `${name}.json`)
 }
 
 /** Where a context's login is kept. */
@@ -89,131 +88,50 @@ export function checkName(name: string): string {
   return name
 }
 
-/** The contexts file; with none, only `local`. */
-export function readContexts(env: Env = process.env): Contexts {
-  const path = contextsPath(env)
-  const found: Contexts = {
-    current: LOCAL,
-    contexts: Object.create(null) as Record<string, Context>,
-  }
-  if (existsSync(path)) {
-    let raw: { current?: string; contexts?: Record<string, Partial<Context>> }
-    try {
-      raw = JSON.parse(readFileSync(path, 'utf-8')) as typeof raw
-    } catch (e) {
-      throw new ContextError(`malformed ${path}: ${(e as Error).message}`)
-    }
-    found.current = raw.current ?? LOCAL
-    for (const [name, entry] of Object.entries(raw.contexts ?? {})) {
-      found.contexts[name] = { ...emptyContext(), ...entry }
-    }
-  }
-  if (!Object.hasOwn(found.contexts, LOCAL)) found.contexts[LOCAL] = emptyContext()
-  return found
-}
-
-/** Store the contexts file whole, readable by this user only. */
-export function writeContexts(contexts: Contexts, env: Env = process.env): void {
-  const path = contextsPath(env)
-  mkdirSync(dirname(path), { recursive: true })
-  const staged = join(dirname(path), `.${CONTEXTS_FILE}.${String(process.pid)}`)
-  const fd = openSync(staged, 'w', 0o600)
+/** Read a context; `local` is there even with no file; null when there is none. */
+export function readContext(name: string, env: Env = process.env): Context | null {
+  const path = contextPath(name, env)
+  if (!existsSync(path)) return name === LOCAL ? emptyContext() : null
   try {
-    writeSync(fd, JSON.stringify(contexts, null, 2) + '\n')
-  } finally {
-    closeSync(fd)
+    return { ...emptyContext(), ...(JSON.parse(readFileSync(path, 'utf-8')) as Partial<Context>) }
+  } catch (e) {
+    throw new ContextError(`malformed ${path}: ${(e as Error).message}`)
   }
-  renameSync(staged, path)
 }
 
-function sameFile(a: BigIntStats, b: BigIntStats): boolean {
-  return a.ino === b.ino && a.mtimeNs === b.mtimeNs
+/** Store a context whole, readable by this user only. */
+export function writeContext(name: string, context: Context, env: Env = process.env): void {
+  writeOwnerOnly(contextPath(name, env), JSON.stringify(context, null, 2) + '\n')
 }
 
-/**
- * Remove a stale lock, as one waiter at a time: the one that creates the
- * `.break` file, and only while the lock is still the file it saw, so a
- * lock another command just took is never removed.
- */
-function breakStaleLock(path: string, seen: BigIntStats): void {
-  const breaker = `${path}.break`
-  let fd: number
-  try {
-    fd = openSync(breaker, 'wx', 0o600)
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-    const held = statOrNull(breaker)
-    if (held !== null && Date.now() / 1000 - Number(held.mtimeMs) / 1000 > LOCK_STALE_SECONDS) {
-      rmSync(breaker, { force: true })
+/** Forget a context and its login. */
+export function removeContext(name: string, env: Env = process.env): void {
+  rmSync(contextPath(name, env), { force: true })
+  rmSync(loginPath(name, env), { force: true })
+}
+
+/** Every context, `local` among them, sorted. */
+export function contextNames(env: Env = process.env): string[] {
+  const folder = join(mirageHome(env), CONTEXTS_DIR)
+  const found = new Set([LOCAL])
+  if (existsSync(folder)) {
+    for (const file of readdirSync(folder)) {
+      if (file.endsWith('.json')) found.add(file.slice(0, -'.json'.length))
     }
-    return
   }
-  try {
-    const now = statOrNull(path)
-    if (now !== null && sameFile(now, seen)) rmSync(path, { force: true })
-  } finally {
-    closeSync(fd)
-    rmSync(breaker, { force: true })
-  }
+  return [...found].sort(compareCodePoints)
 }
 
-function statOrNull(path: string): BigIntStats | null {
-  try {
-    return statSync(path, { bigint: true })
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw err
-  }
+/** The saved current context, `local` when none is saved. */
+export function readCurrent(env: Env = process.env): string {
+  const path = join(mirageHome(env), CURRENT_FILE)
+  const stored = existsSync(path) ? readFileSync(path, 'utf-8').trim() : ''
+  return stored !== '' ? stored : LOCAL
 }
 
-/**
- * Run `fn` holding the contexts file's lock, so one command at a time
- * reads, changes and writes it. A lock older than `LOCK_STALE_SECONDS` was
- * left by a command that died, and one waiter removes it (`breakStaleLock`);
- * throws `ContextError` when another command held it for `LOCK_WAIT_SECONDS`.
- */
-async function contextsLock<T>(fn: () => T, env: Env = process.env): Promise<T> {
-  const path = join(mirageHome(env), `${CONTEXTS_FILE}.lock`)
-  mkdirSync(dirname(path), { recursive: true })
-  const deadline = Date.now() + LOCK_WAIT_SECONDS * 1000
-  let fd: number
-  for (;;) {
-    try {
-      fd = openSync(path, 'wx', 0o600)
-      break
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
-    }
-    const seen = statOrNull(path)
-    if (seen === null) continue
-    if (Date.now() / 1000 - Number(seen.mtimeMs) / 1000 > LOCK_STALE_SECONDS) {
-      breakStaleLock(path, seen)
-      continue
-    }
-    if (Date.now() > deadline) {
-      throw new ContextError(`${path} is held by another mirage command`)
-    }
-    await sleep(LOCK_RETRY_SECONDS * 1000)
-  }
-  try {
-    return fn()
-  } finally {
-    closeSync(fd)
-    rmSync(path, { force: true })
-  }
-}
-
-/** Read, change and write the contexts file under its lock, so a command running at the same time loses nothing. */
-export async function updateContexts<T>(
-  change: (contexts: Contexts) => T,
-  env: Env = process.env,
-): Promise<T> {
-  return contextsLock(() => {
-    const contexts = readContexts(env)
-    const result = change(contexts)
-    writeContexts(contexts, env)
-    return result
-  }, env)
+/** Make a context the current one. */
+export function writeCurrent(name: string, env: Env = process.env): void {
+  writeOwnerOnly(join(mirageHome(env), CURRENT_FILE), `${name}\n`)
 }
 
 /** The command that logs a context in again. */
@@ -223,13 +141,13 @@ export function loginCommand(url: string, name: string): string {
 
 /**
  * The context this command uses: `--context` or `$MIRAGE_CONTEXT`, else
- * the file's current one. Throws `ContextError` when there is none by
- * that name.
+ * the current one, else `local`. Throws `ContextError` when there is none
+ * by that name.
  */
-export function currentName(contexts: Contexts, env: Env = process.env): string {
+export function currentName(env: Env = process.env): string {
   const fromEnv = env[ENV_CONTEXT]
-  const name = fromEnv !== undefined && fromEnv !== '' ? fromEnv : contexts.current
-  if (!Object.hasOwn(contexts.contexts, name)) {
+  const name = fromEnv !== undefined && fromEnv !== '' ? fromEnv : readCurrent(env)
+  if (readContext(name, env) === null) {
     throw new ContextError(`no context '${name}'; run \`mirage context list\``)
   }
   return name
@@ -269,7 +187,7 @@ export function renewBy(login: Login): number {
 
 /** The current context's login file. */
 function currentLoginPath(env: Record<string, string | undefined> = process.env): string {
-  return loginPath(currentName(readContexts(env), env), env)
+  return loginPath(currentName(env), env)
 }
 
 /** The stored login, or null when there is none. */
@@ -280,15 +198,7 @@ export function readLogin(path: string = currentLoginPath()): Login | null {
 
 /** Store a login, readable by this user only. */
 export function writeLogin(login: Login, path: string = currentLoginPath()): void {
-  mkdirSync(dirname(path), { recursive: true })
-  const staged = join(dirname(path), `.${basename(path)}.${String(process.pid)}`)
-  const fd = openSync(staged, 'w', 0o600)
-  try {
-    writeSync(fd, JSON.stringify(login, null, 2))
-  } finally {
-    closeSync(fd)
-  }
-  renameSync(staged, path)
+  writeOwnerOnly(path, JSON.stringify(login, null, 2))
 }
 
 /** Forget the stored login; returns the login removed, or null when there was none. */

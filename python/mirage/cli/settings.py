@@ -25,13 +25,12 @@ import typer
 from mirage.cli.constants import DEFAULT_PORT, LOCAL
 from mirage.cli.credentials import (
     ContextError,
-    Contexts,
     Login,
     current_name,
     login_path,
-    read_contexts,
+    read_context,
     read_login,
-    update_contexts,
+    write_context,
 )
 from mirage.cli.env import ENV_DAEMON_URL, ENV_TOKEN, ENV_WORKSPACE
 from mirage.cli.output import fail
@@ -98,14 +97,13 @@ _ENV_FOR_KEY = {
 }
 
 
-def local_url(table: dict[str, Any], contexts: Contexts) -> str:
+def local_url(table: dict[str, Any]) -> str:
     """The ``local`` context's URL: the one it logged in to, else
-    config.toml's ``url`` (until that key goes), else this machine at
-    the port a spawned daemon listens on.
+    config.toml's ``url``, else this machine at the port a spawned
+    daemon listens on.
 
     Args:
         table (dict[str, Any]): config.toml's ``[daemon]`` table.
-        contexts (Contexts): the contexts.
 
     Returns:
         str: the URL.
@@ -115,8 +113,9 @@ def local_url(table: dict[str, Any], contexts: Contexts) -> str:
         or str(table.get("port", ""))
         or DEFAULT_PORT
     )
+    local = read_context(LOCAL)
     return (
-        contexts.contexts[LOCAL].url
+        (local.url if local else "")
         or str(table.get("url", ""))
         or f"http://127.0.0.1:{port}"
     )
@@ -132,8 +131,8 @@ def current_workspace() -> str | None:
     env = os.environ.get(ENV_WORKSPACE)
     if env:
         return env
-    contexts = read_contexts()
-    return contexts.contexts[current_name(contexts)].workspace
+    context = read_context(current_name())
+    return context.workspace if context else None
 
 
 def resolve_workspace(given: str | None) -> str:
@@ -166,9 +165,9 @@ def header(action: str, name: str | None = None) -> None:
     """
     if not sys.stderr.isatty():
         return
-    contexts = read_contexts()
-    name = name or current_name(contexts)
-    team = contexts.contexts[name].team
+    name = name or current_name()
+    context = read_context(name)
+    team = context.team if context else None
     parts = [name, *([f"team {team}"] if team else []), action]
     typer.echo(" · ".join(parts), err=True)
 
@@ -183,13 +182,11 @@ def use_workspace(name: str, workspace_id: str) -> None:
     Raises:
         ContextError: the context was deleted meanwhile.
     """
-
-    def change(contexts: Contexts) -> None:
-        if name not in contexts.contexts:
-            raise ContextError(f"no context {name!r}")
-        contexts.contexts[name].workspace = workspace_id
-
-    update_contexts(change)
+    context = read_context(name)
+    if context is None:
+        raise ContextError(f"no context {name!r}")
+    context.workspace = workspace_id
+    write_context(name, context)
 
 
 def is_local_url(url: str) -> bool:
@@ -247,14 +244,12 @@ def load_daemon_settings(path: Path | None = None) -> DaemonSettings:
             table = {}
     else:
         table = read_daemon_table(mirage_home())
-    contexts = read_contexts()
-    name = current_name(contexts)
+    name = current_name()
     local = name == LOCAL
+    context = read_context(name)
     settings = DaemonSettings(
         context=name,
-        url=local_url(table, contexts)
-        if local
-        else contexts.contexts[name].url,
+        url=local_url(table) if local or context is None else context.url,
         socket=str(table.get("socket", "")) if local else "",
         auth_token=str(table.get("auth_token", "")) if local else "",
         idle_grace_seconds=float(table.get("idle_grace_seconds", 30.0)),

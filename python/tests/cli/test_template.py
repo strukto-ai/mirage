@@ -162,4 +162,3 @@ def test_get_yaml_keeps_ambiguous_strings_strings(client, monkeypatch):
     done = _invoke("get", "env", "-o", "yaml")
     assert done.exit_code == 0, done.output
     assert parse_yaml(done.output)["config"] == saved["config"]
-

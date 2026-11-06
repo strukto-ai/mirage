@@ -306,8 +306,9 @@ On a terminal, a command that changes something names its context first, as
   <Accordion title="How login works">
     - `mirage login` asks the server where to sign in, opens your browser there,
       and waits. If you are already signed in, the browser comes straight back.
-    - The CLI keeps the contexts in `~/.mirage/contexts.json` and each
-      context's tokens in `~/.mirage/logins/NAME.json`, readable only by you.
+    - The CLI keeps each context in `~/.mirage/contexts/NAME.json`, its
+      tokens in `~/.mirage/logins/NAME.json`, and the current context's name
+      in `~/.mirage/current_context`, all readable only by you.
     - On a machine with no browser, `mirage login --token TOKEN` keeps a token
       you paste once the server accepts it. `--token -` reads it from stdin, so
       it stays out of your shell history.

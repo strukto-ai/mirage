@@ -14,7 +14,6 @@
 
 import base64
 import json
-import os
 import stat
 import threading
 import time
@@ -27,19 +26,19 @@ from mirage.cli.credentials import (
     LOGIN_MAX_AGE_SECONDS,
     Context,
     ContextError,
-    Contexts,
     Login,
     LoginError,
     check_name,
+    context_names,
     current_name,
     fresh_token,
-    read_contexts,
+    read_context,
     read_login,
     remove_login,
     renew_by,
     token_claims,
-    update_contexts,
-    write_contexts,
+    write_context,
+    write_current,
     write_login,
 )
 
@@ -164,25 +163,25 @@ def test_a_pasted_token_renews_by_its_own_end():
 
 
 def test_only_local_is_current_with_no_file(home):
-    contexts = read_contexts()
-    assert list(contexts.contexts) == ["local"]
-    assert current_name(contexts) == "local"
+    assert context_names() == ["local"]
+    assert current_name() == "local"
 
 
 def test_env_context_wins_and_an_unknown_one_is_refused(home, monkeypatch):
-    write_contexts(
-        Contexts(contexts={"dev": Context(url="https://dev.example")})
-    )
+    write_context("dev", Context(url="https://dev.example"))
     monkeypatch.setenv("MIRAGE_CONTEXT", "dev")
-    assert current_name(read_contexts()) == "dev"
+    assert current_name() == "dev"
     monkeypatch.setenv("MIRAGE_CONTEXT", "nope")
     with pytest.raises(ContextError, match="no context 'nope'"):
-        current_name(read_contexts())
+        current_name()
 
 
-def test_the_file_is_the_owners_only(home):
-    write_contexts(read_contexts())
-    assert (home / "contexts.json").stat().st_mode & 0o777 == 0o600
+def test_each_context_is_its_own_file_readable_by_its_owner(home):
+    write_context("dev", Context(url="https://dev.example"))
+    write_current("dev")
+    assert (home / "contexts" / "dev.json").stat().st_mode & 0o777 == 0o600
+    assert (home / "current_context").stat().st_mode & 0o777 == 0o600
+    assert read_context("dev") == Context(url="https://dev.example")
 
 
 def test_a_name_must_be_safe_as_a_file_name(home):
@@ -192,42 +191,13 @@ def test_a_name_must_be_safe_as_a_file_name(home):
             check_name(bad)
 
 
-def test_two_changes_made_at_once_both_stay(home):
+def test_two_contexts_written_at_once_both_stay(home):
     def add(name: str) -> None:
-        def change(contexts: Contexts) -> None:
-            time.sleep(0.05)
-            contexts.contexts[name] = Context(url=f"https://{name}.example")
-
-        update_contexts(change)
+        write_context(name, Context(url=f"https://{name}.example"))
 
     threads = [threading.Thread(target=add, args=(n,)) for n in "ab"]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
-    assert sorted(read_contexts().contexts) == ["a", "b", "local"]
-    assert not (home / "contexts.json.lock").exists()
-
-
-def test_a_stale_lock_is_removed_and_the_change_lands(home):
-    lock = home / "contexts.json.lock"
-    lock.write_text("")
-    old = time.time() - 60
-    os.utime(lock, (old, old))
-    update_contexts(lambda c: c.contexts.update(dev=Context(url="https://d")))
-    assert "dev" in read_contexts().contexts
-    assert not lock.exists()
-
-
-def test_a_lock_taken_after_it_was_seen_stale_stays(home):
-    lock = home / "contexts.json.lock"
-    lock.write_text("")
-    old = time.time() - 60
-    os.utime(lock, (old, old))
-    seen = lock.stat()
-    lock.unlink()
-    lock.write_text("")
-    credentials._break_stale_lock(lock, seen)
-    assert lock.exists()
-    assert not lock.with_name("contexts.json.lock.break").exists()
-
+    assert context_names() == ["a", "b", "local"]

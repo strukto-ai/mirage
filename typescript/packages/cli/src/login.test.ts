@@ -33,12 +33,14 @@ import {
   ContextError,
   LoginError,
   checkName,
+  contextNames,
   currentName,
   loginPath,
-  readContexts,
+  readContext,
+  readCurrent,
   readLogin,
-  updateContexts,
-  writeContexts,
+  writeContext,
+  writeCurrent,
   writeLogin,
   type Login,
 } from './credentials.ts'
@@ -358,7 +360,9 @@ function stored(url: string, token = 'from-login'): Login {
   }
 }
 
-async function runProgram(args: string[]): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+async function runProgram(
+  args: string[],
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
   let stdout = ''
   let stderr = ''
   let exitCode = 0
@@ -413,25 +417,24 @@ describe('contexts', () => {
   })
 
   it('has only local, current, with no file', () => {
-    const contexts = readContexts()
-    expect(Object.keys(contexts.contexts)).toEqual(['local'])
-    expect(currentName(contexts)).toBe('local')
+    expect(contextNames()).toEqual(['local'])
+    expect(currentName()).toBe('local')
   })
 
   it('takes $MIRAGE_CONTEXT over the file, and refuses an unknown one', () => {
-    writeContexts({
-      current: 'local',
-      contexts: { dev: { url: 'https://dev.example', team: null, workspace: null } },
-    })
+    writeContext('dev', { url: 'https://dev.example', team: null, workspace: null })
     vi.stubEnv('MIRAGE_CONTEXT', 'dev')
-    expect(currentName(readContexts())).toBe('dev')
+    expect(currentName()).toBe('dev')
     vi.stubEnv('MIRAGE_CONTEXT', 'nope')
-    expect(() => currentName(readContexts())).toThrow(/no context 'nope'/)
+    expect(() => currentName()).toThrow(/no context 'nope'/)
   })
 
-  it('keeps the file to its owner', () => {
-    writeContexts(readContexts())
-    expect(statSync(join(dir, 'contexts.json')).mode & 0o777).toBe(0o600)
+  it('keeps each context in its own file, readable by its owner', () => {
+    writeContext('dev', { url: 'https://dev.example', team: null, workspace: null })
+    writeCurrent('dev')
+    expect(statSync(join(dir, 'contexts', 'dev.json')).mode & 0o777).toBe(0o600)
+    expect(statSync(join(dir, 'current_context')).mode & 0o777).toBe(0o600)
+    expect(readContext('dev')).toEqual({ url: 'https://dev.example', team: null, workspace: null })
   })
 
   it('refuses a name that is no safe file name', () => {
@@ -441,25 +444,19 @@ describe('contexts', () => {
   })
 
   it('follows the daemon port for local, after its own URL and config.toml', () => {
-    const contexts = readContexts()
-    expect(localUrl({}, contexts)).toBe('http://127.0.0.1:8765')
-    expect(localUrl({ port: '9100' }, contexts)).toBe('http://127.0.0.1:9100')
+    expect(localUrl({})).toBe('http://127.0.0.1:8765')
+    expect(localUrl({ port: '9100' })).toBe('http://127.0.0.1:9100')
     vi.stubEnv('MIRAGE_DAEMON_PORT', '9200')
-    expect(localUrl({ port: '9100' }, contexts)).toBe('http://127.0.0.1:9200')
-    expect(localUrl({ url: 'http://127.0.0.1:9300' }, contexts)).toBe('http://127.0.0.1:9300')
-    const own = {
-      ...contexts,
-      contexts: { local: { url: 'http://127.0.0.1:9400', team: null, workspace: null } },
-    }
-    expect(localUrl({ url: 'http://127.0.0.1:9300' }, own)).toBe('http://127.0.0.1:9400')
+    expect(localUrl({ port: '9100' })).toBe('http://127.0.0.1:9200')
+    expect(localUrl({ url: 'http://127.0.0.1:9300' })).toBe('http://127.0.0.1:9300')
+    writeContext('local', { url: 'http://127.0.0.1:9400', team: null, workspace: null })
+    expect(localUrl({ url: 'http://127.0.0.1:9300' })).toBe('http://127.0.0.1:9400')
   })
 
   it("sends a remote context's login there, and never config.toml's token", () => {
     writeFileSync(join(dir, 'config.toml'), '[daemon]\nauth_token = "local-only"\n')
-    writeContexts({
-      current: 'dev',
-      contexts: { dev: { url: 'https://dev.example', team: 'acme', workspace: null } },
-    })
+    writeContext('dev', { url: 'https://dev.example', team: 'acme', workspace: null })
+    writeCurrent('dev')
     expect(loadDaemonSettings().authToken).toBe('')
     writeLogin(stored('https://dev.example'), loginPath('dev'))
     const settings = loadDaemonSettings()
@@ -467,23 +464,15 @@ describe('contexts', () => {
     expect(settings.login?.access_token).toBe('from-login')
   })
 
-  it('keeps both of two changes made at once', async () => {
-    await Promise.all(
-      ['a', 'b'].map((name) =>
-        updateContexts((contexts) => {
-          contexts.contexts[name] = { url: `https://${name}.example`, team: null, workspace: null }
-        }),
-      ),
-    )
-    expect(Object.keys(readContexts().contexts).sort()).toEqual(['a', 'b', 'local'])
-    expect(existsSync(join(dir, 'contexts.json.lock'))).toBe(false)
+  it('keeps two contexts written one after another apart', () => {
+    for (const name of ['a', 'b']) {
+      writeContext(name, { url: `https://${name}.example`, team: null, workspace: null })
+    }
+    expect(contextNames()).toEqual(['a', 'b', 'local'])
   })
 
   it('picks the workspace from -w, then $MIRAGE_WORKSPACE, then the context', () => {
-    writeContexts({
-      current: 'local',
-      contexts: { local: { url: '', team: null, workspace: 'kept' } },
-    })
+    writeContext('local', { url: '', team: null, workspace: 'kept' })
     expect(resolveWorkspace(undefined)).toBe('kept')
     vi.stubEnv('MIRAGE_WORKSPACE', 'env')
     expect(resolveWorkspace(undefined)).toBe('env')
@@ -497,10 +486,7 @@ describe('contexts', () => {
   })
 
   it('switches, runs one command elsewhere, and forgets a context', async () => {
-    writeContexts({
-      current: 'local',
-      contexts: { dev: { url: 'https://dev.example', team: 'acme', workspace: 'w1' } },
-    })
+    writeContext('dev', { url: 'https://dev.example', team: 'acme', workspace: 'w1' })
     writeLogin(stored('https://dev.example'), loginPath('dev'))
     const once = await runProgram(['--context', 'dev', 'whoami'])
     expect(JSON.parse(once.stdout)).toMatchObject({
@@ -509,15 +495,16 @@ describe('contexts', () => {
       team: 'acme',
       workspace: 'w1',
     })
-    expect(readContexts().current).toBe('local')
+    expect(readCurrent()).toBe('local')
     expect((await runProgram(['context', 'use', 'dev'])).exitCode).toBe(0)
-    expect(readContexts().current).toBe('dev')
+    expect(readCurrent()).toBe('dev')
     expect((await runProgram(['context', 'use', 'nope'])).exitCode).toBe(2)
     expect((await runProgram(['context', 'use', 'constructor'])).exitCode).toBe(2)
     expect((await runProgram(['context', 'delete', 'local'])).exitCode).toBe(2)
     expect((await runProgram(['context', 'delete', 'dev'])).exitCode).toBe(0)
-    expect(readContexts()).toMatchObject({ current: 'local' })
+    expect(readCurrent()).toBe('local')
     expect(existsSync(join(dir, 'logins', 'dev.json'))).toBe(false)
+    expect(existsSync(join(dir, 'contexts', 'dev.json'))).toBe(false)
   })
 
   it('keeps the daemon settings under daemon config', async () => {
