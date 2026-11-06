@@ -80,6 +80,9 @@ from mirage.workspace.session.serialize import (
 )
 from mirage.workspace.types import StatusWriter
 
+# The file-creation mask a fresh shell starts with, as bash's.
+_FRESH_UMASK = 0o022
+
 
 def copy_state(value: Any) -> Any:
     """Copy one session field deeply enough that a child cannot write back.
@@ -341,7 +344,7 @@ class SessionState:
     aliases: dict[str, str] = field(default_factory=dict)
     # The file-creation mask. bash's default for a fresh shell, and
     # exactly what mirage's 644/755 defaults for a new entry are.
-    umask: int = 0o022
+    umask: int = _FRESH_UMASK
     mount_modes: dict[str, MountMode] | None = None
     # What exists for this session: the profile's hides, shows, hidden
     # variables, process scope and allow list, compiled once. The views
@@ -620,6 +623,35 @@ class SessionState:
             data["readonly_functions"] = sorted(self.readonly_functions)
         if self.exported_functions:
             data["exported_functions"] = sorted(self.exported_functions)
+        # The rest of what a shell keeps between lines, each only when it
+        # differs from a fresh shell's, so a host that forgets its memory
+        # brings the session back as it was left.
+        if self.aliases:
+            data["aliases"] = dict(self.aliases)
+        # Each function's body runs the aliases its definition saw, not
+        # the ones defined since, so the view goes with it.
+        views = {}
+        for name, source in self.functions.items():
+            site = self._function_sites.get(name)
+            if site is not None and site.aliases is not None:
+                if site.source == source:
+                    views[name] = dict(site.aliases)
+        if views:
+            data["function_aliases"] = views
+        if self.shell_options:
+            data["shell_options"] = dict(self.shell_options)
+        if self.shopts:
+            data["shopts"] = dict(self.shopts)
+        if self.umask != _FRESH_UMASK:
+            data["umask"] = self.umask
+        if self.logical_cwd is not None:
+            data["logical_cwd"] = self.logical_cwd
+        if self.exit_trap is not None:
+            data["exit_trap"] = self.exit_trap
+        if self.err_trap is not None:
+            data["err_trap"] = self.err_trap
+        if self.return_trap is not None:
+            data["return_trap"] = self.return_trap
         if self.mount_modes is not None:
             data["mount_modes"] = {
                 prefix: mode.value for prefix, mode in self.mount_modes.items()
@@ -710,6 +742,11 @@ class SessionState:
         for marks in ("readonly_functions", "exported_functions"):
             if marks in data:
                 data = {**data, marks: set(data[marks])}
+        # A session's own copies, so two loaded from one record share none.
+        for table in ("aliases", "shell_options", "shopts"):
+            if data.get(table) is not None:
+                data = {**data, table: dict(data[table])}
+        views = data.get("function_aliases")
         modes = data.get("mount_modes")
         paths = data.get("hidden_paths")
         shown = data.get("shown_paths")
@@ -723,7 +760,13 @@ class SessionState:
         data = {
             key: value
             for key, value in data.items()
-            if key not in ("hidden_paths", "shown_paths", "hidden_vars")
+            if key
+            not in (
+                "hidden_paths",
+                "shown_paths",
+                "hidden_vars",
+                "function_aliases",
+            )
         }
         if modes is not None:
             data["mount_modes"] = {
@@ -793,6 +836,13 @@ class SessionState:
                 processes=data.get("processes", ProcessPermissions()).list,
             )
         session = cls(**data)
+        # A function's alias view comes back as its site; where on its line
+        # the definition stood went with the line.
+        for name, view in (views or {}).items():
+            if name in session.functions:
+                session._function_sites[name] = FunctionSite(
+                    session.functions[name], (0, 0), None, dict(view)
+                )
         if recorded is not None:
             # A recorded session comes back as it was written, so a
             # startup variable it had unset stays unset rather than being

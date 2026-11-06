@@ -155,9 +155,9 @@ async def test_a_call_with_its_own_env_or_cwd_reads_the_same_aliases(
 
 @pytest.mark.asyncio
 async def test_a_checked_out_function_does_not_read_the_replaced_site():
-    # Checkout restores the table but not where the live definitions
-    # were made, so a restored body runs as a parse of its own and reads
-    # the aliases as they are, even after the same text was defined again.
+    # Checkout restores the aliases and each definition's alias view, not
+    # the live sites: a restored body runs the aliases its definition saw,
+    # even after the same text was defined again under others.
     ws = _ws()
     for line in ("shopt -s expand_aliases", "alias a='echo 1'", "f() { a; }"):
         await ws.shell(line)
@@ -165,7 +165,7 @@ async def test_a_checked_out_function_does_not_read_the_replaced_site():
     for line in ("alias a='echo 2'", "f() { a; }", "alias a='echo 3'"):
         await ws.shell(line)
     await apply_state_dict(ws, state)
-    assert await _run(ws, "f") == ("3\n", 0)
+    assert await _run(ws, "f") == ("1\n", 0)
     await ws.close()
 
 
