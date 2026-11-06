@@ -20,9 +20,9 @@ import { DaemonConfigError } from '@struktoai/mirage-server/daemon_config'
 import { registerApiCommand } from './api.ts'
 import { DaemonUnreachable } from './client.ts'
 import { LoginError } from './credentials.ts'
-import { registerConfigCommands } from './config.ts'
-import { ContextError, registerContextCommands } from './context.ts'
+import { registerContextCommands } from './context.ts'
 import { ENV_CONTEXT } from './env.ts'
+import { ContextError } from './errors.ts'
 import { registerDaemonCommands } from './daemon.ts'
 import { registerShellCommand } from './shell.ts'
 import { registerToolCommands } from './tools.ts'
@@ -58,7 +58,10 @@ export function buildProgram(): Command {
     .name('mirage')
     .description('Mirage daemon CLI: manage workspaces and run shell lines.')
     .version(resolveVersion())
-    .option('--context <name>', 'Run this one command in another context; $MIRAGE_CONTEXT does the same')
+    .option(
+      '--context <name>',
+      'Run this one command in another context; $MIRAGE_CONTEXT does the same',
+    )
     .hook('preAction', (root) => {
       const context = root.opts<{ context?: string }>().context
       if (context !== undefined && context !== '') process.env[ENV_CONTEXT] = context
@@ -75,7 +78,6 @@ export function buildProgram(): Command {
   registerCodexExecCommand(program)
   registerLoginCommands(program)
   registerDaemonCommands(program)
-  registerConfigCommands(program, true)
   registerContextCommands(program)
   registerTemplateCommands(program)
   return program

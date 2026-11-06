@@ -1011,16 +1011,6 @@ async def lifecycle(
     got["config_unset"] = str(code)
     code, _, _ = await cli(*daemon_config, "set", "typo_key", "1")
     got["config_unknown_key"] = str(code)
-    warned = []
-    for verb in (
-        ("set", "idle_grace_seconds", "46"),
-        ("get", "idle_grace_seconds"),
-        ("list",),
-        ("unset", "idle_grace_seconds"),
-    ):
-        _, _, err = await cli("config", *verb)
-        warned.append("moved to `mirage daemon config`" in err)
-    got["config_moved"] = " ".join("warns" if w else "silent" for w in warned)
     await cli("daemon", "stop")
     moved = free_port()
     plain = {
@@ -1102,6 +1092,22 @@ async def lifecycle(
     got["context_once"] = f"{code} {await contexts()}"
     await cli("context", "delete", "spare")
     got["context_delete"] = await contexts()
+
+    await cli(
+        "template", "create", "t1", "-f", str(config), "--description", "ram"
+    )
+    _, out, _ = await cli("template", "get", "t1", "-o", "yaml")
+    back = root / "back.yaml"
+    back.write_text(out)
+    await cli("template", "delete", "t1")
+    await cli("template", "create", "t2", "-f", str(back))
+    await cli("template", "restore", "t1")
+    _, out, _ = await cli("template", "list", "-o", "json")
+    saved = json.loads(out)
+    same = len({json.dumps(t["config"], sort_keys=True) for t in saved}) == 1
+    got["template_round_trip"] = " ".join(
+        f"{t['name']}:{t['description']}" for t in saved
+    ) + (" same config" if same else " configs differ")
     _, out, _ = await cli(
         "api", "/v1/workspaces/i/shell", "--command", "echo api"
     )

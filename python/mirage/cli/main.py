@@ -31,9 +31,9 @@ from mirage.cli import tools as tools_module
 from mirage.cli import vfs as vfs_module
 from mirage.cli import workspace as workspace_module
 from mirage.cli.client import DaemonUnreachable
-from mirage.cli.context import ContextError
 from mirage.cli.credentials import LoginError
 from mirage.cli.env import ENV_CONTEXT
+from mirage.cli.errors import ContextError
 from mirage.server.daemon_config import DaemonConfigError
 
 app = typer.Typer(
@@ -72,7 +72,6 @@ app.command(
 app.add_typer(tools_module.app, name="tools")
 daemon_module.app.add_typer(config_module.app, name="config")
 app.add_typer(daemon_module.app, name="daemon")
-app.add_typer(config_module.moved, name="config")
 app.add_typer(context_module.app, name="context")
 app.add_typer(template_module.app, name="template")
 app.command("mcp")(mcp_module.mcp_cmd)

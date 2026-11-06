@@ -23,7 +23,6 @@ describe('mirage CLI program', () => {
       [
         'api',
         'codex-exec',
-        'config',
         'context',
         'daemon',
         'glob',

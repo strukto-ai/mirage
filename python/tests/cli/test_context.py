@@ -12,26 +12,27 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import json
+import threading
 import time
 
 import pytest
 from typer.testing import CliRunner
 
 from mirage.cli.context import (
-    Context,
-    ContextError,
-    Contexts,
     check_name,
     current_name,
     local_url,
     login_path,
     read_contexts,
     resolve_workspace,
+    update_contexts,
     write_contexts,
 )
-from mirage.cli.credentials import Login, read_login, write_login
+from mirage.cli.credentials import Login, write_login
+from mirage.cli.errors import ContextError
 from mirage.cli.main import app
 from mirage.cli.settings import load_daemon_settings
+from mirage.cli.types import Context, Contexts
 
 
 def _stored(url: str) -> Login:
@@ -48,7 +49,7 @@ def home(tmp_path, monkeypatch):
         "MIRAGE_DAEMON_PORT",
         "MIRAGE_TOKEN",
     ):
-        monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv(name, "")
     return tmp_path
 
 
@@ -95,14 +96,6 @@ def test_local_follows_the_daemon_port_after_its_own_url_and_config(
     assert local_url(table, contexts) == "http://127.0.0.1:9400"
 
 
-def test_a_login_kept_before_contexts_moves_to_local(home):
-    write_login(_stored("http://127.0.0.1:8765"), home / "login.json")
-    path = login_path("local")
-    assert path == home / "logins" / "local.json"
-    assert not (home / "login.json").exists()
-    assert read_login(path).access_token == "from-login"
-
-
 def test_a_remote_context_gets_its_login_never_config_tokens(home):
     (home / "config.toml").write_text('[daemon]\nauth_token = "local-only"\n')
     write_contexts(
@@ -120,6 +113,23 @@ def test_a_remote_context_gets_its_login_never_config_tokens(home):
         "",
     )
     assert settings.login.access_token == "from-login"
+
+
+def test_two_changes_made_at_once_both_stay(home):
+    def add(name: str) -> None:
+        def change(contexts: Contexts) -> None:
+            time.sleep(0.05)
+            contexts.contexts[name] = Context(url=f"https://{name}.example")
+
+        update_contexts(change)
+
+    threads = [threading.Thread(target=add, args=(n,)) for n in "ab"]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert sorted(read_contexts().contexts) == ["a", "b", "local"]
+    assert not (home / "contexts.json.lock").exists()
 
 
 def test_the_workspace_is_the_flag_then_env_then_the_context(monkeypatch):
@@ -157,7 +167,7 @@ def test_switch_run_once_elsewhere_and_forget(home, monkeypatch):
         "workspace": "w1",
         "renew_by": None,
     }
-    monkeypatch.delenv("MIRAGE_CONTEXT")
+    monkeypatch.setenv("MIRAGE_CONTEXT", "")
     assert read_contexts().current == "local"
     assert runner.invoke(app, ["context", "use", "dev"]).exit_code == 0
     assert read_contexts().current == "dev"
@@ -170,12 +180,10 @@ def test_switch_run_once_elsewhere_and_forget(home, monkeypatch):
     assert not (home / "logins" / "dev.json").exists()
 
 
-def test_config_moved_and_url_leaves_config_toml(home):
+def test_daemon_config_holds_the_daemon_settings(home):
     runner = CliRunner()
-    done = runner.invoke(app, ["config", "set", "url", "http://127.0.0.1:9"])
-    assert "`mirage config` moved to `mirage daemon config`" in done.stderr
-    assert "url leaves config.toml in the next release" in done.stderr
-    assert 'url = "http://127.0.0.1:9"' in (home / "config.toml").read_text()
-    daemon = runner.invoke(app, ["daemon", "config", "get", "url"])
-    assert daemon.stderr == ""
-    assert json.loads(daemon.stdout) == {"url": "http://127.0.0.1:9"}
+    done = runner.invoke(app, ["daemon", "config", "set", "port", "9100"])
+    assert done.exit_code == 0, done.output
+    assert "port = 9100" in (home / "config.toml").read_text()
+    assert load_daemon_settings().url == "http://127.0.0.1:9100"
+    assert runner.invoke(app, ["config", "list"]).exit_code == 2

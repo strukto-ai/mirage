@@ -13,9 +13,9 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from collections.abc import Callable
 from typing import Any
 from urllib.parse import quote
 
@@ -40,14 +40,10 @@ class Output(str, Enum):
     JSON = "json"
 
 
-OUTPUT = typer.Option(
-    None, "--output", "-o", help="Print as yaml or json."
-)
+OUTPUT = typer.Option(None, "--output", "-o", help="Print as yaml or json.")
 
 
-def show(
-    obj: Any, output: Output | None, human: Callable[[Any], str]
-) -> None:
+def show(obj: Any, output: Output | None, human: Callable[[Any], str]) -> None:
     """Print an answer as ``-o`` asks, else as ``emit`` does.
 
     Args:
@@ -67,7 +63,8 @@ def show(
 
 
 def as_yaml(obj: Any) -> str:
-    return yaml.safe_dump(obj, sort_keys=False, allow_unicode=True).rstrip()
+    text: str = yaml.safe_dump(obj, sort_keys=False, allow_unicode=True)
+    return text.rstrip()
 
 
 def read_template(path: Path) -> dict[str, Any]:
@@ -92,7 +89,7 @@ def read_template(path: Path) -> dict[str, Any]:
     return {"description": None, "config": doc}
 
 
-def _path(name: str) -> str:
+def template_path(name: str) -> str:
     return f"/v1/templates/{quote(name, safe='')}"
 
 
@@ -112,8 +109,7 @@ def create_cmd(
         "-f",
         exists=True,
         readable=True,
-        help="A workspace config, or a template as `get -o yaml` prints "
-        "it.",
+        help="A workspace config, or a template as `get -o yaml` prints it.",
     ),
     description: str | None = typer.Option(
         None, "--description", help="Say what the template is for."
@@ -153,7 +149,7 @@ def get_cmd(
     """Print a template; ``-o yaml`` is a file ``create -f`` reads."""
     with make_client() as client:
         client.ensure_running()
-        r = client.request("GET", _path(name))
+        r = client.request("GET", template_path(name))
     show(handle_response(r), output, as_yaml)
 
 
@@ -162,7 +158,7 @@ def delete_cmd(name: str = typer.Argument(..., help="Template name.")) -> None:
     """Delete a template; ``restore`` brings it back."""
     with make_client() as client:
         client.ensure_running()
-        r = client.request("DELETE", _path(name))
+        r = client.request("DELETE", template_path(name))
     handle_response(r)
     header(f"deleted template {name}")
     emit({"deleted": name}, human=lambda d: f"Deleted template {name}.")
@@ -175,7 +171,7 @@ def restore_cmd(
     """Bring back a deleted template."""
     with make_client() as client:
         client.ensure_running()
-        r = client.request("POST", f"{_path(name)}/restore")
+        r = client.request("POST", f"{template_path(name)}/restore")
     restored = handle_response(r)
     header(f"restored template {name}")
     emit(restored, human=as_yaml)
