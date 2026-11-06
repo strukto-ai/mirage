@@ -16,11 +16,14 @@ import type { EntryKind, ResourceKind } from './types.ts'
 
 export const ENTRY_KINDS: readonly EntryKind[] = ['vfs', 'cli', 'runtime', 'store']
 
-/** The one scope a local daemon serves; the console builds a store per team. */
+/** The one scope a local daemon serves; a hosted server keeps one per team. */
 export const DEFAULT_SCOPE = 'local'
 
-/** A name the console accepts, which is also safe as a file name. */
+/** A saved config's name, which is also safe as a file name. */
 export const NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/
+
+/** The source a config names a saved entry through: `{from: strukto, ref}`. */
+export const STRUKTO = 'strukto'
 
 /** The folder deleted templates wait in until restored. */
 export const DELETED_TEMPLATES = '.deleted/template'

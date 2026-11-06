@@ -347,7 +347,7 @@ def context_name(url: str) -> str:
         url (str): the server.
 
     Returns:
-        str: ``strukto`` for the hosted console, ``local`` for this
+        str: ``strukto`` for the hosted API, ``local`` for this
             machine, else the server's host.
     """
     if url == HOSTED_URL:
@@ -413,13 +413,13 @@ def save_context(name: str, url: str, login: Login | None) -> None:
 
 def login_cmd(
     url: str | None = typer.Argument(
-        None, help="The server; the hosted console when left out."
+        None, help="The server; the hosted API when left out."
     ),
     name: str | None = typer.Option(
         None,
         "--name",
         help="Name the context; by default strukto for the hosted "
-        "console, local for this machine, else the server's host.",
+        "API, local for this machine, else the server's host.",
     ),
     token: str | None = typer.Option(
         None,

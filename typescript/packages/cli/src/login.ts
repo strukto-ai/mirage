@@ -277,7 +277,7 @@ export async function tokenLogin(url: string, token: string): Promise<Login> {
   }
 }
 
-/** The context a login makes when given no `--name`: `strukto` for the hosted console, `local` for this machine, else the server's host. */
+/** The context a login makes when given no `--name`: `strukto` for the hosted API, `local` for this machine, else the server's host. */
 function contextName(url: string): string {
   if (url === HOSTED_URL) return HOSTED
   if (isLocalUrl(url)) return LOCAL
@@ -322,10 +322,10 @@ export function registerLoginCommands(program: Command): void {
   program
     .command('login')
     .description('Log in to a server and make it the current context.')
-    .argument('[url]', 'The server; the hosted console when left out')
+    .argument('[url]', 'The server; the hosted API when left out')
     .option(
       '--name <name>',
-      "Name the context; by default strukto for the hosted console, local for this machine, else the server's host",
+      "Name the context; by default strukto for the hosted API, local for this machine, else the server's host",
     )
     .option(
       '--token <token>',

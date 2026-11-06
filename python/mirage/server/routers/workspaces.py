@@ -41,6 +41,7 @@ from mirage.policy.base import Policy
 from mirage.policy.errors import PolicyDenied, PolicyError
 from mirage.policy.profile import SessionProfile
 from mirage.resources.errors import ResourceError
+from mirage.resources.refs import secret_refs
 from mirage.secrets.errors import SecretsError
 from mirage.secrets.sources import resolve_config_secrets, resolve_sources_for
 from mirage.server.clone import (
@@ -57,6 +58,7 @@ from mirage.server.multipart import (
     part_events,
 )
 from mirage.server.registry import Claim, WorkspaceEntry
+from mirage.server.resources.strukto import with_entries
 from mirage.server.routers.templates import (
     NO_WORKSPACE_ID,
     require_one_account,
@@ -378,6 +380,32 @@ async def _config_of(
     return config, template.config
 
 
+async def _with_saved(
+    request: Request, config: WorkspaceConfig, written: dict[str, Any]
+) -> WorkspaceConfig:
+    """The config a create builds, with the saved entries its pointers
+    name declared for it; after the digest and the policies, which judge
+    the config as written and never see a sealed value.
+
+    Args:
+        request (Request): the HTTP request, for the app's store.
+        config (WorkspaceConfig): the checked config.
+        written (dict[str, Any]): the config as written.
+
+    Raises:
+        HTTPException: 501 on a server of many accounts, 400 for a name
+            that is not saved.
+    """
+    refs = secret_refs(written)
+    if not refs:
+        return config
+    require_one_account(request)
+    try:
+        return await with_entries(request.app.state.resources, config, refs)
+    except ResourceError as e:
+        raise store_refusal(e) from e
+
+
 @router.post("", response_model=WorkspaceDetail, status_code=201)
 async def create_workspace(
     req: CreateWorkspaceRequest,
@@ -446,11 +474,12 @@ async def create_workspace(
             response.status_code = 200
             return await make_detail(held)
         await _admit(request, written)
+        built = await _with_saved(request, config, written)
         async with _claimed(request, wid):
             try:
                 runner = await WorkspaceRunner.build(
                     _construct(
-                        config,
+                        built,
                         registry.rule_for(config.network),
                         wid,
                         str(request.app.state.state_root),

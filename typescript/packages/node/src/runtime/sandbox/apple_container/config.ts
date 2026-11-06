@@ -12,8 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
 import {
-  BASE_CONFIG_KEYS,
+  BASE_CONFIG_FIELDS,
   nonblank,
   type SandboxConfig,
 } from '@struktoai/mirage-core/runtime/sandbox/config'
@@ -27,11 +28,11 @@ export interface AppleContainerConfig extends SandboxConfig {
   containers?: Record<string, string>
 }
 
-export const APPLE_CONTAINER_CONFIG_KEYS: readonly string[] = [
-  ...BASE_CONFIG_KEYS,
-  'container',
-  'containers',
-]
+export const APPLE_CONTAINER_CONFIG_FIELDS: ConfigFields = {
+  ...BASE_CONFIG_FIELDS,
+  container: { type: 'string' },
+  containers: { type: 'map' },
+}
 
 /** Validate container ids before any session can use the runtime. */
 export function validateAppleContainerConfig(config: AppleContainerConfig): void {

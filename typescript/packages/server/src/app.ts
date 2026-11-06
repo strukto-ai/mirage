@@ -31,7 +31,10 @@ import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { registerMetrics } from './metrics.ts'
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { type RateLimit, registerRateLimits, resolveRateLimits } from './rate_limit.ts'
+import { STRUKTO } from '@struktoai/mirage-core/resources/constants'
+import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 import { buildResourceStore, resolveResourceStore } from './resources/config.ts'
+import { StruktoSourceConfig, fetchStrukto } from './resources/strukto.ts'
 import {
   OWNERS_PREFIX,
   resolveCeilings,
@@ -176,6 +179,7 @@ function noop(): void {
 
 export function buildApp(options: BuildAppOptions = {}) {
   validateDaemonTable(readDaemonTable(mirageHome()))
+  registerSecrets(STRUKTO, StruktoSourceConfig, fetchStrukto)
   const startedAt = Date.now() / 1000
   const exitFn = options.onIdleExit ?? noop
   const authConfig = options.authConfig ?? resolveAuthConfig()

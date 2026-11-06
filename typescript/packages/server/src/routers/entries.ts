@@ -13,28 +13,31 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
-import { ENTRY_KINDS, NAME, NOUN } from '@struktoai/mirage-core/resources/constants'
+import { NAME, NOUN } from '@struktoai/mirage-core/resources/constants'
 import { ResourceError } from '@struktoai/mirage-core/resources/errors'
+import { usesOf } from '@struktoai/mirage-core/resources/refs'
 import type { Entry, EntryKind, Fields } from '@struktoai/mirage-core/resources/types'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { WorkspaceRegistry } from '../registry.ts'
 import { typesOf } from '../resources/fields.ts'
-import { uses } from '../resources/refs.ts'
 import { checkValues, storesOf } from '../resources/values.ts'
 import type { RouteApp, RouteReply } from '../routes.ts'
 import { requireOneAccount, storeRefusal } from './templates.ts'
 
-/** Each kind's route, as the console names it. */
+/** Each kind's route. */
 export const ROUTES = {
   vfs: '/v1/vfs',
   cli: '/v1/clis',
   runtime: '/v1/runtimes',
 } as const satisfies Partial<Record<EntryKind, string>>
 
-/** A name the console reads as an id, which it refuses as a name. */
+/** The route that lists a kind's types, which no entry can be named. */
+const TYPES_ROUTE = 'types'
+
+/** A name that reads as an id, which no entry may take. */
 const ID_PREFIX = /^(ws|sec|pol|key|tpl|team|usr)_/
 
-/** A request the console answers with a 4xx and extra keys beside `detail`. */
+/** A request answered with a 4xx and extra keys beside `detail`. */
 class Refused extends Error {
   constructor(
     readonly status: number,
@@ -55,7 +58,7 @@ interface ListQuery {
 }
 
 /**
- * An entry as the console answers it. The daemon keeps no id, creator or
+ * An entry as a route answers it. The daemon keeps no id, creator or
  * times, so the id is the name and the rest are null.
  */
 function present(kind: EntryKind, entry: Entry, usedBy?: number): Record<string, JsonValue> {
@@ -90,6 +93,8 @@ function checkName(kind: EntryKind, name: string): string {
       `${NOUN[kind]} name must be 1-63 of a-z 0-9 . _ -, start with a letter or digit, and not look like an id`,
     )
   }
+  if (name === TYPES_ROUTE)
+    throw new Refused(400, `${TYPES_ROUTE} names the types route; pick another`)
   return name
 }
 
@@ -100,7 +105,7 @@ function jsonBody(body: unknown): Record<string, unknown> {
   return body as Record<string, unknown>
 }
 
-/** The entry of `kind` named `ref`, refused as the console refuses a missing one. */
+/** The entry of `kind` named `ref`; a missing one is a 404. */
 async function entryNamed(store: ResourceStore, kind: EntryKind, ref: string): Promise<Entry> {
   try {
     return await store.getEntry(kind, ref)
@@ -119,18 +124,6 @@ async function requireStores(store: ResourceStore, config: Fields): Promise<void
   if (missing.length > 0) {
     throw new Refused(400, `add ${missing.join(', ')} under Secret stores first`, { missing })
   }
-}
-
-async function exists(store: ResourceStore, name: string): Promise<boolean> {
-  for (const kind of ENTRY_KINDS) {
-    try {
-      await store.getEntry(kind, name)
-      return true
-    } catch (e) {
-      if (!(e instanceof ResourceError) || e.code !== 'not_found') throw e
-    }
-  }
-  return false
 }
 
 /** The fields an edit removes: given as null, or now pointing at a store, whose sealed value would be read instead. */
@@ -162,7 +155,7 @@ async function answered<T>(
 }
 
 /**
- * The routes of one kind of entry, as the console serves them: the route sets
+ * The routes of one kind of entry. The route sets
  * the kind, so an entry answers only under its own. Sealed fields are
  * write-only; no route answers with one.
  */
@@ -177,7 +170,7 @@ export function registerEntryRoutes(
   app.get<{ Querystring: ListQuery }>(route, (req, reply) =>
     answered(registry, reply, async () => {
       const entries = await resources.listEntries(kind)
-      const used = await uses(resources)
+      const used = usesOf(await resources.listTemplates())
       const type = req.query.type ?? ''
       const text = (req.query.q ?? '').trim().toLowerCase()
       return {
@@ -188,7 +181,9 @@ export function registerEntryRoutes(
     }),
   )
 
-  app.get(`${route}/types`, (_req, reply) => answered(registry, reply, () => typesOf(kind)))
+  app.get(`${route}/${TYPES_ROUTE}`, (_req, reply) =>
+    answered(registry, reply, () => typesOf(kind)),
+  )
 
   app.post(route, (req, reply) =>
     answered(registry, reply, async () => {
@@ -197,8 +192,7 @@ export function registerEntryRoutes(
       const checked = checkValues(kind, type, body.fields, await typesOf(kind))
       const name = checkName(kind, requiredString(body, 'name'))
       await requireStores(resources, checked.config)
-      if (await exists(resources, name)) throw new Refused(409, `${name} already exists`)
-      const saved = await resources.putEntry(kind, {
+      const saved = await resources.createEntry(kind, {
         name,
         type,
         fields: checked.config,
@@ -228,7 +222,7 @@ export function registerEntryRoutes(
         [...removed].map((k) => [k, null]),
       )
       Object.assign(sealed, checked.sealed)
-      const saved = await resources.putEntry(kind, {
+      const saved = await resources.updateEntry(kind, {
         name: current.name,
         type: current.type,
         fields: checked.config,
@@ -241,9 +235,6 @@ export function registerEntryRoutes(
   app.delete<{ Params: RefParams }>(`${route}/:ref`, (req, reply) =>
     answered(registry, reply, async () => {
       const current = await entryNamed(resources, kind, req.params.ref)
-      const usedBy = (await uses(resources)).get(current.name) ?? []
-      if (usedBy.length > 0)
-        throw new Refused(409, `${current.name} is used by ${usedBy.join(', ')}`)
       await resources.deleteEntry(kind, current.name)
       return reply.status(204).send()
     }),

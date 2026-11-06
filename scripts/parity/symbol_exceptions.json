@@ -162,7 +162,7 @@
   },
   "runtime/sandbox/microsandbox/config": {
    "typescript_only": {
-    "MICROSANDBOX_CONFIG_KEYS": "TypeScript validates interface fields at runtime with an explicit key list; Python's dataclass fields provide that list."
+    "MICROSANDBOX_CONFIG_FIELDS": "A TypeScript runtime lists the keys its config takes, each with its type, so an unknown key fails loud at construction and a saved runtime's form is typed; Python reads both off the config dataclass."
    }
   },
   "core/api/client": {
@@ -748,7 +748,6 @@
   "cli/vfs": {
    "python_only": {
     "app": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
-    "glob_cmd": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
     "EXPLAIN": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly.",
     "SESSION": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly.",
     "WORKSPACE": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly.",
@@ -759,8 +758,7 @@
     "Target": "Commander hands an action its options as one camelCased object, which TypeScript types as Target and maps back to the call's snake_case argument names; Typer passes each option as its own keyword argument.",
     "camel": "Commander hands an action its options as one camelCased object, which TypeScript types as Target and maps back to the call's snake_case argument names; Typer passes each option as its own keyword argument.",
     "WORKSPACE_FLAGS": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
-    "WORKSPACE_HELP": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
-    "globCommand": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers."
+    "WORKSPACE_HELP": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers."
    }
   },
   "server/routers/vfs": {
@@ -951,7 +949,7 @@
   },
   "runtime/python/local/config": {
    "typescript_only": {
-    "LOCAL_CONFIG_KEYS": "A TypeScript config interface lists its keys so an unknown one fails loud at construction; Python's dataclass refuses an unknown field by itself (RuntimeConfig.coerce)."
+    "LOCAL_CONFIG_FIELDS": "A TypeScript runtime lists the keys its config takes, each with its type, so an unknown key fails loud at construction and a saved runtime's form is typed; Python reads both off the config dataclass."
    }
   },
   "runtime/python/local/runtime": {
@@ -1357,8 +1355,7 @@
     "stored": "Each FastAPI handler maps a store refusal in its own try; the TypeScript routes share one wrapper because a refusal answers through the reply.",
     "Refusal": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves and answer with this status and detail.",
     "bodyOf": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves and answer with this status and detail.",
-    "isRefusal": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves and answer with this status and detail.",
-    "exists": "Python's create catches the store's not_found inline with try/else; the TypeScript route names the same check so its wrapper can answer the refusal."
+    "isRefusal": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves and answer with this status and detail."
    }
   },
   "cli/policy": {
@@ -1421,16 +1418,11 @@
     "unwrap": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys."
    }
   },
-  "server/resources/refs": {
-   "python_only": {
-    "walk_refs": "Python walks a config with a module function; TypeScript's secretRefs closes over its own walk, as the console's does."
-   }
-  },
   "server/resources/values": {
    "python_only": {
     "POINTER_KEYS": "Python names the pointer's keys and each field type's Python types as tables; TypeScript tests them inline with typeof.",
     "TYPEOF": "Python names the pointer's keys and each field type's Python types as tables; TypeScript tests them inline with typeof.",
-    "pointer_of": "Python checks a pointer in its own function; TypeScript checks it inline in valueOf, as the console does."
+    "pointer_of": "Python checks a pointer in its own function; TypeScript checks it inline in valueOf."
    },
    "typescript_only": {
     "StorePointer": "TypeScript narrows a pointer to an interface; Python's is_pointer narrows to a dict."
@@ -1446,6 +1438,17 @@
     "RefParams": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper.",
     "answered": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper.",
     "registerEntryRoutes": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper."
+   }
+  },
+  "resources/refs": {
+   "python_only": {
+    "walk_refs": "Python walks a config with a module function; TypeScript's secretRefs closes over its own walk."
+   }
+  },
+  "runtime/config": {
+   "typescript_only": {
+    "ConfigField": "A TypeScript interface is erased at runtime, so the keys a runtime's config takes and their types are a table of these; Python reads them off the config dataclass.",
+    "ConfigFields": "A TypeScript interface is erased at runtime, so the keys a runtime's config takes and their types are a table of these; Python reads them off the config dataclass."
    }
   }
  }

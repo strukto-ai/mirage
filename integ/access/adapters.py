@@ -1482,8 +1482,6 @@ def vfs_words(step: dict[str, Any]) -> tuple[list[str], bytes]:
     Returns:
         tuple[list[str], bytes]: the words after ``mirage``, and stdin.
     """
-    if step["call"] == "glob":
-        return ["workspace", "vfs", "glob", step["pattern"]], b""
     call = VFS_CALL_BY_NAME[step["call"]]
     words = ["workspace", "vfs", call.name.replace("_", "-")]
     stdin = b""

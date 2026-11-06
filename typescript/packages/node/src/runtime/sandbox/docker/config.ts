@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BASE_CONFIG_KEYS, type SandboxConfig } from '@struktoai/mirage-core/runtime/sandbox/config'
+import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
+import {
+  BASE_CONFIG_FIELDS,
+  type SandboxConfig,
+} from '@struktoai/mirage-core/runtime/sandbox/config'
 
 /** How to reach the user's running container. */
 export interface DockerConfig extends SandboxConfig {
@@ -25,4 +29,7 @@ export interface DockerConfig extends SandboxConfig {
   container: string
 }
 
-export const DOCKER_CONFIG_KEYS: readonly string[] = [...BASE_CONFIG_KEYS, 'container']
+export const DOCKER_CONFIG_FIELDS: ConfigFields = {
+  ...BASE_CONFIG_FIELDS,
+  container: { type: 'string', required: true },
+}

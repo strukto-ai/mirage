@@ -14,6 +14,7 @@
 
 
 import json
+from typing import Any
 
 import httpx
 import pytest
@@ -35,7 +36,7 @@ class FakeClient:
     def __enter__(self) -> "FakeClient":
         return self
 
-    def __exit__(self, *exc: object) -> None:
+    def __exit__(self, *_: Any) -> None:
         return None
 
     def ensure_running(self, allow_spawn: bool = True) -> None:

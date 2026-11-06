@@ -30,7 +30,7 @@ FieldType: TypeAlias = Literal["string", "number", "boolean", "list"]
 
 class Field(TypedDict):
     """One field of a type's config, as a config file writes it and as
-    the console's ``/types`` answers it."""
+    a ``/types`` route answers it."""
 
     name: str
     type: FieldType

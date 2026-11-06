@@ -25,7 +25,7 @@ function root(): string {
 describe('filesResourceStore', () => {
   it('keeps sealed values apart, in owner-only files', async () => {
     const dir = root()
-    await filesResourceStore(dir).putEntry('cli', {
+    await filesResourceStore(dir).createEntry('cli', {
       name: 'gh',
       type: 'gh',
       fields: { a: 1 },

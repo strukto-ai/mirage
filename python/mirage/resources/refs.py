@@ -12,9 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
-from mirage.resources.base import ResourceStore
-from mirage.server.resources.values import STRUKTO
+from mirage.resources.constants import STRUKTO
+from mirage.resources.types import Template
 from mirage.types import JsonValue
 
 
@@ -34,8 +33,8 @@ def walk_refs(value: JsonValue, found: list[str]) -> None:
 
 
 def secret_refs(config: JsonValue) -> list[str]:
-    """The ``{from: strukto, ref}`` entries a config names, each once, in
-    order. Mirrors the console's ``secretRefs``.
+    """The saved entries a config names through ``{from: strukto, ref}``,
+    each once, in order.
 
     Args:
         config (JsonValue): a workspace config.
@@ -45,16 +44,14 @@ def secret_refs(config: JsonValue) -> list[str]:
     return found
 
 
-async def uses(store: ResourceStore) -> dict[str, list[str]]:
-    """The saved templates whose config names each entry, by the entry's
-    name. The daemon keeps no live workspace to count, so a saved
-    template is what refers to an entry.
+def uses_of(templates: list[Template]) -> dict[str, list[str]]:
+    """The templates whose config names each entry, by the entry's name.
 
     Args:
-        store (ResourceStore): the saved configs.
+        templates (list[Template]): the saved templates.
     """
     out: dict[str, list[str]] = {}
-    for template in await store.list_templates():
+    for template in templates:
         for ref in secret_refs(template.config):
             names = out.setdefault(ref, [])
             if template.name not in names:

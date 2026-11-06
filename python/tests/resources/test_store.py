@@ -20,7 +20,7 @@ import pytest
 from mirage.resources.errors import ResourceError
 from mirage.resources.memory import MemoryRecords, MemorySealer
 from mirage.resources.store import RecordResourceStore
-from mirage.resources.types import EntryInput, Fields, TemplateInput
+from mirage.resources.types import EntryInput, Fields, Policy, TemplateInput
 
 GITHUB = EntryInput("github", "github", {"owner": "x"}, {"token": "t1"})
 
@@ -61,18 +61,18 @@ class FailingRecords(MemoryRecords):
 @pytest.mark.asyncio
 async def test_a_put_keeps_drops_and_replaces_sealed_fields():
     store = RecordResourceStore("t", MemoryRecords(), MemorySealer())
-    await store.put_entry("vfs", GITHUB)
-    kept = await store.put_entry("vfs", EntryInput("github", "github", {}))
+    await store.create_entry("vfs", GITHUB)
+    kept = await store.update_entry("vfs", EntryInput("github", "github", {}))
     assert kept.sealed == ["token"]
     pointer = {"token": {"from": "aws", "ref": "r", "key": "k"}}
-    moved = await store.put_entry(
+    moved = await store.update_entry(
         "vfs", EntryInput("github", "github", pointer)
     )
     assert moved.sealed == []
-    await store.put_entry(
+    await store.update_entry(
         "vfs", EntryInput("github", "github", {}, {"token": "t2", "k": "v"})
     )
-    dropped = await store.put_entry(
+    dropped = await store.update_entry(
         "vfs", EntryInput("github", "github", {}, {"k": None})
     )
     assert dropped.sealed == ["token"]
@@ -84,12 +84,12 @@ async def test_a_put_keeps_drops_and_replaces_sealed_fields():
 @pytest.mark.asyncio
 async def test_a_deleted_entry_comes_back_without_its_secret():
     store = RecordResourceStore("t", MemoryRecords(), MemorySealer())
-    await store.put_entry("vfs", GITHUB)
+    await store.create_entry("vfs", GITHUB)
     await store.delete_entry("vfs", "github")
     with pytest.raises(ResourceError) as gone:
         await store.reveal_entry("vfs", "github")
     assert gone.value.code == "not_found"
-    again = await store.put_entry("vfs", EntryInput("github", "github", {}))
+    again = await store.create_entry("vfs", EntryInput("github", "github", {}))
     assert again.sealed == []
 
 
@@ -97,10 +97,10 @@ async def test_a_deleted_entry_comes_back_without_its_secret():
 async def test_a_failed_record_write_keeps_the_old_secret():
     records = FailingRecords()
     store = RecordResourceStore("t", records, MemorySealer())
-    await store.put_entry("vfs", GITHUB)
+    await store.create_entry("vfs", GITHUB)
     records.fail = True
     with pytest.raises(OSError):
-        await store.put_entry(
+        await store.update_entry(
             "vfs", EntryInput("github", "github", {"token": {"from": "aws"}})
         )
     assert (await store.reveal_entry("vfs", "github")).sealed == {
@@ -111,10 +111,49 @@ async def test_a_failed_record_write_keeps_the_old_secret():
 @pytest.mark.asyncio
 async def test_an_entry_name_is_one_across_kinds():
     store = RecordResourceStore("t", MemoryRecords(), MemorySealer())
-    await store.put_entry("vfs", GITHUB)
+    await store.create_entry("vfs", GITHUB)
     with pytest.raises(ResourceError) as taken:
-        await store.put_entry("cli", EntryInput("github", "gh", {}))
+        await store.create_entry("cli", EntryInput("github", "gh", {}))
     assert taken.value.code == "conflict"
+
+
+@pytest.mark.asyncio
+async def test_a_create_refuses_a_taken_name_and_an_update_a_missing_one():
+    store = RecordResourceStore("t", MemoryRecords(), MemorySealer())
+    await store.create_entry("vfs", GITHUB)
+    await store.create_policy(Policy(name="guard.py", source="pass"))
+    for create in (
+        store.create_entry("vfs", GITHUB),
+        store.create_policy(Policy(name="guard.py", source="x")),
+    ):
+        with pytest.raises(ResourceError) as taken:
+            await create
+        assert taken.value.code == "conflict"
+    for update in (
+        store.update_entry("vfs", EntryInput("nope", "github", {})),
+        store.update_policy(Policy(name="nope.py", source="x")),
+    ):
+        with pytest.raises(ResourceError) as missing:
+            await update
+        assert missing.value.code == "not_found"
+    assert (await store.get_policy("guard.py")).source == "pass"
+
+
+@pytest.mark.asyncio
+async def test_an_entry_a_template_names_is_not_deleted():
+    store = RecordResourceStore("t", MemoryRecords(), MemorySealer())
+    await store.create_entry("vfs", GITHUB)
+    ref = {"token": {"from": "strukto", "ref": "github", "key": "token"}}
+    config = {"mounts": {"/gh": {"vfs": "github", "config": ref}}}
+    await store.create_template(TemplateInput(name="agent", config=config))
+    with pytest.raises(ResourceError) as used:
+        await store.delete_entry("vfs", "github")
+    assert (used.value.code, str(used.value)) == (
+        "conflict",
+        "github is used by agent",
+    )
+    await store.delete_template("agent")
+    await store.delete_entry("vfs", "github")
 
 
 @pytest.mark.parametrize("name", ["../x", "Upper", "", "a" * 64])
@@ -136,7 +175,7 @@ async def test_every_call_refuses_a_name_outside_the_rule(name):
 async def test_a_cancelled_put_saves_record_and_secret_together():
     records = SlowRecords()
     store = RecordResourceStore("t", records, MemorySealer())
-    put = asyncio.ensure_future(store.put_entry("vfs", GITHUB))
+    put = asyncio.ensure_future(store.create_entry("vfs", GITHUB))
     await records.started.wait()
     put.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -149,7 +188,7 @@ async def test_a_cancelled_put_saves_record_and_secret_together():
 async def test_a_cancelled_delete_removes_record_and_secret_together():
     sealer = SlowSealer()
     store = RecordResourceStore("t", MemoryRecords(), sealer)
-    await store.put_entry("vfs", GITHUB)
+    await store.create_entry("vfs", GITHUB)
     delete = asyncio.ensure_future(store.delete_entry("vfs", "github"))
     await sealer.started.wait()
     delete.cancel()

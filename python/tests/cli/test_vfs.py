@@ -65,21 +65,12 @@ def test_a_call_runs_under_workspace_vfs(fake):
     ]
 
 
-def test_glob_runs_under_workspace_vfs_from_the_environment(fake, monkeypatch):
-    monkeypatch.setenv(ENV_WORKSPACE, "demo")
-    result = CliRunner().invoke(
-        main_cli.app, ["workspace", "vfs", "glob", "/**/*.py"]
-    )
-    assert result.exit_code == 0, result.output
-    assert fake.calls == [
-        ("POST", "/v1/workspaces/demo/glob", {"pattern": "/**/*.py"})
-    ]
-    assert result.stderr == ""
-
-
-def test_the_old_glob_is_gone(fake):
-    result = CliRunner().invoke(main_cli.app, ["glob", "*.py", "-w", "demo"])
-    assert result.exit_code == 2
+def test_glob_is_not_a_vfs_call(fake):
+    for words in (["glob"], ["workspace", "vfs", "glob"]):
+        result = CliRunner().invoke(
+            main_cli.app, [*words, "*.py", "-w", "demo"]
+        )
+        assert result.exit_code == 2
     assert fake.calls == []
 
 

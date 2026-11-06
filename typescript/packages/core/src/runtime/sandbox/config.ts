@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RuntimeConfig } from '../config.ts'
+import type { ConfigFields, RuntimeConfig } from '../config.ts'
 import type { MountType } from '../types.ts'
 import { MOUNT_TYPES } from './constants.ts'
 
@@ -41,7 +41,10 @@ export interface SandboxConfig extends RuntimeConfig {
 export type NormalizedSandboxConfig<C extends SandboxConfig = SandboxConfig> = C &
   Required<Pick<SandboxConfig, 'env'>>
 
-export const BASE_CONFIG_KEYS: readonly string[] = ['env', 'mountType']
+export const BASE_CONFIG_FIELDS: ConfigFields = {
+  env: { type: 'map' },
+  mountType: { type: 'string', options: MOUNT_TYPES },
+}
 
 /** Fail loud on a `mountType` other than ssh, fuse or both; unset serves nothing. */
 export function checkMountType(runtime: string, mountType: unknown): MountType | null {

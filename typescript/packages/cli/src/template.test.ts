@@ -35,7 +35,7 @@ afterEach(() => {
   for (const server of servers.splice(0)) server.close()
 })
 
-/** A server double: lists SAVED as the console does, and keeps every POST body. */
+/** A server double: lists SAVED as `{items}`, and keeps every POST body. */
 async function fakeServer(): Promise<{ url: string; posted: unknown[] }> {
   const posted: unknown[] = []
   const server = createServer((req: IncomingMessage, res) => {
@@ -87,7 +87,7 @@ describe('mirage template', () => {
     expect(JSON.parse(listed.out)).toEqual([SAVED])
   })
 
-  it('reads a console template back without the fields the server fills in', async () => {
+  it('reads a hosted template back without the fields the server fills in', async () => {
     const { url, posted } = await fakeServer()
     const dir = mkdtempSync(join(tmpdir(), 'mirage-template-file-'))
     tempDirs.push(dir)

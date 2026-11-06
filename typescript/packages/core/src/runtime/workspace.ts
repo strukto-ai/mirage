@@ -46,7 +46,7 @@ export class WorkspaceRuntime extends Runtime {
   readonly restricted: boolean
 
   constructor(options: RuntimeOptions = {}) {
-    super(options, [], [])
+    super(options, [])
     this.restricted = options.captures !== undefined
   }
 }

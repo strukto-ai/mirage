@@ -96,10 +96,10 @@ def test_get_as_yaml_is_a_file_create_reads_back(client, tmp_path):
     assert client.calls[-1][2] == {**SAVED, "name": "copy"}
 
 
-def test_a_console_template_reads_back_without_the_server_fields(
+def test_a_hosted_template_reads_back_without_the_server_fields(
     client, tmp_path
 ):
-    console = {
+    hosted = {
         **SAVED,
         "id": "tpl_1",
         "builtin": False,
@@ -110,7 +110,7 @@ def test_a_console_template_reads_back_without_the_server_fields(
         "workspace_count": 0,
     }
     path = tmp_path / "t.yaml"
-    path.write_text(yaml.safe_dump(console))
+    path.write_text(yaml.safe_dump(hosted))
     assert _invoke("create", "copy", "-f", str(path)).exit_code == 0
     assert client.calls[-1][2] == {**SAVED, "name": "copy"}
 

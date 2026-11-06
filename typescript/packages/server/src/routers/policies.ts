@@ -22,10 +22,10 @@ interface RefParams {
   ref: string
 }
 
-/** A file name mirage reads as Python, as the console names a policy. */
+/** A policy's name: a file name mirage reads as Python. */
 const POLICY_NAME = /^[a-z0-9][a-z0-9._-]{0,59}\.py$/
 
-/** A policy is a script, not a project; the console takes 64 KiB. */
+/** A policy is a script, not a project, so its source is at most 64 KiB. */
 const MAX_SOURCE = 64 * 1024
 
 interface PolicyResponse {
@@ -85,7 +85,7 @@ function bodyOf(body: unknown, fields: readonly string[]): Record<string, string
   return out
 }
 
-/** A refusal for a source over the console's limit, else null. */
+/** A refusal for a source over 64 KiB, else null. */
 function checkSource(source: string): Refusal | null {
   return new TextEncoder().encode(source).length > MAX_SOURCE
     ? { status: 400, detail: `source must be at most ${String(MAX_SOURCE / 1024)} KB` }
@@ -117,16 +117,6 @@ async function stored<T>(
   }
 }
 
-async function exists(resources: ResourceStore, name: string): Promise<boolean> {
-  try {
-    await resources.getPolicy(name)
-    return true
-  } catch (e) {
-    if (e instanceof ResourceError && e.code === 'not_found') return false
-    throw e
-  }
-}
-
 export function registerPoliciesRoutes(
   app: RouteApp,
   deps: {
@@ -152,10 +142,7 @@ export function registerPoliciesRoutes(
       }
       const tooBig = checkSource(source)
       if (tooBig !== null) return reply.status(tooBig.status).send({ detail: tooBig.detail })
-      if (await exists(resources, name)) {
-        return reply.status(409).send({ detail: `${name} already exists` })
-      }
-      return reply.status(201).send(present(await resources.putPolicy({ name, source })))
+      return reply.status(201).send(present(await resources.createPolicy({ name, source })))
     }),
   )
 
@@ -171,9 +158,7 @@ export function registerPoliciesRoutes(
       const { source } = body as unknown as UpdatePolicyRequest
       const tooBig = checkSource(source)
       if (tooBig !== null) return reply.status(tooBig.status).send({ detail: tooBig.detail })
-      const name = req.params.ref
-      await resources.getPolicy(name)
-      return present(await resources.putPolicy({ name, source }))
+      return present(await resources.updatePolicy({ name: req.params.ref, source }))
     }),
   )
 

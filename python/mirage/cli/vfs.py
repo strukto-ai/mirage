@@ -213,18 +213,3 @@ def command(call: VfsCall) -> Callable[..., None]:
 
 for _call in VFS_CALLS:
     app.command(_call.name.replace("_", "-"))(command(_call))
-
-
-@app.command("glob")
-def glob_cmd(
-    pattern: str = typer.Argument(
-        ..., help="Pathname pattern such as /**/*.py."
-    ),
-    workspace_id: str | None = WORKSPACE,
-    session_id: str | None = SESSION,
-) -> None:
-    """Every path a pattern matches, as the session sees them."""
-    result = answer(
-        post(workspace_id, "glob", {"pattern": pattern}, session_id)
-    )
-    emit(result, human=_lines)

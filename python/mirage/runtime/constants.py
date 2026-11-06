@@ -66,4 +66,4 @@ SCRIPT_EVAL_TIMEOUT_SECONDS = 10.0
 
 # The config fields that hold a runtime's credential: a saved runtime keeps
 # them sealed, as a mount keeps a SecretStr field.
-SECRET_CONFIG_FIELDS: Final = frozenset({"api_key"})
+SECRET_CONFIG_FIELDS: Final = frozenset({"api_key", "private_key"})

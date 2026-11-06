@@ -19,9 +19,9 @@ import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/runtime/sandbox/mixin'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
-import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
+import type { ConfigFields, RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import {
-  APPLE_CONTAINER_CONFIG_KEYS,
+  APPLE_CONTAINER_CONFIG_FIELDS,
   type AppleContainerConfig,
   validateAppleContainerConfig,
 } from './config.ts'
@@ -53,13 +53,13 @@ export class AppleContainerRuntime
   extends RemoteSandbox<AppleContainerConfig>
   implements PipeTransport
 {
-  static override readonly configKeys: readonly string[] = APPLE_CONTAINER_CONFIG_KEYS
+  static override readonly configFields: ConfigFields = APPLE_CONTAINER_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'apple_container'
   private readonly probes = new Map<string, Promise<void>>()
 
   constructor(options: RuntimeOptions<AppleContainerConfig> = {}) {
-    super(options, AppleContainerRuntime.configKeys)
+    super(options, AppleContainerRuntime.configFields)
     validateAppleContainerConfig(this.config)
   }
 

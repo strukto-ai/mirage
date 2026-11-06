@@ -34,14 +34,20 @@ export interface ResourceStore {
 
   listEntries(kind: EntryKind): Promise<Entry[]>
   getEntry(kind: EntryKind, name: string): Promise<Entry>
-  /** Create or replace an entry. Its name is unique across the four entry kinds. */
-  putEntry(kind: EntryKind, input: EntryInput): Promise<Entry>
+  /** Save a new entry; a conflict when any entry kind has the name. */
+  createEntry(kind: EntryKind, input: EntryInput): Promise<Entry>
+  /** Replace an entry, keeping a sealed value the input leaves out and removing one given as null; not_found when missing. */
+  updateEntry(kind: EntryKind, input: EntryInput): Promise<Entry>
+  /** Delete an entry and wipe its sealed values; a conflict while a saved template names it. */
   deleteEntry(kind: EntryKind, name: string): Promise<void>
   revealEntry(kind: EntryKind, name: string): Promise<RevealedEntry>
 
   listPolicies(): Promise<Policy[]>
   getPolicy(name: string): Promise<Policy>
-  putPolicy(policy: Policy): Promise<Policy>
+  /** Save a new policy; a conflict when one has the name. */
+  createPolicy(policy: Policy): Promise<Policy>
+  /** Replace a policy's source; not_found when missing. */
+  updatePolicy(policy: Policy): Promise<Policy>
   deletePolicy(name: string): Promise<void>
 
   listTemplates(): Promise<Template[]>

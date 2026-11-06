@@ -116,6 +116,49 @@ describe('templates router', () => {
     await app.close()
   })
 
+  it('builds a workspace from a saved connection a template names', async () => {
+    const app = appWithStore()
+    const root = mkdtempSync(join(tmpdir(), 'mirage-saved-'))
+    writeFileSync(join(root, 'hi.txt'), 'hello\n')
+    await app.resources.createEntry('vfs', {
+      name: 'box',
+      type: 'disk',
+      fields: {},
+      sealed: { root },
+    })
+    const named = (ref: string) => ({
+      mounts: {
+        '/': { vfs: 'ram', mode: 'write' },
+        '/host': { vfs: 'disk', config: { root: { from: 'strukto', ref, key: 'root' } } },
+      },
+    })
+    await app.inject({
+      method: 'POST',
+      url: '/v1/templates',
+      payload: { name: 'boxed', config: named('box') },
+    })
+    const r = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: { id: 'boxed', template: 'boxed' },
+    })
+    expect(r.statusCode).toBe(201)
+    const ran = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/boxed/shell',
+      payload: { command: 'cat /host/hi.txt' },
+    })
+    expect(ran.json<{ stdout: string }>().stdout).toBe('hello\n')
+    const gone = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: { config: named('gone') },
+    })
+    expect(gone.statusCode).toBe(400)
+    expect(gone.json()).toEqual({ detail: 'gone is not saved as a VFS, CLI or runtime' })
+    await app.close()
+  })
+
   it('creates from one known template or a config', async () => {
     const app = appWithStore()
     const unknown = await app.inject({

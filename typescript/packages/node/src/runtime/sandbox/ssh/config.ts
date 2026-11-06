@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BASE_CONFIG_KEYS, type SandboxConfig } from '@struktoai/mirage-core/runtime/sandbox/config'
+import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
+import {
+  BASE_CONFIG_FIELDS,
+  type SandboxConfig,
+} from '@struktoai/mirage-core/runtime/sandbox/config'
 
 /**
  * How to reach the machine that runs captured lines.
@@ -42,13 +46,13 @@ export interface SSHRuntimeConfig extends SandboxConfig {
   timeout?: number
 }
 
-export const SSH_RUNTIME_CONFIG_KEYS: readonly string[] = [
-  ...BASE_CONFIG_KEYS,
-  'host',
-  'hostname',
-  'port',
-  'username',
-  'identityFile',
-  'privateKey',
-  'timeout',
-]
+export const SSH_RUNTIME_CONFIG_FIELDS: ConfigFields = {
+  ...BASE_CONFIG_FIELDS,
+  host: { type: 'string', required: true },
+  hostname: { type: 'string' },
+  port: { type: 'number' },
+  username: { type: 'string' },
+  identityFile: { type: 'string' },
+  privateKey: { type: 'string' },
+  timeout: { type: 'number', default: 30 },
+}

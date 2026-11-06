@@ -72,7 +72,7 @@ async def test_a_missing_policy_is_not_updated(client):
 
 
 @pytest.mark.asyncio
-async def test_a_policy_is_checked_as_the_console_checks_it(client):
+async def test_a_policy_name_and_source_are_checked(client):
     r = await client.post("/v1/policies", json={"name": "guard", "source": ""})
     assert r.status_code == 400
     assert "end in .py" in r.json()["detail"]

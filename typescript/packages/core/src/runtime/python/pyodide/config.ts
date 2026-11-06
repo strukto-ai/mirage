@@ -1,3 +1,5 @@
+import type { ConfigField } from '../../config.ts'
+
 export interface PyodideConfig {
   /** Maximum simultaneous top-level calls, default 1; hosts without isolated async context serialize. */
   maxConcurrency?: number
@@ -49,16 +51,16 @@ export interface PyodideConfig {
   maxMemory?: string | number | null
 }
 
-export const KEYS: readonly (keyof PyodideConfig)[] = [
-  'maxConcurrency',
-  'autoLoadFromImports',
-  'bootstrapCode',
-  'initModule',
-  'denyPackages',
-  'home',
-  'sysPath',
-  'packages',
-  'packageBaseUrl',
-  'lockFileUrl',
-  'maxMemory',
-]
+export const FIELDS = {
+  maxConcurrency: { type: 'number' },
+  autoLoadFromImports: { type: 'boolean' },
+  bootstrapCode: { type: 'string' },
+  initModule: { type: 'string' },
+  denyPackages: { type: 'list' },
+  home: { type: 'string' },
+  sysPath: { type: 'list' },
+  packages: { type: 'list' },
+  packageBaseUrl: { type: 'string' },
+  lockFileUrl: { type: 'string' },
+  maxMemory: { type: 'string' },
+} as const satisfies Record<keyof PyodideConfig, ConfigField>

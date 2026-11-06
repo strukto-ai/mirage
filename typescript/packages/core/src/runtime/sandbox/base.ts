@@ -21,7 +21,7 @@ import type { PathSpec } from '../../types.ts'
 import { abortable } from '../../utils/abort.ts'
 import { rstripSlash } from '../../utils/slash.ts'
 import { Runtime } from '../base.ts'
-import type { RuntimeOptions } from '../config.ts'
+import type { ConfigFields, RuntimeOptions } from '../config.ts'
 import { EXTERNAL_COMMANDS } from '../constants.ts'
 import {
   LINE_EXECUTOR,
@@ -31,7 +31,7 @@ import {
 } from '../mixin.ts'
 import type { MountType, OutputFn, RunResult } from '../types.ts'
 import {
-  BASE_CONFIG_KEYS,
+  BASE_CONFIG_FIELDS,
   checkMountType,
   type NormalizedSandboxConfig,
   type SandboxConfig,
@@ -74,7 +74,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   extends Runtime<undefined>
   implements LineExecutorMixin<undefined>, ProcessExecutorMixin<undefined>
 {
-  static override readonly configKeys: readonly string[] = BASE_CONFIG_KEYS
+  static override readonly configFields: ConfigFields = BASE_CONFIG_FIELDS
   // Lines execute on the provider's machine and act on that machine's
   // world (its filesystem, its network); the workspace gate never sees
   // those effects, however well isolated the sandbox itself is.
@@ -94,8 +94,8 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   // again.
   private readonly faketime = new Map<string, Promise<string | null>>()
 
-  constructor(options: RuntimeOptions<C> = {}, configKeys?: readonly string[]) {
-    super(options as RuntimeOptions, [EXTERNAL_COMMANDS], configKeys ?? BASE_CONFIG_KEYS)
+  constructor(options: RuntimeOptions<C> = {}, configFields?: ConfigFields) {
+    super(options as RuntimeOptions, [EXTERNAL_COMMANDS], configFields ?? BASE_CONFIG_FIELDS)
     // The sandbox refinement of the base's coerced copy: the shared
     // collection fields are always present (env).
     const config = this.config as C

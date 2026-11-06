@@ -40,21 +40,21 @@ function store(records = new MemoryRecords()): RecordResourceStore {
 describe('RecordResourceStore', () => {
   it('keeps, drops and replaces sealed fields on a put', async () => {
     const s = store()
-    await s.putEntry('vfs', GITHUB)
+    await s.createEntry('vfs', GITHUB)
     expect(
-      (await s.putEntry('vfs', { name: 'github', type: 'github', fields: {} })).sealed,
+      (await s.updateEntry('vfs', { name: 'github', type: 'github', fields: {} })).sealed,
     ).toEqual(['token'])
     const pointer = { token: { from: 'aws', ref: 'r', key: 'k' } }
     expect(
-      (await s.putEntry('vfs', { name: 'github', type: 'github', fields: pointer })).sealed,
+      (await s.updateEntry('vfs', { name: 'github', type: 'github', fields: pointer })).sealed,
     ).toEqual([])
-    await s.putEntry('vfs', {
+    await s.updateEntry('vfs', {
       name: 'github',
       type: 'github',
       fields: {},
       sealed: { token: 't2', k: 'v' },
     })
-    const dropped = await s.putEntry('vfs', {
+    const dropped = await s.updateEntry('vfs', {
       name: 'github',
       type: 'github',
       fields: {},
@@ -66,21 +66,21 @@ describe('RecordResourceStore', () => {
 
   it('brings a deleted entry back without its secret', async () => {
     const s = store()
-    await s.putEntry('vfs', GITHUB)
+    await s.createEntry('vfs', GITHUB)
     await s.deleteEntry('vfs', 'github')
     await expect(s.revealEntry('vfs', 'github')).rejects.toMatchObject({ code: 'not_found' })
     expect(
-      (await s.putEntry('vfs', { name: 'github', type: 'github', fields: {} })).sealed,
+      (await s.createEntry('vfs', { name: 'github', type: 'github', fields: {} })).sealed,
     ).toEqual([])
   })
 
   it('keeps the old secret when the record write fails', async () => {
     const records = new FailingRecords()
     const s = store(records)
-    await s.putEntry('vfs', GITHUB)
+    await s.createEntry('vfs', GITHUB)
     records.fail = true
     await expect(
-      s.putEntry('vfs', { name: 'github', type: 'github', fields: { token: { from: 'aws' } } }),
+      s.updateEntry('vfs', { name: 'github', type: 'github', fields: { token: { from: 'aws' } } }),
     ).rejects.toThrow('disk full')
     expect((await s.revealEntry('vfs', 'github')).sealed).toEqual({ token: 't1' })
   })
@@ -88,16 +88,16 @@ describe('RecordResourceStore', () => {
   it('keeps a sealed field of any name', async () => {
     const s = store()
     const sealed = JSON.parse('{"__proto__": "p"}') as Record<string, string>
-    const entry = await s.putEntry('vfs', { name: 'odd', type: 't', fields: {}, sealed })
+    const entry = await s.createEntry('vfs', { name: 'odd', type: 't', fields: {}, sealed })
     expect(entry.sealed).toEqual(['__proto__'])
     expect(Object.hasOwn((await s.revealEntry('vfs', 'odd')).sealed, '__proto__')).toBe(true)
   })
 
   it('holds an entry name once across kinds', async () => {
     const s = store()
-    await s.putEntry('vfs', GITHUB)
+    await s.createEntry('vfs', GITHUB)
     await expect(
-      s.putEntry('cli', { name: 'github', type: 'gh', fields: {} }),
+      s.createEntry('cli', { name: 'github', type: 'gh', fields: {} }),
     ).rejects.toMatchObject({
       code: 'conflict',
     })
@@ -117,6 +117,39 @@ describe('RecordResourceStore', () => {
       }
     },
   )
+
+  it('refuses a create of a taken name and an update of a missing one', async () => {
+    const s = store()
+    await s.createEntry('vfs', GITHUB)
+    await s.createPolicy({ name: 'guard.py', source: 'pass' })
+    await expect(s.createEntry('vfs', GITHUB)).rejects.toMatchObject({ code: 'conflict' })
+    await expect(s.createPolicy({ name: 'guard.py', source: 'x' })).rejects.toMatchObject({
+      code: 'conflict',
+    })
+    await expect(
+      s.updateEntry('vfs', { name: 'nope', type: 'github', fields: {} }),
+    ).rejects.toMatchObject({ code: 'not_found' })
+    await expect(s.updatePolicy({ name: 'nope.py', source: 'x' })).rejects.toMatchObject({
+      code: 'not_found',
+    })
+    expect((await s.getPolicy('guard.py')).source).toBe('pass')
+  })
+
+  it('does not delete an entry a template names', async () => {
+    const s = store()
+    await s.createEntry('vfs', GITHUB)
+    const token = { from: 'strukto', ref: 'github', key: 'token' }
+    await s.createTemplate({
+      name: 'agent',
+      config: { mounts: { '/gh': { vfs: 'github', config: { token } } } },
+    })
+    await expect(s.deleteEntry('vfs', 'github')).rejects.toMatchObject({
+      code: 'conflict',
+      message: 'github is used by agent',
+    })
+    await s.deleteTemplate('agent')
+    await s.deleteEntry('vfs', 'github')
+  })
 
   it('saves one of two creates of one template', async () => {
     const s = store()

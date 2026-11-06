@@ -16,6 +16,7 @@ import { compareCodePoints } from '../utils/sort.ts'
 import type { ResourceStore } from './base.ts'
 import { DELETED_TEMPLATES, ENTRY_KINDS, NAME, NOUN } from './constants.ts'
 import { ResourceError } from './errors.ts'
+import { usesOf } from './refs.ts'
 import type {
   Entry,
   EntryInput,
@@ -132,53 +133,69 @@ export class RecordResourceStore implements ResourceStore {
     return this.serial(() => this.entryOf(kind, name))
   }
 
-  putEntry(kind: EntryKind, input: EntryInput): Promise<Entry> {
+  createEntry(kind: EntryKind, input: EntryInput): Promise<Entry> {
     return this.serial(async () => {
       checkName(kind, input.name)
-      const given = Object.entries(input.sealed ?? {})
-      const both = given.find(([key, value]) => value !== null && Object.hasOwn(input.fields, key))
-      if (both !== undefined) {
-        throw new ResourceError('invalid', `${both[0]} is given both plain and sealed`)
-      }
       for (const other of ENTRY_KINDS) {
-        if (other !== kind && (await this.records.read(other, input.name)) !== null) {
-          throw new ResourceError('conflict', `${input.name} is already a ${NOUN[other]}`)
+        if ((await this.records.read(other, input.name)) !== null) {
+          throw new ResourceError('conflict', `${input.name} already exists`)
         }
       }
-      const kept =
-        (await this.records.read(kind, input.name)) === null
-          ? {}
-          : await this.sealer.read(kind, input.name)
-      const values = new Map(Object.entries(kept))
-      for (const key of Object.keys(input.fields)) values.delete(key)
-      for (const [key, value] of given) {
-        if (value === null) values.delete(key)
-        else values.set(key, value)
-      }
-      const sealed: Fields = Object.fromEntries(values)
-      await this.sealer.write(kind, input.name, sealed)
-      try {
-        await this.records.write(kind, input.name, {
-          name: input.name,
-          type: input.type,
-          fields: input.fields,
-        })
-      } catch (e) {
-        await this.sealer.write(kind, input.name, kept)
-        throw e
-      }
-      return {
+      return this.save(kind, input)
+    })
+  }
+
+  updateEntry(kind: EntryKind, input: EntryInput): Promise<Entry> {
+    return this.serial(async () => {
+      await this.entryRecord(kind, input.name)
+      return this.save(kind, input)
+    })
+  }
+
+  /** Save an entry whose name the caller checked, keeping a sealed value the input leaves out and removing one it gives as null. */
+  private async save(kind: EntryKind, input: EntryInput): Promise<Entry> {
+    const given = Object.entries(input.sealed ?? {})
+    const both = given.find(([key, value]) => value !== null && Object.hasOwn(input.fields, key))
+    if (both !== undefined) {
+      throw new ResourceError('invalid', `${both[0]} is given both plain and sealed`)
+    }
+    const kept =
+      (await this.records.read(kind, input.name)) === null
+        ? {}
+        : await this.sealer.read(kind, input.name)
+    const values = new Map(Object.entries(kept))
+    for (const key of Object.keys(input.fields)) values.delete(key)
+    for (const [key, value] of given) {
+      if (value === null) values.delete(key)
+      else values.set(key, value)
+    }
+    const sealed: Fields = Object.fromEntries(values)
+    await this.sealer.write(kind, input.name, sealed)
+    try {
+      await this.records.write(kind, input.name, {
         name: input.name,
         type: input.type,
         fields: input.fields,
-        sealed: Object.keys(sealed).sort(compareCodePoints),
-      }
-    })
+      })
+    } catch (e) {
+      await this.sealer.write(kind, input.name, kept)
+      throw e
+    }
+    return {
+      name: input.name,
+      type: input.type,
+      fields: input.fields,
+      sealed: Object.keys(sealed).sort(compareCodePoints),
+    }
   }
 
   deleteEntry(kind: EntryKind, name: string): Promise<void> {
     return this.serial(async () => {
       await this.entryRecord(kind, name)
+      const usedBy = usesOf(await this.templates()).get(name) ?? []
+      if (usedBy.length > 0) {
+        throw new ResourceError('conflict', `${name} is used by ${usedBy.join(', ')}`)
+      }
       await this.sealer.wipe(kind, name)
       await this.records.remove(kind, name)
     })
@@ -210,12 +227,26 @@ export class RecordResourceStore implements ResourceStore {
     return this.serial(() => this.policyOf(name))
   }
 
-  putPolicy(policy: Policy): Promise<Policy> {
+  createPolicy(policy: Policy): Promise<Policy> {
     return this.serial(async () => {
       checkName(POLICY, policy.name)
-      await this.records.write(POLICY, policy.name, { name: policy.name, source: policy.source })
-      return { name: policy.name, source: policy.source }
+      if ((await this.records.read(POLICY, policy.name)) !== null) {
+        throw new ResourceError('conflict', `${policy.name} already exists`)
+      }
+      return this.writePolicy(policy)
     })
+  }
+
+  updatePolicy(policy: Policy): Promise<Policy> {
+    return this.serial(async () => {
+      await this.policyOf(policy.name)
+      return this.writePolicy(policy)
+    })
+  }
+
+  private async writePolicy(policy: Policy): Promise<Policy> {
+    await this.records.write(POLICY, policy.name, { name: policy.name, source: policy.source })
+    return { name: policy.name, source: policy.source }
   }
 
   deletePolicy(name: string): Promise<void> {
@@ -237,12 +268,14 @@ export class RecordResourceStore implements ResourceStore {
     return template
   }
 
+  private async templates(): Promise<Template[]> {
+    const out: Template[] = []
+    for (const name of await this.sortedNames(TEMPLATE)) out.push(await this.liveTemplate(name))
+    return out
+  }
+
   listTemplates(): Promise<Template[]> {
-    return this.serial(async () => {
-      const out: Template[] = []
-      for (const name of await this.sortedNames(TEMPLATE)) out.push(await this.liveTemplate(name))
-      return out
-    })
+    return this.serial(() => this.templates())
   }
 
   getTemplate(name: string): Promise<Template> {

@@ -117,7 +117,6 @@ mirage shell -w work -c 'ls /repo && echo draft > /scratch/notes.txt'
 | --- | --- |
 | `mirage workspace shell -c LINE` | Run a line, streaming its stdout and stderr. |
 | `mirage workspace vfs CALL ARGS` | Make one of the 23 [VFS calls](/home/access/http#call-the-vfs). |
-| `mirage workspace vfs glob PATTERN` | Print every path a pattern matches. |
 | `mirage workspace tools TOOL ARGS` | Run one of the [agent tools](/home/access/mcp#tools). |
 
 The workspace is `-w`, else `MIRAGE_WORKSPACE`, else the current one that
@@ -180,7 +179,6 @@ MIRAGE_WORKSPACE=demo mirage-bash -c 'ls /data | wc -l'
 ```bash
 echo "hello" | mirage workspace vfs write /data/hi.txt -w demo
 mirage workspace vfs read /data/hi.txt -w demo
-mirage workspace vfs glob '/**/*.py' -w demo
 ```
 
 ### Relays
@@ -252,7 +250,7 @@ not both. The local daemon keeps templates under `~/.mirage/resources`, as
 ### Saved policies
 
 `mirage policy` keeps Python programs by name on the daemon, or on the
-console, through the [`/v1/policies`](/home/access/http#saved-policies)
+hosted API, through the [`/v1/policies`](/home/access/http#saved-policies)
 routes. A name ends in `.py`. `--source @FILE` reads a file; any other value
 is the program itself.
 
@@ -283,7 +281,7 @@ mirage policy get guard.py -o yaml
 server: a type, its settings and its credentials, saved once under a name. They
 are the [`/v1/vfs`, `/v1/clis` and
 `/v1/runtimes`](/home/access/http#saved-connections) routes, and work the same
-against the local daemon and the console.
+against the local daemon and the hosted API.
 
 | Command | Does |
 | --- | --- |
@@ -369,7 +367,7 @@ workspace. `local` is the daemon on this machine, which needs no login and
 is always there. `mirage login` adds a context and makes it current:
 
 ```bash
-mirage login                                   # the hosted console, context "strukto"
+mirage login                                   # the hosted API, context "strukto"
 mirage login https://mirage.example.com        # context "mirage.example.com"
 mirage login https://dev.example.com --name dev
 mirage context use local
@@ -377,7 +375,7 @@ mirage context use local
 
 | Command | Does |
 | --- | --- |
-| `mirage login [URL] [--name NAME] [--token TOKEN]` | Log in to `URL`, `https://api.strukto.ai` when left out, and make its context current. The context is `--name`, else `strukto` for the hosted console, `local` for this machine, else the server's host. |
+| `mirage login [URL] [--name NAME] [--token TOKEN]` | Log in to `URL`, `https://api.strukto.ai` when left out, and make its context current. The context is `--name`, else `strukto` for the hosted API, `local` for this machine, else the server's host. |
 | `mirage context list` | List the contexts; `*` marks the current one. |
 | `mirage context use NAME` | Make a context current. |
 | `mirage context delete NAME` | Forget a context and its login. `local` stays. |

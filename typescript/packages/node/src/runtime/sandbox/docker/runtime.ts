@@ -18,8 +18,8 @@ import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/runti
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
-import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
-import { DOCKER_CONFIG_KEYS, type DockerConfig } from './config.ts'
+import type { ConfigFields, RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
+import { DOCKER_CONFIG_FIELDS, type DockerConfig } from './config.ts'
 import { notRunningHint } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { DOCKER_HINT, RUNNING_STATE } from './constants.ts'
 import { execArgs, openProgramPipe, reportedState, runProgram } from '../program.ts'
@@ -35,12 +35,12 @@ import { execArgs, openProgramPipe, reportedState, runProgram } from '../program
  * stderr.
  */
 export class DockerRuntime extends RemoteSandbox<DockerConfig> implements PipeTransport {
-  static override readonly configKeys: readonly string[] = DOCKER_CONFIG_KEYS
+  static override readonly configFields: ConfigFields = DOCKER_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'docker'
 
   constructor(options: RuntimeOptions<DockerConfig> = {}) {
-    super(options, DockerRuntime.configKeys)
+    super(options, DockerRuntime.configFields)
     requireId('docker', 'container', this.config.container)
   }
 
