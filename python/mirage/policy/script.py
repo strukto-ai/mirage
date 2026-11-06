@@ -18,7 +18,7 @@ import dataclasses
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from enum import Enum
 from typing import Any
 
@@ -65,6 +65,7 @@ from mirage.policy.types import (
 from mirage.runtime.binding import WorkspaceBinding
 from mirage.runtime.constants import SCRIPT_EVAL_TIMEOUT_SECONDS
 from mirage.runtime.language import LanguageRuntime
+from mirage.runtime.python.monty.execution import compile_error
 from mirage.runtime.python.monty.runtime import MontyRuntime
 from mirage.runtime.resolver import MountResolver
 from mirage.runtime.script import script_engine
@@ -355,6 +356,33 @@ def program_source(source: str, method: str) -> str:
         "import json as _mirage_json, os as _mirage_os\n"
         f"print(_mirage_json.dumps({call}))\n"
     )
+
+
+async def check_program(source: str, methods: Sequence[str]) -> None:
+    """Whether a policy program can answer at each method it is given,
+    found without running it: monty parses and compiles it once
+    (``compile_error``), and it defines each one's function at its top
+    level (``program_source``), so a typo is refused where the program is
+    written rather than as a deny on every line it judges. Given no
+    method, only the parse. Mirrors the TypeScript ``checkProgram``.
+
+    Args:
+        source (str): the program.
+        methods (Sequence[str]): the methods it answers at.
+
+    Raises:
+        ValueError: it cannot, as a clause about "script" naming the
+            line.
+        ImportError: the ``monty`` extra is not installed.
+    """
+    # The parse first: a program indented whole defines no function at
+    # its top level, but its indent is what to fix.
+    refused = await compile_error(source)
+    if refused is not None:
+        at = "" if refused.line is None else f" at line {refused.line}"
+        raise ValueError(f"script has an error{at}: {refused.message}")
+    for method in methods:
+        program_source(source, method)
 
 
 def script_action(output: bytes, method: str) -> Deny | Ask | Route | None:

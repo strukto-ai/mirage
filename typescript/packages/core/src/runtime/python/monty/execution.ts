@@ -116,6 +116,53 @@ class SharedPool {
 
 const sharedPool = new SharedPool()
 
+// Where a monty traceback places its error: the frame's line.
+const ERROR_LINE = /, line (\d+)/
+
+/** Why monty refuses a program, and the program's own line it names. */
+export interface CompileError {
+  line: number | null
+  message: string
+}
+
+/**
+ * Why monty would refuse a program before running any of it, or null when
+ * it would run it: fed after a `raise SystemExit`, the program is parsed
+ * and compiled whole on the shared pool, and the exit stops the feed
+ * before the program's first line. So a syntax error, or syntax monty
+ * does not support, is found, and nothing the program does at its top
+ * level happens. Mirrors the Python `compile_error`.
+ */
+export async function compileError(code: string): Promise<CompileError | null> {
+  const module = await loadMontyModule()
+  const pool = await sharedPool.acquire()
+  try {
+    const session = await pool.checkout({ limits: LIMITS })
+    try {
+      await session.feedRun(`raise SystemExit\n${code}`)
+    } catch (caught) {
+      if (
+        !(caught instanceof module.MontySyntaxError || caught instanceof module.MontyRuntimeError)
+      ) {
+        throw caught
+      }
+      const inner = (caught as { exception?: { typeName: string; message: string } }).exception
+      if (inner?.typeName === 'SystemExit') return null
+      // One line above the program's own: the exit's.
+      const found = ERROR_LINE.exec(displayError(caught))
+      return {
+        line: found === null ? null : Number(found[1]) - 1,
+        message: inner?.message ?? caught.message,
+      }
+    } finally {
+      await session.close()
+    }
+    return null
+  } finally {
+    await sharedPool.release()
+  }
+}
+
 /**
  * Runs on pooled monty workers: the process's shared pool, or one of its own
  * for a run nested in another, which must not queue behind its parent's

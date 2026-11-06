@@ -20,7 +20,7 @@ import { PrefixResolver } from '../../resolver.ts'
 import type { BridgeDispatchFn } from '../../types.ts'
 import { runWithDeadline } from '../../../utils/abort.ts'
 import { POOL_WORKERS, SHARED_THREAD_SECONDS } from './constants.ts'
-import { MontyExecution } from './execution.ts'
+import { MontyExecution, compileError } from './execution.ts'
 import type * as loader from './loader.ts'
 
 const fake = vi.hoisted(() => ({ module: null as unknown, shared: false }))
@@ -121,6 +121,30 @@ describe('the shared pool', () => {
     } finally {
       fake.module = null
     }
+  })
+})
+
+describe('compileError', () => {
+  it('finds nothing in a program monty would run, and runs none of it', async () => {
+    expect(await compileError('1 / 0\ndef pre_command(ctx):\n    return None\n')).toBeNull()
+  })
+
+  it("names a syntax error at the program's own line", async () => {
+    expect(await compileError('def pre_command(ctx)\n    return None\n')).toEqual({
+      line: 1,
+      message: 'Expected `:`, found newline',
+    })
+    expect(await compileError('def pre_command(ctx):\nreturn None\n')).toEqual({
+      line: 2,
+      message: 'Expected an indented block after function definition',
+    })
+  })
+
+  it('names syntax monty does not support', async () => {
+    expect(await compileError('x = 1\nyield x\n')).toEqual({
+      line: 2,
+      message: 'The monty syntax parser does not yet support yield expressions',
+    })
   })
 })
 
