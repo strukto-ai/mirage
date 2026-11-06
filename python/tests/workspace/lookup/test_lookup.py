@@ -458,7 +458,9 @@ async def test_a_script_path_is_explained_as_mirage_runs_it():
         runtimes=[_Box("e2b", "@external"), "workspace"],
     )
     try:
-        await ws.shell("echo 'echo here' > /data/run.sh; chmod +x /data/run.sh")
+        await ws.shell(
+            "echo 'echo here' > /data/run.sh; chmod +x /data/run.sh"
+        )
         io = await ws.shell("/data/run.sh")
         assert (io.exit_code, await io.stdout_str()) == (0, "here\n")
         said = await ws.explain("/data/run.sh")
