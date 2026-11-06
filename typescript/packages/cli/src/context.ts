@@ -12,7 +12,6 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-
 import {
   closeSync,
   existsSync,
@@ -53,7 +52,7 @@ export class ContextError extends Error {
  * login acts for if the server names one, and the workspace commands use
  * when given none.
  */
-export interface Context {
+interface Context {
   url: string
   team: string | null
   workspace: string | null
@@ -192,7 +191,7 @@ export function resolveWorkspace(given: string | undefined): string {
  * when left out.
  */
 export function header(action: string, name?: string): void {
-  if (process.stderr.isTTY !== true) return
+  if (!process.stderr.isTTY) return
   const contexts = readContexts()
   const used = name ?? currentName(contexts)
   const team = contexts.contexts[used]?.team ?? null
@@ -204,7 +203,10 @@ export function header(action: string, name?: string): void {
 export function useWorkspace(workspaceId: string): void {
   const contexts = readContexts()
   const name = currentName(contexts)
-  contexts.contexts[name] = { ...(contexts.contexts[name] ?? emptyContext()), workspace: workspaceId }
+  contexts.contexts[name] = {
+    ...(contexts.contexts[name] ?? emptyContext()),
+    workspace: workspaceId,
+  }
   writeContexts(contexts)
 }
 
@@ -243,13 +245,7 @@ export function registerContextCommands(program: Command): void {
       emit(rows, (items) =>
         formatTable(
           ['', 'NAME', 'URL', 'TEAM', 'WORKSPACE'],
-          items.map((r) => [
-            r.current ? '*' : '',
-            r.name,
-            r.url,
-            r.team ?? '',
-            r.workspace ?? '',
-          ]),
+          items.map((r) => [r.current ? '*' : '', r.name, r.url, r.team ?? '', r.workspace ?? '']),
         ),
       )
     })

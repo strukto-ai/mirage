@@ -271,14 +271,14 @@ export async function tokenLogin(url: string, token: string): Promise<Login> {
 }
 
 /** The context a login makes when given no `--name`: `strukto` for the hosted console, `local` for this machine, else the server's host. */
-export function contextName(url: string): string {
+function contextName(url: string): string {
   if (url === HOSTED_URL) return HOSTED
   if (isLocalUrl(url)) return LOCAL
   return new URL(url).hostname.toLowerCase()
 }
 
 /** The team a login acts for, as the server's `/v1/me` names it, or null when it names none. */
-export async function teamOf(url: string, token: string): Promise<string | null> {
+async function teamOf(url: string, token: string): Promise<string | null> {
   let reply: Response
   try {
     reply = await fetch(`${url}/v1/me`, {
@@ -308,7 +308,7 @@ async function saveContext(name: string, url: string, login: Login | null): Prom
   contexts.contexts[name] = {
     url: stored,
     team: login !== null ? await teamOf(url, login.access_token) : null,
-    workspace: kept !== undefined && kept.url === stored ? kept.workspace : null,
+    workspace: kept?.url === stored ? kept.workspace : null,
   }
   contexts.current = name
   writeContexts(contexts)
@@ -381,7 +381,7 @@ export function registerLoginCommands(program: Command): void {
         },
         (row) =>
           Object.entries(row)
-            .map(([k, v]) => `${k}: ${v === null ? '-' : String(v)}`)
+            .map(([k, v]) => `${k}: ${v ?? '-'}`)
             .join('\n'),
       )
     })

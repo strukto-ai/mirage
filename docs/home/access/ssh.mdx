@@ -27,7 +27,7 @@ through the workspace's mounts.
   </Step>
   <Step title="Pick a port">
     ```bash
-    mirage config set ssh_port 2222
+    mirage daemon config set ssh_port 2222
     ```
     SSH stays off until a port is set.
   </Step>
@@ -88,7 +88,7 @@ Host mirage
 
 Then `ssh demo@mirage`, `sftp demo@mirage`, `scp notes.txt demo@mirage:/data/`
 and `sshfs -o direct_io demo@mirage:/ ~/mnt/demo` all work. The CLI sends its
-token, your [`mirage login`](/home/access/cli#log-in) on a hosted server, and the
+token, your [`mirage login`](/home/access/cli#contexts) on a hosted server, and the
 login runs under the workspace's default profile.
 
 ## Auth (optional)

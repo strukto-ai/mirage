@@ -60,6 +60,7 @@ from typing import Any
 import httpx
 import websockets
 from adapters import (
+    NESTED_GROUPS,
     SSH_OPTIONS,
     Answer,
     Cli,
@@ -455,7 +456,7 @@ async def login(server: Server, scratch: Path, report: Report) -> None:
     browser.chmod(0o755)
     env = {**d.cli_env(), "MIRAGE_HOME": str(home), "BROWSER": str(browser)}
     env.pop("MIRAGE_TOKEN", None)
-    stored = home / "login.json"
+    stored = home / "logins" / "local.json"
 
     async def cli(*args: str) -> tuple[int, str, str]:
         return await run(server.cli(*args), env)
@@ -474,15 +475,15 @@ async def login(server: Server, scratch: Path, report: Report) -> None:
     ) as http:
         found = await http.get("/.well-known/oauth-protected-resource")
         got["resource"] = found.status_code
-    _, out, _ = await cli("login")
+    _, out, _ = await cli("login", d.url)
     got["login"] = out.strip().replace(d.url, "{url}")
     if d.name == "token":
         got["login_wrong_token"], _, _ = await cli(
-            "login", "--token", "some-other-token"
+            "login", d.url, "--token", "some-other-token"
         )
-        got["login_token"], _, _ = await cli("login", "--token", TOKEN)
+        got["login_token"], _, _ = await cli("login", d.url, "--token", TOKEN)
     code, out, _ = await cli("whoami")
-    got["whoami"] = json.loads(out)["account"] if code == 0 else code
+    got["whoami"] = json.loads(out)["user"] if code == 0 else code
     if stored.exists():
         got["list"] = await lists()
     if d.name == "jwt":
@@ -856,10 +857,15 @@ async def lifecycle(
     got: dict[str, str] = {}
 
     async def cli(
-        *args: str, use: dict[str, str] | None = None, tty: bool = False
+        *args: str,
+        use: dict[str, str] | None = None,
+        tty: bool = False,
+        stdin: bytes = b"",
     ) -> tuple[int, str, str]:
         recorder.command(host, args)
-        return await run(mirage_cli(host, *args), use or env, tty=tty)
+        return await run(
+            mirage_cli(host, *args), use or env, stdin=stdin, tty=tty
+        )
 
     def alive(at: str = url) -> bool:
         try:
@@ -982,11 +988,12 @@ async def lifecycle(
         f"{'initialized' if 'result' in reply else reply} {during - len(ids())} gone"
     )
 
-    _, out, _ = await cli("config", "set", "idle_grace_seconds", "45")
-    _, out, _ = await cli("config", "get", "idle_grace_seconds")
+    daemon_config = ("daemon", "config")
+    _, out, _ = await cli(*daemon_config, "set", "idle_grace_seconds", "45")
+    _, out, _ = await cli(*daemon_config, "get", "idle_grace_seconds")
     got["config_set_get"] = str(json.loads(out)["idle_grace_seconds"])
     _, out, _ = await cli(
-        "config",
+        *daemon_config,
         "list",
         "--resolved",
         use={
@@ -999,11 +1006,21 @@ async def lifecycle(
     grace = resolved["idle_grace_seconds"]
     got["config_env_wins"] = f"{grace['value']} {grace['origin']}"
     got["config_token_masked"] = str(resolved["auth_token"]["value"])
-    await cli("config", "unset", "idle_grace_seconds")
-    code, _, _ = await cli("config", "get", "idle_grace_seconds")
+    await cli(*daemon_config, "unset", "idle_grace_seconds")
+    code, _, _ = await cli(*daemon_config, "get", "idle_grace_seconds")
     got["config_unset"] = str(code)
-    code, _, _ = await cli("config", "set", "typo_key", "1")
+    code, _, _ = await cli(*daemon_config, "set", "typo_key", "1")
     got["config_unknown_key"] = str(code)
+    warned = []
+    for verb in (
+        ("set", "idle_grace_seconds", "46"),
+        ("get", "idle_grace_seconds"),
+        ("list",),
+        ("unset", "idle_grace_seconds"),
+    ):
+        _, _, err = await cli("config", *verb)
+        warned.append("moved to `mirage daemon config`" in err)
+    got["config_moved"] = " ".join("warns" if w else "silent" for w in warned)
     await cli("daemon", "stop")
     moved = free_port()
     plain = {
@@ -1011,9 +1028,8 @@ async def lifecycle(
         for k, v in env.items()
         if k not in ("MIRAGE_DAEMON_URL", "MIRAGE_DAEMON_PORT")
     }
-    await cli("config", "set", "url", f"http://127.0.0.1:{moved}", use=plain)
-    await cli("config", "set", "port", str(moved), use=plain)
-    await cli("config", "set", "allowed_hosts", "127.0.0.1", use=plain)
+    await cli(*daemon_config, "set", "port", str(moved), use=plain)
+    await cli(*daemon_config, "set", "allowed_hosts", "127.0.0.1", use=plain)
     hosts = {
         **plain,
         "MIRAGE_ALLOWED_HOSTS": "127.0.0.1,localhost,evil.example",
@@ -1029,8 +1045,8 @@ async def lifecycle(
     )
     got["allowed_hosts_env_wins"] = str(evil.status_code)
     await cli("daemon", "stop", use=hosts)
-    for key in ("url", "port", "allowed_hosts"):
-        await cli("config", "unset", key, use=plain)
+    for key in ("port", "allowed_hosts"):
+        await cli(*daemon_config, "unset", key, use=plain)
     (home / "config.toml").write_text("[daemon\n")
     code, _, _ = await cli("workspace", "create", str(config), "--id", "g")
     got["config_malformed"] = str(code)
@@ -1066,6 +1082,26 @@ async def lifecycle(
     tty_code, _, _ = await cli("shell", "-w", "i", "-c", "exit 3", tty=True)
     piped_code, _, _ = await cli("shell", "-w", "i", "-c", "exit 3")
     got["shell_exit_status"] = f"{tty_code} {piped_code}"
+    await cli("workspace", "use", "i")
+    _, out, _ = await cli("shell", "-c", "echo current")
+    got["workspace_use"] = out
+    token = (home / "auth_token").read_text().strip().encode()
+    await cli("login", url, "--name", "spare", "--token", "-", stdin=token)
+
+    async def contexts() -> str:
+        _, out, _ = await cli("context", "list")
+        return " ".join(
+            ("*" if c["current"] else "") + c["name"] for c in json.loads(out)
+        )
+
+    got["context_list"] = await contexts()
+    await cli("context", "use", "local")
+    code, _, _ = await cli(
+        "workspace", "list", use={**env, "MIRAGE_CONTEXT": "spare"}
+    )
+    got["context_once"] = f"{code} {await contexts()}"
+    await cli("context", "delete", "spare")
+    got["context_delete"] = await contexts()
     _, out, _ = await cli(
         "api", "/v1/workspaces/i/shell", "--command", "echo api"
     )
@@ -1210,7 +1246,13 @@ def typescript_commands() -> set[str]:
     found = set()
     for name in listed():
         subs = listed(name)
-        found |= {f"{name} {s}" for s in subs} if subs else {name}
+        if not subs:
+            found.add(name)
+        for sub in subs:
+            if (name, sub) in NESTED_GROUPS:
+                found |= {f"{name} {sub} {leaf}" for leaf in listed(name, sub)}
+            else:
+                found.add(f"{name} {sub}")
     return found
 
 

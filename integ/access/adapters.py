@@ -55,9 +55,12 @@ CLI_GROUPS = (
     "session",
     "daemon",
     "config",
+    "context",
     "vfs",
     "tools",
 )
+# A group inside a group: its commands are three words.
+NESTED_GROUPS = (("daemon", "config"),)
 WAITED = "the line waited for all of its input"
 # A case line touches BEGUN as it starts; a cancel case's line then sleeps
 # CANCEL_SLEEP seconds and touches LEAKED. A session of WATCH's looks.
@@ -214,7 +217,12 @@ class Recorder:
         return record
 
     def command(self, host: str, args: tuple[str, ...]) -> None:
-        words = args[:2] if args and args[0] in CLI_GROUPS else args[:1]
+        if tuple(args[:2]) in NESTED_GROUPS:
+            words = args[:3]
+        elif args and args[0] in CLI_GROUPS:
+            words = args[:2]
+        else:
+            words = args[:1]
         self.commands.setdefault(host, set()).add(" ".join(words))
 
 

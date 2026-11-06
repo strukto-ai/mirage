@@ -115,12 +115,14 @@ mirage shell -w work -c 'ls /repo && echo draft > /scratch/notes.txt'
 
 | Command | Does |
 | --- | --- |
-| `mirage shell -w ID -c LINE` | Run a line, streaming its stdout and stderr. |
-| `mirage vfs CALL ARGS -w ID` | Make one of the 23 [VFS calls](/home/access/http#call-the-vfs). |
-| `mirage glob PATTERN -w ID` | Print every path a pattern matches. |
-| `mirage tools TOOL ARGS -w ID` | Run one of the [agent tools](/home/access/mcp#tools). |
+| `mirage shell [-w ID] -c LINE` | Run a line, streaming its stdout and stderr. |
+| `mirage vfs CALL ARGS [-w ID]` | Make one of the 23 [VFS calls](/home/access/http#call-the-vfs). |
+| `mirage glob PATTERN [-w ID]` | Print every path a pattern matches. |
+| `mirage tools TOOL ARGS [-w ID]` | Run one of the [agent tools](/home/access/mcp#tools). |
 
-Each takes `-s SESSION`, the default session when absent. `shell` and `vfs`
+The workspace is `-w`, else `MIRAGE_WORKSPACE`, else the current one that
+`mirage workspace use ID` set for the [context](#contexts). With none, the
+command exits 2. Each takes `-s SESSION`, the default session when absent. `shell` and `vfs`
 take `--explain`, which says what the line or call would do and runs nothing;
 see [Explain](/home/policy/explain).
 
@@ -200,6 +202,7 @@ a `workspace_id`.
 | `mirage workspace create --template NAME [-w ID]` | Create a workspace from a saved [template](#from-a-template). |
 | `mirage workspace create CONFIG --explain` | Show what the [server policies](/home/access/http#server-policies) say of the config, and create nothing. |
 | `mirage workspace list` | List workspaces. |
+| `mirage workspace use ID` | Make it the current workspace of the [context](#contexts). |
 | `mirage workspace get ID [--verbose]` | Show mounts and sessions. |
 | `mirage workspace delete ID` | Close a workspace and delete its state. |
 | `mirage workspace close ID` | Close a workspace and keep its state for the same id. |
@@ -275,32 +278,45 @@ The server the CLI starts. It exits 30 seconds after its last workspace is delet
 | `mirage daemon restart [--eager]` | Stop it; the next command, or `--eager`, starts a new one. Workspaces are lost. |
 | `mirage daemon kill` | Kill it. A last resort. |
 
-## Log in
+## Contexts
 
-A server in `jwt` mode, such as a hosted one, needs a login:
+A context is a server the CLI talks to, with its login, team and current
+workspace. `local` is the daemon on this machine, which needs no login and
+is always there. `mirage login` adds a context and makes it current:
 
 ```bash
-mirage config set url https://mirage.example.com
-mirage login
+mirage login                                   # the hosted console, context "strukto"
+mirage login https://mirage.example.com        # context "mirage.example.com"
+mirage login https://dev.example.com --name dev
+mirage context use local
 ```
 
 | Command | Does |
 | --- | --- |
-| `mirage login [--token TOKEN]` | Log in to the server `url` points at. |
-| `mirage whoami` | Show the account and the date to log in again by. |
-| `mirage logout` | Forget the login. |
+| `mirage login [URL] [--name NAME] [--token TOKEN]` | Log in to `URL`, `https://api.strukto.ai` when left out, and make its context current. The context is `--name`, else `strukto` for the hosted console, `local` for this machine, else the server's host. |
+| `mirage context list` | List the contexts; `*` marks the current one. |
+| `mirage context use NAME` | Make a context current. |
+| `mirage context delete NAME` | Forget a context and its login. `local` stays. |
+| `mirage whoami` | Show the context, its URL, team, user and workspace, and the date to log in again by. |
+| `mirage logout` | Forget the current context's login; the context stays. |
+
+`--context NAME` before a command, or `MIRAGE_CONTEXT=NAME`, runs one command
+in another context. `MIRAGE_DAEMON_URL` points any context at another URL.
+On a terminal, a command that changes something names its context first, as
+`strukto · team acme · created demo`.
 
 <AccordionGroup>
   <Accordion title="How login works">
     - `mirage login` asks the server where to sign in, opens your browser there,
       and waits. If you are already signed in, the browser comes straight back.
-    - The CLI keeps the tokens in `~/.mirage/login.json`, readable only by you.
+    - The CLI keeps the contexts in `~/.mirage/contexts.json` and each
+      context's tokens in `~/.mirage/logins/NAME.json`, readable only by you.
     - On a machine with no browser, `mirage login --token TOKEN` keeps a token
       you paste once the server accepts it. `--token -` reads it from stdin, so
       it stays out of your shell history.
     - Every command sends the login's token, `ssh-proxy` and `codex-exec`
-      included, but only to the server it was made for. `MIRAGE_TOKEN` or
-      `auth_token` wins over it.
+      included, but only to the server it was made for. `MIRAGE_TOKEN` wins
+      over it, and so does `auth_token` in the `local` context.
     - The token refreshes on its own; you log in again 30 days after you
       signed in.
     - A server that publishes no login, such as the one the CLI starts on your
@@ -330,7 +346,7 @@ mirage login
 
 ## Call any route
 
-`mirage api` calls a route of the server `url` points at with the CLI's login
+`mirage api` calls a route of the current context's server with the CLI's login
 or token, as `gh api` does, so a script needs no token of its own:
 
 ```bash
@@ -356,15 +372,17 @@ string of a GET. The answer prints as JSON, a 204 prints nothing, and an error
 exits 2 with its detail. `api` takes only a route, never a URL, so the token
 goes nowhere but its own server.
 
-## Config
+## Daemon config
 
-`mirage config set|get|unset|list` edits `~/.mirage/config.toml`. An environment variable wins over the file. Changes apply on the next start.
+`mirage daemon config set|get|unset|list` edits `~/.mirage/config.toml`. An
+environment variable wins over the file. Changes apply on the next start.
+`mirage config` still works until the next release, and warns that it moved.
 
 | Key | Env var | Default |
 | --- | --- | --- |
-| `url` | `MIRAGE_DAEMON_URL` | `http://127.0.0.1:8765` |
-| `port` | `MIRAGE_DAEMON_PORT` | the `url`'s port |
-| `auth_token` | `MIRAGE_TOKEN` | your [login](#log-in) for this `url`, else `~/.mirage/auth_token` for a local `url` |
+| `port` | `MIRAGE_DAEMON_PORT` | `8765`; the `local` context follows it |
+| `url` | `MIRAGE_DAEMON_URL` | `http://127.0.0.1:PORT`. Leaves config.toml in the next release; `mirage login URL` adds another server |
+| `auth_token` | `MIRAGE_TOKEN` | your [login](#contexts) for the `local` context, else `~/.mirage/auth_token` |
 | `auth_mode` | `MIRAGE_AUTH_MODE` | `local` |
 | `allowed_hosts` | `MIRAGE_ALLOWED_HOSTS` | `127.0.0.1,localhost,::1` |
 | `idle_grace_seconds` | `MIRAGE_IDLE_GRACE_SECONDS` | `30` |
@@ -383,6 +401,6 @@ goes nowhere but its own server.
 | `resource_store` | `MIRAGE_RESOURCE_STORE` | `files`, under `~/.mirage/resources`; `memory` keeps saved templates only until the daemon stops, and does not combine with `workers` |
 | `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#set-up) |
 | `jwt_*` | `MIRAGE_JWT_*` | see [Configure authentication](/home/access/http#configure-authentication) |
-| `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [Log in](#log-in) |
+| `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [Contexts](#contexts) |
 
 `MIRAGE_HOME` moves everything under `~/.mirage`.

@@ -273,10 +273,14 @@ def test_a_pasted_token_is_kept_once_the_server_takes_it(clerk):
 def test_login_reads_a_dash_token_from_stdin(clerk, tmp_path, monkeypatch):
     monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
     monkeypatch.setenv("MIRAGE_DAEMON_URL", clerk.url)
-    done = CliRunner().invoke(app, ["login", "--token", "-"], input="good\n")
+    done = CliRunner().invoke(
+        app, ["login", clerk.url, "--token", "-"], input="good\n"
+    )
     assert done.exit_code == 0, done.output
     assert read_login().access_token == "good"
-    empty = CliRunner().invoke(app, ["login", "--token", "-"], input="")
+    empty = CliRunner().invoke(
+        app, ["login", clerk.url, "--token", "-"], input=""
+    )
     assert empty.exit_code == 1
     assert "no token on stdin" in empty.output
 
@@ -286,17 +290,20 @@ def test_login_whoami_logout(clerk, browser, tmp_path, monkeypatch):
     monkeypatch.setenv("MIRAGE_DAEMON_URL", clerk.url)
     monkeypatch.delenv("MIRAGE_TOKEN", raising=False)
     runner = CliRunner()
-    done = runner.invoke(app, ["login"])
+    done = runner.invoke(app, ["login", clerk.url])
     assert done.exit_code == 0, done.output
     assert f"Logged in to {clerk.url} as user_alice." in done.output
     assert read_login().refresh_token == "r1"
     who = runner.invoke(app, ["whoami"])
     assert who.exit_code == 0
-    assert json.loads(who.stdout)["account"] == "user_alice"
+    row = json.loads(who.stdout)
+    assert (row["context"], row["user"]) == ("local", "user_alice")
     out = runner.invoke(app, ["logout"])
     assert out.stdout == f"Logged out of {clerk.url}.\n"
     assert read_login() is None
-    assert runner.invoke(app, ["whoami"]).exit_code == 1
+    after = runner.invoke(app, ["whoami"])
+    assert after.exit_code == 0
+    assert json.loads(after.stdout)["user"] is None
 
 
 def test_whoami_ignores_a_login_for_another_server(
@@ -308,15 +315,15 @@ def test_whoami_ignores_a_login_for_another_server(
     login.url = "https://elsewhere.test"
     write_login(login)
     who = CliRunner().invoke(app, ["whoami"])
-    assert who.exit_code == 1
-    assert f"not logged in to {clerk.url}" in who.output
+    assert who.exit_code == 0
+    assert json.loads(who.stdout)["user"] is None
 
 
 def test_login_to_a_server_without_one_says_so(browser, tmp_path, monkeypatch):
     monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
     with FakeClerk(publishes=False).serving() as fake:
         monkeypatch.setenv("MIRAGE_DAEMON_URL", fake.url)
-        done = CliRunner().invoke(app, ["login"])
+        done = CliRunner().invoke(app, ["login", fake.url])
     assert done.exit_code == 0
     assert "publishes no login" in done.output
     assert read_login() is None
