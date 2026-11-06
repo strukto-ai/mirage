@@ -127,6 +127,32 @@ def wrapper_routing(
     )
 
 
+def routed_consumer(
+    name: str,
+    args: Sequence[str],
+    session: SessionState,
+    registry: "MountRegistry",
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> tuple[Consumer, RouteDecision[RuntimeIdentity] | None]:
+    """The layer a command runs from and the placement it runs under: a
+    wrapper nothing in Mirage owns goes where the program it runs is
+    (``wrapper_routing``), and anything else is ``lookup``'s answer.
+
+    Args:
+        name (str): expanded command name.
+        args (Sequence[str]): its words, argv[0] excluded.
+        session (SessionState): shell session (function table).
+        registry (MountRegistry): mount registry (command registration).
+        routing (RouteDecision | None): the line's placement.
+    """
+    consumer = lookup(name, session, registry, routing)
+    if consumer in (Consumer.EXTERNAL, Consumer.UNKNOWN):
+        wrapped = wrapper_routing(name, args, routing)
+        if wrapped is not None:
+            return Consumer.EXTERNAL, wrapped
+    return consumer, routing
+
+
 def _wrapped(
     name: str,
     args: Sequence[str],

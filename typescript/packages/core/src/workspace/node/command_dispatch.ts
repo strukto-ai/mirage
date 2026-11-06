@@ -99,8 +99,8 @@ import { Argv, expandArgv } from '../expand/argv.ts'
 import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { expandNode } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
-import { Consumer, lookup, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
-import { wrapperRouting } from '../lookup/lookup.ts'
+import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
+import { routedConsumer } from '../lookup/lookup.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { type SessionState, sessionEntry, setSessionEntry } from '../session/session.ts'
@@ -980,16 +980,13 @@ async function routeArgv(
     ]
   }
 
-  let routing = context.frame.routing
-  let consumer = lookup(name, session, registry, routing)
-  const wrapped =
-    consumer === Consumer.EXTERNAL || consumer === Consumer.UNKNOWN
-      ? wrapperRouting(name, argv.args, routing)
-      : null
-  if (wrapped !== null) {
-    routing = wrapped
-    consumer = Consumer.EXTERNAL
-  }
+  const [consumer, routing] = routedConsumer(
+    name,
+    argv.args,
+    session,
+    registry,
+    context.frame.routing,
+  )
   if (consumer === Consumer.EXTERNAL) {
     if (routing === undefined) throw new Error(`${name}: run outside a routed line`)
     return runExternal(argv, stdin, session, registry, routing, signal, sink)

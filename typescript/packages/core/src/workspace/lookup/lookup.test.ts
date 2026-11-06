@@ -1000,3 +1000,61 @@ describe('a wrapper runs where the program it runs is captured', () => {
     }
   })
 })
+
+class Echo extends Box {
+  override runLine(
+    _e?: unknown,
+    _p?: unknown,
+    _t?: unknown,
+    ctx?: { flags: Record<string, unknown> },
+  ): Promise<RunResult> {
+    return Promise.resolve({
+      stdout: new TextEncoder().encode(`${String(ctx?.flags.c)}\n`),
+      stderr: null,
+      exitCode: 0,
+    })
+  }
+}
+
+describe('a wrapped program', () => {
+  it.each([false, true])(
+    'has its globs expanded as the program does (external: %s)',
+    async (external) => {
+      const entries: RuntimeEntry[] = [new Echo('docker', 'gcc'), 'workspace']
+      if (external) entries.unshift(new Box('e2b', '@external'))
+      const ws = new Workspace(
+        { '/data': new RAMVFS() },
+        { mode: MountMode.EXEC, runtimes: entries },
+      )
+      try {
+        await ws.vfs.write('/data/a.c', '')
+        await ws.vfs.write('/data/b.c', '')
+        const io = await ws.shell('cd /data && nice gcc *.c')
+        expect(new TextDecoder().decode(io.stdout)).toBe('nice gcc a.c b.c\n')
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it.each([false, true])(
+    'is explained as it runs when a function takes the wrapper (external: %s)',
+    async (external) => {
+      const entries: RuntimeEntry[] = [new Box('docker', 'gcc'), 'workspace']
+      if (external) entries.unshift(new Box('e2b', '@external'))
+      const ws = new Workspace(
+        { '/data': new RAMVFS() },
+        { mode: MountMode.EXEC, runtimes: entries },
+      )
+      try {
+        await ws.shell('nice() { echo local; }')
+        const io = await ws.shell('nice gcc x.c')
+        expect(new TextDecoder().decode(io.stdout)).toBe('local\n')
+        const said = await ws.explain('nice gcc x.c')
+        expect(runtimesOf(said.node)[0]).toBe('')
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+})

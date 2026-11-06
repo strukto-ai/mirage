@@ -47,12 +47,12 @@ from mirage.workspace.lookup import (
     Consumer,
     WordPolicy,
     end_options_after_program,
-    lookup,
     runs_as,
     runtime_refused,
     word_policy,
 )
 from mirage.workspace.lookup.constants import INTERPRETER_NAMES
+from mirage.workspace.lookup.lookup import routed_consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import env_snapshot
@@ -159,8 +159,14 @@ async def expand_argv(
     # python3` masks the function for its inner run, which is exactly
     # when the rewrite applies again. A CLI cannot reach here at all,
     # since register_cli refuses a shell builtin's name.
-    consumer = lookup(name, session, registry, context.frame.routing)
-    refused = runtime_refused(name, session, registry, context.frame.routing)
+    consumer, routing = routed_consumer(
+        name,
+        [unmark_globs(w) for w in expanded[consumed:]],
+        session,
+        registry,
+        context.frame.routing,
+    )
+    refused = runtime_refused(name, session, registry, routing)
     if name not in session.functions and consumer is not Consumer.EXTERNAL:
         expanded = expanded[:consumed] + end_options_after_program(
             name, expanded[consumed:]

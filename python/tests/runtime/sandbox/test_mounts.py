@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import contextlib
 import io
 import os
 import re
@@ -337,6 +338,26 @@ async def test_ssh_refuses_a_line_from_a_cwd_it_cannot_see(cwd, ran):
             "cd into a mount first\n",
         )
         assert (sandbox.commands, sandbox.pipes) == ([], [])
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_branch_refused_for_its_cwd_leaves_a_running_branch_admitted():
+    sandbox = FakeSandbox("ssh")
+    ws = workspace(sandbox)
+    assert (await ws.shell("mkdir -p /notes")).exit_code == 0
+    line = asyncio.create_task(
+        ws.shell("cd /data && python3 slow.py | (cd /notes && python3 job.py)")
+    )
+    for _ in range(500):
+        if "python3 slow.py" in sandbox.commands:
+            break
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.2)
+    assert len(sandbox._mounts._lines) == 1
+    line.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await line
     await ws.close()
 
 

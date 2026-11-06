@@ -28,11 +28,11 @@ import {
   Consumer,
   WordPolicy,
   endOptionsAfterProgram,
-  lookup,
   runsAs,
   runtimeRefused,
   wordPolicy,
 } from '../lookup/index.ts'
+import { routedConsumer } from '../lookup/lookup.ts'
 
 import { classifyParts } from './classify/index.ts'
 import { globNeedsShell, globOptions, resolveGlobs } from './globs.ts'
@@ -134,8 +134,14 @@ export async function expandArgv(
   // function for its inner run, which is exactly when the rewrite
   // applies again. A CLI cannot reach here at all, since registerCli
   // refuses a shell builtin's name.
-  const consumer = lookup(name, session, registry, context.frame.routing)
-  const refused = runtimeRefused(name, session, registry, context.frame.routing)
+  const [consumer, routing] = routedConsumer(
+    name,
+    expanded.slice(consumed).map(unmarkGlobs),
+    session,
+    registry,
+    context.frame.routing,
+  )
+  const refused = runtimeRefused(name, session, registry, routing)
   const shadowed = Object.hasOwn(session.functions, name) || consumer === Consumer.EXTERNAL
   const line = expanded.slice(consumed)
   const tail = shadowed ? line : endOptionsAfterProgram(name, line)

@@ -35,7 +35,7 @@ from mirage.runtime.sandbox.constants import (
     reap_line,
 )
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
-from mirage.runtime.sandbox.mounts import SandboxMounts, mount_paths
+from mirage.runtime.sandbox.mounts import SandboxMounts
 from mirage.runtime.types import (
     OutputFn,
     RunResult,
@@ -186,9 +186,7 @@ class RemoteSandbox(
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        """Connect once, bring the served mounts in step, then run. With
-        ``mount_type: ssh``, a cwd other than ``/`` on no served mount
-        answers 126 before anything reaches the sandbox.
+        """Connect once, bring the served mounts in step, then run.
 
         Args:
             argv (tuple[str, ...]): the program and its arguments.
@@ -196,29 +194,10 @@ class RemoteSandbox(
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
         """
-        cwd = ctx.cwd.virtual.rstrip("/")
-        if (
-            self.config.mount_type == "ssh"
-            and cwd
-            and self._binding is not None
-            and self._binding.mount_prefixes is not None
-            and not any(
-                cwd == p or cwd.startswith(p + "/")
-                for p in mount_paths(self._binding.mount_prefixes())
-            )
-        ):
-            return RunResult(
-                stdout=b"",
-                stderr=(
-                    f"{self.name}: the sandbox cannot see the working "
-                    f"directory {cwd}; cd into a mount first\n"
-                ).encode(),
-                exit_code=CANNOT_EXECUTE_STATUS,
-            )
         await self._ensure_connected()
         run = argv
         if self._mounts is not None:
-            refusal = await self._mounts.admit(self._binding)
+            refusal = await self._mounts.admit(self._binding, ctx.cwd.virtual)
             if refusal is not None:
                 return refusal
             run = self._mounts.guarded(argv)

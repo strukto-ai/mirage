@@ -47,7 +47,7 @@ import {
 } from './constants.ts'
 import { boundSystemClock } from '../../utils/clock.ts'
 import { isPipeTransport } from './mixin.ts'
-import { mountPaths, SandboxMounts } from './mounts.ts'
+import { SandboxMounts } from './mounts.ts'
 
 /**
  * A runtime that executes programs in a sandbox the user runs.
@@ -166,9 +166,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   }
 
   /**
-   * Connect once, bring the served mounts in step, then run. With
-   * `mountType: 'ssh'`, a cwd other than `/` on no served mount answers 126
-   * before anything reaches the sandbox.
+   * Connect once, bring the served mounts in step, then run.
    *
    * @param argv the program and its arguments.
    * @param ctx the run's stdin, environment, cwd and signal.
@@ -181,27 +179,11 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     output: OutputFn | null,
     errors: OutputFn | null,
   ): Promise<RunResult> {
-    const cwd = rstripSlash(ctx.cwd.virtual)
-    if (
-      this.config.mountType === 'ssh' &&
-      cwd !== '' &&
-      this.binding?.mountPrefixes != null &&
-      ![...mountPaths(this.binding.mountPrefixes())].some(
-        (p) => cwd === p || cwd.startsWith(`${p}/`),
-      )
-    )
-      return {
-        stdout: new Uint8Array(),
-        stderr: new TextEncoder().encode(
-          `${this.name}: the sandbox cannot see the working directory ${cwd}; cd into a mount first\n`,
-        ),
-        exitCode: CANNOT_EXECUTE_STATUS,
-      }
     // Served here rather than in the constructor, which runs before a
     // subclass names itself.
     if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
     await this.ensureConnected(ctx.signal)
-    const refusal = (await this.mounts?.admit(this.binding, ctx.signal)) ?? null
+    const refusal = (await this.mounts?.admit(this.binding, ctx.cwd.virtual, ctx.signal)) ?? null
     if (refusal !== null) return refusal
     const run = this.mounts?.guarded(argv) ?? argv
     const given = { ...this.config.env, ...ctx.env }

@@ -1428,7 +1428,7 @@ export class Workspace {
         line,
         judged,
         wholeLine ? judged : verdicts,
-        (command, args) => this.router.runtimeFor(command, args, placed),
+        (one) => this.router.runtimeFor(one, placed),
         reparse,
         wholeLine,
       )

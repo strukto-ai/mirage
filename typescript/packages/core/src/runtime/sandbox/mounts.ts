@@ -92,8 +92,8 @@ export function mountTable(text: string): Map<string, [string, string]> {
   return table
 }
 
-/** The mountpoints a sandbox could hold of `prefixes`. Mirrors Python's `mount_paths`. */
-export function mountPaths(prefixes: Iterable<string>): Set<string> {
+/** The mountpoints a sandbox could hold of `prefixes`. */
+function mountPaths(prefixes: Iterable<string>): Set<string> {
   const paths = new Set<string>()
   for (const prefix of prefixes) paths.add(rstripSlash(prefix))
   paths.delete('')
@@ -254,12 +254,17 @@ export class SandboxMounts {
   /**
    * Bring the mounts in step, then refuse a line that may not run: one the
    * session's restrictions reach past the dispatcher is refused as a policy
-   * refuses it (126), one the sandbox cannot serve because another session
-   * or another sshfs holds it, or another mount covers it, fails (1), and
-   * one over a mount of the sandbox's own that is gone is refused (126). Null
-   * when the line may run.
+   * refuses it (126), one from a cwd other than `/` that ssh serves no mount
+   * for is refused before anything reaches the sandbox (126), one the
+   * sandbox cannot serve because another session or another sshfs holds it,
+   * or another mount covers it, fails (1), and one over a mount of the
+   * sandbox's own that is gone is refused (126). Null when the line may run.
    */
-  async admit(binding: WorkspaceBinding | null, signal?: AbortSignal): Promise<RunResult | null> {
+  async admit(
+    binding: WorkspaceBinding | null,
+    cwd: string,
+    signal?: AbortSignal,
+  ): Promise<RunResult | null> {
     const files = binding?.files ?? null
     const getSession = binding?.getSession ?? null
     const mountPrefixes = binding?.mountPrefixes ?? null
@@ -285,6 +290,19 @@ export class SandboxMounts {
     }
     const { stop, writeHeld } = currentCaller()
     this.lines.push({ stop, writeHeld, lent: new Set() })
+    const seen = rstripSlash(cwd)
+    if (
+      this.mountType === 'ssh' &&
+      seen !== '' &&
+      ![...mountPaths(mountPrefixes())].some((p) => seen === p || seen.startsWith(`${p}/`))
+    )
+      return {
+        stdout: new Uint8Array(),
+        stderr: new TextEncoder().encode(
+          `${this.runtime}: the sandbox cannot see the working directory ${seen}; cd into a mount first\n`,
+        ),
+        exitCode: CANNOT_EXECUTE_STATUS,
+      }
     return this.locked(async () => {
       const served = this.session
       const session = getSession(current.sessionId)

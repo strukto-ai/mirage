@@ -110,6 +110,27 @@ export function wrapperRouting(
 }
 
 /**
+ * The layer a command runs from and the placement it runs under: a wrapper
+ * nothing in Mirage owns goes where the program it runs is
+ * (`wrapperRouting`), and anything else is `lookup`'s answer. Mirrors
+ * Python's `routed_consumer`.
+ */
+export function routedConsumer(
+  name: string,
+  args: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+): [Consumer, RouteDecision<Runtime> | undefined] {
+  const consumer = lookup(name, session, registry, routing)
+  if (consumer === Consumer.EXTERNAL || consumer === Consumer.UNKNOWN) {
+    const wrapped = wrapperRouting(name, args, routing)
+    if (wrapped !== null) return [Consumer.EXTERNAL, wrapped]
+  }
+  return [consumer, routing]
+}
+
+/**
  * The program a wrapper runs that a runtime captures by name and runs
  * natively, nested wrappers followed; null when there is none.
  */

@@ -442,3 +442,47 @@ async def test_a_wrapper_a_runtime_captures_runs_there():
         assert await io.stdout_str() == "niced\n"
     finally:
         await ws.close()
+
+
+class _Echo(_Box):
+    """A line runtime that answers the line it was handed."""
+
+    async def run_line(self, engine, paths, texts, ctx):
+        return RunResult(
+            stdout=f"{ctx.flags['c']}\n".encode(), stderr=None, exit_code=0
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("external", [False, True])
+async def test_a_wrapped_programs_globs_expand_as_the_programs_do(external):
+    entries = [_Echo("docker", "gcc"), "workspace"]
+    if external:
+        entries.insert(0, _Box("e2b", "@external"))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=entries)
+    try:
+        await ws.vfs.write("/data/a.c", b"")
+        await ws.vfs.write("/data/b.c", b"")
+        io = await ws.shell("cd /data && nice gcc *.c")
+        assert await io.stdout_str() == "nice gcc a.c b.c\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("external", [False, True])
+async def test_a_function_named_like_a_wrapper_is_explained_as_it_runs(
+    external,
+):
+    entries = [_Box("docker", "gcc"), "workspace"]
+    if external:
+        entries.insert(0, _Box("e2b", "@external"))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=entries)
+    try:
+        await ws.shell("nice() { echo local; }")
+        io = await ws.shell("nice gcc x.c")
+        assert await io.stdout_str() == "local\n"
+        said = await ws.explain("nice gcc x.c")
+        assert _commands(said.node)[0] == ""
+    finally:
+        await ws.close()

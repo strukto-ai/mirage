@@ -838,9 +838,7 @@ class Workspace:
                 line,
                 judged,
                 judged if whole_line else verdicts,
-                lambda command, args: (
-                    whole.name if isinstance(whole, Runtime) else ""
-                ),
+                lambda one: whole.name if isinstance(whole, Runtime) else "",
                 whole_line,
                 aliases,
             )
@@ -870,7 +868,7 @@ class Workspace:
                 line,
                 judged,
                 verdicts,
-                lambda command, args: "",
+                lambda one: "",
                 aliases=aliases,
             )
             return dataclasses.replace(
@@ -891,9 +889,7 @@ class Workspace:
             line,
             judged,
             judged if whole_line else verdicts,
-            lambda command, args: self._router.runtime_for(
-                command, args, placed
-            ),
+            lambda one: self._router.runtime_for(one, placed),
             whole_line,
             aliases,
         )
