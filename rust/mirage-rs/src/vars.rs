@@ -727,10 +727,10 @@ impl Store {
     /// Put back what `drop_var` dropped, after a refusal: the value the
     /// unset revealed goes back to its scope before the name's own record.
     pub fn undrop(&mut self, name: &str, old: Option<Arc<Var>>, frame: Option<usize>, seed: Seed) {
-        if let Some(index) = frame
-            && index < self.frames.len()
-            && !self.frames[index].saved.contains_key(name)
-        {
+        let unsaved = frame.filter(|&index| {
+            index < self.frames.len() && !self.frames[index].saved.contains_key(name)
+        });
+        if let Some(index) = unsaved {
             let revealed = self.vars.get(name).cloned();
             self.frames[index].saved.insert(name.to_owned(), revealed);
         }
@@ -824,8 +824,9 @@ impl Store {
     /// `x` from `x=1 f` once something inside runs `export x` or
     /// `readonly x`.
     pub fn outlive_call(&mut self, name: &str) {
-        if let Some(index) = self.shadowing(name)
-            && self.frames[index].temp
+        if let Some(index) = self
+            .shadowing(name)
+            .filter(|&index| self.frames[index].temp)
         {
             self.frames[index].saved.remove(name);
         }
@@ -1142,10 +1143,10 @@ impl Store {
     /// The scalar an array conversion keeps as element 0; for a live
     /// `RANDOM` the read draws (`RANDOM[1]=5` leaves `[0]` one draw).
     pub fn conversion_scalar(&mut self, name: &str) -> Result<Option<Vec<u8>>, arith::Error> {
-        if name == RANDOM
-            && let Some(value) = self.next_random()?
-        {
-            return Ok(Some(value.to_string().into_bytes()));
+        if name == RANDOM {
+            if let Some(value) = self.next_random()? {
+                return Ok(Some(value.to_string().into_bytes()));
+            }
         }
         Ok(self.record(name).and_then(Var::text).map(<[u8]>::to_vec))
     }
@@ -1239,16 +1240,16 @@ impl<'s> Reading<'s> {
             dynamic,
         };
         let mut outcome = arith::evaluate(&request, self);
-        if let Err(arith::Error::Halt { subscript }) = outcome.value
-            && let Some(mut kept) = self.kept.take()
-        {
-            if let arith::Error::Arith {
-                subscript: inner, ..
-            } = &mut kept
-            {
-                *inner |= subscript;
+        if let Err(arith::Error::Halt { subscript }) = outcome.value {
+            if let Some(mut kept) = self.kept.take() {
+                if let arith::Error::Arith {
+                    subscript: inner, ..
+                } = &mut kept
+                {
+                    *inner |= subscript;
+                }
+                outcome.value = Err(kept);
             }
-            outcome.value = Err(kept);
         }
         outcome
     }

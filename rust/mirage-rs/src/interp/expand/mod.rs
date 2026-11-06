@@ -389,14 +389,15 @@ impl<H: Host> Expander<'_, H> {
     pub async fn fields(&mut self, node: usize) -> Result<Vec<Field>, Fault> {
         if matches!(self.kind(node), "concatenation" | "brace_expression")
             && self.shell.option("braceexpand")
-            && let Some(words) = self.brace_words(node).await?
         {
-            let mut out = Vec::new();
-            for mut chunks in words {
-                self.tilde(&mut chunks);
-                out.extend(split_fields(&chunks, self.shell.ifs()));
+            if let Some(words) = self.brace_words(node).await? {
+                let mut out = Vec::new();
+                for mut chunks in words {
+                    self.tilde(&mut chunks);
+                    out.extend(split_fields(&chunks, self.shell.ifs()));
+                }
+                return Ok(out);
             }
-            return Ok(out);
         }
         let mut chunks = self.chunks(node, false).await?;
         self.tilde(&mut chunks);
@@ -411,12 +412,11 @@ impl<H: Host> Expander<'_, H> {
     fn assignment_tildes(&self, chunks: &mut Vec<Chunk>) {
         let mut merged: Vec<Chunk> = Vec::with_capacity(chunks.len());
         for chunk in std::mem::take(chunks) {
-            if let (Some(Chunk::Piece(prev)), Chunk::Piece(next)) = (merged.last_mut(), &chunk)
-                && plain(prev)
-                && plain(next)
-            {
-                prev.text.extend_from_slice(&next.text);
-                continue;
+            if let (Some(Chunk::Piece(prev)), Chunk::Piece(next)) = (merged.last_mut(), &chunk) {
+                if plain(prev) && plain(next) {
+                    prev.text.extend_from_slice(&next.text);
+                    continue;
+                }
             }
             merged.push(chunk);
         }
@@ -444,15 +444,15 @@ impl<H: Host> Expander<'_, H> {
                     let end = (i + 1..text.len())
                         .find(|&j| matches!(text[j], b'/' | b':'))
                         .unwrap_or(text.len());
-                    if (end < text.len() || last)
-                        && let Some(named) = self.tilde_prefix(&text[i..end])
-                    {
-                        out.push(Chunk::literal(text[from..i].to_vec()));
-                        out.push(Chunk::quoted(named));
-                        from = end;
-                        i = end;
-                        start = false;
-                        continue;
+                    if end < text.len() || last {
+                        if let Some(named) = self.tilde_prefix(&text[i..end]) {
+                            out.push(Chunk::literal(text[from..i].to_vec()));
+                            out.push(Chunk::quoted(named));
+                            from = end;
+                            i = end;
+                            start = false;
+                            continue;
+                        }
                     }
                 }
                 start = text[i] == b':';
@@ -517,11 +517,13 @@ impl<H: Host> Expander<'_, H> {
                 let boundary =
                     end == bytes.len() || (bytes[end].1 && matches!(bytes[end].0, b'/' | b':'));
                 let prefix: Vec<u8> = bytes[i..end].iter().map(|(b, _)| *b).collect();
-                if boundary && let Some(named) = self.tilde_prefix(&prefix) {
-                    out.extend(named);
-                    i = end;
-                    start = false;
-                    continue;
+                if boundary {
+                    if let Some(named) = self.tilde_prefix(&prefix) {
+                        out.extend(named);
+                        i = end;
+                        start = false;
+                        continue;
+                    }
                 }
             }
             start = literal && byte == b':';
@@ -873,10 +875,10 @@ impl<H: Host> Expander<'_, H> {
             return Ok(Vec::new());
         }
         let name = String::from_utf8_lossy(name).into_owned();
-        if name == RANDOM
-            && let Some(value) = self.shell.vars.next_random().map_err(Fault::Arith)?
-        {
-            return Ok(value.to_string().into_bytes());
+        if name == RANDOM {
+            if let Some(value) = self.shell.vars.next_random().map_err(Fault::Arith)? {
+                return Ok(value.to_string().into_bytes());
+            }
         }
         let vars = &self.shell.vars;
         let found = if let Some(array) = self.shell.indexed(&name) {

@@ -40,10 +40,7 @@ impl<H: Host> Expander<'_, H> {
         }
         let offset = values.first().copied().unwrap_or(0);
         let length = values.get(1).copied();
-        if let Some(length) = length
-            && length < 0
-            && (!scalar || extent + length < offset)
-        {
+        if length.is_some_and(|length| length < 0 && (!scalar || extent + length < offset)) {
             let text = String::from_utf8_lossy(&texts[1]);
             return Err(discard(format!("bash: {text}: substring expression < 0\n")));
         }

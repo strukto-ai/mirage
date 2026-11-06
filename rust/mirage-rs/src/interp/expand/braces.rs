@@ -87,12 +87,12 @@ impl<H: Host> Expander<'_, H> {
                 }
                 _ => {}
             }
-            if braces.op.is_none()
-                && let Some(op) = PARAM_OPS.iter().find(|op| **op == kind)
-            {
-                braces.op = Some(op);
-                braces.groups.push(Vec::new());
-                continue;
+            if braces.op.is_none() {
+                if let Some(op) = PARAM_OPS.iter().find(|op| **op == kind) {
+                    braces.op = Some(op);
+                    braces.groups.push(Vec::new());
+                    continue;
+                }
             }
             if let Some(op) = braces.op {
                 let separator = match op {
@@ -556,10 +556,10 @@ impl<H: Host> Expander<'_, H> {
         if let Some(map) = self.shell.vars.assoc(&var) {
             return Ok(map.get(b"0").map(<[u8]>::to_vec));
         }
-        if var == RANDOM
-            && let Some(drawn) = self.shell.vars.next_random().map_err(Fault::Arith)?
-        {
-            return Ok(Some(drawn.to_string().into_bytes()));
+        if var == RANDOM {
+            if let Some(drawn) = self.shell.vars.next_random().map_err(Fault::Arith)? {
+                return Ok(Some(drawn.to_string().into_bytes()));
+            }
         }
         Ok(self.shell.vars.scalar(&var).map(<[u8]>::to_vec))
     }
@@ -754,13 +754,10 @@ impl<H: Host> Expander<'_, H> {
         quoted: bool,
         leading: bool,
     ) -> Result<Vec<Chunk>, Fault> {
-        if !quoted
-            && leading
-            && !text.contains(&b'\\')
-            && !text.contains(&b'$')
-            && let Some(expanded) = self.tilde_prefix(text)
-        {
-            return Ok(vec![Chunk::quoted(expanded)]);
+        if !quoted && leading && !text.contains(&b'\\') && !text.contains(&b'$') {
+            if let Some(expanded) = self.tilde_prefix(text) {
+                return Ok(vec![Chunk::quoted(expanded)]);
+            }
         }
         let mut out = Vec::new();
         let mut run = Vec::new();
@@ -788,14 +785,14 @@ impl<H: Host> Expander<'_, H> {
                 }
                 continue;
             }
-            if byte == b'$'
-                && let Some((name, end)) = scan_parameter(text, index)
-            {
-                let name = name.to_vec();
-                flush(&mut run, &mut out);
-                out.extend(self.parameter_chunks(&name, quoted)?);
-                index = end;
-                continue;
+            if byte == b'$' {
+                if let Some((name, end)) = scan_parameter(text, index) {
+                    let name = name.to_vec();
+                    flush(&mut run, &mut out);
+                    out.extend(self.parameter_chunks(&name, quoted)?);
+                    index = end;
+                    continue;
+                }
             }
             run.push(byte);
             index += 1;

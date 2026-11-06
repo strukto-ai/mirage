@@ -48,6 +48,7 @@ from mirage.policy.decisions import is_pending
 from mirage.policy.match import Outcome, has_rules, reads_args, scopes_paths
 from mirage.policy.match.decide import source_of
 from mirage.policy.policies import settled
+from mirage.rs.session import ShellVars
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.helpers import (
     get_parts,
@@ -618,7 +619,9 @@ async def _judge_words(
     inner_session = session
     if child is not None and not isinstance(child, str):
         inner_session = session.fork()
-        inner_session.vars = env_vars(session, child[1])
+        inner_session.vars = ShellVars.of(
+            env_vars(session, child[1]), session.ids.random_u32
+        )
     elif name in ("sh", "bash") and inners:
         inner_session = session.new_shell()
     elif name == "command" and inners and inners[0].argv:

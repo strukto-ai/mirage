@@ -226,9 +226,11 @@ impl<G: Gate> Writer<'_, G> {
                 .map_err(Fault::Denied)?;
         }
         let generator = self.store.generator();
-        if self.store.seeds_random(&name)
-            && let Value::Scalar(word) = &value
-        {
+        let seeding = match &value {
+            Value::Scalar(word) if self.store.seeds_random(&name) => Some(word),
+            _ => None,
+        };
+        if let Some(word) = seeding {
             match self.store.evaluate_integer(&mut coercion, word, None) {
                 Ok(text) => {
                     let state = std::str::from_utf8(&text)
@@ -266,13 +268,12 @@ impl<G: Gate> Writer<'_, G> {
         self.store.note_kind(&name, &value);
         self.land_coercion(&mut coercion).await?;
         let unaimed = existing.as_ref().is_some_and(|var| var.has(NAMEREF));
-        if unaimed
-            && value.is_array()
-            && let Some(diagnostics) = self.diagnostics.as_deref_mut()
-        {
-            diagnostics.push(Diagnostic::Bytes(
-                format!("bash: warning: {name}: removing nameref attribute\n").into_bytes(),
-            ));
+        if unaimed && value.is_array() {
+            if let Some(diagnostics) = self.diagnostics.as_deref_mut() {
+                diagnostics.push(Diagnostic::Bytes(
+                    format!("bash: warning: {name}: removing nameref attribute\n").into_bytes(),
+                ));
+            }
         }
         let before = existing
             .as_ref()

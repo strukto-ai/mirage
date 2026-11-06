@@ -30,12 +30,12 @@ impl<H: Host> Expander<'_, H> {
                 let raw = self.text(node).to_vec();
                 if leading && raw.starts_with(b"~") {
                     let end = raw.iter().position(|&b| b == b'/').unwrap_or(raw.len());
-                    if !raw[..end].contains(&b'\\')
-                        && let Some(home) = self.tilde_prefix(&raw[..end])
-                    {
-                        let mut out = vec![(home, true)];
-                        out.extend(unquoted_runs(&raw[end..]));
-                        return Ok(out);
+                    if !raw[..end].contains(&b'\\') {
+                        if let Some(home) = self.tilde_prefix(&raw[..end]) {
+                            let mut out = vec![(home, true)];
+                            out.extend(unquoted_runs(&raw[end..]));
+                            return Ok(out);
+                        }
                     }
                 }
                 Ok(unquoted_runs(&raw))
@@ -162,31 +162,31 @@ impl<H: Host> Expander<'_, H> {
                 i = end;
                 continue;
             }
-            if byte == b'\''
-                && let Some(close) = memchr::memchr(b'\'', &text[i + 1..])
-            {
-                pattern.push(&std::mem::take(&mut live), false, utf8);
-                pattern.push(&text[i + 1..i + 1 + close], true, utf8);
-                i += close + 2;
-                continue;
-            }
-            if byte == b'"'
-                && let Some(close) = escaped_find(text, i + 1, b'"')
-            {
-                pattern.push(&std::mem::take(&mut live), false, utf8);
-                let inner = self.dquoted_pattern(&text[i + 1..close])?;
-                pattern.push(&inner, true, utf8);
-                i = close + 1;
-                continue;
-            }
-            if byte == b'$' && i + 1 < text.len() {
-                if text[i + 1] == b'\''
-                    && let Some(close) = escaped_find(text, i + 2, b'\'')
-                {
+            if byte == b'\'' {
+                if let Some(close) = memchr::memchr(b'\'', &text[i + 1..]) {
                     pattern.push(&std::mem::take(&mut live), false, utf8);
-                    pattern.push(&decode_ansi_c(&text[i + 2..close], utf8), true, utf8);
+                    pattern.push(&text[i + 1..i + 1 + close], true, utf8);
+                    i += close + 2;
+                    continue;
+                }
+            }
+            if byte == b'"' {
+                if let Some(close) = escaped_find(text, i + 1, b'"') {
+                    pattern.push(&std::mem::take(&mut live), false, utf8);
+                    let inner = self.dquoted_pattern(&text[i + 1..close])?;
+                    pattern.push(&inner, true, utf8);
                     i = close + 1;
                     continue;
+                }
+            }
+            if byte == b'$' && i + 1 < text.len() {
+                if text[i + 1] == b'\'' {
+                    if let Some(close) = escaped_find(text, i + 2, b'\'') {
+                        pattern.push(&std::mem::take(&mut live), false, utf8);
+                        pattern.push(&decode_ansi_c(&text[i + 2..close], utf8), true, utf8);
+                        i = close + 1;
+                        continue;
+                    }
                 }
                 if let Some((name, end)) = scan_parameter(text, i) {
                     let name = name.to_vec();
@@ -213,13 +213,13 @@ impl<H: Host> Expander<'_, H> {
                 i += 2;
                 continue;
             }
-            if byte == b'$'
-                && let Some((name, end)) = scan_parameter(inner, i)
-            {
-                let name = name.to_vec();
-                out.extend(self.lookup(&name, true)?);
-                i = end;
-                continue;
+            if byte == b'$' {
+                if let Some((name, end)) = scan_parameter(inner, i) {
+                    let name = name.to_vec();
+                    out.extend(self.lookup(&name, true)?);
+                    i = end;
+                    continue;
+                }
             }
             out.push(byte);
             i += 1;
@@ -267,10 +267,11 @@ pub(super) fn regex_text(runs: &[(Vec<u8>, bool)]) -> Vec<u8> {
             continue;
         };
         let next = chars.get(i + 1).map(|c| c.0);
-        if byte == b'['
-            && let Some(delimiter @ (b':' | b'.' | b'=')) = next
-            && !unclosed.contains(&delimiter)
-        {
+        let delimiter = match next {
+            Some(delimiter @ (b':' | b'.' | b'=')) if byte == b'[' => Some(delimiter),
+            _ => None,
+        };
+        if let Some(delimiter) = delimiter.filter(|d| !unclosed.contains(d)) {
             let close = (i + 2..chars.len().saturating_sub(1))
                 .find(|&j| chars[j].0 == delimiter && chars[j + 1].0 == b']');
             if let Some(close) = close {
