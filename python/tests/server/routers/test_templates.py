@@ -83,7 +83,11 @@ async def test_a_template_is_checked_when_saved(client):
     assert (await client.post("/v1/templates", json=typo)).status_code == 422
     pinned = {"name": "pinned", "config": {**RAM, "workspace_id": "one"}}
     assert (await client.post("/v1/templates", json=pinned)).status_code == 400
-    assert (await client.get("/v1/templates")).json() == []
+    unpinned = {"name": "unpinned", "config": {**RAM, "workspace_id": None}}
+    r = await client.post("/v1/templates", json=unpinned)
+    assert r.status_code == 201
+    names = [t["name"] for t in (await client.get("/v1/templates")).json()]
+    assert names == ["unpinned"]
 
 
 @pytest.mark.asyncio

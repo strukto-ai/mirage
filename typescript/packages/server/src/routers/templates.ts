@@ -108,7 +108,7 @@ export function registerTemplatesRoutes(
       return reply.status(400).send({ detail: 'description must be a string' })
     }
     try {
-      if (checkConfig(body.config).workspaceId !== undefined) {
+      if ((checkConfig(body.config).workspaceId ?? null) !== null) {
         return reply.status(400).send({ detail: NO_WORKSPACE_ID })
       }
     } catch (e) {

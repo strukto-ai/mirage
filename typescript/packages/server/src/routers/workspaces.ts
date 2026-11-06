@@ -104,7 +104,7 @@ async function configOf(
   } catch (e) {
     return { status: 400, detail: (e as Error).message }
   }
-  if (body.template !== undefined && cfg.workspaceId !== undefined) {
+  if (body.template !== undefined && (cfg.workspaceId ?? null) !== null) {
     return { status: 400, detail: NO_WORKSPACE_ID }
   }
   return { cfg, written: written as Record<string, JsonValue> }
