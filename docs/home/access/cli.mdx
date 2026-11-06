@@ -256,6 +256,68 @@ back. The local daemon keeps templates under `~/.mirage/resources`, as
 | `mirage workspace allow ID ASK [--scope once\|session]` | Allow one. |
 | `mirage workspace deny ID ASK` | Deny one. |
 
+## Saved connections
+
+`mirage vfs`, `mirage cli`, `mirage runtime` and `mirage store` keep
+connections on the server: a type, its settings and its credentials, saved
+once under a name. They are the [`/v1/vfs`, `/v1/clis`, `/v1/runtimes` and
+`/v1/stores`](/home/access/http#saved-connections) routes, and work the same
+against the local daemon and the console.
+
+| Command | Does |
+| --- | --- |
+| `mirage vfs types [TYPE]` | List the types, with their required and secret fields; with `TYPE`, its fields. |
+| `mirage vfs create NAME --type TYPE [--set K=V] [--secret K] [-f FILE]` | Save a new entry. |
+| `mirage vfs list [--type TYPE] [-q TEXT]` | List the entries, by name, with how many saved templates use each. |
+| `mirage vfs get NAME` | Show an entry. A secret field shows as `(sealed)`, never its value. |
+| `mirage vfs update NAME [--set K=V] [--secret K] [--unset K] [-f FILE]` | Change an entry. Fields not named keep their values. |
+| `mirage vfs delete NAME` | Delete an entry and wipe its secrets. There is no restore. |
+
+`mirage cli`, `mirage runtime` and `mirage store` take the same commands.
+
+```bash
+mirage vfs types github
+mirage vfs create github --type github --set owner=strukto-ai --set repo=mirage --secret token
+Token for github: ********
+mirage vfs get github
+mirage vfs update github --secret token
+mirage vfs delete github
+```
+
+- `--set KEY=VALUE` sets a plain field and can be repeated. A value that starts
+  with `{` or `[` is JSON, such as a pointer to a saved store:
+  `--set 'token={"from":"aws","ref":"github","key":"token"}'`.
+- `--secret KEY` reads a secret field from a hidden prompt, or from the next
+  line of stdin when stdin is not a terminal. `--secret KEY=@FILE` reads a file,
+  without its last newline. A secret value on the command line is refused, by
+  `--secret KEY=VALUE` and by `--set` alike.
+- `--unset KEY` removes a field, plain or secret.
+- `-f FILE` reads the entry from YAML or JSON: `name`, `type`, `fields`, and
+  `secrets`, a list of the secret fields to read as `--secret` reads them. The
+  output of `get -o yaml` reads back too.
+- In a terminal, a missing required field is prompted for. Otherwise the
+  command exits `2` and names every missing field.
+- `-o yaml` or `-o json` on `get`, `list` and `types` picks the format.
+
+```yaml github.yaml
+name: github
+type: github
+fields:
+  owner: strukto-ai
+  repo: mirage
+secrets: [token]
+```
+
+```bash
+mirage vfs create -f github.yaml < token.txt
+```
+
+`update` keeps a secret field you leave out, so `--secret token` rotates a
+token while the entry stays in use. `delete` is refused while a saved template
+uses the entry, and a store while an entry's field points at it. The local
+daemon keeps entries under `~/.mirage/resources`, their secrets in a separate
+file only you can read.
+
 ## Sessions
 
 | Command | Does |
@@ -398,7 +460,7 @@ environment variable wins over the file. Changes apply on the next start.
 | `forwarded_allow_ips` | `MIRAGE_FORWARDED_ALLOW_IPS` | none; the proxies whose `X-Forwarded-For` names the client |
 | `graceful_timeout` | `MIRAGE_GRACEFUL_TIMEOUT` | `0`; seconds running lines get to finish on shutdown |
 | `policy_file` | `MIRAGE_POLICY_FILE` | none; see [Server policies](/home/access/http#server-policies) |
-| `resource_store` | `MIRAGE_RESOURCE_STORE` | `files`, under `~/.mirage/resources`; `memory` keeps saved templates only until the daemon stops, and does not combine with `workers` |
+| `resource_store` | `MIRAGE_RESOURCE_STORE` | `files`, under `~/.mirage/resources`; `memory` keeps saved templates and connections only until the daemon stops, and does not combine with `workers` |
 | `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#set-up) |
 | `jwt_*` | `MIRAGE_JWT_*` | see [Configure authentication](/home/access/http#configure-authentication) |
 | `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [Contexts](#contexts) |

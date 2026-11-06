@@ -299,7 +299,7 @@ export type ConfigSchemaLoader = () => Promise<z.ZodType>
  * {@link DIRECT_REGISTRY} parses its config with, by name, loaded on
  * first use as the factory loads it. Python reads the same off each
  * registry entry's config class; a factory here hides its schema, so the
- * schemas sit beside it, and `registry.test.ts` holds every factory that
+ * schemas sit beside it, and the node package's `registry.test.ts` holds every factory that
  * parses a config to an entry here.
  */
 export const CONFIG_SCHEMAS: Readonly<Record<string, ConfigSchemaLoader>> = {

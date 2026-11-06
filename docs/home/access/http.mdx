@@ -451,6 +451,85 @@ Upload the tar as `multipart/form-data`: a `request` part holding the JSON field
 
 Returns HTTP 201 Created with the restored workspace.
 
+## Saved connections
+
+`/v1/vfs`, `/v1/clis`, `/v1/runtimes` and `/v1/stores` keep VFS, CLI, runtime
+and secret store entries: a type, its fields, and the fields its config schema
+marks secret, which are sealed. The routes and bodies are the console's, so a
+client works against either. An entry answers only under its own kind's
+route, and a name is taken once across the four kinds. On a server that
+requires accounts these routes answer HTTP 501 Not Implemented.
+
+Routes that return an entry yield this object:
+
+<ResponseField name="id" type="string">On the local daemon, the name.</ResponseField>
+<ResponseField name="name" type="string">The entry's name.</ResponseField>
+<ResponseField name="kind" type="string">`vfs`, `cli`, `runtime` or `store`.</ResponseField>
+<ResponseField name="type" type="string">Its type, such as `github`.</ResponseField>
+<ResponseField name="builtin" type="boolean">Whether the server made it; always false on the local daemon.</ResponseField>
+<ResponseField name="config" type="object">The plain fields. A secret field never appears, unless it holds a `{from, ref, key}` pointer to a saved store.</ResponseField>
+<ResponseField name="captures" type="string[]">For a runtime only.</ResponseField>
+<ResponseField name="created_by" type="string | null">Who made it; null on the local daemon.</ResponseField>
+<ResponseField name="created_at" type="number | null">Unix time, in seconds; null on the local daemon.</ResponseField>
+<ResponseField name="updated_at" type="number | null">Unix time, in seconds; null on the local daemon.</ResponseField>
+
+### List the types
+
+<Badge color="blue">GET</Badge> `/v1/vfs/types`
+
+Returns each type an entry can be, with its fields, read off the registered
+VFS, CLI and runtime types and secrets sources and their config schemas. Each
+field has `name`, `type` (`string`, `number`, `boolean` or `list`), `secret`,
+`required`, and when they apply `options`, `description`, `default` and
+`group`, the optional block a field such as `auth.token` belongs to: it is
+required only when the block is used.
+
+### Create an entry
+
+<Badge color="green">POST</Badge> `/v1/vfs`
+
+<ParamField body="name" type="string" required>1-63 of `a-z 0-9 . _ -`, starting with a letter or digit.</ParamField>
+<ParamField body="type" type="string" required>One of the types.</ParamField>
+<ParamField body="fields" type="object" required>The fields, each checked against the type. A string field may instead be a `{from, ref, key}` pointer to a saved store.</ParamField>
+
+Returns HTTP 201 Created with the entry. A name already taken returns HTTP 409
+Conflict; a field the type lacks, a missing required field, or a pointer to a
+store not saved returns HTTP 400 Bad Request (the last with `missing`, the
+stores to add).
+
+### List entries
+
+<Badge color="blue">GET</Badge> `/v1/vfs`
+
+<ParamField query="type" type="string">Only entries of this type.</ParamField>
+<ParamField query="q" type="string">Only entries whose name contains this text, in any case.</ParamField>
+
+Returns `{"items": [...]}`, by name, each with `used_by`: how many saved
+templates use it.
+
+### Get an entry
+
+<Badge color="blue">GET</Badge> `/v1/vfs/{name}`
+
+Returns the entry with `sealed`: the names of its secret fields that hold a
+value, never the values.
+
+### Update an entry
+
+<Badge color="orange">PUT</Badge> `/v1/vfs/{name}`
+
+<ParamField body="fields" type="object" required>The new plain fields, which replace the old ones. A secret field left out keeps its value; one given as `null` is removed.</ParamField>
+
+Returns the entry. Its name and type stay as they are.
+
+### Delete an entry
+
+<Badge color="red">DELETE</Badge> `/v1/vfs/{name}`
+
+Deletes the entry and wipes its secret values; there is no restore. Returns
+HTTP 204 No Content, or HTTP 409 Conflict naming what uses it: a saved
+template, or for a store, an entry whose field points at it.
+
 ## Sessions
 
 A session keeps its own working directory, environment, and history. Requests use the workspace's default session unless they specify `session_id`.
