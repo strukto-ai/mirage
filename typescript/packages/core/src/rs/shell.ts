@@ -868,9 +868,12 @@ export class Shell {
     ]
   }
 
-  /** The number of the records' last change, which a copy holding the same records shares. */
-  version(): bigint {
-    return this.call('version') as bigint
+  /**
+   * Whether this shell holds the records `other` holds, value for value: a host
+   * keeps a fork of what it saved and saves again only once they part.
+   */
+  sameVars(other: Shell): boolean {
+    return this.call('same_vars', other.handle) as boolean
   }
 
   /** The scalar an array conversion keeps as element 0, or a seed's error. */

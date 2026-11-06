@@ -387,10 +387,11 @@ impl Shell {
             .map_or(self.parked, |inner| inner.vars.held())
     }
 
-    /// The number of the records' last change, which a copy holding the
-    /// same records shares: the host saves them again only once it moves.
-    fn version(&self) -> PyResult<u64> {
-        Ok(self.store()?.version())
+    /// Whether this shell holds the records `other` holds, value for
+    /// value: a host keeps a fork of what it saved and saves again only
+    /// once they part.
+    fn same_vars(&self, other: PyRef<'_, Shell>) -> PyResult<bool> {
+        Ok(self.store()?.same_records(other.store()?))
     }
 
     /// Hide the names a session's visibility lists, exactly or by glob.

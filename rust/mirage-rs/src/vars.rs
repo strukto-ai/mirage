@@ -18,7 +18,6 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::arith::{self, Halt, Outcome, Vars};
 use crate::policy::{VarScope, Visibility, VisibilityMatcher};
@@ -398,17 +397,6 @@ pub struct Store {
     hidden: Option<Arc<VisibilityMatcher>>,
     ids: Ids,
     held: usize,
-    /// The number of the last change to the records, which every copy
-    /// holding the same records shares.
-    version: u64,
-}
-
-/// The number the next change to any store's records takes: one count for
-/// every store, so two stores at one number hold the same records.
-static VERSIONS: AtomicU64 = AtomicU64::new(1);
-
-fn next_version() -> u64 {
-    VERSIONS.fetch_add(1, Ordering::Relaxed)
 }
 
 impl std::fmt::Debug for Store {
@@ -445,15 +433,23 @@ impl Store {
             hidden: None,
             ids,
             held: 0,
-            version: next_version(),
         }
     }
 
-    /// The number of the records' last change: a store at the number it
-    /// was at before holds the records it held then, so a host can tell
-    /// whether to save them again without reading them.
-    pub fn version(&self) -> u64 {
-        self.version
+    /// Whether this store holds the records `other` holds, value for
+    /// value. A fork that has written nothing shares them outright, and
+    /// a write undone (`TMP=x true`) puts back the record it replaced, so
+    /// a host holding a fork of what it saved tells whether to save again
+    /// without reading the records out.
+    pub fn same_records(&self, other: &Store) -> bool {
+        Arc::ptr_eq(&self.vars, &other.vars)
+            || self.vars.len() == other.vars.len()
+                && self.vars.iter().all(|(name, var)| {
+                    other
+                        .vars
+                        .get(name)
+                        .is_some_and(|theirs| Arc::ptr_eq(var, theirs) || var == theirs)
+                })
     }
 
     /// Draw first seeds from `ids` from now on.
@@ -523,7 +519,6 @@ impl Store {
             return None;
         }
         let vars = Arc::make_mut(&mut self.vars);
-        self.version = next_version();
         let old = match var {
             Some(var) => {
                 self.held += entry_bytes(name, var.value.as_ref());
@@ -931,7 +926,6 @@ impl Store {
         let mut forked = Self::new(self.ids.clone());
         forked.vars = self.vars.clone();
         forked.held = self.held;
-        forked.version = self.version;
         forked.hidden = self.hidden.clone();
         if self.random_seed == Seed::Off {
             forked.random_seed = Seed::Off;
@@ -1566,20 +1560,24 @@ mod tests {
     }
 
     #[test]
-    fn a_version_moves_with_every_change_and_copies_share_it() {
+    fn a_fork_holds_the_same_records_until_one_changes_and_stays() {
         let mut store = store();
         store.seed("x", Value::Scalar(b"1".to_vec()));
-        let before = store.version();
-        let forked = store.fork();
-        assert_eq!(forked.version(), before);
+        let saved = store.fork();
+        assert!(store.same_records(&saved));
         store.drop_var("absent");
-        assert_eq!(store.version(), before);
+        assert!(store.same_records(&saved));
+        let old = store.place("x", Some(Arc::new(Var::scalar("2"))));
+        assert!(!store.same_records(&saved));
+        store.place("x", old);
+        store.place("y", Some(Arc::new(Var::scalar("3"))));
+        store.place("y", None);
+        assert!(store.same_records(&saved));
+        store.seed("x", Value::Scalar(b"1".to_vec()));
+        assert!(store.same_records(&saved));
         store.set_attr("x", Some(EXPORT), true);
-        let marked = store.version();
-        assert_ne!(marked, before);
-        store.seed("x", Value::Scalar(b"2".to_vec()));
-        assert_ne!(store.version(), marked);
-        assert_eq!(forked.version(), before);
+        assert!(!store.same_records(&saved));
+        assert!(saved.same_records(&saved.fork()));
     }
 
     #[test]

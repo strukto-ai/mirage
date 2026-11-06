@@ -13,10 +13,10 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
 import copy
-import json
 from collections.abc import Mapping
 from typing import Any
 
+from mirage._rs import Shell
 from mirage.context.session_context import SessionOwner
 from mirage.io.async_line_iterator import release_inputs
 from mirage.policy.profile import CompiledProfile
@@ -44,45 +44,33 @@ from mirage.workspace.session.session import (
 )
 from mirage.workspace.session.shell_dirs import set_cwd
 
-# What a flush compares a session against: the version its variables'
-# store was at, the variables as one sorted JSON text and the rest of its
-# record. Two equal versions hold the same variables, so a clean session
-# is told apart without copying them out of the store; the text tells a
-# change that came back (`TMP=x true`) from one that stayed.
-Baseline = tuple[int, str, RecordFields]
-
-
-def _variables_text(variables: RecordFields) -> str:
-    """The variables' keys of a record as one comparable text.
-
-    Args:
-        variables (RecordFields): the keys the variables fill.
-    """
-    return json.dumps(variables, sort_keys=True)
-
-
-def _written(version: int, fields: RecordFields) -> Baseline:
-    """The baseline of a record written whole, at the version its
-    variables were read at.
-
-    Args:
-        version (int): the variables' version as ``fields`` was made.
-        fields (RecordFields): the record written.
-    """
-    variables = {
-        key: value for key, value in fields.items() if key in VAR_KEYS
-    }
-    rest = {key: value for key, value in fields.items() if key not in VAR_KEYS}
-    return version, _variables_text(variables), copy.deepcopy(rest)
+# What a flush compares a session against: a fork of its shell as its
+# variables were saved, which shares their records rather than copying
+# them, and the rest of its record. A clean session, or one whose change
+# came back where it was (`TMP=x true`), is told apart without reading
+# the variables out of the store.
+Baseline = tuple[Shell, RecordFields]
 
 
 def _baseline(session: SessionState) -> Baseline:
-    """The baseline of the session as it stands.
+    """What the session would write now, as a flush compares it.
 
     Args:
         session (SessionState): the session to read.
     """
-    return _written(session.vars.shell.version(), session.to_dict())
+    return session.vars.shell.fork(), session.to_dict(variables=False)
+
+
+def _written(saved: Shell, fields: RecordFields) -> Baseline:
+    """The baseline of a record written whole, beside a fork of the shell
+    its variables were read from.
+
+    Args:
+        saved (Shell): a fork of the shell as ``fields`` was made.
+        fields (RecordFields): the record written.
+    """
+    rest = {key: value for key, value in fields.items() if key not in VAR_KEYS}
+    return saved, copy.deepcopy(rest)
 
 
 def _holds_managed(session: SessionState) -> bool:
@@ -508,21 +496,16 @@ class SessionManager(SessionOwner):
         """Persist one session, retrying when another writer races us."""
         sid = session.session_id
         kept = self._persisted.get(sid)
-        version = session.vars.shell.version()
-        rest = session.to_dict(variables=False)
-        if kept is not None and kept[2] == rest:
-            if kept[0] == version:
-                return  # clean: the store already has exactly this state
-            # A change that came back where it was (`TMP=x true`) moves
-            # the version and leaves the store's record as it is.
-            text = _variables_text(session.variables_to_dict())
-            if text == kept[1]:
-                self._persisted[sid] = (version, text, kept[2])
-                return
+        if (
+            kept is not None
+            and session.vars.shell.same_vars(kept[0])
+            and kept[1] == session.to_dict(variables=False)
+        ):
+            return  # clean: the store already has exactly this state
         for _ in range(CAS_MAX_RETRIES):
             expected = session.generation
             session.generation = expected + 1
-            version = session.vars.shell.version()
+            saved = session.vars.shell.fork()
             fields = session.to_dict()
             try:
                 placed = await self._store.cas_set(sid, fields, expected)
@@ -548,7 +531,7 @@ class SessionManager(SessionOwner):
                 # Deep copy: to_dict() returns nested dicts the caller
                 # may go on to mutate, and the baseline this is compared
                 # against must stay frozen at what was written.
-                self._persisted[sid] = _written(version, fields)
+                self._persisted[sid] = _written(saved, fields)
                 return
             # Lost the race: adopt the winner's generation and retry
             # our content on top (last-writer-wins until a merge
@@ -571,7 +554,7 @@ class SessionManager(SessionOwner):
         """
         self._loaded = True
         written = {
-            s.session_id: (s.vars.shell.version(), s.to_dict())
+            s.session_id: (s.vars.shell.fork(), s.to_dict())
             for s in (*self._sessions.values(), *sessions)
         }
         for session in sessions:
@@ -580,8 +563,8 @@ class SessionManager(SessionOwner):
             {sid: fields for sid, (_, fields) in written.items()}
         )
         self._persisted = {
-            sid: _written(version, fields)
-            for sid, (version, fields) in written.items()
+            sid: _written(saved, fields)
+            for sid, (saved, fields) in written.items()
         }
 
     def create(

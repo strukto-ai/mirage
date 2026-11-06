@@ -413,6 +413,17 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             let child = engine.shell(handle)?.shell()?.subshell();
             return Ok(Item::int(engine.adopt(child)));
         }
+        "same_vars" => {
+            let other = args.handle()?;
+            let store = |handle| {
+                engine
+                    .shells
+                    .get(&handle)
+                    .ok_or_else(|| format!("no shell {handle}"))?
+                    .store()
+            };
+            return Ok(Item::Bool(store(handle)?.same_records(store(other)?)));
+        }
         "expand" => {
             let tree = args.handle()?;
             let node = size(args.int()?)?;
@@ -575,7 +586,6 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         ),
         "len" => Item::int(shell.store()?.records().count()),
         "contains" => Item::Bool(shell.store()?.record(&args.string()?).is_some()),
-        "version" => Item::Big(i64::try_from(shell.store()?.version()).unwrap_or(i64::MAX)),
         "held" => Item::int(
             shell
                 .inner
