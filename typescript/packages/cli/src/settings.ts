@@ -53,7 +53,8 @@ import {
 } from '@struktoai/mirage-server/ssh/constants'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { currentName, LOCAL, localUrl, loginPath, readContexts } from './context.ts'
+import { LOCAL } from './constants.ts'
+import { currentName, localUrl, loginPath, readContexts } from './context.ts'
 import { readLogin, type Login } from './credentials.ts'
 import { ENV_DAEMON_URL, ENV_TOKEN } from './env.ts'
 

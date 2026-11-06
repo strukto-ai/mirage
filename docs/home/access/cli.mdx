@@ -220,32 +220,29 @@ a `workspace_id`.
 
 ### From a template
 
-A template is a saved workspace config. Save one through the server's
-`/v1/templates` route, with a body of `name`, an optional `description`, and
-`config`, a whole workspace config:
-
-```yaml template.yaml
-name: ram-only
-description: One writable RAM mount
-config:
-  mounts:
-    /data:
-      vfs: ram
-```
+A template is a saved workspace config. `-f` takes a workspace config, or a
+file with `name`, an optional `description`, and `config`, as
+`mirage template get NAME -o yaml` prints one:
 
 ```bash
-mirage api /v1/templates --input template.yaml
+mirage template create ram-only -f workspace.yaml --description "One RAM mount"
 mirage workspace create --template ram-only -w demo
 ```
 
-The server checks the config when it saves the template, as a create would.
-A workspace gets a copy of the template's config, so a later change to the
+| Command | Does |
+| --- | --- |
+| `mirage template create NAME -f FILE [--description TEXT]` | Save a config as a template. |
+| `mirage template list [-o yaml\|json]` | List templates. |
+| `mirage template get NAME [-o yaml\|json]` | Print one; `-o yaml` is a file `create -f` reads back. |
+| `mirage template delete NAME` | Delete one. |
+| `mirage template restore NAME` | Bring a deleted one back. |
+
+The file is saved as written: `${NAME}` is not read from the environment. The
+server checks the config when it saves the template, as a create would. A
+workspace gets a copy of the template's config, so a later change to the
 template leaves it as it is, and a template's config cannot set
 `workspace_id`: `-w` names the workspace. Give a config file or `--template`,
-not both.
-`mirage api /v1/templates` lists templates, and `-X DELETE` on
-`/v1/templates/NAME` deletes one; `POST /v1/templates/NAME/restore` brings it
-back. The local daemon keeps templates under `~/.mirage/resources`, as
+not both. The local daemon keeps templates under `~/.mirage/resources`, as
 `resource_store` sets.
 
 ### Asks
@@ -376,12 +373,11 @@ goes nowhere but its own server.
 
 `mirage daemon config set|get|unset|list` edits `~/.mirage/config.toml`. An
 environment variable wins over the file. Changes apply on the next start.
-`mirage config` still works until the next release, and warns that it moved.
 
 | Key | Env var | Default |
 | --- | --- | --- |
 | `port` | `MIRAGE_DAEMON_PORT` | `8765`; the `local` context follows it |
-| `url` | `MIRAGE_DAEMON_URL` | `http://127.0.0.1:PORT`. Leaves config.toml in the next release; `mirage login URL` adds another server |
+| `url` | `MIRAGE_DAEMON_URL` | `http://127.0.0.1:PORT`: the `local` context's URL; `mirage login URL` adds another server |
 | `auth_token` | `MIRAGE_TOKEN` | your [login](#contexts) for the `local` context, else `~/.mirage/auth_token` |
 | `auth_mode` | `MIRAGE_AUTH_MODE` | `local` |
 | `allowed_hosts` | `MIRAGE_ALLOWED_HOSTS` | `127.0.0.1,localhost,::1` |

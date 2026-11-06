@@ -316,7 +316,9 @@ def get_cmd(
 
 
 @app.command("use")
-def use_cmd(workspace_id: str = typer.Argument(..., help="Workspace id.")) -> None:
+def use_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+) -> None:
     """Make a workspace the current context's, for the commands that
     take ``-w``."""
     with make_client() as client:
@@ -324,9 +326,10 @@ def use_cmd(workspace_id: str = typer.Argument(..., help="Workspace id.")) -> No
         r = client.request(
             "GET", f"/v1/workspaces/{quote(workspace_id, safe='')}"
         )
+        context = client.settings.context
     handle_response(r)
-    use_workspace(workspace_id)
-    header(f"using {workspace_id}")
+    use_workspace(context, workspace_id)
+    header(f"using {workspace_id}", context)
     emit(
         {"workspace": workspace_id},
         human=lambda d: f"Using workspace {workspace_id}.",

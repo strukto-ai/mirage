@@ -23,7 +23,7 @@ import {
   closeSync,
 } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import { currentName, loginPath, readContexts } from './context.ts'
+import { currentName, loginCommand, loginPath, readContexts } from './context.ts'
 
 export const LOGIN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 const REFRESH_MARGIN_SECONDS = 60
@@ -131,7 +131,7 @@ export function endsAt(body: Record<string, unknown>, now: number): number | nul
  */
 export async function freshToken(login: Login, path: string = currentLoginPath()): Promise<string> {
   const now = Date.now() / 1000
-  const again = `run \`mirage login ${login.url}\` to log in again`
+  const again = `run \`${loginCommand(login.url, basename(path, '.json'))}\` to log in again`
   if (now >= login.logged_in_at + LOGIN_MAX_AGE_SECONDS) {
     throw new LoginError(`the login is 30 days old; ${again}`)
   }

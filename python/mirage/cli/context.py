@@ -15,68 +15,39 @@
 
 import json
 import os
-import re
 import sys
-from dataclasses import asdict, dataclass, field
+import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import typer
 
+from mirage.cli.constants import (
+    CONTEXT_NAME,
+    CONTEXTS_FILE,
+    DEFAULT_PORT,
+    LOCAL,
+    LOCK_RETRY_SECONDS,
+    LOCK_STALE_SECONDS,
+    LOCK_WAIT_SECONDS,
+    LOGINS_DIR,
+)
 from mirage.cli.env import ENV_CONTEXT, ENV_DAEMON_PORT, ENV_WORKSPACE
+from mirage.cli.errors import ContextError
 from mirage.cli.output import emit, fail, format_table
+from mirage.cli.types import Context, Contexts
 from mirage.server.daemon_config import read_daemon_table
 from mirage.server.paths import mirage_home
 
-CONTEXTS_FILE = "contexts.json"
-LOGINS_DIR = "logins"
-LEGACY_LOGIN_FILE = "login.json"
-LOCAL = "local"
-HOSTED = "strukto"
-HOSTED_URL = "https://api.strukto.ai"
-DEFAULT_PORT = 8765
-NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,62}$")
+T = TypeVar("T")
 
 app = typer.Typer(
     no_args_is_help=True,
     help="The servers the CLI talks to: list, switch, forget.",
 )
-
-
-class ContextError(RuntimeError):
-    """A context that does not exist, or one that cannot be changed."""
-
-
-@dataclass
-class Context:
-    """One server the CLI talks to, with what it remembers there.
-
-    Args:
-        url (str): the server; empty for ``local``, whose URL follows
-            the daemon's port.
-        team (str | None): the team the login acts for, if the server
-            names one.
-        workspace (str | None): the workspace commands use when given
-            none.
-    """
-
-    url: str = ""
-    team: str | None = None
-    workspace: str | None = None
-
-
-@dataclass
-class Contexts:
-    """The contexts file: which context is current, and every context.
-
-    Args:
-        current (str): the current context's name.
-        contexts (dict[str, Context]): every context by name; ``local``
-            is always there.
-    """
-
-    current: str = LOCAL
-    contexts: dict[str, Context] = field(default_factory=dict)
 
 
 def contexts_path() -> Path:
@@ -86,21 +57,26 @@ def contexts_path() -> Path:
 def login_path(name: str) -> Path:
     """Where a context's login is kept.
 
-    A login kept before contexts existed belongs to ``local``, whose
-    URL it was made for, and moves there on first use.
-
     Args:
         name (str): the context.
 
     Returns:
         Path: its login file.
     """
-    path = mirage_home() / LOGINS_DIR / f"{name}.json"
-    legacy = mirage_home() / LEGACY_LOGIN_FILE
-    if name == LOCAL and legacy.exists() and not path.exists():
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.replace(legacy, path)
-    return path
+    return mirage_home() / LOGINS_DIR / f"{name}.json"
+
+
+def login_command(url: str, name: str) -> str:
+    """The command that logs a context in again.
+
+    Args:
+        url (str): the context's server.
+        name (str): the context.
+
+    Returns:
+        str: ``mirage login URL --name NAME``.
+    """
+    return f"mirage login {url} --name {name}"
 
 
 def check_name(name: str) -> str:
@@ -116,7 +92,7 @@ def check_name(name: str) -> str:
         ContextError: it is not lowercase letters, digits, ``.``, ``_``
             and ``-``.
     """
-    if not NAME.match(name):
+    if not CONTEXT_NAME.match(name):
         raise ContextError(
             f"invalid context name {name!r}: use lowercase letters, "
             "digits, '.', '_' and '-'"
@@ -166,6 +142,61 @@ def write_contexts(contexts: Contexts, path: Path | None = None) -> None:
     os.replace(staged, use)
 
 
+@contextmanager
+def contexts_lock() -> Iterator[None]:
+    """Hold the contexts file's lock, so one command at a time reads,
+    changes and writes it.
+
+    A lock older than ``LOCK_STALE_SECONDS`` was left by a command that
+    died, and is taken over.
+
+    Raises:
+        ContextError: another command held it for ``LOCK_WAIT_SECONDS``.
+    """
+    path = contexts_path().with_name(f"{CONTEXTS_FILE}.lock")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + LOCK_WAIT_SECONDS
+    while True:
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - path.stat().st_mtime
+            except FileNotFoundError:
+                continue
+            if age > LOCK_STALE_SECONDS:
+                path.unlink(missing_ok=True)
+                continue
+            if time.monotonic() > deadline:
+                raise ContextError(
+                    f"{path} is held by another mirage command"
+                ) from None
+            time.sleep(LOCK_RETRY_SECONDS)
+    try:
+        yield
+    finally:
+        os.close(fd)
+        path.unlink(missing_ok=True)
+
+
+def update_contexts(change: Callable[[Contexts], T]) -> T:
+    """Read, change and write the contexts file under its lock, so a
+    command running at the same time loses nothing.
+
+    Args:
+        change (Callable[[Contexts], T]): changes the contexts in place.
+
+    Returns:
+        T: what ``change`` returned.
+    """
+    with contexts_lock():
+        contexts = read_contexts()
+        result = change(contexts)
+        write_contexts(contexts)
+    return result
+
+
 def current_name(contexts: Contexts) -> str:
     """The context this command uses: ``--context`` or
     ``$MIRAGE_CONTEXT``, else the file's current one.
@@ -181,9 +212,7 @@ def current_name(contexts: Contexts) -> str:
     """
     name = os.environ.get(ENV_CONTEXT) or contexts.current
     if name not in contexts.contexts:
-        raise ContextError(
-            f"no context {name!r}; run `mirage context list`"
-        )
+        raise ContextError(f"no context {name!r}; run `mirage context list`")
     return name
 
 
@@ -262,15 +291,23 @@ def header(action: str, name: str | None = None) -> None:
     typer.echo(" · ".join(parts), err=True)
 
 
-def use_workspace(workspace_id: str) -> None:
-    """Make a workspace the current context's.
+def use_workspace(name: str, workspace_id: str) -> None:
+    """Make a workspace a context's current one.
 
     Args:
+        name (str): the context, as the command chose it.
         workspace_id (str): the workspace.
+
+    Raises:
+        ContextError: the context was deleted meanwhile.
     """
-    contexts = read_contexts()
-    contexts.contexts[current_name(contexts)].workspace = workspace_id
-    write_contexts(contexts)
+
+    def change(contexts: Contexts) -> None:
+        if name not in contexts.contexts:
+            raise ContextError(f"no context {name!r}")
+        contexts.contexts[name].workspace = workspace_id
+
+    update_contexts(change)
 
 
 @app.command("list")
@@ -310,11 +347,15 @@ def list_cmd() -> None:
 @app.command("use")
 def use_cmd(name: str = typer.Argument(..., help="Context name.")) -> None:
     """Make a context the current one."""
-    contexts = read_contexts()
-    if name not in contexts.contexts:
-        raise ContextError(f"no context {name!r}; run `mirage context list`")
-    contexts.current = name
-    write_contexts(contexts)
+
+    def change(contexts: Contexts) -> None:
+        if name not in contexts.contexts:
+            raise ContextError(
+                f"no context {name!r}; run `mirage context list`"
+            )
+        contexts.current = name
+
+    update_contexts(change)
     header("now current", name)
     emit({"current": name}, human=lambda d: f"Using context {name}.")
 
@@ -326,12 +367,16 @@ def delete_cmd(
     """Forget a context and its login; ``local`` stays."""
     if name == LOCAL:
         raise ContextError("the local context cannot be deleted")
-    contexts = read_contexts()
-    if name not in contexts.contexts:
-        raise ContextError(f"no context {name!r}; run `mirage context list`")
-    del contexts.contexts[name]
-    if contexts.current == name:
-        contexts.current = LOCAL
-    write_contexts(contexts)
+
+    def change(contexts: Contexts) -> None:
+        if name not in contexts.contexts:
+            raise ContextError(
+                f"no context {name!r}; run `mirage context list`"
+            )
+        del contexts.contexts[name]
+        if contexts.current == name:
+            contexts.current = LOCAL
+
+    update_contexts(change)
     (mirage_home() / LOGINS_DIR / f"{name}.json").unlink(missing_ok=True)
     emit({"deleted": name}, human=lambda d: f"Deleted context {name}.")

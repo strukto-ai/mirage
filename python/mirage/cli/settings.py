@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+from mirage.cli.constants import LOCAL
 from mirage.cli.context import (
-    LOCAL,
     current_name,
     local_url,
     login_path,

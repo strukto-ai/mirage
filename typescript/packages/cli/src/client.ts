@@ -24,7 +24,7 @@ import { readDaemonTable, validateDaemonTable } from '@struktoai/mirage-server/d
 import { mirageHome } from '@struktoai/mirage-server/paths'
 
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
-import { loginPath } from './context.ts'
+import { loginCommand, loginPath } from './context.ts'
 import { LoginError, freshToken, readLogin } from './credentials.ts'
 import { isLocalUrl, loadDaemonSettings, type DaemonSettings } from './settings.ts'
 
@@ -69,7 +69,7 @@ export class DaemonClient {
       const stored = readLogin(path)
       if (stored?.url !== login.url) {
         throw new LoginError(
-          `not logged in to ${login.url} any more; run \`mirage login ${login.url}\``,
+          `not logged in to ${login.url} any more; run \`${loginCommand(login.url, this.settings.context)}\``,
         )
       }
       if (stored.logged_in_at !== login.logged_in_at) {

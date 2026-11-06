@@ -26,7 +26,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from mirage.cli.context import login_path
+from mirage.cli.context import login_command, login_path
 from mirage.cli.credentials import LoginError, fresh_token, read_login
 from mirage.cli.env import ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT
 from mirage.cli.settings import (
@@ -103,7 +103,7 @@ class DaemonClient:
             if login is None or login.url != bound.url:
                 raise LoginError(
                     f"not logged in to {bound.url} any more; "
-                    f"run `mirage login {bound.url}`"
+                    f"run `{login_command(bound.url, self.settings.context)}`"
                 )
             if login.logged_in_at != bound.logged_in_at:
                 raise LoginError(

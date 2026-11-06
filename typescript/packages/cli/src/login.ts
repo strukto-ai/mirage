@@ -30,14 +30,12 @@ import {
   currentName,
   currentWorkspace,
   header,
-  HOSTED,
-  HOSTED_URL,
-  LOCAL,
   localUrl,
   loginPath,
   readContexts,
-  writeContexts,
+  updateContexts,
 } from './context.ts'
+import { HOSTED, HOSTED_URL, LOCAL } from './constants.ts'
 import {
   LoginError,
   endsAt,
@@ -285,7 +283,8 @@ async function teamOf(url: string, token: string): Promise<string | null> {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(30_000),
     })
-  } catch {
+  } catch (err) {
+    console.debug(`${url}/v1/me is out of reach: ${String(err)}`)
     return null
   }
   const team = reply.ok ? (await jsonBody(reply)).team_id : undefined
@@ -298,20 +297,22 @@ async function teamOf(url: string, token: string): Promise<string | null> {
  * the one it follows anyway.
  */
 async function saveContext(name: string, url: string, login: Login | null): Promise<void> {
-  const contexts = readContexts()
-  const kept = contexts.contexts[name]
-  let stored = url
-  if (name === LOCAL) {
-    contexts.contexts[LOCAL] = { url: '', team: null, workspace: null }
-    if (url === localUrl(readDaemonTable(mirageHome(process.env)), contexts)) stored = ''
-  }
-  contexts.contexts[name] = {
-    url: stored,
-    team: login !== null ? await teamOf(url, login.access_token) : null,
-    workspace: kept?.url === stored ? kept.workspace : null,
-  }
-  contexts.current = name
-  writeContexts(contexts)
+  const team = login !== null ? await teamOf(url, login.access_token) : null
+  const table = readDaemonTable(mirageHome(process.env))
+  await updateContexts((contexts) => {
+    const kept = Object.hasOwn(contexts.contexts, name) ? contexts.contexts[name] : undefined
+    let stored = url
+    if (name === LOCAL) {
+      contexts.contexts[LOCAL] = { url: '', team: null, workspace: null }
+      if (url === localUrl(table, contexts)) stored = ''
+    }
+    contexts.contexts[name] = {
+      url: stored,
+      team,
+      workspace: kept?.url === stored ? kept.workspace : null,
+    }
+    contexts.current = name
+  })
 }
 
 export function registerLoginCommands(program: Command): void {

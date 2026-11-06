@@ -36,6 +36,17 @@ class SlowRecords(MemoryRecords):
         await super().write(folder, name, record)
 
 
+class SlowSealer(MemorySealer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = asyncio.Event()
+
+    async def wipe(self, kind: str, name: str) -> None:
+        self.started.set()
+        await asyncio.sleep(0.05)
+        await super().wipe(kind, name)
+
+
 class FailingRecords(MemoryRecords):
     def __init__(self) -> None:
         super().__init__()
@@ -132,6 +143,19 @@ async def test_a_cancelled_put_saves_record_and_secret_together():
         await put
     saved = await store.reveal_entry("vfs", "github")
     assert (saved.fields, saved.sealed) == ({"owner": "x"}, {"token": "t1"})
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_delete_removes_record_and_secret_together():
+    sealer = SlowSealer()
+    store = RecordResourceStore("t", MemoryRecords(), sealer)
+    await store.put_entry("vfs", GITHUB)
+    delete = asyncio.ensure_future(store.delete_entry("vfs", "github"))
+    await sealer.started.wait()
+    delete.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await delete
+    assert await store.list_entries("vfs") == []
 
 
 @pytest.mark.asyncio

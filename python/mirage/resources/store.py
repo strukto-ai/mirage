@@ -212,8 +212,24 @@ class RecordResourceStore(ResourceStore):
     async def delete_entry(self, kind: EntryKind, name: str) -> None:
         async with self._lock:
             await self._entry_record(kind, name)
-            await self._sealer.wipe(kind, name)
-            await self._records.remove(kind, name)
+            delete = asyncio.ensure_future(self._delete_entry(kind, name))
+            try:
+                await asyncio.shield(delete)
+            except asyncio.CancelledError:
+                await settle(delete)
+                raise
+
+    async def _delete_entry(self, kind: EntryKind, name: str) -> None:
+        """Wipe an entry's sealed values, then its record, as one step a
+        cancel does not split: a record left without its values would
+        still be listed with its credentials gone.
+
+        Args:
+            kind (EntryKind): the entry's kind.
+            name (str): its name.
+        """
+        await self._sealer.wipe(kind, name)
+        await self._records.remove(kind, name)
 
     async def reveal_entry(self, kind: EntryKind, name: str) -> RevealedEntry:
         async with self._lock:

@@ -30,11 +30,8 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 import typer
 
+from mirage.cli.constants import HOSTED, HOSTED_URL, LOCAL
 from mirage.cli.context import (
-    HOSTED,
-    HOSTED_URL,
-    LOCAL,
-    Context,
     check_name,
     current_name,
     current_workspace,
@@ -42,7 +39,7 @@ from mirage.cli.context import (
     local_url,
     login_path,
     read_contexts,
-    write_contexts,
+    update_contexts,
 )
 from mirage.cli.credentials import (
     Login,
@@ -57,12 +54,13 @@ from mirage.cli.credentials import (
 )
 from mirage.cli.output import emit, fail
 from mirage.cli.settings import is_local_url, load_daemon_settings
-from mirage.server.daemon_config import read_daemon_table
-from mirage.server.paths import mirage_home
+from mirage.cli.types import Context, Contexts
 from mirage.server.auth.config import (
     AUTHORIZATION_SERVER_PATH,
     PROTECTED_RESOURCE_PATH,
 )
+from mirage.server.daemon_config import read_daemon_table
+from mirage.server.paths import mirage_home
 from mirage.types import JsonValue
 
 CALLBACK_PATH = "/callback"
@@ -380,22 +378,26 @@ def save_context(name: str, url: str, login: Login | None) -> None:
         url (str): the server.
         login (Login | None): the login, when the server has one.
     """
-    contexts = read_contexts()
-    kept = contexts.contexts.get(name)
-    stored = url
-    if name == LOCAL:
-        contexts.contexts[LOCAL] = Context()
-        if url == local_url(read_daemon_table(mirage_home()), contexts):
-            stored = ""
-    contexts.contexts[name] = Context(
-        url=stored,
-        team=team_of(url, login.access_token) if login else None,
-        workspace=kept.workspace
-        if kept is not None and kept.url == stored
-        else None,
-    )
-    contexts.current = name
-    write_contexts(contexts)
+    team = team_of(url, login.access_token) if login else None
+    table = read_daemon_table(mirage_home())
+
+    def change(contexts: Contexts) -> None:
+        kept = contexts.contexts.get(name)
+        stored = url
+        if name == LOCAL:
+            contexts.contexts[LOCAL] = Context()
+            if url == local_url(table, contexts):
+                stored = ""
+        contexts.contexts[name] = Context(
+            url=stored,
+            team=team,
+            workspace=kept.workspace
+            if kept is not None and kept.url == stored
+            else None,
+        )
+        contexts.current = name
+
+    update_contexts(change)
 
 
 def login_cmd(

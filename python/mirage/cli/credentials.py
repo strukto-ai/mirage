@@ -23,7 +23,12 @@ from pathlib import Path
 
 import httpx
 
-from mirage.cli.context import current_name, login_path, read_contexts
+from mirage.cli.context import (
+    current_name,
+    login_command,
+    login_path,
+    read_contexts,
+)
 from mirage.types import JsonValue
 
 LOGIN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
@@ -204,8 +209,9 @@ def fresh_token(login: Login, path: Path | None = None) -> str:
         LoginError: the login is over 30 days old, its token ended with
             nothing to refresh it, or the issuer refused the refresh.
     """
+    use = path if path is not None else current_login_path()
+    again = f"run `{login_command(login.url, use.stem)}` to log in again"
     now = time.time()
-    again = f"run `mirage login {login.url}` to log in again"
     if now >= login.logged_in_at + LOGIN_MAX_AGE_SECONDS:
         raise LoginError(f"the login is 30 days old; {again}")
     if login.expires_at is None or now < (
@@ -239,5 +245,5 @@ def fresh_token(login: Login, path: Path | None = None) -> str:
     login.access_token = str(body["access_token"])
     login.refresh_token = str(body.get("refresh_token") or login.refresh_token)
     login.expires_at = ends_at(body, now)
-    write_login(login, path)
+    write_login(login, use)
     return login.access_token

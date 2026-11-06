@@ -1292,15 +1292,26 @@
     "emptyContext": "A fresh Context record; Python's Context dataclass has these defaults."
    }
   },
-  "cli/config": {
-   "python_only": {
-    "moved": "The old `mirage config` group, a second Typer app over the same verbs; commander registers it with registerConfigCommands(program, true).",
-    "moved_cmd": "The callback that warns `mirage config` moved; commander warns from a preAction hook in registerConfigCommands."
-   }
-  },
   "cli/main": {
    "python_only": {
     "root": "The Typer callback that takes the root --context option; commander takes it with a preAction hook in buildProgram."
+   }
+  },
+  "cli/template": {
+   "python_only": {
+    "app": "The Typer group of the template verbs; commander builds the same group in registerTemplateCommands.",
+    "OUTPUT": "The shared Typer -o option; commander declares -o on each verb inline.",
+    "_format_list": "The list's terminal table; commander formats it inline in the list action.",
+    "create_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "list_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "get_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "delete_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "restore_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
+   },
+   "typescript_only": {
+    "registerTemplateCommands": "Commander builds the template group in one function; Typer declares it as the module's app.",
+    "Template": "The shape of a template answer, which Python leaves as a dict.",
+    "call": "One client request per verb; each Typer verb opens its client inline."
    }
   }
  }

@@ -17,16 +17,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  ContextError,
   checkName,
   currentName,
   localUrl,
   loginPath,
   readContexts,
   resolveWorkspace,
+  updateContexts,
   writeContexts,
 } from './context.ts'
-import { readLogin, writeLogin, type Login } from './credentials.ts'
+import { ContextError } from './errors.ts'
+import { writeLogin, type Login } from './credentials.ts'
 import { buildProgram } from './main.ts'
 import { loadDaemonSettings } from './settings.ts'
 
@@ -138,14 +139,6 @@ describe('contexts', () => {
     expect(localUrl({ url: 'http://127.0.0.1:9300' }, own)).toBe('http://127.0.0.1:9400')
   })
 
-  it("moves a login kept before contexts to local's", () => {
-    writeFileSync(join(dir, 'login.json'), JSON.stringify(stored('http://127.0.0.1:8765')))
-    const path = loginPath('local')
-    expect(path).toBe(join(dir, 'logins', 'local.json'))
-    expect(existsSync(join(dir, 'login.json'))).toBe(false)
-    expect(readLogin(path)?.access_token).toBe('from-login')
-  })
-
   it("sends a remote context's login there, and never config.toml's token", () => {
     writeFileSync(join(dir, 'config.toml'), '[daemon]\nauth_token = "local-only"\n')
     writeContexts({
@@ -157,6 +150,18 @@ describe('contexts', () => {
     const settings = loadDaemonSettings()
     expect(settings).toMatchObject({ context: 'dev', url: 'https://dev.example', authToken: '' })
     expect(settings.login?.access_token).toBe('from-login')
+  })
+
+  it('keeps both of two changes made at once', async () => {
+    await Promise.all(
+      ['a', 'b'].map((name) =>
+        updateContexts((contexts) => {
+          contexts.contexts[name] = { url: `https://${name}.example`, team: null, workspace: null }
+        }),
+      ),
+    )
+    expect(Object.keys(readContexts().contexts).sort()).toEqual(['a', 'b', 'local'])
+    expect(existsSync(join(dir, 'contexts.json.lock'))).toBe(false)
   })
 
   it('picks the workspace from -w, then $MIRAGE_WORKSPACE, then the context', () => {
@@ -193,19 +198,17 @@ describe('contexts', () => {
     expect((await run(['context', 'use', 'dev'])).exitCode).toBe(0)
     expect(readContexts().current).toBe('dev')
     expect((await run(['context', 'use', 'nope'])).exitCode).toBe(2)
+    expect((await run(['context', 'use', 'constructor'])).exitCode).toBe(2)
     expect((await run(['context', 'delete', 'local'])).exitCode).toBe(2)
     expect((await run(['context', 'delete', 'dev'])).exitCode).toBe(0)
     expect(readContexts()).toMatchObject({ current: 'local' })
     expect(existsSync(join(dir, 'logins', 'dev.json'))).toBe(false)
   })
 
-  it('warns that config moved, and that url leaves config.toml', async () => {
-    const done = await run(['config', 'set', 'url', 'http://127.0.0.1:9'])
-    expect(done.stderr).toContain('`mirage config` moved to `mirage daemon config`')
-    expect(done.stderr).toContain('url leaves config.toml in the next release')
-    expect(readFileSync(join(dir, 'config.toml'), 'utf-8')).toContain('url = "http://127.0.0.1:9"')
-    const daemon = await run(['daemon', 'config', 'get', 'url'])
-    expect(daemon.stderr).toBe('')
-    expect(JSON.parse(daemon.stdout)).toEqual({ url: 'http://127.0.0.1:9' })
+  it('keeps the daemon settings under daemon config', async () => {
+    const done = await run(['daemon', 'config', 'set', 'port', '9100'])
+    expect(done.exitCode).toBe(0)
+    expect(readFileSync(join(dir, 'config.toml'), 'utf-8')).toContain('port = 9100')
+    expect(loadDaemonSettings().url).toBe('http://127.0.0.1:9100')
   })
 })

@@ -20,49 +20,31 @@ import {
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeSync,
 } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { readDaemonTable } from '@struktoai/mirage-server/daemon_config'
 import { mirageHome } from '@struktoai/mirage-server/paths'
 import type { Command } from 'commander'
+import {
+  CONTEXT_NAME,
+  CONTEXTS_FILE,
+  DEFAULT_PORT,
+  LOCAL,
+  LOCK_RETRY_SECONDS,
+  LOCK_STALE_SECONDS,
+  LOCK_WAIT_SECONDS,
+  LOGINS_DIR,
+} from './constants.ts'
 import { ENV_CONTEXT, ENV_DAEMON_PORT, ENV_WORKSPACE } from './env.ts'
+import { ContextError } from './errors.ts'
 import { emit, fail, formatTable } from './output.ts'
+import type { Context, Contexts } from './types.ts'
 
 type Env = Record<string, string | undefined>
-
-const CONTEXTS_FILE = 'contexts.json'
-const LOGINS_DIR = 'logins'
-const LEGACY_LOGIN_FILE = 'login.json'
-export const LOCAL = 'local'
-export const HOSTED = 'strukto'
-export const HOSTED_URL = 'https://api.strukto.ai'
-const DEFAULT_PORT = 8765
-const NAME = /^[a-z0-9][a-z0-9._-]{0,62}$/
-
-/** A context that does not exist, or one that cannot be changed. */
-export class ContextError extends Error {
-  override readonly name = 'ContextError'
-}
-
-/**
- * One server the CLI talks to, with what it remembers there: its URL
- * (empty for `local`, whose URL follows the daemon's port), the team the
- * login acts for if the server names one, and the workspace commands use
- * when given none.
- */
-interface Context {
-  url: string
-  team: string | null
-  workspace: string | null
-}
-
-/** The contexts file: which context is current, and every context; `local` is always there. */
-export interface Contexts {
-  current: string
-  contexts: Record<string, Context>
-}
 
 function emptyContext(): Context {
   return { url: '', team: null, workspace: null }
@@ -72,24 +54,14 @@ function contextsPath(env: Env): string {
   return join(mirageHome(env), CONTEXTS_FILE)
 }
 
-/**
- * Where a context's login is kept. A login kept before contexts existed
- * belongs to `local`, whose URL it was made for, and moves there on first
- * use.
- */
+/** Where a context's login is kept. */
 export function loginPath(name: string, env: Env = process.env): string {
-  const path = join(mirageHome(env), LOGINS_DIR, `${name}.json`)
-  const legacy = join(mirageHome(env), LEGACY_LOGIN_FILE)
-  if (name === LOCAL && existsSync(legacy) && !existsSync(path)) {
-    mkdirSync(dirname(path), { recursive: true, mode: 0o700 })
-    renameSync(legacy, path)
-  }
-  return path
+  return join(mirageHome(env), LOGINS_DIR, `${name}.json`)
 }
 
 /** A context name, refused unless it is safe as a file name. */
 export function checkName(name: string): string {
-  if (!NAME.test(name)) {
+  if (!CONTEXT_NAME.test(name)) {
     throw new ContextError(
       `invalid context name '${name}': use lowercase letters, digits, '.', '_' and '-'`,
     )
@@ -100,7 +72,10 @@ export function checkName(name: string): string {
 /** The contexts file; with none, only `local`. */
 export function readContexts(env: Env = process.env): Contexts {
   const path = contextsPath(env)
-  const found: Contexts = { current: LOCAL, contexts: {} }
+  const found: Contexts = {
+    current: LOCAL,
+    contexts: Object.create(null) as Record<string, Context>,
+  }
   if (existsSync(path)) {
     let raw: { current?: string; contexts?: Record<string, Partial<Context>> }
     try {
@@ -113,7 +88,7 @@ export function readContexts(env: Env = process.env): Contexts {
       found.contexts[name] = { ...emptyContext(), ...entry }
     }
   }
-  found.contexts[LOCAL] ??= emptyContext()
+  if (!Object.hasOwn(found.contexts, LOCAL)) found.contexts[LOCAL] = emptyContext()
   return found
 }
 
@@ -132,6 +107,66 @@ export function writeContexts(contexts: Contexts, env: Env = process.env): void 
 }
 
 /**
+ * Run `fn` holding the contexts file's lock, so one command at a time
+ * reads, changes and writes it. A lock older than `LOCK_STALE_SECONDS` was
+ * left by a command that died, and is taken over; throws `ContextError`
+ * when another command held it for `LOCK_WAIT_SECONDS`.
+ */
+async function contextsLock<T>(fn: () => T, env: Env = process.env): Promise<T> {
+  const path = join(mirageHome(env), `${CONTEXTS_FILE}.lock`)
+  mkdirSync(dirname(path), { recursive: true })
+  const deadline = Date.now() + LOCK_WAIT_SECONDS * 1000
+  let fd: number
+  for (;;) {
+    try {
+      fd = openSync(path, 'wx', 0o600)
+      break
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err
+    }
+    let age: number
+    try {
+      age = Date.now() / 1000 - statSync(path).mtimeMs / 1000
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') continue
+      throw err
+    }
+    if (age > LOCK_STALE_SECONDS) {
+      rmSync(path, { force: true })
+      continue
+    }
+    if (Date.now() > deadline) {
+      throw new ContextError(`${path} is held by another mirage command`)
+    }
+    await sleep(LOCK_RETRY_SECONDS * 1000)
+  }
+  try {
+    return fn()
+  } finally {
+    closeSync(fd)
+    rmSync(path, { force: true })
+  }
+}
+
+/** Read, change and write the contexts file under its lock, so a command running at the same time loses nothing. */
+export async function updateContexts<T>(
+  change: (contexts: Contexts) => T,
+  env: Env = process.env,
+): Promise<T> {
+  return contextsLock(() => {
+    const contexts = readContexts(env)
+    const result = change(contexts)
+    writeContexts(contexts, env)
+    return result
+  }, env)
+}
+
+/** The command that logs a context in again. */
+export function loginCommand(url: string, name: string): string {
+  return `mirage login ${url} --name ${name}`
+}
+
+/**
  * The context this command uses: `--context` or `$MIRAGE_CONTEXT`, else
  * the file's current one. Throws `ContextError` when there is none by
  * that name.
@@ -139,7 +174,7 @@ export function writeContexts(contexts: Contexts, env: Env = process.env): void 
 export function currentName(contexts: Contexts, env: Env = process.env): string {
   const fromEnv = env[ENV_CONTEXT]
   const name = fromEnv !== undefined && fromEnv !== '' ? fromEnv : contexts.current
-  if (!(name in contexts.contexts)) {
+  if (!Object.hasOwn(contexts.contexts, name)) {
     throw new ContextError(`no context '${name}'; run \`mirage context list\``)
   }
   return name
@@ -199,15 +234,13 @@ export function header(action: string, name?: string): void {
   process.stderr.write(parts.join(' · ') + '\n')
 }
 
-/** Make a workspace the current context's. */
-export function useWorkspace(workspaceId: string): void {
-  const contexts = readContexts()
-  const name = currentName(contexts)
-  contexts.contexts[name] = {
-    ...(contexts.contexts[name] ?? emptyContext()),
-    workspace: workspaceId,
-  }
-  writeContexts(contexts)
+/** Make a workspace the current one of context `name`, as the command chose it. */
+export async function useWorkspace(name: string, workspaceId: string): Promise<void> {
+  await updateContexts((contexts) => {
+    const entry = Object.hasOwn(contexts.contexts, name) ? contexts.contexts[name] : undefined
+    if (entry === undefined) throw new ContextError(`no context '${name}'`)
+    entry.workspace = workspaceId
+  })
 }
 
 interface ContextRow {
@@ -254,13 +287,13 @@ export function registerContextCommands(program: Command): void {
     .command('use')
     .argument('<name>', 'Context name')
     .description('Make a context the current one.')
-    .action((name: string) => {
-      const contexts = readContexts()
-      if (!(name in contexts.contexts)) {
-        throw new ContextError(`no context '${name}'; run \`mirage context list\``)
-      }
-      contexts.current = name
-      writeContexts(contexts)
+    .action(async (name: string) => {
+      await updateContexts((contexts) => {
+        if (!Object.hasOwn(contexts.contexts, name)) {
+          throw new ContextError(`no context '${name}'; run \`mirage context list\``)
+        }
+        contexts.current = name
+      })
       header('now current', name)
       emit({ current: name }, () => `Using context ${name}.`)
     })
@@ -269,17 +302,17 @@ export function registerContextCommands(program: Command): void {
     .command('delete')
     .argument('<name>', 'Context name')
     .description('Forget a context and its login; `local` stays.')
-    .action((name: string) => {
+    .action(async (name: string) => {
       if (name === LOCAL) throw new ContextError('the local context cannot be deleted')
-      const contexts = readContexts()
-      if (!(name in contexts.contexts)) {
-        throw new ContextError(`no context '${name}'; run \`mirage context list\``)
-      }
-      contexts.contexts = Object.fromEntries(
-        Object.entries(contexts.contexts).filter(([n]) => n !== name),
-      )
-      if (contexts.current === name) contexts.current = LOCAL
-      writeContexts(contexts)
+      await updateContexts((contexts) => {
+        if (!Object.hasOwn(contexts.contexts, name)) {
+          throw new ContextError(`no context '${name}'; run \`mirage context list\``)
+        }
+        contexts.contexts = Object.fromEntries(
+          Object.entries(contexts.contexts).filter(([n]) => n !== name),
+        )
+        if (contexts.current === name) contexts.current = LOCAL
+      })
       rmSync(join(mirageHome(process.env), LOGINS_DIR, `${name}.json`), { force: true })
       emit({ deleted: name }, () => `Deleted context ${name}.`)
     })
