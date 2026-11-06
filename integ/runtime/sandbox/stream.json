@@ -6,6 +6,7 @@
         "docker",
         "ssh",
         "e2b",
+        "microsandbox",
         "apple_container"
       ],
       "entry": {
@@ -73,6 +74,7 @@
         "docker",
         "ssh",
         "e2b",
+        "microsandbox",
         "apple_container"
       ],
       "entry": {
@@ -104,6 +106,7 @@
         "docker",
         "ssh",
         "e2b",
+        "microsandbox",
         "apple_container"
       ],
       "entry": {
