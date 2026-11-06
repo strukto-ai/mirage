@@ -14,6 +14,7 @@
 
 
 from enum import StrEnum
+from typing import Literal, NotRequired, TypeAlias, TypedDict
 
 
 class ResourceStoreBackend(StrEnum):
@@ -22,3 +23,24 @@ class ResourceStoreBackend(StrEnum):
 
     FILES = "files"
     MEMORY = "memory"
+
+
+FieldType: TypeAlias = Literal["string", "number", "boolean", "list"]
+
+
+class Field(TypedDict):
+    """One field of a type's config, as a config file writes it and as
+    the console's ``/types`` answers it."""
+
+    name: str
+    type: FieldType
+    secret: bool
+    required: bool
+    options: NotRequired[list[str]]
+    description: NotRequired[str]
+    default: NotRequired[str | int | float | bool]
+    group: NotRequired[str]
+
+
+TypeTable: TypeAlias = dict[str, list[Field]]
+"""Each type of a kind with its fields, by type name."""
