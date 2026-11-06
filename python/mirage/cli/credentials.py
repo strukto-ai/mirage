@@ -116,8 +116,11 @@ def context_path(name: str) -> Path:
 
     Returns:
         Path: its file.
+
+    Raises:
+        ContextError: the name is not safe as a file name.
     """
-    return mirage_home() / CONTEXTS_DIR / f"{name}.json"
+    return mirage_home() / CONTEXTS_DIR / f"{check_name(name)}.json"
 
 
 def login_path(name: str) -> Path:
@@ -128,8 +131,11 @@ def login_path(name: str) -> Path:
 
     Returns:
         Path: its login file.
+
+    Raises:
+        ContextError: the name is not safe as a file name.
     """
-    return mirage_home() / LOGINS_DIR / f"{name}.json"
+    return mirage_home() / LOGINS_DIR / f"{check_name(name)}.json"
 
 
 def login_command(url: str, name: str) -> str:
@@ -217,7 +223,7 @@ def context_names() -> list[str]:
     found = (
         {p.stem for p in folder.glob("*.json")} if folder.exists() else set()
     )
-    return sorted(found | {LOCAL})
+    return sorted({n for n in found if CONTEXT_NAME.match(n)} | {LOCAL})
 
 
 def read_current() -> str:
@@ -240,9 +246,19 @@ def write_current(name: str) -> None:
     _write_owner_only(mirage_home() / CURRENT_FILE, name + "\n")
 
 
+def chosen_name() -> str:
+    """The context this command asks for: ``--context`` or
+    ``$MIRAGE_CONTEXT``, else the current one, else ``local``; it may
+    not exist.
+
+    Returns:
+        str: its name.
+    """
+    return os.environ.get(ENV_CONTEXT) or read_current()
+
+
 def current_name() -> str:
-    """The context this command uses: ``--context`` or
-    ``$MIRAGE_CONTEXT``, else the current one, else ``local``.
+    """The context this command uses, as ``chosen_name`` picks it.
 
     Returns:
         str: its name.
@@ -250,7 +266,7 @@ def current_name() -> str:
     Raises:
         ContextError: there is no context by that name.
     """
-    name = os.environ.get(ENV_CONTEXT) or read_current()
+    name = chosen_name()
     if read_context(name) is None:
         raise ContextError(f"no context {name!r}; run `mirage context list`")
     return name

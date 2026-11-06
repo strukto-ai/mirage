@@ -507,6 +507,25 @@ describe('contexts', () => {
     expect(existsSync(join(dir, 'contexts', 'dev.json'))).toBe(false)
   })
 
+  it('refuses a name that is no safe file name everywhere', async () => {
+    writeContext('local', { url: '', team: null, workspace: 'kept' })
+    for (const args of [
+      ['context', 'delete', './local'],
+      ['context', 'use', '../up'],
+      ['--context', '../up', 'whoami'],
+    ]) {
+      expect((await runProgram(args)).exitCode).toBe(2)
+    }
+    expect(existsSync(join(dir, 'contexts', 'local.json'))).toBe(true)
+  })
+
+  it('lists the contexts when the current one is gone', async () => {
+    writeFileSync(join(dir, 'current_context'), 'gone\n')
+    const done = await runProgram(['context', 'list'])
+    expect(done.exitCode).toBe(0)
+    expect((JSON.parse(done.stdout) as { name: string }[]).map((r) => r.name)).toEqual(['local'])
+  })
+
   it('keeps the daemon settings under daemon config', async () => {
     const done = await runProgram(['daemon', 'config', 'set', 'port', '9100'])
     expect(done.exitCode).toBe(0)

@@ -97,8 +97,8 @@ _ENV_FOR_KEY = {
 }
 
 
-def local_url(table: dict[str, Any]) -> str:
-    """The ``local`` context's URL: the one it logged in to, else
+def default_local_url(table: dict[str, Any]) -> str:
+    """The URL ``local`` follows when it keeps none of its own:
     config.toml's ``url``, else this machine at the port a spawned
     daemon listens on.
 
@@ -113,12 +113,21 @@ def local_url(table: dict[str, Any]) -> str:
         or str(table.get("port", ""))
         or DEFAULT_PORT
     )
+    return str(table.get("url", "")) or f"http://127.0.0.1:{port}"
+
+
+def local_url(table: dict[str, Any]) -> str:
+    """The ``local`` context's URL: the one it logged in to, else
+    ``default_local_url``.
+
+    Args:
+        table (dict[str, Any]): config.toml's ``[daemon]`` table.
+
+    Returns:
+        str: the URL.
+    """
     local = read_context(LOCAL)
-    return (
-        (local.url if local else "")
-        or str(table.get("url", ""))
-        or f"http://127.0.0.1:{port}"
-    )
+    return (local.url if local else "") or default_local_url(table)
 
 
 def current_workspace() -> str | None:
@@ -247,9 +256,11 @@ def load_daemon_settings(path: Path | None = None) -> DaemonSettings:
     name = current_name()
     local = name == LOCAL
     context = read_context(name)
+    if context is None:
+        raise ContextError(f"no context {name!r}; run `mirage context list`")
     settings = DaemonSettings(
         context=name,
-        url=local_url(table) if local or context is None else context.url,
+        url=local_url(table) if local else context.url,
         socket=str(table.get("socket", "")) if local else "",
         auth_token=str(table.get("auth_token", "")) if local else "",
         idle_grace_seconds=float(table.get("idle_grace_seconds", 30.0)),

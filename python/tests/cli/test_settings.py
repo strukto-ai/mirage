@@ -17,8 +17,10 @@ import time
 import pytest
 from typer.testing import CliRunner
 
+from mirage.cli import settings as settings_module
 from mirage.cli.credentials import (
     Context,
+    ContextError,
     Login,
     login_path,
     write_context,
@@ -393,3 +395,11 @@ def test_no_workspace_selected_gives_a_hint(home):
     done = CliRunner().invoke(app, ["shell", "-c", "true"])
     assert done.exit_code == 2
     assert "run `mirage workspace use <id>` or pass -w" in done.output
+
+
+def test_a_context_gone_mid_command_is_refused_not_sent_local(
+    home, monkeypatch
+):
+    monkeypatch.setattr(settings_module, "current_name", lambda: "gone")
+    with pytest.raises(ContextError, match="no context 'gone'"):
+        load_daemon_settings()

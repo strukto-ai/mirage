@@ -30,6 +30,7 @@ import {
   ContextError,
   LoginError,
   checkName,
+  chosenName,
   contextNames,
   currentName,
   emptyContext,
@@ -49,7 +50,14 @@ import {
   type Login,
 } from './credentials.ts'
 import { emit, fail, formatTable } from './output.ts'
-import { currentWorkspace, header, isLocalUrl, loadDaemonSettings, localUrl } from './settings.ts'
+import {
+  currentWorkspace,
+  defaultLocalUrl,
+  header,
+  isLocalUrl,
+  loadDaemonSettings,
+  localUrl,
+} from './settings.ts'
 
 const CALLBACK_PATH = '/callback'
 const CALLBACK_TIMEOUT_SECONDS = 300
@@ -301,11 +309,7 @@ async function saveContext(name: string, url: string, login: Login | null): Prom
   const team = login !== null ? await teamOf(url, login.access_token) : null
   const table = readDaemonTable(mirageHome(process.env))
   const kept = readContext(name)
-  let stored = url
-  if (name === LOCAL) {
-    writeContext(LOCAL, emptyContext())
-    if (url === localUrl(table)) stored = ''
-  }
+  const stored = name === LOCAL && url === defaultLocalUrl(table) ? '' : url
   writeContext(name, {
     url: stored,
     team,
@@ -403,7 +407,7 @@ export function registerContextCommands(program: Command): void {
     .command('list')
     .description('List the contexts; the current one is marked.')
     .action(() => {
-      const current = currentName()
+      const current = chosenName()
       const table = readDaemonTable(mirageHome(process.env))
       const rows: ContextRow[] = contextNames().map((name) => {
         const entry = readContext(name) ?? emptyContext()
