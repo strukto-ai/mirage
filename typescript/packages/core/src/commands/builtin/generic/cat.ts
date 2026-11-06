@@ -14,7 +14,7 @@
 
 import { stdinStream, stdinStat } from '../utils/stream.ts'
 import { asyncChain, ensureStream } from '../../../io/stream.ts'
-import { IOResult, type ByteSource } from '../../../io/types.ts'
+import { IOResult, materialize, type ByteSource } from '../../../io/types.ts'
 import {
   FileType,
   Limit,
@@ -24,6 +24,7 @@ import {
   type ReadStreamFn,
 } from '../../../types.ts'
 import type { CommandFnResult, Context } from '../../config.ts'
+import { ownOutput } from '../utils/links.ts'
 import { reportedStream, splitReadable } from '../utils/operands.ts'
 import { resolveSource, streamOutput } from '../utils/stream.ts'
 import { openStream } from '../../../rs/stream.ts'
@@ -33,6 +34,7 @@ import { specOf } from '../../spec/builtins.ts'
 import { CHAR_DEVICE_MAX_BYTES } from '../utils/constants.ts'
 import { truncateStream } from '../utils/limit.ts'
 import { encodeText } from '../../../shell/bytes.ts'
+import { concat } from '../../../utils/bytes.ts'
 
 interface CatFlags {
   readonly numberLines: boolean
@@ -75,6 +77,28 @@ async function displayLines(
   )
 }
 
+/**
+ * The operand cat's own stdout writes: GNU copies none of it once it holds
+ * bytes, as reading a file while it grows would never end.
+ */
+async function* unlessOutput(
+  source: AsyncIterable<Uint8Array>,
+  io: IOResult,
+  path: PathSpec,
+): AsyncGenerator<Uint8Array> {
+  for await (const chunk of source) {
+    if (chunk.byteLength > 0) {
+      io.stderr = concat([
+        await materialize(io.stderr),
+        encodeText(`cat: ${path.rawPath}: input file is output file\n`),
+      ])
+      io.exitCode = 1
+      return
+    }
+    yield chunk
+  }
+}
+
 export async function catGeneric(
   paths: PathSpec[],
   texts: string[],
@@ -100,12 +124,13 @@ export async function catGeneric(
     }
     const outputs: AsyncIterable<Uint8Array>[] = []
     const io = new IOResult({ exitCode: err === '' ? 0 : 1, stderr: errBytes })
+    const writes = ownOutput(ctx)
     for (const p of readable) {
       let source: ByteSource = stream(p)
       if (stats.get(p.virtual)?.type === FileType.CHAR_DEVICE) {
         source = truncateStream(source, io, new Limit({ maxBytes: CHAR_DEVICE_MAX_BYTES }))
       }
-      const out = ensureStream(source)
+      const out = writes(p) ? unlessOutput(ensureStream(source), io, p) : ensureStream(source)
       outputs.push(readable.length === 1 ? out : reportedStream(out, io, p, 'cat'))
     }
     const merged = outputs.length === 1 ? outputs[0] : asyncChain(outputs)

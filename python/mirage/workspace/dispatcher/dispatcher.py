@@ -1005,6 +1005,8 @@ class Dispatcher:
         try:
             if caller is None:
                 caller = current_caller()
+            if caller.streamed:
+                await self._hand_over(caller.streamed, path, kwargs)
             if self._admit_write is None or name not in POLICY_WRITE_OPS:
                 return await run_with_system_clock(
                     system_clock,
@@ -1042,6 +1044,41 @@ class Dispatcher:
         finally:
             if name in ("write", "append", "pwrite"):
                 await close_quietly(kwargs.get("data"))
+
+    async def _hand_over(
+        self,
+        streamed: tuple[tuple[str, Callable[[], Awaitable[None]]], ...],
+        path: PathSpec,
+        kwargs: dict[str, Any],
+    ) -> None:
+        """Have a redirect that writes a file this op reaches, by any
+        spelling, commit what its command wrote so far, so the op finds
+        what a descriptor's writes would have left there (``{ seq 3; wc
+        -l < f; } > f``).
+
+        Args:
+            streamed (tuple[tuple[str, Callable[[], Awaitable[None]]], ...]):
+                the caller's streamed files, each with its hold.
+            path (PathSpec): the op's path.
+            kwargs (dict[str, Any]): its arguments, a destination among
+                them.
+        """
+        reached = {
+            self._followed(p.virtual)
+            for p in (
+                path,
+                *(v for v in kwargs.values() if isinstance(v, PathSpec)),
+            )
+        }
+        for target, hold in streamed:
+            if self._followed(target) in reached:
+                await hold()
+
+    def _followed(self, virtual: str) -> str:
+        try:
+            return self._namespace.follow(virtual)
+        except CycleError:
+            return virtual
 
     async def _bound(
         self,

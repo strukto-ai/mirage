@@ -58,6 +58,7 @@ from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
+from mirage.shell.descriptors import Recorder
 from mirage.shell.errors import (
     ArithError,
     DiscardSignal,
@@ -876,6 +877,11 @@ async def _run_argv(
                 command=argv.name,
                 invocation=admitted.ctx if admitted is not None else None,
                 declared=None,
+                output_file=(
+                    output.output_file
+                    if isinstance(output, Recorder)
+                    else None
+                ),
             )
         )
         try:

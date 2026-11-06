@@ -157,16 +157,21 @@ describe('mirage in workerd', () => {
     expect(after?.stdout).toBe('ok\n')
   })
 
-  it('streams a redirect into its file, and stops output held for one at max_memory', async () => {
-    const [streamed, held, after] = await run(
-      ['seq 1 10000000 > /tmp/big', 'seq 1 10000000 | sed s/1/x/ > /tmp/big', 'echo ok'],
+  it('streams a redirect into its file as its command writes it, a group included', async () => {
+    const results = await run(
+      [
+        'seq 1 10000000 > /tmp/big',
+        'seq 1 10000000 | sed s/1/x/ > /tmp/big',
+        '{ seq 1 5000000; seq 1 5000000; } > /tmp/big',
+        'echo ok',
+      ],
       '8MB',
     )
-    expect(streamed?.exit).toBe(1)
-    expect(streamed?.stderr).toBe('/tmp/big: Disk quota exceeded\n')
-    expect(held?.exit).toBe(1)
-    expect(held?.stderr).toBe('line: memory exhausted\n')
-    expect(after?.stdout).toBe('ok\n')
+    for (const streamed of results.slice(0, 3)) {
+      expect(streamed.exit).toBe(1)
+      expect(streamed.stderr).toBe('/tmp/big: Disk quota exceeded\n')
+    }
+    expect(results[3]?.stdout).toBe('ok\n')
   })
 
   it.skipIf(REDIS_URL === undefined)(

@@ -855,6 +855,7 @@ async def _run_redirected(
                     name=name,
                     args=args,
                     forked=ran_forked,
+                    follow=namespace.session_links(context.session).follow,
                 )
 
             token = set_redirect_paths(
@@ -883,6 +884,7 @@ async def _run_redirected(
                 sink=sink,
                 expand=expand,
                 forked=forked,
+                follow=namespace.session_links(context.session).follow,
             )
         if simple and command is not None and context.frame.diagnostics:
             err = diagnostic_stderr(command, context)

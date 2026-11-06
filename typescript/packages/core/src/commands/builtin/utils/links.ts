@@ -291,6 +291,25 @@ export function mountRoot(ctx: Context): string {
 }
 
 /**
+ * Which operands are, through their links, the regular file the running
+ * command's stdout writes (`cat f >> f`), as the command starts; it may read
+ * them after that, as its stream is pulled. Mirrors Python's own_output.
+ */
+export function ownOutput(ctx: Context): (path: PathSpec) => boolean {
+  const output = currentCaller().outputFile
+  const links = linksOf(ctx)
+  return (path) => {
+    if (output === null) return false
+    try {
+      return (links === undefined ? path.virtual : links.resolve(path.virtual)) === output
+    } catch (error) {
+      if (error instanceof CycleError) return false
+      throw error
+    }
+  }
+}
+
+/**
  * Where the mount boundaries are for the command's walk, read off its files;
  * undefined outside a workspace. A run across mounts (`crossesMounts`) has
  * the dispatcher descend into every mount, so it has no boundary to stop at.

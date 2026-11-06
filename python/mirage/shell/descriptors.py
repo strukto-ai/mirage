@@ -131,6 +131,9 @@ class Recorder(JobConsole, StreamOwner):
     A chunk on a channel goes through the level's descriptor table; one
     written to a stream another level owns stays in place on its way up
     to that level, so it lands among the bytes written around it.
+    ``output_file`` is the regular file the level's stdout writes, if
+    one does, which a command writing to the level may not read as its
+    input (``cat f >> f``).
     """
 
     def __init__(self) -> None:
@@ -139,6 +142,7 @@ class Recorder(JobConsole, StreamOwner):
         self.storage = ByteSpool()
         self.writing = asyncio.Lock()
         self.pending = 0
+        self.output_file: str | None = None
 
     @property
     def busy(self) -> bool:

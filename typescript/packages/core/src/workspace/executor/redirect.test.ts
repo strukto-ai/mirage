@@ -95,6 +95,83 @@ describe('handleRedirect > / >>', () => {
     }
   })
 
+  it.each([
+    "seq 1 2000 | awk '{print}' > /data/out",
+    'seq 1 2000 | sed s/1/x/ > /data/out',
+    'seq 1 2000 | tee /data/copy > /data/out',
+    '{ seq 1 1000; seq 1001 2000; } > /data/out',
+    'for i in 1 2; do seq 1 1000; done > /data/out',
+    'f() { seq 1 2000; }; f > /data/out',
+  ])('%s goes into its file as it is written', async (line) => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const emit = vi.spyOn(Recorder.prototype, 'emit')
+    try {
+      await ws.shell('mkdir -p /data')
+      emit.mockClear()
+      expect((await ws.shell(line)).exitCode).toBe(0)
+      const held = emit.mock.calls.filter(
+        ([channel], i) =>
+          emit.mock.contexts[i] instanceof PipeRecorder && channel === Channel.STDOUT,
+      )
+      expect(held).toEqual([])
+      expect((await ws.shell('wc -l /data/out')).stdoutText).toBe('2000 /data/out\n')
+    } finally {
+      emit.mockRestore()
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['{ seq 3; wc -l < /data/f; } > /data/f', 0, '1\n2\n3\n3\n', ''],
+    ['{ echo A; head -n 1 /data/link; } > /data/f', 0, 'A\nA\n', ''],
+    ['{ echo A; echo B >> /data/f; echo C; } > /data/f', 0, 'A\nC\n', ''],
+    [
+      'for f in /data/a /data/f; do cat $f; done > /data/f',
+      1,
+      'a\n',
+      'cat: /data/f: input file is output file\n',
+    ],
+    [
+      '{ echo A; grep A /data/link; } > /data/f',
+      2,
+      'A\n',
+      'grep: /data/link: input file is also the output\n',
+    ],
+    ['f() { seq 3; return 4; }; f > /data/f', 4, '1\n2\n3\n', ''],
+    ['( echo A; exit 3 ) > /data/f', 3, 'A\n', ''],
+  ])(
+    'an op on a streamed file finds what was written: %s',
+    async (line, status, content, stderr) => {
+      const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+      try {
+        await ws.shell('mkdir -p /data; echo a > /data/a; ln -s /data/f /data/link')
+        const io = await ws.shell(line)
+        expect(io.exitCode).toBe(status)
+        expect(io.stderrText).toBe(stderr)
+        expect((await ws.shell('cat /data/f')).stdoutText).toBe(content)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('cat and grep refuse their own output file as GNU does', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('echo x > /f')
+      let io = await ws.shell('cat /f >> /f')
+      expect([io.exitCode, io.stderrText]).toEqual([1, 'cat: /f: input file is output file\n'])
+      expect((await ws.shell('grep -c x /f >> /f')).exitCode).toBe(0)
+      io = await ws.shell('grep x /f >> /f')
+      expect([io.exitCode, io.stderrText]).toEqual([2, 'grep: /f: input file is also the output\n'])
+      expect((await ws.shell('cat /f')).stdoutText).toBe('x\n1\n')
+      expect((await ws.shell('cat /f > /f')).exitCode).toBe(0)
+      expect((await ws.shell('cat /f')).stdoutText).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('>> dispatches append without reading the target', async () => {
     const writes: { path: string; data: Uint8Array }[] = []
     const dispatch = vi.fn<DispatchFn>((op, path, args) => {

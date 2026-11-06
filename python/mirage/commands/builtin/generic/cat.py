@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass
 
 from mirage.commands.builtin.utils.constants import CHAR_DEVICE_MAX_BYTES
 from mirage.commands.builtin.utils.limit import truncate_stream
+from mirage.commands.builtin.utils.links import own_output
 from mirage.commands.builtin.utils.operands import (
     normalized_read,
     operands_io,
@@ -19,9 +20,10 @@ from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
 from mirage.commands.spec.types import FlagValue
-from mirage.io.stream import OutputStream, async_chain
-from mirage.io.types import ByteSource, IOResult
+from mirage.io.stream import OutputStream, async_chain, close_quietly
+from mirage.io.types import ByteSource, IOResult, materialize
 from mirage.rs.stream import open_stream
+from mirage.shell.bytes import encode_text
 from mirage.types import (
     FileStat,
     FileType,
@@ -122,9 +124,17 @@ async def cat_generic(
                 )
             return source
 
+        writes = own_output(ctx)
         source: ByteSource = async_chain(
             [
-                reported_stream(await source_for(p), io, p, "cat")
+                reported_stream(
+                    _unless_output(await source_for(p), io, p)
+                    if writes(p)
+                    else await source_for(p),
+                    io,
+                    p,
+                    "cat",
+                )
                 for p in readable
             ]
         )
@@ -135,6 +145,30 @@ async def cat_generic(
     if wants_display:
         return display_lines(source, parsed), IOResult()
     return source, IOResult()
+
+
+async def _unless_output(
+    source: AsyncIterator[bytes], io: IOResult, path: PathSpec
+) -> AsyncIterator[bytes]:
+    """The operand cat's own stdout writes: GNU copies none of it once
+    it holds bytes, as reading a file while it grows would never end.
+
+    Args:
+        source (AsyncIterator[bytes]): the operand's bytes.
+        io (IOResult): the result the refusal is reported on.
+        path (PathSpec): the operand.
+    """
+    try:
+        async for chunk in source:
+            if chunk:
+                io.stderr = (await materialize(io.stderr)) + encode_text(
+                    f"cat: {path.raw_path}: input file is output file\n"
+                )
+                io.exit_code = 1
+                return
+            yield chunk
+    finally:
+        await close_quietly(source)
 
 
 def display_lines(source: ByteSource, parsed: CatFlags) -> OutputStream:

@@ -68,7 +68,7 @@ from mirage.shell.errors import ExitSignal
 from mirage.shell.helpers import get_text, literal_word
 from mirage.shell.types import Redirect, RedirectKind, TSNodeLike
 from mirage.types import FileStat, FileType, PathSpec
-from mirage.utils.path import ends_at_dot, owner_prefix
+from mirage.utils.path import CycleError, ends_at_dot, owner_prefix
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins import _to_scope
 from mirage.workspace.executor.builtins.exec.constants import (
@@ -95,10 +95,10 @@ from mirage.workspace.types import ExecutionNode
 
 logger = logging.getLogger(__name__)
 
-# These producers write no named file while their output is consumed (curl
-# writes its cookie jar once its body has ended), so their output streams
-# into a redirect's file; any other command's output is replayed once it
-# ends.
+# What these return streams into a redirect's file as it is read; a file
+# one reads or writes meanwhile (awk's `print > f`, sed's `w f`, tee's
+# operands) first takes what streamed (`PipeRecorder.hold`). What any other
+# command returns is replayed once it ends.
 STREAM_OUTPUT_BUILTINS = frozenset(
     {
         "cat",
@@ -152,6 +152,9 @@ STREAM_OUTPUT_BUILTINS = frozenset(
         "sha256sum",
         "sha384sum",
         "sha512sum",
+        "awk",
+        "sed",
+        "tee",
     }
 )
 
@@ -219,13 +222,19 @@ class PipeRecorder(Recorder):
         self.broken: set[int] = set()
         self.file: FileDescription | None = None
         self.failure: Exception | None = None
+        self.streaming = asyncio.Lock()
 
     async def consume(self, file: FileDescription, source: ByteSource) -> None:
-        await self.dispatch(
-            "append" if file.append else "write",
-            file.scope,
-            data=source,
-        )
+        # The write is the redirect's own, so it waits on no hold of its file.
+        token = bind_caller(current_caller().changed({"streamed": ()}))
+        try:
+            await self.dispatch(
+                "append" if file.append else "write",
+                file.scope,
+                data=source,
+            )
+        finally:
+            reset_caller(token)
 
     def stream_to(
         self, file: FileDescription, channel: Channel = Channel.STDOUT
@@ -261,15 +270,49 @@ class PipeRecorder(Recorder):
         return list(seen.values())
 
     async def finish_writer(self) -> None:
-        for file, writer in self._distinct():
-            try:
-                await writer.finish()
-            except PipeClosed:
+        """Commit what each bound channel wrote; what comes after is
+        recorded, for the level's end to write. A channel whose writer
+        failed stays bound, so the rest of its bytes go nowhere."""
+        async with self.streaming:
+            for file, writer in self._distinct():
+                await self._commit(file, writer)
+            self._unbind(list(self.bound))
+
+    async def hold(self, file: FileDescription) -> None:
+        """Commit what went into ``file`` for an op that reaches it, so
+        the op finds it there as a descriptor's writes leave it, and
+        record the rest, which the level's end writes at the
+        description's offset (``{ seq 3; wc -l < f; } > f``).
+
+        Args:
+            file (FileDescription): a description ``stream_to`` bound.
+        """
+        async with self.streaming:
+            channels = [c for c, held in self.bound.items() if held is file]
+            for writer in {
+                id(entry[1]): entry[1]
+                for c in channels
+                if (entry := self.writers.get(c)) is not None
+            }.values():
+                await self._commit(file, writer)
+            self._unbind(channels)
+
+    async def _commit(self, file: FileDescription, writer: ByteWriter) -> None:
+        try:
+            await writer.finish()
+        except PipeClosed:
+            raise
+        except Exception as exc:
+            if is_aborting(exc):
                 raise
-            except Exception as exc:
-                if is_aborting(exc):
-                    raise
-                self._failed(file, writer, exc)
+            self._failed(file, writer, exc)
+
+    def _unbind(self, channels: list[Channel]) -> None:
+        for channel in channels:
+            live = self.writers.get(channel)
+            if live is None or id(live[1]) not in self.broken:
+                self.bound.pop(channel, None)
+                self.writers.pop(channel, None)
 
     async def abort(self) -> None:
         for _, writer in self._distinct():
@@ -282,10 +325,19 @@ class PipeRecorder(Recorder):
         if self.failure is None:
             self.failure, self.file = exc, file
 
-    async def emit(self, channel: Channel, data: bytes) -> None:
-        if channel in self.bound:
+    async def _streamed(self, channel: Channel, data: bytes) -> bool:
+        """Write bytes into the file their channel is bound to; False
+        once a hold took the channel, so they are recorded instead.
+
+        Args:
+            channel (Channel): a channel ``stream_to`` bound.
+            data (bytes): the bytes.
+        """
+        async with self.streaming:
+            if channel not in self.bound:
+                return False
             if not data:
-                return
+                return True
             file, writer = self._writer(channel)
             if id(writer) not in self.broken:
                 try:
@@ -297,6 +349,10 @@ class PipeRecorder(Recorder):
                     if is_aborting(exc):
                         raise
                     self._failed(file, writer, exc)
+            return True
+
+    async def emit(self, channel: Channel, data: bytes) -> None:
+        if channel in self.bound and await self._streamed(channel, data):
             return
         scope = self.streams.get(channel)
         if scope is None:
@@ -555,6 +611,7 @@ async def handle_redirect(
     name: str = "",
     args: tuple[str, ...] = (),
     forked: bool = False,
+    follow: Callable[[str], str] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Apply ordered descriptor bindings for one command and restore them.
 
@@ -590,6 +647,8 @@ async def handle_redirect(
         args (tuple[str, ...]): expanded command arguments.
         forked (bool): whether bash forks to run the command, so a
             closed pipe ends it alone.
+        follow (Callable[[str], str] | None): resolves a path's links,
+            to tell whether two targets are one file.
     """
     owned: list[SharedInput] = []
     try:
@@ -609,6 +668,7 @@ async def handle_redirect(
             name,
             args,
             forked,
+            follow,
         )
     finally:
         await context.session.release_inputs(owned)
@@ -630,6 +690,7 @@ async def _handle_redirect(
     name: str = "",
     args: tuple[str, ...] = (),
     forked: bool = False,
+    follow: Callable[[str], str] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     session = context.session
     bad_fd = unsupported_descriptor(redirects)
@@ -930,6 +991,33 @@ async def _handle_redirect(
                 if outputs[fd] is file:
                     file.emit = partial(recorder.emit, channel)
                     break
+    # What the command writes as it runs (a group's, a loop's, a
+    # function's statements) goes into its file as it is written, its
+    # stderr too when it shares the description (`> f 2>&1`); an op that
+    # reaches the file first commits what went in (`hold`). A stderr
+    # that opened the same file again (`> f 2> f`) keeps both waiting,
+    # so each write lands at its own description's offset.
+    target = outputs[1]
+    errs = outputs[2]
+    if (
+        isinstance(target, FileDescription)
+        and target in files
+        and target.source is None
+        and not target.pipe
+    ):
+        recorder.output_file = _followed(target.scope, follow)
+        if (
+            command is not None
+            and target.opened
+            and (
+                errs is target
+                or not isinstance(errs, FileDescription)
+                or not _one_file(errs.scope, target.scope, follow)
+            )
+        ):
+            recorder.stream_to(target)
+            if errs is target:
+                recorder.stream_to(target, Channel.STDERR)
     unwound: Exception | None = None
     refused = False
     saved = session.descriptors
@@ -959,7 +1047,23 @@ async def _handle_redirect(
     )
     leave = route.record(recorder)
     session.job_output = route
-    enclosing = bind_caller(current_caller().changed({"enclosing": recorder}))
+    outer = current_caller()
+    enclosing = bind_caller(
+        outer.changed(
+            {
+                "enclosing": recorder,
+                "streamed": (
+                    *outer.streamed,
+                    *(
+                        (file.scope.virtual, partial(recorder.hold, file))
+                        for file in {
+                            id(f): f for f in recorder.bound.values()
+                        }.values()
+                    ),
+                ),
+            }
+        )
+    )
     unbound = {
         field: value
         for fd, fields in EXEC_STREAM_UNBOUND.items()
@@ -991,39 +1095,37 @@ async def _handle_redirect(
                 # A command reading the file it writes (`cat f >> f`, `grep
                 # -r x d > d/f`) would read its own output back.
                 producer = result[1].producer
-                if (
-                    not refused
-                    and (
-                        name in STREAM_OUTPUT_BUILTINS
-                        or (producer is not None and producer.native)
+                if refused:
+                    await recorder.finish_writer()
+                elif (
+                    isinstance(target, FileDescription)
+                    and result[0] is not None
+                    and result[0] != b""
+                    and not (
+                        (
+                            name in STREAM_OUTPUT_BUILTINS
+                            or (producer is not None and producer.native)
+                        )
+                        and owner_prefix(
+                            (p.virtual for p in result[2].paths),
+                            target.scope.virtual,
+                        )
+                        is None
                     )
-                    and not recorder.chunks
-                    and isinstance(target, FileDescription)
-                    and target in files
-                    and target.source is None
-                    and not target.pipe
-                    and owner_prefix(
-                        (p.virtual for p in result[2].paths),
-                        target.scope.virtual,
-                    )
-                    is None
                 ):
-                    recorder.stream_to(target)
-                errs = outputs[2]
-                # A program's stderr goes into its file as it is written
-                # too, with its stdout when both share one (`> f 2>&1`).
+                    await recorder.hold(target)
+                # A program's stderr goes into its own file as it is
+                # written too.
                 if (
                     not refused
                     and producer is not None
                     and producer.native
                     and not recorder.chunks
                     and isinstance(errs, FileDescription)
+                    and errs is not target
                     and errs in files
                     and errs.source is None
                     and not errs.pipe
-                    and (
-                        errs is not target or Channel.STDOUT in recorder.bound
-                    )
                 ):
                     recorder.stream_to(errs, Channel.STDERR)
                 _, io, exec_node = await drained(recorder, *result)
@@ -1035,6 +1137,7 @@ async def _handle_redirect(
                 if not forked:
                     raise ExitSignal(SIGPIPE_STATUS) from None
                 io = IOResult(exit_code=SIGPIPE_STATUS)
+                await recorder.finish_writer()
     except UNWINDING as sig:
         unwound, io = sig, IOResult()
         output = await take_stdout(sig)
@@ -1048,6 +1151,7 @@ async def _handle_redirect(
             diagnostic = await take_stderr(sig)
             if diagnostic:
                 await recorder.emit(Channel.STDERR, diagnostic)
+        await recorder.finish_writer()
     except (asyncio.CancelledError, CommandTimeoutError) as exc:
         cancelled = exc
     except BaseException:
@@ -1242,6 +1346,37 @@ async def _handle_redirect(
             command="redirect", exit_code=io.exit_code, refused=refused
         ),
     )
+
+
+def _followed(scope: PathSpec, follow: Callable[[str], str] | None) -> str:
+    """The file a target names once its links are resolved; a loop of
+    links names itself.
+
+    Args:
+        scope (PathSpec): the target.
+        follow (Callable[[str], str] | None): resolves a path's links.
+    """
+    if follow is None:
+        return scope.virtual
+    try:
+        return follow(scope.virtual)
+    except CycleError:
+        return scope.virtual
+
+
+def _one_file(
+    first: PathSpec, second: PathSpec, follow: Callable[[str], str] | None
+) -> bool:
+    """Whether two targets name one file, through links too.
+
+    Args:
+        first (PathSpec): one target.
+        second (PathSpec): the other.
+        follow (Callable[[str], str] | None): resolves a path's links.
+    """
+    return first.virtual == second.virtual or _followed(
+        first, follow
+    ) == _followed(second, follow)
 
 
 def _output_only(name: str, args: tuple[str, ...]) -> bool:
