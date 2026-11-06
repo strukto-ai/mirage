@@ -234,8 +234,8 @@ mirage workspace create --template ram-only -w demo
 | Command | Does |
 | --- | --- |
 | `mirage template create NAME -f FILE [--description TEXT]` | Save a config as a template. |
-| `mirage template list [-o yaml\|json]` | List templates. |
-| `mirage template get NAME [-o yaml\|json]` | Print one; `-o yaml` is a file `create -f` reads back. |
+| `mirage template list` | List templates. |
+| `mirage template get NAME [-o yaml]` | Print one; `-o yaml` is a file `create -f` reads back. |
 | `mirage template delete NAME` | Delete one. |
 | `mirage template restore NAME` | Bring a deleted one back. |
 
@@ -257,8 +257,8 @@ is the program itself.
 | Command | Does |
 | --- | --- |
 | `mirage policy create NAME --source @FILE\|TEXT` | Save a new policy. A name already saved exits 2. |
-| `mirage policy list [-o yaml\|json]` | List the saved names. |
-| `mirage policy get NAME [-o yaml\|json]` | Show one; in a terminal, its source. |
+| `mirage policy list` | List the saved names. |
+| `mirage policy get NAME [-o yaml]` | Show one; in a terminal, its source. |
 | `mirage policy update NAME --source @FILE\|TEXT` | Replace its source. |
 | `mirage policy delete NAME` | Delete it. |
 
@@ -288,7 +288,7 @@ against the local daemon and the hosted API.
 | `mirage vfs types [TYPE]` | List the types, with their required and secret fields; with `TYPE`, its fields. |
 | `mirage vfs create NAME --type TYPE [--set K=V] [--secret K] [-f FILE]` | Save a new entry. |
 | `mirage vfs list [--type TYPE] [-q TEXT]` | List the entries, by name, with how many saved templates use each. |
-| `mirage vfs get NAME` | Show an entry. A secret field shows as `(sealed)`, never its value. |
+| `mirage vfs get NAME [-o yaml]` | Show an entry. A secret field shows as `(sealed)`, never its value. |
 | `mirage vfs update NAME [--set K=V] [--secret K] [--unset K] [-f FILE]` | Change an entry. Fields not named keep their values. |
 | `mirage vfs delete NAME` | Delete an entry and wipe its secrets. There is no restore. |
 
@@ -315,7 +315,8 @@ mirage vfs delete github
   output of `get -o yaml` reads back too.
 - In a terminal, a missing required field is prompted for. Otherwise the
   command exits `2` and names every missing field.
-- `-o yaml` or `-o json` on `get`, `list` and `types` picks the format.
+- Piped, every command prints JSON. `-o yaml` on `get` prints a file that
+  `create -f` and `update -f` read back.
 
 ```yaml github.yaml
 name: github

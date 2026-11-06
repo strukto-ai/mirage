@@ -89,13 +89,14 @@ def test_a_policy_is_created_from_a_file_and_read_back(daemon, tmp_path):
     assert daemon.saved == {"guard.py": GUARD}
     code, out = run("get", "guard.py", "-o", "yaml")
     assert yaml.safe_load(out) == {"name": "guard.py", "source": GUARD}
-    code, out = run("get", "guard.py", "-o", "json")
+    code, out = run("get", "guard.py")
     assert json.loads(out) == {"name": "guard.py", "source": GUARD}
+    assert run("get", "guard.py", "-o", "json")[0] == 2
 
 
 def test_list_update_and_delete_reach_the_routes(daemon):
     assert run("create", "a.py", "--source", "x = 1")[0] == 0
-    code, out = run("list", "-o", "json")
+    code, out = run("list")
     assert json.loads(out) == [{"name": "a.py"}]
     assert run("update", "a.py", "--source", "x = 2")[0] == 0
     assert daemon.saved == {"a.py": "x = 2"}

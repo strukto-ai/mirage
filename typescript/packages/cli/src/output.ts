@@ -22,6 +22,29 @@ export function emit<T = unknown>(obj: T, human?: Formatter<T>): void {
   process.stdout.write(JSON.stringify(obj, null, 2) + '\n')
 }
 
+/** What `get -o` prints instead of its default: YAML, a file `create -f` and `update -f` read back. */
+export type Output = 'yaml'
+
+/** `-o yaml`, refused otherwise. */
+export function outputOf(value: string): Output {
+  if (value === 'yaml') return value
+  return fail(`-o takes yaml, not '${value}'`, 2)
+}
+
+/** Print `obj` as YAML when `-o yaml` asks, else as `emit` does. */
+export async function show<T>(
+  obj: T,
+  output: Output | undefined,
+  human: Formatter<T>,
+): Promise<void> {
+  if (output === 'yaml') {
+    const { dumpYaml } = await import('@struktoai/mirage-node/utils/yaml')
+    process.stdout.write(dumpYaml(obj))
+    return
+  }
+  emit(obj, human)
+}
+
 export function fail(message: string, exitCode = 1): never {
   process.stderr.write(message + '\n')
   process.exit(exitCode)

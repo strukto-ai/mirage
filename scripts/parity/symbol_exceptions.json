@@ -1315,7 +1315,6 @@
   "cli/template": {
    "python_only": {
     "app": "The Typer group of the template verbs; commander builds the same group in registerTemplateCommands.",
-    "OUTPUT": "The shared Typer -o option; commander declares -o on each verb inline.",
     "_format_list": "The list's terminal table; commander formats it inline in the list action.",
     "create_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
     "list_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
@@ -1371,9 +1370,6 @@
    },
    "typescript_only": {
     "registerPolicyCommands": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
-    "FORMATS": "Typer checks -o against the Format enum; commander takes any string, so the TypeScript CLI checks it against this list.",
-    "formatOf": "Typer checks -o against the Format enum; commander takes any string, so the TypeScript CLI checks it against this list.",
-    "render": "Python prints yaml or json inline in each verb; the TypeScript verbs share one printer that loads yaml lazily.",
     "PolicyBody": "The Python CLI reads the daemon's JSON as untyped dicts; TypeScript names the shapes it reads.",
     "PolicyName": "The Python CLI reads the daemon's JSON as untyped dicts; TypeScript names the shapes it reads."
    }
@@ -1382,7 +1378,6 @@
    "python_only": {
     "APPS": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
     "FILE": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
-    "OUTPUT": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
     "SECRETS": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
     "SETS": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
     "UNSETS": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
@@ -1449,6 +1444,14 @@
    "typescript_only": {
     "ConfigField": "A TypeScript interface is erased at runtime, so the keys a runtime's config takes and their types are a table of these; Python reads them off the config dataclass.",
     "ConfigFields": "A TypeScript interface is erased at runtime, so the keys a runtime's config takes and their types are a table of these; Python reads them off the config dataclass."
+   }
+  },
+  "cli/output": {
+   "python_only": {
+    "OUTPUT": "Typer reads a command's options off its function signature, so the shared -o option is a module-level Option value; commander takes the flag, its help and its parser inline on each command."
+   },
+   "typescript_only": {
+    "outputOf": "Commander hands an option's raw string to a parser, so TypeScript refuses anything but yaml in outputOf; Typer checks the value against the Output enum itself."
    }
   }
  }

@@ -1147,7 +1147,7 @@ async def lifecycle(
     await cli("template", "delete", "t1")
     await cli("template", "create", "t2", "-f", str(back))
     await cli("template", "restore", "t1")
-    _, out, _ = await cli("template", "list", "-o", "json")
+    _, out, _ = await cli("template", "list")
     saved = json.loads(out)
     same = len({json.dumps(t["config"], sort_keys=True) for t in saved}) == 1
     got["template_round_trip"] = " ".join(
@@ -1157,12 +1157,12 @@ async def lifecycle(
     rule.write_text("def check(call):\n    return None\n")
     await cli("policy", "create", "guard.py", "--source", f"@{rule}")
     await cli("policy", "update", "guard.py", "--source", "pass\n")
-    _, out, _ = await cli("policy", "get", "guard.py", "-o", "json")
+    _, out, _ = await cli("policy", "get", "guard.py")
     source = json.loads(out)["source"].strip()
     await cli("policy", "delete", "guard.py")
-    _, out, _ = await cli("policy", "list", "-o", "json")
+    _, out, _ = await cli("policy", "list")
     got["policy_round_trip"] = f"{source} {len(json.loads(out))}"
-    await cli("vfs", "types", "github", "-o", "json")
+    await cli("vfs", "types", "github")
     await cli(
         "vfs",
         "create",
@@ -1178,10 +1178,10 @@ async def lifecycle(
         stdin=b"t\n",
     )
     await cli("vfs", "update", "gh", "--set", "repo=r2")
-    _, out, _ = await cli("vfs", "get", "gh", "-o", "json")
+    _, out, _ = await cli("vfs", "get", "gh")
     entry = json.loads(out)
     await cli("vfs", "delete", "gh")
-    _, out, _ = await cli("vfs", "list", "-o", "json")
+    _, out, _ = await cli("vfs", "list")
     got["vfs_round_trip"] = (
         f"{entry['config']['repo']} {','.join(entry['sealed'])} "
         f"{len(json.loads(out)['items'])}"
@@ -1189,8 +1189,8 @@ async def lifecycle(
     refused = []
     for kind in ("cli", "runtime"):
         codes = [
-            (await cli(kind, "types", "-o", "json"))[0],
-            (await cli(kind, "list", "-o", "json"))[0],
+            (await cli(kind, "types"))[0],
+            (await cli(kind, "list"))[0],
             (await cli(kind, "create", "nope"))[0],
             (await cli(kind, "get", "nope"))[0],
             (await cli(kind, "update", "nope", "--set", "a=b"))[0],

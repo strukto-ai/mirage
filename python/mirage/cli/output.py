@@ -16,10 +16,25 @@ import json
 import math
 import sys
 import time
+from enum import StrEnum
 from typing import Any, Callable, NoReturn, cast
 
 import httpx
 import typer
+
+from mirage.utils.yaml import dump_yaml
+
+
+class Output(StrEnum):
+    """What ``get -o`` prints instead of its default: YAML, a file
+    ``create -f`` and ``update -f`` read back."""
+
+    YAML = "yaml"
+
+
+OUTPUT = typer.Option(
+    None, "--output", "-o", help="yaml: a file create -f and update -f read."
+)
 
 
 def emit(obj: Any, human: Callable[[Any], str] | None = None) -> None:
@@ -36,6 +51,20 @@ def emit(obj: Any, human: Callable[[Any], str] | None = None) -> None:
         typer.echo(human(obj))
         return
     typer.echo(json.dumps(obj, indent=2, default=str, ensure_ascii=False))
+
+
+def show(obj: Any, output: Output | None, human: Callable[[Any], str]) -> None:
+    """Print ``obj`` as YAML when ``-o yaml`` asks, else as ``emit`` does.
+
+    Args:
+        obj (Any): the answer.
+        output (Output | None): ``yaml``, or None.
+        human (Callable[[Any], str]): the terminal formatter for ``emit``.
+    """
+    if output is Output.YAML:
+        typer.echo(dump_yaml(obj), nl=False)
+        return
+    emit(obj, human=human)
 
 
 def fail(message: str, exit_code: int = 1) -> NoReturn:

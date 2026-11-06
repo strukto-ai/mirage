@@ -82,7 +82,7 @@ async function template(
 describe('mirage template', () => {
   it('lists the items of the answer', async () => {
     const { url } = await fakeServer()
-    const listed = await template(url, 'list', '-o', 'json')
+    const listed = await template(url, 'list')
     expect(listed.code).toBe(0)
     expect(JSON.parse(listed.out)).toEqual([SAVED])
   })

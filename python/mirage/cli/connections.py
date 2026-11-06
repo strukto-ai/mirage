@@ -24,7 +24,15 @@ import typer
 import yaml
 
 from mirage.cli.client import DaemonClient, make_client
-from mirage.cli.output import emit, fail, format_table, handle_response
+from mirage.cli.output import (
+    OUTPUT,
+    Output,
+    emit,
+    fail,
+    format_table,
+    handle_response,
+    show,
+)
 from mirage.utils.yaml import parse_yaml
 
 
@@ -43,7 +51,6 @@ KINDS: tuple[Kind, ...] = (
     Kind("runtime", "/v1/runtimes", "runtime"),
 )
 
-OUTPUTS = ("json", "yaml")
 
 NO_ARGV_SECRET = (
     "a secret never comes from the command line: use --secret {key} to "
@@ -274,19 +281,6 @@ def fill(draft: Draft, name: str, spec: list[dict[str, Any]]) -> None:
         )
 
 
-def render(obj: Any, output: str | None, human: Any) -> None:
-    if output is None:
-        emit(obj, human=human)
-    elif output == "yaml":
-        typer.echo(
-            yaml.safe_dump(obj, sort_keys=False, allow_unicode=True), nl=False
-        )
-    elif output == "json":
-        typer.echo(json.dumps(obj, indent=2, ensure_ascii=False))
-    else:
-        fail(f"-o takes {' or '.join(OUTPUTS)}, not {output}", exit_code=2)
-
-
 def text(value: Any) -> str:
     return value if isinstance(value, str) else json.dumps(value)
 
@@ -334,7 +328,6 @@ def format_types(types: dict[str, Any]) -> str:
     return format_table(["TYPE", "REQUIRED", "SECRET"], rows)
 
 
-OUTPUT = typer.Option(None, "--output", "-o", help="json or yaml.")
 SETS = typer.Option(
     [], "--set", help="key=value; a value starting with { or [ is JSON."
 )
@@ -367,7 +360,6 @@ def kind_app(kind: Kind) -> typer.Typer:
     @app.command("types")
     def types_cmd(
         type: str | None = typer.Argument(None, help="One type's fields."),
-        output: str | None = OUTPUT,
     ) -> None:
         """List the types an entry can be; with TYPE, its fields."""
         with make_client() as client:
@@ -376,32 +368,31 @@ def kind_app(kind: Kind) -> typer.Typer:
                 types = handle_response(
                     client.request("GET", f"{kind.route}/types")
                 )
-                render(types, output, format_types)
+                emit(types, human=format_types)
                 return
-            render(type_fields(client, kind, type), output, format_fields)
+            emit(type_fields(client, kind, type), human=format_fields)
 
     @app.command("list")
     def list_cmd(
         type: str | None = typer.Option(None, "--type", help="Only TYPE."),
         q: str | None = typer.Option(None, "--query", "-q", help="Name has."),
-        output: str | None = OUTPUT,
     ) -> None:
         """List the saved entries, by name."""
         params = {k: v for k, v in (("type", type), ("q", q)) if v}
         with make_client() as client:
             client.ensure_running(allow_spawn=False)
             r = client.request("GET", kind.route, params=params)
-        render(handle_response(r), output, format_entries)
+        emit(handle_response(r), human=format_entries)
 
     @app.command("get")
     def get_cmd(
-        name: str = typer.Argument(...), output: str | None = OUTPUT
+        name: str = typer.Argument(...), output: Output | None = OUTPUT
     ) -> None:
         """Show an entry; a sealed field shows by name only."""
         with make_client() as client:
             client.ensure_running(allow_spawn=False)
             r = client.request("GET", entry_path(name))
-        render(handle_response(r), output, format_entry)
+        show(handle_response(r), output, format_entry)
 
     @app.command("create")
     def create_cmd(

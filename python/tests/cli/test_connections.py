@@ -177,13 +177,14 @@ def test_update_keeps_fields_and_unset_removes_them(daemon, store):
     )
     r = run("vfs", "update", "gh", "--secret", "token", stdin="t2\n")
     assert r.exit_code == 0, r.output
-    got = json.loads(run("vfs", "get", "gh", "-o", "json").output)
+    got = json.loads(run("vfs", "get", "gh").output)
     assert got["config"] == {"owner": "o", "repo": "r"}
     assert got["sealed"] == ["token"]
     assert sealed(store, "vfs", "gh") == {"token": "t2"}
+    assert run("vfs", "get", "gh", "-o", "json").exit_code == 2
     r = run("vfs", "update", "gh", "--unset", "repo")
     assert r.exit_code == 0, r.output
-    got = json.loads(run("vfs", "get", "gh", "-o", "json").output)
+    got = json.loads(run("vfs", "get", "gh").output)
     assert got["config"] == {"owner": "o"}
     r = run("vfs", "update", "gh", "--unset", "token")
     assert r.exit_code == 2
@@ -207,7 +208,7 @@ def test_a_file_names_the_secrets_to_read(daemon, store, tmp_path: Path):
     assert sealed(store, "vfs", "gh") == {"token": "t"}
     out = yaml.safe_load(run("vfs", "get", "gh", "-o", "yaml").output)
     assert out["config"] == {"owner": "o"}
-    listed = json.loads(run("vfs", "list", "-o", "json").output)
+    listed = json.loads(run("vfs", "list").output)
     assert [i["name"] for i in listed["items"]] == ["gh"]
 
 
@@ -237,13 +238,13 @@ def test_an_export_reads_back_and_a_file_update_keeps_the_rest(
     change.write_text(yaml.safe_dump({"fields": {"repo": "r2"}}))
     r = run("vfs", "update", "gh", "-f", str(change))
     assert r.exit_code == 0, r.output
-    got = json.loads(run("vfs", "get", "gh", "-o", "json").output)
+    got = json.loads(run("vfs", "get", "gh").output)
     assert got["config"] == {"owner": "o", "repo": "r2"}
     assert sealed(store, "vfs", "gh") == {"token": "t1"}
 
 
 def test_types_and_delete(daemon, store):
-    r = run("vfs", "types", "github", "-o", "json")
+    r = run("vfs", "types", "github")
     assert r.exit_code == 0, r.output
     token = {f["name"]: f for f in json.loads(r.output)}["token"]
     assert token["secret"] is True

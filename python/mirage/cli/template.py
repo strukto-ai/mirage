@@ -12,9 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import json
-from collections.abc import Callable
-from enum import Enum
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -23,7 +20,15 @@ import typer
 import yaml
 
 from mirage.cli.client import make_client
-from mirage.cli.output import emit, fail, format_table, handle_response
+from mirage.cli.output import (
+    OUTPUT,
+    Output,
+    emit,
+    fail,
+    format_table,
+    handle_response,
+    show,
+)
 from mirage.cli.settings import header
 from mirage.utils.yaml import dump_yaml, parse_yaml
 
@@ -31,31 +36,6 @@ app = typer.Typer(
     no_args_is_help=True,
     help="Saved workspace configs: create, list, get, delete, restore.",
 )
-
-
-class Output(str, Enum):
-    YAML = "yaml"
-    JSON = "json"
-
-
-OUTPUT = typer.Option(None, "--output", "-o", help="Print as yaml or json.")
-
-
-def show(obj: Any, output: Output | None, human: Callable[[Any], str]) -> None:
-    """Print an answer as ``-o`` asks, else as ``emit`` does.
-
-    Args:
-        obj (Any): the answer.
-        output (Output | None): ``yaml``, ``json``, or None.
-        human (Callable[[Any], str]): the terminal formatter for
-            ``emit``.
-    """
-    if output is Output.YAML:
-        typer.echo(dump_yaml(obj), nl=False)
-    elif output is Output.JSON:
-        typer.echo(json.dumps(obj, indent=2, ensure_ascii=False))
-    else:
-        emit(obj, human=human)
 
 
 def as_yaml(obj: Any) -> str:
@@ -143,7 +123,7 @@ def create_cmd(
 
 
 @app.command("list")
-def list_cmd(output: Output | None = OUTPUT) -> None:
+def list_cmd() -> None:
     """List the saved templates."""
     with make_client() as client:
         client.ensure_running()
@@ -151,7 +131,7 @@ def list_cmd(output: Output | None = OUTPUT) -> None:
     listed = handle_response(r)
     if not isinstance(listed, dict):
         fail("the server answered no template list", 1)
-    show(listed["items"], output, _format_list)
+    emit(listed["items"], human=_format_list)
 
 
 @app.command("get")

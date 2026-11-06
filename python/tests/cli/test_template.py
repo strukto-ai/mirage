@@ -115,10 +115,10 @@ def test_a_hosted_template_reads_back_without_the_server_fields(
     assert client.calls[-1][2] == {**SAVED, "name": "copy"}
 
 
-def test_list_prints_json_or_yaml(client):
-    assert json.loads(_invoke("list", "-o", "json").stdout) == [SAVED]
-    assert yaml.safe_load(_invoke("list", "-o", "yaml").stdout) == [SAVED]
-    assert _invoke("list", "-o", "xml").exit_code == 2
+def test_list_prints_json_piped_and_takes_no_output_flag(client):
+    assert json.loads(_invoke("list").stdout) == [SAVED]
+    assert _invoke("list", "-o", "yaml").exit_code == 2
+    assert _invoke("get", "a", "-o", "json").exit_code == 2
 
 
 def test_delete_and_restore_name_the_template(client):
