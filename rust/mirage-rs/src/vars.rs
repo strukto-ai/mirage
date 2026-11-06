@@ -497,9 +497,39 @@ impl Store {
         }));
     }
 
-    /// The bytes every record holds, names and values.
+    /// The bytes the variables hold: every record, names and values, and
+    /// the records a running prefix assignment set aside, which bash keeps
+    /// too.
     pub fn held(&self) -> usize {
-        self.held
+        self.held + self.aside()
+    }
+
+    /// The bytes of what each prefix scope saved and of the values a
+    /// `declare -g` reaching past one put aside, each unless the variables
+    /// hold it again.
+    fn aside(&self) -> usize {
+        let temp = |index: usize| self.frames.get(index).is_some_and(|frame| frame.temp);
+        let saved = self
+            .frames
+            .iter()
+            .filter(|frame| frame.temp)
+            .flat_map(|frame| frame.saved.iter());
+        let reached = self
+            .reached
+            .iter()
+            .filter(|(_, index, _)| temp(*index))
+            .map(|(name, _, running)| (name, running));
+        saved
+            .chain(reached)
+            .filter_map(|(name, var)| var.as_ref().map(|var| (name, var)))
+            .filter(|(name, var)| {
+                !self
+                    .vars
+                    .get(name.as_str())
+                    .is_some_and(|held| Arc::ptr_eq(held, var))
+            })
+            .map(|(name, var)| entry_bytes(name, var.value.as_ref()))
+            .sum()
     }
 
     pub fn hidden(&self, name: &str) -> bool {
@@ -1593,6 +1623,27 @@ mod tests {
         store.set_attr("x", Some(EXPORT), true);
         assert!(!store.same_records(&saved));
         assert!(saved.same_records(&saved.fork()));
+    }
+
+    #[test]
+    fn a_prefix_scope_holds_what_it_set_aside_until_it_closes() {
+        let mut store = store();
+        store.seed("x", Value::Scalar(b"old".to_vec()));
+        assert_eq!(store.held(), 4);
+        let temp = store.open_temp();
+        store.save_temp(temp, "x");
+        store.seed("x", Value::Scalar(b"new!".to_vec()));
+        assert_eq!(store.held(), 5 + 4);
+        store.enter();
+        store.reach_global(&["x".to_owned()]);
+        assert_eq!(store.held(), 4 + 5);
+        store.seed("x", Value::Scalar(b"global".to_vec()));
+        assert_eq!(store.held(), 7 + 4 + 5);
+        store.unreach();
+        assert_eq!(store.held(), 5 + 7);
+        store.leave(None);
+        store.close_temp(temp);
+        assert_eq!(store.held(), 7);
     }
 
     #[test]

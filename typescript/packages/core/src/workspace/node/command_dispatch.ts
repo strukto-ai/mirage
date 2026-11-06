@@ -391,7 +391,9 @@ export async function executeCommand(
   const seedPrefix = async (command: string): Promise<void> => {
     const shell = session.vars.shell
     if (session.functions[command] !== undefined) temp = shell.openTemp()
-    session.prefixSaves.push(savedEnvOverrides)
+    // A function's prefix scope keeps the records it saves, and the shell
+    // counts them against max_env itself.
+    if (temp === null) session.prefixSaves.push(savedEnvOverrides)
     for (const [k, v] of prefixAssignments) {
       // A first write's old record stays held; a repeat drops the earlier value.
       const old = savedEnvOverrides.has(k) ? session.vars.get(k) : undefined

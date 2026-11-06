@@ -486,11 +486,14 @@ async def execute_command(
         shell = session.vars.shell
         if command in session.functions:
             temp = shell.open_temp()
+        # A function's prefix scope keeps the records it saves, and the
+        # shell counts them against max_env itself.
+        if temp is None:
+            session._prefix_saves.append(saved_env_overrides)
         # Seeded once the command's words are expanded, since bash
         # expands them with the values from before the assignment:
         # `x=new echo $x` prints the old x and `IFS=, cmd $v` splits on
         # the old IFS.
-        session._prefix_saves.append(saved_env_overrides)
         for k, v in prefix_assignments:
             # A first write's old record stays held; a repeat drops the earlier value.
             old = session.vars.get(k) if k in saved_env_overrides else None
