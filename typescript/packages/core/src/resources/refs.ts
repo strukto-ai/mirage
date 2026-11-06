@@ -12,10 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { isConfigPointer } from '../secrets/sources.ts'
 import { STRUKTO } from './constants.ts'
 import type { Template } from './types.ts'
 
-/** The saved entries a config names through `{from: strukto, ref}`, each once, in order. */
+/**
+ * The saved entries a config names through `{from: strukto, ref, key}`, each
+ * once, in order. Only a pointer counts, by the rule the secrets layer reads
+ * one by, so a map such as an `env` holding `from` and `ref` is not one.
+ */
 export function secretRefs(config: unknown): string[] {
   const found: string[] = []
   const walk = (v: unknown): void => {
@@ -25,8 +30,11 @@ export function secretRefs(config: unknown): string[] {
     }
     if (v === null || typeof v !== 'object') return
     const o = v as Record<string, unknown>
-    if (o.from === STRUKTO && typeof o.ref === 'string') {
-      if (!found.includes(o.ref)) found.push(o.ref)
+    if (isConfigPointer(o)) {
+      const ref = o.ref
+      if (o.from === STRUKTO && typeof ref === 'string' && ref !== '' && !found.includes(ref)) {
+        found.push(ref)
+      }
       return
     }
     Object.values(o).forEach(walk)

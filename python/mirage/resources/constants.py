@@ -25,7 +25,7 @@ DEFAULT_SCOPE = "local"
 # A saved config's name, which is also safe as a file name.
 NAME = re.compile(r"[a-z0-9][a-z0-9._-]{0,62}")
 
-# The source a config names a saved entry through: {from: strukto, ref}.
+# The source a config names a saved field through: {from: strukto, ref, key}.
 STRUKTO = "strukto"
 
 # The folder deleted templates wait in until restored.

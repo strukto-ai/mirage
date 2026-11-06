@@ -195,7 +195,7 @@ async function loadDraft(path: string, readSealed = true): Promise<Draft> {
   }
 }
 
-/** The flags applied over a draft: `--set` then `--unset`, with `--secret` read when sent. */
+/** The flags applied over a draft: `--set` then `--unset`, with `--secret` read when sent; a `--secret` replaces the read a file names for the same field. */
 function applyFlags(draft: Draft, sets: string[], secrets: string[], unsets: string[]): Draft {
   for (const word of sets) {
     const [key, value] = setValue(word)
@@ -207,7 +207,9 @@ function applyFlags(draft: Draft, sets: string[], secrets: string[], unsets: str
     delete draft.fields[key]
     draft.plain.delete(key)
   }
-  for (const word of secrets) draft.secrets.push(secretSource(word))
+  const given = secrets.map(secretSource)
+  const named = new Set(given.map(([key]) => key))
+  draft.secrets = [...draft.secrets.filter(([key]) => !named.has(key)), ...given]
   return draft
 }
 

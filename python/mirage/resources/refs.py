@@ -14,6 +14,7 @@
 
 from mirage.resources.constants import STRUKTO
 from mirage.resources.types import Template
+from mirage.secrets.sources import is_config_pointer
 from mirage.types import JsonValue
 
 
@@ -24,17 +25,20 @@ def walk_refs(value: JsonValue, found: list[str]) -> None:
         return
     if not isinstance(value, dict):
         return
-    if value.get("from") == STRUKTO and isinstance(value.get("ref"), str):
-        if value["ref"] not in found:
-            found.append(str(value["ref"]))
+    if is_config_pointer(value):
+        ref = value.get("ref")
+        if value["from"] == STRUKTO and ref and ref not in found:
+            found.append(str(ref))
         return
     for item in value.values():
         walk_refs(item, found)
 
 
 def secret_refs(config: JsonValue) -> list[str]:
-    """The saved entries a config names through ``{from: strukto, ref}``,
-    each once, in order.
+    """The saved entries a config names through ``{from: strukto, ref,
+    key}``, each once, in order. Only a pointer counts, by the rule the
+    secrets layer reads one by, so a map such as an ``env`` holding
+    ``from`` and ``ref`` is not one.
 
     Args:
         config (JsonValue): a workspace config.

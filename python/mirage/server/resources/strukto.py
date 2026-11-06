@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import json
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -20,19 +21,22 @@ from mirage.config import WorkspaceConfig
 from mirage.resources.base import ResourceStore
 from mirage.resources.constants import ENTRY_KINDS, STRUKTO
 from mirage.resources.errors import ResourceError
+from mirage.resources.types import Fields
 from mirage.secrets.config import SecretSource
 from mirage.secrets.errors import SecretsError
+from mirage.secrets.sources import is_config_pointer
 from mirage.secrets.types import ResolvedSecret
+from mirage.server.schemas import check_config
 from mirage.types import JsonValue
 
 
 class StruktoSourceConfig(BaseModel):
-    """The ``strukto`` secrets source's config: each saved entry a
-    workspace's config names, field by field.
+    """The ``strukto`` secrets source's config: the sealed fields of each
+    saved entry a workspace's config names.
 
     Args:
-        entries (dict[str, dict[str, str]]): the fields of each entry, by
-            the entry's name.
+        entries (dict[str, dict[str, str]]): the sealed fields of each
+            entry, by the entry's name.
     """
 
     entries: dict[str, dict[str, str]]
@@ -41,7 +45,8 @@ class StruktoSourceConfig(BaseModel):
 async def fetch_strukto(
     config: StruktoSourceConfig, ref: str
 ) -> ResolvedSecret:
-    """The fields of the saved entry ``ref``, as a workspace was handed them.
+    """The sealed fields of the saved entry ``ref``, as a workspace was
+    handed them.
 
     Args:
         config (StruktoSourceConfig): the entries the workspace names.
@@ -57,41 +62,61 @@ async def fetch_strukto(
 
 
 def _flat(value: JsonValue) -> str:
-    """A field's value as a secret's field holds it: a string as it is, a
-    list joined by commas, anything else as JSON.
+    """A sealed value as a secret's field holds it: a string as it is,
+    anything else as JSON.
 
     Args:
-        value (JsonValue): the saved value.
+        value (JsonValue): the sealed value.
     """
-    if isinstance(value, str):
-        return value
+    return value if isinstance(value, str) else json.dumps(value)
+
+
+def _inline(value: Any, plain: dict[str, Fields]) -> Any:
+    """``value`` with each ``{from: strukto, ref, key}`` that names a plain
+    field replaced by the field's value, its type kept.
+
+    Args:
+        value (Any): a config, or a part of one.
+        plain (dict[str, Fields]): the plain fields of each named entry.
+    """
     if isinstance(value, list):
-        return ",".join(_flat(item) for item in value)
-    return json.dumps(value)
+        return [_inline(item, plain) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if is_config_pointer(value):
+        fields = plain.get(value.get("ref", ""), {})
+        if value["from"] == STRUKTO and value["key"] in fields:
+            return fields[value["key"]]
+        return value
+    return {k: _inline(v, plain) for k, v in value.items()}
 
 
 async def with_entries(
-    store: ResourceStore, config: WorkspaceConfig, refs: list[str]
+    store: ResourceStore, written: dict[str, Any], refs: list[str]
 ) -> WorkspaceConfig:
-    """The config with the saved entries its ``{from: strukto, ref, key}``
-    pointers name declared as the ``strukto`` source, sealed fields
-    opened, so mirage reads each pointer as it reads any secret's. A saved
-    field never points at a store, since a save refuses one.
+    """The config to build, with the saved entries its ``{from: strukto,
+    ref, key}`` pointers name filled in. A pointer at a plain field becomes
+    the field's value, so a list stays a list; one at a sealed field reads
+    it from the ``strukto`` source, declared here with the sealed fields
+    opened, as mirage reads any secret's. A saved field never points at a
+    store, since a save refuses one.
 
     Args:
         store (ResourceStore): where the entries are saved.
-        config (WorkspaceConfig): the checked config.
+        written (dict[str, Any]): the config as written.
         refs (list[str]): the entries its pointers name.
 
     Raises:
-        ResourceError: a name is not saved as a VFS, CLI or runtime.
+        ResourceError: a name is not saved as a VFS, CLI or runtime, or
+            a saved value is one its field cannot take.
     """
     kinds = {
         entry.name: kind
         for kind in ENTRY_KINDS
         for entry in await store.list_entries(kind)
     }
-    entries: dict[str, dict[str, str]] = {}
+    plain: dict[str, Fields] = {}
+    sealed: dict[str, dict[str, str]] = {}
     for ref in refs:
         kind = kinds.get(ref)
         if kind is None:
@@ -99,11 +124,14 @@ async def with_entries(
                 "invalid", f"{ref} is not saved as a VFS, CLI or runtime"
             )
         entry = await store.reveal_entry(kind, ref)
-        entries[ref] = {
-            k: _flat(v) for k, v in {**entry.fields, **entry.sealed}.items()
-        }
+        plain[ref] = entry.fields
+        sealed[ref] = {k: _flat(v) for k, v in entry.sealed.items()}
+    try:
+        config = check_config(_inline(written, plain))
+    except ValueError as e:
+        raise ResourceError("invalid", str(e)) from e
     declared = {
         **(config.secrets or {}),
-        STRUKTO: SecretSource(source=STRUKTO, config={"entries": entries}),
+        STRUKTO: SecretSource(source=STRUKTO, config={"entries": sealed}),
     }
     return config.model_copy(update={"secrets": declared})
