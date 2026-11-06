@@ -17,8 +17,15 @@ from collections.abc import Mapping
 from typing import Any, TypeGuard
 
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
+from mirage.runtime.constants import (
+    EXTERNAL_COMMANDS,
+    JS_GROUP,
+    LANGUAGE_COMMANDS,
+    PYTHON_GROUP,
+    WHOLE_LINE,
+)
 from mirage.runtime.js.quickjs import QuickJsRuntime
+from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.local import LocalRuntime
 from mirage.runtime.python.monty import MontyRuntime
@@ -94,9 +101,10 @@ def known_runtimes() -> list[str]:
 
 # The default world when no runtimes list is given: one python engine,
 # one js engine, and the builtin command engine, the same three as
-# TypeScript's (pinned by integ/runtime/routing/defaults.json). Defaults build
-# gracefully (a missing extra leaves the command reporting its install
-# hint per invocation); an explicitly listed name still fails loud.
+# TypeScript's (integ/runtime/routing/defaults.json pins the python
+# engine). Defaults build gracefully (a missing extra leaves the command
+# reporting its install hint per invocation); an explicitly listed name
+# still fails loud.
 # `local` is deliberately absent: a sandboxed default must never
 # silently escalate to host execution.
 DEFAULT_ENTRIES: tuple[str, ...] = (
@@ -200,7 +208,10 @@ def bind_commands(entries: list[Runtime[Any]]) -> dict[str, Runtime[Any]]:
         entries (list[Runtime]): runtime instances in precedence order.
 
     Raises:
-        ValueError: duplicate entry names.
+        ValueError: a capture that is not a program or a group, ``@line``
+            or ``@external`` on a runtime that cannot run a line or a
+            process, a name a language-only runtime does not run, or
+            duplicate entry names.
     """
     bindings: dict[str, Runtime[Any]] = {}
     seen: set[str] = set()
@@ -211,7 +222,8 @@ def bind_commands(entries: list[Runtime[Any]]) -> dict[str, Runtime[Any]]:
             ):
                 raise ValueError(
                     f"{capture!r} is not a program or a group; the groups"
-                    f" are {EXTERNAL_COMMANDS!r} and {WHOLE_LINE!r}"
+                    f" are {EXTERNAL_COMMANDS!r}, {WHOLE_LINE!r},"
+                    f" {PYTHON_GROUP!r} and {JS_GROUP!r}"
                 )
         if WHOLE_LINE in entry.captures and not isinstance(
             entry, LineExecutorMixin
@@ -221,6 +233,14 @@ def bind_commands(entries: list[Runtime[Any]]) -> dict[str, Runtime[Any]]:
             entry, (LineExecutorMixin, ProcessExecutorMixin)
         ):
             raise ValueError("@external requires process or shell execution")
+        if isinstance(entry, LanguageRuntime) and not isinstance(
+            entry, (LineExecutorMixin, ProcessExecutorMixin)
+        ):
+            for capture in entry.captures:
+                if capture not in LANGUAGE_COMMANDS[entry.language]:
+                    raise ValueError(
+                        f"runtime {entry.name!r} does not run {capture!r}"
+                    )
         if entry.name in seen:
             raise ValueError(f"duplicate runtime entry: {entry.name!r}")
         seen.add(entry.name)

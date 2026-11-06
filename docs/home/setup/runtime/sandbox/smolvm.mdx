@@ -22,8 +22,8 @@ smolvm machine start --name mirage-box
 ## Usage
 
 `captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
-every program Mirage does not have itself. Name `python3` and `python` to run
-them in the machine too.
+every program Mirage does not have itself. Name `@python` to run
+Python in the machine too.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -31,7 +31,7 @@ them in the machine too.
     from mirage import RAMVFS, MountMode, Workspace
     from mirage.runtime.sandbox.smolvm import SmolvmRuntime
 
-    runtime = SmolvmRuntime(captures=["python3", "python", "@external"], config={"machine": "mirage-box"})
+    runtime = SmolvmRuntime(captures=["@python", "@external"], config={"machine": "mirage-box"})
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
     await ws.shell("python3 -c 'print(1 + 1)'")
     ```
@@ -41,7 +41,7 @@ them in the machine too.
     import { MountMode, RAMVFS, SmolvmRuntime, Workspace } from '@struktoai/mirage-node'
 
     const runtime = new SmolvmRuntime({
-      captures: ['python3', 'python', '@external'],
+      captures: ['@python', '@external'],
       config: { machine: 'mirage-box' },
     })
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
@@ -53,7 +53,7 @@ them in the machine too.
     mode: exec
     runtimes:
       - name: smolvm
-        captures: ["python3", "python", "@external"]
+        captures: ["@python", "@external"]
         config:
           machine: mirage-box
     mounts:

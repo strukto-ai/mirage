@@ -32,7 +32,7 @@ export interface RouteDecision<R extends RuntimeIdentity> {
   /**
    * Every command some entry captures, resolved for this line: the
    * runtime it runs on, or null when a route to the workspace keeps the
-   * line off its only capturer, a `*` line executor (exit 126, never a
+   * line off its only capturer, an `@line` line executor (exit 126, never a
    * silent fallback to the workspace).
    */
   readonly bindings: Readonly<Record<string, R | null>>

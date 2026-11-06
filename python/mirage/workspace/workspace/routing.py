@@ -31,7 +31,7 @@ from mirage.policy.types import (
     RouteContext,
 )
 from mirage.runtime.base import Runtime
-from mirage.runtime.constants import WHOLE_LINE
+from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import (
     bind_commands,
@@ -43,7 +43,8 @@ from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
 from mirage.view.types import FileView, SessionView
-from mirage.workspace.lookup.lookup import routed_consumer
+from mirage.workspace.lookup.lookup import mirage_program_at, routed_consumer
+from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.node.explain import Judged, Walked
 from mirage.workspace.session import SessionState
@@ -199,7 +200,7 @@ class Router:
         self, entries: list[Runtime[Any]], name: str
     ) -> RouteDecision[RuntimeIdentity]:
         """The decision a policy's route places a line on. ``workspace``
-        keeps the line in Mirage: no line executor (a ``*`` capture)
+        keeps the line in Mirage: no line executor (an ``@line`` capture)
         takes it, and each command stays on its first other capturer.
         Any other name places it as the runtime argument does.
 
@@ -237,7 +238,9 @@ class Router:
         self, one: Judged, decision: RouteDecision[RuntimeIdentity]
     ) -> str:
         """The runtime entry that serves a command under a decision, as
-        its run places it; empty when the workspace runs it itself.
+        its run places it: the ``@external`` runtime for a program no
+        name binds (a path runs through the workspace's exec path first);
+        empty when the workspace runs it itself.
 
         Args:
             one (Judged): the command's judgment and the session it was
@@ -248,12 +251,26 @@ class Router:
         if isinstance(whole, Runtime):
             return whole.name
         command = one.judgment.command
+        fallback = decision.fallback
         if one.ctx is not None and one.session is not None:
-            _, routed = routed_consumer(
+            if (
+                mirage_program_at(
+                    command,
+                    one.ctx.argv,
+                    one.session,
+                    self._registry,
+                    decision,
+                )
+                is not None
+            ):
+                return ""
+            consumer, routed = routed_consumer(
                 command, one.ctx.argv, one.session, self._registry, decision
             )
             decision = routed or decision
-        serving = decision.bindings.get(command, decision.fallback)
+            if consumer is Consumer.EXTERNAL and "/" not in command:
+                fallback = decision.bindings.get(EXTERNAL_COMMANDS)
+        serving = decision.bindings.get(command, fallback)
         if serving is None or isinstance(serving, WorkspaceRuntime):
             return ""
         return serving.name

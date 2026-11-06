@@ -226,7 +226,7 @@
       ]
     },
     {
-      "id": "runtime_arg_vfs_refused",
+      "id": "runtime_arg_workspace_refused",
       "world": {
         "runtimes": [
           "monty"

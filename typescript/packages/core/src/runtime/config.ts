@@ -36,7 +36,8 @@ export interface RuntimeOptions<C extends RuntimeConfig = Record<string, unknown
   /**
    * Commands this runtime claims; EXTERNAL_COMMANDS (`@external`)
    * captures unresolved program names. WHOLE_LINE (`@line`) claims every
-   * line for a line-executing runtime.
+   * line for a line-executing runtime. PYTHON_GROUP (`@python`) and
+   * JS_GROUP (`@js`) stand for their tier's interpreter names.
    */
   captures?: readonly string[]
   /**

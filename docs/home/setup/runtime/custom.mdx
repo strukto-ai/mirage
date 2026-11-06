@@ -47,8 +47,9 @@ other program runs, write a runtime.
 A runtime captures the program names you give it. `@external` captures every
 program no builtin, CLI or other runtime claims, and `@line` takes every line.
 Interpreter names (`python3`, `python`, `node`, `js`) are never left over, so
-capture the ones you want by name. Only a line executor can take `@line`, and only a line or process
-executor can take `@external`.
+capture the ones you want by name or by group (`@python`, `@js`). Only a line executor can take `@line`, and only a line or process
+executor can take `@external`. A `LanguageRuntime` that is neither runs only its own
+language's names; naming another is refused when the workspace is built.
 
 ## Reach files through `ctx.vfs`
 

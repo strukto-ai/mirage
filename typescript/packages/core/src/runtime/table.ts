@@ -15,8 +15,15 @@
 import { compareCodePoints } from '../utils/sort.ts'
 import type { Runtime } from './base.ts'
 import type { RuntimeOptions } from './config.ts'
-import { EXTERNAL_COMMANDS, WHOLE_LINE } from './constants.ts'
+import {
+  EXTERNAL_COMMANDS,
+  JS_GROUP,
+  LANGUAGE_COMMANDS,
+  PYTHON_GROUP,
+  WHOLE_LINE,
+} from './constants.ts'
 import { QuickJsRuntime } from './js/quickjs/runtime.ts'
+import { LanguageRuntime } from './language.ts'
 import { isLineExecutor, isProcessExecutor, type LineExecutorMixin } from './mixin.ts'
 import { MontyRuntime } from './python/monty/index.ts'
 import { PyodideRuntime } from './python/pyodide/runtime.ts'
@@ -44,8 +51,8 @@ const NAMED: Record<
 /**
  * The default world when no runtimes list is given: one python engine,
  * one js engine, and the builtin command engine, the same three as
- * Python's (pinned by integ/runtime/routing/defaults.json). Names, not
- * classes: `name` is an instance field, so `MontyRuntime.name` is the JS
+ * Python's (integ/runtime/routing/defaults.json pins the python engine).
+ * Names, not classes: `name` is an instance field, so `MontyRuntime.name` is the JS
  * function name, not the registry key.
  */
 export const DEFAULT_ENTRIES: readonly string[] = ['monty', 'quickjs', 'workspace']
@@ -221,7 +228,7 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
         (capture === '*' || capture.startsWith('@'))
       ) {
         throw new Error(
-          `'${capture}' is not a program or a group; the groups are '${EXTERNAL_COMMANDS}' and '${WHOLE_LINE}'`,
+          `'${capture}' is not a program or a group; the groups are '${EXTERNAL_COMMANDS}', '${WHOLE_LINE}', '${PYTHON_GROUP}' and '${JS_GROUP}'`,
         )
       }
     }
@@ -233,6 +240,14 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
       !isProcessExecutor(entry)
     ) {
       throw new Error('@external requires process or shell execution')
+    }
+    if (entry instanceof LanguageRuntime && !isLineExecutor(entry) && !isProcessExecutor(entry)) {
+      const runs = LANGUAGE_COMMANDS[entry.language]
+      for (const capture of entry.captures) {
+        if (!runs.includes(capture)) {
+          throw new Error(`runtime '${entry.name}' does not run '${capture}'`)
+        }
+      }
     }
     if (seen.has(entry.name)) {
       throw new Error(`duplicate runtime entry: '${entry.name}'`)

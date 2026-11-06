@@ -14,6 +14,11 @@
 
 import { describe, expect, it } from 'vitest'
 import { Runtime } from './base.ts'
+import { JsRuntime } from './js/base.ts'
+import { LanguageRuntime } from './language.ts'
+import { PROCESS_EXECUTOR, type ProcessExecutorMixin } from './mixin.ts'
+import { PythonRuntime } from './python/base.ts'
+import type { Language, RunResult } from './types.ts'
 import {
   bindCommands,
   buildRuntime,
@@ -34,6 +39,61 @@ class FakeRuntime extends Runtime {
 
   constructor() {
     super({ captures: ['python3', 'made-up'] })
+  }
+}
+
+const done = (): Promise<RunResult> =>
+  Promise.resolve({ stdout: new Uint8Array(), stderr: null, exitCode: 0 })
+
+class PyEngine extends PythonRuntime {
+  readonly name = 'pyengine'
+
+  constructor(captures?: string[]) {
+    super(captures !== undefined ? { captures } : {})
+  }
+
+  interpret = done
+}
+
+class JsEngine extends JsRuntime {
+  readonly name = 'jsengine'
+
+  constructor(captures?: string[]) {
+    super(captures !== undefined ? { captures } : {})
+  }
+
+  interpret = done
+}
+
+class HostPython extends PythonRuntime implements ProcessExecutorMixin {
+  readonly [PROCESS_EXECUTOR] = true as const
+  readonly name = 'host-python'
+
+  constructor(captures: string[]) {
+    super({ captures })
+  }
+
+  interpret = done
+  runProcess = done
+}
+
+// A language runtime that sets no head words, as a custom one may.
+class DirectEngine extends LanguageRuntime {
+  readonly name = 'direct'
+  readonly language: Language = 'python'
+
+  constructor() {
+    super({}, ['python3', 'python'])
+  }
+
+  interpret = done
+}
+
+class Cap extends Runtime {
+  readonly name = 'cap'
+
+  constructor(captures: string[]) {
+    super({ captures })
   }
 }
 
@@ -97,10 +157,68 @@ describe('bindCommands', () => {
   })
 
   // Twin of test_bind_commands_refuses_a_group_it_does_not_have.
-  it.each(['*', '@all', '@lines'])('refuses a group it does not have: %s', (capture) => {
+  it.each(['*', '@all', '@lines', '@pyton'])('refuses a group it does not have: %s', (capture) => {
     expect(() => bindCommands([new OneCapture(capture)])).toThrow(
-      `'${capture}' is not a program or a group; the groups are '@external' and '@line'`,
+      `'${capture}' is not a program or a group; the groups are '@external', '@line', '@python' and '@js'`,
     )
+  })
+
+  // Twin of test_bind_commands_refuses_a_capture_a_language_runtime_does_not_run.
+  it.each([
+    [() => new PyEngine(['node']), 'pyengine', 'node'],
+    [() => new PyEngine(['gcc']), 'pyengine', 'gcc'],
+    [() => new JsEngine(['python3']), 'jsengine', 'python3'],
+    [() => new PyEngine(['@js']), 'pyengine', 'node'],
+  ] as const)('refuses a capture a language runtime does not run: %#', (make, name, capture) => {
+    expect(() => bindCommands([make()])).toThrow(`runtime '${name}' does not run '${capture}'`)
+  })
+
+  // Twin of test_bind_commands_lets_a_language_runtime_that_runs_processes_take_any_name.
+  it('lets a language runtime that runs processes take any name', () => {
+    const host = new HostPython(['python3', 'node'])
+    expect(bindCommands([host])).toEqual({ python3: host, node: host })
+  })
+
+  // Twin of test_bind_commands_reads_the_tier_from_the_language_not_from_commands.
+  it('reads the tier from the language, not from commands', () => {
+    const direct = new DirectEngine()
+    expect(bindCommands([direct])).toEqual({ python3: direct, python: direct })
+  })
+
+  // Twin of test_a_group_expands_to_the_interpreter_names_mirage_owns.
+  it('a group expands to the interpreter names Mirage owns', () => {
+    expect(new PyEngine(['@python']).captures).toEqual(['python3', 'python'])
+    expect(new JsEngine(['@js']).captures).toEqual(['node', 'js'])
+    expect(new Cap(['@python', 'pip', 'python3', '@external']).captures).toEqual([
+      'python3',
+      'python',
+      'pip',
+      '@external',
+    ])
+  })
+
+  // Twin of test_an_explicit_empty_list_captures_nothing.
+  it('an explicit empty list captures nothing', () => {
+    expect(new PyEngine([]).captures).toEqual([])
+  })
+
+  // Twin of test_a_group_in_a_class_default_expands_too.
+  it('a group in a default expands too', () => {
+    class GroupDefault extends Runtime {
+      readonly name = 'group-default'
+
+      constructor() {
+        super({}, ['@python', 'pip'])
+      }
+    }
+    expect(new GroupDefault().captures).toEqual(['python3', 'python', 'pip'])
+  })
+
+  // Twin of test_a_group_binds_both_names_to_the_runtime_that_took_it.
+  it('a group binds both names to the runtime that took it', () => {
+    const fake = new Cap(['@python', 'pip'])
+    const bindings = bindCommands([fake, new PyEngine()])
+    expect([bindings.python3, bindings.python, bindings.pip]).toEqual([fake, fake, fake])
   })
 
   it('rejects duplicate names', () => {

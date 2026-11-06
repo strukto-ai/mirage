@@ -24,6 +24,7 @@ import {
   type RuntimeConfig,
   type RuntimeOptions,
 } from './config.ts'
+import { expandCaptures } from './constants.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import { isLineExecutor, isProcessExecutor } from './mixin.ts'
 import type {
@@ -94,8 +95,7 @@ export abstract class Runtime<E = unknown> {
     defaultCaptures: readonly string[] = [],
     configFields: ConfigFields = {},
   ) {
-    this.captures =
-      options.captures !== undefined ? options.captures.slice() : defaultCaptures.slice()
+    this.captures = expandCaptures(options.captures ?? defaultCaptures)
     this.config = coerceRuntimeConfig(options.config, Object.keys(configFields))
   }
 

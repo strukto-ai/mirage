@@ -120,7 +120,8 @@ A line adds `exit_code` and `stderr`, what the agent would read, and
 own `outcome`, `answers`, `exit_code`, `stderr`, `runtime` and `words`,
 the command line word by word as policies read it (see
 [Context](/home/policy/policies#context)). Under an `@line` runtime, every
-command's `runtime` names it.
+command's `runtime` names it. A program only `@external` takes (`make`, `gcc`) names the runtime
+that takes it.
 
 ### A line
 

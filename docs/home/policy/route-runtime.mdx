@@ -18,7 +18,7 @@ mode: exec
 runtimes:
   - monty
   - name: docker
-    captures: ["python3"]
+    captures: ["@python"]
     config:
       container: my-box
   - workspace
@@ -46,7 +46,7 @@ resolved paths, and the session. It returns its answer:
 | --- | --- |
 | `{"kind": "route", "runtime": "docker"}` | that runtime serves every command it captures |
 | `{"kind": "route", "runtime": "docker", "reason": "..."}` | the same, with why for `ws.explain(line)` to show |
-| `{"kind": "route", "runtime": "workspace"}` | the line runs in Mirage: no whole-line runtime (an `@line` capture) takes it |
+| `{"kind": "route", "runtime": "workspace"}` | entries that capture `@line` are excluded entirely; other entries still serve their captures, and a command only an excluded entry captures is refused |
 | `None` | the first capturer in `runtimes` order serves each command |
 | `{"kind": "deny", "reason": "..."}` | the line is refused, as by any `pre_execute` program |
 

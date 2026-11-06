@@ -19,6 +19,8 @@ import pytest
 from mirage.commands.config import Context
 from mirage.runtime.base import Runtime
 from mirage.runtime.errors import UnsupportedExecutionError
+from mirage.runtime.js.base import JsRuntime
+from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.python import LocalRuntime
 from mirage.runtime.python.base import PythonRuntime
@@ -43,6 +45,29 @@ class FakeRuntime(Runtime):
     captures = ("python3", "made-up")
 
     async def run(self, engine, paths, texts, ctx) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+class PyEngine(PythonRuntime):
+    name = "pyengine"
+
+    async def interpret(self, engine, program, ctx) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+class JsEngine(JsRuntime):
+    name = "jsengine"
+
+    async def interpret(self, engine, program, ctx) -> RunResult:
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+class DirectEngine(LanguageRuntime):
+    name = "direct"
+    language = "python"
+    captures = ("python3", "python")
+
+    async def interpret(self, engine, program, ctx) -> RunResult:
         return RunResult(stdout=b"", stderr=None, exit_code=0)
 
 
@@ -77,21 +102,79 @@ def test_bind_commands_first_capturer_wins():
     assert bindings["python"] is local
 
 
-@pytest.mark.parametrize("capture", ["*", "@all", "@lines"])
+@pytest.mark.parametrize("capture", ["*", "@all", "@lines", "@pyton"])
 def test_bind_commands_refuses_a_group_it_does_not_have(capture):
     with pytest.raises(ValueError) as refused:
         bind_commands([FakeRuntime(captures=[capture])])
     assert str(refused.value) == (
         f"{capture!r} is not a program or a group; the groups are"
-        " '@external' and '@line'"
+        " '@external', '@line', '@python' and '@js'"
     )
+
+
+@pytest.mark.parametrize(
+    "entry, capture",
+    [
+        (PyEngine, "node"),
+        (PyEngine, "gcc"),
+        (JsEngine, "python3"),
+        (PyEngine, "@js"),
+    ],
+)
+def test_bind_commands_refuses_a_capture_a_language_runtime_does_not_run(
+    entry, capture
+):
+    with pytest.raises(ValueError) as refused:
+        bind_commands([entry(captures=[capture])])
+    assert str(refused.value) == (
+        f"runtime {entry.name!r} does not run "
+        f"{('node' if capture == '@js' else capture)!r}"
+    )
+
+
+def test_bind_commands_lets_a_language_runtime_that_runs_processes_take_any_name():
+    local = LocalRuntime(captures=["python3", "node"])
+    assert bind_commands([local]) == {"python3": local, "node": local}
+
+
+def test_bind_commands_reads_the_tier_from_the_language_not_from_commands():
+    engine = DirectEngine()
+    assert bind_commands([engine]) == {"python3": engine, "python": engine}
+
+
+def test_a_group_expands_to_the_interpreter_names_mirage_owns():
+    assert PyEngine(captures=["@python"]).captures == ("python3", "python")
+    assert JsEngine(captures=["@js"]).captures == ("node", "js")
+    mixed = FakeRuntime(captures=["@python", "pip", "python3", "@external"])
+    assert mixed.captures == ("python3", "python", "pip", "@external")
+
+
+def test_an_explicit_empty_list_captures_nothing():
+    assert PyEngine(captures=[]).captures == ()
+
+
+def test_a_group_in_a_class_default_expands_too():
+    class GroupDefault(FakeRuntime):
+        captures = ("@python", "pip")
+
+    assert GroupDefault().captures == ("python3", "python", "pip")
+
+
+def test_a_group_binds_both_names_to_the_runtime_that_took_it():
+    fake = FakeRuntime(captures=["@python", "pip"])
+    bindings = bind_commands([fake, PyEngine()])
+    assert {n: bindings[n] for n in ("python3", "python", "pip")} == {
+        "python3": fake,
+        "python": fake,
+        "pip": fake,
+    }
 
 
 def test_bind_commands_workspace_runtime_binds_nothing():
     assert bind_commands([WorkspaceRuntime()]) == {}
 
 
-def test_build_runtime_vfs_is_a_named_runtime():
+def test_build_runtime_workspace_is_a_named_runtime():
     assert isinstance(build_runtime("workspace"), WorkspaceRuntime)
 
 
@@ -136,20 +219,20 @@ def test_named_capture_does_not_take_the_whole_line():
     assert whole_line_runtime({"nvidia-smi": box}) is None
 
 
-def test_only_star_takes_the_whole_line():
+def test_only_a_line_capture_takes_the_whole_line():
     box, star = _LineRuntime(), _LineRuntime()
     bindings = {"nvidia-smi": box, "@line": star}
     assert whole_line_runtime(bindings) is star
 
 
-def test_whole_line_runtime_skips_stage_engines_and_vfs():
+def test_whole_line_runtime_skips_stage_engines_and_workspace():
     vfs = WorkspaceRuntime(captures=["grep"])
     monty_like = FakeRuntime()
     bindings = {"grep": vfs, "python3": monty_like}
     assert whole_line_runtime(bindings) is None
 
 
-def test_vfs_is_a_pure_routing_marker():
+def test_workspace_runtime_is_a_pure_routing_marker():
     # A line resolved to workspace runs on the workspace executor inline, so
     # the marker carries no line entry point and no interpreter entry point.
     vfs = WorkspaceRuntime()
@@ -159,11 +242,11 @@ def test_vfs_is_a_pure_routing_marker():
         asyncio.run(vfs.execute([], [], Context()))
 
 
-def test_vfs_marker_reach_is_vfs():
+def test_workspace_runtime_reach_is_workspace():
     assert WorkspaceRuntime.reach == "workspace"
 
 
-def test_default_world_reaches_only_the_vfs():
+def test_default_world_reaches_only_the_workspace():
     # The default world's sandbox story rests on every entry keeping
     # its effects behind the workspace gate; `local` (process reach)
     # is deliberately not a default entry.

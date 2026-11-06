@@ -18,6 +18,7 @@ from typing import Any
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import WorkspaceBinding
+from mirage.runtime.constants import expand_captures
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.table import (
     DEFAULT_ENTRIES,
@@ -87,7 +88,7 @@ class Runtimes:
                     # The skipped class still declares its captures, so
                     # the dispatcher can answer "why is python3 dead"
                     # with the install hint instead of a blank refusal.
-                    for cmd in NAMED[name].captures:
+                    for cmd in expand_captures(NAMED[name].captures):
                         self._registry.runtime_unavailable.setdefault(
                             cmd, str(exc)
                         )

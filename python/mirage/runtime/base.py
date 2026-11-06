@@ -25,6 +25,7 @@ from mirage.context.session_context import bind_caller, reset_caller
 from mirage.io.gateway import live_egress
 from mirage.runtime.binding import WorkspaceBinding, refused_run
 from mirage.runtime.config import RuntimeConfig
+from mirage.runtime.constants import expand_captures
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.mixin import E, LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.types import (
@@ -105,16 +106,18 @@ class Runtime(ABC, Generic[E]):
             captures (Sequence[str] | None): commands this runtime
                 claims, overriding the class default; EXTERNAL_COMMANDS
                 captures unresolved program names. WHOLE_LINE
-                claims every line for a line-executing runtime. None keeps
-                the default.
+                claims every line for a line-executing runtime.
+                PYTHON_GROUP and JS_GROUP stand for their tier's
+                interpreter names. None keeps the default.
             config (RuntimeConfig | dict[str, Any] | None): the
                 runtime's implementation knobs, coerced through its
                 own config class (config_cls), so a field the runtime
                 does not have fails loud; the dict form is a yaml
                 entry's ``config`` block.
         """
-        if captures is not None:
-            self.captures = tuple(captures)
+        self.captures = expand_captures(
+            self.captures if captures is None else captures
+        )
         self.config = self.config_cls.coerce(config)
 
     @property

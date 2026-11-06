@@ -1,0 +1,28 @@
+{
+  "requires": {
+    "python": [
+      "env:MIRAGE_QUICKJS_HOME"
+    ],
+    "typescript": []
+  },
+  "cases": [
+    {
+      "id": "quickjs_cannot_take_python3",
+      "world": {
+        "runtimes": [
+          {
+            "name": "quickjs",
+            "captures": [
+              "node",
+              "python3"
+            ]
+          },
+          "workspace"
+        ]
+      },
+      "build_error": {
+        "contains": "runtime 'quickjs' does not run 'python3'"
+      }
+    }
+  ]
+}

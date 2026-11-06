@@ -26,8 +26,8 @@ machine; Mirage only runs programs on it. Python SDK and Node.
 ## Usage
 
 `captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
-every program Mirage does not have itself. Name `python3` and `python` to run
-them on the machine too.
+every program Mirage does not have itself. Name `@python` to run
+Python on the machine too.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -36,7 +36,7 @@ them on the machine too.
     from mirage.runtime.sandbox.ssh import SSHRuntime
 
     runtime = SSHRuntime(
-        captures=["python3", "python", "@external"],
+        captures=["@python", "@external"],
         config={"host": "mybox", "username": "deploy", "identity_file": "~/.ssh/id_ed25519"},
     )
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
@@ -48,7 +48,7 @@ them on the machine too.
     import { MountMode, RAMVFS, SSHRuntime, Workspace } from '@struktoai/mirage-node'
 
     const runtime = new SSHRuntime({
-      captures: ['python3', 'python', '@external'],
+      captures: ['@python', '@external'],
       config: { host: 'mybox', username: 'deploy', identityFile: '~/.ssh/id_ed25519' },
     })
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
@@ -60,7 +60,7 @@ them on the machine too.
     mode: exec
     runtimes:
       - name: ssh
-        captures: ["python3", "python", "@external"]
+        captures: ["@python", "@external"]
         config:
           host: mybox
           username: deploy
@@ -97,7 +97,7 @@ mounts:
       root: /home/user/proj
 runtimes:
   - name: ssh
-    captures: ["python3", "python", "@external"]
+    captures: ["@python", "@external"]
     config:
       host: mybox
 ```

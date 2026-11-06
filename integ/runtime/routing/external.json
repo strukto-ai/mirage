@@ -575,6 +575,47 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_group_takes_both_interpreter_names",
+      "note": "@python is python3 and python, so one entry moves both to the runtime; a tool such as pip is no interpreter name and reaches the runtime through @external.",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "captures": [
+              "@python",
+              "@external"
+            ]
+          }
+        ]
+      },
+      "steps": [
+        {
+          "command": "python3 -c 'print(1)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"python3\",\"-c\",\"print(1)\"]\n"
+          }
+        },
+        {
+          "command": "python -c 'print(2)'",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"python\",\"-c\",\"print(2)\"]\n"
+          }
+        },
+        {
+          "command": "pip install x",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"pip\",\"install\",\"x\"]\n"
+          }
+        }
+      ]
     }
   ]
 }

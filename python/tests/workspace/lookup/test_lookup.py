@@ -410,6 +410,7 @@ def _commands(node) -> list[str]:
         (True, "ionice -c2 gcc x.c", "docker"),
         (True, "setsid -w gcc x.c", "docker"),
         (False, "nice gcc x.c", "docker"),
+        (True, "make -j2", "e2b"),
         (True, "nice make", "e2b"),
         (True, "nice", "e2b"),
         (True, "sudo gcc x.c", "e2b"),
@@ -426,7 +427,44 @@ async def test_a_wrapper_runs_where_the_program_it_runs_is_captured(
         io = await ws.shell(line)
         assert (io.exit_code, await io.stdout_str()) == (0, f"{runs}\n")
         said = await ws.explain(line)
-        assert _commands(said.node)[0] == ("" if runs == "e2b" else runs)
+        assert _commands(said.node)[0] == runs
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_wrapper_around_a_mirage_command_is_explained_as_mirage_runs_it():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[_Box("e2b", "@external"), "workspace"],
+    )
+    try:
+        await ws.shell("echo hit > /data/f")
+        line = "nice grep hit /data/f"
+        io = await ws.shell(line)
+        assert (io.exit_code, await io.stdout_str()) == (0, "hit\n")
+        said = await ws.explain(line)
+        assert _commands(said.node)[0] == ""
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_script_path_is_explained_as_mirage_runs_it():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[_Box("e2b", "@external"), "workspace"],
+    )
+    try:
+        await ws.shell(
+            "echo 'echo here' > /data/run.sh; chmod +x /data/run.sh"
+        )
+        io = await ws.shell("/data/run.sh")
+        assert (io.exit_code, await io.stdout_str()) == (0, "here\n")
+        said = await ws.explain("/data/run.sh")
+        assert _commands(said.node)[0] == ""
     finally:
         await ws.close()
 

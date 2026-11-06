@@ -1,7 +1,7 @@
 {
   "cases": [
     {
-      "id": "whole_line_star",
+      "id": "whole_line_capture",
       "world": {
         "runtimes": [
           {

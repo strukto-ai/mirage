@@ -246,6 +246,11 @@ def _layers(
     allow list does not narrow it: a word the list leaves out is found,
     and the policy gate refuses it.
 
+    A default runtime skipped for a missing extra leaves its names in
+    ``registry.runtime_unavailable``, which the ``@external`` fallback
+    never takes. TypeScript builds every default entry, so it has no
+    such table.
+
     Args:
         name (str): expanded command name.
         session (SessionState): shell session (function table).

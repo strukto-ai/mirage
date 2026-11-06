@@ -51,25 +51,43 @@ To choose a runtime for each command line, see [Route Runtime](/home/policy/rout
 | Entry | Takes |
 | --- | --- |
 | A name, such as `python3` or `ffmpeg` | That program |
+| `@python`, `@js` | `python3` and `python`, or `node` and `js` |
 | `@external` | Every program Mirage does not have itself, such as `gcc`, `ffmpeg`, `perl` or a vendor CLI |
-| `@line` | The whole line, Mirage's own commands included (sandboxes only) |
+| `@line` | The whole line, Mirage's own commands included (any runtime that runs a shell line) |
 
 | Runtime | Default `captures` |
 | --- | --- |
-| `monty`, `wasi`, `pyodide`, `local` | `python3`, `python` |
-| `quickjs` | `node`, `js` |
+| `monty`, `wasi`, `pyodide`, `local` | `@python` |
+| `quickjs` | `@js` |
 | Sandboxes | `@external` |
 
 - Mirage's own commands (`cat`, `grep`, `sha1sum`), pipes and redirects stay
-  in Mirage. `cd`, `export` and `echo` stay even when named.
+  in Mirage. Name `cat`, `grep`, `ps` or `kill` to run it on a runtime
+  instead; `cd`, `export`, `echo`, `ln`, functions and installed CLIs stay
+  in Mirage even when named.
 - `@external` does not take `python`, `python3`, `node` or `js`: Mirage has
   those itself and gives them to the Python or JavaScript runtime in the list.
-  Name them to send them somewhere else.
+  Name them, or `@python` or `@js`, to send them somewhere else. A tool such
+  as `pip` is an ordinary program: capture it on the same runtime when
+  packages must land there, as in `captures: ["@python", "pip", "pip3"]`.
+- `monty`, `wasi`, `pyodide` and `quickjs` take only their own interpreter's
+  names; naming another program on one is refused when the workspace is
+  built. `local` and sandboxes take any name.
 - `nice`, `nohup`, `stdbuf`, `ionice` and `setsid` run their program where
   it runs alone: `nice gcc x.c` where `gcc` is taken, `nice grep` in Mirage.
+- Under `local` and the sandboxes, a program a captured program starts runs
+  there: `make` running `gcc`, or a script calling `subprocess`. Capture the
+  launcher on the same runtime as the tool. A Pyodide script's `subprocess`
+  calls go back through Mirage's routing like any other command.
+- An alias is captured as the word it expands to, once `shopt -s
+  expand_aliases` is on and the alias was defined on an earlier line.
 - If two runtimes take the same name or group, the first wins and Mirage
   logs a warning.
 - A program no runtime takes exits 127, `command not found`.
+- A `workspace` entry with `captures` runs only those mount commands itself:
+  another mount command, such as `ls`, exits 126, `no runtime accepted this
+  line`, and an unknown program exits 127. The shell's own words (`cd`,
+  `export`, `echo`) still run.
 - A name only `@external` takes has no file, so `which`, `command -v` and
   `type` report it missing; running it still works.
 - Globs expand against the workspace first (`python3 job.py *.csv` runs
@@ -78,7 +96,7 @@ To choose a runtime for each command line, see [Route Runtime](/home/policy/rout
 ```yaml
 runtimes:
   - name: docker
-    captures: ["python3", "@external"]
+    captures: ["@python", "@external"]
     config:
       container: my-sandbox
 ```

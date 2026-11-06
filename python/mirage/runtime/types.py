@@ -46,7 +46,7 @@ class RouteDecision(Generic[_R]):
         bindings (Mapping[str, _R | None]): every command some entry
             captures, resolved for this line: the runtime it runs on,
             or None when a route to the workspace keeps the line off
-            its only capturer, a ``*`` line executor (exit 126, never a
+            its only capturer, an ``@line`` line executor (exit 126, never a
             silent fallback to the workspace).
         fallback (_R | None): where commands no entry captures run:
             the catch-all workspace runtime, or None when the workspace
