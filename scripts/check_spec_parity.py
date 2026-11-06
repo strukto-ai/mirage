@@ -770,9 +770,27 @@ def http_methods(doc: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
     ]
 
 
+def answers(op: dict[str, Any]) -> dict[str, str]:
+    """The named schema each success code answers in JSON, by code.
+
+    Args:
+        op (dict[str, Any]): the operation object.
+    """
+    named: dict[str, str] = {}
+    for code, response in op.get("responses", {}).items():
+        schema = (
+            response.get("content", {})
+            .get("application/json", {})
+            .get("schema", {})
+        )
+        if code.startswith("2") and "$ref" in schema:
+            named[code] = schema["$ref"].rsplit("/", 1)[-1]
+    return named
+
+
 def http_operations(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Each operation's success codes, request body and hosts, keyed by
-    ``METHOD /path``.
+    """Each operation's success codes, named answers, request body and
+    hosts, keyed by ``METHOD /path``.
 
     Args:
         doc (dict[str, Any]): an OpenAPI document.
@@ -782,6 +800,7 @@ def http_operations(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
             "success": sorted(
                 c for c in op.get("responses", {}) if c.startswith("2")
             ),
+            "answers": answers(op),
             "body": request_body(doc, op),
             "hosts": op.get("x-hosts", ["daemon"]),
         }
@@ -813,6 +832,12 @@ def compare_operation(
         failures.append(
             f"{key}: success codes {missing} are served but missing from {name}"
         )
+    for code, schema in served["answers"].items():
+        if written["answers"].get(code) != schema:
+            failures.append(
+                f"{key}: the daemon answers {code} with {schema} but {name} "
+                f"has {written['answers'].get(code, 'another schema')}"
+            )
     if served["body"] is not None and served["body"] != written["body"]:
         failures.append(
             f"{key}: the daemon's request body is {served['body']} "
@@ -862,6 +887,33 @@ def check_http_api() -> list[str]:
         failures.extend(
             compare_operation(key, served[key], written[key], name)
         )
+    failures.extend(compare_schemas(daemon, spec, name))
+    return failures
+
+
+def compare_schemas(
+    daemon: dict[str, Any], spec: dict[str, Any], name: str
+) -> list[str]:
+    """Each schema both documents name: its fields and required fields
+    must match, so an answer's shape cannot drift once it is written.
+
+    Args:
+        daemon (dict[str, Any]): the daemon's OpenAPI document.
+        spec (dict[str, Any]): the committed document.
+        name (str): the committed document's path, for messages.
+    """
+    served = daemon.get("components", {}).get("schemas", {})
+    written = spec.get("components", {}).get("schemas", {})
+    failures: list[str] = []
+    for schema in sorted(set(served) & set(written)):
+        for part in ("properties", "required"):
+            have = set(served[schema].get(part, []))
+            want = set(written[schema].get(part, []))
+            if have != want:
+                failures.append(
+                    f"schema {schema}: the daemon's {part} are "
+                    f"{sorted(have)} but {name} has {sorted(want)}"
+                )
     return failures
 
 

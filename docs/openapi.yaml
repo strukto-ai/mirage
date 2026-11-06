@@ -612,10 +612,7 @@ paths:
           content:
             application/json:
               schema:
-                items:
-                  $ref: '#/components/schemas/TemplateResponse'
-                type: array
-                title: Response List Templates V1 Templates Get
+                $ref: '#/components/schemas/TemplateList'
         '401':
           $ref: '#/components/responses/401'
         '429':
@@ -6140,12 +6137,14 @@ components:
           description: The saved store holding the secret.
         ref:
           type: string
-          description: The secret's name in that store.
+          description: The secret in that store.
         key:
           type: string
-          description: A key inside the secret, when it holds several.
+          description: The key inside that secret whose value the field takes.
       required:
         - from
+        - ref
+        - key
     FieldValue:
       description: A field's value, or a pointer to a saved store's secret for a string field.
       anyOf:
@@ -6291,6 +6290,7 @@ components:
       required:
         - name
         - type
+        - fields
     UpdateSavedEntryRequest:
       type: object
       properties:
@@ -6302,6 +6302,8 @@ components:
               - type: 'null'
           description: The fields to set. A sealed field left out keeps its value; null removes
             a field.
+      required:
+        - fields
     CreatePolicyRequest:
       additionalProperties: false
       properties:
@@ -6350,6 +6352,15 @@ components:
       required:
         - items
       type: object
+    TemplateList:
+      properties:
+        items:
+          items:
+            $ref: '#/components/schemas/TemplateResponse'
+          type: array
+      required:
+        - items
+      type: object
   securitySchemes:
     bearerAuth:
       type: http
@@ -6364,6 +6375,11 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+        text/plain:
+          schema:
+            type: string
+            description: The daemon refuses a host not allowed, or a browser page from another
+              origin, in plain text.
     '401':
       description: The token is missing or wrong
       content:

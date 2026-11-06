@@ -3692,13 +3692,9 @@ The saved templates, by name.
 
 `200` OK
 
-`application/json` `TemplateResponse[]`
+`application/json` `TemplateList`
 
-<ResponseField name="name" type="string" required>
-</ResponseField>
-<ResponseField name="description" type="string | null" required>
-</ResponseField>
-<ResponseField name="config" type="object" required>
+<ResponseField name="items" type="TemplateResponse[]" required>
 </ResponseField>
 
 `401` The token is missing or wrong
@@ -3916,7 +3912,7 @@ Save a VFS config. Its fields are checked against the type's; secret fields are 
 <ParamField body="type" type="string" required>
 One of the types its kind's `/types` route lists, such as `GET /v1/vfs/types`.
 </ParamField>
-<ParamField body="fields" type="object">
+<ParamField body="fields" type="object" required>
 The type's config. Secret fields are sealed; a string field may point at a saved store instead.
 </ParamField>
 
@@ -4066,7 +4062,7 @@ The VFS config's name.
 
 **Body** `application/json`
 
-<ParamField body="fields" type="object">
+<ParamField body="fields" type="object" required>
 The fields to set. A sealed field left out keeps its value; null removes a field.
 </ParamField>
 
@@ -4209,7 +4205,7 @@ Save a CLI config. Its fields are checked against the type's; secret fields are 
 <ParamField body="type" type="string" required>
 One of the types its kind's `/types` route lists, such as `GET /v1/vfs/types`.
 </ParamField>
-<ParamField body="fields" type="object">
+<ParamField body="fields" type="object" required>
 The type's config. Secret fields are sealed; a string field may point at a saved store instead.
 </ParamField>
 
@@ -4359,7 +4355,7 @@ The CLI config's name.
 
 **Body** `application/json`
 
-<ParamField body="fields" type="object">
+<ParamField body="fields" type="object" required>
 The fields to set. A sealed field left out keeps its value; null removes a field.
 </ParamField>
 
@@ -4502,7 +4498,7 @@ Save a runtime config. Its fields are checked against the type's; secret fields 
 <ParamField body="type" type="string" required>
 One of the types its kind's `/types` route lists, such as `GET /v1/vfs/types`.
 </ParamField>
-<ParamField body="fields" type="object">
+<ParamField body="fields" type="object" required>
 The type's config. Secret fields are sealed; a string field may point at a saved store instead.
 </ParamField>
 
@@ -4652,7 +4648,7 @@ The runtime config's name.
 
 **Body** `application/json`
 
-<ParamField body="fields" type="object">
+<ParamField body="fields" type="object" required>
 The fields to set. A sealed field left out keeps its value; null removes a field.
 </ParamField>
 
