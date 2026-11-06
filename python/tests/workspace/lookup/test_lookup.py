@@ -486,3 +486,21 @@ async def test_a_function_named_like_a_wrapper_is_explained_as_it_runs(
         assert _commands(said.node)[0] == ""
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_command_past_a_wrapper_function_is_explained_as_it_runs():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[_Box("docker", "gcc"), "workspace"],
+    )
+    try:
+        await ws.shell("nice() { echo local; }")
+        io = await ws.shell("command nice gcc x.c")
+        assert await io.stdout_str() == "docker\n"
+        said = await ws.explain("command nice gcc x.c")
+        assert _commands(said.node) == ["", "docker", "docker"]
+        assert "nice" in ws.get_session(ws.default_session_id).functions
+    finally:
+        await ws.close()

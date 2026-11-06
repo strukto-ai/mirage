@@ -1058,3 +1058,21 @@ describe('a wrapped program', () => {
     },
   )
 })
+
+describe('command past a wrapper function', () => {
+  it('is explained as it runs', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new Box('docker', 'gcc'), 'workspace'] },
+    )
+    try {
+      await ws.shell('nice() { echo local; }')
+      const io = await ws.shell('command nice gcc x.c')
+      expect(new TextDecoder().decode(io.stdout)).toBe('docker\n')
+      const said = await ws.explain('command nice gcc x.c')
+      expect(runtimesOf(said.node)).toEqual(['', 'docker', 'docker'])
+    } finally {
+      await ws.close()
+    }
+  })
+})

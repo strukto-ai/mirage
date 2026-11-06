@@ -543,15 +543,24 @@ async function* judgeWords(
     ctx,
     session,
   }
-  // env's command runs in the environment env builds for it, and a nested
-  // shell's line in a new shell started from this one.
+  // env's command runs in the environment env builds for it, a nested
+  // shell's line in a new shell started from this one, and command's past
+  // the function and alias its name masks, as its run does.
   const child = name === 'env' && inners.length > 0 ? envChild(args, session) : null
+  const named = name === 'command' ? inners[0]?.argv[0] : undefined
+  const masked = named === undefined ? undefined : wordValue(named)
   let innerSession = session
   if (child !== null && typeof child !== 'string') {
     innerSession = session.fork()
     innerSession.vars = envVars(session, child[1])
   } else if ((name === 'sh' || name === 'bash') && inners.length > 0) {
     innerSession = session.newShell()
+  } else if (masked !== undefined) {
+    innerSession = session.fork()
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete innerSession.functions[masked]
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete innerSession.aliases[masked]
   }
   for (const inner of inners) {
     if (!innerReadable(inner)) continue

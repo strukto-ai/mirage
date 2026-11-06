@@ -612,8 +612,9 @@ async def _judge_words(
         ctx,
         session,
     )
-    # env's command runs in the environment env builds for it, and a
-    # nested shell's line in a new shell started from this one.
+    # env's command runs in the environment env builds for it, a nested
+    # shell's line in a new shell started from this one, and command's
+    # past the function and alias its name masks, as its run does.
     child = env_child(args, session) if name == "env" and inners else None
     inner_session = session
     if child is not None and not isinstance(child, str):
@@ -621,6 +622,10 @@ async def _judge_words(
         inner_session.vars = env_vars(session, child[1])
     elif name in ("sh", "bash") and inners:
         inner_session = session.new_shell()
+    elif name == "command" and inners and inners[0].argv:
+        inner_session = session.fork()
+        inner_session.functions.pop(inners[0].argv[0].value, None)
+        inner_session.aliases.pop(inners[0].argv[0].value, None)
     for inner in inners:
         if not inner.readable:
             continue
