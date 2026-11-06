@@ -94,6 +94,32 @@ def frames_bytes(call_stack: CallStack) -> int:
     return sum(args_bytes(args) for args in call_stack.positionals())
 
 
+def saves_bytes(session: SessionState) -> int:
+    """The bytes the records running prefix assignments set aside hold.
+
+    A ``declare -g`` that reaches past one swaps that record into the
+    variables, where it is counted, and holds the running value aside in
+    its place.
+
+    Args:
+        session (SessionState): the session.
+    """
+    held = 0
+    for saved in session._prefix_saves:
+        for n, var in saved.items():
+            var = next(
+                (
+                    running
+                    for name, frame, running in session._reached
+                    if frame is saved and name == n
+                ),
+                var,
+            )
+            if var is not None:
+                held += entry_bytes(n, var.value)
+    return held
+
+
 def env_bytes(session: SessionState) -> int:
     """The bytes a session's shell state holds: its variables, functions,
     aliases and positional parameters, names and values, and the records
@@ -107,12 +133,7 @@ def env_bytes(session: SessionState) -> int:
         + sum(entry_bytes(n, body) for n, body in session.functions.items())
         + sum(entry_bytes(n, text) for n, text in session.aliases.items())
         + args_bytes(session.positional_args)
-        + sum(
-            entry_bytes(n, var.value)
-            for saved in session._prefix_saves
-            for n, var in saved.items()
-            if var is not None
-        )
+        + saves_bytes(session)
     )
 
 

@@ -142,6 +142,14 @@ describe('max_env', () => {
     }
   })
 
+  it('counts the record a global declaration reaches past a prefix once', async () => {
+    const [out, , code] = await run(
+      'X=$(printf %0100d 0); f() { declare -g X=$(printf %0150d 0); }; X= f; echo ${#X}',
+      300,
+    )
+    expect([out, code]).toEqual(['150\n', 0])
+  })
+
   it('stops counting the set-aside value once the prefix is restored', async () => {
     const [out, , code] = await run('X=$(printf %0100d 0); X= eval :; Y=$(printf %050d 0); echo ok')
     expect([out, code]).toEqual(['ok\n', 0])

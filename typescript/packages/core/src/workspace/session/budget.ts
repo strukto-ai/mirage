@@ -105,8 +105,23 @@ export function envBytes(session: SessionState): number {
   for (const [name, record] of Object.entries(session.vars)) held += recordBytes(name, record)
   for (const [name, body] of Object.entries(session.functions)) held += entryBytes(name, body)
   for (const [name, text] of Object.entries(session.aliases)) held += entryBytes(name, text)
+  return held + savesBytes(session)
+}
+
+/**
+ * The bytes the records running prefix assignments set aside hold. A
+ * `declare -g` that reaches past one swaps that record into the variables,
+ * where it is counted, and holds the running value aside in its place.
+ * Mirrors Python's `saves_bytes`.
+ */
+export function savesBytes(session: SessionState): number {
+  let held = 0
   for (const saved of session.prefixSaves) {
-    for (const [name, record] of saved) if (record !== null) held += recordBytes(name, record)
+    for (const [name, record] of saved) {
+      const swap = session.reached.find(([n, frame]) => frame === saved && n === name)
+      const kept = swap === undefined ? record : swap[2]
+      if (kept !== null) held += recordBytes(name, kept)
+    }
   }
   return held
 }

@@ -160,6 +160,16 @@ async def test_the_value_a_prefix_sets_aside_counts(line: str, size: int):
 
 
 @pytest.mark.asyncio
+async def test_a_global_declaration_past_a_prefix_counts_the_record_once():
+    out, _, code = await run(
+        "X=$(printf %0100d 0); f() { declare -g X=$(printf %0150d 0); };"
+        " X= f; echo ${#X}",
+        300,
+    )
+    assert (out, code) == ("150\n", 0)
+
+
+@pytest.mark.asyncio
 async def test_a_prefix_s_set_aside_value_stops_counting_once_restored():
     out, _, code = await run(
         "X=$(printf %0100d 0); X= eval :; Y=$(printf %050d 0); echo ok"
