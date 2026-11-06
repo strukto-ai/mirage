@@ -327,8 +327,10 @@ def report_jobs(
 ) -> bytes:
     """bash's reports of the jobs its shell started that a signal ended
     since it last told, as it tells once it reaped a child or waited:
-    each once, and the TERM, INT or PIPE that ended one untold. A
-    substitution's shell tells of none.
+    each once, and the TERM, INT or PIPE that ended one untold. The
+    signal is the one ``kill`` stopped a job with, or the one that ended
+    the native program a job's status is. A substitution's shell tells
+    of none.
 
     Args:
         context (EvaluationContext): the shell.
@@ -343,17 +345,24 @@ def report_jobs(
         return b""
     told = []
     for job in job_table.list_jobs(_session_of(session)):
+        process = job.process
         if (
             job.reported
-            or job.status != JobStatus.KILLED
-            or job.exit_code <= 128
-            or job.process is None
-            or job.process.info.parent_pid != session.process_id
+            or job.status == JobStatus.RUNNING
+            or process is None
+            or process.info.parent_pid != session.process_id
         ):
+            continue
+        ended = (
+            job.exit_code - 128
+            if job.status == JobStatus.KILLED
+            else process.ended_by
+        )
+        if ended is None or ended < 1 or job.exit_code != 128 + ended:
             continue
         report = signal_report(
             shell_voice(),
-            [(job.pid, job.exit_code, job.exit_code - 128, job.command)],
+            [(job.pid, job.exit_code, ended, job.command)],
             False,
         )
         if report:
@@ -1461,7 +1470,7 @@ async def handle_kill(
         ):
             spec, words = word[2:], words[1:]
         elif word.startswith("-") and len(word) > 1 and not saw_signal:
-            spec, words, saw_signal = word[1:], words[1:], True
+            spec, words = word[1:], words[1:]
         else:
             break
         number = signal_number(spec)
@@ -1475,7 +1484,7 @@ async def handle_kill(
             return _job_result(
                 cmd_str, f"mirage: kill: {spec}: not supported\n", 1
             )
-        signal = number
+        signal, saw_signal = number, True
     if not words:
         return _job_result(cmd_str, builtin_usage("kill"), 2)
     processes = _process_view(job_table, session)
@@ -1491,9 +1500,14 @@ async def handle_kill(
                     "or job IDs"
                 )
                 continue
+            # A signal that leaves a process running only probes it.
             try:
                 found = await job_table.signal_remote(
-                    owner, int(local), signal, sid, processes.permissions
+                    owner,
+                    int(local),
+                    0 if signal in _KEPT_SIGNALS else signal,
+                    sid,
+                    processes.permissions,
                 )
             except PermissionError:
                 errors.append(

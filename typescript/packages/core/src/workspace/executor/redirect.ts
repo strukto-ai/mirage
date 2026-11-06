@@ -427,7 +427,10 @@ export class JobRoute extends JobOutput {
 
   /** Route what a job wrote. */
   override async emit(channel: Channel, data: Uint8Array): Promise<void> {
-    if (this.recorder !== null) await this.recorder.emit(channel, data)
+    // The job holds the level's own descriptors, whatever `exec` its shell
+    // runs later (`{ cmd & exec >g; } >f` leaves the job writing `f`).
+    if (this.recorder instanceof PipeRecorder) await this.recorder.emitLevel(channel, data)
+    else if (this.recorder !== null) await this.recorder.emit(channel, data)
     else await this.write(channel, data)
   }
 

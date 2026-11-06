@@ -31,7 +31,7 @@ from mirage.shell.array import (
 )
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
-from mirage.shell.constants import BASHPID, LINENO, RANDOM
+from mirage.shell.constants import RANDOM
 from mirage.shell.errors import (
     ArithError,
     BadSubstitution,
@@ -333,10 +333,9 @@ def _lookup_var(
         drawn = next_random(session, env.get(RANDOM))
         if drawn is not None:
             return str(drawn)
-    if var == LINENO:
-        return str(session.line_number)
-    if var == BASHPID:
-        return str(session.bash_pid)
+    dynamic = session.dynamic_value(var)
+    if dynamic is not None:
+        return dynamic
     arrays = visible_arrays(session)
     if var in arrays:
         return array_get(arrays[var], 0)
@@ -1318,12 +1317,10 @@ async def _expand_braces(
             if drawn is not None:
                 val = str(drawn)
                 var_in_env = True
-        if not var_in_env and p.var_name == LINENO:
-            val = str(session.line_number)
-            var_in_env = True
-        if not var_in_env and p.var_name == BASHPID:
-            val = str(session.bash_pid)
-            var_in_env = True
+        if not var_in_env:
+            dynamic = session.dynamic_value(p.var_name)
+            if dynamic is not None:
+                val, var_in_env = dynamic, True
         if not var_in_env and p.var_name in env:
             val = env[p.var_name]
             var_in_env = True

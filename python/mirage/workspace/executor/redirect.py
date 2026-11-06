@@ -493,14 +493,19 @@ class JobRoute(JobOutput):
         self.session = session
 
     async def emit(self, channel: Channel, data: bytes) -> None:
-        """Route what a job wrote.
+        """Route what a job wrote: through the level's own descriptors,
+        which the job holds whatever ``exec`` its shell runs later
+        (``{ cmd & exec >g; } >f`` leaves the job writing ``f``).
 
         Args:
             channel (Channel): stdout or stderr.
             data (bytes): the bytes.
         """
-        if self.recorder is not None:
-            await self.recorder.emit(channel, data)
+        recorder = self.recorder
+        if isinstance(recorder, PipeRecorder):
+            await recorder.emit_level(channel, data)
+        elif recorder is not None:
+            await recorder.emit(channel, data)
         else:
             await self._write(channel, data)
 

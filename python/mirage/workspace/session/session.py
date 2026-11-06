@@ -32,8 +32,10 @@ from mirage.secrets.config import EnvVar
 from mirage.shell.array import ShellArray
 from mirage.shell.console import JobOutput, Terminal
 from mirage.shell.constants import (
+    BASHPID,
     BIN_PREFIX,
     IFS_DEFAULT,
+    LINENO,
     RANDOM,
     RANDOM_UNSET,
     SHELL_ARGV0,
@@ -472,6 +474,9 @@ class SessionState:
     _random_state: int | None = field(default=None, repr=False)
     _random_seed: str | None = field(default=None, repr=False)
     _random_last: int = field(default=0, repr=False)
+    # `$LINENO` and `$BASHPID` once the shell unset them: ordinary
+    # variables from then on, as bash's are. A fork keeps them so.
+    _plain_specials: frozenset[str] = field(default=frozenset(), repr=False)
     # Alias bookkeeping. bash expands an alias when it *parses* the line
     # that uses it, so a definition takes effect from the next line read
     # (`alias x=..; x` on one line finds no `x`; the same two statements
@@ -894,6 +899,22 @@ class SessionState:
         stage or substitution it runs in, else the shell itself."""
         return self.process_id or self.shell_pid or 0
 
+    def dynamic_value(self, name: str) -> str | None:
+        """What the shell computes a read of ``$LINENO`` or ``$BASHPID``
+        to (``line_number``, ``bash_pid``); None for any other name and
+        for one the shell unset, which reads as it was assigned.
+
+        Args:
+            name (str): the variable read.
+        """
+        if name in self._plain_specials:
+            return None
+        if name == LINENO:
+            return str(self.line_number)
+        if name == BASHPID:
+            return str(self.bash_pid)
+        return None
+
     @property
     def env(self) -> Mapping[str, str]:
         """The scalar variables, by name.
@@ -1013,6 +1034,7 @@ class SessionState:
             forked.vars = kept
         if self._random_seed == RANDOM_UNSET:
             forked._random_seed = RANDOM_UNSET
+        forked._plain_specials = self._plain_specials
         forked._borrowed = [*self._borrowed, *self.open_inputs()]
         return forked
 
@@ -1124,6 +1146,7 @@ class SessionState:
             _getopts_optind=None,
             errexit_ignored=False,
         )
+        child._plain_specials = frozenset()
         child._draw_afresh()
         return child
 

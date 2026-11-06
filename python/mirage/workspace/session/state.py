@@ -709,10 +709,9 @@ class RandomReader:
         Args:
             name (str): the variable the expression reads.
         """
-        if name == LINENO:
-            return str(self.session.line_number)
-        if name == BASHPID:
-            return str(self.session.bash_pid)
+        dynamic = self.session.dynamic_value(name)
+        if dynamic is not None:
+            return dynamic
         if not self._special(name):
             return None
         if self.seeded is None:
@@ -1276,6 +1275,8 @@ async def unset_var(
     if name == RANDOM:
         # bash: unsetting RANDOM strips its special meaning for good.
         session._random_seed = RANDOM_UNSET
+    elif name in (LINENO, BASHPID):
+        session._plain_specials = session._plain_specials | {name}
 
 
 def _shadowing_frame(

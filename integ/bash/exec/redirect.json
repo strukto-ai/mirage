@@ -99,10 +99,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( exec > exr.txt; echo a; echo b ); cat exr.txt; ( { echo A; exec > exg.txt; echo B; } > exf.txt; echo C ); cat exf.txt exg.txt; ( { echo A; exec > exk.txt; cat exh.txt; } > exh.txt; echo rc=$? ); cat exh.txt exk.txt; ( for i in 1 2; do echo a$i; exec > exg4.txt; echo b$i; done > exf4.txt ); cat exf4.txt exg4.txt; echo old > exg6.txt; ( { echo A; exec >> exg6.txt; echo B; } > exf6.txt ); cat exf6.txt exg6.txt; rm -f exf.txt exg.txt exh.txt exk.txt exf4.txt exg4.txt exf6.txt exg6.txt",
+      "command": "( exec > exr.txt; echo a; echo b ); cat exr.txt; ( { echo A; exec > exg.txt; echo B; } > exf.txt; echo C ); cat exf.txt exg.txt; ( { echo A; exec > exk.txt; cat exh.txt; } > exh.txt; echo rc=$? ); cat exh.txt exk.txt; ( for i in 1 2; do echo a$i; exec > exg4.txt; echo b$i; done > exf4.txt ); cat exf4.txt exg4.txt; echo old > exg6.txt; ( { echo A; exec >> exg6.txt; echo B; } > exf6.txt ); cat exf6.txt exg6.txt; ( { { sleep 0.1; echo CHILD; } & exec > exjg.txt; echo MAIN; wait; } > exjf.txt ); cat exjf.txt exjg.txt; rm -f exf.txt exg.txt exh.txt exk.txt exf4.txt exg4.txt exf6.txt exg6.txt exjf.txt exjg.txt",
       "expect": {
         "exit": 0,
-        "stdout": "a\nb\nC\nA\nB\nrc=0\nA\nA\na1\nb2\nA\nold\nB\n",
+        "stdout": "a\nb\nC\nA\nB\nrc=0\nA\nA\na1\nb2\nA\nold\nB\nCHILD\nMAIN\n",
         "stderr": ""
       }
     },

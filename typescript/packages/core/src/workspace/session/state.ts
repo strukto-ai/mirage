@@ -528,8 +528,8 @@ export class RandomReader {
 
   /** The dynamic value of a name, null for a name that has none. */
   readonly read = (name: string): string | null => {
-    if (name === LINENO) return String(this.session.lineNumber)
-    if (name === BASHPID) return String(this.session.bashPid)
+    const dynamic = this.session.dynamicValue(name)
+    if (dynamic !== null) return dynamic
     if (!this.special(name)) return null
     if (this.seeded === null) {
       const value = nextRandom(this.session, visibleEnv(this.session)[name])
@@ -942,6 +942,9 @@ async function unsetVar(
   }
   // bash: unsetting RANDOM strips its special meaning for good.
   if (name === RANDOM) session.randomSeed = RANDOM_UNSET
+  else if (name === LINENO || name === BASHPID) {
+    session.plainSpecials = new Set([...session.plainSpecials, name])
+  }
 }
 
 function place(session: SessionState, name: string, v: ShellVar | null): void {

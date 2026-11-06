@@ -94,6 +94,14 @@
             "stdout": "137\n",
             "stderr": "bash: line 1:    11 Killed                  python3 -c 'import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); open(sys.argv[1], \"w\").close(); time.sleep(60)' \"$F\"\n"
           }
+        },
+        {
+          "command": "python3 -c 'import os; os.kill(os.getpid(), 9)' & wait %1; echo $?",
+          "expect": {
+            "exit": 0,
+            "stdout": "137\n",
+            "stderr": "bash: line 1:    12 Killed                  python3 -c 'import os; os.kill(os.getpid(), 9)'\n"
+          }
         }
       ]
     }

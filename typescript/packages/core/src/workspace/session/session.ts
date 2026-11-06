@@ -26,8 +26,10 @@ import { EnvVar, type EnvEntries } from '../../secrets/config.ts'
 import { ShellArray } from '../../shell/array.ts'
 import { Terminal, type JobOutput } from '../../shell/console/index.ts'
 import {
+  BASHPID,
   BIN_PREFIX,
   IFS_DEFAULT,
+  LINENO,
   RANDOM,
   RANDOM_UNSET,
   SHELL_ARGV0,
@@ -414,6 +416,9 @@ export class SessionState {
   randomState: number | null = null
   randomSeed: string | null = null
   randomLast = 0
+  // `$LINENO` and `$BASHPID` once the shell unset them: ordinary variables
+  // from then on, as bash's are. A fork keeps them so.
+  plainSpecials: ReadonlySet<string> = new Set()
   positionalArgs: string[]
   // What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
   // sets it to the script file it is running, or to the name given after
@@ -683,6 +688,7 @@ export class SessionState {
     // again; a fork given new variables starts them.
     if (overrides.vars === undefined) forked.vars = vars
     if (this.randomSeed === RANDOM_UNSET) forked.randomSeed = RANDOM_UNSET
+    forked.plainSpecials = this.plainSpecials
     forked.versions = this.versions
     forked.ids = this.ids
     forked.terminalOutput = this.terminalOutput
@@ -809,6 +815,7 @@ export class SessionState {
     child.getoptsPos = 0
     child.getoptsOptind = null
     child.errexitIgnored = false
+    child.plainSpecials = new Set()
     child.drawAfresh()
     return child
   }
@@ -835,6 +842,18 @@ export class SessionState {
    */
   get bashPid(): number {
     return this.processId ?? this.shellPid ?? 0
+  }
+
+  /**
+   * What the shell computes a read of `$LINENO` or `$BASHPID` to
+   * (`lineNumber`, `bashPid`); null for any other name and for one the shell
+   * unset, which reads as it was assigned. Mirrors Python's dynamic_value.
+   */
+  dynamicValue(name: string): string | null {
+    if (this.plainSpecials.has(name)) return null
+    if (name === LINENO) return String(this.lineNumber)
+    if (name === BASHPID) return String(this.bashPid)
+    return null
   }
 
   /**

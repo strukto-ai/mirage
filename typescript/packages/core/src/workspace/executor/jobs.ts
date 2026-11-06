@@ -342,8 +342,10 @@ export async function tell(
 /**
  * bash's reports of the jobs its shell started that a signal ended since it
  * last told, as it tells once it reaped a child or waited: each once, and
- * the TERM, INT or PIPE that ended one untold. A substitution's shell tells
- * of none. Mirrors Python's report_jobs.
+ * the TERM, INT or PIPE that ended one untold. The signal is the one `kill`
+ * stopped a job with, or the one that ended the native program a job's
+ * status is. A substitution's shell tells of none. Mirrors Python's
+ * report_jobs.
  */
 export function reportJobs(context: EvaluationContext, jobTable: JobTable | null): Uint8Array {
   const session = context.session
@@ -352,19 +354,17 @@ export function reportJobs(context: EvaluationContext, jobTable: JobTable | null
   }
   const told: string[] = []
   for (const job of jobTable.listJobs(sessionOf(session))) {
+    const process = job.process ?? null
     if (
       job.reported ||
-      job.status !== JobStatus.KILLED ||
-      job.exitCode <= 128 ||
-      job.process?.info.parentPid !== session.processId
+      job.status === JobStatus.RUNNING ||
+      process?.info.parentPid !== session.processId
     ) {
       continue
     }
-    const report = signalReport(
-      shellVoice(),
-      [[job.pid, job.exitCode, job.exitCode - 128, job.command]],
-      false,
-    )
+    const ended = job.status === JobStatus.KILLED ? job.exitCode - 128 : process.endedBy
+    if (ended === null || ended < 1 || job.exitCode !== 128 + ended) continue
+    const report = signalReport(shellVoice(), [[job.pid, job.exitCode, ended, job.command]], false)
     if (report !== '') {
       job.reported = true
       told.push(report)
@@ -1294,13 +1294,13 @@ export async function handleKill(
     } else if (word.startsWith('-') && word.length > 1 && !sawSignal) {
       spec = word.slice(1)
       words = words.slice(1)
-      sawSignal = true
     } else break
     const number = signalNumber(spec)
     if (number === null)
       return jobResult(cmdStr, `${voice}kill: ${spec}: invalid signal specification\n`, 1)
     if (number === SIGSTOP) return jobResult(cmdStr, `mirage: kill: ${spec}: not supported\n`, 1)
     signal = number
+    sawSignal = true
   }
   if (words.length === 0) return jobResult(cmdStr, builtinUsage('kill'), 2)
   const processes = processView(jobTable, session)
@@ -1318,10 +1318,11 @@ export async function handleKill(
       }
       let found: boolean
       try {
+        // A signal that leaves a process running only probes it.
         found = await jobTable.signalRemote(
           owner,
           Number(owned),
-          signal,
+          KEPT_SIGNALS.has(signal) ? 0 : signal,
           sid,
           processes.permissions,
         )

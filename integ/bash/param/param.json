@@ -2093,10 +2093,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "( RANDOM=42; RANDOM=(1 2); echo $RANDOM; unset RANDOM; RANDOM=5; echo $RANDOM )",
+      "command": "( RANDOM=42; RANDOM=(1 2); echo $RANDOM; unset RANDOM; RANDOM=5; echo $RANDOM ); ( unset BASHPID; BASHPID=42; echo \"bp=$BASHPID ${BASHPID} $((BASHPID))\"; unset LINENO; echo \"ln=[$LINENO] [${LINENO}] $((LINENO+1))\"; LINENO=7; echo \"ln=$LINENO\" ); ( (unset BASHPID; echo \"sub=[$BASHPID]\"); [ -n \"$BASHPID\" ] && echo par; unset LINENO; bash -c 'echo nested=$LINENO' )",
       "expect": {
         "exit": 0,
-        "stdout": "1\n5\n",
+        "stdout": "1\n5\nbp=42 42 42\nln=[] [] 1\nln=7\nsub=[]\npar\nnested=1\n",
         "stderr": ""
       }
     },

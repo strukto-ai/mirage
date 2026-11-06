@@ -31,7 +31,7 @@ import {
 } from '../../shell/array.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { YieldBudget } from '../../io/yield_budget.ts'
-import { BASHPID, LINENO, RANDOM } from '../../shell/constants.ts'
+import { RANDOM } from '../../shell/constants.ts'
 import {
   ArithError,
   BadSubstitution,
@@ -188,8 +188,8 @@ export function lookupVar(
     const drawn = nextRandom(session, env[RANDOM])
     if (drawn !== null) return String(drawn)
   }
-  if (name === LINENO) return String(session.lineNumber)
-  if (name === BASHPID) return String(session.bashPid)
+  const dynamic = session.dynamicValue(name)
+  if (dynamic !== null) return dynamic
   // A name reference resolves to its target before the store is read.
   name = deref(session, name) || name
   const fromArray = visibleArrays(session)[name]
@@ -1186,13 +1186,12 @@ async function expandBracesIn(
         varInEnv = true
       }
     }
-    if (!varInEnv && p.varName === LINENO) {
-      val = String(session.lineNumber)
-      varInEnv = true
-    }
-    if (!varInEnv && p.varName === BASHPID) {
-      val = String(session.bashPid)
-      varInEnv = true
+    if (!varInEnv) {
+      const dynamic = session.dynamicValue(p.varName)
+      if (dynamic !== null) {
+        val = dynamic
+        varInEnv = true
+      }
     }
     if (!varInEnv && p.varName in env) {
       val = env[p.varName] ?? ''
