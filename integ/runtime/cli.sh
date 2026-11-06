@@ -416,8 +416,7 @@ run_host() {
   export MIRAGE_HOME="$home"
   unset MIRAGE_DAEMON_PORT MIRAGE_DAEMON_URL MIRAGE_ALLOWED_HOSTS \
     MIRAGE_AUTH_MODE 2>/dev/null || true
-  $cli config set port "$port" >/dev/null </dev/null
-  $cli config set url "http://127.0.0.1:$port" >/dev/null </dev/null
+  $cli daemon config set port "$port" >/dev/null </dev/null
 
   # The CLI spawns its daemon on the first create and gives it 5 s to answer.
   # On a busy runner the python daemon takes longer, and the lane's first

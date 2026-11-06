@@ -54,8 +54,7 @@ env:
     key: DOTFILE_SECRET
 YML
 
-  $cli config set port "$port" >/dev/null </dev/null
-  $cli config set url "http://127.0.0.1:$port" >/dev/null </dev/null
+  $cli daemon config set port "$port" >/dev/null </dev/null
 
   $cli workspace delete env1 >/dev/null 2>&1 </dev/null || true
   $cli workspace create "$yaml" --id env1 >/dev/null </dev/null
