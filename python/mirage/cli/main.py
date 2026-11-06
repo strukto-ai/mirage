@@ -26,6 +26,7 @@ from mirage.cli import rpc as rpc_module
 from mirage.cli import session as session_module
 from mirage.cli import shell as shell_module
 from mirage.cli import ssh as ssh_module
+from mirage.cli import template as template_module
 from mirage.cli import tools as tools_module
 from mirage.cli import vfs as vfs_module
 from mirage.cli import workspace as workspace_module
@@ -73,6 +74,7 @@ daemon_module.app.add_typer(config_module.app, name="config")
 app.add_typer(daemon_module.app, name="daemon")
 app.add_typer(config_module.moved, name="config")
 app.add_typer(context_module.app, name="context")
+app.add_typer(template_module.app, name="template")
 app.command("mcp")(mcp_module.mcp_cmd)
 app.command("rpc")(rpc_module.rpc_cmd)
 app.command("ssh-proxy")(ssh_module.ssh_proxy_cmd)
