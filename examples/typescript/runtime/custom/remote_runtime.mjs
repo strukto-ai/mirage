@@ -25,7 +25,11 @@ import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, Runtime } from '@struktoai/mirage-
 // working directory and writes back the files the program changed. Both go
 // through ctx.vfs, so mount modes, policy and the cache apply to them.
 
-const CONFIG_KEYS = ['url', 'token', 'maxBytes']
+const CONFIG_FIELDS = {
+  url: { type: 'string' },
+  token: { type: 'string' },
+  maxBytes: { type: 'number' },
+}
 const MAX_BYTES = 16 * 1024 * 1024
 
 export class RemoteRuntime extends Runtime {
@@ -34,7 +38,7 @@ export class RemoteRuntime extends Runtime {
   reach = 'remote'
 
   constructor(options = {}) {
-    super(options, ['python3', 'python', 'node', EXTERNAL_COMMANDS], CONFIG_KEYS)
+    super(options, ['python3', 'python', 'node', EXTERNAL_COMMANDS], CONFIG_FIELDS)
   }
 
   /**

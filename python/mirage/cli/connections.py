@@ -190,7 +190,8 @@ def apply_flags(
     draft: Draft, sets: list[str], secrets: list[str], unsets: list[str]
 ) -> Draft:
     """The flags applied over a draft, in the order a reader expects:
-    ``--set`` then ``--unset``, with ``--secret`` read when sent.
+    ``--set`` then ``--unset``, with ``--secret`` read when sent. A
+    ``--secret`` replaces the read a file names for the same field.
 
     Args:
         draft (Draft): the entry so far.
@@ -205,7 +206,9 @@ def apply_flags(
     for key in unsets:
         draft.fields.pop(key, None)
         draft.plain.discard(key)
-    draft.secrets.extend(secret_source(word) for word in secrets)
+    given = [secret_source(word) for word in secrets]
+    named = {key for key, _ in given}
+    draft.secrets = [s for s in draft.secrets if s[0] not in named] + given
     return draft
 
 

@@ -361,9 +361,10 @@ function configDigest(config: unknown): string {
 
 /**
  * The config a create builds, with the saved entries its pointers name
- * declared for it: after the digest and the policies, which judge the
- * config as written and never see a sealed value. Answers 501 on a server of
- * many accounts and 400 for a name that is not saved.
+ * filled in: after the digest and the policies, which judge the config as
+ * written and never see a sealed value. Answers 501 on a server of many
+ * accounts, and 400 for a name that is not saved or a saved value its field
+ * cannot take.
  */
 async function withSaved(
   deps: WorkspaceRoutesDeps,
@@ -378,7 +379,7 @@ async function withSaved(
     return { status: 400, detail: 'this server keeps no saved connections' }
   }
   try {
-    return { cfg: await withEntries(deps.resources, cfg, refs) }
+    return { cfg: await withEntries(deps.resources, written, refs) }
   } catch (e) {
     if (!(e instanceof ResourceError)) throw e
     return storeRefusal(e)

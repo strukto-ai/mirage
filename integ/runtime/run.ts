@@ -245,7 +245,7 @@ class EchoBox extends Runtime<undefined> implements LineExecutorMixin<undefined>
   readonly name = 'echobox'
 
   constructor(options = {}) {
-    super(options, ['nvidia-smi'], [])
+    super(options, ['nvidia-smi'])
   }
 
   runLine(_engine: undefined, _paths: PathSpec[], _texts: string[], ctx: Context) {
@@ -268,7 +268,7 @@ class ProcessBox extends Runtime<undefined> implements ProcessExecutorMixin<unde
   readonly name = 'processbox'
 
   constructor(options = {}) {
-    super(options, [EXTERNAL_COMMANDS], [])
+    super(options, [EXTERNAL_COMMANDS])
   }
 
   runProcess(_engine: undefined, _paths: PathSpec[], texts: string[]) {

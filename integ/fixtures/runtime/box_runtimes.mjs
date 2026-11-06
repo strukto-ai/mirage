@@ -23,7 +23,7 @@ export class EchoBox extends Runtime {
   name = 'echobox'
 
   constructor(options = {}) {
-    super(options, ['nvidia-smi'], [])
+    super(options, ['nvidia-smi'])
   }
 
   runLine(_engine, _paths, _texts, ctx) {
@@ -40,7 +40,7 @@ export class ShoutPython extends LanguageRuntime {
   language = 'python'
 
   constructor(options = {}) {
-    super(options, ['python3', 'python'], [])
+    super(options, ['python3', 'python'])
   }
 
   interpret(_engine, program) {

@@ -384,8 +384,8 @@ async def _with_saved(
     request: Request, config: WorkspaceConfig, written: dict[str, Any]
 ) -> WorkspaceConfig:
     """The config a create builds, with the saved entries its pointers
-    name declared for it; after the digest and the policies, which judge
-    the config as written and never see a sealed value.
+    name filled in; after the digest and the policies, which judge the
+    config as written and never see a sealed value.
 
     Args:
         request (Request): the HTTP request, for the app's store.
@@ -394,14 +394,14 @@ async def _with_saved(
 
     Raises:
         HTTPException: 501 on a server of many accounts, 400 for a name
-            that is not saved.
+            that is not saved or a saved value its field cannot take.
     """
     refs = secret_refs(written)
     if not refs:
         return config
     require_one_account(request)
     try:
-        return await with_entries(request.app.state.resources, config, refs)
+        return await with_entries(request.app.state.resources, written, refs)
     except ResourceError as e:
         raise store_refusal(e) from e
 

@@ -159,6 +159,19 @@ describe('mirage vfs against a daemon', () => {
     const copied = await run(['vfs', 'create', 'exported-copy', '-f', exported], 't2\n')
     expect(copied.code).toBe(0)
     expect((await store.revealEntry('vfs', 'exported-copy')).sealed).toEqual({ token: 't2' })
+    const key = join(dir, 'token')
+    writeFileSync(key, 't3\n')
+    const fromFile = await run([
+      'vfs',
+      'create',
+      'exported-key',
+      '-f',
+      exported,
+      '--secret',
+      `token=@${key}`,
+    ])
+    expect(fromFile.code).toBe(0)
+    expect((await store.revealEntry('vfs', 'exported-key')).sealed).toEqual({ token: 't3' })
     const change = join(dir, 'change.yaml')
     writeFileSync(change, 'fields:\n  repo: r2\n')
     expect((await run(['vfs', 'update', 'exported', '-f', change])).code).toBe(0)

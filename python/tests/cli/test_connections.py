@@ -234,6 +234,19 @@ def test_an_export_reads_back_and_a_file_update_keeps_the_rest(
     r = run("vfs", "create", "copy", "-f", str(exported), stdin="t2\n")
     assert r.exit_code == 0, r.output
     assert sealed(store, "vfs", "copy") == {"token": "t2"}
+    key = tmp_path / "token"
+    key.write_text("t3\n")
+    r = run(
+        "vfs",
+        "create",
+        "copy2",
+        "-f",
+        str(exported),
+        "--secret",
+        f"token=@{key}",
+    )
+    assert r.exit_code == 0, r.output
+    assert sealed(store, "vfs", "copy2") == {"token": "t3"}
     change = tmp_path / "change.yaml"
     change.write_text(yaml.safe_dump({"fields": {"repo": "r2"}}))
     r = run("vfs", "update", "gh", "-f", str(change))
