@@ -35,6 +35,7 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { JobRoute, PipeRecorder, handleRedirect } from './redirect.ts'
+import { soleStream } from './create.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { FileDescription, Recorder } from '../../shell/descriptors.ts'
 
@@ -90,6 +91,137 @@ describe('handleRedirect > / >>', () => {
     try {
       await ws.shell('shuf -i 1-1 -o /out > /out')
       expect((await ws.shell('cat /out')).stdoutText).toBe('1\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    "seq 1 2000 | awk '{print}' > /data/out",
+    'seq 1 2000 | sed s/1/x/ > /data/out',
+    'seq 1 2000 | tee /data/copy > /data/out',
+    '{ seq 1 1000; seq 1001 2000; } > /data/out',
+    'for i in 1 2; do seq 1 1000; done > /data/out',
+    'f() { seq 1 2000; }; f > /data/out',
+  ])('%s goes into its file as it is written', async (line) => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const emit = vi.spyOn(Recorder.prototype, 'emit')
+    try {
+      await ws.shell('mkdir -p /data')
+      emit.mockClear()
+      expect((await ws.shell(line)).exitCode).toBe(0)
+      const held = emit.mock.calls.filter(
+        ([channel], i) =>
+          emit.mock.contexts[i] instanceof PipeRecorder && channel === Channel.STDOUT,
+      )
+      expect(held).toEqual([])
+      expect((await ws.shell('wc -l /data/out')).stdoutText).toBe('2000 /data/out\n')
+    } finally {
+      emit.mockRestore()
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['{ seq 3; wc -l < /data/f; } > /data/f', 0, '1\n2\n3\n3\n', ''],
+    ['{ echo A; head -n 1 /data/link; } > /data/f', 0, 'A\nA\n', ''],
+    ['{ echo A; echo B >> /data/f; echo C; } > /data/f', 0, 'A\nC\n', ''],
+    [
+      'for f in /data/a /data/f; do cat $f; done > /data/f',
+      1,
+      'a\n',
+      'cat: /data/f: input file is output file\n',
+    ],
+    [
+      '{ echo A; grep A /data/link; } > /data/f',
+      2,
+      'A\n',
+      'grep: /data/link: input file is also the output\n',
+    ],
+    ['f() { seq 3; return 4; }; f > /data/f', 4, '1\n2\n3\n', ''],
+    ['( echo A; exit 3 ) > /data/f', 3, 'A\n', ''],
+    [
+      '{ echo A; wc -c < /data/f; echo B; wc -c < /data/f; echo C; } > /data/f',
+      0,
+      'A\n2\nB\n6\nC\n',
+      '',
+    ],
+    ['{ echo BBBB >> /data/f; echo A; } > /data/f', 0, 'A\nBB\n', ''],
+    [
+      '( echo A; grep A /data/f ) > /data/f',
+      2,
+      'A\n',
+      'grep: /data/f: input file is also the output\n',
+    ],
+    ['( echo A; cat /data/f ) > /data/f', 1, 'A\n', 'cat: /data/f: input file is output file\n'],
+    ['( echo A; exec > /data/g; cat /data/f ) > /data/f', 0, 'A\n', ''],
+  ])(
+    'an op on a streamed file finds what was written: %s',
+    async (line, status, content, stderr) => {
+      const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+      try {
+        await ws.shell('mkdir -p /data; echo a > /data/a; ln -s /data/f /data/link')
+        const io = await ws.shell(line)
+        expect(io.exitCode).toBe(status)
+        expect(io.stderrText).toBe(stderr)
+        expect((await ws.shell('cat /data/f')).stdoutText).toBe(content)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  // A read before the first byte leaves the file empty, so what comes after
+  // still lands as one stream, not as blocks a store would rewrite the file
+  // for one after another.
+  it('a read of an empty target keeps its one stream', async () => {
+    const pwrite = vi.spyOn(RAMVFS.prototype, 'pwrite')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('mkdir -p /data')
+      const io = await ws.shell('{ wc -c < /data/f > /dev/null; seq 1 300000; } > /data/f')
+      expect(io.exitCode).toBe(0)
+      expect(pwrite).not.toHaveBeenCalled()
+      expect((await ws.shell('wc -l < /data/f')).stdoutText.trim()).toBe('300000')
+    } finally {
+      pwrite.mockRestore()
+      await ws.close()
+    }
+  })
+
+  // Another description streaming the same file keeps the claim, so a
+  // resumed writer takes windows instead of replacing what that stream writes.
+  it('a resumed writer into a file another streams takes windows', async () => {
+    const pwrite = vi.spyOn(RAMVFS.prototype, 'pwrite')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('mkdir -p /data')
+      const { dispatcher } = ws as unknown as { dispatcher: { dispatch: DispatchFn } }
+      const other = new FileDescription(PathSpec.fromStrPath('/data/f'))
+      const io = await soleStream(dispatcher.dispatch, other, () =>
+        ws.shell('{ wc -c < /data/f > /dev/null; seq 1 3000; } > /data/f'),
+      )
+      expect(io.exitCode).toBe(0)
+      expect(pwrite).toHaveBeenCalled()
+      expect((await ws.shell('wc -l < /data/f')).stdoutText.trim()).toBe('3000')
+    } finally {
+      pwrite.mockRestore()
+      await ws.close()
+    }
+  })
+
+  it('cat and grep refuse their own output file as GNU does', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('echo x > /f')
+      let io = await ws.shell('cat /f >> /f')
+      expect([io.exitCode, io.stderrText]).toEqual([1, 'cat: /f: input file is output file\n'])
+      expect((await ws.shell('grep -c x /f >> /f')).exitCode).toBe(0)
+      io = await ws.shell('grep x /f >> /f')
+      expect([io.exitCode, io.stderrText]).toEqual([2, 'grep: /f: input file is also the output\n'])
+      expect((await ws.shell('cat /f')).stdoutText).toBe('x\n1\n')
+      expect((await ws.shell('cat /f > /f')).exitCode).toBe(0)
+      expect((await ws.shell('cat /f')).stdoutText).toBe('')
     } finally {
       await ws.close()
     }

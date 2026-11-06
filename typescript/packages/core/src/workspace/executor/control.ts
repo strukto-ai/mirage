@@ -39,7 +39,7 @@ import { ExecutionNode } from '../types.ts'
 import { readReply } from './builtins/read/index.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
-import { runStatement } from './jobs.ts'
+import { runProgram, runStatement } from './jobs.ts'
 import {
   errexitActs,
   fd0Binding,
@@ -107,19 +107,22 @@ export async function executeBody(
     if (cmd.type === NT.COMMENT) continue
     const armed = errTrapArmed(session)
     try {
-      const [stdout, io, execNode] = await runStatement(
-        executeNode,
-        cmd,
-        context,
-        stdin,
-        bound,
-        callStack,
-        jobTable,
-        handed,
-        decisions,
-      )
+      const [stdout, io, execNode] = await runProgram(cmd, context, async () => {
+        const [out, ranIo, ran] = await runStatement(
+          executeNode,
+          cmd,
+          context,
+          stdin,
+          bound,
+          callStack,
+          jobTable,
+          handed,
+          decisions,
+        )
+        return [await finishStatement(out, ranIo, session, cmd), ranIo, ran]
+      })
       lastExec = execNode
-      allStdout.push(await finishStatement(stdout, io, session, cmd))
+      allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
       mergedIo = await land(
         await runErrTrap(executeFn, cmd, io.exitCode, session, armed, stdin, callStack, execNode),

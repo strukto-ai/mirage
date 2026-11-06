@@ -241,7 +241,7 @@ async def test_kill_all_reaches_every_session():
 
 # kill %N with a signal records bash's status for it: 128 plus the signal.
 @pytest.mark.asyncio
-@pytest.mark.parametrize("signal,code", [(9, 137), (15, 143), (2, 130)])
+@pytest.mark.parametrize("signal,code", [(9, 137), (15, 143), (1, 129)])
 async def test_a_job_killed_with_a_signal_exits_128_plus_it(signal, code):
     table = JobTable()
     job = await _submit(table, "a")
@@ -1275,6 +1275,37 @@ async def test_a_stop_asked_elsewhere_stops_the_owners_job(monkeypatch):
     assert not await b.signal_remote(
         "ffffffff", job.pid, 15, "t", lambda: every
     )
+    await a.close()
+    await b.close()
+
+
+# bash starts a job ignoring INT and QUIT: either, sent by the job's own
+# table, by another table on the store or as a stop asked through it,
+# leaves the job running, so the TERM after them is what ends it.
+@pytest.mark.asyncio
+async def test_int_and_quit_leave_a_job_running_from_any_table(monkeypatch):
+    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
+    store = RAMJobStore(lease_seconds=30.0)
+    a, b = _publishing(store), _publishing(store)
+    job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
+
+    async def listed() -> bool:
+        return a.owner in await b.remote_processes()
+
+    await _until(listed)
+    await b.sync("s")
+    every = ProcessPermissions(list="workspace", kill="workspace")
+    for signal in (2, 3):
+        assert await a.kill(job.id, "s", signal)
+        assert await b.kill(job.id, "s", signal)
+        assert await b.signal_remote(
+            a.owner, job.pid, signal, "t", lambda: every
+        )
+    assert await b.signal_remote(a.owner, job.pid, 15, "t", lambda: every)
+    assert job.process is not None
+    async with asyncio.timeout(5):
+        await job.process.join()
+    assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
     await a.close()
     await b.close()
 

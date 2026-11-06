@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from concurrent.futures import Future
 from dataclasses import replace
 from threading import RLock
-from typing import Protocol, cast
+from typing import Any, Protocol, TypeVar, cast
 
 from mirage.concurrency.limiter import owned_task
 from mirage.process.types import ProcessInfo, ProcessRunner, ProcessState
 from mirage.types import JsonValue
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 
 class ExecutionBind(Protocol):
@@ -50,13 +52,19 @@ class ProcessHandle:
         finished: Callable[[int], None],
         cancel_children: Callable[[int], None] = lambda signal: None,
         bind: ExecutionBind | None = None,
+        signal_children: Callable[[int], None] = lambda signal: None,
+        ignores: frozenset[int] = frozenset(),
     ) -> None:
         self._info = info
+        self.ignores = ignores
         self._run = run
         self._bind = bind
         self._lock = RLock()
         self._finished = finished
         self._cancel_children = cancel_children
+        self._signal_children = signal_children
+        self._programs: dict[asyncio.Task[Any], int | None] = {}
+        self._takes: dict[asyncio.Task[Any], frozenset[int] | None] = {}
         self._signal: int | None = None
         self._program_code: int | None = None
         self._runs: dict[str, dict[str, JsonValue]] = {}
@@ -96,6 +104,16 @@ class ProcessHandle:
         """The signal the runner was stopped with, None while it runs."""
         with self._lock:
             return self._signal
+
+    @property
+    def interrupted(self) -> int | None:
+        """The signal ``interrupt`` stops the program the runner runs
+        right now with, None while none is stopping."""
+        with self._lock:
+            return next(
+                (sent for sent in self._programs.values() if sent is not None),
+                None,
+            )
 
     @property
     def program_code(self) -> int | None:
@@ -142,6 +160,80 @@ class ProcessHandle:
         with self._lock:
             self._program_code = code
 
+    async def program(
+        self,
+        run: Callable[[], Coroutine[Any, Any, T]],
+        takes: frozenset[int] | None = None,
+    ) -> tuple[T, None] | tuple[None, int]:
+        """Run one program of the runner's shell where ``interrupt``
+        reaches it, as bash's background job runs each program as a
+        child that takes the INT the job itself ignores.
+
+        Args:
+            run (Callable[[], Coroutine[Any, Any, T]]): the program, to
+                its end.
+            takes (frozenset[int] | None): the signals that stop it,
+                every one when None.
+
+        Returns:
+            tuple[T, None] | tuple[None, int]: what it returned, or the
+            signal ``interrupt`` stopped it with.
+        """
+        # Eager, so the program begins where the statement stands, before
+        # what the shell runs next (a job's redirect lands first).
+        task: asyncio.Task[T] = asyncio.Task(
+            run(), loop=asyncio.get_running_loop(), eager_start=True
+        )
+        with self._lock:
+            self._programs[task] = None
+            self._takes[task] = takes
+        try:
+            return await task, None
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            signal = self._programs.get(task)
+            if signal is None or (
+                current is not None and current.cancelling()
+            ):
+                raise
+            return None, signal
+        finally:
+            with self._lock:
+                self._programs.pop(task, None)
+                self._takes.pop(task, None)
+
+    def interrupt(self, signal: int) -> None:
+        """Deliver a signal the runner's shell ignores, as bash's
+        background job ignores INT: the program it runs right now
+        (``program``) gets it, and the shell goes on.
+
+        Args:
+            signal (int): the signal.
+        """
+        with self._lock:
+            running = [
+                task
+                for task, sent in self._programs.items()
+                if sent is None
+                and (
+                    (takes := self._takes.get(task)) is None or signal in takes
+                )
+            ]
+            for task in running:
+                self._programs[task] = signal
+        for task in running:
+            task.get_loop().call_soon_threadsafe(task.cancel)
+
+    def signal_children(self, signal: int) -> None:
+        """Deliver a signal to every runner this one started, and theirs,
+        as a process group gets it: one that ignores it hands it to its
+        program (``interrupt``), any other stops with it.
+
+        Args:
+            signal (int): the signal.
+        """
+        self._signal_children(signal)
+
     def terminate(self, signal: int = 9, children: bool = True) -> bool:
         """Request cancellation without waiting for the runner to exit.
 
@@ -149,7 +241,8 @@ class ProcessHandle:
         started may still run (``sh -c 'sleep 100 &'``), so its children
         are stopped all the same. A KILL while the runner still stops
         under another signal cuts the grace that signal gave its program
-        short, as a second ``kill -KILL`` does.
+        short, as a second ``kill -KILL`` does. A signal the runner
+        ignores (``ignores``) does nothing.
 
         Args:
             signal (int): what the stop stands for, KILL (9) unless a
@@ -157,6 +250,8 @@ class ProcessHandle:
             children (bool): stop what the runner started too; False
                 leaves its jobs running, for a signal they ignore.
         """
+        if signal in self.ignores:
+            return False
         with self._lock:
             exited = self._info.state == ProcessState.EXITED
             stopped = not exited and not self._info.cancellation_requested

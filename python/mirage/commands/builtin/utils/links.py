@@ -390,6 +390,31 @@ def mount_root(ctx: Context) -> str:
     return mount[0].rstrip("/") if mount is not None else ""
 
 
+def own_output(ctx: Context) -> Callable[[PathSpec], bool]:
+    """Which operands are, through their links, the regular file the
+    running command's stdout writes (``cat f >> f``), as the command
+    starts; it may read them after that, as its stream is pulled.
+
+    Args:
+        ctx (Context): the invocation's context.
+    """
+    links = links_of(ctx)
+
+    def real(path: str) -> str | None:
+        try:
+            return path if links is None else links.resolve(path)
+        except CycleError:
+            return None
+
+    output = current_caller().output_file
+    target = None if output is None else real(output)
+
+    def writes(path: PathSpec) -> bool:
+        return target is not None and real(path.virtual) == target
+
+    return writes
+
+
 def mounts_of(ctx: Context) -> MountView | None:
     """Where the mount boundaries are for the command's walk, read off
     its files; None outside a workspace.

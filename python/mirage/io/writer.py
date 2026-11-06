@@ -14,19 +14,24 @@ class ByteWriter:
 
     Args:
         consume (Callable): consumes the source once and commits at EOF.
+        joined (bool): hand the consumer everything buffered in each read
+            (``BytePipe.stream``), so writes that come while it is busy
+            reach it as one.
     """
 
     def __init__(
-        self, consume: Callable[[ByteSource], Awaitable[None]]
+        self,
+        consume: Callable[[ByteSource], Awaitable[None]],
+        joined: bool = False,
     ) -> None:
         self.pipe = BytePipe()
-        self.task = asyncio.create_task(self._run(consume))
+        self.task = asyncio.create_task(self._run(consume, joined))
 
     async def _run(
-        self, consume: Callable[[ByteSource], Awaitable[None]]
+        self, consume: Callable[[ByteSource], Awaitable[None]], joined: bool
     ) -> None:
         try:
-            await consume(self.pipe.stream())
+            await consume(self.pipe.stream(joined))
         finally:
             self.pipe.close_reader()
 

@@ -28,7 +28,9 @@ from mirage.io.types import ByteSource
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.descriptors import FileDescription, Recorder
 from mirage.types import FileStat, PathSpec
+from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.create import sole_stream
 from mirage.workspace.executor.redirect import JobRoute, PipeRecorder
 from mirage.workspace.session.session import SessionState
 
@@ -60,6 +62,157 @@ async def test_a_streamed_redirect_leaves_a_file_its_command_wrote():
     ws = await _workspace()
     await ws.shell("shuf -i 1-1 -o /data/out > /data/out")
     assert await _out(ws, "cat /data/out") == "1\n"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "seq 1 2000 | awk '{print}' > /data/out",
+        "seq 1 2000 | sed s/1/x/ > /data/out",
+        "seq 1 2000 | tee /data/copy > /data/out",
+        "{ seq 1 1000; seq 1001 2000; } > /data/out",
+        "for i in 1 2; do seq 1 1000; done > /data/out",
+        "f() { seq 1 2000; }; f > /data/out",
+    ],
+)
+async def test_output_goes_into_its_file_as_it_is_written(line, monkeypatch):
+    held: list[int] = []
+    record = Recorder._record
+
+    async def spy(self, key, data):
+        if isinstance(self, PipeRecorder) and key == Channel.STDOUT:
+            held.append(len(data))
+        await record(self, key, data)
+
+    monkeypatch.setattr(Recorder, "_record", spy)
+    ws = await _workspace()
+    io = await ws.shell(line)
+    assert io.exit_code == 0
+    assert held == []
+    assert (await _out(ws, "wc -l /data/out")).split()[0] == "2000"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,status,content,stderr",
+    [
+        ("{ seq 3; wc -l < /data/f; } > /data/f", 0, "1\n2\n3\n3\n", ""),
+        ("{ echo A; head -n 1 /data/link; } > /data/f", 0, "A\nA\n", ""),
+        ("{ echo A; echo B >> /data/f; echo C; } > /data/f", 0, "A\nC\n", ""),
+        (
+            "for f in /data/a /data/f; do cat $f; done > /data/f",
+            1,
+            "a\n",
+            "cat: /data/f: input file is output file\n",
+        ),
+        (
+            "{ echo A; grep A /data/link; } > /data/f",
+            2,
+            "A\n",
+            "grep: /data/link: input file is also the output\n",
+        ),
+        ("f() { seq 3; return 4; }; f > /data/f", 4, "1\n2\n3\n", ""),
+        ("( echo A; exit 3 ) > /data/f", 3, "A\n", ""),
+        (
+            "{ echo A; wc -c < /data/f; echo B; wc -c < /data/f; echo C; }"
+            " > /data/f",
+            0,
+            "A\n2\nB\n6\nC\n",
+            "",
+        ),
+        ("{ echo BBBB >> /data/f; echo A; } > /data/f", 0, "A\nBB\n", ""),
+        (
+            "( echo A; grep A /data/f ) > /data/f",
+            2,
+            "A\n",
+            "grep: /data/f: input file is also the output\n",
+        ),
+        (
+            "( echo A; cat /data/f ) > /data/f",
+            1,
+            "A\n",
+            "cat: /data/f: input file is output file\n",
+        ),
+        ("( echo A; exec > /data/g; cat /data/f ) > /data/f", 0, "A\n", ""),
+    ],
+)
+async def test_an_op_on_a_streamed_file_finds_what_was_written(
+    line, status, content, stderr
+):
+    ws = await _workspace()
+    await ws.shell("echo a > /data/a; ln -s /data/f /data/link")
+    io = await ws.shell(line)
+    assert io.exit_code == status
+    assert await io.stderr_str() == stderr
+    assert await _out(ws, "cat /data/f") == content
+
+
+# A read before the first byte leaves the file empty, so what comes after
+# still lands as one stream, not as blocks a store would rewrite the file
+# for one after another.
+@pytest.mark.asyncio
+async def test_a_read_of_an_empty_target_keeps_its_one_stream(monkeypatch):
+    ops: list[str] = []
+    dispatch = Dispatcher.dispatch
+
+    async def spy(self, name, path, /, **kwargs):
+        ops.append(name)
+        return await dispatch(self, name, path, **kwargs)
+
+    monkeypatch.setattr(Dispatcher, "dispatch", spy)
+    ws = await _workspace()
+    io = await ws.shell(
+        "{ wc -c < /data/f > /dev/null; seq 1 300000; } > /data/f"
+    )
+    assert io.exit_code == 0
+    assert "pwrite" not in ops
+    assert (await _out(ws, "wc -l < /data/f")).strip() == "300000"
+
+
+# Another description streaming the same file keeps the claim, so a
+# resumed writer takes windows instead of replacing what that stream writes.
+@pytest.mark.asyncio
+async def test_a_resumed_writer_into_a_file_another_streams_takes_windows(
+    monkeypatch,
+):
+    ops: list[str] = []
+    dispatch = Dispatcher.dispatch
+
+    async def spy(self, name, path, /, **kwargs):
+        ops.append(name)
+        return await dispatch(self, name, path, **kwargs)
+
+    monkeypatch.setattr(Dispatcher, "dispatch", spy)
+    ws = await _workspace()
+    other = FileDescription(PathSpec.from_str_path("/data/f"))
+    async with sole_stream(ws._dispatcher.dispatch, other):
+        io = await ws.shell(
+            "{ wc -c < /data/f > /dev/null; seq 1 3000; } > /data/f"
+        )
+    assert io.exit_code == 0
+    assert "pwrite" in ops
+    assert (await _out(ws, "wc -l < /data/f")).strip() == "3000"
+
+
+@pytest.mark.asyncio
+async def test_cat_and_grep_refuse_their_own_output_file_as_gnu_does():
+    ws = await _workspace()
+    await ws.shell("echo x > /data/f")
+    io = await ws.shell("cat /data/f >> /data/f")
+    assert io.exit_code == 1
+    assert await io.stderr_str() == "cat: /data/f: input file is output file\n"
+    io = await ws.shell("grep -c x /data/f >> /data/f")
+    assert io.exit_code == 0
+    io = await ws.shell("grep x /data/f >> /data/f")
+    assert io.exit_code == 2
+    assert await io.stderr_str() == (
+        "grep: /data/f: input file is also the output\n"
+    )
+    assert await _out(ws, "cat /data/f") == "x\n1\n"
+    io = await ws.shell("cat /data/f > /data/f")
+    assert io.exit_code == 0
+    assert await _out(ws, "cat /data/f") == ""
 
 
 @pytest.mark.asyncio
