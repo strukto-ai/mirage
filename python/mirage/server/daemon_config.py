@@ -42,6 +42,7 @@ ALLOWED_KEYS = frozenset(
         "max_line_seconds",
         "rate_limits",
         "policy_file",
+        "resource_store",
         "port",
         "ssh_port",
         "ssh_host",

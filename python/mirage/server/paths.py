@@ -71,3 +71,20 @@ def state_root_path(explicit: str | Path | None = None) -> Path:
     if explicit is not None:
         return _absolute(explicit)
     return mirage_home() / "state"
+
+
+def resources_root_path(explicit: str | Path | None = None) -> Path:
+    """Resolve the saved-config (Files resource store) root.
+
+    Priority: ``explicit`` argument, then ``resources`` under
+    :func:`mirage_home`.
+
+    Args:
+        explicit (str | Path | None): caller-supplied override.
+
+    Returns:
+        Path: the resolved absolute resources root.
+    """
+    if explicit is not None:
+        return _absolute(explicit)
+    return mirage_home() / "resources"

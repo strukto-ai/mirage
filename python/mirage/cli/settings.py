@@ -44,6 +44,7 @@ from mirage.server.env import (
     ENV_MAX_WORKSPACES,
     ENV_POLICY_FILE,
     ENV_RATE_LIMITS,
+    ENV_RESOURCE_STORE,
     ENV_WORKER_TYPE,
     ENV_WORKERS,
 )
@@ -77,6 +78,7 @@ _ENV_FOR_KEY = {
     "worker_type": ENV_WORKER_TYPE,
     "rate_limits": ENV_RATE_LIMITS,
     "policy_file": ENV_POLICY_FILE,
+    "resource_store": ENV_RESOURCE_STORE,
     "port": ENV_DAEMON_PORT,
     **SSH_ENV_KEYS,
 }
@@ -193,6 +195,7 @@ def _default_for_key(key: str) -> str:
         "worker_type": "",
         "rate_limits": DEFAULT_RATE_LIMITS,
         "policy_file": "",
+        "resource_store": "files",
         "port": "8765",
         "ssh_port": "",
         "ssh_host": DEFAULT_SSH_HOST,

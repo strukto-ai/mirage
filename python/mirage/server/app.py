@@ -31,6 +31,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from mirage.concurrency.limiter import run_blocking
 from mirage.policy.base import Policy
+from mirage.resources.base import ResourceStore
 from mirage.server.auth import (
     AuthConfig,
     AuthMiddleware,
@@ -66,6 +67,10 @@ from mirage.server.registry import (
     resolve_max_sessions,
     resolve_max_workspaces,
     resolve_policy_file,
+)
+from mirage.server.resources.config import (
+    build_resource_store,
+    resolve_resource_store,
 )
 from mirage.server.routers import (
     asks,
@@ -306,6 +311,7 @@ def build_app(
     max_processes: int | None = None,
     max_line_seconds: float | None = None,
     max_env: str | int | None = None,
+    resource_store: ResourceStore | None = None,
 ) -> FastAPI:
     """Construct the Mirage server's FastAPI app.
 
@@ -399,6 +405,11 @@ def build_app(
             reaches, a lifted one included, as a size. ``None`` (default)
             reads ``$MIRAGE_MAX_ENV`` or the ``max_env`` config key, else
             sets no ceiling.
+        resource_store (ResourceStore | None): where saved vfs, cli,
+            runtime, policy and template configs are kept. ``None``
+            (default) reads ``$MIRAGE_RESOURCE_STORE`` or the
+            ``resource_store`` config key, else files under the mirage
+            home.
 
     Returns:
         FastAPI: configured app with all routers mounted.
@@ -441,6 +452,11 @@ def build_app(
         ),
     )
     app.state.graceful_timeout = resolve_graceful_timeout(graceful_timeout)
+    app.state.resources = (
+        resource_store
+        if resource_store is not None
+        else build_resource_store(resolve_resource_store())
+    )
     app.state.jobs = app.state.registry.jobs
     app.state.pid_file = (
         pid_file_path(pid_file) if pid_file is not None else None
