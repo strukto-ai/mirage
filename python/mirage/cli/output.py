@@ -36,6 +36,8 @@ OUTPUT = typer.Option(
     None, "--output", "-o", help="yaml: a file create -f and update -f read."
 )
 
+ID_HELP = "The ID, or the name: a name is unique, so it works as an ID."
+
 
 def emit(obj: Any, human: Callable[[Any], str] | None = None) -> None:
     """Print ``obj`` to stdout.

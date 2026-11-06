@@ -91,6 +91,16 @@ describe('mirage policy', () => {
     expect(out).toContain('name: guard.py')
   })
 
+  it('names a saved policy by its ID, and a new one by its name', () => {
+    const program = new Command()
+    registerPolicyCommands(program)
+    const policy = program.commands.find((c) => c.name() === 'policy')
+    const first = (name: string) =>
+      policy?.commands.find((c) => c.name() === name)?.registeredArguments[0]?.name()
+    expect(['get', 'update', 'delete'].map(first)).toEqual(['id', 'id', 'id'])
+    expect(first('create')).toBe('name')
+  })
+
   it('lists, updates and deletes through the routes', async () => {
     await run('create', 'a.py', '--source', 'x = 1')
     out = ''

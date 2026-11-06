@@ -25,6 +25,7 @@ import yaml
 
 from mirage.cli.client import DaemonClient, make_client
 from mirage.cli.output import (
+    ID_HELP,
     OUTPUT,
     Output,
     emit,
@@ -342,9 +343,6 @@ SECRETS = typer.Option(
 UNSETS = typer.Option([], "--unset", help="Remove a field.")
 FILE = typer.Option(
     None, "--file", "-f", help="The entry as YAML or JSON; - for stdin."
-)
-ID_HELP = (
-    "The entry's ID, or its name: a name is unique, so it works as an ID."
 )
 
 
