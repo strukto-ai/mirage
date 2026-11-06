@@ -138,6 +138,7 @@ from mirage.workspace.node.admission import (
 from mirage.workspace.node.occurrence import claimant_for, evaluated_from
 from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.budget import check_env, entry_bytes
 from mirage.workspace.session.state import (
     ensure_var_visible,
     gate_rendering,
@@ -415,6 +416,16 @@ async def execute_command(
                 None if old is None else gate_rendering(old.value),
             )
 
+    def seed(k: str, v: str) -> None:
+        # `seed_var` counts nothing, so the write is checked against max_env.
+        old = session.vars.get(k)
+        check_env(
+            session,
+            0 if old is None else entry_bytes(k, old.value),
+            entry_bytes(k, v),
+        )
+        seed_var(session, k, v)
+
     def restore(saved: Mapping[str, Any]) -> None:
         for k, prev in saved.items():
             if prev is None:
@@ -472,7 +483,7 @@ async def execute_command(
             # installed CLI, a guest runtime -- once that view narrowed
             # to the exported set. The saved record is put back below, so
             # neither the value nor the attribute outlives the command.
-            seed_var(session, k, v)
+            seed(k, v)
             set_attr(session, k, VarAttr.EXPORT)
         if command in session.functions:
             # A function runs with the prefix as its temporary
