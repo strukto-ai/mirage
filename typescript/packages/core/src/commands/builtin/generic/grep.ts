@@ -52,7 +52,7 @@ import { SYNOPSES } from '../../spec/synopsis.ts'
 import { usageHint } from '../../spec/usage.ts'
 import { scanned } from '../../../rs/scan.ts'
 import { GREP_STDIN_LABEL } from '../utils/constants.ts'
-import { linksOf, mountsOf, mountRoot } from '../utils/links.ts'
+import { linksOf, mountsOf, mountRoot, ownOutput } from '../utils/links.ts'
 
 const ENC = new TextEncoder()
 // GNU grep with no pattern prints its synopsis and the help hint, exit 2
@@ -324,6 +324,16 @@ export async function grepGeneric(
   // leads to, and a directory it reaches again is a loop.
   const follow = f.recursive && f.dereference === true ? (linksOf(ctx) ?? null) : null
   const walkedSt = (p: string) => followedStat(st, follow, p)
+  // GNU refuses to search the file its own output goes into, unless it
+  // prints no lines, or stops at the first.
+  const writes = ownOutput(ctx)
+  const guarded = !(
+    f.countOnly ||
+    f.quiet ||
+    f.filesOnly ||
+    f.filesWithoutMatch ||
+    (f.maxCount !== null && f.maxCount <= 1)
+  )
   let failed = false
   const notices: Uint8Array[] = []
   let matched = false
@@ -407,6 +417,10 @@ export async function grepGeneric(
     if (f.skipDevices === true && DEVICE_TYPES.has(info.type) && !isStdin(p)) return
     if (walked && !f.filters.text && BINARY_EXTENSIONS.has(getExtension(p.virtual) ?? '')) return
     if (!fileAdmitted(p.virtual, f.filters)) return
+    if (guarded && writes(p)) {
+      warn(`grep: ${p.rawPath}: input file is also the output`)
+      return
+    }
     const fileIO = new IOResult({ exitCode: 1 })
     try {
       try {

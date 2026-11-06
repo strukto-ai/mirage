@@ -117,11 +117,14 @@ export class Inherited {
  * What one level's command wrote, in order, for the level to route. A chunk
  * on a channel goes through the level's descriptor table; one written to a
  * stream another level owns stays in place on its way up to that level, so it
- * lands among the bytes written around it. Mirrors Python's Recorder.
+ * lands among the bytes written around it. `outputFile` is the regular file
+ * the level's stdout writes, if one does, which a command writing to the level
+ * may not read as its input (`cat f >> f`). Mirrors Python's Recorder.
  */
 export class Recorder extends JobConsole {
   readonly chunks: [Channel | Inherited, number, number][] = []
   readonly owner: StreamOwner = Symbol('recorder')
+  outputFile: string | null = null
   private storage = new ByteSpool()
   private writing = Promise.resolve()
   private pending = 0

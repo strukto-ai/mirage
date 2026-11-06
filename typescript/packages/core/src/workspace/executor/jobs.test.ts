@@ -155,6 +155,28 @@ describe('handleKill', () => {
   })
 })
 
+// bash starts a job ignoring INT and QUIT, so kill -INT or -QUIT reaches it
+// and the job runs on; TERM still ends it. Pinned on bash 5.2, once the job
+// has started (a kill right after `&` races bash's own setup).
+describe('kill -INT and -QUIT on a job', () => {
+  it.each([
+    ['sleep 0.5 & sleep 0.1; kill -INT $!; wait $!; echo $?', '0\n'],
+    ['sleep 0.5 & sleep 0.1; kill -s QUIT %1; wait %1; echo $?', '0\n'],
+    ['(sleep 0.5; echo x $?) & sleep 0.1; kill -2 $!; wait $!; echo $?', 'x 0\n0\n'],
+    ['f() { sleep 0.5; echo f; }; f & sleep 0.1; kill -INT $!; wait $!; echo $?', 'f\n0\n'],
+    ["bash -c 'sleep 0.5; echo y' & sleep 0.1; kill -INT $!; wait; echo $?", 'y\n0\n'],
+    ['sleep 5 & sleep 0.1; kill -TERM $!; wait $!; echo $?', '143\n'],
+  ])('%s', async (line, out) => {
+    const ws = new Workspace({ '/m': [new RAMVFS(), MountMode.WRITE] }, { mode: MountMode.WRITE })
+    try {
+      const io = await ws.shell(line)
+      expect([stdoutStr(io), io.exitCode]).toEqual([out, 0])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
 describe('handleJobs', () => {
   it('returns empty output when no jobs', async () => {
     const jt = new JobTable()

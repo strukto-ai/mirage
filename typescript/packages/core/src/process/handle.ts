@@ -1,4 +1,6 @@
+import { isAborting } from '../errors/fs.ts'
 import type { JsonValue } from '../types.ts'
+import { SignalStop } from '../utils/abort.ts'
 import type { ProcessInfo, ProcessRunner } from './types.ts'
 
 /**
@@ -29,6 +31,9 @@ export class ProcessHandle {
   private stopSignal: number | null = null
   private exitedCode: number | null = null
   private readonly nativeRuns = new Map<string, Record<string, JsonValue>>()
+  // The programs `program` runs, each with the signal `interrupt` sent it.
+  private readonly programs = new Map<AbortController, number | null>()
+  private readonly takes = new Map<AbortController, ReadonlySet<number> | null>()
   private completion!: Promise<ProcessInfo>
 
   constructor(
@@ -38,6 +43,8 @@ export class ProcessHandle {
     private readonly finished: (pid: number) => void,
     private readonly cancelChildren: (signal: number) => void = () => undefined,
     private readonly bind: ExecutionBind = (_id, run) => run(),
+    private readonly signalChildrenOf: (signal: number) => void = () => undefined,
+    readonly ignores: ReadonlySet<number> = new Set(),
   ) {
     this.current = Object.freeze(info)
   }
@@ -77,6 +84,12 @@ export class ProcessHandle {
   /** The signal the runner was stopped with, null while it runs. */
   get signal(): number | null {
     return this.stopSignal
+  }
+
+  /** The signal `interrupt` stops the program the runner runs right now with, null while none is stopping. */
+  get interrupted(): number | null {
+    for (const sent of this.programs.values()) if (sent !== null) return sent
+    return null
   }
 
   /** The status a program the runner started exited with on its own after the stop signal, null unless one did. */
@@ -120,17 +133,69 @@ export class ProcessHandle {
   }
 
   /**
+   * Run one program of the runner's shell where `interrupt` reaches it, as
+   * bash's background job runs each program as a child that takes the INT
+   * the job itself ignores. The program stops when the signal it is handed
+   * aborts. `takes` are the signals that stop it, every one when null.
+   * Resolves to what it returned, or the signal `interrupt` stopped it with.
+   * Mirrors Python's program.
+   */
+  async program<T>(
+    run: (stop: AbortSignal) => Promise<T>,
+    takes: ReadonlySet<number> | null = null,
+  ): Promise<[T, null] | [null, number]> {
+    const stop = new AbortController()
+    this.programs.set(stop, null)
+    this.takes.set(stop, takes)
+    try {
+      return [await run(stop.signal), null]
+    } catch (error) {
+      const signal = this.programs.get(stop) ?? null
+      if (signal === null || !isAborting(error)) throw error
+      return [null, signal]
+    } finally {
+      this.programs.delete(stop)
+      this.takes.delete(stop)
+    }
+  }
+
+  /**
+   * Deliver a signal the runner's shell ignores, as bash's background job
+   * ignores INT: the program it runs right now (`program`) gets it, and the
+   * shell goes on.
+   */
+  interrupt(signal: number): void {
+    for (const [stop, sent] of this.programs) {
+      const takes = this.takes.get(stop) ?? null
+      if (sent !== null || (takes !== null && !takes.has(signal))) continue
+      this.programs.set(stop, signal)
+      stop.abort(new SignalStop(signal))
+    }
+  }
+
+  /**
+   * Deliver a signal to every runner this one started, and theirs, as a
+   * process group gets it: one that ignores it hands it to its program
+   * (`interrupt`), any other stops with it.
+   */
+  signalChildren(signal: number): void {
+    this.signalChildrenOf(signal)
+  }
+
+  /**
    * Request cancellation without waiting for the runner to exit. A runner
    * that already exited has nothing to cancel, but what it started may
    * still run (`sh -c 'sleep 100 &'`), so its children are stopped all the
    * same. A KILL while the runner still stops under another signal cuts the
    * grace that signal gave its program short, as a second `kill -KILL` does.
+   * A signal the runner ignores (`ignores`) does nothing.
    *
    * @param signal what the stop stands for, KILL (9) unless a `kill` named another.
    * @param children stop what the runner started too; false leaves its jobs
    *   running, for a signal they ignore.
    */
   terminate(signal = 9, children = true): boolean {
+    if (this.ignores.has(signal)) return false
     if (this.current.state === 'exited') {
       if (children) this.cancelChildren(signal)
       return false

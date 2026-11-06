@@ -653,6 +653,8 @@ async function runRedirected(
       command.type === NT.VARIABLE_ASSIGNMENTS)
   const outer = context.frame.diagnostics
   if (simple) context.frame.diagnostics = []
+  const links = namespace.sessionLinks(context.session)
+  const followLinks = (path: string): string => links.follow(path)
   let stdout: ByteSource | null
   let io: IOResult
   let execNode: ExecutionNode
@@ -678,6 +680,7 @@ async function runRedirected(
           name,
           args,
           ranForked,
+          followLinks,
         )
       }
       ;[stdout, io, execNode] = await runWithRedirectPaths(
@@ -709,6 +712,7 @@ async function runRedirected(
         '',
         [],
         forked,
+        followLinks,
       )
     }
     if (simple && context.frame.diagnostics.length > 0) {

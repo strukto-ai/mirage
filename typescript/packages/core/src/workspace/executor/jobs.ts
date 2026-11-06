@@ -45,12 +45,12 @@ import {
 } from '../../shell/constants.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
-import { STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
+import { ENDING_SIGNALS, STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
 import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
 import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
 import { commandInvocations } from '../../shell/parse/names.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
-import type { TSNodeLike } from '../../shell/types.ts'
+import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { type JsonValue, PathSpec, type Refusal } from '../../types.ts'
 import { abortable, atDeadline, runWithDeadline } from '../../utils/abort.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
@@ -67,7 +67,7 @@ import { ExecutionNode } from '../types.ts'
 import { scanOptions } from './builtins/getopt.ts'
 import { builtinUsage } from './builtins/shared.ts'
 import type { ExecuteNodeFn, ExecuteNodeOpts } from './command/types.ts'
-import { answerClosed, failedRead, statementStdin } from './statement.ts'
+import { answerClosed, failedRead, forks, recordStatus, statementStdin } from './statement.ts'
 import { inheritTraps } from './traps.ts'
 
 // Opt in by assigning a debug sink, as Python's module logger is off until
@@ -222,6 +222,54 @@ function oneProgram(left: TSNodeLike, session: SessionState): boolean {
   )
 }
 
+/**
+ * Whether bash forks a statement as one child: a program or a subshell. The
+ * shell's own work (a builtin, a function, a compound command) is not, and a
+ * pipeline forks each stage (`handlePipe`). Mirrors Python's _forked.
+ */
+function forked(node: TSNodeLike | null, session: SessionState): boolean {
+  if (node === null || isBackgrounded(node)) return false
+  if (node.type === NT.REDIRECTED_STATEMENT) return forked(getRedirects(node)[0], session)
+  return node.type === NT.SUBSHELL || (node.type === NT.COMMAND && forks(node, session))
+}
+
+/**
+ * Run one statement to the end of its output. A program or a subshell a
+ * background job's shell runs (`sleep 3` in `{ sleep 3; echo x; } &`) runs
+ * where a signal that shell ignores still stops it, whole, as bash forks each
+ * with INT back at its default: the statement ends with 128 plus the signal,
+ * and the job goes on. Mirrors Python's run_program.
+ */
+export async function runProgram(
+  node: TSNodeLike,
+  context: EvaluationContext,
+  run: () => Promise<RedirectResult>,
+): Promise<RedirectResult> {
+  const job = context.frame.job
+  if (job === null || !forked(node, context.session)) return run()
+  const outer = context.frame.abortSignal
+  const [ran, signal] = await job.program(async (stop) => {
+    context.frame.abortSignal = outer === null ? stop : AbortSignal.any([outer, stop])
+    // What the child runs is its own, which the signal stops with it.
+    context.frame.job = null
+    try {
+      return await run()
+    } finally {
+      context.frame.abortSignal = outer
+      context.frame.job = job
+    }
+  })
+  if (signal === null) return ran
+  const code = 128 + signal
+  if (node.type !== NT.COMMAND) context.session.pipeStatusPending = [code]
+  recordStatus(context.session, code)
+  return [
+    null,
+    new IOResult({ exitCode: code }),
+    new ExecutionNode({ command: node.text, exitCode: code }),
+  ]
+}
+
 export async function handleBackground(
   executeNode: ExecuteNodeFn,
   left: TSNodeLike,
@@ -246,6 +294,14 @@ export async function handleBackground(
   const releaseProgram = retainPrograms([left])
   const childEvaluation = childContext(context)
   const bgSession = childEvaluation.session
+  // How a job takes an INT or a QUIT, which its shell ignores: one program
+  // ignores it too, and a shell that runs commands of its own (`{ sleep 3;
+  // echo x; } &`) loses only the program it runs right now (`runProgram`). A
+  // builtin or a function its shell runs (`f &`) ends with that program on
+  // INT, as bash's shell does of an INT its child died of.
+  const command = left.type === NT.REDIRECTED_STATEMENT ? getRedirects(left)[0] : left
+  const oneCommand = command !== null && command.type === NT.COMMAND
+  const ends = oneCommand && !forks(command, session)
   const heldInputs = holdInputs(bgSession.openInputs())
   const dropHolds = async (): Promise<void> => {
     let failure: { error: unknown } | undefined
@@ -301,6 +357,7 @@ export async function handleBackground(
   childEvaluation.frame.abortSignal = stopped
   const cmdStrInner = left.text
   const runBg = async (job: Job): Promise<[IOResult, ExecutionNode]> => {
+    childEvaluation.frame.job = oneCommand && !ends ? null : job.process
     // What the job writes stays in its console and goes where its shell
     // writes as it is written: the terminal, or the substitution or pipe
     // it was started in.
@@ -313,7 +370,7 @@ export async function handleBackground(
       hold.held ||= isPending(refusal)
       lineSink?.(refusal)
     }
-    const run = async (): Promise<[IOResult, ExecutionNode]> => {
+    const run = async (stop: AbortSignal | null = null): Promise<[IOResult, ExecutionNode]> => {
       let stdout: ByteSource | null
       let io: IOResult
       let execNode: ExecutionNode
@@ -324,7 +381,7 @@ export async function handleBackground(
         // job at all, since a promise cannot be cancelled.
         const opts: ExecuteNodeOpts = {
           sink: console_,
-          signal: AbortSignal.any([abort.signal, expiry.signal]),
+          signal: AbortSignal.any([abort.signal, expiry.signal, ...(stop === null ? [] : [stop])]),
           executionScope: new ExecutionScope(undefined, job.executionId ?? undefined),
           endsShell: true,
           jobTable: jobTable.child(),
@@ -369,6 +426,19 @@ export async function handleBackground(
       }
       return [io, execNode]
     }
+    const takingInterrupts = async (): Promise<[IOResult, ExecutionNode]> => {
+      if (!ends || job.process === null) return run()
+      const [ran, signal] = await job.process.program((stop) => {
+        childEvaluation.frame.abortSignal = AbortSignal.any([stopped, stop])
+        return run(stop)
+      }, ENDING_SIGNALS)
+      if (signal === null) return ran
+      const code = 128 + signal
+      return [
+        new IOResult({ exitCode: code }),
+        new ExecutionNode({ command: cmdStrInner, exitCode: code }),
+      ]
+    }
     const body = async (): Promise<[IOResult, ExecutionNode]> => {
       const seconds = childEvaluation.frame.lineTimeout
       const limit = seconds !== null && seconds > 0 ? seconds : null
@@ -378,7 +448,7 @@ export async function handleBackground(
       const disarm = limit === null ? undefined : atDeadline(limit, expire)
       let result: [IOResult, ExecutionNode]
       try {
-        result = await runWithDeadline(limit, expire, run, true)
+        result = await runWithDeadline(limit, expire, takingInterrupts, true)
       } catch (err) {
         // Past its own limit, or stopped by a command's own timeout, the job
         // answers as a line does, 124 and the message; a killed job ends as

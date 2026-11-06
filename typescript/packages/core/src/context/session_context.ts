@@ -149,6 +149,13 @@ export interface Caller {
   readonly invocation: CommandContext | null
   // The prefix of the mount whose VFS serves the call, null outside one.
   readonly vfsMount: string | null
+  // The files the redirects around the call write as their commands write,
+  // each with what an op that reaches one runs first: it commits what went
+  // in and keeps the rest for the command's end.
+  readonly streamed: readonly (readonly [string, () => Promise<void>])[]
+  // The regular file the running command's stdout writes, null when it
+  // writes anywhere else.
+  readonly outputFile: string | null
 }
 
 /**
@@ -198,6 +205,8 @@ const UNBOUND: Caller = {
   process: null,
   invocation: null,
   vfsMount: null,
+  streamed: [],
+  outputFile: null,
 }
 
 const callerStorage = createAsyncContext<Caller>()

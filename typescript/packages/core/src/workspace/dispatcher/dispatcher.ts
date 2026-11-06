@@ -796,6 +796,8 @@ export class Dispatcher {
 
   dispatch: CallerDispatchFn = async (name, path, args, kwargs, report, caller) => {
     try {
+      const streamed = (caller ?? this.caller ?? currentCaller()).streamed
+      if (streamed.length > 0) await this.handOver(streamed, path, args, kwargs)
       if (caller !== undefined && caller !== this.caller) {
         const view = this.forCaller(caller)
         const run = (): ReturnType<DispatchFn> => view.dispatch(name, path, args, kwargs, report)
@@ -862,6 +864,34 @@ export class Dispatcher {
       ) {
         await closeQuietly(data as ByteSource)
       }
+    }
+  }
+
+  /**
+   * Have a redirect that writes a file this op reaches, by any spelling,
+   * commit what its command wrote so far, so the op finds what a
+   * descriptor's writes would have left there (`{ seq 3; wc -l < f; } > f`).
+   */
+  private async handOver(
+    streamed: Caller['streamed'],
+    path: PathSpec,
+    args: readonly unknown[] | undefined,
+    kwargs: Record<string, unknown> | undefined,
+  ): Promise<void> {
+    const reached = new Set(
+      [path, ...(args ?? []), ...Object.values(kwargs ?? {})]
+        .filter((p): p is PathSpec => p instanceof PathSpec)
+        .map((p) => this.followed(p.virtual)),
+    )
+    for (const [target, hold] of streamed) if (reached.has(this.followed(target))) await hold()
+  }
+
+  private followed(virtual: string): string {
+    try {
+      return this.namespace.follow(virtual)
+    } catch (error) {
+      if (error instanceof CycleError) return virtual
+      throw error
     }
   }
 

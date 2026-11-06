@@ -15,7 +15,7 @@
 import asyncio
 import logging
 import re
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, replace
 from datetime import datetime, tzinfo
 from typing import Any
@@ -62,10 +62,14 @@ from mirage.shell.constants import (
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
 from mirage.shell.job_table import Job, JobStatus, JobTable
-from mirage.shell.job_table.constants import STOP_WAIT_SECONDS
+from mirage.shell.job_table.constants import (
+    ENDING_SIGNALS,
+    STOP_WAIT_SECONDS,
+)
 from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.names import command_invocations
 from mirage.shell.parse.program import retain_programs
+from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.types import JsonValue, PathSpec, Refusal
 from mirage.utils.clock import system_now
@@ -78,6 +82,8 @@ from mirage.workspace.executor.builtins.shared import builtin_usage
 from mirage.workspace.executor.statement import (
     answer_closed,
     failed_read,
+    forks,
+    record_status,
     statement_stdin,
 )
 from mirage.workspace.executor.traps import inherit_traps
@@ -248,6 +254,66 @@ def _one_program(left: TSNodeLike, session: SessionState) -> bool:
     )
 
 
+def _forked(node: TSNodeLike | None, session: SessionState) -> bool:
+    """Whether bash forks a statement as one child: a program or a
+    subshell. The shell's own work (a builtin, a function, a compound
+    command) is not, and a pipeline forks each stage (``handle_pipe``).
+
+    Args:
+        node (TSNodeLike | None): the statement.
+        session (SessionState): the shell it runs in.
+    """
+    if node is None or is_backgrounded(node):
+        return False
+    if node.type == NT.REDIRECTED_STATEMENT:
+        return _forked(get_redirects(node)[0], session)
+    return node.type == NT.SUBSHELL or (
+        node.type == NT.COMMAND and forks(node, session)
+    )
+
+
+async def run_program(
+    node: TSNodeLike,
+    context: EvaluationContext,
+    run: Callable[
+        [],
+        Coroutine[Any, Any, tuple[ByteSource | None, IOResult, ExecutionNode]],
+    ],
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Run one statement to the end of its output. A program or a
+    subshell a background job's shell runs (``sleep 3`` in ``{ sleep 3;
+    echo x; } &``) runs where a signal that shell ignores still stops it,
+    whole, as bash forks each with INT back at its default: the statement
+    ends with 128 plus the signal, and the job goes on.
+
+    Args:
+        node (TSNodeLike): the statement.
+        context (EvaluationContext): the evaluation's session and frame.
+        run (Callable): the statement, its output drained.
+    """
+    job = context.frame.job
+    if job is None or not _forked(node, context.session):
+        return await run()
+    # What the child runs is its own, which the signal stops with it.
+    context.frame.job = None
+    try:
+        result, signal = await job.program(run)
+    finally:
+        context.frame.job = job
+    if signal is None:
+        assert result is not None
+        return result
+    code = 128 + signal
+    if node.type != NT.COMMAND:
+        context.session._pipe_status_pending = (code,)
+    record_status(context.session, code)
+    return (
+        None,
+        IOResult(exit_code=code),
+        ExecutionNode(command=get_text(node), exit_code=code),
+    )
+
+
 async def handle_background(
     execute_node: Callable[
         ..., Awaitable[tuple[ByteSource | None, IOResult, ExecutionNode]]
@@ -318,7 +384,24 @@ async def handle_background(
         else None
     )
 
+    command = (
+        get_redirects(left)[0]
+        if left.type == NT.REDIRECTED_STATEMENT
+        else left
+    )
+    # How a job takes an INT or a QUIT, which its shell ignores: one
+    # program ignores it too, and a shell that runs commands of its own
+    # (`{ sleep 3; echo x; } &`) loses only the program it runs right now
+    # (`run_program`). A builtin or a function its shell runs (`f &`) ends
+    # with that program on INT, as bash's shell does of an INT its child
+    # died of.
+    one_command = command is not None and command.type == NT.COMMAND
+    ends = one_command and not forks(command, session)
+
     async def _run_bg(job: Job) -> tuple[IOResult, ExecutionNode]:
+        child_evaluation.frame.job = (
+            None if one_command and not ends else job.process
+        )
         # Background jobs don't receive stdin, matching real shell
         # behavior where bg processes get /dev/null. This prevents
         # race conditions when stdin is an async iterator.
@@ -424,13 +507,27 @@ async def handle_background(
                 await console.emit(Channel.STDERR, stderr)
             return io, exec_node
 
+        async def taking_interrupts() -> tuple[IOResult, ExecutionNode]:
+            if not ends or job.process is None:
+                return await run_job()
+            ran, signal = await job.process.program(run_job, ENDING_SIGNALS)
+            if signal is None:
+                assert ran is not None
+                return ran
+            code = 128 + signal
+            return IOResult(exit_code=code), ExecutionNode(
+                command=cmd_str_inner, exit_code=code
+            )
+
         try:
             try:
                 # The job runs under the `@line` limit of the line that
                 # started it, from its own start, its output included: a
                 # job is past it as a line is, 124 and the line's message.
                 io, exec_node = await run_with_timeout(
-                    run_job(), child_evaluation.frame.line_timeout, LINE_NAME
+                    taking_interrupts(),
+                    child_evaluation.frame.line_timeout,
+                    LINE_NAME,
                 )
             except CommandTimeoutError as exc:
                 msg = encode_text(str(exc) + "\n")

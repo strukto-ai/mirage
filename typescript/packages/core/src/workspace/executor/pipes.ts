@@ -23,6 +23,7 @@ import type { HandOff } from '../../policy/types.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ProcessTable } from '../../process/table.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
+import { isAborting } from '../../errors/fs.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { type JobConsole, JobOutput } from '../../shell/console/index.ts'
@@ -43,11 +44,11 @@ import { childContext, type EvaluationContext } from '../evaluation.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
-import { divertStatement } from './builtins/exec/index.ts'
+import { divertStatement, divertedFile } from './builtins/exec/index.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, ended, isUnwinding } from './control.ts'
-import { handleBackground, pump } from './jobs.ts'
+import { handleBackground, pump, runProgram } from './jobs.ts'
 import {
   answerClosed,
   asWritten,
@@ -108,14 +109,19 @@ export async function handlePipe(
 
   let failed = false
   const tasks: Promise<void>[] = []
+  const job = context.frame.job
   const launch = (cmd: TSNodeLike, i: number): Promise<void> => {
-    // Each segment is a child shell: bash forks one per stage.
+    // Each segment is a child shell: bash forks one per stage. In a
+    // background job each is a program a signal the job ignores still stops
+    // whole (`runProgram`), and one that ended keeps its status.
     const childEvaluation = childContext(context)
+    childEvaluation.frame.job = null
+    const interrupted = new AbortController()
+    const stops = mergeSignals(abort.signal, interrupted.signal) ?? abort.signal
     const child = childEvaluation.session
     inheritTraps(child)
     child.terminalOutput = session.terminalOutput && i === commands.length - 1
-    childEvaluation.frame.abortSignal =
-      mergeSignals(context.frame.abortSignal, abort.signal) ?? abort.signal
+    childEvaluation.frame.abortSignal = mergeSignals(context.frame.abortSignal, stops) ?? stops
     const output = pipes[i]
     if (output === undefined) throw new Error('Missing pipeline segment')
     const upstream = pipes[i - 1]
@@ -148,7 +154,7 @@ export async function handlePipe(
           stageStack,
           executeNode(cmd, childEvaluation, input, stageStack, {
             sink: output,
-            signal: abort.signal,
+            signal: stops,
           }),
         )
         io = result
@@ -168,7 +174,9 @@ export async function handlePipe(
           await pump(output, Channel.STDERR, unwound.stderr)
           await waits?.join(rest)
         } else {
-          output.end(error)
+          // One an interrupt stopped closes its pipe as a killed child
+          // does: the reader sees the end, not the stop.
+          output.end(interrupted.signal.aborted && isAborting(error) ? undefined : error)
           throw error
         }
       } finally {
@@ -182,8 +190,23 @@ export async function handlePipe(
         await child.closeInputs()
       }
     }
-    const execute = () =>
+    const isolated = () =>
       asyncContextIsolatesTasks ? runWithEvaluation(childEvaluation, run) : run()
+    const execute = async (): Promise<void> => {
+      if (job === null) return isolated()
+      const [, signal] = await job.program(async (stop) => {
+        stop.addEventListener(
+          'abort',
+          () => {
+            interrupted.abort(stop.reason)
+          },
+          { once: true },
+        )
+        await isolated()
+      })
+      const io = ios[i]
+      if (signal !== null && io !== undefined) io.exitCode = 128 + signal
+    }
     if (processes === undefined) return execute()
     let process: ProcessHandle
     try {
@@ -302,37 +325,40 @@ export async function handleConnection(
 ): Promise<RedirectResult> {
   const session = context.session
   const bound = fd0Binding(session)
-  const [leftStdout, leftIo, leftExec] = await ignoringErrexit(session, () =>
-    executeNode(left, context, stdin, callStack),
-  )
+  const [leftBytes, leftIo, leftExec] = await runProgram(left, context, async () => {
+    const [out, io, ran] = await ignoringErrexit(session, () =>
+      executeNode(left, context, stdin, callStack),
+    )
+    return [await finishStatement(out, io, session, left), io, ran]
+  })
   const children = [leftExec]
-
-  const leftBytes = await finishStatement(leftStdout, leftIo, session, left)
   if ((op === NT.AND && leftIo.exitCode !== 0) || (op === NT.OR && leftIo.exitCode === 0)) {
     if (op === NT.AND) session.errexitImmune = true
     carryStatus(session)
     return [leftBytes, leftIo, new ExecutionNode({ op, exitCode: leftIo.exitCode, children })]
   }
-  let rightStdout: ByteSource | null
+  let rightBytes: ByteSource | null
   let rightIo: IOResult
   let rightExec: ExecutionNode
   const armed = errTrapArmed(session)
   try {
-    ;[rightStdout, rightIo, rightExec] = await executeNode(
-      right,
-      context,
-      statementStdin(session, stdin, bound),
-      callStack,
-    )
+    // The right command closes here, so its ERR action reads its status and
+    // `${PIPESTATUS[@]}`; the list's boundary claims them again once the
+    // action is done.
+    ;[rightBytes, rightIo, rightExec] = await runProgram(right, context, async () => {
+      const [out, io, ran] = await executeNode(
+        right,
+        context,
+        statementStdin(session, stdin, bound),
+        callStack,
+      )
+      return [await finishStatement(out, io, session, right), io, ran]
+    })
   } catch (err) {
     if (isUnwinding(err)) throw await carried(err, leftBytes, leftIo)
     throw err
   }
   children.push(rightExec)
-  // The right command closes here, so its ERR action reads its status and
-  // `${PIPESTATUS[@]}`; the list's boundary claims them again once the
-  // action is done.
-  const rightBytes = await finishStatement(rightStdout, rightIo, session, right)
   let merged = await leftIo.merge(rightIo)
   const outputs: (ByteSource | null)[] = [leftBytes, rightBytes]
   try {
@@ -494,15 +520,18 @@ export async function handleSubshell(
     }
     i += 1
     const recorder = new Recorder()
+    recorder.outputFile = divertedFile(session, sink)
     const leave = recordJobs(session, recorder)
     let io: IOResult
     try {
       const childStdin = statementStdin(session, stdin, bound)
       let stdout: ByteSource | null
-      ;[stdout, io, lastExec] = await recording(recorder, () =>
-        executeNode(child, context, childStdin, callStack, { sink: recorder }),
-      )
-      stdout = await finishStatement(stdout, io, session, child, lastExec)
+      ;[stdout, io, lastExec] = await runProgram(child, context, async () => {
+        const [out, ranIo, ran] = await recording(recorder, () =>
+          executeNode(child, context, childStdin, callStack, { sink: recorder }),
+        )
+        return [await finishStatement(out, ranIo, session, child, ran), ranIo, ran]
+      })
       const written = await divertStatement(
         dispatch,
         session,

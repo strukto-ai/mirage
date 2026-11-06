@@ -34,6 +34,7 @@ from mirage.shell.console import (
 from mirage.shell.job_table.constants import (
     GENERATION_BITS,
     HANGUP_EXIT_CODE,
+    IGNORED_SIGNALS,
     KILLED_EXIT_CODE,
     LIST_CHECK_SECONDS,
     LIST_MAX_RETRIES,
@@ -458,6 +459,7 @@ class JobTable:
                 run=execute,
                 parent_pid=parent_pid,
                 limit=limit,
+                ignores=IGNORED_SIGNALS,
             )
         except BaseException:
             await self._remove(session_id, {name}, give_back=True)
@@ -665,7 +667,8 @@ class JobTable:
         Another workspace's job is killed by ending its console; its
         owner sees the ending and stops the runner. Should the job have
         ended first, the ending it wrote stands and the job was not
-        killed.
+        killed. INT and QUIT reach a running job and do nothing, as bash
+        starts each job ignoring them.
 
         Args:
             job_id (int): the job to stop.
@@ -676,6 +679,8 @@ class JobTable:
         job = self.get(job_id, session_id)
         if job is None or job.status != JobStatus.RUNNING:
             return False
+        if signal in IGNORED_SIGNALS:
+            return True
         if job.process is not None:
             await self._stop_runner(job, job.process, signal)
             return True

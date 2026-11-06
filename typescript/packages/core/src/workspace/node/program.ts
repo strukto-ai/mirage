@@ -36,7 +36,7 @@ import { concat } from '../../utils/bytes.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { expandingAliases } from '../executor/builtins/alias/alias.ts'
-import { divertStatement } from '../executor/builtins/exec/index.ts'
+import { divertStatement, divertedFile } from '../executor/builtins/exec/index.ts'
 import type { ExecuteNodeFn } from '../executor/command/types.ts'
 import { carried, isUnwinding, LoopSignal, type Unwinding } from '../executor/control.ts'
 import { handleBackground } from '../executor/jobs.ts'
@@ -279,6 +279,7 @@ async function runProgram(
     // Ordinary output progresses while the statement runs. Descriptor
     // copies and exec diversions retain their order for routing below.
     const recorder = new StatementRecorder(session, sink)
+    recorder.outputFile = divertedFile(session, sink)
     const leave = recordJobs(session, recorder)
     let io: IOResult
     try {
