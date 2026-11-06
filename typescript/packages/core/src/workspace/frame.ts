@@ -1,4 +1,5 @@
 import type { ByteSource, IOResult } from '../io/types.ts'
+import type { ProcessHandle } from '../process/handle.ts'
 import type { JobConsole } from '../shell/console/index.ts'
 import type { TSNodeLike } from '../shell/types.ts'
 
@@ -24,11 +25,16 @@ export class ExecutionFrame {
   // and cancellation is ambient.
   abortSignal: AbortSignal | null = null
   lineTimeout: number | null = null
+  // The background job whose shell the evaluation runs in, when that shell
+  // runs commands of its own (`{ sleep 3; echo x; } &`), each of which a
+  // signal the shell ignores still reaches.
+  job: ProcessHandle | null = null
 
   fork(): ExecutionFrame {
     const child = new ExecutionFrame()
     child.abortSignal = this.abortSignal
     child.lineTimeout = this.lineTimeout
+    child.job = this.job
     if (this.routing !== undefined) child.routing = this.routing
     return child
   }

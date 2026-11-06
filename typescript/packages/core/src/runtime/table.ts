@@ -25,8 +25,14 @@ import { WorkspaceRuntime } from './workspace.ts'
 // Null prototype: runtime names come from config, and a name like
 // `constructor` must miss instead of resolving an `Object.prototype`
 // member as a runtime class.
-const NAMED: Record<string, new (options?: RuntimeOptions<never>) => Runtime> = Object.assign(
-  Object.create(null) as Record<string, new (options?: RuntimeOptions<never>) => Runtime>,
+const NAMED: Record<
+  string,
+  (new (options?: RuntimeOptions<never>) => Runtime) & Pick<typeof Runtime, 'configFields'>
+> = Object.assign(
+  Object.create(null) as Record<
+    string,
+    (new (options?: RuntimeOptions<never>) => Runtime) & Pick<typeof Runtime, 'configFields'>
+  >,
   {
     pyodide: PyodideRuntime,
     monty: MontyRuntime,
@@ -107,7 +113,7 @@ const BUILTIN_RUNTIMES: ReadonlySet<string> = new Set([
  */
 export function registerRuntime(
   name: string,
-  cls: new (options?: RuntimeOptions<never>) => Runtime,
+  cls: (new (options?: RuntimeOptions<never>) => Runtime) & Pick<typeof Runtime, 'configFields'>,
 ): void {
   if (BUILTIN_RUNTIMES.has(name) && NAMED[name] !== undefined) {
     throw new Error(`cannot register '${name}': shadows a builtin`)
@@ -141,6 +147,20 @@ export function checkRuntimeOptions(name: string, options: Record<string, unknow
  * cross-language hint for Python-only names) and on unknown options.
  */
 export function buildRuntime(name: string, options: Record<string, unknown> = {}): Runtime {
+  const cls = runtimeClass(name)
+  checkRuntimeOptions(name, options)
+  return new cls(options as RuntimeOptions<never>)
+}
+
+/**
+ * The runtime class a name resolves to. Mirrors Python's `runtime_class`.
+ *
+ * Throws:
+ *   Error: unknown name, with a hint for one another package registers.
+ */
+export function runtimeClass(
+  name: string,
+): (new (options?: RuntimeOptions<never>) => Runtime) & Pick<typeof Runtime, 'configFields'> {
   const cls = NAMED[name]
   if (cls === undefined) {
     const hint = RUNTIME_HINTS[name]
@@ -150,8 +170,7 @@ export function buildRuntime(name: string, options: Record<string, unknown> = {}
       .join(', ')
     throw new Error(`unknown runtime: '${name}' (expected one of ${known})`)
   }
-  checkRuntimeOptions(name, options)
-  return new cls(options as RuntimeOptions<never>)
+  return cls
 }
 
 /**
@@ -227,6 +246,25 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
 }
 
 /**
+ * Each capture an earlier entry already takes, as [capture, winner,
+ * shadowed], in list order. Mirrors Python's `shadowed_captures`.
+ *
+ * @param entries runtime instances in precedence order.
+ */
+export function shadowedCaptures(entries: readonly Runtime[]): [string, string, string][] {
+  const winners = new Map<string, string>()
+  const shadowed: [string, string, string][] = []
+  for (const entry of entries) {
+    for (const capture of new Set(entry.captures)) {
+      const winner = winners.get(capture)
+      if (winner !== undefined) shadowed.push([capture, winner, entry.name])
+      else winners.set(capture, entry.name)
+    }
+  }
+  return shadowed
+}
+
+/**
  * The runtime that runs this entire line, if any.
  *
  * Only an explicit WHOLE_LINE capture claims a whole line. Named captures
@@ -240,6 +278,16 @@ export function wholeLineRuntime(
   const whole = Object.hasOwn(bindings, WHOLE_LINE) ? bindings[WHOLE_LINE] : null
   if (whole != null && isLineExecutor(whole)) return whole
   return null
+}
+
+/**
+ * Whether a runtime is a sandbox: a line executor on another machine.
+ * Mirrors Python's `is_sandbox`.
+ *
+ * @param entry the runtime, null or undefined for none.
+ */
+export function isSandbox(entry: Runtime | null | undefined): entry is Runtime & LineExecutorMixin {
+  return entry != null && isLineExecutor(entry) && entry.reach === 'remote'
 }
 
 /**

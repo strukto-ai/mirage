@@ -15,6 +15,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { pidFilePath } from '@struktoai/mirage-server/paths'
 import type { Command } from 'commander'
+import { registerConfigCommands } from './config.ts'
 import { makeClient } from './client.ts'
 import { emit, fail, formatAge } from './output.ts'
 
@@ -86,6 +87,7 @@ async function waitForUnreachable(timeoutMs: number): Promise<boolean> {
 
 export function registerDaemonCommands(program: Command): void {
   const d = program.command('daemon').description('Manage the daemon process lifecycle.')
+  registerConfigCommands(d)
 
   d.command('status')
     .description('Show daemon health, PID, uptime, workspace count.')

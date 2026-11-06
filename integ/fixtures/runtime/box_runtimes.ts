@@ -33,7 +33,7 @@ export class EchoBox extends Runtime<undefined> implements LineExecutorMixin<und
   readonly name = 'echobox'
 
   constructor(options = {}) {
-    super(options, ['nvidia-smi'], [])
+    super(options, ['nvidia-smi'])
   }
 
   runLine(
@@ -52,7 +52,7 @@ export class ShoutPython extends LanguageRuntime<undefined> {
   readonly language = 'python' as const
 
   constructor(options = {}) {
-    super(options, ['python3', 'python'], [])
+    super(options, ['python3', 'python'])
   }
 
   interpret(_engine: undefined, program: Program, _ctx: Context): Promise<RunResult> {

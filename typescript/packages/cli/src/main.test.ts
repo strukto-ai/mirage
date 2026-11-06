@@ -23,17 +23,18 @@ describe('mirage CLI program', () => {
       [
         'api',
         'codex-exec',
-        'config',
+        'cli',
+        'context',
         'daemon',
-        'glob',
         'login',
         'logout',
         'mcp',
+        'policy',
         'rpc',
-        'session',
+        'runtime',
         'shell',
         'ssh-proxy',
-        'tools',
+        'template',
         'vfs',
         'whoami',
         'workspace',
@@ -61,18 +62,23 @@ describe('mirage CLI program', () => {
         'list',
         'list-asks',
         'load',
+        'session',
         'set-profile',
+        'shell',
         'snapshot',
+        'tools',
+        'use',
+        'vfs',
         'vfs-md',
         'skill-md',
       ].sort(),
     )
   })
 
-  it('daemon subcommand has status/stop/restart/kill', () => {
+  it('daemon subcommand has its lifecycle and config', () => {
     const program = buildProgram()
     const d = program.commands.find((c) => c.name() === 'daemon')
     const sub = d?.commands.map((c) => c.name()).sort() ?? []
-    expect(sub).toEqual(['kill', 'restart', 'status', 'stop'].sort())
+    expect(sub).toEqual(['config', 'kill', 'restart', 'status', 'stop'].sort())
   })
 })

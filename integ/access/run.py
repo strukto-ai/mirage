@@ -53,12 +53,14 @@ import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 import httpx
 import websockets
 from adapters import (
+    NESTED_GROUPS,
     SSH_OPTIONS,
     Answer,
     Cli,
@@ -454,7 +456,7 @@ async def login(server: Server, scratch: Path, report: Report) -> None:
     browser.chmod(0o755)
     env = {**d.cli_env(), "MIRAGE_HOME": str(home), "BROWSER": str(browser)}
     env.pop("MIRAGE_TOKEN", None)
-    stored = home / "login.json"
+    stored = home / "logins" / "local.json"
 
     async def cli(*args: str) -> tuple[int, str, str]:
         return await run(server.cli(*args), env)
@@ -473,15 +475,15 @@ async def login(server: Server, scratch: Path, report: Report) -> None:
     ) as http:
         found = await http.get("/.well-known/oauth-protected-resource")
         got["resource"] = found.status_code
-    _, out, _ = await cli("login")
+    _, out, _ = await cli("login", d.url)
     got["login"] = out.strip().replace(d.url, "{url}")
     if d.name == "token":
         got["login_wrong_token"], _, _ = await cli(
-            "login", "--token", "some-other-token"
+            "login", d.url, "--token", "some-other-token"
         )
-        got["login_token"], _, _ = await cli("login", "--token", TOKEN)
+        got["login_token"], _, _ = await cli("login", d.url, "--token", TOKEN)
     code, out, _ = await cli("whoami")
-    got["whoami"] = json.loads(out)["account"] if code == 0 else code
+    got["whoami"] = json.loads(out)["user"] if code == 0 else code
     if stored.exists():
         got["list"] = await lists()
     if d.name == "jwt":
@@ -752,6 +754,68 @@ async def server_checks(server: Server, report: Report) -> None:
                 [refused.status_code, refused.json().get("detail")],
                 want["no_snapshot_store"],
             )
+        name = f"access-{uuid.uuid4().hex[:8]}"
+        config = {"mounts": {"/": {"vfs": "ram"}}}
+        template = f"/v1/templates/{name}"
+        codes = [
+            (
+                await http.post(
+                    "/v1/templates",
+                    json={"name": name, "config": config},
+                    headers=auth,
+                )
+            ).status_code,
+            (await http.get("/v1/templates", headers=auth)).status_code,
+            (await http.get(template, headers=auth)).status_code,
+            (await http.delete(template, headers=auth)).status_code,
+            (await http.post(f"{template}/restore", headers=auth)).status_code,
+        ]
+        report.check(
+            f"{server.key} server.templates", codes, want["templates"][d.name]
+        )
+        policy = f"/v1/policies/{name}.py"
+        source = {"source": "pass\n"}
+        codes = [
+            (
+                await http.post(
+                    "/v1/policies",
+                    json={"name": f"{name}.py", **source},
+                    headers=auth,
+                )
+            ).status_code,
+            (await http.get("/v1/policies", headers=auth)).status_code,
+            (await http.get(policy, headers=auth)).status_code,
+            (await http.put(policy, json=source, headers=auth)).status_code,
+            (await http.delete(policy, headers=auth)).status_code,
+        ]
+        report.check(
+            f"{server.key} server.policies", codes, want["policies"][d.name]
+        )
+        for route in ("/v1/vfs", "/v1/clis", "/v1/runtimes"):
+            entry = f"{route}/{name}"
+            unknown = {"name": name, "type": "nope", "fields": {}}
+            codes = [
+                (await http.get(route, headers=auth)).status_code,
+                (await http.get(f"{route}/types", headers=auth)).status_code,
+                (
+                    await http.post(route, json=unknown, headers=auth)
+                ).status_code,
+                (await http.get(entry, headers=auth)).status_code,
+                (
+                    await http.put(entry, json={"fields": {}}, headers=auth)
+                ).status_code,
+                (await http.delete(entry, headers=auth)).status_code,
+            ]
+            report.check(
+                f"{server.key} server.entries {route}",
+                codes,
+                want["entries"][d.name],
+            )
+        report.check(
+            f"{server.key} server.no_secret_stores",
+            (await http.get("/v1/stores", headers=auth)).status_code,
+            404,
+        )
         stop = await http.post("/v1/shutdown", headers=auth)
         report.check(
             f"{server.key} server.shutdown",
@@ -836,10 +900,15 @@ async def lifecycle(
     got: dict[str, str] = {}
 
     async def cli(
-        *args: str, use: dict[str, str] | None = None, tty: bool = False
+        *args: str,
+        use: dict[str, str] | None = None,
+        tty: bool = False,
+        stdin: bytes = b"",
     ) -> tuple[int, str, str]:
         recorder.command(host, args)
-        return await run(mirage_cli(host, *args), use or env, tty=tty)
+        return await run(
+            mirage_cli(host, *args), use or env, stdin=stdin, tty=tty
+        )
 
     def alive(at: str = url) -> bool:
         try:
@@ -962,11 +1031,12 @@ async def lifecycle(
         f"{'initialized' if 'result' in reply else reply} {during - len(ids())} gone"
     )
 
-    _, out, _ = await cli("config", "set", "idle_grace_seconds", "45")
-    _, out, _ = await cli("config", "get", "idle_grace_seconds")
+    daemon_config = ("daemon", "config")
+    _, out, _ = await cli(*daemon_config, "set", "idle_grace_seconds", "45")
+    _, out, _ = await cli(*daemon_config, "get", "idle_grace_seconds")
     got["config_set_get"] = str(json.loads(out)["idle_grace_seconds"])
     _, out, _ = await cli(
-        "config",
+        *daemon_config,
         "list",
         "--resolved",
         use={
@@ -979,10 +1049,10 @@ async def lifecycle(
     grace = resolved["idle_grace_seconds"]
     got["config_env_wins"] = f"{grace['value']} {grace['origin']}"
     got["config_token_masked"] = str(resolved["auth_token"]["value"])
-    await cli("config", "unset", "idle_grace_seconds")
-    code, _, _ = await cli("config", "get", "idle_grace_seconds")
+    await cli(*daemon_config, "unset", "idle_grace_seconds")
+    code, _, _ = await cli(*daemon_config, "get", "idle_grace_seconds")
     got["config_unset"] = str(code)
-    code, _, _ = await cli("config", "set", "typo_key", "1")
+    code, _, _ = await cli(*daemon_config, "set", "typo_key", "1")
     got["config_unknown_key"] = str(code)
     await cli("daemon", "stop")
     moved = free_port()
@@ -991,9 +1061,8 @@ async def lifecycle(
         for k, v in env.items()
         if k not in ("MIRAGE_DAEMON_URL", "MIRAGE_DAEMON_PORT")
     }
-    await cli("config", "set", "url", f"http://127.0.0.1:{moved}", use=plain)
-    await cli("config", "set", "port", str(moved), use=plain)
-    await cli("config", "set", "allowed_hosts", "127.0.0.1", use=plain)
+    await cli(*daemon_config, "set", "port", str(moved), use=plain)
+    await cli(*daemon_config, "set", "allowed_hosts", "127.0.0.1", use=plain)
     hosts = {
         **plain,
         "MIRAGE_ALLOWED_HOSTS": "127.0.0.1,localhost,evil.example",
@@ -1009,8 +1078,8 @@ async def lifecycle(
     )
     got["allowed_hosts_env_wins"] = str(evil.status_code)
     await cli("daemon", "stop", use=hosts)
-    for key in ("url", "port", "allowed_hosts"):
-        await cli("config", "unset", key, use=plain)
+    for key in ("port", "allowed_hosts"):
+        await cli(*daemon_config, "unset", key, use=plain)
     (home / "config.toml").write_text("[daemon\n")
     code, _, _ = await cli("workspace", "create", str(config), "--id", "g")
     got["config_malformed"] = str(code)
@@ -1044,8 +1113,91 @@ async def lifecycle(
 
     await cli("workspace", "create", str(config), "--id", "i")
     tty_code, _, _ = await cli("shell", "-w", "i", "-c", "exit 3", tty=True)
-    piped_code, _, _ = await cli("shell", "-w", "i", "-c", "exit 3")
+    piped_code, _, _ = await cli(
+        "workspace", "shell", "-w", "i", "-c", "exit 3"
+    )
     got["shell_exit_status"] = f"{tty_code} {piped_code}"
+    await cli("workspace", "use", "i")
+    _, out, _ = await cli("shell", "-c", "echo current")
+    got["workspace_use"] = out
+    token = (home / "auth_token").read_text().strip().encode()
+    await cli("login", url, "--name", "spare", "--token", "-", stdin=token)
+
+    async def contexts() -> str:
+        _, out, _ = await cli("context", "list")
+        return " ".join(
+            ("*" if c["current"] else "") + c["name"] for c in json.loads(out)
+        )
+
+    got["context_list"] = await contexts()
+    await cli("context", "use", "local")
+    code, _, _ = await cli(
+        "workspace", "list", use={**env, "MIRAGE_CONTEXT": "spare"}
+    )
+    got["context_once"] = f"{code} {await contexts()}"
+    await cli("context", "delete", "spare")
+    got["context_delete"] = await contexts()
+
+    await cli(
+        "template", "create", "t1", "-f", str(config), "--description", "ram"
+    )
+    _, out, _ = await cli("template", "get", "t1", "-o", "yaml")
+    back = root / "back.yaml"
+    back.write_text(out)
+    await cli("template", "delete", "t1")
+    await cli("template", "create", "t2", "-f", str(back))
+    await cli("template", "restore", "t1")
+    _, out, _ = await cli("template", "list")
+    saved = json.loads(out)
+    same = len({json.dumps(t["config"], sort_keys=True) for t in saved}) == 1
+    got["template_round_trip"] = " ".join(
+        f"{t['name']}:{t['description']}" for t in saved
+    ) + (" same config" if same else " configs differ")
+    rule = root / "guard.py"
+    rule.write_text("def check(call):\n    return None\n")
+    await cli("policy", "create", "guard.py", "--source", f"@{rule}")
+    await cli("policy", "update", "guard.py", "--source", "pass\n")
+    _, out, _ = await cli("policy", "get", "guard.py")
+    source = json.loads(out)["source"].strip()
+    await cli("policy", "delete", "guard.py")
+    _, out, _ = await cli("policy", "list")
+    got["policy_round_trip"] = f"{source} {len(json.loads(out))}"
+    await cli("vfs", "types", "github")
+    await cli(
+        "vfs",
+        "create",
+        "gh",
+        "--type",
+        "github",
+        "--set",
+        "owner=o",
+        "--set",
+        "repo=r",
+        "--secret",
+        "token",
+        stdin=b"t\n",
+    )
+    await cli("vfs", "update", "gh", "--set", "repo=r2")
+    _, out, _ = await cli("vfs", "get", "gh")
+    entry = json.loads(out)
+    await cli("vfs", "delete", "gh")
+    _, out, _ = await cli("vfs", "list")
+    got["vfs_round_trip"] = (
+        f"{entry['config']['repo']} {','.join(entry['sealed'])} "
+        f"{len(json.loads(out)['items'])}"
+    )
+    refused = []
+    for kind in ("cli", "runtime"):
+        codes = [
+            (await cli(kind, "types"))[0],
+            (await cli(kind, "list"))[0],
+            (await cli(kind, "create", "nope"))[0],
+            (await cli(kind, "get", "nope"))[0],
+            (await cli(kind, "update", "nope", "--set", "a=b"))[0],
+            (await cli(kind, "delete", "nope"))[0],
+        ]
+        refused.append(f"{kind}:{''.join(map(str, codes))}")
+    got["entries_refuse_unknown"] = " ".join(refused)
     _, out, _ = await cli(
         "api", "/v1/workspaces/i/shell", "--command", "echo api"
     )
@@ -1161,6 +1313,7 @@ def python_commands() -> set[str]:
         return [
             leaf
             for name, sub in subs.items()
+            if not sub.hidden
             for leaf in walk(sub, [*words, name])
         ]
 
@@ -1190,7 +1343,13 @@ def typescript_commands() -> set[str]:
     found = set()
     for name in listed():
         subs = listed(name)
-        found |= {f"{name} {s}" for s in subs} if subs else {name}
+        if not subs:
+            found.add(name)
+        for sub in subs:
+            if (name, sub) in NESTED_GROUPS:
+                found |= {f"{name} {sub} {leaf}" for leaf in listed(name, sub)}
+            else:
+                found.add(f"{name} {sub}")
     return found
 
 

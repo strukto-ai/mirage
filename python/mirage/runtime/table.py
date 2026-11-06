@@ -14,7 +14,7 @@
 
 import importlib
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, TypeGuard
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
@@ -129,6 +129,20 @@ def build_runtime(name: str, **options: Any) -> Runtime[Any]:
         ValueError: unknown name, with a cross-language hint for
             TypeScript-only names.
     """
+    return runtime_class(name)(**options)
+
+
+def runtime_class(name: str) -> type[Runtime[Any]]:
+    """The runtime class a name resolves to, importing a sandbox's module
+    on first use.
+
+    Args:
+        name (str): a runtime name from NAMED or SANDBOX_MODULES.
+
+    Raises:
+        ValueError: unknown name, with a cross-language hint for
+            TypeScript-only names.
+    """
     cls = NAMED.get(name)
     if cls is None and name in SANDBOX_MODULES:
         module_path, attr = SANDBOX_MODULES[name].split(":")
@@ -140,7 +154,7 @@ def build_runtime(name: str, **options: Any) -> Runtime[Any]:
         raise ValueError(
             f"unknown runtime: {name!r} (expected one of {known})"
         )
-    return cls(**options)
+    return cls
 
 
 def runtime_bindings_for(
@@ -216,6 +230,26 @@ def bind_commands(entries: list[Runtime[Any]]) -> dict[str, Runtime[Any]]:
     return bindings
 
 
+def shadowed_captures(
+    entries: list[Runtime[Any]],
+) -> list[tuple[str, str, str]]:
+    """Each capture an earlier entry already takes, as (capture,
+    winner, shadowed), in list order.
+
+    Args:
+        entries (list[Runtime]): runtime instances in precedence order.
+    """
+    winners: dict[str, str] = {}
+    shadowed: list[tuple[str, str, str]] = []
+    for entry in entries:
+        for capture in dict.fromkeys(entry.captures):
+            if capture in winners:
+                shadowed.append((capture, winners[capture], entry.name))
+            else:
+                winners[capture] = entry.name
+    return shadowed
+
+
 def whole_line_runtime(
     bindings: Mapping[str, RuntimeIdentity | None],
 ) -> LineExecutorMixin[Any] | None:
@@ -235,6 +269,20 @@ def whole_line_runtime(
     if isinstance(whole, LineExecutorMixin):
         return whole
     return None
+
+
+def is_sandbox(entry: RuntimeIdentity | None) -> TypeGuard[Runtime[Any]]:
+    """Whether a runtime is a sandbox: a line executor on another
+    machine.
+
+    Args:
+        entry (RuntimeIdentity | None): the runtime, None for none.
+    """
+    return (
+        isinstance(entry, Runtime)
+        and isinstance(entry, LineExecutorMixin)
+        and entry.reach == "remote"
+    )
 
 
 def catch_all(entries: list[Runtime[Any]]) -> Runtime[Any] | None:

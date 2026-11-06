@@ -22,7 +22,7 @@ import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult, materialize, PipeStream } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
-import { Channel } from '../../../../shell/console/index.ts'
+import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
 import {
   FD_BOTH,
   FD_CLOSE,
@@ -37,6 +37,7 @@ import {
   FileDescription,
   FileInput,
   Inherited,
+  Recorder,
   unsupportedDescriptor,
 } from '../../../../shell/descriptors.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
@@ -448,6 +449,24 @@ function stdoutToStderr(node: TSNodeLike): boolean {
   if (node.type !== NT.REDIRECTED_STATEMENT) return false
   const [, redirects] = getRedirects(node)
   return redirects.some((r) => r.target === FD_STDERR && (r.fd === FD_STDOUT || r.fd === FD_BOTH))
+}
+
+/**
+ * The regular file a statement of a shell's own loop writes its stdout to:
+ * where `exec` bound the shell's stdout while that binding stands (`exec
+ * >g`), as `divertStatement` sends it, else where the loop's sink writes
+ * (`Recorder.outputFile`), a streamed redirect's description shared as it is.
+ * Mirrors Python's diverted_file.
+ */
+export function divertedFile(
+  session: SessionState,
+  sink: JobConsole | null,
+): string | FileDescription | null {
+  if (session.execStdout !== null) {
+    const file = session.descriptors.get(FD_STDOUT)?.file ?? null
+    return file?.source !== null || file.pipe ? null : file.scope.virtual
+  }
+  return sink instanceof Recorder ? sink.outputFile : null
 }
 
 /**

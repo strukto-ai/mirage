@@ -18,7 +18,12 @@ import { liveEgress } from '../io/gateway.ts'
 import type { PathSpec } from '../types.ts'
 import { Activity } from '../utils/activity.ts'
 import { refusedRun, type WorkspaceBinding } from './binding.ts'
-import { coerceRuntimeConfig, type RuntimeConfig, type RuntimeOptions } from './config.ts'
+import {
+  coerceRuntimeConfig,
+  type ConfigFields,
+  type RuntimeConfig,
+  type RuntimeOptions,
+} from './config.ts'
 import { UnsupportedExecutionError } from './errors.ts'
 import { isLineExecutor, isProcessExecutor } from './mixin.ts'
 import type {
@@ -53,6 +58,12 @@ import type {
  * (config_cls in Python).
  */
 export abstract class Runtime<E = unknown> {
+  /**
+   * The keys its config takes, camelCase, each with its type: what a saved
+   * runtime's fields are. Python reads the same off its `config_cls`
+   * dataclass.
+   */
+  static readonly configFields: ConfigFields = {}
   abstract readonly name: string
   readonly captures: readonly string[]
   /**
@@ -81,11 +92,11 @@ export abstract class Runtime<E = unknown> {
   constructor(
     options: RuntimeOptions<RuntimeConfig> = {},
     defaultCaptures: readonly string[] = [],
-    configKeys: readonly string[] = [],
+    configFields: ConfigFields = {},
   ) {
     this.captures =
       options.captures !== undefined ? options.captures.slice() : defaultCaptures.slice()
-    this.config = coerceRuntimeConfig(options.config, configKeys)
+    this.config = coerceRuntimeConfig(options.config, Object.keys(configFields))
   }
 
   /** Whether workspace file mutations already invalidate through dispatch. */

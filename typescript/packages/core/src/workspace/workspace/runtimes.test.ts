@@ -20,6 +20,7 @@ import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { Program, RunResult } from '../../runtime/types.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
+import { logger } from './runtimes.ts'
 import { Workspace } from './workspace.ts'
 
 const ENC = new TextEncoder()
@@ -173,5 +174,77 @@ describe('removeRuntime', () => {
     expect(() => new Workspace({}, { python: { denyPackages: ['requests'] } } as never)).toThrow(
       /'python' workspace option was removed/,
     )
+  })
+})
+
+class Box extends Runtime implements LineExecutorMixin {
+  readonly [LINE_EXECUTOR] = true as const
+  override readonly reach = 'remote'
+
+  constructor(
+    readonly name: string,
+    ...captures: string[]
+  ) {
+    super({ captures: captures.length > 0 ? captures : ['@external'] })
+  }
+
+  runLine(): Promise<RunResult> {
+    return Promise.resolve({ stdout: ENC.encode(`${this.name}\n`), stderr: null, exitCode: 0 })
+  }
+}
+
+describe('addRuntime', () => {
+  it.each([
+    [() => [new Engine('a')], () => [new Box('b1'), new Box('b2')], ['b1', 'b2', 'a', 'workspace']],
+    [() => [new Engine('a'), new Box('b1')], () => [new Box('b2')], ['a', 'b1', 'b2', 'workspace']],
+    [
+      () => [new Engine('a')],
+      () => [new Engine('b'), new Box('b1')],
+      ['b1', 'a', 'workspace', 'b'],
+    ],
+    [() => [new Gate(), new Engine('a')], () => [new Box('b1')], ['gate', 'b1', 'a', 'workspace']],
+    [() => [new Gate()], () => [new Box('b1')], ['gate', 'workspace', 'b1']],
+  ] as [() => Runtime[], () => Runtime[], string[]][])(
+    'places an added sandbox after the last sandbox or before the languages (%#)',
+    async (listed, added, order) => {
+      const ws = workspace(...listed())
+      try {
+        for (const entry of added()) ws.addRuntime(entry)
+        expect(ws.runtimes().map((r) => r.name)).toEqual(order)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it('runs a python3 captured on an added sandbox there', async () => {
+    const ws = workspace(new Engine('monty'))
+    try {
+      ws.addRuntime(new Box('box', 'python3'))
+      expect(await python3(ws)).toEqual([0, 'box\n', ''])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('shadowed captures', () => {
+  it('logs a capture that never wins', async () => {
+    const said: string[] = []
+    logger.warn = (message) => said.push(message)
+    const ws = workspace(new Engine('a'), new Engine('b'))
+    try {
+      ws.addRuntime(new Box('box', 'python3'))
+      expect(said).toEqual([
+        "runtime 'b' never runs 'python3': 'a', listed before it, takes it",
+        "runtime 'b' never runs 'python': 'a', listed before it, takes it",
+        "runtime 'a' never runs 'python3': 'box', listed before it, takes it",
+        "runtime 'b' never runs 'python3': 'box', listed before it, takes it",
+        "runtime 'b' never runs 'python': 'a', listed before it, takes it",
+      ])
+    } finally {
+      delete logger.warn
+      await ws.close()
+    }
   })
 })

@@ -15,6 +15,7 @@
 import base64
 import json
 import stat
+import threading
 import time
 
 import httpx
@@ -23,13 +24,21 @@ import pytest
 from mirage.cli import credentials
 from mirage.cli.credentials import (
     LOGIN_MAX_AGE_SECONDS,
+    Context,
+    ContextError,
     Login,
     LoginError,
+    check_name,
+    context_names,
+    current_name,
     fresh_token,
+    read_context,
     read_login,
     remove_login,
     renew_by,
     token_claims,
+    write_context,
+    write_current,
     write_login,
 )
 
@@ -94,7 +103,10 @@ def test_a_login_ends_30_days_after_sign_in_however_often_refreshed(
 
 def test_an_ended_token_with_nothing_to_refresh_asks_to_log_in(tmp_path):
     pasted = _login(refresh_token=None, expires_at=time.time() - 1)
-    with pytest.raises(LoginError, match="expired; run `mirage login`"):
+    with pytest.raises(
+        LoginError,
+        match="expired; run `mirage login https://mirage.example.com --name login`",
+    ):
         fresh_token(pasted, tmp_path / "login.json")
 
 
@@ -148,3 +160,54 @@ def test_a_pasted_token_renews_by_its_own_end():
     assert renew_by(_login(refresh_token=None, expires_at=ends)) == ends
     login = _login()
     assert renew_by(login) == login.logged_in_at + LOGIN_MAX_AGE_SECONDS
+
+
+def test_only_local_is_current_with_no_file(home):
+    assert context_names() == ["local"]
+    assert current_name() == "local"
+
+
+def test_env_context_wins_and_an_unknown_one_is_refused(home, monkeypatch):
+    write_context("dev", Context(url="https://dev.example"))
+    monkeypatch.setenv("MIRAGE_CONTEXT", "dev")
+    assert current_name() == "dev"
+    monkeypatch.setenv("MIRAGE_CONTEXT", "nope")
+    with pytest.raises(ContextError, match="no context 'nope'"):
+        current_name()
+
+
+def test_each_context_is_its_own_file_readable_by_its_owner(home):
+    write_context("dev", Context(url="https://dev.example"))
+    write_current("dev")
+    assert (home / "contexts" / "dev.json").stat().st_mode & 0o777 == 0o600
+    assert (home / "current_context").stat().st_mode & 0o777 == 0o600
+    assert read_context("dev") == Context(url="https://dev.example")
+
+
+@pytest.mark.parametrize(
+    "text", ['{"url": "", "extra": 1}', '["https://dev.example"]']
+)
+def test_a_context_file_with_an_unknown_shape_is_refused(home, text):
+    (home / "contexts").mkdir()
+    (home / "contexts" / "dev.json").write_text(text)
+    with pytest.raises(ContextError, match="malformed"):
+        read_context("dev")
+
+
+def test_a_name_must_be_safe_as_a_file_name(home):
+    assert check_name("dev.example-1") == "dev.example-1"
+    for bad in ("../up", "Dev"):
+        with pytest.raises(ContextError):
+            check_name(bad)
+
+
+def test_two_contexts_written_at_once_both_stay(home):
+    def add(name: str) -> None:
+        write_context(name, Context(url=f"https://{name}.example"))
+
+    threads = [threading.Thread(target=add, args=(n,)) for n in "ab"]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert context_names() == ["a", "b", "local"]

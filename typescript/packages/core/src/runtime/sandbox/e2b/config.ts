@@ -12,7 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BASE_CONFIG_KEYS, type SandboxConfig } from '../config.ts'
+import type { ConfigFields } from '../../config.ts'
+import { BASE_CONFIG_FIELDS, type SandboxConfig } from '../config.ts'
 
 /** How to reach the user's live E2B sandbox. */
 export interface E2BConfig extends SandboxConfig {
@@ -25,4 +26,8 @@ export interface E2BConfig extends SandboxConfig {
   apiKey?: string
 }
 
-export const E2B_CONFIG_KEYS: readonly string[] = [...BASE_CONFIG_KEYS, 'sandboxId', 'apiKey']
+export const E2B_CONFIG_FIELDS: ConfigFields = {
+  ...BASE_CONFIG_FIELDS,
+  sandboxId: { type: 'string', required: true },
+  apiKey: { type: 'string' },
+}

@@ -17,7 +17,7 @@ later.
 ## Usage
 
 `captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
-every program Mirage does not have itself. Name `python3` to run the host's
+every program Mirage does not have itself. Name `python3` and `python` to run the host's
 `python3` under Sandlock too.
 
 <Tabs>
@@ -27,7 +27,7 @@ every program Mirage does not have itself. Name `python3` to run the host's
     from mirage.runtime.sandbox.sandlock import SandlockRuntime
 
     runtime = SandlockRuntime(
-        captures=["python3", "@external"],
+        captures=["python3", "python", "@external"],
         config={"fs_readable": ["/opt/tools"], "fs_writable": ["/tmp/work"]},
     )
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
@@ -39,7 +39,7 @@ every program Mirage does not have itself. Name `python3` to run the host's
     import { MountMode, RAMVFS, SandlockRuntime, Workspace } from '@struktoai/mirage-node'
 
     const runtime = new SandlockRuntime({
-      captures: ['python3', '@external'],
+      captures: ['python3', 'python', '@external'],
       config: { fsReadable: ['/opt/tools'], fsWritable: ['/tmp/work'] },
     })
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
@@ -51,7 +51,7 @@ every program Mirage does not have itself. Name `python3` to run the host's
     mode: exec
     runtimes:
       - name: sandlock
-        captures: ["python3", "@external"]
+        captures: ["python3", "python", "@external"]
         config:
           fs_readable: [/opt/tools]
           fs_writable: [/tmp/work]
@@ -79,7 +79,7 @@ mounts:
     mountpoint: /data
 runtimes:
   - name: sandlock
-    captures: ["python3", "@external"]
+    captures: ["python3", "python", "@external"]
     config:
       fs_writable: [/data]
 ```

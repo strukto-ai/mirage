@@ -1534,6 +1534,10 @@ def seed_var(session: SessionState, name: str, value: ShellValue) -> None:
     whole statement; a readonly name is refused alone, as bash does,
     and the command runs without it.
 
+    Nor does it count against max_env: a caller that grows a value a
+    line chose, as that prefix assignment does, calls ``check_env``
+    first.
+
     Args:
         session (SessionState): the session being seeded.
         name (str): variable name.

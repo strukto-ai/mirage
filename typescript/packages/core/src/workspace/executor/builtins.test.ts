@@ -3065,6 +3065,52 @@ describe('handleTimeout', () => {
     }
   })
 
+  // A job's shell ignores INT, but what it forks right now takes it, so the
+  // job goes on past it with 130: a program, a subshell whole, and each stage
+  // of a pipeline still running, one that ended keeping its status. A
+  // function or a builtin the job's shell runs (`f &`) ends with it.
+  it('an INT ends the program a job runs and the job goes on', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const io = await ws.shell(
+        "timeout -s INT 0.1 sh -c '{ sleep 30; echo $? > /a; } & " +
+          '{ sleep 30 | cat; echo ${PIPESTATUS[@]} > /b; } & ' +
+          'sleep 30 && : || echo $? > /c & ' +
+          '{ true | sleep 30 | true; echo ${PIPESTATUS[@]} > /e; } & ' +
+          '{ (sleep 30; echo in > /f); echo $? > /g; } & ' +
+          "f() { sleep 30; echo > /d; }; f & sleep 30'; " +
+          'sleep 0.3; cat /a /b /c /e /g; test -e /d || test -e /f; echo $?',
+      )
+      expect(decode(io.stdout).split('\n')).toEqual([
+        '130',
+        '130 130',
+        '130',
+        '0 130 0',
+        '130',
+        '1',
+        '',
+      ])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  // Every bash shell ignores QUIT, a job's and a function job's alike, so
+  // timeout's QUIT ends only the program each job runs right now.
+  it('a QUIT ends the program a job runs and every job goes on', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const io = await ws.shell(
+        "timeout -s QUIT 0.1 sh -c '{ sleep 30; echo $? > /a; } & " +
+          "f() { sleep 30; echo $? > /d; }; f & sleep 30'; " +
+          'sleep 0.3; cat /a /d',
+      )
+      expect(decode(io.stdout).split('\n')).toEqual(['131', '131', ''])
+    } finally {
+      await ws.close()
+    }
+  })
+
   it('cannot start the command once its session holds processes.max', async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { processes: { max: 1 } })
     try {

@@ -34,7 +34,7 @@ in Mirage: `ffmpeg -i in.mp4 out.webm | wc -c` sends only `ffmpeg`.
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.EXEC,
-        runtimes=[LocalRuntime(captures=["python3", "@external"])],
+        runtimes=[LocalRuntime(captures=["python3", "python", "@external"])],
     )
     await ws.shell("python3 -c 'print(1 + 1)'; echo hi | cksum")
     ```
@@ -45,7 +45,7 @@ in Mirage: `ffmpeg -i in.mp4 out.webm | wc -c` sends only `ffmpeg`.
 
     const ws = new Workspace(
       { '/data': new RAMVFS() },
-      { mode: MountMode.EXEC, runtimes: [new LocalRuntime({ captures: ['python3', '@external'] })] },
+      { mode: MountMode.EXEC, runtimes: [new LocalRuntime({ captures: ['python3', 'python', '@external'] })] },
     )
     await ws.shell("python3 -c 'print(1 + 1)'; echo hi | cksum")
     ```
@@ -55,7 +55,7 @@ in Mirage: `ffmpeg -i in.mp4 out.webm | wc -c` sends only `ffmpeg`.
     mode: exec
     runtimes:
       - name: local
-        captures: ["python3", "@external"]
+        captures: ["python3", "python", "@external"]
         config:
           home: /path/to/venv/bin/python
     mounts:
@@ -80,7 +80,7 @@ mounts:
     mountpoint: /data
 runtimes:
   - name: local
-    captures: ["python3", "@external"]
+    captures: ["python3", "python", "@external"]
 ```
 
 After the folder is mounted, run the shared

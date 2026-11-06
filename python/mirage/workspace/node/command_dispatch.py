@@ -25,6 +25,7 @@ from functools import partial
 from itertools import accumulate
 from typing import Any, TypeVar
 
+from mirage.commands.builtin.general.interpreter import run_output
 from mirage.commands.builtin.utils.limit import (
     guard_io,
 )
@@ -37,11 +38,14 @@ from mirage.context import (
     redirect_paths_for,
     redirect_runner_for,
     reset_caller,
+    reset_program_invocation,
     reset_redirect_paths,
+    set_program_invocation,
     set_redirect_paths,
 )
 from mirage.context.session_context import RedirectResult, redirect_syntax_for
 from mirage.io import IOResult
+from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, OutputState, materialize
 from mirage.observe.context import command_records
 from mirage.policy import (
@@ -53,11 +57,12 @@ from mirage.policy import (
     resolve_producer,
 )
 from mirage.policy.types import Claimant, HandOff, SessionContext
-from mirage.runtime.types import DispatchFn
+from mirage.runtime.types import DispatchFn, OutputFn, RunResult
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
+from mirage.shell.descriptors import Recorder
 from mirage.shell.errors import (
     ArithError,
     DiscardSignal,
@@ -73,6 +78,7 @@ from mirage.shell.helpers import (
     split_env_prefix,
 )
 from mirage.shell.job_table import JobTable
+from mirage.shell.join import shell_join
 from mirage.shell.parse.constants import WORD_BREAKS
 from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope
@@ -123,8 +129,12 @@ from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.lookup import (
     UNSUPPORTED_BUILTINS,
     Consumer,
-    lookup,
     runtime_refused,
+)
+from mirage.workspace.lookup.lookup import (
+    mirage_program_at,
+    routed_consumer,
+    wrapper_refusal,
 )
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -137,6 +147,7 @@ from mirage.workspace.node.admission import (
 from mirage.workspace.node.occurrence import claimant_for, evaluated_from
 from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session import SessionState
+from mirage.workspace.session.budget import check_env, entry_bytes
 from mirage.workspace.session.state import (
     ensure_var_visible,
     gate_rendering,
@@ -420,6 +431,8 @@ async def execute_command(
                 session.vars.pop(k, None)
             else:
                 session.vars[k] = prev
+        saves = session._prefix_saves
+        saves[:] = [s for s in saves if s is not saved]
 
     if prefix_assignments and not name:
         olds = {k: session.vars.get(k) for k, _ in prefix_assignments}
@@ -461,7 +474,15 @@ async def execute_command(
         # expands them with the values from before the assignment:
         # `x=new echo $x` prints the old x and `IFS=, cmd $v` splits on
         # the old IFS.
+        session._prefix_saves.append(saved_env_overrides)
         for k, v in prefix_assignments:
+            # A first write's old record stays held; a repeat drops the earlier value.
+            old = session.vars.get(k) if k in saved_env_overrides else None
+            check_env(
+                session,
+                0 if old is None else entry_bytes(k, old.value),
+                entry_bytes(k, v),
+            )
             saved_env_overrides.setdefault(k, session.vars.get(k))
             # Exported for the duration, which is the whole point of the
             # form: `TOKEN=x printenv TOKEN` prints `x` because bash puts
@@ -876,6 +897,11 @@ async def _run_argv(
                 command=argv.name,
                 invocation=admitted.ctx if admitted is not None else None,
                 declared=None,
+                output_file=(
+                    output.output_target
+                    if isinstance(output, Recorder)
+                    else None
+                ),
             )
         )
         try:
@@ -1011,6 +1037,68 @@ def unsaid(lines: list[str], said: bytes) -> list[str]:
     return [line for line in lines if line.strip() not in spoken]
 
 
+class _Relay(JobConsole):
+    """A console that hands each chunk a line writes on as it comes.
+
+    Args:
+        output (OutputFn): takes stdout.
+        errors (OutputFn): takes stderr.
+    """
+
+    def __init__(self, output: OutputFn, errors: OutputFn) -> None:
+        super().__init__()
+        self._output = output
+        self._errors = errors
+
+    async def emit(self, channel: Channel, data: bytes) -> None:
+        await (self._output if channel == Channel.STDOUT else self._errors)(
+            data
+        )
+
+
+def _run_program(
+    execute_fn: ExecuteFn,
+    name: str,
+    line: str,
+    session: SessionState,
+    stdin: ByteSource | None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Run a wrapper's program in Mirage, its output handed over as it
+    runs.
+
+    Args:
+        execute_fn (ExecuteFn): runs a line in the session.
+        name (str): the wrapper, which the node records.
+        line (str): the program's words, quoted.
+        session (SessionState): the session it runs in.
+        stdin (ByteSource | None): its input.
+    """
+    node = ExecutionNode(command=name)
+
+    async def run(output: OutputFn, errors: OutputFn) -> RunResult:
+        token = set_program_invocation(session)
+        try:
+            ran = await execute_fn(
+                line,
+                session_id=session.session_id,
+                stdin=stdin,
+                sink=_Relay(output, errors),
+            )
+            if ran.stdout is not None:
+                async for chunk in ensure_stream(ran.stdout):
+                    await output(chunk)
+            said = await ran.materialize_stderr()
+        finally:
+            reset_program_invocation(token)
+        node.exit_code = ran.exit_code
+        return RunResult(
+            stdout=b"", stderr=said or None, exit_code=ran.exit_code
+        )
+
+    stdout, io = run_output(run)
+    return stdout, io, node
+
+
 async def _route_argv(
     recurse: Callable[..., Awaitable[RedirectResult]],
     dispatch: DispatchFn,
@@ -1068,8 +1156,26 @@ async def _route_argv(
             ExecutionNode(command=name, exit_code=2, stderr=err),
         )
 
-    routing = context.frame.routing
-    consumer = lookup(name, session, registry, routing)
+    at = mirage_program_at(
+        name, argv.args, session, registry, context.frame.routing
+    )
+    if at is not None:
+        refused = wrapper_refusal(name, argv.args, session, registry)
+        if refused is not None:
+            code, said = refused
+            err = encode_text(said)
+            return (
+                None,
+                IOResult(exit_code=code, stderr=err),
+                ExecutionNode(command=name, exit_code=code, stderr=err),
+            )
+        return _run_program(
+            execute_fn, name, shell_join(argv.args[at:]), session, stdin
+        )
+
+    consumer, routing = routed_consumer(
+        name, argv.args, session, registry, context.frame.routing
+    )
     if consumer is Consumer.EXTERNAL:
         assert routing is not None
         return await run_external(

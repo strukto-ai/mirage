@@ -758,7 +758,7 @@ export class Workspace {
     return Promise.resolve(false)
   }
 
-  /** Append a runtime entry to the workspace's ordered world (last, first capturer still wins). */
+  /** Add a runtime entry to the workspace's ordered set; `Runtimes.add` places it. */
   addRuntime(runtime: RuntimeEntry): Runtime {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     return this.runtimeWorld.add(runtime)
@@ -1379,7 +1379,8 @@ export class Workspace {
       if (holds(verdicts.map((one) => one.judgment))) {
         // The run leaves a held line on its static bindings for the gate to
         // answer (`Router.decide`), whole when they take it whole.
-        const wholeLine = wholeLineRuntime(this.registry.runtimeBindings) !== null
+        const whole = wholeLineRuntime(this.registry.runtimeBindings)
+        const wholeLine = whole !== null
         const judged = await explainLine(
           root,
           session,
@@ -1392,7 +1393,7 @@ export class Workspace {
           line,
           judged,
           wholeLine ? judged : verdicts,
-          () => '',
+          () => whole?.name ?? '',
           reparse,
           wholeLine,
         )
@@ -1435,7 +1436,7 @@ export class Workspace {
         line,
         judged,
         wholeLine ? judged : verdicts,
-        (command) => this.router.runtimeFor(command, placed),
+        (one) => this.router.runtimeFor(one, placed),
         reparse,
         wholeLine,
       )

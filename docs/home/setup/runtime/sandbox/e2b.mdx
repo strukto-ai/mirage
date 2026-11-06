@@ -32,8 +32,8 @@ or `E2B_API_KEY`.
 ## Usage
 
 `captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
-every program Mirage does not have itself. Name `python3` to run it in the
-sandbox too.
+every program Mirage does not have itself. Name `python3` and `python` to run
+them in the sandbox too.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -42,7 +42,7 @@ sandbox too.
     from mirage.runtime.sandbox.e2b import E2BRuntime
 
     runtime = E2BRuntime(
-        captures=["python3", "@external"],
+        captures=["python3", "python", "@external"],
         config={"sandbox_id": "sandbox-id", "mount_type": "ssh"},
     )
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
@@ -54,7 +54,7 @@ sandbox too.
     import { E2BRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const runtime = new E2BRuntime({
-      captures: ['python3', '@external'],
+      captures: ['python3', 'python', '@external'],
       config: { sandboxId: 'sandbox-id', mountType: 'ssh' },
     })
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
@@ -71,7 +71,7 @@ sandbox too.
     mode: exec
     runtimes:
       - name: e2b
-        captures: ["python3", "@external"]
+        captures: ["python3", "python", "@external"]
         config:
           sandbox_id: ${E2B_SANDBOX_ID}
           mount_type: ssh
@@ -96,8 +96,8 @@ Mirage, so the sandbox must see the mounts there. `mount_type` picks how:
 
 ### ssh
 
-- The template needs only `sshfs`. No Mirage, keys or open port in the
-  sandbox.
+- The template needs only `sshfs` ([below](#a-template-for-ssh)). No
+  Mirage, keys or open port in the sandbox.
 - `ssh` and `both` do not work in browsers.
 - Each file call is a round trip to the workspace, about 150 ms for a small
   file from a laptop; with `both`, keep bulk data on the sandbox's own
@@ -110,6 +110,35 @@ Mirage, so the sandbox must see the mounts there. `mount_type` picks how:
 - If the sandbox restarts, Mirage mounts the paths again. A line caught
   mid-restart exits 126 without running.
 - The root mount and `/dev` are not served.
+
+#### A template for ssh
+
+Build a template with `sshfs` and pass its sandbox ID as `sandbox_id`:
+
+<Tabs>
+  <Tab title="Python" icon="/images/python-logo.svg">
+    ```python
+    from e2b import AsyncSandbox, Template
+
+    Template.build(Template().from_base_image().apt_install("sshfs"), "mirage-sshfs")
+    sandbox = await AsyncSandbox.create("mirage-sshfs")
+    print(sandbox.sandbox_id)
+    ```
+  </Tab>
+  <Tab title="TypeScript" icon="/images/typescript-logo.svg">
+    ```typescript
+    import { Sandbox, Template } from 'e2b'
+
+    await Template.build(Template().fromBaseImage().aptInstall('sshfs'), 'mirage-sshfs')
+    const sandbox = await Sandbox.create('mirage-sshfs')
+    console.log(sandbox.sandboxId)
+    ```
+  </Tab>
+</Tabs>
+
+Keep the base image's user, which has `sudo` for mountpoints such as
+`/data`. On the default template, run `sudo apt-get install -y sshfs`
+instead.
 
 ### fuse
 
@@ -155,9 +184,6 @@ mirage workspace create /tmp/sandbox.yaml
 - Closing the workspace leaves the sandbox running.
 - Commands run concurrently, each with its own input and output. Without
   piped input, stdin starts closed.
-- On the default template, install `sshfs` with
-  `sudo apt-get install -y sshfs`.
-- Templates, sizing, networking and lifecycle stay E2B settings. E2B applies
-  its own command timeout, 60 seconds by default, to every command.
+- Templates, sizing, networking and lifecycle stay E2B settings.
 - A Mirage [timeout](/home/setup/runtime/sandbox#timeouts) tries to kill the command; its child
   processes may survive.

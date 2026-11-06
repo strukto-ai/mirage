@@ -14,9 +14,19 @@
 
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import type { WorkspaceBinding } from '../../runtime/binding.ts'
-import { bindCommands, buildRuntime, DEFAULT_ENTRIES } from '../../runtime/table.ts'
+import { LanguageRuntime } from '../../runtime/language.ts'
+import {
+  bindCommands,
+  buildRuntime,
+  DEFAULT_ENTRIES,
+  isSandbox,
+  shadowedCaptures,
+} from '../../runtime/table.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
+
+/** Set `warn` to receive the captures another runtime shadows. */
+export const logger: { warn?: (message: string) => void } = {}
 
 /**
  * The workspace's ordered runtime world; the first capturer binds each
@@ -57,16 +67,23 @@ export class Runtimes {
   }
 
   /**
-   * Append a runtime entry to the ordered world.
+   * Add a runtime entry to the ordered world.
    *
-   * The entry lands last, so it never steals a command an earlier entry
-   * already captures (first capturer still wins). A name builds like a
-   * config entry and fails loud; a duplicate name is rejected before
-   * any state changes.
+   * A sandbox (`isSandbox`) lands after the last sandbox listed, else before
+   * the first language runtime, else last; any other entry lands last. A
+   * name builds like a config entry and fails loud; a duplicate name is
+   * rejected before any state changes.
    */
   add(runtime: RuntimeEntry): Runtime {
     const entry: Runtime = typeof runtime === 'string' ? buildRuntime(runtime) : runtime
-    const candidate = [...this.entries, entry]
+    let at = this.entries.length
+    if (isSandbox(entry)) {
+      const lastSandbox = this.entries.reduce((last, e, i) => (isSandbox(e) ? i : last), -1)
+      const firstLanguage = this.entries.findIndex((e) => e instanceof LanguageRuntime)
+      if (lastSandbox >= 0) at = lastSandbox + 1
+      else if (firstLanguage >= 0) at = firstLanguage
+    }
+    const candidate = [...this.entries.slice(0, at), entry, ...this.entries.slice(at)]
     const bindings = bindCommands(candidate)
     entry.bind(this.binding)
     this.install(candidate, bindings)
@@ -105,6 +122,11 @@ export class Runtimes {
   }
 
   private install(entries: readonly Runtime[], bindings: Record<string, Runtime>): void {
+    for (const [capture, winner, shadowed] of shadowedCaptures(entries)) {
+      logger.warn?.(
+        `runtime '${shadowed}' never runs '${capture}': '${winner}', listed before it, takes it`,
+      )
+    }
     this.entries = entries
     this.registry.runtimeEntries = entries
     this.registry.runtimeBindings = bindings

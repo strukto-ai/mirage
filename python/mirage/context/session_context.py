@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     )
     from mirage.process.handle import ProcessHandle
     from mirage.shell.console import JobConsole
+    from mirage.shell.descriptors import FileDescription
     from mirage.shell.types import Redirect
     from mirage.workspace.evaluation import EvaluationContext
     from mirage.workspace.history.line import LineHistory
@@ -174,6 +175,14 @@ class Caller:
             the running command on, which a connection it opens reports.
         vfs_mount (str | None): the prefix of the mount whose VFS serves
             the call, None outside one.
+        streamed (tuple[tuple[FileDescription,
+            Callable[[], Awaitable[None]]], ...]): the descriptions the
+            redirects around the call write as their commands write,
+            each with what an op that reaches its file runs first: it
+            commits what went in and keeps the rest for the command's
+            end.
+        output_file (str | None): the regular file the running command's
+            stdout writes, None when it writes anywhere else.
     """
 
     session: SessionState | None = None
@@ -216,6 +225,10 @@ class Caller:
     process: ProcessHandle | None = None
     invocation: CommandContext | None = None
     vfs_mount: str | None = None
+    streamed: tuple[
+        tuple[FileDescription, Callable[[], Awaitable[None]]], ...
+    ] = ()
+    output_file: str | None = None
 
     @property
     def visibility(self) -> Visibility | None:

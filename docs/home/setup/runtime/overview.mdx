@@ -65,6 +65,10 @@ To choose a runtime for each command line, see [Route Runtime](/home/policy/rout
 - `@external` does not take `python`, `python3`, `node` or `js`: Mirage has
   those itself and gives them to the Python or JavaScript runtime in the list.
   Name them to send them somewhere else.
+- `nice`, `nohup`, `stdbuf`, `ionice` and `setsid` run their program where
+  it runs alone: `nice gcc x.c` where `gcc` is taken, `nice grep` in Mirage.
+- If two runtimes take the same name or group, the first wins and Mirage
+  logs a warning.
 - A program no runtime takes exits 127, `command not found`.
 - A name only `@external` takes has no file, so `which`, `command -v` and
   `type` report it missing; running it still works.

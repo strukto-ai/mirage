@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import logging
 
 import pytest
 
@@ -166,4 +167,86 @@ async def test_a_cancelled_removal_still_reports_its_close_failure():
     alpha.release.set()
     await line
     with pytest.raises(RuntimeError, match="close failed"):
+        await ws.close()
+
+
+class Box(Runtime, LineExecutorMixin):
+    """A line executor on another machine, as a sandbox is."""
+
+    reach = "remote"
+
+    def __init__(self, name: str, *captures: str) -> None:
+        super().__init__(captures=captures or ("@external",))
+        self.name = name
+
+    async def run_line(self, engine, paths, texts, ctx):
+        return RunResult(
+            stdout=f"{self.name}\n".encode(), stderr=None, exit_code=0
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "listed, added, order",
+    [
+        (
+            [Engine("a")],
+            [Box("b1"), Box("b2")],
+            ["b1", "b2", "a", "workspace"],
+        ),
+        (
+            [Engine("a"), Box("b1")],
+            [Box("b2")],
+            ["a", "b1", "b2", "workspace"],
+        ),
+        (
+            [Engine("a")],
+            [Engine("b"), Box("b1")],
+            ["b1", "a", "workspace", "b"],
+        ),
+        (
+            [Gate(), Engine("a")],
+            [Box("b1")],
+            ["gate", "b1", "a", "workspace"],
+        ),
+        ([Gate()], [Box("b1")], ["gate", "workspace", "b1"]),
+    ],
+)
+async def test_an_added_sandbox_goes_after_the_last_sandbox_or_the_languages(
+    listed, added, order
+):
+    ws = workspace(*listed)
+    try:
+        for entry in added:
+            ws.add_runtime(entry)
+        assert [r.name for r in ws.runtimes()] == order
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_python3_captured_on_an_added_sandbox_wins():
+    ws = workspace(Engine("monty"))
+    try:
+        ws.add_runtime(Box("box", "python3"))
+        assert await python3(ws) == (0, b"box\n", b"")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_capture_that_never_wins_is_logged(caplog):
+    caplog.set_level(logging.WARNING, logger="mirage.workspace.workspace")
+    ws = workspace(Engine("a"), Engine("b"))
+    try:
+        ws.add_runtime(Box("box", "python3"))
+        said = [r.getMessage() for r in caplog.records]
+        assert said == [
+            "runtime 'b' never runs 'python3': 'a', listed before it, takes it",
+            "runtime 'b' never runs 'python': 'a', listed before it, takes it",
+            "runtime 'a' never runs 'python3': 'box', listed before it, takes it",
+            "runtime 'b' never runs 'python3': 'box', listed before it, takes it",
+            "runtime 'b' never runs 'python': 'a', listed before it, takes it",
+        ]
+    finally:
         await ws.close()

@@ -13,6 +13,11 @@
     "dark": "/logo/dark.svg"
   },
   "favicon": "/favicon.svg",
+  "api": {
+    "playground": {
+      "display": "none"
+    }
+  },
   "contextual": {
     "options": [
       "copy",
@@ -708,6 +713,28 @@
             "pages": [
               "typescript/runtime/python"
             ]
+          }
+        ]
+      },
+      {
+        "tab": "API",
+        "icon": "code",
+        "groups": [
+          {
+            "group": "HTTP API",
+            "pages": [
+              "api/overview",
+              "api/reference"
+            ]
+          },
+          {
+            "group": "Operations",
+            "hidden": true,
+            "searchable": true,
+            "openapi": {
+              "source": "openapi.yaml",
+              "directory": "api/operations"
+            }
           }
         ]
       }

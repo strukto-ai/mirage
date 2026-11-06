@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from dataclasses import dataclass
 from enum import Enum, auto
 
 
@@ -75,3 +76,23 @@ def word_policy(consumer: Consumer) -> WordPolicy:
     if consumer in SHELL_CONSUMERS:
         return WordPolicy.SHELL
     return WordPolicy.MOUNT
+
+
+@dataclass(frozen=True)
+class WrapperOptions:
+    """A program-running wrapper's option grammar and its answers.
+
+    Args:
+        values (tuple[str, ...]): options that take a value.
+        flags (tuple[str, ...]): options that take none.
+        stops (tuple[str, ...]): options after which it runs no program.
+        status (int): its exit status for a bad option.
+        missing (str): its stderr for a program it cannot run, ``{}``
+            the program's name.
+    """
+
+    values: tuple[str, ...]
+    flags: tuple[str, ...]
+    stops: tuple[str, ...]
+    status: int
+    missing: str

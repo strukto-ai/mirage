@@ -1301,6 +1301,33 @@ async def test_explain_reads_a_line_as_the_runtime_it_is_placed_on():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, outcome, count",
+    [
+        ("cd /data && echo hi | cat", Outcome.ALLOW, 3),
+        ("cd /data && git push origin main", Outcome.ASK, 2),
+    ],
+)
+async def test_explain_names_the_line_runtime_for_every_command_it_takes(
+    line, outcome, count
+):
+    ws = Workspace(
+        {"/data/": RAMVFS()},
+        mode=MountMode.EXEC,
+        profiles={"r": PROFILE},
+        runtimes=[_LineBox(), "workspace"],
+    )
+    try:
+        ws.create_session("s", profile="r")
+        said = await ws.explain(line, "s")
+        runtimes = [c.runtime for c in _commands(said.node)]
+        assert said.outcome == outcome
+        assert runtimes == ["sandbox"] * count
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
 async def test_a_path_the_pass_cannot_read_is_left_to_the_gate():
     # Read as typed in the cwd the pass last knew, `$F` and a relative
     # word after `cd "$d"` matched the rule's glob, refusing whole lines

@@ -823,10 +823,20 @@ async function restoreSessions(
     session.vars = fields.vars
     session.functions = fields.functions
     // A restored function runs as a parse of its own, as one loaded from
-    // storage does: the sites of what it replaced are gone.
-    session.functionSites.clear()
+    // storage does: the sites of what it replaced are gone, but for the
+    // alias view each one's definition saw.
+    session.functionSites = new Map(fields.functionSites)
     session.readonlyFunctions = fields.readonlyFunctions
     session.exportedFunctions = fields.exportedFunctions
+    // The rest of the shell as the snapshot left it.
+    session.aliases = fields.aliases
+    session.shellOptions = fields.shellOptions
+    session.shopts = fields.shopts
+    session.umask = fields.umask
+    session.logicalCwd = fields.logicalCwd
+    session.exitTrap = fields.exitTrap
+    session.errTrap = fields.errTrap
+    session.returnTrap = fields.returnTrap
     // The caps are narrowing, which a checkout keeps: the table's narrow
     // the session's further and never lift one it holds.
     session.mountModes = stricterModes(session.mountModes, fields.mountModes)

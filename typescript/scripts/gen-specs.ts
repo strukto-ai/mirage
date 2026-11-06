@@ -33,6 +33,8 @@ import { declaredFacts } from '@struktoai/mirage-core/commands/builtin/generic_b
 import { MCPAuth, MCPConfig } from '@struktoai/mirage-core/core/mcp/config'
 import { LineFacts } from '@struktoai/mirage-core/types'
 import { lineFacts } from '@struktoai/mirage-core/workspace/lookup/constants'
+import { type ApiDeps, registerApi } from '@struktoai/mirage-server/api'
+import type { RouteApp } from '@struktoai/mirage-server/routes'
 
 import {
   type Capabilities,
@@ -489,7 +491,48 @@ function emitVariant(
   )
 }
 
+/**
+ * The `METHOD /path` of every route the server API registers, written to
+ * `node/http_routes.json`. `registerApi` runs against a recorder instead of
+ * a server, so nothing listens and no dependency is called.
+ */
+function emitHttpRoutes(): void {
+  const routes: string[] = []
+  const record =
+    (method: string) =>
+    (path: string): void => {
+      routes.push(`${method} ${path}`)
+    }
+  const recorder = {
+    get: record('GET'),
+    post: record('POST'),
+    put: record('PUT'),
+    patch: record('PATCH'),
+    delete: record('DELETE'),
+    route: (options: { method: string | string[]; url: string }): void => {
+      for (const method of ([] as string[]).concat(options.method)) record(method)(options.url)
+    },
+  }
+  const deps = {
+    registry: { jobs: {} },
+    host: {},
+    auth: { mode: 'local' },
+    startedAt: 0,
+    exit: () => undefined,
+    snapshotStore: undefined,
+    resources: {},
+  }
+  registerApi(recorder as unknown as RouteApp, deps as unknown as ApiDeps)
+  const out = resolve(SPEC_ROOT, 'node')
+  mkdirSync(out, { recursive: true })
+  writeFileSync(
+    resolve(out, 'http_routes.json'),
+    JSON.stringify(routes.sort(compareCodePoints), null, 2) + '\n',
+  )
+}
+
 async function main(): Promise<void> {
+  emitHttpRoutes()
   const core = await coreCommandGroups()
   emitVariant('node', ['core', 'node'], [core, Node as unknown as ModuleBag], Node.knownVfsNames())
   emitVariant(

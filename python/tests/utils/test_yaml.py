@@ -1,7 +1,7 @@
 import pytest
 import yaml
 
-from mirage.utils.yaml import parse_yaml
+from mirage.utils.yaml import dump_yaml, parse_yaml
 
 
 @pytest.mark.parametrize(
@@ -43,3 +43,11 @@ def test_exponent_resolver_does_not_change_pyyaml_safe_load():
 def test_python_object_tags_are_rejected():
     with pytest.raises(yaml.constructor.ConstructorError):
         parse_yaml("!!python/tuple [1, 2]")
+
+
+@pytest.mark.parametrize(
+    "text", ["1e3", "off", "yes", "1_000", "0o17", "2026-01-02", "~", "null"]
+)
+def test_dumped_strings_read_back_as_strings(text: str):
+    doc = {"env": {"VALUE": text}, text: "key"}
+    assert parse_yaml(dump_yaml(doc)) == doc

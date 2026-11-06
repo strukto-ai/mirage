@@ -58,7 +58,8 @@ export class ProcessTable {
    * nothing left to do first, so the runner then starts at once, unless a
    * runner started before it has yet to begin: runners begin in the order
    * they were started, so a job's redirect lands before the line that
-   * started it reads the file.
+   * started it reads the file. `ignores` are the signals the runner ignores,
+   * which stop neither it nor what it started.
    */
   start(init: {
     sessionId: string
@@ -70,6 +71,7 @@ export class ProcessTable {
     limit?: number | null
     executionId?: string
     started?: (info: ProcessInfo) => void
+    ignores?: ReadonlySet<number>
   }): ProcessHandle {
     if (this.stopped) throw new Error('process table is stopped')
     const limit = underCeiling(init.limit ?? null, this.ceiling)
@@ -116,6 +118,10 @@ export class ProcessTable {
         this.terminateChildren(pid, signal)
       },
       this.bind,
+      (signal) => {
+        this.signalChildren(pid, signal)
+      },
+      init.ignores,
     )
     const eager = init.started !== undefined && !this.queued()
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
@@ -137,8 +143,35 @@ export class ProcessTable {
    * @param signal what the stop stands for, as the parent's.
    */
   terminateChildren(pid: number, signal = 9): void {
-    for (const child of this.live())
-      if (this.ancestors.get(child.info.pid)?.includes(pid) === true) child.terminate(signal)
+    for (const child of this.under(pid)) child.terminate(signal)
+  }
+
+  /**
+   * Deliver a signal to every live runner under `pid`, as a process group
+   * gets it: a runner that ignores it (a job's shell) hands it to the program
+   * it runs right now (`ProcessHandle.interrupt`), and any other stops with
+   * it, so a native program it started receives that signal. A runner such a
+   * shell started is one of its programs, which the shell sees end and goes
+   * on past, so the signal reaches it through that shell. Mirrors Python's
+   * signal_children.
+   */
+  signalChildren(pid: number, signal: number): void {
+    for (const child of this.under(pid)) {
+      if (child.ignores.has(signal)) child.interrupt(signal)
+      else if (!this.ignoredAbove(child.info.pid, pid, signal)) child.terminate(signal, false)
+    }
+  }
+
+  private ignoredAbove(pid: number, top: number, signal: number): boolean {
+    const chain = this.ancestors.get(pid) ?? []
+    const at = chain.indexOf(top)
+    return chain
+      .slice(at < 0 ? chain.length : at + 1)
+      .some((ancestor) => this.runners.get(ancestor)?.handle.ignores.has(signal) === true)
+  }
+
+  private under(pid: number): ProcessHandle[] {
+    return this.live().filter((child) => this.ancestors.get(child.info.pid)?.includes(pid) === true)
   }
 
   view(
@@ -180,7 +213,10 @@ export class ProcessTable {
           throw Object.assign(new Error('process spawn is not permitted'), { code: 'EACCES' })
       },
       probe: (pid: number) => signalTarget(pid) !== null,
-      terminate: (pid: number, signal: number) => signalTarget(pid)?.terminate(signal) ?? false,
+      terminate: (pid: number, signal: number) => {
+        const handle = signalTarget(pid)
+        return handle !== null && (handle.ignores.has(signal) || handle.terminate(signal))
+      },
       permissions: () => (valid() ? permissions() : null),
     })
   }

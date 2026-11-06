@@ -13,13 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import logging
 from collections.abc import AsyncIterator
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 
 from mirage.context import DEFAULT_UMASK
 from mirage.errors.constants import FS_ERRORS
 from mirage.io.cooperative import chunks
 from mirage.io.spool import MEMORY_LIMIT
-from mirage.io.stream import rechunk, slice_stream
+from mirage.io.stream import drain, rechunk, slice_stream
 from mirage.io.types import ByteSource, OpReport
 from mirage.runtime.types import DispatchFn
 from mirage.shell.descriptors import FileDescription
@@ -149,6 +149,9 @@ async def write_description(
         replace (bool): the write is the file's whole content from its
             start, so it lands as one replacement.
     """
+    if file.lost:
+        await drain(data)
+        return
     if file.emit is not None:
         async with aclosing(chunks(data)) as source:
             async for part in source:
@@ -159,7 +162,7 @@ async def write_description(
             not file.opened or file.append or (replace and not file.offset)
         ):
             file.offset += await create_counted(
-                dispatch, session, file.scope, data, append=file.append
+                dispatch, session, file.where, data, append=file.append
             )
             file.opened = True
             return
@@ -171,7 +174,7 @@ async def write_description(
             return
         if not file.opened:
             await create_file(
-                dispatch, session, file.scope, b"", append=file.append
+                dispatch, session, file.where, b"", append=file.append
             )
             file.opened = True
         start = offset = file.offset + (
@@ -181,7 +184,7 @@ async def write_description(
             async with aclosing(rechunk(data, MEMORY_LIMIT)) as source:
                 async for part in source:
                     await dispatch(
-                        "pwrite", file.scope, data=part, offset=offset
+                        "pwrite", file.where, data=part, offset=offset
                     )
                     offset += len(part)
         finally:
@@ -189,7 +192,7 @@ async def write_description(
                 file.offset = offset
                 if file.source is not None:
                     content, _ = await dispatch(
-                        "read", file.scope, stream=True
+                        "read", file.where, stream=True
                     )
                     file.source.lines = await file.source.lines.reopen(
                         slice_stream(content, offset)
@@ -203,17 +206,8 @@ async def _first_write(
     data: ByteSource,
 ) -> bool:
     """Land an opened description's first write into a file still empty
-    as one stream, and answer whether it did.
-
-    The same bytes from offset 0 in ``pwrite`` windows cost a copy of the
-    file each on a store whose ``pwrite`` rewrites it, so ``cmd > f``
-    would move the file's size squared. The backing file (the store and
-    its key, alike for every workspace mounting that store) is claimed
-    before the size is read and kept until the stream ends, so another
-    description of it writing meanwhile takes the windows, which
-    interleave as two descriptors do, instead of replacing what this one
-    wrote; a file in another store never contends. A stream that fails
-    leaves the offset at what landed.
+    as one stream (``sole_stream``), and answer whether it did. A stream
+    that fails leaves the offset at what landed.
 
     Args:
         dispatch (DispatchFn): operation dispatcher.
@@ -222,28 +216,54 @@ async def _first_write(
         data (ByteSource): bytes emitted by the command, untouched when
             this answers False.
     """
+    async with sole_stream(dispatch, file) as sole:
+        if not sole:
+            return False
+        try:
+            file.offset = await create_counted(
+                dispatch, session, file.where, data
+            )
+        except BaseException:
+            file.offset = await _size_of(dispatch, file.where) or 0
+            raise
+        return True
+
+
+@asynccontextmanager
+async def sole_stream(
+    dispatch: DispatchFn, file: FileDescription
+) -> AsyncIterator[bool]:
+    """Claim a description's file for a write from offset 0 as one
+    stream, yielding whether the file is claimed and still empty.
+
+    The same bytes from offset 0 in ``pwrite`` windows cost a copy of the
+    file each on a store whose ``pwrite`` rewrites it, so ``cmd > f``
+    would move the file's size squared. The backing file (the store and
+    its key, alike for every workspace mounting that store) is claimed
+    before the size is read and kept until the stream ends, so another
+    description of it writing meanwhile takes the windows, which
+    interleave as two descriptors do, instead of replacing what this one
+    wrote; a file in another store never contends.
+
+    Args:
+        dispatch (DispatchFn): operation dispatcher.
+        file (FileDescription): the description, at offset 0.
+    """
     report = OpReport()
     try:
-        await dispatch("stat", file.scope, admit_only=True, report=report)
+        await dispatch("stat", file.where, admit_only=True, report=report)
     except FS_ERRORS as exc:
         logger.debug(
             "write target %s has no store: %s", file.scope.raw_path, exc
         )
-        return False
-    store = report.store or file.scope.virtual
+        yield False
+        return
+    store = report.store or file.where.virtual
     if _streaming.setdefault(store, id(file)) != id(file):
-        return False
+        yield False
+        return
     try:
-        if await _size_of(dispatch, file.scope) != 0:
-            return False
-        try:
-            file.offset = await create_counted(
-                dispatch, session, file.scope, data
-            )
-        except BaseException:
-            file.offset = await _size_of(dispatch, file.scope) or 0
-            raise
-        return True
+        yield await _size_of(dispatch, file.where) == 0
     finally:
         del _streaming[store]
 

@@ -14,6 +14,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { PathSpec } from '../types.ts'
+import { stopSignal } from '../utils/abort.ts'
 import { ProcessHandle } from './handle.ts'
 import type { ProcessInfo } from './types.ts'
 
@@ -63,6 +64,53 @@ describe('ProcessHandle', () => {
     handle.start()
     const done = await handle.join()
     expect([done.exitCode, done.failure]).toEqual([1, 'boom'])
+  })
+
+  // A program the runner runs where an interrupt reaches it hands back what
+  // it returned; a failure of its own is still its failure.
+  it('a program returns unless interrupted and its own failure passes', async () => {
+    const handle = new ProcessHandle(info(), () => Promise.resolve(0), ignore, ignore)
+    handle.interrupt(2)
+    expect(await handle.program(() => Promise.resolve(3))).toEqual([3, null])
+    await expect(handle.program(raises)).rejects.toThrow('boom')
+  })
+
+  // A native run reads the signal an interrupt stops its program with, from
+  // the runner or the program's abort, so it hands the program INT rather
+  // than killing it; once the program is gone, nothing is stopping.
+  it('names the signal an interrupt stops its program with', async () => {
+    const handle = new ProcessHandle(info(), () => Promise.resolve(0), ignore, ignore)
+    const seen: (number | null)[] = []
+    const ran = handle.program(
+      (stop) =>
+        new Promise<number>((_, reject) => {
+          stop.addEventListener('abort', () => {
+            seen.push(handle.interrupted, stopSignal(stop))
+            reject(stop.reason as Error)
+          })
+        }),
+    )
+    handle.interrupt(2)
+    expect(await ran).toEqual([null, 2])
+    expect([...seen, handle.interrupted]).toEqual([2, 2, null])
+  })
+
+  // A program that takes only some signals runs on through the others.
+  it('runs a program on through a signal it does not take', async () => {
+    const handle = new ProcessHandle(info(), () => Promise.resolve(0), ignore, ignore)
+    let finish = (): void => undefined
+    const ran = handle.program(
+      () =>
+        new Promise<number>((resolve) => {
+          finish = () => {
+            resolve(7)
+          }
+        }),
+      new Set([2]),
+    )
+    handle.interrupt(3)
+    finish()
+    expect(await ran).toEqual([7, null])
   })
 
   it('terminate asks once and the runner exits 137', async () => {

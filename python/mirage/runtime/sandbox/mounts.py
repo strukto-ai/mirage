@@ -263,6 +263,46 @@ class SandboxMounts:
         """SSH mode serves every workspace prefix through the host's gate."""
         return self._mount_type == "ssh"
 
+    def enter(
+        self, binding: WorkspaceBinding | None, cwd: str
+    ) -> RunResult | None:
+        """Record the line for ``sync``, then refuse a cwd other than
+        ``/`` that ssh serves no mount for (126), before connecting.
+
+        Args:
+            binding (WorkspaceBinding | None): the runtime's workspace.
+            cwd (str): the line's working directory.
+
+        Returns:
+            RunResult | None: the refused run, None when the line may go
+            on to ``admit``.
+        """
+        if binding is None or binding.mount_prefixes is None:
+            raise RuntimeError(
+                f"{self._runtime}: mount_type needs the runtime in a workspace"
+            )
+        line = current_caller()
+        held = Caller(stop=line.stop, write_held=line.write_held)
+        self._lines.append((held, set()))
+        seen = cwd.rstrip("/")
+        if (
+            self._mount_type == "ssh"
+            and seen
+            and not any(
+                seen == p or seen.startswith(p + "/")
+                for p in mount_paths(binding.mount_prefixes())
+            )
+        ):
+            return RunResult(
+                stdout=b"",
+                stderr=(
+                    f"{self._runtime}: the sandbox cannot see the working "
+                    f"directory {seen}; cd into a mount first\n"
+                ).encode(),
+                exit_code=CANNOT_EXECUTE_STATUS,
+            )
+        return None
+
     async def admit(
         self, binding: WorkspaceBinding | None
     ) -> RunResult | None:
@@ -294,9 +334,6 @@ class SandboxMounts:
                 f"{self._runtime}: mount_type serves a session's view, "
                 "and this line runs as none"
             )
-        line = current_caller()
-        held = Caller(stop=line.stop, write_held=line.write_held)
-        self._lines.append((held, set()))
         rules = current.commands
         if rules is not None and any(
             rule.commands and (rule.paths or rule.mount)

@@ -35,6 +35,8 @@ from mirage.server.registry import (
     resolve_graceful_timeout,
     resolve_max_workspaces,
 )
+from mirage.server.resources.config import resolve_resource_store
+from mirage.server.resources.types import ResourceStoreBackend
 from mirage.server.ssh.config import resolve_ssh_config
 from mirage.server.workers.config import resolve_worker_type, resolve_workers
 from mirage.server.workers.pool import WorkerPool
@@ -81,6 +83,11 @@ def _workers_proxy() -> Any:
     not taken with workers yet; each worker counts its own rate limits."""
     if resolve_ssh_config().port is not None:
         raise DaemonConfigError("ssh_port does not combine with workers yet")
+    if resolve_resource_store() == ResourceStoreBackend.MEMORY:
+        raise DaemonConfigError(
+            "resource_store memory does not combine with workers: "
+            "each worker would keep its own"
+        )
     allowed_hosts = resolve_allowed_hosts(None)
     host = next((h for h in allowed_hosts if "*" not in h), "localhost")
     pool = WorkerPool(

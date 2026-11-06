@@ -1148,6 +1148,9 @@ export function restoreLocals(session: SessionState, locals: Map<string, ShellVa
  * narrowing"). Anything reached from a command line goes through
  * `SessionView.set` instead, which is the whole point of the store being
  * read-only from outside.
+ *
+ * Nor does it count against max_env: a caller that grows a value a line
+ * chose, as a prefix assignment does, calls `checkEnv` first.
  */
 export function seedVar(session: SessionState, name: string, value: ShellValue): void {
   const existing = sessionEntry(session.vars, name)

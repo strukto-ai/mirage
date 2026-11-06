@@ -355,7 +355,7 @@ describe('conditional writes on an S3 mount', () => {
     [
       'redirect',
       ['echo a > /s3/new'],
-      '({ printf b; printf c; printf E >&2; printf d; printf e; } >/s3/new) 2>/ram/err',
+      '({ printf b; printf c; wc -c < /s3/new >&2; printf d; printf e; } >/s3/new) 2>/ram/err',
       'PutObject',
       [{ IfMatch: etag('a\n') }, EMPTY, { IfMatch: etag('bc') }],
     ],

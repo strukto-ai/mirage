@@ -194,6 +194,10 @@ class RemoteSandbox(
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
         """
+        if self._mounts is not None:
+            refusal = self._mounts.enter(self._binding, ctx.cwd.virtual)
+            if refusal is not None:
+                return refusal
         await self._ensure_connected()
         run = argv
         if self._mounts is not None:
@@ -224,7 +228,13 @@ class RemoteSandbox(
                 errors,
             )
         except asyncio.CancelledError:
-            signum = runner.signal if runner is not None else None
+            signum = None
+            if runner is not None:
+                signum = (
+                    runner.signal
+                    if runner.signal is not None
+                    else runner.interrupted
+                )
             await asyncio.shield(self._reap(exec_id, signum or 15))
             raise
         finally:

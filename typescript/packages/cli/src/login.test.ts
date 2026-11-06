@@ -13,7 +13,16 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { createHash } from 'node:crypto'
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -21,8 +30,24 @@ import { join } from 'node:path'
 import { Readable } from 'node:stream'
 import { Command } from 'commander'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { LoginError, readLogin, writeLogin } from './credentials.ts'
+import {
+  ContextError,
+  LoginError,
+  checkName,
+  contextNames,
+  currentName,
+  loginPath,
+  readContext,
+  readCurrent,
+  readLogin,
+  writeContext,
+  writeCurrent,
+  writeLogin,
+  type Login,
+} from './credentials.ts'
 import { browserLogin, metadataUrl, registerLoginCommands, tokenLogin } from './login.ts'
+import { buildProgram } from './main.ts'
+import { loadDaemonSettings, localUrl, resolveWorkspace } from './settings.ts'
 
 const CLIENT_ID = 'client_cli'
 
@@ -276,48 +301,245 @@ describe('mirage login', () => {
     vi.spyOn(process, 'stdin', 'get').mockReturnValue(
       Readable.from([Buffer.from('good\n')]) as unknown as typeof process.stdin,
     )
-    const done = await run(['login', '--token', '-'])
+    const done = await run(['login', clerk.url, '--token', '-'])
     expect(done.exitCode).toBe(0)
     expect(readLogin()?.access_token).toBe('good')
     vi.spyOn(process, 'stdin', 'get').mockReturnValue(
       Readable.from([]) as unknown as typeof process.stdin,
     )
-    const empty = await run(['login', '--token', '-'])
+    const empty = await run(['login', clerk.url, '--token', '-'])
     expect(empty.exitCode).toBe(1)
     expect(empty.stderr).toContain('no token on stdin')
   })
 
   it('logs in, says who, and logs out', async () => {
-    const done = await run(['login'])
+    const done = await run(['login', clerk.url])
     expect(done.exitCode).toBe(0)
     expect(done.stdout).toContain(`Logged in to ${clerk.url} as user_alice.`)
     expect(readLogin()?.refresh_token).toBe('r1')
     const who = await run(['whoami'])
     expect(who.exitCode).toBe(0)
-    expect((JSON.parse(who.stdout) as { account: string }).account).toBe('user_alice')
+    expect(JSON.parse(who.stdout)).toMatchObject({ context: 'local', user: 'user_alice' })
     const out = await run(['logout'])
     expect(out.stdout).toBe(`Logged out of ${clerk.url}.\n`)
     expect(readLogin()).toBeNull()
-    expect((await run(['whoami'])).exitCode).toBe(1)
+    const after = await run(['whoami'])
+    expect(after.exitCode).toBe(0)
+    expect((JSON.parse(after.stdout) as { user: string | null }).user).toBeNull()
   })
 
   it('whoami ignores a login for another server', async () => {
     writeLogin({ ...(await tokenLogin(clerk.url, 'good')), url: 'https://elsewhere.test' })
     const who = await run(['whoami'])
-    expect(who.exitCode).toBe(1)
-    expect(who.stderr).toContain(`not logged in to ${clerk.url}`)
+    expect(who.exitCode).toBe(0)
+    expect((JSON.parse(who.stdout) as { user: string | null }).user).toBeNull()
   })
 
   it('says so on a server without a login', async () => {
     const quiet = await new FakeClerk({ publishes: false }).start()
     vi.stubEnv('MIRAGE_DAEMON_URL', quiet.url)
+    writeLogin({ ...(await tokenLogin(clerk.url, 'good')), url: quiet.url }, loginPath('local'))
     try {
-      const done = await run(['login'])
+      const done = await run(['login', quiet.url])
       expect(done.exitCode).toBe(0)
       expect(done.stdout).toContain('publishes no login')
     } finally {
       await quiet.stop()
     }
-    expect(readLogin()).toBeNull()
+    expect(existsSync(loginPath('local'))).toBe(false)
+  })
+})
+
+function stored(url: string, token = 'from-login'): Login {
+  return {
+    url,
+    access_token: token,
+    logged_in_at: Date.now() / 1000,
+    refresh_token: null,
+    expires_at: null,
+    client_id: null,
+    token_endpoint: null,
+  }
+}
+
+async function runProgram(
+  args: string[],
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+  let stdout = ''
+  let stderr = ''
+  let exitCode = 0
+  const outSpy = vi.spyOn(process.stdout, 'write').mockImplementation((chunk: unknown) => {
+    stdout += String(chunk)
+    return true
+  })
+  const errSpy = vi.spyOn(process.stderr, 'write').mockImplementation((chunk: unknown) => {
+    stderr += String(chunk)
+    return true
+  })
+  const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+    exitCode = code ?? 0
+    throw new Error('__exit__')
+  }) as never)
+  try {
+    await buildProgram().exitOverride().parseAsync(args, { from: 'user' })
+  } catch (e) {
+    if (e instanceof ContextError) {
+      stderr += e.message
+      exitCode = 2
+    } else if (!(e instanceof Error) || e.message !== '__exit__') throw e
+  } finally {
+    outSpy.mockRestore()
+    errSpy.mockRestore()
+    exitSpy.mockRestore()
+  }
+  return { stdout, stderr, exitCode }
+}
+
+describe('contexts', () => {
+  let dir: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'mirage-context-'))
+    vi.stubEnv('MIRAGE_HOME', dir)
+    for (const name of [
+      'MIRAGE_CONTEXT',
+      'MIRAGE_WORKSPACE',
+      'MIRAGE_DAEMON_URL',
+      'MIRAGE_DAEMON_PORT',
+      'MIRAGE_TOKEN',
+    ]) {
+      vi.stubEnv(name, undefined)
+    }
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    vi.restoreAllMocks()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('has only local, current, with no file', () => {
+    expect(contextNames()).toEqual(['local'])
+    expect(currentName()).toBe('local')
+  })
+
+  it('takes $MIRAGE_CONTEXT over the file, and refuses an unknown one', () => {
+    writeContext('dev', { url: 'https://dev.example', team: null, workspace: null })
+    vi.stubEnv('MIRAGE_CONTEXT', 'dev')
+    expect(currentName()).toBe('dev')
+    vi.stubEnv('MIRAGE_CONTEXT', 'nope')
+    expect(() => currentName()).toThrow(/no context 'nope'/)
+  })
+
+  it('keeps each context in its own file, readable by its owner', () => {
+    writeContext('dev', { url: 'https://dev.example', team: null, workspace: null })
+    writeCurrent('dev')
+    expect(statSync(join(dir, 'contexts', 'dev.json')).mode & 0o777).toBe(0o600)
+    expect(statSync(join(dir, 'current_context')).mode & 0o777).toBe(0o600)
+    expect(readContext('dev')).toEqual({ url: 'https://dev.example', team: null, workspace: null })
+  })
+
+  it('refuses a context file of an unknown shape', () => {
+    mkdirSync(join(dir, 'contexts'))
+    for (const text of ['{"url": "", "extra": 1}', '["https://dev.example"]']) {
+      writeFileSync(join(dir, 'contexts', 'dev.json'), text)
+      expect(() => readContext('dev')).toThrow(/malformed/)
+    }
+  })
+
+  it('refuses a name that is no safe file name', () => {
+    expect(checkName('dev.example-1')).toBe('dev.example-1')
+    expect(() => checkName('../up')).toThrow(ContextError)
+    expect(() => checkName('Dev')).toThrow(ContextError)
+  })
+
+  it('follows the daemon port for local, after its own URL and config.toml', () => {
+    expect(localUrl({})).toBe('http://127.0.0.1:8765')
+    expect(localUrl({ port: '9100' })).toBe('http://127.0.0.1:9100')
+    vi.stubEnv('MIRAGE_DAEMON_PORT', '9200')
+    expect(localUrl({ port: '9100' })).toBe('http://127.0.0.1:9200')
+    expect(localUrl({ url: 'http://127.0.0.1:9300' })).toBe('http://127.0.0.1:9300')
+    writeContext('local', { url: 'http://127.0.0.1:9400', team: null, workspace: null })
+    expect(localUrl({ url: 'http://127.0.0.1:9300' })).toBe('http://127.0.0.1:9400')
+  })
+
+  it("sends a remote context's login there, and never config.toml's token", () => {
+    writeFileSync(join(dir, 'config.toml'), '[daemon]\nauth_token = "local-only"\n')
+    writeContext('dev', { url: 'https://dev.example', team: 'acme', workspace: null })
+    writeCurrent('dev')
+    expect(loadDaemonSettings().authToken).toBe('')
+    writeLogin(stored('https://dev.example'), loginPath('dev'))
+    const settings = loadDaemonSettings()
+    expect(settings).toMatchObject({ context: 'dev', url: 'https://dev.example', authToken: '' })
+    expect(settings.login?.access_token).toBe('from-login')
+  })
+
+  it('keeps two contexts written one after another apart', () => {
+    for (const name of ['a', 'b']) {
+      writeContext(name, { url: `https://${name}.example`, team: null, workspace: null })
+    }
+    expect(contextNames()).toEqual(['a', 'b', 'local'])
+  })
+
+  it('picks the workspace from -w, then $MIRAGE_WORKSPACE, then the context', () => {
+    writeContext('local', { url: '', team: null, workspace: 'kept' })
+    expect(resolveWorkspace(undefined)).toBe('kept')
+    vi.stubEnv('MIRAGE_WORKSPACE', 'env')
+    expect(resolveWorkspace(undefined)).toBe('env')
+    expect(resolveWorkspace('flag')).toBe('flag')
+  })
+
+  it('fails with a hint when no workspace is selected', async () => {
+    const done = await runProgram(['shell', '-c', 'true'])
+    expect(done.exitCode).toBe(2)
+    expect(done.stderr).toContain('run `mirage workspace use <id>` or pass -w')
+  })
+
+  it('switches, runs one command elsewhere, and forgets a context', async () => {
+    writeContext('dev', { url: 'https://dev.example', team: 'acme', workspace: 'w1' })
+    writeLogin(stored('https://dev.example'), loginPath('dev'))
+    const once = await runProgram(['--context', 'dev', 'whoami'])
+    expect(JSON.parse(once.stdout)).toMatchObject({
+      context: 'dev',
+      url: 'https://dev.example',
+      team: 'acme',
+      workspace: 'w1',
+    })
+    expect(readCurrent()).toBe('local')
+    expect((await runProgram(['context', 'use', 'dev'])).exitCode).toBe(0)
+    expect(readCurrent()).toBe('dev')
+    expect((await runProgram(['context', 'use', 'nope'])).exitCode).toBe(2)
+    expect((await runProgram(['context', 'use', 'constructor'])).exitCode).toBe(2)
+    expect((await runProgram(['context', 'delete', 'local'])).exitCode).toBe(2)
+    expect((await runProgram(['context', 'delete', 'dev'])).exitCode).toBe(0)
+    expect(readCurrent()).toBe('local')
+    expect(existsSync(join(dir, 'logins', 'dev.json'))).toBe(false)
+    expect(existsSync(join(dir, 'contexts', 'dev.json'))).toBe(false)
+  })
+
+  it('refuses a name that is no safe file name everywhere', async () => {
+    writeContext('local', { url: '', team: null, workspace: 'kept' })
+    for (const args of [
+      ['context', 'delete', './local'],
+      ['context', 'use', '../up'],
+      ['--context', '../up', 'whoami'],
+    ]) {
+      expect((await runProgram(args)).exitCode).toBe(2)
+    }
+    expect(existsSync(join(dir, 'contexts', 'local.json'))).toBe(true)
+  })
+
+  it('lists the contexts when the current one is gone', async () => {
+    writeFileSync(join(dir, 'current_context'), 'gone\n')
+    const done = await runProgram(['context', 'list'])
+    expect(done.exitCode).toBe(0)
+    expect((JSON.parse(done.stdout) as { name: string }[]).map((r) => r.name)).toEqual(['local'])
+  })
+
+  it('keeps the daemon settings under daemon config', async () => {
+    const done = await runProgram(['daemon', 'config', 'set', 'port', '9100'])
+    expect(done.exitCode).toBe(0)
+    expect(readFileSync(join(dir, 'config.toml'), 'utf-8')).toContain('port = 9100')
+    expect(loadDaemonSettings().url).toBe('http://127.0.0.1:9100')
   })
 })

@@ -1271,7 +1271,7 @@ describe('runtimes name: reference', () => {
     'export class EchoBox extends Runtime {\n' +
     '  [LINE_EXECUTOR] = true\n' +
     "  name = 'echobox'\n" +
-    "  constructor(options = {}) { super(options, ['nvidia-smi'], []) }\n" +
+    "  constructor(options = {}) { super(options, ['nvidia-smi']) }\n" +
     '  runLine(line) { return Promise.resolve({ stdout: new TextEncoder().encode(`box:${line}\\n`), stderr: null, exitCode: 0 }) }\n' +
     '}\n' +
     "export const NOT_A_RUNTIME = { name: 'nope' }\n"

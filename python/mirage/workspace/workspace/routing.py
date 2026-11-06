@@ -33,11 +33,17 @@ from mirage.policy.types import (
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import WHOLE_LINE
 from mirage.runtime.routing import RouteError
-from mirage.runtime.table import bind_commands, catch_all, runtime_bindings_for
+from mirage.runtime.table import (
+    bind_commands,
+    catch_all,
+    runtime_bindings_for,
+    whole_line_runtime,
+)
 from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
 from mirage.view.types import FileView, SessionView
+from mirage.workspace.lookup.lookup import routed_consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.node.explain import Judged, Walked
 from mirage.workspace.session import SessionState
@@ -228,15 +234,25 @@ class Router:
         )
 
     def runtime_for(
-        self, command: str, decision: RouteDecision[RuntimeIdentity]
+        self, one: Judged, decision: RouteDecision[RuntimeIdentity]
     ) -> str:
-        """The runtime entry that serves a command under a decision,
-        empty when the workspace runs it itself.
+        """The runtime entry that serves a command under a decision, as
+        its run places it; empty when the workspace runs it itself.
 
         Args:
-            command (str): the command name.
+            one (Judged): the command's judgment and the session it was
+                judged in.
             decision (RouteDecision): the line's placement.
         """
+        whole = whole_line_runtime(decision.bindings)
+        if isinstance(whole, Runtime):
+            return whole.name
+        command = one.judgment.command
+        if one.ctx is not None and one.session is not None:
+            _, routed = routed_consumer(
+                command, one.ctx.argv, one.session, self._registry, decision
+            )
+            decision = routed or decision
         serving = decision.bindings.get(command, decision.fallback)
         if serving is None or isinstance(serving, WorkspaceRuntime):
             return ""

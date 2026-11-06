@@ -27,8 +27,8 @@ import {
 } from '@struktoai/mirage-core/runtime/mixin'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
-import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
-import { SANDLOCK_CONFIG_KEYS, type SandlockConfig } from './config.ts'
+import type { ConfigFields, RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
+import { SANDLOCK_CONFIG_FIELDS, type SandlockConfig } from './config.ts'
 import { SANDLOCK_HINT, SYSTEM_READABLE } from './constants.ts'
 import { closeChildren, cwdRefusal, onHostPath, runProgram, systemTimeEnv } from '../program.ts'
 
@@ -37,6 +37,7 @@ export class SandlockRuntime
   extends Runtime<undefined>
   implements LineExecutorMixin<undefined>, ProcessExecutorMixin<undefined>
 {
+  static override readonly configFields: ConfigFields = SANDLOCK_CONFIG_FIELDS
   readonly name = 'sandlock'
   readonly [LINE_EXECUTOR] = true as const
   readonly [PROCESS_EXECUTOR] = true as const
@@ -45,7 +46,7 @@ export class SandlockRuntime
   private closed = false
 
   constructor(options: RuntimeOptions<SandlockConfig> = {}) {
-    super(options, [EXTERNAL_COMMANDS], SANDLOCK_CONFIG_KEYS)
+    super(options, [EXTERNAL_COMMANDS], SandlockRuntime.configFields)
     if (this.config.mountType != null)
       throw new Error('sandlock: mountType needs a remote pipe transport')
   }

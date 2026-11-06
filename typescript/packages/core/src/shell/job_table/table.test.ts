@@ -205,7 +205,7 @@ describe('JobTable.kill', () => {
   it.each([
     [9, 137],
     [15, 143],
-    [2, 130],
+    [1, 129],
   ])('a job killed with signal %i exits %i', async (signal, code) => {
     const jt = new JobTable()
     const abort = new AbortController()
@@ -1564,6 +1564,35 @@ describe('JobTable process plane', () => {
     await job.process?.join()
     expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 143])
     expect(await b.signalRemote('ffffffff', job.pid, 15, 't', () => every)).toBe(false)
+    await a.close()
+    await b.close()
+  })
+
+  // bash starts a job ignoring INT and QUIT: either, sent by the job's own
+  // table, by another table on the store or as a stop asked through it,
+  // leaves the job running, so the TERM after them is what ends it.
+  it('leaves a job running on INT and QUIT from any table', async () => {
+    const store = new RAMJobStore(30)
+    const [a, b] = [publishing(store), publishing(store)]
+    const abort = new AbortController()
+    const job = await a.submit({
+      command: 'sleep 30',
+      run: pending(abort),
+      abort,
+      cwd: '/',
+      sessionId: 's',
+    })
+    await until(async () => a.owner in (await b.remoteProcesses()))
+    await b.sync('s')
+    const every = { list: 'workspace', kill: 'workspace', max: null } as const
+    for (const signal of [2, 3]) {
+      expect(await a.kill(job.id, 's', signal)).toBe(true)
+      expect(await b.kill(job.id, 's', signal)).toBe(true)
+      expect(await b.signalRemote(a.owner, job.pid, signal, 't', () => every)).toBe(true)
+    }
+    expect(await b.signalRemote(a.owner, job.pid, 15, 't', () => every)).toBe(true)
+    await job.process?.join()
+    expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 143])
     await a.close()
     await b.close()
   })

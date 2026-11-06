@@ -20,9 +20,52 @@ import typer
 
 from mirage.cli.client import make_client
 from mirage.cli.output import emit, handle_response
+from mirage.cli.settings import resolve_workspace
+from mirage.cli.vfs import WORKSPACE
 from mirage.cli.workspace import load_profile_argument
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspace sessions.")
+
+SESSION = typer.Option(
+    ..., "--session_id", "--session", "-s", help="Session id."
+)
+PROFILE = typer.Option(
+    None, "--profile", "-p", help="Replace the live session's profile."
+)
+PROFILE_FILE = typer.Option(
+    None,
+    "--profile-file",
+    exists=True,
+    readable=True,
+    help="Replace it with this YAML/JSON profile document.",
+)
+DEFAULT_PROFILE = typer.Option(
+    False, "--default-profile", help="Use the workspace default profile."
+)
+MOUNT = typer.Option(
+    [],
+    "--mount",
+    "-m",
+    help=(
+        "Narrow a mount's mode for this session: '/data:read' "
+        "(alias '/data:r'), '/scratch:rw', '/bin:rwx', or a bare "
+        "'/data' to keep the mount's own mode. Repeat per mount. "
+        "This narrows only; a mount you do not name keeps its own "
+        "mode, and keeping a session away from one is a hide in "
+        "its profile."
+    ),
+)
+CREATE_PROFILE = typer.Option(
+    None,
+    "--profile",
+    "-p",
+    help=(
+        "The profile this session runs under, by name from the "
+        "workspace's profiles. A profile is the whole permission "
+        "document; omit it to take the workspace default."
+    ),
+)
+
 
 _MODES = ("read", "write", "exec", "r", "rw", "rwx")
 
@@ -49,36 +92,27 @@ def _parse_mount_modes(mounts: list[str]) -> dict[str, str]:
     return modes
 
 
+def _session_path(workspace_id: str, session_id: str | None = None) -> str:
+    base = f"/v1/workspaces/{quote(workspace_id, safe='')}/sessions"
+    return (
+        base if session_id is None else f"{base}/{quote(session_id, safe='')}"
+    )
+
+
 @app.command("create")
 def create_cmd(
-    workspace_id: str = typer.Argument(...),
+    workspace_id: str | None = WORKSPACE,
     session_id: str | None = typer.Option(
-        None, "--id", help="Explicit session id."
-    ),
-    mount: list[str] = typer.Option(
-        [],
-        "--mount",
-        "-m",
-        help=(
-            "Narrow a mount's mode for this session: '/data:read' "
-            "(alias '/data:r'), '/scratch:rw', '/bin:rwx', or a bare "
-            "'/data' to keep the mount's own mode. Repeat per mount. "
-            "This narrows only; a mount you do not name keeps its own "
-            "mode, and keeping a session away from one is a hide in "
-            "its profile."
-        ),
-    ),
-    profile: str | None = typer.Option(
         None,
-        "--profile",
-        "-p",
-        help=(
-            "The profile this session runs under, by name from the "
-            "workspace's profiles. A profile is the whole permission "
-            "document; omit it to take the workspace default."
-        ),
+        "--session_id",
+        "--session",
+        "-s",
+        help="Explicit session id.",
     ),
+    mount: list[str] = MOUNT,
+    profile: str | None = CREATE_PROFILE,
 ) -> None:
+    """Add a session to the workspace."""
     body: dict[str, Any] = {}
     if session_id:
         body["session_id"] = session_id
@@ -86,86 +120,66 @@ def create_cmd(
         body["mounts"] = _parse_mount_modes(mount)
     if profile:
         body["profile"] = profile
+    path = _session_path(resolve_workspace(workspace_id))
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        r = client.request(
-            "POST",
-            f"/v1/workspaces/{quote(workspace_id, safe='')}/sessions",
-            json=body,
-        )
+        r = client.request("POST", path, json=body)
     emit(handle_response(r))
 
 
 @app.command("list")
-def list_cmd(workspace_id: str = typer.Argument(...)) -> None:
+def list_cmd(workspace_id: str | None = WORKSPACE) -> None:
+    """List the workspace's sessions."""
+    path = _session_path(resolve_workspace(workspace_id))
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        r = client.request(
-            "GET", f"/v1/workspaces/{quote(workspace_id, safe='')}/sessions"
-        )
+        r = client.request("GET", path)
     emit(handle_response(r))
 
 
 @app.command("delete")
 def delete_cmd(
-    workspace_id: str = typer.Argument(...),
-    session_id: str = typer.Argument(...),
+    workspace_id: str | None = WORKSPACE, session_id: str = SESSION
 ) -> None:
+    """Close a session."""
+    path = _session_path(resolve_workspace(workspace_id), session_id)
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        wid = quote(workspace_id, safe="")
-        sid = quote(session_id, safe="")
-        r = client.request("DELETE", f"/v1/workspaces/{wid}/sessions/{sid}")
+        r = client.request("DELETE", path)
     emit(handle_response(r))
 
 
 @app.command("cancel")
 def cancel_cmd(
-    workspace_id: str = typer.Argument(...),
-    session_id: str = typer.Argument(...),
+    workspace_id: str | None = WORKSPACE, session_id: str = SESSION
 ) -> None:
     """Cancel the session's running and queued commands."""
+    path = _session_path(resolve_workspace(workspace_id), session_id)
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        wid = quote(workspace_id, safe="")
-        sid = quote(session_id, safe="")
-        r = client.request(
-            "POST", f"/v1/workspaces/{wid}/sessions/{sid}/cancel"
-        )
+        r = client.request("POST", f"{path}/cancel")
     emit(handle_response(r))
 
 
 @app.command("kill")
 def kill_cmd(
-    workspace_id: str = typer.Argument(...),
-    session_id: str = typer.Argument(...),
+    workspace_id: str | None = WORKSPACE, session_id: str = SESSION
 ) -> None:
     """Kill the session's background jobs; the session stays open."""
+    path = _session_path(resolve_workspace(workspace_id), session_id)
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        wid = quote(workspace_id, safe="")
-        sid = quote(session_id, safe="")
-        r = client.request("POST", f"/v1/workspaces/{wid}/sessions/{sid}/kill")
+        r = client.request("POST", f"{path}/kill")
     emit(handle_response(r))
 
 
 @app.command("update")
 def update_cmd(
-    workspace_id: str = typer.Argument(...),
-    session_id: str = typer.Argument(...),
-    profile: str | None = typer.Option(
-        None, "--profile", "-p", help="Replace the live session's profile."
-    ),
-    profile_file: Path | None = typer.Option(
-        None,
-        "--profile-file",
-        exists=True,
-        readable=True,
-        help="Replace it with this YAML/JSON profile document.",
-    ),
-    default_profile: bool = typer.Option(
-        False, "--default-profile", help="Use the workspace default profile."
-    ),
+    workspace_id: str | None = WORKSPACE,
+    session_id: str = SESSION,
+    profile: str | None = PROFILE,
+    profile_file: Path | None = PROFILE_FILE,
+    default_profile: bool = DEFAULT_PROFILE,
 ) -> None:
     """Replace the session's profile; its cwd, env and history stay."""
     if (
@@ -182,13 +196,8 @@ def update_cmd(
             else profile
         )
     }
+    path = _session_path(resolve_workspace(workspace_id), session_id)
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        wid = quote(workspace_id, safe="")
-        sid = quote(session_id, safe="")
-        r = client.request(
-            "PATCH",
-            f"/v1/workspaces/{wid}/sessions/{sid}",
-            json=body,
-        )
+        r = client.request("PATCH", path, json=body)
     emit(handle_response(r))

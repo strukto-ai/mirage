@@ -17,7 +17,9 @@ from contextlib import contextmanager
 
 from typer.testing import CliRunner
 
+from mirage.cli import main as main_cli
 from mirage.cli import session as session_cli
+from mirage.cli.env import ENV_WORKSPACE
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -33,6 +35,7 @@ class _FakeResponse:
 class _FakeClient:
     def __init__(self) -> None:
         self.last_body: dict | None = None
+        self.last_path: str | None = None
 
     def __enter__(self):
         return self
@@ -45,6 +48,7 @@ class _FakeClient:
 
     def request(self, method: str, path: str, json: dict | None = None):
         self.last_body = json
+        self.last_path = path
         return _FakeResponse()
 
 
@@ -65,8 +69,9 @@ def test_session_create_passes_mount_flags():
             session_cli.app,
             [
                 "create",
+                "-w",
                 "demo",
-                "--id",
+                "-s",
                 "agent",
                 "-m",
                 "/s3",
@@ -88,8 +93,9 @@ def test_session_create_parses_role_suffix():
             session_cli.app,
             [
                 "create",
+                "-w",
                 "demo",
-                "--id",
+                "-s",
                 "agent",
                 "-m",
                 "/data:read",
@@ -113,6 +119,7 @@ def test_session_create_parses_alias_role_suffix():
             session_cli.app,
             [
                 "create",
+                "-w",
                 "demo",
                 "-m",
                 "/data:r",
@@ -133,7 +140,7 @@ def test_session_create_no_mount_flag_omits_field():
     with _patched_client(fake):
         result = CliRunner().invoke(
             session_cli.app,
-            ["create", "demo", "--id", "agent"],
+            ["create", "-w", "demo", "-s", "agent"],
         )
     assert result.exit_code == 0, result.output
     assert fake.last_body == {"session_id": "agent"}
@@ -142,7 +149,7 @@ def test_session_create_no_mount_flag_omits_field():
 def test_session_create_without_id_or_mount_sends_empty_body():
     fake = _FakeClient()
     with _patched_client(fake):
-        result = CliRunner().invoke(session_cli.app, ["create", "demo"])
+        result = CliRunner().invoke(session_cli.app, ["create", "-w", "demo"])
     assert result.exit_code == 0, result.output
     assert fake.last_body == {}
 
@@ -152,3 +159,51 @@ def test_session_create_help_lists_mount_flag():
     assert result.exit_code == 0
     plain = _ANSI_RE.sub("", result.output)
     assert "--mount" in plain
+
+
+def test_the_workspace_comes_from_the_environment(monkeypatch):
+    monkeypatch.setenv(ENV_WORKSPACE, "demo")
+    fake = _FakeClient()
+    with _patched_client(fake):
+        result = CliRunner().invoke(session_cli.app, ["kill", "-s", "agent"])
+    assert result.exit_code == 0, result.output
+    assert fake.last_path == "/v1/workspaces/demo/sessions/agent/kill"
+
+
+def test_w_wins_over_the_environment(monkeypatch):
+    monkeypatch.setenv(ENV_WORKSPACE, "other")
+    fake = _FakeClient()
+    with _patched_client(fake):
+        result = CliRunner().invoke(
+            session_cli.app, ["delete", "-w", "demo", "-s", "agent"]
+        )
+    assert result.exit_code == 0, result.output
+    assert fake.last_path == "/v1/workspaces/demo/sessions/agent"
+
+
+def test_no_workspace_is_a_usage_failure(monkeypatch, tmp_path):
+    monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
+    monkeypatch.delenv(ENV_WORKSPACE, raising=False)
+    result = CliRunner().invoke(session_cli.app, ["list"])
+    assert result.exit_code == 2
+    assert "no workspace selected" in result.output
+
+
+def test_workspace_session_is_registered_under_workspace():
+    fake = _FakeClient()
+    with _patched_client(fake):
+        result = CliRunner().invoke(
+            main_cli.app, ["workspace", "session", "list", "-w", "demo"]
+        )
+    assert result.exit_code == 0, result.output
+    assert fake.last_path == "/v1/workspaces/demo/sessions"
+
+
+def test_the_old_session_form_is_gone():
+    fake = _FakeClient()
+    with _patched_client(fake):
+        result = CliRunner().invoke(
+            main_cli.app, ["session", "cancel", "demo", "agent"]
+        )
+    assert result.exit_code == 2
+    assert fake.last_path is None

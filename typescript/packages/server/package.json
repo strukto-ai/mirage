@@ -49,6 +49,10 @@
       "types": "./dist/env.d.ts",
       "import": "./dist/env.js"
     },
+    "./resources/files": {
+      "types": "./dist/resources/files.d.ts",
+      "import": "./dist/resources/files.js"
+    },
     "./daemon_config": {
       "types": "./dist/daemon_config.d.ts",
       "import": "./dist/daemon_config.js"
@@ -142,7 +146,8 @@
     "fastify": "^5.12.6",
     "jose": "^6.2.3",
     "rate-limiter-flexible": "^11.2.0",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "yaml": "^2.6.0"
   },
   "peerDependencies": {
     "ssh2": "^1.16.0"

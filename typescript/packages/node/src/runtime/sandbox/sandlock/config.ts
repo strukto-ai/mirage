@@ -12,7 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { BASE_CONFIG_KEYS, type SandboxConfig } from '@struktoai/mirage-core/runtime/sandbox/config'
+import type { ConfigFields } from '@struktoai/mirage-core/runtime/config'
+import {
+  BASE_CONFIG_FIELDS,
+  type SandboxConfig,
+} from '@struktoai/mirage-core/runtime/sandbox/config'
 
 export interface SandlockConfig extends SandboxConfig {
   fsReadable?: readonly string[]
@@ -20,9 +24,9 @@ export interface SandlockConfig extends SandboxConfig {
   maxMemory?: string
 }
 
-export const SANDLOCK_CONFIG_KEYS: readonly string[] = [
-  ...BASE_CONFIG_KEYS,
-  'fsReadable',
-  'fsWritable',
-  'maxMemory',
-]
+export const SANDLOCK_CONFIG_FIELDS: ConfigFields = {
+  ...BASE_CONFIG_FIELDS,
+  fsReadable: { type: 'list' },
+  fsWritable: { type: 'list' },
+  maxMemory: { type: 'string' },
+}

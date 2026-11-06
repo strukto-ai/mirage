@@ -139,6 +139,10 @@ export const COPY_OPS = callNames(VFS_CALLS, { effects: [Effect.COPY] })
 // write, and on the mount that serves the path.
 export const DESTINATION_OPS: ReadonlySet<string> = new Set(['rename', ...COPY_OPS])
 
+// Ops that take a name, and every name below it, from the file there: a
+// redirect writing that file follows a rename and loses it to a removal.
+export const UNLINKING_OPS = callNames(VFS_CALLS, { effects: [Effect.REMOVE, Effect.RENAME] })
+
 // Ops that reach everything below their paths: a read-only region or a
 // path rule anywhere under one is theirs to answer for.
 export const SUBTREE_OPS: ReadonlySet<string> = new Set(

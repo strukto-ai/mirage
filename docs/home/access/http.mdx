@@ -6,7 +6,8 @@ icon: globe
 
 The Mirage server holds workspaces and serves them over HTTP. The Python and
 TypeScript servers speak the same protocol. Routes are under `/v1` and return
-JSON.
+JSON. Every route, with its fields and responses, is in the
+[API reference](/api/reference).
 
 ## Launch a server
 
@@ -450,6 +451,146 @@ Upload the tar as `multipart/form-data`: a `request` part holding the JSON field
 <ParamField body="override" type="object">Configuration overrides for the restored workspace, including credentials redacted from the snapshot. Overriding `/` replaces its backing VFS, but it remains the scratch root.</ParamField>
 
 Returns HTTP 201 Created with the restored workspace.
+
+## Saved policies
+
+A saved policy is a Python program kept by name, as the hosted API keeps one. Its
+name ends in `.py`, such as `guard.py`, and its source is at most 64 KB. The
+local daemon keeps them under `~/.mirage/resources`, as `resource_store` sets.
+`{id}` takes a policy's ID or its name; on the local daemon a policy's ID is
+its name. A server of many [accounts](#accounts) answers HTTP 501 on these routes.
+
+### Create a policy
+
+<Badge color="green">POST</Badge> `/v1/policies`
+
+<ParamField body="name" type="string" required>The policy's name, ending in `.py`.</ParamField>
+<ParamField body="source" type="string" required>The program.</ParamField>
+
+Returns HTTP 201 Created with `{"name", "source"}`. A name already saved
+returns HTTP 409 Conflict.
+
+### List policies
+
+<Badge color="blue">GET</Badge> `/v1/policies`
+
+Returns the names, sorted; get one for its source:
+
+```json
+{"items": [{"name": "guard.py"}]}
+```
+
+### Get a policy
+
+<Badge color="blue">GET</Badge> `/v1/policies/{id}`
+
+Returns `{"name", "source"}`.
+
+### Update a policy
+
+<Badge color="orange">PUT</Badge> `/v1/policies/{id}`
+
+<ParamField body="source" type="string" required>The new program.</ParamField>
+
+Returns `{"name", "source"}`. An ID or name not saved returns HTTP 404 Not Found.
+
+### Delete a policy
+
+<Badge color="red">DELETE</Badge> `/v1/policies/{id}`
+
+Returns HTTP 204 No Content.
+
+## Saved connections
+
+`/v1/vfs`, `/v1/clis` and `/v1/runtimes` keep VFS, CLI and runtime
+entries: a type, its fields, and the fields its config schema
+marks secret, which are sealed. The routes and bodies are the hosted API's, so a
+client works against either. An entry answers only under its own kind's
+route, and a name is taken once across the three kinds, so a route's `{id}`
+takes an entry's ID or its name. On the local daemon an entry's ID is its name.
+On a server that requires accounts these routes answer HTTP 501 Not
+Implemented.
+
+A workspace config, or a template's, uses a saved field as
+`{from: strukto, ref: NAME, key: FIELD}` wherever a secret pointer may go,
+such as `token: {from: strukto, ref: github, key: token}`, and as a managed
+`env` entry, such as `GITHUB_TOKEN: {from: strukto, ref: github, key: token, readonly: true}`.
+The server reads the entries those pointers name when it creates the
+workspace. A pointer at a
+plain field becomes the field's value, its type kept, so a list stays a list;
+a secret field's value is kept only in the workspace's memory. A name that is
+not saved returns HTTP 400, and a server that requires accounts returns HTTP 501.
+
+Routes that return an entry yield this object:
+
+<ResponseField name="id" type="string">On the local daemon, the name.</ResponseField>
+<ResponseField name="name" type="string">The entry's name.</ResponseField>
+<ResponseField name="kind" type="string">`vfs`, `cli` or `runtime`.</ResponseField>
+<ResponseField name="type" type="string">Its type, such as `github`.</ResponseField>
+<ResponseField name="builtin" type="boolean">Whether the server made it; always false on the local daemon.</ResponseField>
+<ResponseField name="config" type="object">The plain fields. A secret field never appears.</ResponseField>
+<ResponseField name="captures" type="string[]">For a runtime only.</ResponseField>
+<ResponseField name="created_by" type="string | null">Who made it; null on the local daemon.</ResponseField>
+<ResponseField name="created_at" type="number | null">Unix time, in seconds; null on the local daemon.</ResponseField>
+<ResponseField name="updated_at" type="number | null">Unix time, in seconds; null on the local daemon.</ResponseField>
+
+### List the types
+
+<Badge color="blue">GET</Badge> `/v1/vfs/types`
+
+Returns each type an entry can be, with its fields, read off the registered
+VFS, CLI and runtime types and their config schemas. Each
+field has `name`, `type` (`string`, `number`, `boolean` or `list`), `secret`,
+`required`, and when they apply `options`, `description`, `default` and
+`group`, the optional block a field such as `auth.token` belongs to: it is
+required only when the block is used.
+
+### Create an entry
+
+<Badge color="green">POST</Badge> `/v1/vfs`
+
+<ParamField body="name" type="string" required>1-63 of `a-z 0-9 . _ -`, starting with a letter or digit. `types` is refused, since it names the types route.</ParamField>
+<ParamField body="type" type="string" required>One of the types.</ParamField>
+<ParamField body="fields" type="object" required>The fields, each checked against the type.</ParamField>
+
+Returns HTTP 201 Created with the entry. A name already taken returns HTTP 409
+Conflict; a field the type lacks or a missing required field returns HTTP 400
+Bad Request. The local daemon keeps no secret stores yet, so a
+`{from, ref, key}` pointer to one returns HTTP 400 with `missing`, the stores to
+add.
+
+### List entries
+
+<Badge color="blue">GET</Badge> `/v1/vfs`
+
+<ParamField query="type" type="string">Only entries of this type.</ParamField>
+<ParamField query="q" type="string">Only entries whose name contains this text, in any case.</ParamField>
+
+Returns `{"items": [...]}`, by name, each with `used_by`: how many saved
+templates use it.
+
+### Get an entry
+
+<Badge color="blue">GET</Badge> `/v1/vfs/{id}`
+
+Returns the entry with `sealed`: the names of its secret fields that hold a
+value, never the values.
+
+### Update an entry
+
+<Badge color="orange">PUT</Badge> `/v1/vfs/{id}`
+
+<ParamField body="fields" type="object" required>The new plain fields, which replace the old ones. A secret field left out keeps its value; one given as `null` is removed.</ParamField>
+
+Returns the entry. Its name and type stay as they are.
+
+### Delete an entry
+
+<Badge color="red">DELETE</Badge> `/v1/vfs/{id}`
+
+Deletes the entry and wipes its secret values; there is no restore. Returns
+HTTP 204 No Content, or HTTP 409 Conflict naming the saved templates that use
+it.
 
 ## Sessions
 

@@ -24,7 +24,7 @@ import { readDaemonTable, validateDaemonTable } from '@struktoai/mirage-server/d
 import { mirageHome } from '@struktoai/mirage-server/paths'
 
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
-import { LoginError, freshToken, readLogin } from './credentials.ts'
+import { LoginError, freshToken, loginCommand, loginPath, readLogin } from './credentials.ts'
 import { isLocalUrl, loadDaemonSettings, type DaemonSettings } from './settings.ts'
 
 const requireFromHere = createRequire(import.meta.url)
@@ -64,14 +64,17 @@ export class DaemonClient {
       return this.held
     }
     this.refreshing ??= (async () => {
-      const stored = readLogin()
+      const path = loginPath(this.settings.context)
+      const stored = readLogin(path)
       if (stored?.url !== login.url) {
-        throw new LoginError(`not logged in to ${login.url} any more; run \`mirage login\``)
+        throw new LoginError(
+          `not logged in to ${login.url} any more; run \`${loginCommand(login.url, this.settings.context)}\``,
+        )
       }
       if (stored.logged_in_at !== login.logged_in_at) {
         throw new LoginError(`the login to ${login.url} changed; run the command again`)
       }
-      this.held = await freshToken(stored)
+      this.held = await freshToken(stored, path)
       return this.held
     })().finally(() => {
       this.refreshing = undefined

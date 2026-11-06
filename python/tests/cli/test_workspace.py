@@ -286,3 +286,30 @@ def test_a_multiline_command_stays_on_its_row():
     )
     assert table.splitlines()[1].split()[-1] == "<<EOF\\nhi\\nEOF"
     assert len(table.splitlines()) == 2
+
+
+def test_create_from_a_template_sends_its_name_and_the_id(fake):
+    result = _invoke("create", "--template", "base", "-w", "my-ws")
+    assert result.exit_code == 0, result.output
+    method, path, kwargs = fake.calls[0]
+    assert (method, path) == ("POST", "/v1/workspaces")
+    assert kwargs["json"] == {"template": "base", "id": "my-ws"}
+
+
+@pytest.mark.parametrize("given", [[], ["CONFIG", "--template", "base"]])
+def test_create_takes_one_of_a_file_or_a_template(fake, tmp_path, given):
+    config = tmp_path / "c.yaml"
+    config.write_text("mounts: {/: {vfs: ram}}\n")
+    args = [str(config) if a == "CONFIG" else a for a in given]
+    result = _invoke("create", *args)
+    assert result.exit_code == 2
+    assert "--template" in result.output
+    assert fake.calls == []
+
+
+def test_create_still_takes_id(fake, tmp_path):
+    config = tmp_path / "c.yaml"
+    config.write_text("mounts: {/: {vfs: ram}}\n")
+    result = _invoke("create", str(config), "--id", "w2")
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0][2]["json"]["id"] == "w2"

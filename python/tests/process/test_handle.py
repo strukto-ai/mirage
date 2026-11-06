@@ -85,6 +85,83 @@ async def test_terminate_asks_once_and_the_runner_exits_137():
     assert (info.exit_code, info.cancellation_requested) == (137, True)
 
 
+# A program the runner runs where an interrupt reaches it hands back what
+# it returned; a stop of the runner itself still stops the runner.
+@pytest.mark.asyncio
+async def test_a_program_returns_unless_interrupted_and_a_stop_still_stops():
+    started = asyncio.Event()
+    outcome: list[tuple[int | None, int | None]] = []
+
+    async def program() -> int:
+        started.set()
+        await asyncio.Event().wait()
+        return 0
+
+    async def run() -> int:
+        outcome.append(await handle.program(_exits_3))
+        await handle.program(program)
+        return 0
+
+    handle = ProcessHandle(_info(), run, lambda _pid: None)
+    handle.interrupt(2)
+    handle.start()
+    async with asyncio.timeout(5):
+        await started.wait()
+        assert handle.terminate()
+        assert (await handle.join()).exit_code == 137
+    assert outcome == [(3, None)]
+
+
+# A native run reads the signal an interrupt stops its program with, so
+# it hands the program INT rather than killing it; once the program is
+# gone, nothing is stopping.
+@pytest.mark.asyncio
+async def test_an_interrupted_program_names_its_signal_until_it_ends():
+    started = asyncio.Event()
+    seen: list[int | None] = []
+
+    async def program() -> int:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            seen.append(handle.interrupted)
+        return 0
+
+    async def run() -> int:
+        _, signal = await handle.program(program)
+        seen.append(handle.interrupted)
+        return signal or 0
+
+    handle = ProcessHandle(_info(), run, lambda _pid: None)
+    handle.start()
+    await started.wait()
+    handle.interrupt(2)
+    assert ((await handle.join()).exit_code, seen) == (2, [2, None])
+
+
+# A program that takes only some signals runs on through the others.
+@pytest.mark.asyncio
+async def test_a_program_runs_on_through_a_signal_it_does_not_take():
+    started = asyncio.Event()
+
+    async def program() -> int:
+        started.set()
+        await asyncio.sleep(0.05)
+        return 7
+
+    async def run() -> int:
+        outcome = await handle.program(program, frozenset({2}))
+        assert outcome == (7, None)
+        return 0
+
+    handle = ProcessHandle(_info(), run, lambda _pid: None)
+    handle.start()
+    await started.wait()
+    handle.interrupt(3)
+    assert (await handle.join()).exit_code == 0
+
+
 # A stop stands for the signal a kill named: the runner reads it from the
 # caller it runs as, and its status is 128 plus it, as bash reports a
 # child that signal ended.

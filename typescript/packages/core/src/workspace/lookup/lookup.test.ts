@@ -21,11 +21,17 @@ import { ParsedArgs } from '../../commands/spec/parser.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { headAllowed } from '../../policy/match/allow.ts'
+import type { ShellNode } from '../../policy/types.ts'
 import { SCANS } from '../../rs/scan.ts'
 import * as stream from '../../rs/stream.ts'
-import { Runtime } from '../../runtime/base.ts'
+import { Runtime, type RuntimeEntry } from '../../runtime/base.ts'
 import { EXTERNAL_COMMANDS } from '../../runtime/constants.ts'
-import { PROCESS_EXECUTOR, type ProcessExecutorMixin } from '../../runtime/mixin.ts'
+import {
+  LINE_EXECUTOR,
+  type LineExecutorMixin,
+  PROCESS_EXECUTOR,
+  type ProcessExecutorMixin,
+} from '../../runtime/mixin.ts'
 import { PythonRuntime } from '../../runtime/python/base.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { Follow, LineFacts, MountMode, PathSpec, wordText } from '../../types.ts'
@@ -909,4 +915,301 @@ describe('reading a line once', () => {
       ;(facts as { writes: boolean }).writes = false
     }).toThrow(TypeError)
   })
+})
+
+class Box extends Runtime implements LineExecutorMixin {
+  readonly [LINE_EXECUTOR] = true as const
+  override readonly reach = 'remote'
+
+  constructor(
+    readonly name: string,
+    ...captures: string[]
+  ) {
+    super({ captures })
+  }
+
+  runLine(): Promise<RunResult> {
+    return Promise.resolve({
+      stdout: new TextEncoder().encode(`${this.name}\n`),
+      stderr: null,
+      exitCode: 0,
+    })
+  }
+}
+
+class Monty extends PythonRuntime {
+  readonly name = 'monty'
+
+  interpret(): Promise<RunResult> {
+    return Promise.resolve({
+      stdout: new TextEncoder().encode('monty\n'),
+      stderr: null,
+      exitCode: 0,
+    })
+  }
+}
+
+function runtimesOf(node: ShellNode): string[] {
+  return node.children.flatMap((child) =>
+    'command' in child ? [child.runtime, ...child.children.flatMap(runtimesOf)] : runtimesOf(child),
+  )
+}
+
+describe('a wrapper runs where the program it runs is captured', () => {
+  it.each([
+    [true, 'nice gcc x.c', 'docker'],
+    [true, 'nice -n -5 gcc x.c', 'docker'],
+    [true, 'nice -- gcc x.c', 'docker'],
+    [true, 'nohup gcc x.c', 'docker'],
+    [true, 'nice nohup gcc x.c', 'docker'],
+    [true, 'stdbuf -o L gcc x.c', 'docker'],
+    [true, 'ionice -c2 gcc x.c', 'docker'],
+    [true, 'setsid -w gcc x.c', 'docker'],
+    [false, 'nice gcc x.c', 'docker'],
+    [true, 'nice make', 'e2b'],
+    [true, 'nice', 'e2b'],
+    [true, 'sudo gcc x.c', 'e2b'],
+  ] as [boolean, string, string][])('%s %s runs on %s', async (external, line, runs) => {
+    const entries: RuntimeEntry[] = [new Box('docker', 'gcc'), new Monty(), 'workspace']
+    if (external) entries.unshift(new Box('e2b', '@external'))
+    const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: entries })
+    try {
+      const io = await ws.shell(line)
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, `${runs}\n`])
+      const said = await ws.explain(line)
+      expect(runtimesOf(said.node)[0]).toBe(runs === 'e2b' ? '' : runs)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('runs a wrapper a runtime captures there', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        runtimes: [new Box('niced', 'nice'), new Box('docker', 'gcc'), 'workspace'],
+      },
+    )
+    try {
+      const io = await ws.shell('nice gcc x.c')
+      expect(new TextDecoder().decode(io.stdout)).toBe('niced\n')
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+class Echo extends Box {
+  override runLine(
+    _e?: unknown,
+    _p?: unknown,
+    _t?: unknown,
+    ctx?: { flags: Record<string, unknown> },
+  ): Promise<RunResult> {
+    return Promise.resolve({
+      stdout: new TextEncoder().encode(`${String(ctx?.flags.c)}\n`),
+      stderr: null,
+      exitCode: 0,
+    })
+  }
+}
+
+describe('a wrapped program', () => {
+  it.each([false, true])(
+    'has its globs expanded as the program does (external: %s)',
+    async (external) => {
+      const entries: RuntimeEntry[] = [new Echo('docker', 'gcc'), 'workspace']
+      if (external) entries.unshift(new Box('e2b', '@external'))
+      const ws = new Workspace(
+        { '/data': new RAMVFS() },
+        { mode: MountMode.EXEC, runtimes: entries },
+      )
+      try {
+        await ws.vfs.write('/data/a.c', '')
+        await ws.vfs.write('/data/b.c', '')
+        const io = await ws.shell('cd /data && nice gcc *.c')
+        expect(new TextDecoder().decode(io.stdout)).toBe('nice gcc a.c b.c\n')
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it.each([false, true])(
+    'is explained as it runs when a function takes the wrapper (external: %s)',
+    async (external) => {
+      const entries: RuntimeEntry[] = [new Box('docker', 'gcc'), 'workspace']
+      if (external) entries.unshift(new Box('e2b', '@external'))
+      const ws = new Workspace(
+        { '/data': new RAMVFS() },
+        { mode: MountMode.EXEC, runtimes: entries },
+      )
+      try {
+        await ws.shell('nice() { echo local; }')
+        const io = await ws.shell('nice gcc x.c')
+        expect(new TextDecoder().decode(io.stdout)).toBe('local\n')
+        const said = await ws.explain('nice gcc x.c')
+        expect(runtimesOf(said.node)[0]).toBe('')
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+})
+
+describe('command past a wrapper function', () => {
+  it('is explained as it runs', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new Box('docker', 'gcc'), 'workspace'] },
+    )
+    try {
+      await ws.shell('nice() { echo local; }')
+      const io = await ws.shell('command nice gcc x.c')
+      expect(new TextDecoder().decode(io.stdout)).toBe('docker\n')
+      const said = await ws.explain('command nice gcc x.c')
+      expect(runtimesOf(said.node)).toEqual(['', 'docker', 'docker'])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+function mirageWorkspace(...entries: RuntimeEntry[]): Workspace {
+  return new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      runtimes: [...entries, 'workspace'],
+      profiles: { tight: { commands: { allow: ['cd', 'grep'] } } },
+    },
+  )
+}
+
+describe("a wrapper around Mirage's program", () => {
+  it.each([
+    [true, 'nice grep python f', 'python here\n'],
+    [false, 'nice grep python f', 'python here\n'],
+    [true, 'nohup cat f', 'python here\n'],
+    [true, 'nice -n 5 grep python f', 'python here\n'],
+    [true, 'nice nohup grep python f', 'python here\n'],
+    [false, 'nice grep -h python *.txt', 'python a\npython b\n'],
+    [true, 'nice python3 -c 1', 'monty\n'],
+    [true, 'stdbuf -oL grep python f', 'python here\n'],
+  ] as [boolean, string, string][])('%s %s runs it in Mirage', async (external, line, out) => {
+    const entries: RuntimeEntry[] = [new Box('docker', 'gcc'), new Monty()]
+    if (external) entries.unshift(new Box('e2b', '@external'))
+    const ws = mirageWorkspace(...entries)
+    try {
+      await ws.vfs.write('/data/f', 'python here\n')
+      await ws.vfs.write('/data/a.txt', 'python a\n')
+      await ws.vfs.write('/data/b.txt', 'python b\n')
+      await ws.shell('cd /data')
+      const io = await ws.shell(line)
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, out])
+      const said = await ws.explain(line)
+      expect(runtimesOf(said.node)[0]).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['foo() { echo hi; }; nice foo', 'hi\n'],
+    ['nice python3 -c 1', 'e2b\n'],
+    ['nice --help grep x', 'e2b\n'],
+    ['ionice -p 1 grep x', 'e2b\n'],
+  ])('runs a function, and keeps its route otherwise: %s', async (line, out) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new Box('e2b', '@external'), 'workspace'] },
+    )
+    try {
+      const io = await ws.shell(line)
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, out])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('is still refused by an allow list that leaves the wrapper out', async () => {
+    const ws = mirageWorkspace(new Box('e2b', '@external'))
+    try {
+      await ws.vfs.write('/data/f', 'python here\n')
+      ws.createSession('s', { profile: 'tight' })
+      expect((await ws.shell('cd /data && grep python f', { sessionId: 's' })).exitCode).toBe(0)
+      const io = await ws.shell('cd /data && nice grep python f', { sessionId: 's' })
+      expect(io.exitCode).toBe(126)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('a wrapper Mirage runs a program for', () => {
+  const tryHelp = (name: string): string => `Try '${name} --help' for more information.\n`
+
+  it.each([
+    ['nice cd /data', 127, "nice: 'cd': No such file or directory\n"],
+    ['nohup cd /data', 127, "nohup: failed to run command 'cd': No such file or directory\n"],
+    ['stdbuf -oL cd /data', 127, "stdbuf: failed to run command 'cd': No such file or directory\n"],
+    ['ionice -c3 cd /data', 127, 'ionice: failed to execute cd: No such file or directory\n'],
+    ['setsid cd /data', 127, 'setsid: failed to execute cd: No such file or directory\n'],
+    ['nice --bogus rm f', 125, `nice: unrecognized option '--bogus'\n${tryHelp('nice')}`],
+    ['nice -x rm f', 125, `nice: invalid option -- 'x'\n${tryHelp('nice')}`],
+    ['nice -n abc rm f', 125, "nice: invalid adjustment 'abc'\n"],
+    ['nohup -x rm f', 125, `nohup: invalid option -- 'x'\n${tryHelp('nohup')}`],
+    ['stdbuf -o abc rm f', 125, "stdbuf: invalid mode 'abc'\n"],
+    [
+      'stdbuf -o 1Q rm f',
+      125,
+      "stdbuf: invalid mode '1Q': Value too large for defined data type\n",
+    ],
+    ['stdbuf rm f', 125, `stdbuf: you must specify a buffering mode option\n${tryHelp('stdbuf')}`],
+    ['stdbuf -i L rm f', 125, `stdbuf: line buffering stdin is meaningless\n${tryHelp('stdbuf')}`],
+    ['ionice -c abc rm f', 1, "ionice: unknown scheduling class: 'abc'\n"],
+    ['ionice -n 1x rm f', 1, "ionice: invalid class data argument: '1x'\n"],
+    ['setsid -x rm f', 1, `setsid: invalid option -- 'x'\n${tryHelp('setsid')}`],
+  ] as [string, number, string][])('refuses %s as GNU does', async (line, code, said) => {
+    const ws = mirageWorkspace(new Box('e2b', '@external'))
+    try {
+      await ws.vfs.write('/data/f', 'kept\n')
+      const io = await ws.shell(`cd / && ${line}`)
+      expect([io.exitCode, new TextDecoder().decode(io.stderr)]).toEqual([code, said])
+      const after = await ws.shell('pwd; cat /data/f')
+      expect(new TextDecoder().decode(after.stdout)).toBe('/\nkept\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    'nice -n +3 cat /data/f',
+    'nice -10 cat /data/f',
+    'nice --adj 3 cat /data/f',
+    'stdbuf -o 1KB -e0 cat /data/f',
+    'ionice -c idle -n 0 cat /data/f',
+    'setsid -fw cat /data/f',
+  ])('runs %s with good options', async (line) => {
+    const ws = mirageWorkspace(new Box('e2b', '@external'))
+    try {
+      await ws.vfs.write('/data/f', 'kept\n')
+      const io = await ws.shell(line)
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'kept\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('streams the program output', async () => {
+    const ws = mirageWorkspace()
+    try {
+      await ws.vfs.write('/data/log', 'one\n')
+      const io = await ws.shell('nice tail -f /data/log | head -n 1')
+      expect(new TextDecoder().decode(io.stdout)).toBe('one\n')
+    } finally {
+      await ws.close()
+    }
+  }, 10000)
 })

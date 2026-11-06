@@ -34,9 +34,10 @@ class SqlWorkspaceStateStore(WorkspaceStateStore):
     - ``{scope}{ws}/nodes/`` — symlinks and the attribute overlay
 
     So a workspace whose process restarts on the same file keeps its
-    sessions' cwd, exported env and functions, and its links. Observer
-    events and jobs are per-process planes and stay in memory. Mirrors
-    TypeScript's ``SqlWorkspaceStateStore``.
+    sessions' cwd, variables, functions, aliases, options, umask and
+    traps, and its links. Observer events and jobs are per-process
+    planes and stay in memory. Mirrors TypeScript's
+    ``SqlWorkspaceStateStore``.
     """
 
     def __init__(

@@ -55,6 +55,9 @@ import {
   type ScriptJSON,
 } from './serialize.ts'
 
+// The file-creation mask a fresh shell starts with, as bash's.
+const FRESH_UMASK = 0o022
+
 /**
  * Read one entry of a session record, ignoring anything inherited from
  * `Object.prototype`. Shell names are script-controlled, so a plain
@@ -496,7 +499,7 @@ export class SessionState {
   readonly terminal: StreamOwner = Symbol('terminal')
   lineOpen = false
   // File-creation mask. bash's default for a fresh shell.
-  umask = 0o022
+  umask = FRESH_UMASK
   // `exec` redirect-only state: where the shell's own stdout, stderr and
   // stdin point after a bare `exec > file`. Null is the terminal; `""`
   // is a closed descriptor whose writes drop. `execStdin` is the one
@@ -523,6 +526,8 @@ export class SessionState {
   // closing one never closes the parent's. Mirrors Python's _borrowed.
   borrowed: SharedInput[] = []
   localFrames: Map<string, ShellVar | null>[] = []
+  // The records running prefix assignments set aside, held until put back.
+  prefixSaves: ReadonlyMap<string, ShellVar | null>[] = []
   // The names a running `declare -g` has put at global scope
   // (`reachGlobal`), each with its frame and the function's local it set
   // aside: arithmetic in the declaration still reads that local.
@@ -943,6 +948,25 @@ export class SessionState {
       data.readonly_functions = [...this.readonlyFunctions].sort(compareCodePoints)
     if (this.exportedFunctions.size > 0)
       data.exported_functions = [...this.exportedFunctions].sort(compareCodePoints)
+    // The rest of what a shell keeps between lines, each only when it
+    // differs from a fresh shell's, so a host that forgets its memory
+    // brings the session back as it was left.
+    if (Object.keys(this.aliases).length > 0) data.aliases = { ...this.aliases }
+    // Each function's body runs the aliases its definition saw, not the
+    // ones defined since, so the view goes with it.
+    const views = ownRecord<Record<string, string>>()
+    for (const [name, source] of Object.entries(this.functions)) {
+      const site = this.functionSites.get(name)
+      if (site?.aliases != null && site.source === source) views[name] = { ...site.aliases }
+    }
+    if (Object.keys(views).length > 0) data.function_aliases = views
+    if (Object.keys(this.shellOptions).length > 0) data.shell_options = { ...this.shellOptions }
+    if (Object.keys(this.shopts).length > 0) data.shopts = { ...this.shopts }
+    if (this.umask !== FRESH_UMASK) data.umask = this.umask
+    if (this.logicalCwd !== undefined) data.logical_cwd = this.logicalCwd
+    if (this.exitTrap !== null) data.exit_trap = this.exitTrap
+    if (this.errTrap !== null) data.err_trap = this.errTrap
+    if (this.returnTrap !== null) data.return_trap = this.returnTrap
     if (this.mountModes !== null) {
       data.mount_modes = Object.fromEntries(this.mountModes)
     }
@@ -1007,6 +1031,15 @@ export class SessionState {
     functions?: Record<string, string>
     readonly_functions?: string[]
     exported_functions?: string[]
+    aliases?: Record<string, string>
+    function_aliases?: Record<string, Record<string, string>>
+    shell_options?: Record<string, boolean>
+    shopts?: Record<string, boolean>
+    umask?: number
+    logical_cwd?: string | null
+    exit_trap?: string | null
+    err_trap?: string | null
+    return_trap?: string | null
   }): SessionState {
     const commands = data.commands != null ? commandsFromDict(data.commands) : null
     const processes = parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS)
@@ -1019,6 +1052,7 @@ export class SessionState {
       ...(data.functions === undefined ? {} : { functions: data.functions }),
       readonlyFunctions: new Set(data.readonly_functions ?? []),
       exportedFunctions: new Set(data.exported_functions ?? []),
+      ...(data.shell_options != null ? { shellOptions: { ...data.shell_options } } : {}),
       ...(data.cwd !== undefined ? { cwd: data.cwd } : {}),
       // No `var_attrs` at all means the payload is a bare process
       // environment -- an embedder's record, or one another writer
@@ -1065,6 +1099,20 @@ export class SessionState {
     // variable it had unset stays unset rather than being seeded again; a
     // bare environment starts a new shell. The constructor seeded a copy.
     if (data.var_attrs !== undefined && vars !== undefined) session.vars = vars
+    if (data.aliases != null) session.aliases = { ...data.aliases }
+    // A function's alias view comes back as its site; where on its line the
+    // definition stood went with the line.
+    for (const [name, view] of Object.entries(data.function_aliases ?? {})) {
+      const source = Object.hasOwn(session.functions, name) ? session.functions[name] : undefined
+      if (source === undefined) continue
+      session.functionSites.set(name, { source, mark: [0, 0], origin: null, aliases: { ...view } })
+    }
+    if (data.shopts != null) session.shopts = { ...data.shopts }
+    if (data.umask != null) session.umask = data.umask
+    if (data.logical_cwd != null) session.logicalCwd = data.logical_cwd
+    session.exitTrap = data.exit_trap ?? null
+    session.errTrap = data.err_trap ?? null
+    session.returnTrap = data.return_trap ?? null
     return session
   }
 }

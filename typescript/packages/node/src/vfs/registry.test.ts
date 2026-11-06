@@ -22,11 +22,12 @@ import { OneDriveVFS } from '@struktoai/mirage-core/vfs/onedrive/onedrive'
 import { parseConfigWithSchema, vfsStateRequiresOverride } from '@struktoai/mirage-core/vfs/secrets'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { describe, expect, it, vi } from 'vitest'
 import { Workspace } from '../workspace.ts'
-import { buildVfs, knownVfsNames, registerVfs } from './registry.ts'
+import { buildVfs, CONFIG_SCHEMAS, knownVfsNames, registerVfs } from './registry.ts'
 import { S3Config } from '@struktoai/mirage-core/vfs/direct/s3'
 
 // Captured before any test calls register(), which is the public hook for
@@ -587,5 +588,34 @@ describe('the write-condition table covers the registry', () => {
     // The browser registers a backend of its own (opfs); its twin checks it.
     const rows = Object.keys(fixture.vfs).filter((n) => !fixture.browser_only.includes(n))
     expect(new Set(rows)).toEqual(new Set(names))
+  })
+})
+
+describe('CONFIG_SCHEMAS', () => {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const sources = [
+    resolve(here, 'registry.ts'),
+    resolve(here, '..', '..', '..', 'core', 'src', 'vfs', 'registry.ts'),
+  ]
+
+  it('names every factory that parses a config', () => {
+    const parsing = new Set<string>()
+    for (const source of sources) {
+      const text = readFileSync(source, 'utf8')
+      for (const m of text.matchAll(
+        /\n {2}'?([a-z0-9_]+)'?: async \(config\) => \{([\s\S]*?)\n {2}\},/g,
+      )) {
+        if (/parseConfigWithSchema|normalize\w+Config\(/.test(m[2] ?? '')) parsing.add(m[1] ?? '')
+      }
+    }
+    expect([...parsing].sort(compareCodePoints)).toEqual(
+      Object.keys(CONFIG_SCHEMAS).sort(compareCodePoints),
+    )
+  })
+
+  it('loads a schema for each', async () => {
+    for (const load of Object.values(CONFIG_SCHEMAS)) {
+      expect(typeof (await load()).safeParse).toBe('function')
+    }
   })
 })

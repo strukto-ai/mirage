@@ -92,7 +92,9 @@ describe('the stored login', () => {
 
   it('asks to log in when an ended token has nothing to refresh it', async () => {
     const pasted = login({ refresh_token: null, expires_at: Date.now() / 1000 - 1 })
-    await expect(freshToken(pasted, path)).rejects.toThrow(/expired; run `mirage login`/)
+    await expect(freshToken(pasted, path)).rejects.toThrow(
+      /expired; run `mirage login https:\/\/mirage.example.com --name login`/,
+    )
   })
 
   it('refreshes an ending token and stores it', async () => {

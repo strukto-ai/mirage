@@ -103,6 +103,7 @@
     "@struktoai/mirage-browser": "workspace:*",
     "@struktoai/mirage-core": "workspace:*",
     "@struktoai/mirage-node": "workspace:*",
+    "@struktoai/mirage-server": "workspace:*",
     "@types/node": "^22.0.0",
     "eslint": "^9.0.0",
     "eslint-config-prettier": "^10.1.8",

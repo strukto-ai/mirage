@@ -423,7 +423,7 @@ describe('native streamed writes', () => {
   })
 
   it.each([
-    ['cat /dst/f >> /dst/f', { '/dst/f': 'a\nb\nca\nb\nc' }],
+    ['head -n 3 /dst/f >> /dst/f', { '/dst/f': 'a\nb\nca\nb\nc' }],
     ["sed -n -e 'w /dst/a' -e 'w /dst/b' /dst/f", { '/dst/a': 'a\nb\nc', '/dst/b': 'a\nb\nc' }],
   ])('never rereads or reopens its output: %s', async (line, expected) => {
     const destination = new StreamWritingRAM()

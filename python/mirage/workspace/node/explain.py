@@ -621,6 +621,10 @@ async def _judge_words(
         inner_session.vars = env_vars(session, child[1])
     elif name in ("sh", "bash") and inners:
         inner_session = session.new_shell()
+    elif name == "command" and inners and inners[0].argv:
+        inner_session = session.fork()
+        inner_session.functions.pop(inners[0].argv[0].value, None)
+        inner_session.aliases.pop(inners[0].argv[0].value, None)
     for inner in inners:
         if not inner.readable:
             continue
@@ -1866,7 +1870,7 @@ def explained_line(
     line: str,
     judged: Sequence[Judged],
     verdicts: Sequence[Judged],
-    runtime_of: Callable[[str], str],
+    runtime_of: Callable[[Judged], str],
     whole_line: bool = False,
     aliases: frozenset[str] = frozenset(),
 ) -> ShellExplanation:
@@ -1895,7 +1899,7 @@ def explained_line(
             line on: the profile's rules alone (``every=False``), or
             ``judged`` itself for a runtime that takes the line whole,
             whose gate asks every policy.
-        runtime_of (Callable[[str], str]): the runtime that would run a
+        runtime_of (Callable[[Judged], str]): the runtime that would run a
             command, empty for the workspace.
         whole_line (bool): whether a runtime takes the line whole.
         aliases (frozenset[str]): the alias names the session expands,
@@ -1983,7 +1987,7 @@ def _scope_node(
     kind: str,
     key: tuple[Occurrence | None, str],
     scopes: dict[tuple[Occurrence | None, str], list[Judged]],
-    runtime_of: Callable[[str], str],
+    runtime_of: Callable[[Judged], str],
     aliases: frozenset[str],
 ) -> ShellNode:
     """One scope of a line as a node: its text parsed, the commands
@@ -1996,7 +2000,7 @@ def _scope_node(
             its text was evaluated from, and the text.
         scopes (dict[tuple[Occurrence | None, str], list[Judged]]): every
             scope's judgments.
-        runtime_of (Callable[[str], str]): the runtime that would run a
+        runtime_of (Callable[[Judged], str]): the runtime that would run a
             command.
         aliases (frozenset[str]): the alias names each scope is parsed
             with.
@@ -2078,7 +2082,7 @@ def _command_of(
     one: Judged,
     text: str,
     children: tuple[ShellNode, ...],
-    runtime_of: Callable[[str], str],
+    runtime_of: Callable[[Judged], str],
 ) -> CommandExplanation:
     """One command's public explanation.
 
@@ -2086,7 +2090,7 @@ def _command_of(
         one (Judged): the command's judgment and place.
         text (str): its source text.
         children (tuple[ShellNode, ...]): the scopes it runs in turn.
-        runtime_of (Callable[[str], str]): the runtime that would run it.
+        runtime_of (Callable[[Judged], str]): the runtime that would run it.
     """
     judgment = one.judgment
     outcome, reason, source = _verdict_of(judgment)
@@ -2100,7 +2104,7 @@ def _command_of(
         source=source,
         answers=judgment.answers,
         refusal=judgment.refusal,
-        runtime=runtime_of(judgment.command),
+        runtime=runtime_of(one),
         text=text,
         children=children,
     )

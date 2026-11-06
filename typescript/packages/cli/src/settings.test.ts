@@ -16,7 +16,8 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { loginPath, writeLogin, type Login } from './credentials.ts'
+import { loginPath } from './credentials.ts'
+import { writeLogin, type Login } from './credentials.ts'
 import {
   DEFAULT_DAEMON_URL,
   getConfig,
@@ -108,7 +109,7 @@ describe('loadDaemonSettings', () => {
     try {
       const tokenFile = join(dir, 'auth_token')
       writeFileSync(tokenFile, 'from-file')
-      writeLogin(storedLogin('http://127.0.0.1:8765'), loginPath({ MIRAGE_HOME: dir }))
+      writeLogin(storedLogin('http://127.0.0.1:8765'), loginPath('local', { MIRAGE_HOME: dir }))
       const s = loadDaemonSettings({
         env: { MIRAGE_HOME: dir, MIRAGE_DAEMON_URL: 'http://127.0.0.1:8765/' },
         configPath: '/nonexistent/config.toml',
@@ -124,7 +125,7 @@ describe('loadDaemonSettings', () => {
   it('never sends a login to another server', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-settings-'))
     try {
-      writeLogin(storedLogin('https://other.example.com'), loginPath({ MIRAGE_HOME: dir }))
+      writeLogin(storedLogin('https://other.example.com'), loginPath('local', { MIRAGE_HOME: dir }))
       const s = loadDaemonSettings({
         env: { MIRAGE_HOME: dir, MIRAGE_DAEMON_URL: 'https://mirage.example.com' },
         configPath: '/nonexistent/config.toml',
@@ -140,7 +141,10 @@ describe('loadDaemonSettings', () => {
   it('takes a set token before the login', () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-cli-settings-'))
     try {
-      writeLogin(storedLogin('https://mirage.example.com'), loginPath({ MIRAGE_HOME: dir }))
+      writeLogin(
+        storedLogin('https://mirage.example.com'),
+        loginPath('local', { MIRAGE_HOME: dir }),
+      )
       const s = loadDaemonSettings({
         env: {
           MIRAGE_HOME: dir,

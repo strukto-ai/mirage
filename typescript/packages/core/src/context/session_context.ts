@@ -27,6 +27,7 @@ import type { ProcessHandle } from '../process/handle.ts'
 import { fromUnits, units } from '../rs/document.ts'
 import { visibilityMatcher } from '../rs/policy.ts'
 import type { JobConsole } from '../shell/console/index.ts'
+import type { FileDescription } from '../shell/descriptors.ts'
 import type { Redirect } from '../shell/types.ts'
 import type { Limit, PathSpec, Refusal, Visibility, WalkProbe } from '../types.ts'
 import { MountMode, weakerMode } from '../types.ts'
@@ -149,6 +150,13 @@ export interface Caller {
   readonly invocation: CommandContext | null
   // The prefix of the mount whose VFS serves the call, null outside one.
   readonly vfsMount: string | null
+  // The descriptions the redirects around the call write as their commands
+  // write, each with what an op that reaches its file runs first: it commits
+  // what went in and keeps the rest for the command's end.
+  readonly streamed: readonly (readonly [FileDescription, () => Promise<void>])[]
+  // The regular file the running command's stdout writes, null when it
+  // writes anywhere else.
+  readonly outputFile: string | null
 }
 
 /**
@@ -198,6 +206,8 @@ const UNBOUND: Caller = {
   process: null,
   invocation: null,
   vfsMount: null,
+  streamed: [],
+  outputFile: null,
 }
 
 const callerStorage = createAsyncContext<Caller>()

@@ -63,3 +63,7 @@ HARD_LINK_REFUSAL: Final = FsCondition.EPERM
 # ``route_policy``) may run before the action it judges is refused or
 # the route it decides fails. One bound for every stage.
 SCRIPT_EVAL_TIMEOUT_SECONDS = 10.0
+
+# The config fields that hold a runtime's credential: a saved runtime keeps
+# them sealed, as a mount keeps a SecretStr field.
+SECRET_CONFIG_FIELDS: Final = frozenset({"api_key", "private_key"})

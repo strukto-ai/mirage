@@ -100,6 +100,32 @@ describe('SessionState', () => {
     expect(restored.mountModes?.get('/scratch')).toBe(MountMode.WRITE)
   })
 
+  it('round-trips what the shell keeps between lines, and omits what a fresh one has', () => {
+    const fresh = new SessionState({ sessionId: 'a' }).toDict()
+    for (const key of ['aliases', 'shell_options', 'shopts', 'umask', 'logical_cwd', 'exit_trap'])
+      expect(key in fresh).toBe(false)
+    const original = new SessionState({ sessionId: 'rt', shellOptions: { pipefail: true } })
+    original.aliases = { ll: 'ls -l' }
+    original.shopts = { nullglob: true }
+    original.umask = 0o077
+    original.logicalCwd = '/link'
+    original.exitTrap = 'echo bye'
+    original.errTrap = ''
+    const restored = SessionState.fromDict(
+      original.toDict() as Parameters<typeof SessionState.fromDict>[0],
+    )
+    expect(restored.aliases).toEqual({ ll: 'ls -l' })
+    expect(restored.shellOptions).toEqual({ pipefail: true })
+    expect(restored.shopts).toEqual({ nullglob: true })
+    expect(restored.umask).toBe(0o077)
+    expect(restored.logicalCwd).toBe('/link')
+    expect([restored.exitTrap, restored.errTrap, restored.returnTrap]).toEqual([
+      'echo bye',
+      '',
+      null,
+    ])
+  })
+
   it('round-trips the profile name and omits it when none', () => {
     expect('profile' in new SessionState({ sessionId: 'a' }).toDict()).toBe(false)
     const original = new SessionState({ sessionId: 'rt', profile: 'admin' })

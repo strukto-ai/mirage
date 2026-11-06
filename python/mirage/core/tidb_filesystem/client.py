@@ -431,9 +431,7 @@ async def append_to(
     The server copies the parts the bytes leave alone into a new upload,
     the last part's own bytes come back through its read URL, and they
     go up again with the new ones. False, with nothing sent, for a file
-    drive9 keeps inline (400) or a path that is not a file (404), and
-    False, with the upload aborted, when the file is not ``base_size``
-    bytes long.
+    drive9 keeps inline (400) or a path that is not a file (404).
 
     Args:
         accessor (TiDBFilesystemAccessor): the file system's accessor.
@@ -441,6 +439,10 @@ async def append_to(
         data (bytes | ByteSpool): the bytes to add.
         base_size (int | None): the size the file must have, or None for
             any size.
+
+    Raises:
+        TiDBFilesystemApiError: 412, with the upload aborted, when the
+            file is not ``base_size`` bytes long.
     """
     host = accessor.config.host
     size = size_of(data)
@@ -459,14 +461,10 @@ async def append_to(
         return False
     plan = _AppendPlan.model_validate(raw)
     if base_size is not None and plan.base_size != base_size:
-        logger.debug(
-            "tidb_filesystem: %s is %d bytes, not %d",
-            remote_path,
-            plan.base_size,
-            base_size,
-        )
         await _abort(accessor, "DELETE", f"{host}/v1/uploads/{plan.upload_id}")
-        return False
+        raise TiDBFilesystemApiError(
+            f"{remote_path} is {plan.base_size} bytes, not {base_size}", 412
+        )
 
     def kept(part: _AppendPart) -> int:
         start = (part.number - 1) * plan.part_size

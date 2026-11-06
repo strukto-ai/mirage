@@ -1062,6 +1062,25 @@ describe('prejudge', () => {
     expect(commands(said.node).map((c) => c.exitCode)).toEqual(commands(said.node).map(() => 0))
   })
 
+  it.each([
+    ['cd /data && echo hi | cat', Outcome.ALLOW, 3],
+    ['cd /data && git push origin main', Outcome.ASK, 2],
+  ] as const)('names the line runtime for every command of %s', async (line, outcome, count) => {
+    const w = new Workspace(
+      { '/data': new RAMVFS() },
+      {
+        mode: MountMode.EXEC,
+        profiles: { r: PROFILE },
+        runtimes: [new LineBox(), 'workspace'],
+      },
+    )
+    open.push(w)
+    w.createSession('s', { profile: 'r' })
+    const said = await w.explain(line, 's')
+    expect(said.outcome).toBe(outcome)
+    expect(commands(said.node).map((c) => c.runtime)).toEqual(Array(count).fill('sandbox'))
+  })
+
   it('leaves a path the pass cannot read to the gate', async () => {
     // Read as typed in the cwd the pass last knew, `$F` and a relative
     // word after `cd "$d"` matched the rule's glob, refusing whole lines

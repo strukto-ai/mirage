@@ -165,7 +165,7 @@ VERSION_SOURCES = [
     (
         "redirect",
         ("echo a > /s3/new",),
-        "({ printf b; printf c; printf E >&2; printf d; printf e; }"
+        "({ printf b; printf c; wc -c < /s3/new >&2; printf d; printf e; }"
         " >/s3/new) 2>/ram/err",
         PUT,
         [{"IfMatch": etag(b"a\n")}, EMPTY, {"IfMatch": etag(b"bc")}],
