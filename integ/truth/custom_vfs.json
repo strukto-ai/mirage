@@ -58,7 +58,7 @@
     "Remember: agents just speak bash.",
     "",
     "$ echo changed > /nested/wiki/notes.md",
-    "/nested/wiki/notes.md: Read-only file system",
+    "bash: line 1: /nested/wiki/notes.md: Read-only file system",
     "exit 1",
     "",
     "$ cat /nested/wiki/notes.md",

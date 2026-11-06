@@ -14,7 +14,6 @@
 
 from collections.abc import Callable
 
-
 _reader: list[Callable[[], str]] = [lambda: "bash: "]
 
 
@@ -27,12 +26,17 @@ def shell_voice() -> str:
     return _reader[0]()
 
 
-def use_voice(reader: Callable[[], str]) -> None:
+def use_voice(reader: Callable[[], str]) -> Callable[[], str]:
     """Install what ``shell_voice`` reads the running shell with: the
     session context's, which a shell module cannot import, since the
     session imports it.
 
     Args:
         reader (Callable[[], str]): the running shell's voice.
+
+    Returns:
+        Callable[[], str]: the reader it replaced.
     """
+    before = _reader[0]
     _reader[0] = reader
+    return before

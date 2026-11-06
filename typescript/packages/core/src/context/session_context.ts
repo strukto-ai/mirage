@@ -568,18 +568,21 @@ export function sessionUmask(access?: SessionAccess): number {
 }
 
 /**
- * The voice of the shell bound to the running context (`shellVoice`). The
+ * The voice of `session`'s shell (`shellVoice`), `bash: ` outside one. The
  * name is the file a sourced script, or a function defined in one, came from;
  * `environment` for a function defined in the shell's own input; else the
  * nested shell's `$0`, else `bash`. A builtin run as a program (`env`, `xargs`)
- * is not the shell and leads with nothing. Mirrors Python's _running_voice.
+ * is not the shell and leads with nothing. Mirrors Python's session_voice.
  */
-function runningVoice(): string {
-  const session = getCurrentSession()
+export function sessionVoice(session: SessionState | null): string {
   if (session === null) return 'bash: '
   if (isProgramInvocation(session)) return ''
   const name = session.parseName ?? session.scriptName ?? 'bash'
   return `${name === '' ? 'bash' : name}: line ${String(session.lineNumber)}: `
+}
+
+function runningVoice(): string {
+  return sessionVoice(getCurrentSession())
 }
 
 useVoice(runningVoice)

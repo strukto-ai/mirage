@@ -592,21 +592,26 @@ def session_umask(access: SessionAccess | None = None) -> int:
     return DEFAULT_UMASK if sess is None else sess.umask
 
 
-def _running_voice() -> str:
-    """The voice of the shell bound to the running context
-    (``shell_voice``). The name is the file a sourced script, or a function
-    defined in one, came from; ``environment`` for a function defined in
-    the shell's own input; else the nested shell's ``$0``, else ``bash``.
-    A builtin run as a program (``env``, ``xargs``) is not the shell and
-    leads with nothing.
+def session_voice(session: SessionState | None) -> str:
+    """The voice of ``session``'s shell (``shell_voice``). The name is the
+    file a sourced script, or a function defined in one, came from;
+    ``environment`` for a function defined in the shell's own input; else
+    the nested shell's ``$0``, else ``bash``. A builtin run as a program
+    (``env``, ``xargs``) is not the shell and leads with nothing.
+
+    Args:
+        session (SessionState | None): the shell, None outside one.
     """
-    session = get_current_session()
     if session is None:
         return "bash: "
     if program_invocation(session):
         return ""
     name = session._parse_name or session.script_name or "bash"
     return f"{name}: line {session.line_number}: "
+
+
+def _running_voice() -> str:
+    return session_voice(get_current_session())
 
 
 use_voice(_running_voice)

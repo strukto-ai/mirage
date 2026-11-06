@@ -2190,7 +2190,7 @@
       "expect": {
         "exit": 0,
         "stdout": "0\n0 f\nf\nout\n0\nabsent\n",
-        "stderr": "app: Operation not supported\n"
+        "stderr": "bash: line 1: app: Operation not supported\n"
       },
       "note": "Shared append-open cannot create a missing target without native create-only. Earlier deliberate replacements still truncate before their commands, and the refused append leaves no target."
     }

@@ -27,8 +27,10 @@ export function shellVoice(): string {
 /**
  * Install what `shellVoice` reads the running shell with: the session
  * context's, which a shell module cannot import, since the session imports
- * it.
+ * it. Returns the reader it replaced.
  */
-export function useVoice(voice: () => string): void {
+export function useVoice(voice: () => string): () => string {
+  const before = reader
   reader = voice
+  return before
 }

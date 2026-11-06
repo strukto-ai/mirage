@@ -12,9 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { shellVoice } from '../../../shell/voice.ts'
 import type { RedirectResult } from '../../../context/session_context.ts'
-import { runAsShell } from '../../../context/session_context.ts'
+import { runAsShell, sessionVoice } from '../../../context/session_context.ts'
 import { share } from '../../../io/async_line_iterator.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { IOResult } from '../../../io/types.ts'
@@ -82,7 +81,7 @@ export async function runShellFunction(
   if (cs.functionDepth >= limit) {
     throw new DiscardSignal(
       encodeText(
-        `${shellVoice()}${cmdName}: maximum function nesting level exceeded (${String(limit)})\n`,
+        `${sessionVoice(session)}${cmdName}: maximum function nesting level exceeded (${String(limit)})\n`,
       ),
     )
   }

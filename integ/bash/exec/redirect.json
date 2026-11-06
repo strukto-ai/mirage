@@ -538,7 +538,7 @@
       "expect": {
         "exit": 0,
         "stdout": "append=1\nabsent\nold\n",
-        "stderr": "extn.txt: Operation not supported\n"
+        "stderr": "bash: line 1: extn.txt: Operation not supported\n"
       },
       "note": "Opening a missing append descriptor refuses without native create-only and leaves no file. Ordinary output creation and opening an existing append descriptor still succeed."
     }

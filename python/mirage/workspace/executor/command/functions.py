@@ -19,6 +19,7 @@ from typing import Any
 from mirage.context import (
     clear_program_invocation,
     reset_program_invocation,
+    session_voice,
 )
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
@@ -34,7 +35,6 @@ from mirage.shell.helpers import parse_function
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse.scope import ParseScope
 from mirage.shell.variable import ShellVar
-from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec, word_text
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.alias.alias import body_aliases
@@ -121,8 +121,8 @@ async def run_shell_function(
     if cs.function_depth >= limit:
         raise DiscardSignal(
             encode_text(
-                f"{shell_voice()}{cmd_name}: maximum function nesting level "
-                f"exceeded ({limit})\n"
+                f"{session_voice(session)}{cmd_name}: maximum function "
+                f"nesting level exceeded ({limit})\n"
             )
         )
     cs.admit(cmd_name)

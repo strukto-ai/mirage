@@ -145,7 +145,7 @@ describe('OPFSVFS capacity', () => {
     expect((await ws.shell('printf 1234567 > /o/a')).exitCode).toBe(0)
     const refused = await ws.shell('printf 1234 > /o/b')
     expect(refused.exitCode).toBe(1)
-    expect(refused.stderrText).toBe('/o/b: Disk quota exceeded\n')
+    expect(refused.stderrText).toBe('bash: line 1: /o/b: Disk quota exceeded\n')
     const results = await Promise.all(
       Array.from({ length: 10 }, (_, i) => ws.shell(`printf 1 > /o/p${String(i)}`)),
     )

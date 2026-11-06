@@ -156,7 +156,7 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
     await run(ws, `cat ${r}/f`)
     drive.put('f', 'theirs\n')
     const uploads = drive.fake.count('upload')
-    expect(await run(ws, `echo mine > ${r}/f`)).toEqual([1, '', `${r}/f: ${STALE}\n`])
+    expect(await run(ws, `echo mine > ${r}/f`)).toEqual([1, '', `bash: line 1: ${r}/f: ${STALE}\n`])
     expect(drive.fake.count('upload')).toBe(uploads)
     expect(drive.text('f')).toBe('theirs\n')
   })
@@ -168,7 +168,7 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
     drive.hook('upload', () => {
       drive.put('f', 'theirs\n')
     })
-    expect(await run(ws, `echo mine > ${r}/f`)).toEqual([1, '', `${r}/f: ${STALE}\n`])
+    expect(await run(ws, `echo mine > ${r}/f`)).toEqual([1, '', `bash: line 1: ${r}/f: ${STALE}\n`])
     expect(drive.text('f')).toBe('theirs\n')
   })
 
@@ -345,7 +345,11 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
       '',
       `rm: cannot remove '${r}/d/a': ${STALE}\n`,
     ])
-    expect(await run(ws, `echo x > ${r}/d/b`)).toEqual([1, '', `${r}/d/b: ${STALE}\n`])
+    expect(await run(ws, `echo x > ${r}/d/b`)).toEqual([
+      1,
+      '',
+      `bash: line 1: ${r}/d/b: ${STALE}\n`,
+    ])
   })
 
   it("rm -r stopped partway keeps the changed file's version", async () => {
@@ -362,7 +366,11 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
     const [code, , err] = await run(ws, `rm -r ${r}/d`)
     expect(code).toBe(1)
     expect(err).toContain('Directory not empty')
-    expect(await run(ws, `echo z > ${r}/d/s/x`)).toEqual([1, '', `${r}/d/s/x: ${STALE}\n`])
+    expect(await run(ws, `echo z > ${r}/d/s/x`)).toEqual([
+      1,
+      '',
+      `bash: line 1: ${r}/d/s/x: ${STALE}\n`,
+    ])
     expect(drive.text('d/s/x')).toBe('theirs\n')
   })
 
@@ -457,7 +465,7 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
     await run(ws, `cat ${r}/${key}`)
     drive.put(key, 'theirs\n')
     const line = `echo x > ${r}/${key}; ${move}; echo new > ${r}/${key}`
-    expect(await run(ws, line)).toEqual([0, '', `${r}/${key}: ${STALE}\n`])
+    expect(await run(ws, line)).toEqual([0, '', `bash: line 1: ${r}/${key}: ${STALE}\n`])
     expect(drive.text(key)).toBe('new\n')
   })
 
@@ -473,7 +481,7 @@ describe.each(['box', 'dropbox'] as const)('conditional writes on %s', (kind) =>
     const line =
       `cat ${r}/g > /dev/null; echo x > ${r}/g; echo y > ${r}/y; ` +
       `cp ${r}/f ${r}/g && echo mine > ${r}/g`
-    expect(await run(ws, line)).toEqual([0, '', `${r}/g: ${STALE}\n`])
+    expect(await run(ws, line)).toEqual([0, '', `bash: line 1: ${r}/g: ${STALE}\n`])
     expect(drive.text('g')).toBe('mine\n')
   })
 })
@@ -750,7 +758,11 @@ describe('conditional writes only Box has', () => {
     await run(ws, 'cat /box/d/b')
     expect(await run(ws, 'cp -r /box/e/d /box')).toEqual([0, '', ''])
     drive.put('d/b', 'theirs\n')
-    expect(await run(ws, 'echo mine > /box/d/b')).toEqual([1, '', `/box/d/b: ${STALE}\n`])
+    expect(await run(ws, 'echo mine > /box/d/b')).toEqual([
+      1,
+      '',
+      `bash: line 1: /box/d/b: ${STALE}\n`,
+    ])
     expect(drive.text('d/b')).toBe('theirs\n')
   })
 
@@ -771,7 +783,7 @@ describe('conditional writes only Box has', () => {
     const line =
       'cat /box/d/a > /dev/null; echo x > /box/d/a; echo y > /box/y; ' +
       'cp -r /box/s /box/d && echo mine > /box/d/a'
-    expect(await run(ws, line)).toEqual([0, '', `/box/d/a: ${STALE}\n`])
+    expect(await run(ws, line)).toEqual([0, '', `bash: line 1: /box/d/a: ${STALE}\n`])
     expect(drive.text('d/a')).toBe('mine\n')
   })
 
@@ -890,7 +902,7 @@ describe('conditional writes only Dropbox has', () => {
     drive.put('n', 'v1\n')
     expect(await run(ws, 'cat /dbx/n')).toEqual([0, 'v1\n', ''])
     drive.put('n', 'theirs\n')
-    expect(await run(ws, 'echo mine > /dbx/n')).toEqual([1, '', `/dbx/n: ${STALE}\n`])
+    expect(await run(ws, 'echo mine > /dbx/n')).toEqual([1, '', `bash: line 1: /dbx/n: ${STALE}\n`])
     expect(drive.text('n')).toBe('theirs\n')
   })
 

@@ -37,7 +37,7 @@
       "expect": {
         "exit": 0,
         "stdout": "3\n1\n",
-        "stderr": "/data/new: Disk quota exceeded\n"
+        "stderr": "bash: line 1: /data/new: Disk quota exceeded\n"
       }
     }
   ]

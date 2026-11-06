@@ -169,7 +169,7 @@ describe('mirage in workerd', () => {
     )
     for (const streamed of results.slice(0, 3)) {
       expect(streamed.exit).toBe(1)
-      expect(streamed.stderr).toBe('/tmp/big: Disk quota exceeded\n')
+      expect(streamed.stderr).toBe('bash: line 1: /tmp/big: Disk quota exceeded\n')
     }
     expect(results[3]?.stdout).toBe('ok\n')
   })

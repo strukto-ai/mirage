@@ -490,7 +490,7 @@ LOSS = [
         "mv: cannot move '/s3/g' to '/s3/f': '/s3/f' ",
         1,
     ),
-    ("append", None, "echo x >> /s3/f", "f", PUT, "/s3/f: ", 1),
+    ("append", None, "echo x >> /s3/f", "f", PUT, "bash: line 1: /s3/f: ", 1),
     ("truncate", None, "truncate -s 1 /s3/f", "f", PUT, "truncate: ", 1),
     (
         "truncate-0",

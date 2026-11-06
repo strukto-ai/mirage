@@ -1496,7 +1496,7 @@
       "expect": {
         "exit": 0,
         "stdout": "created=1\nkeep\n",
-        "stderr": "/data/fd_readwrite_create: Operation not supported\n"
+        "stderr": "bash: line 1: /data/fd_readwrite_create: Operation not supported\n"
       },
       "note": "Read-write redirection opens a missing file through append-open. Without native create-only it refuses and leaves no file, while an existing read-write target still preserves its contents under noclobber."
     }

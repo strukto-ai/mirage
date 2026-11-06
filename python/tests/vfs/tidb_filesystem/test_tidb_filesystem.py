@@ -84,7 +84,7 @@ async def test_redirect_under_a_missing_folder_fails(ws, drive9):
     code, _, err = await _run(ws, "echo hi > /fs/nope/a.txt")
 
     assert code == 1
-    assert err == "/fs/nope/a.txt: No such file or directory\n"
+    assert err == "bash: line 1: /fs/nope/a.txt: No such file or directory\n"
     assert "/ws/nope" not in drive9.dirs
 
 
