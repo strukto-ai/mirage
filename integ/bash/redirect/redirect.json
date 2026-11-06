@@ -1730,7 +1730,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r8 && cd /data/r8 && echo keep > other && echo o > open && ln -s open lnk && ln -s other lnk2 && { echo a; mv lnk2 lnk; echo b; } > lnk; cat open other; { echo A; rm lnk; echo C; } > lnk; cat other; test -e lnk || echo unlinked; echo z > f; { echo A; rm f; echo C; } > f; test -e f || echo gone; echo z > f; { echo A; mv f g; wc -l < g; echo C; } > f; test -e f || cat g; mkdir s; { echo A; mv s s2; echo C; } > s/f; cat s2/f; echo keep > other; echo z > f; { echo A; mv other f; echo C; } > f; cat f; { echo A; mv f /data2/r8g; echo C; } > f; test -e f || cat /data2/r8g; rm /data2/r8g; echo z > f; { echo x; mv f g; cat g; } > f; echo $?; cd /",
+      "command": "mkdir -p /data/redirect-follow && cd /data/redirect-follow && echo keep > other && echo o > open && ln -s open lnk && ln -s other lnk2 && { echo a; mv lnk2 lnk; echo b; } > lnk; cat open other; { echo A; rm lnk; echo C; } > lnk; cat other; test -e lnk || echo unlinked; echo z > f; { echo A; rm f; echo C; } > f; test -e f || echo gone; echo z > f; { echo A; mv f g; wc -l < g; echo C; } > f; test -e f || cat g; mkdir s; { echo A; mv s s2; echo C; } > s/f; cat s2/f; echo keep > other; echo z > f; { echo A; mv other f; echo C; } > f; cat f; { echo A; mv f /data2/redirect-follow-g; echo C; } > f; test -e f || cat /data2/redirect-follow-g; rm /data2/redirect-follow-g; echo z > f; { echo x; mv f g; cat g; } > f; echo $?; cd / && rm -r /data/redirect-follow",
       "expect": {
         "exit": 0,
         "stdout": "a\nb\nkeep\nA\nC\nunlinked\ngone\nA\n1\nC\nA\nC\nkeep\nA\n1\n",
