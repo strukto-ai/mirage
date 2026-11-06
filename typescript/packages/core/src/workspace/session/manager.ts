@@ -33,26 +33,40 @@ import { checkName, SystemIdSource, type IdSource } from '../../utils/ids.ts'
 
 type StoredSession = Parameters<typeof SessionState.fromDict>[0]
 
-/** Whether any of the session's variables carries a pointer. */
 /**
  * What a flush compares a session against: the version its variables' store
- * was at and the rest of its record, as JSON. Two equal versions hold the same
- * variables, so a clean session is told apart without copying them out of the
- * store, and the baseline keeps no copy of them either.
+ * was at, the variables as one sorted JSON text and the rest of its record as
+ * JSON. Two equal versions hold the same variables, so a clean session is told
+ * apart without copying them out of the store; the text tells a change that
+ * came back (`TMP=x true`) from one that stayed.
  */
-type Baseline = readonly [bigint, string]
+type Baseline = readonly [bigint, string, string]
 
-/** What the session would write now, as a flush compares it. */
-function baseline(session: SessionState): Baseline {
-  return [session.vars.shell.version(), JSON.stringify(session.toDict(false))]
+/** The variables' keys of a record as one comparable text, keys sorted. */
+function variablesText(variables: Record<string, unknown>): string {
+  return JSON.stringify(variables, (_, value: unknown) =>
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? Object.fromEntries(
+          Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+        )
+      : value,
+  )
 }
 
 /** The baseline of a record written whole, at the version its variables were read at. */
 function written(version: bigint, fields: RecordFields): Baseline {
-  const rest = Object.fromEntries(Object.entries(fields).filter(([key]) => !VAR_KEYS.has(key)))
-  return [version, JSON.stringify(rest)]
+  const entries = Object.entries(fields)
+  const variables = Object.fromEntries(entries.filter(([key]) => VAR_KEYS.has(key)))
+  const rest = Object.fromEntries(entries.filter(([key]) => !VAR_KEYS.has(key)))
+  return [version, variablesText(variables), JSON.stringify(rest)]
 }
 
+/** The baseline of the session as it stands. */
+function baseline(session: SessionState): Baseline {
+  return written(session.vars.shell.version(), session.toDict() as RecordFields)
+}
+
+/** Whether any of the session's variables carries a pointer. */
 function holdsManaged(session: SessionState): boolean {
   return session.vars.records().some(([, v]) => v.managed !== undefined)
 }
@@ -422,10 +436,19 @@ export class SessionManager extends SessionOwner {
   /** Persist one session, retrying when another writer races us. */
   private async flushOne(session: SessionState): Promise<void> {
     const sid = session.sessionId
-    // Clean: the store already has exactly this state.
-    const [version, rest] = baseline(session)
-    const stored = this.persisted.get(sid)
-    if (stored?.[0] === version && stored[1] === rest) return
+    const kept = this.persisted.get(sid)
+    const now = session.vars.shell.version()
+    if (kept?.[2] === JSON.stringify(session.toDict(false))) {
+      // Clean: the store already has exactly this state.
+      if (kept[0] === now) return
+      // A change that came back where it was (`TMP=x true`) moves the
+      // version and leaves the store's record as it is.
+      const text = variablesText(session.variablesToDict())
+      if (text === kept[1]) {
+        this.persisted.set(sid, [now, text, kept[2]])
+        return
+      }
+    }
     for (let attempt = 0; attempt < CAS_MAX_RETRIES; attempt++) {
       const expected = session.generation
       session.generation = expected + 1

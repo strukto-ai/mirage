@@ -177,8 +177,14 @@ pub fn join(chunks: &[Chunk]) -> Vec<u8> {
 /// or quoted text, or a split value that is not empty, opened it, so an
 /// unquoted expansion that comes back empty is no word while `""` is one.
 /// Under `utf8` a separator is a whole character, so `IFS=é` splits on
-/// `é` alone and never inside `à`.
-pub fn split_fields(chunks: &[Chunk], ifs: Option<&[u8]>, utf8: bool) -> Vec<Field> {
+/// `é` alone and never inside `à`. A long value pauses through `pause`
+/// as it is scanned, so a cancel or the line's deadline lands inside it.
+pub async fn split_fields(
+    chunks: &[Chunk],
+    ifs: Option<&[u8]>,
+    utf8: bool,
+    pause: &mut impl AsyncFnMut() -> Result<(), Fault>,
+) -> Result<Vec<Field>, Fault> {
     let separators = ifs.unwrap_or(IFS_DEFAULT);
     let mut set: Vec<&[u8]> = Vec::new();
     let mut rest = separators;
@@ -211,7 +217,12 @@ pub fn split_fields(chunks: &[Chunk], ifs: Option<&[u8]>, utf8: bool) -> Vec<Fie
         }
         let text = &piece.text;
         let mut index = 0;
+        let mut paused = 0;
         while index < text.len() {
+            if index - paused >= SPLIT_SLICE {
+                pause().await?;
+                paused = index;
+            }
             let mut end = index;
             while end < text.len() && !separator(&text[end..]) {
                 end += char_at(&text[end..], utf8).len();
@@ -243,7 +254,7 @@ pub fn split_fields(chunks: &[Chunk], ifs: Option<&[u8]>, utf8: bool) -> Vec<Fie
     if started {
         fields.push(current);
     }
-    fields
+    Ok(fields)
 }
 
 /// A command substitution's run: its output, its stderr, which joins the
@@ -347,6 +358,9 @@ struct Operands {
 /// The brace words made between two pauses.
 const BRACE_SLICE: usize = 1024;
 
+/// The bytes of a value field splitting scans between two pauses.
+const SPLIT_SLICE: usize = 64 * 1024;
+
 const PATTERN_OPS: [&str; 14] = [
     "#", "##", "%", "%%", "/", "//", "/#", "/%", "^", "^^", ",", ",,", "~", "~~",
 ];
@@ -440,7 +454,7 @@ impl<H: Host> Expander<'_, H> {
                 let mut out = Vec::new();
                 for mut chunks in words {
                     self.tilde(&mut chunks);
-                    out.extend(split_fields(&chunks, self.shell.ifs(), self.shell.utf8()));
+                    out.extend(self.split(&chunks).await?);
                 }
                 return Ok(out);
             }
@@ -448,7 +462,15 @@ impl<H: Host> Expander<'_, H> {
         let mut chunks = self.chunks(node, false).await?;
         self.tilde(&mut chunks);
         self.assignment_tildes(&mut chunks);
-        Ok(split_fields(&chunks, self.shell.ifs(), self.shell.utf8()))
+        self.split(&chunks).await
+    }
+
+    /// Split a word's pieces into fields on the shell's IFS, pausing as a
+    /// long value is scanned.
+    async fn split(&mut self, chunks: &[Chunk]) -> Result<Vec<Field>, Fault> {
+        let (host, shell) = (&mut *self.host, &*self.shell);
+        let pause = &mut async || host.pause(shell).await;
+        split_fields(chunks, shell.ifs(), shell.utf8(), pause).await
     }
 
     /// An argument shaped like an assignment (`a=~/x`, `a+=~`, `a[$k]=~`):

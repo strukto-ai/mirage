@@ -391,6 +391,15 @@ describe('SessionManager dirty flush + CAS', () => {
     seedVar(m.get('default'), 'K', 'v')
     await m.flush()
     expect(store.casCalls).toBe(2)
+    // A change that came back where it was (`TMP=x true`) writes nothing,
+    // so it cannot carry stale records over another writer's newer ones.
+    seedVar(m.get('default'), 'K', 'w')
+    seedVar(m.get('default'), 'K', 'v')
+    await m.flush()
+    expect(store.casCalls).toBe(2)
+    seedVar(m.get('default'), 'K', 'w')
+    await m.flush()
+    expect(store.casCalls).toBe(3)
   })
 
   it('flush bumps the generation', async () => {

@@ -730,7 +730,8 @@ impl<'t> Reader<'_, '_, '_, 't> {
         let other = self.ternary();
         self.record.nest -= 1;
         self.skip -= usize::from(taken);
-        Ok(if taken { then } else { other? })
+        let other = other?;
+        Ok(if taken { then } else { other })
     }
 
     /// Binary operators binding at least as tightly as `floor`.
@@ -1146,6 +1147,12 @@ mod tests {
         }
         assert_eq!(value(&format!("2{}", "**1".repeat(200))), 2);
         assert_eq!(value(&format!("{}7", "0?1:".repeat(200))), 7);
+        // The arm not taken still parses: bash refuses a broken one.
+        let broken = run(b"1?2:3+", &mut Session::default());
+        assert!(matches!(
+            broken.value,
+            Err(Error::Arith { ref reason, .. }) if reason == "syntax error: operand expected"
+        ));
     }
 
     #[test]

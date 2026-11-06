@@ -31,7 +31,7 @@ pub enum Step {
 pub struct Job {
     running: Running,
     ended: bool,
-    rest: Vec<Field>,
+    rest: std::vec::IntoIter<Field>,
 }
 
 impl Job {
@@ -40,7 +40,7 @@ impl Job {
         let mut job = Self {
             running,
             ended: false,
-            rest: Vec::new(),
+            rest: Vec::new().into_iter(),
         };
         let step = job.run();
         (job, step)
@@ -61,13 +61,12 @@ impl Job {
 
     /// Whether slices of the result are left to take.
     pub fn more(&self) -> bool {
-        !self.rest.is_empty()
+        self.rest.len() > 0
     }
 
     /// The result's next slice.
     pub fn slice(&mut self) -> Vec<Field> {
-        let rest = self.rest.split_off(SLICE.min(self.rest.len()));
-        std::mem::replace(&mut self.rest, rest)
+        self.rest.by_ref().take(SLICE).collect()
     }
 
     fn run(&mut self) -> Step {
@@ -87,7 +86,7 @@ impl Job {
         };
         if let Ok(Output::Expanded(Expanded::Fields(fields))) = &mut ended.result {
             if fields.len() > SLICE {
-                self.rest = fields.split_off(SLICE);
+                self.rest = fields.split_off(SLICE).into_iter();
             }
         }
         Step::Ended(ended)

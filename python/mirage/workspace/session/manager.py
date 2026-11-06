@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
 import copy
+import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -44,19 +45,20 @@ from mirage.workspace.session.session import (
 from mirage.workspace.session.shell_dirs import set_cwd
 
 # What a flush compares a session against: the version its variables'
-# store was at and the rest of its record. Two equal versions hold the
-# same variables, so a clean session is told apart without copying them
-# out of the store, and the baseline keeps no copy of them either.
-Baseline = tuple[int, RecordFields]
+# store was at, the variables as one sorted JSON text and the rest of its
+# record. Two equal versions hold the same variables, so a clean session
+# is told apart without copying them out of the store; the text tells a
+# change that came back (`TMP=x true`) from one that stayed.
+Baseline = tuple[int, str, RecordFields]
 
 
-def _baseline(session: SessionState) -> Baseline:
-    """What the session would write now, as a flush compares it.
+def _variables_text(variables: RecordFields) -> str:
+    """The variables' keys of a record as one comparable text.
 
     Args:
-        session (SessionState): the session to read.
+        variables (RecordFields): the keys the variables fill.
     """
-    return session.vars.shell.version(), session.to_dict(variables=False)
+    return json.dumps(variables, sort_keys=True)
 
 
 def _written(version: int, fields: RecordFields) -> Baseline:
@@ -67,8 +69,20 @@ def _written(version: int, fields: RecordFields) -> Baseline:
         version (int): the variables' version as ``fields`` was made.
         fields (RecordFields): the record written.
     """
+    variables = {
+        key: value for key, value in fields.items() if key in VAR_KEYS
+    }
     rest = {key: value for key, value in fields.items() if key not in VAR_KEYS}
-    return version, copy.deepcopy(rest)
+    return version, _variables_text(variables), copy.deepcopy(rest)
+
+
+def _baseline(session: SessionState) -> Baseline:
+    """The baseline of the session as it stands.
+
+    Args:
+        session (SessionState): the session to read.
+    """
+    return _written(session.vars.shell.version(), session.to_dict())
 
 
 def _holds_managed(session: SessionState) -> bool:
@@ -493,8 +507,18 @@ class SessionManager(SessionOwner):
     async def _flush_one(self, session: SessionState) -> None:
         """Persist one session, retrying when another writer races us."""
         sid = session.session_id
-        if _baseline(session) == self._persisted.get(sid):
-            return  # clean: the store already has exactly this state
+        kept = self._persisted.get(sid)
+        version = session.vars.shell.version()
+        rest = session.to_dict(variables=False)
+        if kept is not None and kept[2] == rest:
+            if kept[0] == version:
+                return  # clean: the store already has exactly this state
+            # A change that came back where it was (`TMP=x true`) moves
+            # the version and leaves the store's record as it is.
+            text = _variables_text(session.variables_to_dict())
+            if text == kept[1]:
+                self._persisted[sid] = (version, text, kept[2])
+                return
         for _ in range(CAS_MAX_RETRIES):
             expected = session.generation
             session.generation = expected + 1

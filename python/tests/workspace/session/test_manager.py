@@ -512,6 +512,15 @@ def test_flush_skips_clean_sessions():
     seed_var(mgr.get("default"), "K", "v")
     _run(mgr.flush())
     assert store.cas_calls == 2
+    # A change that came back where it was (`TMP=x true`) writes nothing,
+    # so it cannot carry stale records over another writer's newer ones.
+    seed_var(mgr.get("default"), "K", "w")
+    seed_var(mgr.get("default"), "K", "v")
+    _run(mgr.flush())
+    assert store.cas_calls == 2
+    seed_var(mgr.get("default"), "K", "w")
+    _run(mgr.flush())
+    assert store.cas_calls == 3
 
 
 def test_flush_bumps_generation():
