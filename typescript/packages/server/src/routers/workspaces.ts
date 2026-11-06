@@ -53,7 +53,7 @@ import {
   type LoadWorkspaceRequest,
 } from '../schemas.ts'
 import { makeBrief, makeDetail } from '../summary.ts'
-import { requireOneAccount, storeRefusal } from './templates.ts'
+import { NO_WORKSPACE_ID, requireOneAccount, storeRefusal } from './templates.ts'
 import { queryFlag } from './vfs.ts'
 
 export interface WorkspaceRoutesDeps {
@@ -98,11 +98,16 @@ async function configOf(
   } else if (given === undefined) {
     return { status: 400, detail: 'give a template or a config' }
   }
+  let cfg: WorkspaceConfigRaw
   try {
-    return { cfg: checkConfig(written), written: written as Record<string, JsonValue> }
+    cfg = checkConfig(written)
   } catch (e) {
     return { status: 400, detail: (e as Error).message }
   }
+  if (body.template !== undefined && cfg.workspaceId !== undefined) {
+    return { status: 400, detail: NO_WORKSPACE_ID }
+  }
+  return { cfg, written: written as Record<string, JsonValue> }
 }
 
 interface WorkspaceIdParams {

@@ -237,7 +237,9 @@ mirage workspace create --template ram-only -w demo
 
 The server checks the config when it saves the template, as a create would.
 A workspace gets a copy of the template's config, so a later change to the
-template leaves it as it is. Give a config file or `--template`, not both.
+template leaves it as it is, and a template's config cannot set
+`workspace_id`: `-w` names the workspace. Give a config file or `--template`,
+not both.
 `mirage api /v1/templates` lists templates, and `-X DELETE` on
 `/v1/templates/NAME` deletes one; `POST /v1/templates/NAME/restore` brings it
 back. The local daemon keeps templates under `~/.mirage/resources`, as
@@ -378,7 +380,7 @@ goes nowhere but its own server.
 | `forwarded_allow_ips` | `MIRAGE_FORWARDED_ALLOW_IPS` | none; the proxies whose `X-Forwarded-For` names the client |
 | `graceful_timeout` | `MIRAGE_GRACEFUL_TIMEOUT` | `0`; seconds running lines get to finish on shutdown |
 | `policy_file` | `MIRAGE_POLICY_FILE` | none; see [Server policies](/home/access/http#server-policies) |
-| `resource_store` | `MIRAGE_RESOURCE_STORE` | `files`, under `~/.mirage/resources`; `memory` keeps saved templates only until the daemon stops |
+| `resource_store` | `MIRAGE_RESOURCE_STORE` | `files`, under `~/.mirage/resources`; `memory` keeps saved templates only until the daemon stops, and does not combine with `workers` |
 | `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#set-up) |
 | `jwt_*` | `MIRAGE_JWT_*` | see [Configure authentication](/home/access/http#configure-authentication) |
 | `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [Log in](#log-in) |

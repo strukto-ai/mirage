@@ -21,6 +21,13 @@ from mirage.server.schemas import CreateTemplateRequest, TemplateResponse
 
 STATUS = {"not_found": 404, "conflict": 409, "invalid": 400}
 
+# Every workspace made from a template would claim one id, which a worker
+# proxy cannot see without reading the template; the create names it.
+NO_WORKSPACE_ID = (
+    "a template's config cannot set workspace_id; give the id when you "
+    "create from it"
+)
+
 
 def require_one_account(request: Request) -> None:
     """Refuse templates on a server of many accounts: its one store would
@@ -82,6 +89,8 @@ async def create_template(
         req (CreateTemplateRequest): the name, description and config.
         request (Request): the HTTP request, for the app's store.
     """
+    if req.config.workspace_id is not None:
+        raise HTTPException(status_code=400, detail=NO_WORKSPACE_ID)
     written = (await request.json())["config"]
     try:
         saved = await request.app.state.resources.create_template(

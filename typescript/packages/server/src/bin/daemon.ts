@@ -26,6 +26,8 @@ import { ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS, ENV_WORKER_SOCKET } from '../e
 import { resolveAllowedHosts, resolveForwardedAllowIps } from '../host_validation.ts'
 import { pidFilePath, mirageHome } from '../paths.ts'
 import { resolveGracefulTimeout, resolveMaxWorkspaces } from '../registry.ts'
+import { resolveResourceStore } from '../resources/config.ts'
+import { ResourceStoreBackend } from '../resources/types.ts'
 import { resolveSSHConfig } from '../ssh/config.ts'
 import { resolveWorkers, resolveWorkerType } from '../workers/config.ts'
 import { WorkerPool } from '../workers/pool.ts'
@@ -91,6 +93,11 @@ async function serveWorkers(
 ): Promise<void> {
   if (resolveSSHConfig().port !== null) {
     throw new DaemonConfigError('ssh_port does not combine with workers yet')
+  }
+  if (resolveResourceStore() === ResourceStoreBackend.Memory) {
+    throw new DaemonConfigError(
+      'resource_store memory does not combine with workers: each worker would keep its own',
+    )
   }
   const gracefulTimeout = resolveGracefulTimeout()
   const allowedHosts = resolveAllowedHosts()

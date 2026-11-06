@@ -74,6 +74,12 @@ describe('templates router', () => {
       payload: { name: 'typo', descripton: 'd', config: RAM },
     })
     expect(typo.statusCode).toBe(400)
+    const pinned = await app.inject({
+      method: 'POST',
+      url: '/v1/templates',
+      payload: { name: 'pinned', config: { ...RAM, workspace_id: 'one' } },
+    })
+    expect(pinned.statusCode).toBe(400)
     expect((await app.inject({ method: 'GET', url: '/v1/templates' })).json()).toEqual([])
     await app.close()
   })
@@ -127,6 +133,13 @@ describe('templates router', () => {
       payload: { template: ['base'] },
     })
     expect(listed.statusCode).toBe(400)
+    await app.resources.putTemplate({ name: 'pinned', config: { ...RAM, workspace_id: 'one' } })
+    const pinned = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces',
+      payload: { template: 'pinned' },
+    })
+    expect(pinned.statusCode).toBe(400)
     const explained = await app.inject({
       method: 'POST',
       url: '/v1/workspaces?explain=true',

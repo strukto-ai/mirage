@@ -81,6 +81,8 @@ async def test_a_template_is_checked_when_saved(client):
     assert r.status_code == 400
     typo = {"name": "typo", "descripton": "d", "config": RAM}
     assert (await client.post("/v1/templates", json=typo)).status_code == 422
+    pinned = {"name": "pinned", "config": {**RAM, "workspace_id": "one"}}
+    assert (await client.post("/v1/templates", json=pinned)).status_code == 400
     assert (await client.get("/v1/templates")).json() == []
 
 
@@ -101,7 +103,7 @@ async def test_a_workspace_is_created_from_a_copy_of_a_template(app, client):
 
 
 @pytest.mark.asyncio
-async def test_a_create_names_one_known_template_or_a_config(client):
+async def test_a_create_names_one_known_template_or_a_config(app, client):
     r = await client.post("/v1/workspaces", json={"template": "nope"})
     assert r.status_code == 404
     await client.post("/v1/templates", json={"name": "base", "config": RAM})
@@ -113,6 +115,11 @@ async def test_a_create_names_one_known_template_or_a_config(client):
     assert (await client.post("/v1/workspaces", json={})).status_code == 400
     r = await client.post("/v1/workspaces", json={"template": ["base"]})
     assert r.status_code == 422
+    await app.state.resources.put_template(
+        TemplateInput(name="pinned", config={**RAM, "workspace_id": "one"})
+    )
+    r = await client.post("/v1/workspaces", json={"template": "pinned"})
+    assert r.status_code == 400
     r = await client.post(
         "/v1/workspaces?explain=true", json={"template": "base"}
     )
