@@ -332,7 +332,7 @@ run_case() {
   local shell_args=(shell -w "$wsid")
   session_id=$(jq -r '.session_id // empty' <<<"$world_json")
   if [ -n "$session_id" ]; then
-    if ! $cli session create "$wsid" --id "$session_id" \
+    if ! $cli workspace session create -w "$wsid" -s "$session_id" \
         >"$work/session.out" 2>&1 </dev/null; then
       failures+=("$case_id: session create failed: $(head -c 300 "$work/session.out")")
       $cli workspace delete "$wsid" >/dev/null 2>&1 </dev/null || true
@@ -374,7 +374,7 @@ run_case() {
       local pids=()
       for ((k = 0; k < branches; k++)); do
         sid="parallel-$index-$k"
-        if ! $cli session create "$wsid" --id "$sid" \
+        if ! $cli workspace session create -w "$wsid" -s "$sid" \
             >"$work/session.out" 2>&1 </dev/null; then
           failures+=("$case_id step[$index]: session create failed: $(head -c 300 "$work/session.out")")
           ok=1
@@ -416,8 +416,7 @@ run_host() {
   export MIRAGE_HOME="$home"
   unset MIRAGE_DAEMON_PORT MIRAGE_DAEMON_URL MIRAGE_ALLOWED_HOSTS \
     MIRAGE_AUTH_MODE 2>/dev/null || true
-  $cli config set port "$port" >/dev/null </dev/null
-  $cli config set url "http://127.0.0.1:$port" >/dev/null </dev/null
+  $cli daemon config set port "$port" >/dev/null </dev/null
 
   # The CLI spawns its daemon on the first create and gives it 5 s to answer.
   # On a busy runner the python daemon takes longer, and the lane's first

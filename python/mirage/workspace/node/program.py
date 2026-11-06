@@ -40,7 +40,10 @@ from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
-from mirage.workspace.executor.builtins.exec import divert_statement
+from mirage.workspace.executor.builtins.exec import (
+    divert_statement,
+    diverted_file,
+)
 from mirage.workspace.executor.control import (
     UNWINDING,
     LoopSignal,
@@ -292,6 +295,7 @@ async def _run_program(
         # Ordinary output progresses while the statement runs. Descriptor
         # copies and exec diversions retain their order for routing below.
         recorder = StatementRecorder(session, sink)
+        recorder.output_file = diverted_file(session, sink)
         leave = record_jobs(session, recorder)
         try:
             with recording(recorder):

@@ -15,7 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
-import { MAX_LISTED_FIELDS, errorSummary, fieldSummary } from './summary.ts'
+import { MAX_LISTED_FIELDS, errorSummary, fieldSummary, maskValues } from './summary.ts'
 
 describe('fieldSummary', () => {
   it('lists a secret-sized secret', () => {
@@ -98,5 +98,23 @@ describe('errorSummary', () => {
 
   it('names the keys of an unrecognized-keys issue', () => {
     expect(errorSummary(refusal({ port: 1, extra: 1 }))).toBe('extra: unrecognized_keys')
+  })
+})
+
+describe('maskValues', () => {
+  it('hides a value however it was quoted', () => {
+    const message = `e2b mountType must be one of ssh, fuse, both, not ${JSON.stringify('ab"cd')}`
+    expect(maskValues(message, ['ab"cd'])).toBe(
+      'e2b mountType must be one of ssh, fuse, both, not "***"',
+    )
+    expect(maskValues("not 'ab\"cd'", ['ab"cd'])).toBe("not '***'")
+  })
+
+  it('masks a value holding another whole', () => {
+    expect(maskValues('got sk-1234', ['sk', 'sk-1234'])).toBe('got ***')
+  })
+
+  it('leaves a message without them alone', () => {
+    expect(maskValues('needs a sandboxId', ['sk-1234', ''])).toBe('needs a sandboxId')
   })
 })

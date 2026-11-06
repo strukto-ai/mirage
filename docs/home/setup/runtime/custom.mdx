@@ -152,9 +152,14 @@ stand-in service, so it runs on one machine.
       [PROCESS_EXECUTOR] = true
       name = 'remote'
       reach = 'remote'
+      static configFields = {
+        url: { type: 'string' },
+        token: { type: 'string' },
+        maxBytes: { type: 'number' },
+      }
 
       constructor(options = {}) {
-        super(options, ['python3', 'python', 'node', EXTERNAL_COMMANDS], ['url', 'token', 'maxBytes'])
+        super(options, ['python3', 'python', 'node', EXTERNAL_COMMANDS], RemoteRuntime.configFields)
       }
 
       /** @param {import('@struktoai/mirage-node').Context} ctx */
@@ -193,10 +198,12 @@ stand-in service, so it runs on one machine.
 The Python runtime opens one `aiohttp` session as its engine: `open_engine` runs
 once, at the first program, and `close_engine` when the workspace closes. The
 TypeScript one needs no engine, because `fetch` is global. In TypeScript the
-third constructor argument lists the config keys the runtime accepts, and they
-arrive in camelCase (`max_bytes` in the YAML is `maxBytes`); in Python the config
-class's fields do. Either way, an unknown key in the YAML fails when the
-workspace loads.
+static `configFields` maps each config key the runtime accepts to its type
+(`string`, `number`, `boolean`, `list` or `map`), with `required`, `options`
+and `default` where they apply, and the constructor hands it to `super`; the
+keys arrive in camelCase (`max_bytes` in the YAML is `maxBytes`). In Python
+the config class's fields do the same. Either way, an unknown key in the YAML fails when the workspace
+loads, and a saved runtime's form shows these fields.
 
 With `/work` a writable RAM mount and `/archive` a read-only disk folder, each
 holding `report.py` and `orders.csv`:

@@ -12,20 +12,23 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiofiles
-import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.errors import disk_errors
-from mirage.core.disk.utils import resolve_inside
+from mirage.core.disk.utils import resolve_inside_sync
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
 async def create(accessor: DiskAccessor, path_spec: PathSpec) -> None:
     timer = start_op()
-    p = await resolve_inside(accessor.root, path_spec)
-    with disk_errors(path_spec.virtual):
-        async with aiofiles.open(p, "wb") as f:
-            await f.write(b"")
+
+    def empty() -> None:
+        p = resolve_inside_sync(accessor.root, path_spec)
+        with disk_errors(path_spec.virtual):
+            with open(p, "wb") as f:
+                f.write(b"")
+
+    await run_blocking(empty)
     record("create", path_spec.virtual, "disk", 0, timer)

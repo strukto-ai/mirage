@@ -74,6 +74,8 @@ class FakeDrive9:
         part_delay (float): seconds each part upload takes, so ``peak``
             shows how many run at once.
         drop_read_urls (bool): an append plan names no read URL.
+        racing_append (bytes): bytes another writer adds to the file
+            just before the next append plan reads its size.
     """
 
     files: dict[str, bytes] = field(default_factory=dict)
@@ -85,6 +87,7 @@ class FakeDrive9:
     fail_parts: bool = False
     part_delay: float = 0.0
     drop_read_urls: bool = False
+    racing_append: bytes = b""
     in_flight: int = 0
     peak: int = 0
     url: str = ""
@@ -174,6 +177,9 @@ class FakeDrive9:
         data = self.files.get(path)
         if data is None:
             return _missing(404, f'stat append target "{path}": not found')
+        if self.racing_append:
+            data = self.files[path] = data + self.racing_append
+            self.racing_append = b""
         if len(data) < self.inline_threshold:
             return _missing(400, f"file is not S3-stored: {path}")
         body = await request.json()

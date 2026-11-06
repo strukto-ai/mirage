@@ -32,7 +32,7 @@ from mirage.io.stream import (
 from mirage.io.types import ByteSource, PipeStream
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
-from mirage.shell.console import Channel
+from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import (
     FD_BOTH,
     FD_CLOSE,
@@ -47,6 +47,7 @@ from mirage.shell.descriptors import (
     FileDescription,
     FileInput,
     Inherited,
+    Recorder,
     bad_descriptor_line,
     unsupported_descriptor,
 )
@@ -616,6 +617,28 @@ def _stdout_to_stderr(node: TSNodeLike) -> bool:
         and r.fd in (FD_STDOUT, FD_BOTH)
         for r in redirects
     )
+
+
+def diverted_file(
+    session: SessionState, sink: JobConsole | None
+) -> str | FileDescription | None:
+    """The regular file a statement of a shell's own loop writes its
+    stdout to: where ``exec`` bound the shell's stdout while that binding
+    stands (``exec >g``), as ``divert_statement`` sends it, else where
+    the loop's sink writes (``Recorder.output_file``), a streamed
+    redirect's description shared as it is.
+
+    Args:
+        session (SessionState): the shell.
+        sink (JobConsole | None): where the loop writes.
+    """
+    if session.exec_stdout is not None:
+        bound = session.descriptors.get(FD_STDOUT)
+        file = None if bound is None else bound.file
+        if file is None or file.source is not None or file.pipe:
+            return None
+        return file.scope.virtual
+    return sink.output_file if isinstance(sink, Recorder) else None
 
 
 async def divert_statement(

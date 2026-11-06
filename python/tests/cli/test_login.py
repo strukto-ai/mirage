@@ -17,6 +17,7 @@ import hashlib
 import json
 import socket
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,9 +29,20 @@ import pytest
 from typer.testing import CliRunner
 
 from mirage.cli import login as login_module
-from mirage.cli.credentials import LoginError, read_login, write_login
+from mirage.cli.credentials import (
+    Context,
+    ContextError,
+    Login,
+    LoginError,
+    login_path,
+    read_current,
+    read_login,
+    write_context,
+    write_login,
+)
 from mirage.cli.login import browser_login, metadata_url, token_login
 from mirage.cli.main import app
+from mirage.cli.settings import load_daemon_settings
 from mirage.types import JsonValue
 
 CLIENT_ID = "client_cli"
@@ -273,10 +285,14 @@ def test_a_pasted_token_is_kept_once_the_server_takes_it(clerk):
 def test_login_reads_a_dash_token_from_stdin(clerk, tmp_path, monkeypatch):
     monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
     monkeypatch.setenv("MIRAGE_DAEMON_URL", clerk.url)
-    done = CliRunner().invoke(app, ["login", "--token", "-"], input="good\n")
+    done = CliRunner().invoke(
+        app, ["login", clerk.url, "--token", "-"], input="good\n"
+    )
     assert done.exit_code == 0, done.output
     assert read_login().access_token == "good"
-    empty = CliRunner().invoke(app, ["login", "--token", "-"], input="")
+    empty = CliRunner().invoke(
+        app, ["login", clerk.url, "--token", "-"], input=""
+    )
     assert empty.exit_code == 1
     assert "no token on stdin" in empty.output
 
@@ -286,17 +302,20 @@ def test_login_whoami_logout(clerk, browser, tmp_path, monkeypatch):
     monkeypatch.setenv("MIRAGE_DAEMON_URL", clerk.url)
     monkeypatch.delenv("MIRAGE_TOKEN", raising=False)
     runner = CliRunner()
-    done = runner.invoke(app, ["login"])
+    done = runner.invoke(app, ["login", clerk.url])
     assert done.exit_code == 0, done.output
     assert f"Logged in to {clerk.url} as user_alice." in done.output
     assert read_login().refresh_token == "r1"
     who = runner.invoke(app, ["whoami"])
     assert who.exit_code == 0
-    assert json.loads(who.stdout)["account"] == "user_alice"
+    row = json.loads(who.stdout)
+    assert (row["context"], row["user"]) == ("local", "user_alice")
     out = runner.invoke(app, ["logout"])
     assert out.stdout == f"Logged out of {clerk.url}.\n"
     assert read_login() is None
-    assert runner.invoke(app, ["whoami"]).exit_code == 1
+    after = runner.invoke(app, ["whoami"])
+    assert after.exit_code == 0
+    assert json.loads(after.stdout)["user"] is None
 
 
 def test_whoami_ignores_a_login_for_another_server(
@@ -308,15 +327,103 @@ def test_whoami_ignores_a_login_for_another_server(
     login.url = "https://elsewhere.test"
     write_login(login)
     who = CliRunner().invoke(app, ["whoami"])
-    assert who.exit_code == 1
-    assert f"not logged in to {clerk.url}" in who.output
+    assert who.exit_code == 0
+    assert json.loads(who.stdout)["user"] is None
 
 
 def test_login_to_a_server_without_one_says_so(browser, tmp_path, monkeypatch):
     monkeypatch.setenv("MIRAGE_HOME", str(tmp_path))
     with FakeClerk(publishes=False).serving() as fake:
         monkeypatch.setenv("MIRAGE_DAEMON_URL", fake.url)
-        done = CliRunner().invoke(app, ["login"])
+        write_login(
+            Login(url=fake.url, access_token="old", logged_in_at=time.time()),
+            login_path("local"),
+        )
+        done = CliRunner().invoke(app, ["login", fake.url])
     assert done.exit_code == 0
     assert "publishes no login" in done.output
-    assert read_login() is None
+    assert not login_path("local").exists()
+
+
+def test_switch_run_once_elsewhere_and_forget(home, monkeypatch):
+    write_context(
+        "dev", Context(url="https://dev.example", team="acme", workspace="w1")
+    )
+    write_login(
+        Login(
+            url="https://dev.example",
+            access_token="from-login",
+            logged_in_at=time.time(),
+        ),
+        login_path("dev"),
+    )
+    runner = CliRunner()
+    once = runner.invoke(app, ["--context", "dev", "whoami"])
+    assert json.loads(once.stdout) | {"renew_by": None} == {
+        "context": "dev",
+        "url": "https://dev.example",
+        "team": "acme",
+        "user": None,
+        "workspace": "w1",
+        "renew_by": None,
+    }
+    monkeypatch.setenv("MIRAGE_CONTEXT", "")
+    assert read_current() == "local"
+    assert runner.invoke(app, ["context", "use", "dev"]).exit_code == 0
+    assert read_current() == "dev"
+    refused = runner.invoke(app, ["context", "use", "nope"])
+    assert isinstance(refused.exception, ContextError)
+    local = runner.invoke(app, ["context", "delete", "local"])
+    assert isinstance(local.exception, ContextError)
+    assert runner.invoke(app, ["context", "delete", "dev"]).exit_code == 0
+    assert read_current() == "local"
+    assert not (home / "logins" / "dev.json").exists()
+    assert not (home / "contexts" / "dev.json").exists()
+
+
+def test_daemon_config_holds_the_daemon_settings(home):
+    runner = CliRunner()
+    done = runner.invoke(app, ["daemon", "config", "set", "port", "9100"])
+    assert done.exit_code == 0, done.output
+    assert "port = 9100" in (home / "config.toml").read_text()
+    assert load_daemon_settings().url == "http://127.0.0.1:9100"
+    assert runner.invoke(app, ["config", "list"]).exit_code == 2
+
+
+def test_a_name_that_is_no_safe_file_name_is_refused_everywhere(home):
+    runner = CliRunner()
+    write_context("local", Context(workspace="kept"))
+    for args in (
+        ["context", "delete", "./local"],
+        ["context", "use", "../up"],
+        ["--context", "../up", "whoami"],
+    ):
+        done = runner.invoke(app, args)
+        assert isinstance(done.exception, ContextError), args
+    assert (home / "contexts" / "local.json").exists()
+
+
+def test_list_works_when_the_current_context_is_gone(home):
+    (home / "current_context").write_text("gone\n")
+    done = CliRunner().invoke(app, ["context", "list"])
+    assert done.exit_code == 0, done.output
+    assert [row["name"] for row in json.loads(done.stdout)] == ["local"]
+
+
+def test_relogin_to_local_writes_its_context_once(home, monkeypatch):
+    write_context("local", Context(url="http://127.0.0.1:9100", workspace="w"))
+    writes: list[tuple[str, Context]] = []
+    real = login_module.write_context
+
+    def record(name: str, context: Context) -> None:
+        writes.append((name, context))
+        real(name, context)
+
+    monkeypatch.setattr(login_module, "write_context", record)
+    login_module.save_context("local", "http://127.0.0.1:9100", None)
+    assert writes == [
+        ("local", Context(url="http://127.0.0.1:9100", workspace="w"))
+    ]
+    writes.clear()
+    login_module.save_context("local", "http://127.0.0.1:8765", None)
+    assert writes == [("local", Context())]

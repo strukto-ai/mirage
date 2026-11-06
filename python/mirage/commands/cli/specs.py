@@ -107,6 +107,14 @@ def unregister_cli_spec(name: str) -> None:
     del CLI_SPECS[name]
 
 
+def known_cli_names() -> list[str]:
+    """Every name ``cli_spec_for`` resolves without a reference:
+    registered, builtin and installed. ``mcp`` is not one; it is built
+    from its server."""
+    _load_entry_point_clis()
+    return sorted({*CLI_SPECS, *BUILTIN_CLI_SPECS, *_ENTRY_POINT_SPECS})
+
+
 def cli_spec_for(name: str) -> CLI:
     """Resolve a YAML ``cli:`` value to its program tree, fail loud.
 

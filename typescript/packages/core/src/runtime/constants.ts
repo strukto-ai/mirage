@@ -84,3 +84,9 @@ export const HARD_LINK_REFUSAL: FsCondition = 'EPERM'
  * it.
  */
 export const SCRIPT_EVAL_TIMEOUT = { seconds: 10 }
+
+/**
+ * The config fields that hold a runtime's credential, as a config writes
+ * them: a saved runtime keeps them sealed, as a mount keeps a secret field.
+ */
+export const SECRET_CONFIG_FIELDS: ReadonlySet<string> = new Set(['api_key', 'private_key'])

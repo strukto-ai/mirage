@@ -15,6 +15,8 @@
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { emit, fail, handleResponse } from './output.ts'
+import { WORKSPACE_FLAGS, WORKSPACE_HELP } from './vfs.ts'
+import { resolveWorkspace } from './settings.ts'
 import { loadProfileArgument } from './workspace.ts'
 
 const MODES = new Set(['read', 'write', 'exec', 'r', 'rw', 'rwx'])
@@ -40,146 +42,125 @@ export function parseMountModes(mounts: string[]): Record<string, string> {
   return modes
 }
 
-export function registerSessionCommands(program: Command): void {
-  const sess = program.command('session').description('Manage workspace sessions.')
+interface CreateOptions {
+  id?: string | undefined
+  mount?: string[]
+  profile?: string
+}
+
+interface UpdateOptions {
+  profile?: string
+  profileFile?: string
+  defaultProfile?: boolean
+}
+
+interface Flags {
+  workspace?: string
+  session: string
+}
+
+const MOUNT_HELP =
+  "narrow a mount's mode for this session: '/data:read' (alias '/data:r'), " +
+  "'/scratch:rw', '/bin:rwx', or a bare '/data' to keep the mount's own " +
+  'mode; repeatable. This narrows only: a mount you do not name keeps its ' +
+  'own mode, and keeping a session away from one is a hide in its profile'
+
+const CREATE_PROFILE_HELP =
+  "the profile this session runs under, by name from the workspace's profiles; " +
+  'omit it to take the workspace default'
+
+const collect = (value: string, prev: string[]): string[] => prev.concat([value])
+
+function sessionPath(wsId: string, sessionId: string): string {
+  return `/v1/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}`
+}
+
+async function send(method: string, path: string, body?: unknown): Promise<void> {
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
+  const init = body === undefined ? undefined : { body: JSON.stringify(body) }
+  emit(await handleResponse(await c.request(method, path, init)))
+}
+
+async function createSession(wsId: string, opts: CreateOptions): Promise<void> {
+  const body: Record<string, unknown> = {}
+  if (opts.id !== undefined) body.session_id = opts.id
+  if (opts.mount !== undefined && opts.mount.length > 0) {
+    body.mounts = parseMountModes(opts.mount)
+  }
+  if (opts.profile !== undefined) body.profile = opts.profile
+  await send('POST', `/v1/workspaces/${encodeURIComponent(wsId)}/sessions`, body)
+}
+
+async function updateSession(wsId: string, sessionId: string, opts: UpdateOptions): Promise<void> {
+  const chosen = [
+    opts.profile !== undefined,
+    opts.profileFile !== undefined,
+    opts.defaultProfile === true,
+  ].filter(Boolean).length
+  if (chosen !== 1) fail('choose --profile, --profile-file or --default-profile', 2)
+  const profile =
+    opts.profileFile !== undefined
+      ? await loadProfileArgument(opts.profileFile)
+      : (opts.profile ?? null)
+  await send('PATCH', sessionPath(wsId, sessionId), { profile })
+}
+
+function updateOptions(cmd: Command): Command {
+  return cmd
+    .option('-p, --profile <name>', "Replace the live session's profile.")
+    .option('--profile-file <file>', 'Replace it with this YAML/JSON profile document.')
+    .option('--default-profile', 'Use the workspace default profile.')
+}
+
+const ACTIONS = [
+  ['delete', 'Close a session.', 'DELETE', ''],
+  ['cancel', "Cancel the session's running and queued commands.", 'POST', '/cancel'],
+  ['kill', "Kill the session's background jobs; the session stays open.", 'POST', '/kill'],
+] as const
+
+/** `mirage workspace session …`, taking the workspace and session as `-w` and `-s`. */
+export function registerSessionCommands(parent: Command): void {
+  const sess = parent.command('session').description('Manage workspace sessions.')
 
   sess
     .command('create')
-    .argument('<wsId>')
-    .option('--id <sessionId>')
-    .option(
-      '-m, --mount <prefix>',
-      "narrow a mount's mode for this session: '/data:read' (alias '/data:r'), " +
-        "'/scratch:rw', '/bin:rwx', or a bare '/data' to keep the mount's own " +
-        'mode; repeatable. This narrows only: a mount you do not name keeps its ' +
-        'own mode, and keeping a session away from one is a hide in its profile',
-      (value: string, prev: string[]) => prev.concat([value]),
-      [] as string[],
-    )
-    .option(
-      '-p, --profile <name>',
-      "the profile this session runs under, by name from the workspace's profiles; " +
-        'omit it to take the workspace default',
-    )
-    .action(async (wsId: string, opts: { id?: string; mount?: string[]; profile?: string }) => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      const body: Record<string, unknown> = {}
-      if (opts.id !== undefined) body.session_id = opts.id
-      if (opts.mount !== undefined && opts.mount.length > 0) {
-        body.mounts = parseMountModes(opts.mount)
-      }
-      if (opts.profile !== undefined) body.profile = opts.profile
-      emit(
-        await handleResponse(
-          await c.request('POST', `/v1/workspaces/${encodeURIComponent(wsId)}/sessions`, {
-            body: JSON.stringify(body),
-          }),
-        ),
-      )
+    .description('Add a session to the workspace.')
+    .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
+    .option('-s, --session <id>', 'Explicit session id')
+    .option('-m, --mount <prefix>', MOUNT_HELP, collect, [] as string[])
+    .option('-p, --profile <name>', CREATE_PROFILE_HELP)
+    .action(async (opts: Omit<CreateOptions, 'id'> & Partial<Flags>) => {
+      await createSession(resolveWorkspace(opts.workspace), { ...opts, id: opts.session })
     })
 
   sess
     .command('list')
-    .argument('<wsId>')
-    .action(async (wsId: string) => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      emit(
-        await handleResponse(
-          await c.request('GET', `/v1/workspaces/${encodeURIComponent(wsId)}/sessions`),
-        ),
-      )
+    .description("List the workspace's sessions.")
+    .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
+    .action(async (opts: { workspace?: string }) => {
+      const wsId = resolveWorkspace(opts.workspace)
+      await send('GET', `/v1/workspaces/${encodeURIComponent(wsId)}/sessions`)
     })
 
-  sess
-    .command('delete')
-    .argument('<wsId>')
-    .argument('<sessionId>')
-    .action(async (wsId: string, sessionId: string) => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      emit(
-        await handleResponse(
-          await c.request(
-            'DELETE',
-            `/v1/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}`,
-          ),
-        ),
-      )
-    })
+  for (const [name, description, method, suffix] of ACTIONS) {
+    sess
+      .command(name)
+      .description(description)
+      .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
+      .requiredOption('-s, --session <id>', 'Session id')
+      .action(async (opts: Flags) => {
+        await send(method, sessionPath(resolveWorkspace(opts.workspace), opts.session) + suffix)
+      })
+  }
 
-  sess
-    .command('cancel')
-    .description("Cancel the session's running and queued commands.")
-    .argument('<wsId>')
-    .argument('<sessionId>')
-    .action(async (wsId: string, sessionId: string) => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      emit(
-        await handleResponse(
-          await c.request(
-            'POST',
-            `/v1/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}/cancel`,
-          ),
-        ),
-      )
-    })
-
-  sess
-    .command('kill')
-    .description("Kill the session's background jobs; the session stays open.")
-    .argument('<wsId>')
-    .argument('<sessionId>')
-    .action(async (wsId: string, sessionId: string) => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      emit(
-        await handleResponse(
-          await c.request(
-            'POST',
-            `/v1/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}/kill`,
-          ),
-        ),
-      )
-    })
-
-  sess
-    .command('update')
-    .description("Replace the session's profile; its cwd, env and history stay.")
-    .argument('<wsId>')
-    .argument('<sessionId>')
-    .option('-p, --profile <name>', "Replace the live session's profile.")
-    .option('--profile-file <file>', 'Replace it with this YAML/JSON profile document.')
-    .option('--default-profile', 'Use the workspace default profile.')
-    .action(
-      async (
-        wsId: string,
-        sessionId: string,
-        opts: { profile?: string; profileFile?: string; defaultProfile?: boolean },
-      ) => {
-        const chosen = [
-          opts.profile !== undefined,
-          opts.profileFile !== undefined,
-          opts.defaultProfile === true,
-        ].filter(Boolean).length
-        if (chosen !== 1) fail('choose --profile, --profile-file or --default-profile', 2)
-        const profile =
-          opts.profileFile !== undefined
-            ? await loadProfileArgument(opts.profileFile)
-            : (opts.profile ?? null)
-        const c = makeClient()
-        await c.ensureRunning({ allowSpawn: false })
-        emit(
-          await handleResponse(
-            await c.request(
-              'PATCH',
-              `/v1/workspaces/${encodeURIComponent(wsId)}/sessions/${encodeURIComponent(sessionId)}`,
-              { body: JSON.stringify({ profile }) },
-            ),
-          ),
-        )
-      },
-    )
+  updateOptions(
+    sess
+      .command('update')
+      .description("Replace the session's profile; its cwd, env and history stay.")
+      .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
+      .requiredOption('-s, --session <id>', 'Session id'),
+  ).action(async (opts: UpdateOptions & Flags) => {
+    await updateSession(resolveWorkspace(opts.workspace), opts.session, opts)
+  })
 }

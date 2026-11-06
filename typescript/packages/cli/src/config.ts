@@ -75,8 +75,9 @@ function listFile(): void {
   emit(table, humanTable)
 }
 
-export function registerConfigCommands(program: Command): void {
-  const config = program
+/** `mirage daemon config`: the daemon's settings in config.toml. */
+export function registerConfigCommands(parent: Command): void {
+  const config = parent
     .command('config')
     .description('Read and write daemon settings in config.toml.')
 

@@ -16,7 +16,7 @@ import pytest
 
 from mirage.core.tidb_filesystem.errors import TiDBFilesystemApiError
 from mirage.core.tidb_filesystem.truncate import truncate
-from mirage.errors.types import OperationNotSupportedError
+from mirage.errors.types import OperationNotSupportedError, StaleWriteError
 from mirage.observe.context import RecordingScope
 from mirage.types import PathSpec
 from mirage.utils.key_prefix import mount_key
@@ -78,6 +78,36 @@ async def test_a_large_file_grows_by_a_native_append_of_zeros(
     assert drive9.files["/root/big.bin"] == b"x" * 60_000 + bytes(10_000)
     assert drive9.count("GET", "/root") == 0
     assert drive9.count("PUT", "/root") == 0
+
+
+@pytest.mark.asyncio
+async def test_a_grow_racing_an_append_refuses_and_keeps_the_appended_bytes(
+    accessor, drive9
+):
+    drive9.part_size = 25_000
+    drive9.files["/root/big.bin"] = b"x" * 60_000
+    drive9.racing_append = b"y" * 5_000
+
+    with pytest.raises(StaleWriteError) as caught:
+        await truncate(accessor, _path("/fs/big.bin"), 70_000)
+
+    assert caught.value.filename == "/fs/big.bin"
+    assert drive9.files["/root/big.bin"] == b"x" * 60_000 + b"y" * 5_000
+    assert drive9.uploads == {}
+    assert drive9.count("PUT") == 0
+
+
+@pytest.mark.asyncio
+async def test_a_failed_part_of_a_grow_is_not_a_stale_write(accessor, drive9):
+    drive9.part_size = 25_000
+    drive9.files["/root/big.bin"] = b"x" * 60_000
+    drive9.fail_parts = True
+
+    with pytest.raises(TiDBFilesystemApiError) as caught:
+        await truncate(accessor, _path("/fs/big.bin"), 70_000)
+
+    assert caught.value.status == 500
+    assert drive9.files["/root/big.bin"] == b"x" * 60_000
 
 
 @pytest.mark.asyncio

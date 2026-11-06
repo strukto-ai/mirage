@@ -139,8 +139,11 @@ this workspace's mount modes and permissions.
 ## Notes
 
 - `host` is also the address unless `hostname` overrides it; `port`,
-  `username`, `identity_file` and `timeout` are optional. Authentication is
-  a key or an agent, never a password.
+  `username`, `identity_file`, `private_key` and `timeout` are optional.
+  Authentication is a key or an agent, never a password.
+- `private_key` takes the key's own text rather than a path, so a
+  [credential pointer](/home/authentication#pointer-fields) can read it
+  from a secret store.
 - The machine's login shell must be POSIX-compatible. Commands use the
   session's working directory and environment.
 - A [timeout](/home/setup/runtime/sandbox#timeouts) does not kill the remote program.

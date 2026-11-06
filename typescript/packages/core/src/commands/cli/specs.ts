@@ -61,6 +61,11 @@ export function unregisterCliSpec(name: string): void {
 }
 
 /** Resolve a YAML `cli:` key to its registered tree, fail loud. */
+/** Every name `cliSpecFor` resolves: bundled and registered. `mcp` is not one; it is built from its server. */
+export function knownCliNames(): string[] {
+  return [...CLI_SPECS.keys()].sort(compareCodePoints)
+}
+
 export function cliSpecFor(name: string): CLI {
   if (name === MCP_CLI) {
     throw new Error(`cli '${MCP_CLI}' is built from its server: await mcpCli(config)`)

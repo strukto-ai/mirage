@@ -469,6 +469,46 @@ async def test_the_deadline_stops_the_jobs_its_command_started():
     assert "sleep 31" in out and "sleep 32" in out
 
 
+# A job's shell ignores INT, but what it forks right now takes it, so the
+# job goes on past it with 130: a program, a subshell whole, and each
+# stage of a pipeline still running, one that ended keeping its status. A
+# function or a builtin the job's shell runs (`f &`) ends with it.
+@pytest.mark.asyncio
+async def test_an_int_ends_the_program_a_job_runs_and_the_job_goes_on():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        io = await ws.shell(
+            "timeout -s INT 0.1 sh -c '{ sleep 30; echo $? > /a; } & "
+            "{ sleep 30 | cat; echo ${PIPESTATUS[@]} > /b; } & "
+            "sleep 30 && : || echo $? > /c & "
+            "{ true | sleep 30 | true; echo ${PIPESTATUS[@]} > /e; } & "
+            "{ (sleep 30; echo in > /f); echo $? > /g; } & "
+            "f() { sleep 30; echo > /d; }; f & sleep 30'; "
+            "sleep 0.3; cat /a /b /c /e /g; test -e /d || test -e /f; echo $?"
+        )
+        out = (await io.stdout_str()).splitlines()
+    finally:
+        await ws.close()
+    assert out == ["130", "130 130", "130", "0 130 0", "130", "1"]
+
+
+# Every bash shell ignores QUIT, a job's and a function job's alike, so
+# timeout's QUIT ends only the program each job runs right now.
+@pytest.mark.asyncio
+async def test_a_quit_ends_the_program_a_job_runs_and_every_job_goes_on():
+    ws = Workspace({"/": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        io = await ws.shell(
+            "timeout -s QUIT 0.1 sh -c '{ sleep 30; echo $? > /a; } & "
+            "f() { sleep 30; echo $? > /d; }; f & sleep 30'; "
+            "sleep 0.3; cat /a /d"
+        )
+        out = (await io.stdout_str()).splitlines()
+    finally:
+        await ws.close()
+    assert out == ["131", "131"]
+
+
 @pytest.mark.asyncio
 async def test_a_session_at_its_process_cap_cannot_start_the_command():
     ws = Workspace({"/": RAMVFS()}, processes={"max": 1})

@@ -17,7 +17,7 @@ import asyncio
 import httpx
 import pytest
 
-from mirage import Workspace
+from mirage import RAMVFS, Workspace
 from mirage.commands.builtin.errors import HttpConnectError, HttpTimeoutError
 from mirage.commands.builtin.utils import http as http_mod
 from mirage.commands.builtin.utils.cookie import CookieJar
@@ -28,6 +28,7 @@ from mirage.commands.builtin.utils.http import (
     _with_default_ua,
     http_request,
 )
+from mirage.io.types import materialize
 from mirage.utils.abort import MirageAbortError
 
 
@@ -91,7 +92,6 @@ class _FakeResponse:
         headers: list[tuple[str, str]] | None = None,
         url: str = "http://x.test/f",
         method: str = "GET",
-        history: list["_FakeResponse"] | None = None,
     ) -> None:
         self.status_code = status
         self.reason_phrase = reason
@@ -99,7 +99,10 @@ class _FakeResponse:
         self.headers = _FakeHeaders(headers or [])
         self.url = url
         self.request = _FakeRequest(method)
-        self.history = list(history or [])
+        self.next_request = None
+
+    async def aread(self) -> bytes:
+        return self.content
 
 
 class _FakeClient:
@@ -200,48 +203,78 @@ async def test_transport_error_becomes_http_connect_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_redirects_are_not_followed_by_default(monkeypatch):
-    fake = _FakeHttpx(resp=_FakeResponse(200, "OK", b"ok"))
-    monkeypatch.setattr(http_mod, "httpx", fake)
-    await http_request("http://x.test/r")
-    assert fake.client_kwargs["follow_redirects"] is False
-    await http_request("http://x.test/r", follow_redirects=True)
-    assert fake.client_kwargs["follow_redirects"] is True
+async def test_redirects_are_not_followed_by_default(httpx_mock):
+    httpx_mock.add_response(
+        url="http://x.test/r", status_code=302, headers=[("Location", "/f")]
+    )
+    resp = await http_request("http://x.test/r")
+    assert (resp.status, resp.history) == (302, ())
 
 
 @pytest.mark.asyncio
-async def test_followed_redirects_are_kept_as_history_in_order(monkeypatch):
-    hop = _FakeResponse(
-        302,
-        "Found",
-        b"302: Found",
-        [("Location", "/f")],
+async def test_followed_redirects_are_kept_as_history_in_order(httpx_mock):
+    httpx_mock.add_response(
         url="http://x.test/r",
+        status_code=302,
+        headers=[("Location", "/f")],
+        content=b"302: Found",
     )
-    fake = _FakeHttpx(resp=_FakeResponse(200, "OK", b"ok", history=[hop]))
-    monkeypatch.setattr(http_mod, "httpx", fake)
+    httpx_mock.add_response(url="http://x.test/f", content=b"ok")
     resp = await http_request("http://x.test/r", follow_redirects=True)
     assert [(h.status, h.url) for h in resp.history] == [
         (302, "http://x.test/r")
     ]
-    assert resp.history[0].headers == (("Location", "/f"),)
-    assert resp.history[0].body == b"302: Found"
-    assert (resp.status, resp.url) == (200, "http://x.test/f")
+    assert ("location", "/f") in resp.history[0].headers
+    assert resp.history[0].body == b""
+    assert (resp.status, resp.url, resp.body) == (
+        200,
+        "http://x.test/f",
+        b"ok",
+    )
 
 
 @pytest.mark.asyncio
-async def test_each_hop_reports_the_method_the_client_sent(monkeypatch):
+async def test_each_hop_reports_the_method_the_client_sent(httpx_mock):
     # A 302 turns a POST into a GET, in httpx as in curl.
-    hop = _FakeResponse(
-        302, "Found", b"", url="http://x.test/r", method="POST"
+    httpx_mock.add_response(
+        url="http://x.test/r", status_code=302, headers=[("Location", "/f")]
     )
-    fake = _FakeHttpx(resp=_FakeResponse(200, "OK", b"ok", history=[hop]))
-    monkeypatch.setattr(http_mod, "httpx", fake)
+    httpx_mock.add_response(url="http://x.test/f")
     resp = await http_request(
         "http://x.test/r", method="POST", data=b"a=1", follow_redirects=True
     )
     assert resp.history[0].method == "POST"
     assert resp.method == "GET"
+
+
+class _CountedBody(httpx.AsyncByteStream):
+    def __init__(self, chunks: int) -> None:
+        self.chunks = chunks
+        self.pulled = 0
+
+    async def __aiter__(self):
+        for _ in range(self.chunks):
+            self.pulled += 1
+            yield b"x" * 1048576
+
+
+@pytest.mark.asyncio
+async def test_a_redirect_body_is_let_go_unread(httpx_mock):
+    hop = _CountedBody(64)
+    httpx_mock.add_callback(
+        lambda request: httpx.Response(
+            302, headers=[("Location", "/end")], stream=hop
+        ),
+        url="http://x.test/big",
+    )
+    httpx_mock.add_response(url="http://x.test/end", content=b"ok")
+    ws = Workspace({"/": RAMVFS()}, max_memory="8MB", max_body_bytes="1MB")
+    try:
+        io = await ws.shell("curl -sL http://x.test/big")
+        assert (io.exit_code, await materialize(io.stdout)) == (0, b"ok")
+    finally:
+        await ws.close()
+    assert hop.pulled <= 1
 
 
 @pytest.mark.asyncio

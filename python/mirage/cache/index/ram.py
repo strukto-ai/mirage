@@ -62,6 +62,8 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._tombstones: dict[str, dict[str, bool]] = {}
         self._fresh: dict[str, dict[str, None]] = {}
         self._dropped: dict[str, set[str]] = {}
+        # Folders whose listing was not written in name order.
+        self._unsorted: set[str] = set()
         self._versions: dict[str, str] = {}
 
     def seed(
@@ -79,9 +81,10 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._children.update(
             {path: list(keys) for path, keys in children.items()}
         )
-        for path in children:
+        for path, keys in children.items():
             self._fresh.pop(path, None)
             self._dropped.pop(path, None)
+            self._order(path, keys)
         self._expiry.update({path: expires_at for path in children})
         self._partial.difference_update(children)
         self._windows.difference_update(children)
@@ -153,6 +156,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                 lifetime = now + timedelta(seconds=self._ttl)
                 self._children[folder] = [vfs_path]
                 self._fresh.pop(folder, None)
+                self._unsorted.discard(folder)
                 self._dropped.pop(folder, None)
                 self._touch(folder)
                 self._folder_flags[folder] = {}
@@ -165,7 +169,20 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
                 self._windows.discard(folder)
                 self._versions.pop(folder, None)
             elif vfs_path not in self._folder_flags.get(folder, {}):
-                bisect.insort(children, vfs_path)
+                if folder in self._unsorted:
+                    children.insert(
+                        next(
+                            (
+                                at
+                                for at, c in enumerate(children)
+                                if c > vfs_path
+                            ),
+                            len(children),
+                        ),
+                        vfs_path,
+                    )
+                else:
+                    bisect.insort(children, vfs_path)
                 if folder in self._fresh:
                     self._fresh[folder][vfs_path] = None
             self._folder_flags.setdefault(folder, {})[vfs_path] = (
@@ -310,6 +327,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             self._children[vfs_path] = child_keys
             self._fresh.pop(vfs_path, None)
             self._dropped.pop(vfs_path, None)
+            self._order(vfs_path, child_keys)
             self._folder_flags[vfs_path] = {
                 key: row.type is FileType.DIRECTORY
                 for key, row in rows.items()
@@ -410,6 +428,19 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             self._children[folder] = children
         return children
 
+    def _order(self, folder: str, children: Sequence[str]) -> None:
+        """Note whether a folder's listing was written in name order, the
+        order a new child is placed in.
+
+        Args:
+            folder (str): the folder.
+            children (Sequence[str]): its listing as written.
+        """
+        if any(a > b for a, b in zip(children, children[1:])):
+            self._unsorted.add(folder)
+        else:
+            self._unsorted.discard(folder)
+
     def _remember_directory(self, vfs_path: str) -> None:
         vfs_path = vfs_path.rstrip("/")
         if not vfs_path:
@@ -502,6 +533,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             self._children.pop(vfs_path, None)
             self._fresh.pop(vfs_path, None)
             self._dropped.pop(vfs_path, None)
+            self._unsorted.discard(vfs_path)
             self._folder_flags.pop(vfs_path, None)
             self._partial.discard(vfs_path)
             self._windows.discard(vfs_path)
@@ -563,6 +595,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
             self._children.pop(dir_key, None)
             self._fresh.pop(dir_key, None)
             self._dropped.pop(dir_key, None)
+            self._unsorted.discard(dir_key)
             self._folder_flags.pop(dir_key, None)
         for exp_key in [
             k
@@ -594,6 +627,7 @@ class RAMIndexCacheStore(IndexCacheStore, KeyLockMixin):
         self._tombstones.clear()
         self._fresh.clear()
         self._dropped.clear()
+        self._unsorted.clear()
         self._versions.clear()
         self._clear_locks()
 

@@ -18,7 +18,11 @@ import threading
 import pytest
 
 from mirage.runtime.python.monty import execution as monty_execution
-from mirage.runtime.python.monty.execution import MontyExecution
+from mirage.runtime.python.monty.execution import (
+    CompileError,
+    MontyExecution,
+    compile_error,
+)
 from mirage.runtime.python.monty.fs import MontyFs
 from mirage.runtime.types import Program
 
@@ -229,3 +233,31 @@ async def test_a_cancelled_run_cancels_the_write_its_sink_holds():
         assert cancelled.is_set()
     finally:
         await execution.close()
+
+
+@pytest.mark.asyncio
+async def test_a_program_monty_would_run_is_found_clean_and_not_run():
+    assert (
+        await compile_error("1 / 0\ndef pre_command(ctx):\n    return None\n")
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_syntax_error_is_named_at_the_programs_own_line():
+    assert await compile_error(
+        "def pre_command(ctx)\n    return None\n"
+    ) == CompileError(line=1, message="Expected `:`, found newline")
+    assert await compile_error(
+        "def pre_command(ctx):\nreturn None\n"
+    ) == CompileError(
+        line=2, message="Expected an indented block after function definition"
+    )
+
+
+@pytest.mark.asyncio
+async def test_syntax_monty_does_not_support_is_named():
+    assert await compile_error("x = 1\nyield x\n") == CompileError(
+        line=2,
+        message="The monty syntax parser does not yet support yield expressions",
+    )

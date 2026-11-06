@@ -1,11 +1,11 @@
 ---
 title: Service credentials
 sidebarTitle: Service credentials
-description: Connect VFS and CLI credentials from the environment or a secret store.
+description: Connect VFS, CLI and runtime credentials from the environment or a secret store.
 icon: key
 ---
 
-Give each VFS or virtual CLI the credentials it needs to reach its service.
+Give each VFS, virtual CLI or runtime the credentials it needs to reach its service.
 These differ from the bearer tokens and JWTs protecting a Mirage server;
 see [HTTP authentication](/home/access/http#configure-authentication) for those.
 
@@ -41,7 +41,19 @@ mirage shell -w credentials-demo -c 'ls /slack | head'
 ```
 
 Remove the example workspace afterward with `mirage workspace delete credentials-demo`.
-The same pointer format works in credential fields for registered virtual CLIs.
+The same pointer format works in credential fields for registered virtual CLIs,
+and in a runtime entry's `config`, such as E2B's or Daytona's `api_key`:
+
+```yaml workspace.yaml
+runtimes:
+  - name: e2b
+    config:
+      sandbox_id: ${E2B_SANDBOX_ID}
+      api_key:
+        from: 1password
+        ref: op://Engineering/E2B/credential
+        key: credential
+```
 
 ## Pointer fields
 

@@ -37,7 +37,7 @@ import { encodeText } from '../../../../shell/bytes.ts'
 import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
 import { NOT_FOUND_STATUS, TIMEOUT_STATUS } from '../../../../shell/constants.ts'
-import { STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
+import { IGNORED_SIGNALS, STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { abortable, atDeadline, runCancellable, SignalStop } from '../../../../utils/abort.ts'
 import { PathSpec } from '../../../../types.ts'
@@ -50,7 +50,6 @@ import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 import {
   CONTINUE_SIGNALS,
   FORK_FAILED,
-  JOB_IGNORED_SIGNALS,
   SELF_KILLING_SIGNALS,
   SIGCHLD,
   SIGKILL,
@@ -387,10 +386,15 @@ export async function handleTimeout(
   run.catch(() => undefined)
   const foreground = parse.flags.f === true
   // timeout signals its own process group unless --foreground, so the jobs
-  // the command started end with it unless they ignore the signal; the
-  // command itself gets it either way.
+  // the command started end with it, or, when their shells ignore the
+  // signal, the programs they run right now do; the command itself gets it
+  // either way. The group hears it before the command stops, as a stop
+  // reaches children first, so a native program that ends with the command
+  // already knows the signal.
   const send = (number: number): void => {
-    process.terminate(number, !foreground && !JOB_IGNORED_SIGNALS.has(number))
+    const ignored = IGNORED_SIGNALS.has(number)
+    if (ignored && !foreground) process.signalChildren(number)
+    process.terminate(number, !foreground && !ignored)
   }
   const watch = supervise(run, abort.signal, send, sink, held, seconds, lineSignal, {
     signal,

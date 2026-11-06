@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseYaml } from './yaml.ts'
+import { dumpYaml, parseYaml } from './yaml.ts'
 
 describe('parseYaml', () => {
   it.each([
@@ -28,4 +28,15 @@ describe('parseYaml', () => {
       optional: null,
     })
   })
+})
+
+describe('dumpYaml', () => {
+  it.each(['1e3', 'off', 'yes', '1_000', '0o17', '2026-01-02', '~', 'null'])(
+    'writes %s so it reads back a string',
+    (text) => {
+      const doc = { env: { VALUE: text }, [text]: 'key' }
+      expect(parseYaml(dumpYaml(doc))).toEqual(doc)
+      expect(dumpYaml(doc)).not.toContain(`VALUE: ${text}\n`)
+    },
+  )
 })

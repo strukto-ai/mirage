@@ -12,15 +12,15 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
 import os
+from pathlib import Path
 from stat import S_ISDIR
-
-import aiofiles.os
 
 from mirage.accessor.disk import DiskAccessor
 from mirage.core.disk.errors import disk_errors
 from mirage.core.disk.listing_version import stamp, wall_ns
-from mirage.core.disk.utils import resolve_inside
+from mirage.core.disk.utils import resolve_inside_sync
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.dates import ns_to_iso
 from mirage.utils.filetype import content_type_for_path
@@ -77,10 +77,13 @@ def stat_of(
 
 
 async def stat(accessor: DiskAccessor, path_spec: PathSpec) -> FileStat:
-    p = await resolve_inside(accessor.root, path_spec)
-    now_ns = wall_ns()
-    # One stat, restamped: an existence check first would read ENOTDIR
-    # (a path under a plain file) as plain absence.
-    with disk_errors(path_spec.virtual):
-        st = await aiofiles.os.stat(p)
+    def host() -> tuple[Path, os.stat_result, int]:
+        p = resolve_inside_sync(accessor.root, path_spec)
+        now_ns = wall_ns()
+        # One stat, restamped: an existence check first would read ENOTDIR
+        # (a path under a plain file) as plain absence.
+        with disk_errors(path_spec.virtual):
+            return p, os.stat(p), now_ns
+
+    p, st, now_ns = await asyncio.to_thread(host)
     return stat_of(p.name, st, now_ns, accessor.folder_versions)

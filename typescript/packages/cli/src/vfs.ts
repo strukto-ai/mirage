@@ -25,13 +25,19 @@ import {
   type VfsCall,
 } from '@struktoai/mirage-server/vfs_calls'
 import { makeClient } from './client.ts'
+import { resolveWorkspace } from './settings.ts'
 import { emit, handleResponse } from './output.ts'
 
 interface Target {
-  workspace: string
+  /** The workspace; the current one when left out. */
+  workspace?: string
   session?: string
   explain?: boolean
 }
+
+/** The `-w` option every live command takes. */
+export const WORKSPACE_FLAGS = '-w, --workspace <id>'
+export const WORKSPACE_HELP = 'Workspace id; the current workspace when left out'
 
 type Answer = Record<string, unknown>
 
@@ -41,13 +47,14 @@ export async function post(
   route: string,
   body: Record<string, unknown>,
 ): Promise<Response> {
+  const workspace = resolveWorkspace(target.workspace)
   const c = makeClient()
   await c.ensureRunning({ allowSpawn: false })
   const query = new URLSearchParams()
   if (target.session !== undefined) query.set('session_id', target.session)
   if (target.explain === true) query.set('explain', 'true')
   const suffix = query.size === 0 ? '' : `?${query.toString()}`
-  const path = `/v1/workspaces/${encodeURIComponent(target.workspace)}/${route}${suffix}`
+  const path = `/v1/workspaces/${encodeURIComponent(workspace)}/${route}${suffix}`
   return c.request('POST', path, { body: JSON.stringify(body) })
 }
 
@@ -110,7 +117,7 @@ function camel(name: string): string {
 }
 
 /**
- * The `mirage vfs <call>` command for one call: the call's required
+ * The `mirage workspace vfs <call>` command for one call: the call's required
  * arguments in order, then an option for each of the rest. Mirrors
  * Python's `command`.
  */
@@ -133,7 +140,7 @@ function command(vfs: Command, call: VfsCall): void {
     }
   }
   cmd
-    .requiredOption('-w, --workspace <id>', 'Workspace id')
+    .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
     .option('-s, --session <id>', 'Session id')
     .option('--explain', 'Say what the call would do; run nothing')
     .action(async (...given: unknown[]) => {
@@ -154,19 +161,10 @@ function command(vfs: Command, call: VfsCall): void {
     })
 }
 
-/** `mirage vfs <call>` for each `session.vfs` call, and `mirage glob`. */
-export function registerVfsCommands(program: Command): void {
-  const vfs = program
+/** `mirage workspace vfs <call>` for each `session.vfs` call. */
+export function registerVfsCommands(parent: Command): void {
+  const vfs = parent
     .command('vfs')
     .description("The session's VFS calls, one command per call, as POSIX names them.")
   for (const call of VFS_CALLS) command(vfs, call)
-  program
-    .command('glob')
-    .description('Every path a pattern matches, as the session sees them.')
-    .argument('<pattern>', 'Pathname pattern such as /**/*.py')
-    .requiredOption('-w, --workspace <id>', 'Workspace id')
-    .option('-s, --session <id>', 'Session id')
-    .action(async (pattern: string, opts: Target) => {
-      emit(await answer(await post(opts, 'glob', { pattern })), lines)
-    })
 }

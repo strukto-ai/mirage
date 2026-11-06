@@ -97,6 +97,28 @@ async function mirage(url: string, home: string, ...args: string[]): Promise<num
   return new Promise<number | null>((resolve) => child.on('close', resolve))
 }
 
+describe('mirage workspace create from a template', () => {
+  it('sends the template name and the -w id, and needs one of a file or a template', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-template-'))
+    tempDirs.push(dir)
+    const { url, seen, server } = await fakeServer()
+    try {
+      expect(await mirage(url, dir, 'create', '--template', 'base', '-w', 'my-ws')).toBe(0)
+      expect(seen[0]).toMatchObject({ method: 'POST', url: '/v1/workspaces' })
+      expect(JSON.parse(seen[0]?.body ?? '')).toEqual({ template: 'base', id: 'my-ws' })
+      const config = join(dir, 'c.yaml')
+      writeFileSync(config, 'mounts:\n  /ram:\n    vfs: ram\n')
+      expect(await mirage(url, dir, 'create')).toBe(2)
+      expect(await mirage(url, dir, 'create', config, '--template', 'base')).toBe(2)
+      expect(seen).toHaveLength(1)
+      expect(await mirage(url, dir, 'create', config, '--id', 'w2')).toBe(0)
+      expect(JSON.parse(seen[1]?.body ?? '')).toMatchObject({ id: 'w2' })
+    } finally {
+      server.close()
+    }
+  })
+})
+
 describe('mirage workspace snapshot and load', () => {
   it('write the tar here, put a key in the store, and upload a file', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-snapshot-'))

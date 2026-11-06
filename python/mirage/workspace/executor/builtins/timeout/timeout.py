@@ -55,13 +55,13 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.console.pipe import PipeConsole
 from mirage.shell.constants import NOT_FOUND_STATUS, TIMEOUT_STATUS
+from mirage.shell.job_table.constants import IGNORED_SIGNALS
 from mirage.shell.join import shell_join
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.timeout.constants import (
     CONTINUE_SIGNALS,
     FORK_FAILED,
-    JOB_IGNORED_SIGNALS,
     SELF_KILLING_SIGNALS,
     SIGCHLD,
     SIGKILL,
@@ -573,11 +573,15 @@ async def _deadline(
 
 async def _stop(process: ProcessHandle, signal: int, foreground: bool) -> None:
     # timeout signals its own process group unless --foreground, so the
-    # jobs the command started end with it unless they ignore the signal;
-    # the command itself gets it either way.
-    process.terminate(
-        signal, children=not foreground and signal not in JOB_IGNORED_SIGNALS
-    )
+    # jobs the command started end with it, or, when their shells ignore
+    # the signal, the programs they run right now do; the command itself
+    # gets it either way. The group hears it before the command stops, as
+    # a stop reaches children first, so a native program that ends with
+    # the command already knows the signal.
+    ignored = signal in IGNORED_SIGNALS
+    if ignored and not foreground:
+        process.signal_children(signal)
+    process.terminate(signal, children=not foreground and not ignored)
     await _cancel(process.task)
 
 

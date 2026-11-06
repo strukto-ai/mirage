@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RedirectResult } from '../../context/session_context.ts'
+import type { Caller, RedirectResult } from '../../context/session_context.ts'
 import {
   currentCaller,
   runLanding,
@@ -25,8 +25,8 @@ import { posixPhrase } from '../../errors/posix.ts'
 import { share, SharedInput } from '../../io/async_line_iterator.ts'
 import { chunks as byteChunks } from '../../io/cooperative.ts'
 import { PipeClosed } from '../../io/errors.ts'
-import { spooledPair } from '../../io/spool.ts'
-import { asyncChain, discardStreams } from '../../io/stream.ts'
+import { MEMORY_LIMIT, spooledPair } from '../../io/spool.ts'
+import { asyncChain, discardStreams, rechunk } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { DeviceInput, IOResult, materialize, PipeStream } from '../../io/types.ts'
 import { ByteWriter } from '../../io/writer.ts'
@@ -61,7 +61,8 @@ import { getText, literalWord } from '../../shell/helpers.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { RedirectKind, type Redirect } from '../../shell/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { endsAtDot } from '../../utils/path.ts'
+import { walkSpelling } from '../../commands/builtin/utils/paths.ts'
+import { CycleError, endsAtDot, posixNormpath } from '../../utils/path.ts'
 import { ownerPrefix } from '../../utils/slash.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { DEV_PREFIX } from '../mount/registry.ts'
@@ -80,13 +81,13 @@ import {
 import { toScope } from './builtins/scope.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
-import { createFile, writeDescription } from './create.ts'
+import { createFile, soleStream, writeDescription } from './create.ts'
 import { drained, pump } from './jobs.ts'
 
-// These producers write no named file while their output is consumed (curl
-// writes its cookie jar once its body has ended), so their output streams
-// into a redirect's file; any other command's output is replayed once it
-// ends.
+// What these return streams into a redirect's file as it is read; a file one
+// reads or writes meanwhile (awk's `print > f`, sed's `w f`, tee's operands)
+// first takes what streamed (`PipeRecorder.hold`). What any other command
+// returns is replayed once it ends.
 const STREAM_OUTPUT_BUILTINS = new Set([
   'cat',
   'head',
@@ -139,6 +140,9 @@ const STREAM_OUTPUT_BUILTINS = new Set([
   'sha256sum',
   'sha384sum',
   'sha512sum',
+  'awk',
+  'sed',
+  'tee',
 ])
 
 /**
@@ -155,6 +159,9 @@ export class PipeRecorder extends Recorder {
   readonly bound = new Map<Channel, FileDescription>()
   readonly writers = new Map<Channel, [FileDescription, ByteWriter]>()
   private readonly broken = new Set<ByteWriter>()
+  // Descriptions an op reached: what they get next lands at their offset.
+  private readonly resumed = new Set<FileDescription>()
+  private streaming: Promise<void> = Promise.resolve()
   file: FileDescription | null = null
   failure: unknown = null
 
@@ -165,7 +172,8 @@ export class PipeRecorder extends Recorder {
   /**
    * The writer a bound channel's first bytes start. None starts before bytes
    * come, so a command that writes the file itself (`shuf -o f > f`) is not
-   * clobbered by an empty write.
+   * clobbered by an empty write. Each write takes all that came while the
+   * last one ran, so a loop's many small writes cost a backend a few.
    */
   private writerFor(channel: Channel, file: FileDescription): [FileDescription, ByteWriter] {
     let live = this.writers.get(channel)
@@ -173,14 +181,56 @@ export class PipeRecorder extends Recorder {
     for (const [held, writer] of this.writers.values()) {
       if (held === file) live = [file, writer]
     }
+    const offset = this.resumed.has(file) && !file.append ? file.offset : null
     live ??= [
       file,
       new ByteWriter(async (source) => {
-        await this.dispatch(file.append ? 'append' : 'write', file.scope, [source])
-      }),
+        // The write is the redirect's own, so it waits on no hold of its file.
+        await runWithCaller({ ...currentCaller(), streamed: [] }, async () => {
+          if (offset === null) {
+            await this.dispatch(file.append ? 'append' : 'write', file.where, [source])
+            return
+          }
+          // What comes once an op reached the file lands at the
+          // description's offset, as a descriptor's write does, a block at
+          // a time; into a file still empty as one stream, as a
+          // description's first write does, which a store that rewrites the
+          // file on each pwrite would otherwise copy block after block.
+          if (
+            offset === 0 &&
+            (await soleStream(this.dispatch, file, async (sole) => {
+              if (sole) await this.dispatch('write', file.where, [source])
+              return sole
+            }))
+          ) {
+            return
+          }
+          let at = offset
+          for await (const part of rechunk(source, MEMORY_LIMIT)) {
+            await this.dispatch('pwrite', file.where, [part, at])
+            at += part.length
+          }
+        })
+      }, true),
     ]
     this.writers.set(channel, live)
     return live
+  }
+
+  // Bound writes, holds and commits take turns, so none writes into a
+  // writer another has finished.
+  private async inTurn<T>(run: () => Promise<T>): Promise<T> {
+    const before = this.streaming
+    let done = (): void => undefined
+    this.streaming = new Promise((resolve) => {
+      done = resolve
+    })
+    try {
+      await before
+      return await run()
+    } finally {
+      done()
+    }
   }
 
   private distinct(): [FileDescription, ByteWriter][] {
@@ -197,14 +247,57 @@ export class PipeRecorder extends Recorder {
     this.file = file
   }
 
+  /**
+   * Commit what each bound channel wrote; what comes after is recorded, for
+   * the level's end to write. A channel whose writer failed stays bound, so
+   * the rest of its bytes go nowhere.
+   */
   async finishWriter(): Promise<void> {
-    for (const [file, writer] of this.distinct()) {
-      try {
-        await writer.finish()
-      } catch (error) {
-        if (error instanceof PipeClosed || isAborting(error)) throw error
-        this.failed(file, writer, error)
+    await this.inTurn(async () => {
+      for (const [file, writer] of this.distinct()) await this.commit(file, writer)
+      this.unbind([...this.bound.keys()])
+    })
+  }
+
+  /**
+   * Commit what went into `file` for an op that reaches it, so the op finds
+   * it there as a descriptor's writes leave it; what comes after goes in at
+   * the description's offset, for the next op to find (`{ echo A; wc -l < f;
+   * echo B; wc -l < f; } > f`).
+   */
+  async hold(file: FileDescription): Promise<void> {
+    await this.inTurn(async () => {
+      const channels = [...this.bound].filter(([, held]) => held === file).map(([c]) => c)
+      const writers = new Set(
+        channels.flatMap((c) => {
+          const live = this.writers.get(c)
+          return live === undefined ? [] : [live[1]]
+        }),
+      )
+      for (const writer of writers) await this.commit(file, writer)
+      this.resumed.add(file)
+      for (const channel of channels) {
+        const live = this.writers.get(channel)
+        if (live !== undefined && !this.broken.has(live[1])) this.writers.delete(channel)
       }
+    })
+  }
+
+  private async commit(file: FileDescription, writer: ByteWriter): Promise<void> {
+    try {
+      await writer.finish()
+    } catch (error) {
+      if (error instanceof PipeClosed || isAborting(error)) throw error
+      this.failed(file, writer, error)
+    }
+  }
+
+  private unbind(channels: readonly Channel[]): void {
+    for (const channel of channels) {
+      const live = this.writers.get(channel)
+      if (live !== undefined && this.broken.has(live[1])) continue
+      this.bound.delete(channel)
+      this.writers.delete(channel)
     }
   }
 
@@ -221,10 +314,16 @@ export class PipeRecorder extends Recorder {
   ) {
     super()
   }
-  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
-    const bound = this.bound.get(channel)
-    if (bound !== undefined) {
-      if (data.byteLength === 0) return
+  /**
+   * Write bytes into the file their channel is bound to; false once
+   * `finishWriter` let the channel go, so they are recorded instead.
+   */
+  private async streamed(channel: Channel, data: Uint8Array): Promise<boolean> {
+    return this.inTurn(async () => {
+      const bound = this.bound.get(channel)
+      if (bound === undefined) return false
+      if (data.byteLength === 0) return true
+      if (bound.lost) return true
       const [file, writer] = this.writerFor(channel, bound)
       if (!this.broken.has(writer)) {
         try {
@@ -235,8 +334,12 @@ export class PipeRecorder extends Recorder {
           this.failed(file, writer, error)
         }
       }
-      return
-    }
+      return true
+    })
+  }
+
+  override async emit(channel: Channel, data: Uint8Array): Promise<void> {
+    if (this.bound.has(channel) && (await this.streamed(channel, data))) return
     const scope = this.streams.get(channel)
     if (scope === undefined) {
       const channelTo = this.forward.get(channel)
@@ -430,6 +533,8 @@ export async function handleRedirect(
   args: readonly string[] = [],
   // Whether bash forks to run the command, so a closed pipe ends it alone.
   forked = false,
+  // Resolves a path's links, to tell whether two targets are one file.
+  follow: ((path: string) => string) | null = null,
 ): Promise<RedirectResult> {
   const owned: SharedInput[] = []
   try {
@@ -449,6 +554,7 @@ export async function handleRedirect(
       name,
       args,
       forked,
+      follow,
     )
   } finally {
     await context.session.releaseInputs(owned)
@@ -472,6 +578,7 @@ async function runRedirects(
   args: readonly string[] = [],
   // Whether bash forks to run the command, so a closed pipe ends it alone.
   forked = false,
+  follow: ((path: string) => string) | null = null,
 ): Promise<RedirectResult> {
   const session = context.session
   const badFd = unsupportedDescriptor(redirects)
@@ -737,6 +844,41 @@ async function runRedirects(
       }
     }
   }
+  // What the command writes as it runs (a group's, a loop's, a function's
+  // statements) goes into its file as it is written, its stderr too when it
+  // shares the description (`> f 2>&1`); an op that reaches the file first
+  // commits what went in (`hold`). A stderr that opened the same file again
+  // (`> f 2> f`) keeps both waiting, so each write lands at its own
+  // description's offset.
+  const opened = outputs.get(1)
+  const errs = outputs.get(2)
+  if (
+    opened instanceof FileDescription &&
+    files.includes(opened) &&
+    opened.source === null &&
+    !opened.pipe
+  ) {
+    const landed = followed(opened.scope, follow)
+    recorder.outputFile = landed
+    if (
+      command !== null &&
+      opened.opened &&
+      (errs === opened ||
+        !(errs instanceof FileDescription) ||
+        !oneFile(errs.scope, opened.scope, follow))
+    ) {
+      opened.landed = PathSpec.fromStrPath(landed)
+      recorder.outputFile = opened
+      recorder.streamTo(opened)
+      if (errs === opened) recorder.streamTo(opened, Channel.STDERR)
+    }
+  }
+  const streamed: Caller['streamed'] = [
+    ...currentCaller().streamed,
+    ...[...new Set(recorder.bound.values())].map(
+      (file) => [file, () => recorder.hold(file)] as const,
+    ),
+  ]
   let unwound: Unwinding | null = null
   let cancelled: Error | null = null
   let refused = false
@@ -772,60 +914,64 @@ async function runRedirects(
       if (captureInput && given !== UNREADABLE) await pump(recorder, Channel.STDOUT, given)
     } else {
       try {
-        const result = await runWithCaller({ ...currentCaller(), enclosing: recorder }, () =>
-          runWithRedirectPaths(command, targets, () =>
-            executeNode(
-              command,
-              context,
-              given === UNREADABLE ? unreadableStdin() : given,
-              callStack,
-              { sink: recorder },
+        const result = await runWithCaller(
+          { ...currentCaller(), enclosing: recorder, streamed },
+          () =>
+            runWithRedirectPaths(command, targets, () =>
+              executeNode(
+                command,
+                context,
+                given === UNREADABLE ? unreadableStdin() : given,
+                callStack,
+                { sink: recorder },
+              ),
             ),
-          ),
         )
         refused = result[2].refused
-        await runWithRedirectPaths(command, targets, async () => {
-          const target = outputs.get(1)
-          // A command reading the file it writes (`cat f >> f`, `grep -r x d
-          // > d/f`) would read its own output back.
-          if (
-            !refused &&
-            (STREAM_OUTPUT_BUILTINS.has(name) || result[1].producer?.native === true) &&
-            recorder.chunks.length === 0 &&
-            target instanceof FileDescription &&
-            files.includes(target) &&
-            target.source === null &&
-            !target.pipe &&
-            ownerPrefix(
-              result[2].paths.map((p) => p.virtual),
-              target.scope.virtual,
-            ) === null
-          )
-            recorder.streamTo(target)
-          const errs = outputs.get(2)
-          // A program's stderr goes into its file as it is written too,
-          // with its stdout when both share one (`> f 2>&1`).
-          if (
-            !refused &&
-            result[1].producer?.native === true &&
-            recorder.chunks.length === 0 &&
-            errs instanceof FileDescription &&
-            files.includes(errs) &&
-            errs.source === null &&
-            !errs.pipe &&
-            (errs !== target || recorder.bound.has(Channel.STDOUT))
-          )
-            recorder.streamTo(errs, Channel.STDERR)
-          const [, execIo] = await drained(recorder, ...result)
-          io = execIo
-          await recorder.finishWriter()
-        })
+        await runWithCaller({ ...currentCaller(), streamed }, () =>
+          runWithRedirectPaths(command, targets, async () => {
+            const target = outputs.get(1)
+            const [stdout, , ran] = result
+            // A command reading the file it writes (`cat f >> f`, `grep -r x
+            // d > d/f`) would read its own output back.
+            if (refused) await recorder.finishWriter()
+            else if (
+              target instanceof FileDescription &&
+              stdout !== null &&
+              !(stdout instanceof Uint8Array && stdout.byteLength === 0) &&
+              !(
+                (STREAM_OUTPUT_BUILTINS.has(name) || result[1].producer?.native === true) &&
+                ownerPrefix(
+                  ran.paths.map((p) => p.virtual),
+                  target.scope.virtual,
+                ) === null
+              )
+            )
+              await recorder.finishWriter()
+            // A program's stderr goes into its own file as it is written too.
+            if (
+              !refused &&
+              result[1].producer?.native === true &&
+              recorder.chunks.length === 0 &&
+              errs instanceof FileDescription &&
+              errs !== target &&
+              files.includes(errs) &&
+              errs.source === null &&
+              !errs.pipe
+            )
+              recorder.streamTo(errs, Channel.STDERR)
+            const [, execIo] = await drained(recorder, ...result)
+            io = execIo
+            await recorder.finishWriter()
+          }),
+        )
       } catch (error) {
         if (!(error instanceof PipeClosed)) throw error
         // SIGPIPE ends a forked writer alone; a builtin's write, in a
         // function or a group too, is the shell's, which dies.
         if (!forked) throw new ExitSignal(SIGPIPE_STATUS)
         io = new IOResult({ exitCode: SIGPIPE_STATUS })
+        await recorder.finishWriter()
       }
     }
   } catch (error) {
@@ -844,6 +990,7 @@ async function runRedirects(
         const diagnostic = await takeStderr(error)
         if (diagnostic.byteLength > 0) await recorder.emit(Channel.STDERR, diagnostic)
       }
+      await recorder.finishWriter()
     }
   } finally {
     if (cancelled === null) await recorder.abort()
@@ -993,6 +1140,29 @@ async function runRedirects(
     throw await carried(unwound, stdout, new IOResult({ stderr: io.stderr }))
   }
   return [stdout, io, new ExecutionNode({ command: 'redirect', exitCode: io.exitCode, refused })]
+}
+
+/**
+ * The file a target names once its links are resolved, walked as typed, links
+ * before `..`, as its open walked it; a loop of links names itself.
+ */
+function followed(scope: PathSpec, follow: ((path: string) => string) | null): string {
+  if (follow === null) return scope.virtual
+  try {
+    return posixNormpath(follow(walkSpelling(scope, follow)))
+  } catch (error) {
+    if (error instanceof CycleError) return scope.virtual
+    throw error
+  }
+}
+
+/** Whether two targets name one file, through links too. */
+function oneFile(
+  first: PathSpec,
+  second: PathSpec,
+  follow: ((path: string) => string) | null,
+): boolean {
+  return first.virtual === second.virtual || followed(first, follow) === followed(second, follow)
 }
 
 function outputOnly(name: string, args: readonly string[]): boolean {

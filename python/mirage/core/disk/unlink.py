@@ -12,31 +12,35 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiofiles.os
+import os
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.errors import disk_errors
-from mirage.core.disk.utils import resolve_inside
+from mirage.core.disk.utils import resolve_inside_sync
 from mirage.errors.fs import eisdir
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 
 
 async def unlink(accessor: DiskAccessor, path_spec: PathSpec) -> None:
-    p = await resolve_inside(accessor.root, path_spec)
+    def remove() -> None:
+        p = resolve_inside_sync(accessor.root, path_spec)
+        try:
+            with disk_errors(path_spec.virtual):
+                os.remove(p)
+        except PermissionError as exc:
+            # macOS answers unlink(2) on a directory with EPERM; Linux,
+            # whose answer every other backend gives, with EISDIR.
+            if os.path.isdir(p):
+                raise eisdir(path_spec) from exc
+            raise
+
     timer = start_op()
     done = True
     try:
-        with disk_errors(path_spec.virtual):
-            await aiofiles.os.remove(p)
-    except PermissionError as exc:
-        done = False
-        # macOS answers unlink(2) on a directory with EPERM; Linux, whose
-        # answer every other backend gives, with EISDIR.
-        if await aiofiles.os.path.isdir(p):
-            raise eisdir(path_spec) from exc
-        raise
-    except OSError:
+        await run_blocking(remove)
+    except Exception:
         done = False
         raise
     finally:

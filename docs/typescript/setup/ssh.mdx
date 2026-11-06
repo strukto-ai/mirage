@@ -41,7 +41,8 @@ await ws.shell('ls /remote')
 | <code style={{ whiteSpace: 'nowrap' }}>username</code> | Login user; unset uses the local user name. |
 | <code style={{ whiteSpace: 'nowrap' }}>password</code><br />secret | Password for password authentication; prefer `identityFile`. |
 | <code style={{ whiteSpace: 'nowrap' }}>identityFile</code> | Path to a private key; `~` is expanded. Unset tries the SSH agent and the default keys in `~/.ssh` (`id_ed25519`, `id_ecdsa`, `id_rsa`, `id_dsa`). |
-| <code style={{ whiteSpace: 'nowrap' }}>passphrase</code><br />secret | Passphrase of an encrypted private key, from `identityFile` or a default key. |
+| <code style={{ whiteSpace: 'nowrap' }}>privateKey</code><br />secret | A private key's own text, such as one a credential pointer reads from a secret store; offered after `identityFile`'s. |
+| <code style={{ whiteSpace: 'nowrap' }}>passphrase</code><br />secret | Passphrase of an encrypted private key, from `identityFile`, `privateKey` or a default key. |
 | <code style={{ whiteSpace: 'nowrap' }}>root</code><br />default `'/'` | Path on the remote that becomes the mount root. |
 | <code style={{ whiteSpace: 'nowrap' }}>timeout</code><br />default `30` | Seconds to wait for the connection to be ready, authentication included. |
 | <code style={{ whiteSpace: 'nowrap' }}>knownHosts</code> | Accepted but not applied: this backend does not verify host keys. |

@@ -49,6 +49,7 @@ import { decodeText, encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
+import { Recorder } from '../../shell/descriptors.ts'
 import { ArithError, DiscardSignal, ExitSignal, TooManyMatches } from '../../shell/errors.ts'
 import {
   ALIAS_WORD_TYPES,
@@ -808,6 +809,7 @@ async function runArgv(
         command: argv.name,
         invocation: gated?.ctx ?? null,
         declared: null,
+        outputFile: output instanceof Recorder ? output.outputTarget : null,
       },
       () =>
         commandRecords((records) => {

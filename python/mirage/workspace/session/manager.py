@@ -379,7 +379,9 @@ class SessionManager(SessionOwner):
                     set_cwd(default, stored.cwd)
                     default.vars = stored.vars
                     default.functions = stored.functions
-                    default._function_sites.clear()
+                    # The sites the record keeps: each function's alias
+                    # view.
+                    default._function_sites = dict(stored._function_sites)
                     default.readonly_functions = stored.readonly_functions
                     default.exported_functions = stored.exported_functions
                     default.created_at = stored.created_at
@@ -397,6 +399,17 @@ class SessionManager(SessionOwner):
                     # ask again after a restart and the next flush
                     # would erase the record from the store.
                     default.decisions = stored.decisions
+                    # The rest of the shell as the last line left it, so
+                    # a restart keeps its aliases, options, mask, traps
+                    # and spelled cwd.
+                    default.aliases = stored.aliases
+                    default.shell_options = stored.shell_options
+                    default.shopts = stored.shopts
+                    default.umask = stored.umask
+                    default.logical_cwd = stored.logical_cwd
+                    default.exit_trap = stored.exit_trap
+                    default.err_trap = stored.err_trap
+                    default.return_trap = stored.return_trap
                     default.generation = stored.generation
                     # Hydrated sessions start clean: baseline what the
                     # store holds so the next flush skips them.

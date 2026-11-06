@@ -63,6 +63,7 @@ class ProcessTable:
         limit: int | None = None,
         execution_id: str | None = None,
         started: Callable[[ProcessInfo], None] | None = None,
+        ignores: frozenset[int] = frozenset(),
     ) -> ProcessHandle:
         """Track a runner; its caller owns admission before command effects.
 
@@ -87,6 +88,8 @@ class ProcessTable:
                 they were started, so a job's redirect lands before the
                 line that started it reads the file. Without it the
                 runner starts on the loop's next turn.
+            ignores (frozenset[int]): the signals the runner ignores,
+                which stop neither it nor what it started.
 
         Raises:
             BlockingIOError: the session already holds ``limit``
@@ -135,6 +138,8 @@ class ProcessTable:
                 self._retire,
                 lambda signal: self.terminate_children(pid, signal),
                 self._bind,
+                lambda signal: self.signal_children(pid, signal),
+                ignores,
             )
             eager = started is not None and not self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
@@ -161,14 +166,45 @@ class ProcessTable:
             pid (int): the parent or ancestor.
             signal (int): what the stop stands for, as the parent's.
         """
+        for child in self._under(pid):
+            child.terminate(signal)
+
+    def signal_children(self, pid: int, signal: int) -> None:
+        """Deliver a signal to every live runner under ``pid``, as a
+        process group gets it: a runner that ignores it (a job's shell)
+        hands it to the program it runs right now
+        (``ProcessHandle.interrupt``), and any other stops with it, so a
+        native program it started receives that signal. A runner such a
+        shell started is one of its programs, which the shell sees end
+        and goes on past, so the signal reaches it through that shell.
+
+        Args:
+            pid (int): the parent or ancestor.
+            signal (int): the signal.
+        """
+        for child in self._under(pid):
+            if signal in child.ignores:
+                child.interrupt(signal)
+            elif not self._ignored_above(child.info.pid, pid, signal):
+                child.terminate(signal, children=False)
+
+    def _ignored_above(self, pid: int, top: int, signal: int) -> bool:
         with self._lock:
-            under = [
+            chain = self._ancestors.get(pid, ())
+            above = chain[chain.index(top) + 1 :] if top in chain else ()
+            return any(
+                (live := self._live.get(ancestor)) is not None
+                and signal in live[1].ignores
+                for ancestor in above
+            )
+
+    def _under(self, pid: int) -> list[ProcessHandle]:
+        with self._lock:
+            return [
                 handle
                 for _, handle in self._live.values()
                 if pid in self._ancestors.get(handle.info.pid, ())
             ]
-        for child in under:
-            child.terminate(signal)
 
     def _retire(self, pid: int) -> None:
         with self._lock:
@@ -228,7 +264,9 @@ class ProcessTable:
         def terminate(pid: int, signal: int) -> bool:
             with self._lock:
                 handle = signal_target(pid)
-                return handle is not None and handle.terminate(signal)
+                return handle is not None and (
+                    signal in handle.ignores or handle.terminate(signal)
+                )
 
         def granted() -> ProcessPermissions | None:
             return permissions() if valid() else None

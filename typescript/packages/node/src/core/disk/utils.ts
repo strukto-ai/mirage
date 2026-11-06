@@ -48,6 +48,43 @@ async function nativeRealpath(file: string): Promise<string> {
 }
 
 /**
+ * A probe the walk may stop short of awaiting: a failure nothing awaits is
+ * logged, past the absence a walk ends on, instead of left unhandled.
+ */
+function settles<T>(pending: Promise<T>): Promise<T> {
+  pending.catch((err: unknown) => {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') console.debug('Disk probe failed:', code)
+  })
+  return pending
+}
+
+/**
+ * Start a name's probes at once: its lstat, the lstat of its spelling with one
+ * letter's case flipped, and the parent's open. All stay inside a parent the
+ * walk has already proved is no link.
+ */
+function probeName(parent: string, part: string) {
+  const at = path.join(parent, part)
+  const index = part.search(/[A-Za-z]/)
+  let alternate: string | undefined
+  if (index !== -1) {
+    const char = part[index] ?? ''
+    const flipped = char === char.toLowerCase() ? char.toUpperCase() : char.toLowerCase()
+    alternate = path.join(parent, part.slice(0, index) + flipped + part.slice(index + 1))
+  }
+  return {
+    parent,
+    part,
+    at,
+    info: settles(lstat(at)),
+    alternate,
+    alias: alternate === undefined ? undefined : settles(lstat(alternate)),
+    opened: settles(openParent(parent)),
+  }
+}
+
+/**
  * Prove the requested spelling is the entry's own, listing the parent's names
  * only when nothing cheaper proves it. An ASCII name has one spelling unless
  * the directory folds case, and the name with one letter's case flipped tells:
@@ -59,16 +96,12 @@ async function nativeRealpath(file: string): Promise<string> {
  * still opens the parent, so permissions stay uniform; no name cache. Mirrors
  * Python's exact_name.
  */
-async function exactName(parent: string, part: string, info: Stats): Promise<boolean> {
-  const index = part.search(/[A-Za-z]/)
-  let alternate: string | undefined
+async function exactName(probe: ReturnType<typeof probeName>, info: Stats): Promise<boolean> {
+  const { parent, part, alternate } = probe
   let folds = false
-  if (index !== -1) {
-    const char = part[index] ?? ''
-    const flipped = char === char.toLowerCase() ? char.toUpperCase() : char.toLowerCase()
-    alternate = path.join(parent, part.slice(0, index) + flipped + part.slice(index + 1))
+  if (probe.alias !== undefined) {
     try {
-      const alias = await lstat(alternate)
+      const alias = await probe.alias
       folds = !alias.isSymbolicLink() && alias.dev === info.dev && alias.ino === info.ino
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code
@@ -79,14 +112,15 @@ async function exactName(parent: string, part: string, info: Stats): Promise<boo
     }
   }
   if (/^\p{ASCII}*$/u.test(part) && !folds) {
-    await openParent(parent)
+    await probe.opened
     return true
   }
   if (folds && alternate !== undefined && ['darwin', 'win32'].includes(process.platform)) {
     try {
-      const canonical = await nativeRealpath(path.join(parent, part))
-      if (path.basename(canonical) === part && (await nativeRealpath(alternate)) === canonical) {
-        await openParent(parent)
+      const canonical = nativeRealpath(probe.at)
+      const aliased = settles(nativeRealpath(alternate))
+      if (path.basename(await canonical) === part && (await aliased) === (await canonical)) {
+        await probe.opened
         return true
       }
     } catch (err) {
@@ -147,16 +181,20 @@ export async function resolveInside(
   const full = resolveSafe(root, virtual)
   const base = path.resolve(root)
   if (full === base) return full
-  let at = base
-  for (const part of path.relative(at, full).split(path.sep)) {
-    if (part === '') break
-    const parent = at
-    at = path.join(parent, part)
+  const parts = path.relative(base, full).split(path.sep)
+  const end = parts.includes('') ? parts.indexOf('') : parts.length
+  let probe = end > 0 ? probeName(base, parts[0] ?? '') : null
+  for (let i = 0; probe !== null; i++) {
+    const current = probe
+    probe = null
     let info
     let exact
     try {
-      info = await lstat(at)
-      exact = info.isSymbolicLink() ? false : await exactName(parent, part, info)
+      info = await current.info
+      // The next name's probes start once this one is proved no link, so
+      // none of them walks through a host link out of the root.
+      if (!info.isSymbolicLink() && i + 1 < end) probe = probeName(current.at, parts[i + 1] ?? '')
+      exact = info.isSymbolicLink() ? false : await exactName(current, info)
     } catch (err) {
       const code = (err as NodeJS.ErrnoException).code
       if (code === 'ENOENT' || code === 'ENOTDIR') return full

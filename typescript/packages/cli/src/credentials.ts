@@ -13,21 +13,163 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import {
+  closeSync,
   existsSync,
   mkdirSync,
   openSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
   writeSync,
-  closeSync,
 } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { mirageHome } from '@struktoai/mirage-server/paths'
+import { CONTEXT_NAME, CONTEXTS_DIR, CURRENT_FILE, LOCAL, LOGINS_DIR } from './constants.ts'
+import { ENV_CONTEXT } from './env.ts'
 
-const LOGIN_FILE = 'login.json'
+type Env = Record<string, string | undefined>
+
 export const LOGIN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 const REFRESH_MARGIN_SECONDS = 60
+
+/**
+ * One server the CLI talks to, with what it remembers there: its URL
+ * (empty for `local`, whose URL follows the daemon's port), the team the
+ * login acts for if the server names one, and the workspace commands use
+ * when given none.
+ */
+export interface Context {
+  url: string
+  team: string | null
+  workspace: string | null
+}
+
+/** A context that does not exist, or one that cannot be changed. */
+export class ContextError extends Error {
+  override readonly name = 'ContextError'
+}
+
+export function emptyContext(): Context {
+  return { url: '', team: null, workspace: null }
+}
+
+/** Replace `path` whole, readable by this user only. */
+function writeOwnerOnly(path: string, text: string): void {
+  mkdirSync(dirname(path), { recursive: true })
+  const staged = join(dirname(path), `.${basename(path)}.${String(process.pid)}`)
+  const fd = openSync(staged, 'w', 0o600)
+  try {
+    writeSync(fd, text)
+  } finally {
+    closeSync(fd)
+  }
+  renameSync(staged, path)
+}
+
+/** Where a context is kept: one file each, so changing one never touches another. */
+function contextPath(name: string, env: Env): string {
+  return join(mirageHome(env), CONTEXTS_DIR, `${checkName(name)}.json`)
+}
+
+/** Where a context's login is kept. */
+export function loginPath(name: string, env: Env = process.env): string {
+  return join(mirageHome(env), LOGINS_DIR, `${checkName(name)}.json`)
+}
+
+/** A context name, refused unless it is safe as a file name. */
+export function checkName(name: string): string {
+  if (!CONTEXT_NAME.test(name)) {
+    throw new ContextError(
+      `invalid context name '${name}': use lowercase letters, digits, '.', '_' and '-'`,
+    )
+  }
+  return name
+}
+
+/** Read a context; `local` is there even with no file; null when there is none. */
+export function readContext(name: string, env: Env = process.env): Context | null {
+  const path = contextPath(name, env)
+  if (!existsSync(path)) return name === LOCAL ? emptyContext() : null
+  let raw: unknown
+  try {
+    raw = JSON.parse(readFileSync(path, 'utf-8'))
+  } catch (e) {
+    throw new ContextError(`malformed ${path}: ${(e as Error).message}`)
+  }
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ContextError(`malformed ${path}: not a JSON object`)
+  }
+  const empty = emptyContext()
+  const unknown = Object.keys(raw)
+    .filter((k) => !Object.hasOwn(empty, k))
+    .sort(compareCodePoints)
+  if (unknown.length > 0) throw new ContextError(`malformed ${path}: unknown ${unknown.join(', ')}`)
+  return { ...empty, ...(raw as Partial<Context>) }
+}
+
+/** Store a context whole, readable by this user only. */
+export function writeContext(name: string, context: Context, env: Env = process.env): void {
+  writeOwnerOnly(contextPath(name, env), JSON.stringify(context, null, 2) + '\n')
+}
+
+/** Forget a context and its login. */
+export function removeContext(name: string, env: Env = process.env): void {
+  rmSync(contextPath(name, env), { force: true })
+  rmSync(loginPath(name, env), { force: true })
+}
+
+/** Every context, `local` among them, sorted. */
+export function contextNames(env: Env = process.env): string[] {
+  const folder = join(mirageHome(env), CONTEXTS_DIR)
+  const found = new Set([LOCAL])
+  if (existsSync(folder)) {
+    for (const file of readdirSync(folder)) {
+      const name = file.slice(0, -'.json'.length)
+      if (file.endsWith('.json') && CONTEXT_NAME.test(name)) found.add(name)
+    }
+  }
+  return [...found].sort(compareCodePoints)
+}
+
+/** The saved current context, `local` when none is saved. */
+export function readCurrent(env: Env = process.env): string {
+  const path = join(mirageHome(env), CURRENT_FILE)
+  const stored = existsSync(path) ? readFileSync(path, 'utf-8').trim() : ''
+  return stored !== '' ? stored : LOCAL
+}
+
+/** Make a context the current one. */
+export function writeCurrent(name: string, env: Env = process.env): void {
+  writeOwnerOnly(join(mirageHome(env), CURRENT_FILE), `${name}\n`)
+}
+
+/** The command that logs a context in again. */
+export function loginCommand(url: string, name: string): string {
+  return `mirage login ${url} --name ${name}`
+}
+
+/**
+ * The context this command asks for: `--context` or `$MIRAGE_CONTEXT`,
+ * else the current one, else `local`; it may not exist.
+ */
+export function chosenName(env: Env = process.env): string {
+  const fromEnv = env[ENV_CONTEXT]
+  return fromEnv !== undefined && fromEnv !== '' ? fromEnv : readCurrent(env)
+}
+
+/**
+ * The context this command uses, as `chosenName` picks it. Throws
+ * `ContextError` when there is none by that name.
+ */
+export function currentName(env: Env = process.env): string {
+  const name = chosenName(env)
+  if (readContext(name, env) === null) {
+    throw new ContextError(`no context '${name}'; run \`mirage context list\``)
+  }
+  return name
+}
 
 /** The login cannot give a token: it is too old, or the issuer refused to refresh it. */
 export class LoginError extends Error {
@@ -35,7 +177,7 @@ export class LoginError extends Error {
 }
 
 /**
- * What `mirage login` keeps, for the one server it logged in to: the
+ * What `mirage login` keeps, for the one server a context is: the
  * server the token is for (it goes nowhere else), the bearer token, when
  * the user signed in (the login ends 30 days later, however often it was
  * refreshed), the refresh token (null for a pasted token), when the
@@ -61,31 +203,24 @@ export function renewBy(login: Login): number {
   return ends
 }
 
-export function loginPath(env: Record<string, string | undefined> = process.env): string {
-  return join(mirageHome(env), LOGIN_FILE)
+/** The current context's login file. */
+function currentLoginPath(env: Record<string, string | undefined> = process.env): string {
+  return loginPath(currentName(env), env)
 }
 
 /** The stored login, or null when there is none. */
-export function readLogin(path: string = loginPath()): Login | null {
+export function readLogin(path: string = currentLoginPath()): Login | null {
   if (!existsSync(path)) return null
   return JSON.parse(readFileSync(path, 'utf-8')) as Login
 }
 
 /** Store a login, readable by this user only. */
-export function writeLogin(login: Login, path: string = loginPath()): void {
-  mkdirSync(dirname(path), { recursive: true })
-  const staged = join(dirname(path), `.${LOGIN_FILE}.${String(process.pid)}`)
-  const fd = openSync(staged, 'w', 0o600)
-  try {
-    writeSync(fd, JSON.stringify(login, null, 2))
-  } finally {
-    closeSync(fd)
-  }
-  renameSync(staged, path)
+export function writeLogin(login: Login, path: string = currentLoginPath()): void {
+  writeOwnerOnly(path, JSON.stringify(login, null, 2))
 }
 
 /** Forget the stored login; returns the login removed, or null when there was none. */
-export function removeLogin(path: string = loginPath()): Login | null {
+export function removeLogin(path: string = currentLoginPath()): Login | null {
   const login = readLogin(path)
   rmSync(path, { force: true })
   return login
@@ -129,9 +264,9 @@ export function endsAt(body: Record<string, unknown>, now: number): number | nul
  * `LoginError` when the login is over 30 days old, its token ended with
  * nothing to refresh it, or the issuer refused the refresh.
  */
-export async function freshToken(login: Login, path: string = loginPath()): Promise<string> {
+export async function freshToken(login: Login, path: string = currentLoginPath()): Promise<string> {
   const now = Date.now() / 1000
-  const again = `run \`mirage login\` to log in to ${login.url} again`
+  const again = `run \`${loginCommand(login.url, basename(path, '.json'))}\` to log in again`
   if (now >= login.logged_in_at + LOGIN_MAX_AGE_SECONDS) {
     throw new LoginError(`the login is 30 days old; ${again}`)
   }

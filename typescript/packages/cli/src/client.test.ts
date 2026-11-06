@@ -42,6 +42,7 @@ describe('DaemonClient spawn config validation', () => {
   it('refuses to spawn when config.toml has an unknown key', async () => {
     writeFileSync(join(home, 'config.toml'), '[daemon]\ntypo_key = "x"\n')
     const client = new DaemonClient({
+      context: 'local',
       url: 'http://127.0.0.1:1',
       authToken: 't',
       idleGraceSeconds: 30,
@@ -52,13 +53,36 @@ describe('DaemonClient spawn config validation', () => {
 
   it('never spawns for a remote URL', async () => {
     const client = new DaemonClient({
+      context: 'local',
       url: 'https://mirage.invalid',
       authToken: '',
       idleGraceSeconds: 30,
     })
+    vi.spyOn(client, 'isReachable').mockResolvedValue(false)
     await expect(client.ensureRunning({ timeoutMs: 500 })).rejects.toThrow(DaemonUnreachable)
     expect(existsSync(join(home, 'auth_token'))).toBe(false)
     expect(existsSync(join(home, 'daemon.log'))).toBe(false)
+  })
+
+  it('gives a remote server 10 s to answer, and a local daemon half a second', async () => {
+    const remote = new DaemonClient({
+      context: 'local',
+      url: 'https://mirage.invalid',
+      authToken: '',
+      idleGraceSeconds: 30,
+    })
+    const remoteProbe = vi.spyOn(remote, 'isReachable').mockResolvedValue(true)
+    await remote.ensureRunning({ allowSpawn: false })
+    expect(remoteProbe).toHaveBeenCalledWith(10_000)
+    const local = new DaemonClient({
+      context: 'local',
+      url: 'http://127.0.0.1:1',
+      authToken: 't',
+      idleGraceSeconds: 30,
+    })
+    const localProbe = vi.spyOn(local, 'isReachable').mockResolvedValue(true)
+    await local.ensureRunning({ allowSpawn: false })
+    expect(localProbe).toHaveBeenCalledWith()
   })
 })
 
@@ -95,6 +119,7 @@ describe('DaemonClient spawn wait', () => {
     await new Promise((resolve) => probe.close(resolve))
     spawned()
     const client = new DaemonClient({
+      context: 'local',
       url: `http://127.0.0.1:${String(port)}`,
       authToken: 't',
       idleGraceSeconds: 30,
@@ -116,6 +141,7 @@ describe('DaemonClient spawn wait', () => {
     const { port } = server.address() as AddressInfo
     spawned()
     const client = new DaemonClient({
+      context: 'local',
       url: `http://127.0.0.1:${String(port)}`,
       authToken: 't',
       idleGraceSeconds: 30,
@@ -161,12 +187,18 @@ describe('DaemonClient token', () => {
   })
 
   function client(kept: Login): DaemonClient {
-    return new DaemonClient({ url: login.url, idleGraceSeconds: 30, authToken: '', login: kept })
+    return new DaemonClient({
+      context: 'local',
+      url: login.url,
+      idleGraceSeconds: 30,
+      authToken: '',
+      login: kept,
+    })
   }
 
   it("is the settings' own, else the login's", async () => {
     writeLogin(login)
-    const base = { url: login.url, idleGraceSeconds: 30 }
+    const base = { context: 'local', url: login.url, idleGraceSeconds: 30 }
     expect(await new DaemonClient({ ...base, authToken: 'set', login }).token()).toBe('set')
     expect(await client(login).token()).toBe('from-login')
     expect(await new DaemonClient({ ...base, authToken: '' }).token()).toBe('')

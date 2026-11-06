@@ -127,6 +127,30 @@ describe('ListingMemo', () => {
     expect(folder.reads).toBe(2)
   })
 
+  it("reads a command's first lookup of one child alone", async () => {
+    const folder = new Folder()
+    const narrowed: string[] = []
+    const keys = async (child: string): Promise<string[] | null | undefined> =>
+      (
+        await memo.read('/d', folder.fetch, child, () => {
+          narrowed.push(child)
+          return Promise.resolve([{ entries: [child] }, WALL + 60])
+        })
+      ).entries
+    expect(await keys('/d/a')).toEqual(['/d/a'])
+    await runInCommandScope(async () => {
+      expect(await keys('/d/a')).toEqual(['/d/a'])
+      expect(held(memo)).toEqual([])
+      expect(await keys('/d/z')).toEqual([])
+      expect(await keys('/d/b')).toEqual(['/d/b'])
+      expect(held(memo)).toEqual(['/d'])
+      elapsed += LISTING_TRUST_WINDOW
+      expect(await keys('/d/b')).toEqual(['/d/b'])
+    })
+    expect(narrowed).toEqual(['/d/a', '/d/a', '/d/b'])
+    expect(folder.reads).toBe(1)
+  })
+
   it.each([LISTING_TRUST_WINDOW / 2, LISTING_TRUST_WINDOW * 2])(
     'expires rows at the listing expiry or trust window (%s)',
     async (expiry) => {

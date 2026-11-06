@@ -25,6 +25,7 @@ import { withinRequest } from '@struktoai/mirage-core/io/web/request'
 import type { Runtime, RuntimeEntry } from '@struktoai/mirage-core/runtime/base'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import { VFSConfigError } from '@struktoai/mirage-core/vfs/errors'
+import { CONFIG_SCHEMAS } from '@struktoai/mirage-core/vfs/registry'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import {
@@ -149,6 +150,7 @@ export function edgeHost(): ServerHost {
     Workspace,
     workspaceArgs: (cfg) => configToWorkspaceArgs(cfg, CONFIG),
     buildVfs,
+    vfsSchemas: CONFIG_SCHEMAS,
     buildCliEntries: (clis, sources) => buildCliEntries(clis, sources, CONFIG),
     loadProfile: (profile) => loadProfilePolicy(profile, CONFIG),
     stateStore: () => state,

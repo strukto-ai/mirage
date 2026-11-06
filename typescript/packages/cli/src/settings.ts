@@ -38,6 +38,7 @@ import {
   ENV_MAX_WORKSPACES,
   ENV_POLICY_FILE,
   ENV_RATE_LIMITS,
+  ENV_RESOURCE_STORE,
   ENV_WORKER_TYPE,
   ENV_WORKERS,
 } from '@struktoai/mirage-server/env'
@@ -52,10 +53,80 @@ import {
 } from '@struktoai/mirage-server/ssh/constants'
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { loginPath, readLogin, type Login } from './credentials.ts'
-import { ENV_DAEMON_URL, ENV_TOKEN } from './env.ts'
+import { DEFAULT_PORT, LOCAL } from './constants.ts'
+import {
+  ContextError,
+  currentName,
+  loginPath,
+  readContext,
+  readLogin,
+  writeContext,
+  type Login,
+} from './credentials.ts'
+import { ENV_DAEMON_URL, ENV_TOKEN, ENV_WORKSPACE } from './env.ts'
+import { fail } from './output.ts'
+
+type Env = Record<string, string | undefined>
 
 export const DEFAULT_DAEMON_URL = 'http://127.0.0.1:8765'
+
+/**
+ * The URL `local` follows when it keeps none of its own: config.toml's
+ * `url`, else this machine at the port a spawned daemon listens on.
+ */
+export function defaultLocalUrl(table: Record<string, string>, env: Env = process.env): string {
+  const fromEnv = env[ENV_DAEMON_PORT]
+  const port =
+    fromEnv !== undefined && fromEnv !== ''
+      ? fromEnv
+      : table.port !== undefined && table.port !== ''
+        ? table.port
+        : String(DEFAULT_PORT)
+  if (table.url !== undefined && table.url !== '') return table.url
+  return `http://127.0.0.1:${port}`
+}
+
+/** The `local` context's URL: the one it logged in to, else `defaultLocalUrl`. */
+export function localUrl(table: Record<string, string>, env: Env = process.env): string {
+  const own = readContext(LOCAL, env)?.url ?? ''
+  return own !== '' ? own : defaultLocalUrl(table, env)
+}
+
+/** The workspace a command uses when given none: `$MIRAGE_WORKSPACE`, else the current context's. */
+export function currentWorkspace(env: Env = process.env): string | null {
+  const fromEnv = env[ENV_WORKSPACE]
+  if (fromEnv !== undefined && fromEnv !== '') return fromEnv
+  return readContext(currentName(env), env)?.workspace ?? null
+}
+
+/** The workspace to act on: `-w`, else `$MIRAGE_WORKSPACE`, else the current context's. */
+export function resolveWorkspace(given: string | undefined): string {
+  const found = given !== undefined && given !== '' ? given : currentWorkspace()
+  if (found === null || found === '') {
+    fail('no workspace selected · run `mirage workspace use <id>` or pass -w', 2)
+  }
+  return found
+}
+
+/**
+ * Say on a terminal which context and team a command acted in, as
+ * `strukto · team acme · created demo`; `name` is the current context
+ * when left out.
+ */
+export function header(action: string, name?: string): void {
+  if (!process.stderr.isTTY) return
+  const used = name ?? currentName()
+  const team = readContext(used)?.team ?? null
+  const parts = [used, ...(team !== null && team !== '' ? [`team ${team}`] : []), action]
+  process.stderr.write(parts.join(' · ') + '\n')
+}
+
+/** Make a workspace the current one of context `name`, as the command chose it. */
+export function useWorkspace(name: string, workspaceId: string): void {
+  const context = readContext(name)
+  if (context === null) throw new ContextError(`no context '${name}'`)
+  writeContext(name, { ...context, workspace: workspaceId })
+}
 
 /**
  * Whether a daemon URL points at this machine. Only such a URL may use
@@ -76,6 +147,8 @@ export function isLocalUrl(url: string): boolean {
 }
 
 export interface DaemonSettings {
+  /** The context the settings are for. */
+  context: string
   url: string
   authToken: string
   idleGraceSeconds: number
@@ -83,6 +156,14 @@ export interface DaemonSettings {
   login?: Login
 }
 
+/**
+ * The settings for the current context. The URL is `MIRAGE_DAEMON_URL`,
+ * else the context's: a context made by `mirage login` keeps its URL, and
+ * `local` follows config.toml. The token is `MIRAGE_TOKEN`, else, for
+ * `local` only, config.toml's `auth_token`. With neither, the context's
+ * login gives one when it was made for this URL, and then a local URL
+ * takes the token file's.
+ */
 export function loadDaemonSettings(
   options: {
     env?: Record<string, string | undefined>
@@ -97,9 +178,14 @@ export function loadDaemonSettings(
         ? parseDaemonTable(readFileSync(options.configPath, 'utf-8'))
         : {}
       : readDaemonTable(mirageHome(env))
+  const name = currentName(env)
+  const local = name === LOCAL
+  const context = readContext(name, env)
+  if (context === null) throw new ContextError(`no context '${name}'; run \`mirage context list\``)
   const settings: DaemonSettings = {
-    url: table.url ?? DEFAULT_DAEMON_URL,
-    authToken: table.auth_token ?? '',
+    context: name,
+    url: local ? localUrl(table, env) : context.url,
+    authToken: local ? (table.auth_token ?? '') : '',
     idleGraceSeconds: Number(table.idle_grace_seconds ?? '30'),
   }
   const envUrl = env[ENV_DAEMON_URL]
@@ -111,7 +197,7 @@ export function loadDaemonSettings(
     settings.authToken = envToken
   }
   if (settings.authToken === '') {
-    const login = readLogin(loginPath(env))
+    const login = readLogin(loginPath(name, env))
     if (login !== null && login.url === rstripSlash(settings.url)) {
       settings.login = login
       return settings
@@ -148,6 +234,7 @@ const ENV_FOR_KEY: Record<string, string> = {
   worker_type: ENV_WORKER_TYPE,
   rate_limits: ENV_RATE_LIMITS,
   policy_file: ENV_POLICY_FILE,
+  resource_store: ENV_RESOURCE_STORE,
   port: ENV_DAEMON_PORT,
   ...SSH_ENV_KEYS,
 }
@@ -180,6 +267,7 @@ function defaultForKey(key: string, home: string): string {
     worker_type: '',
     rate_limits: DEFAULT_RATE_LIMITS,
     policy_file: '',
+    resource_store: 'files',
     port: '8765',
     ssh_port: '',
     ssh_host: DEFAULT_SSH_HOST,

@@ -18,19 +18,30 @@ import json
 import logging
 import os
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 import httpx
 
+from mirage.cli.constants import (
+    CONTEXT_NAME,
+    CONTEXTS_DIR,
+    CURRENT_FILE,
+    LOCAL,
+    LOGINS_DIR,
+)
+from mirage.cli.env import ENV_CONTEXT
 from mirage.server.paths import mirage_home
 from mirage.types import JsonValue
 
-LOGIN_FILE = "login.json"
 LOGIN_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 REFRESH_MARGIN_SECONDS = 60
 
 logger = logging.getLogger(__name__)
+
+
+class ContextError(RuntimeError):
+    """A context that does not exist, or one that cannot be changed."""
 
 
 class LoginError(RuntimeError):
@@ -40,7 +51,7 @@ class LoginError(RuntimeError):
 
 @dataclass
 class Login:
-    """What ``mirage login`` keeps, for the one server it logged in to.
+    """What ``mirage login`` keeps, for the one server a context is.
 
     Args:
         url (str): the server the token is for; it goes nowhere else.
@@ -63,6 +74,209 @@ class Login:
     token_endpoint: str | None = None
 
 
+@dataclass
+class Context:
+    """One server the CLI talks to, with what it remembers there.
+
+    Args:
+        url (str): the server; empty for ``local``, whose URL follows
+            the daemon's port.
+        team (str | None): the team the login acts for, if the server
+            names one.
+        workspace (str | None): the workspace commands use when given
+            none.
+    """
+
+    url: str = ""
+    team: str | None = None
+    workspace: str | None = None
+
+
+def _write_owner_only(path: Path, text: str) -> None:
+    """Replace ``path`` whole, readable by this user only.
+
+    Args:
+        path (Path): the file.
+        text (str): its new content.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staged = path.with_name(f".{path.name}.{os.getpid()}")
+    fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(text)
+    os.replace(staged, path)
+
+
+def context_path(name: str) -> Path:
+    """Where a context is kept: one file each, so changing one never
+    touches another.
+
+    Args:
+        name (str): the context.
+
+    Returns:
+        Path: its file.
+
+    Raises:
+        ContextError: the name is not safe as a file name.
+    """
+    return mirage_home() / CONTEXTS_DIR / f"{check_name(name)}.json"
+
+
+def login_path(name: str) -> Path:
+    """Where a context's login is kept.
+
+    Args:
+        name (str): the context.
+
+    Returns:
+        Path: its login file.
+
+    Raises:
+        ContextError: the name is not safe as a file name.
+    """
+    return mirage_home() / LOGINS_DIR / f"{check_name(name)}.json"
+
+
+def login_command(url: str, name: str) -> str:
+    """The command that logs a context in again.
+
+    Args:
+        url (str): the context's server.
+        name (str): the context.
+
+    Returns:
+        str: ``mirage login URL --name NAME``.
+    """
+    return f"mirage login {url} --name {name}"
+
+
+def check_name(name: str) -> str:
+    """A context name, refused unless it is safe as a file name.
+
+    Args:
+        name (str): the name.
+
+    Returns:
+        str: the name.
+
+    Raises:
+        ContextError: it is not lowercase letters, digits, ``.``, ``_``
+            and ``-``.
+    """
+    if not CONTEXT_NAME.match(name):
+        raise ContextError(
+            f"invalid context name {name!r}: use lowercase letters, "
+            "digits, '.', '_' and '-'"
+        )
+    return name
+
+
+def read_context(name: str) -> Context | None:
+    """Read a context; ``local`` is there even with no file.
+
+    Args:
+        name (str): the context.
+
+    Returns:
+        Context | None: the context, or None when there is none.
+    """
+    path = context_path(name)
+    if not path.exists():
+        return Context() if name == LOCAL else None
+    try:
+        raw = json.loads(path.read_text())
+    except ValueError as e:
+        raise ContextError(f"malformed {path}: {e}") from e
+    if not isinstance(raw, dict):
+        raise ContextError(f"malformed {path}: not a JSON object")
+    unknown = sorted(set(raw) - {f.name for f in fields(Context)})
+    if unknown:
+        raise ContextError(f"malformed {path}: unknown {', '.join(unknown)}")
+    return Context(**raw)
+
+
+def write_context(name: str, context: Context) -> None:
+    """Store a context whole, readable by this user only.
+
+    Args:
+        name (str): the context.
+        context (Context): what it holds.
+    """
+    _write_owner_only(
+        context_path(name), json.dumps(asdict(context), indent=2) + "\n"
+    )
+
+
+def remove_context(name: str) -> None:
+    """Forget a context and its login.
+
+    Args:
+        name (str): the context.
+    """
+    context_path(name).unlink(missing_ok=True)
+    login_path(name).unlink(missing_ok=True)
+
+
+def context_names() -> list[str]:
+    """Every context, ``local`` among them, sorted.
+
+    Returns:
+        list[str]: their names.
+    """
+    folder = mirage_home() / CONTEXTS_DIR
+    found = (
+        {p.stem for p in folder.glob("*.json")} if folder.exists() else set()
+    )
+    return sorted({n for n in found if CONTEXT_NAME.match(n)} | {LOCAL})
+
+
+def read_current() -> str:
+    """The saved current context, ``local`` when none is saved.
+
+    Returns:
+        str: its name.
+    """
+    path = mirage_home() / CURRENT_FILE
+    stored = path.read_text().strip() if path.exists() else ""
+    return stored or LOCAL
+
+
+def write_current(name: str) -> None:
+    """Make a context the current one.
+
+    Args:
+        name (str): the context.
+    """
+    _write_owner_only(mirage_home() / CURRENT_FILE, name + "\n")
+
+
+def chosen_name() -> str:
+    """The context this command asks for: ``--context`` or
+    ``$MIRAGE_CONTEXT``, else the current one, else ``local``; it may
+    not exist.
+
+    Returns:
+        str: its name.
+    """
+    return os.environ.get(ENV_CONTEXT) or read_current()
+
+
+def current_name() -> str:
+    """The context this command uses, as ``chosen_name`` picks it.
+
+    Returns:
+        str: its name.
+
+    Raises:
+        ContextError: there is no context by that name.
+    """
+    name = chosen_name()
+    if read_context(name) is None:
+        raise ContextError(f"no context {name!r}; run `mirage context list`")
+    return name
+
+
 def renew_by(login: Login) -> float:
     """When the user has to log in again.
 
@@ -79,20 +293,22 @@ def renew_by(login: Login) -> float:
     return ends
 
 
-def login_path() -> Path:
-    return mirage_home() / LOGIN_FILE
+def current_login_path() -> Path:
+    """The current context's login file."""
+    return login_path(current_name())
 
 
 def read_login(path: Path | None = None) -> Login | None:
     """Read the stored login.
 
     Args:
-        path (Path | None): the login file; defaults to ``login_path()``.
+        path (Path | None): the login file; defaults to the current
+            context's.
 
     Returns:
         Login | None: the login, or None when there is none.
     """
-    use = path if path is not None else login_path()
+    use = path if path is not None else current_login_path()
     if not use.exists():
         return None
     return Login(**json.loads(use.read_text()))
@@ -103,27 +319,24 @@ def write_login(login: Login, path: Path | None = None) -> None:
 
     Args:
         login (Login): the login.
-        path (Path | None): the login file; defaults to ``login_path()``.
+        path (Path | None): the login file; defaults to the current
+            context's.
     """
-    use = path if path is not None else login_path()
-    use.parent.mkdir(parents=True, exist_ok=True)
-    staged = use.with_name(f".{use.name}.{os.getpid()}")
-    fd = os.open(staged, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(asdict(login), f, indent=2)
-    os.replace(staged, use)
+    use = path if path is not None else current_login_path()
+    _write_owner_only(use, json.dumps(asdict(login), indent=2))
 
 
 def remove_login(path: Path | None = None) -> Login | None:
     """Forget the stored login.
 
     Args:
-        path (Path | None): the login file; defaults to ``login_path()``.
+        path (Path | None): the login file; defaults to the current
+            context's.
 
     Returns:
         Login | None: the login removed, or None when there was none.
     """
-    use = path if path is not None else login_path()
+    use = path if path is not None else current_login_path()
     login = read_login(use)
     use.unlink(missing_ok=True)
     return login
@@ -192,7 +405,7 @@ def fresh_token(login: Login, path: Path | None = None) -> str:
     Args:
         login (Login): the login; updated in place on a refresh.
         path (Path | None): the login file a refresh is stored in;
-            defaults to ``login_path()``.
+            defaults to the current context's.
 
     Returns:
         str: a token to send.
@@ -201,8 +414,9 @@ def fresh_token(login: Login, path: Path | None = None) -> str:
         LoginError: the login is over 30 days old, its token ended with
             nothing to refresh it, or the issuer refused the refresh.
     """
+    use = path if path is not None else current_login_path()
+    again = f"run `{login_command(login.url, use.stem)}` to log in again"
     now = time.time()
-    again = f"run `mirage login` to log in to {login.url} again"
     if now >= login.logged_in_at + LOGIN_MAX_AGE_SECONDS:
         raise LoginError(f"the login is 30 days old; {again}")
     if login.expires_at is None or now < (
@@ -236,5 +450,5 @@ def fresh_token(login: Login, path: Path | None = None) -> str:
     login.access_token = str(body["access_token"])
     login.refresh_token = str(body.get("refresh_token") or login.refresh_token)
     login.expires_at = ends_at(body, now)
-    write_login(login, path)
+    write_login(login, use)
     return login.access_token

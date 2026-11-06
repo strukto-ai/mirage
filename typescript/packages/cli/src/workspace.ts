@@ -17,6 +17,7 @@ import { dirname, resolve } from 'node:path'
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
+import { header, useWorkspace } from './settings.ts'
 import { emit, fail, formatAge, formatTable, handleResponse } from './output.ts'
 
 // A config handed to `load` or `clone`: env-interpolated, and with its
@@ -234,7 +235,7 @@ function formatAsks(items: AskRecord[]): string {
   )
 }
 
-export function registerWorkspaceCommands(program: Command): void {
+export function registerWorkspaceCommands(program: Command): Command {
   const ws = program.command('workspace').description('Manage workspaces.')
   for (const kind of ['vfs', 'skill']) {
     ws.command(`${kind}-md`)
@@ -262,43 +263,61 @@ export function registerWorkspaceCommands(program: Command): void {
   }
 
   ws.command('create')
-    .description('Create a workspace; daemon auto-spawns if not running.')
-    .argument('<config>', 'YAML/JSON workspace config')
+    .description(
+      'Create a workspace from a config file or a saved template; daemon auto-spawns if not running.',
+    )
+    .argument('[config]', 'YAML/JSON workspace config')
+    .option('--template <name>', 'Create from this saved template')
+    .option('-w, --workspace <id>', 'Explicit workspace id')
     .option('--id <id>', 'Explicit workspace id')
     .option('--explain', "Say what the server's policies make of it; create nothing")
-    .action(async (configPath: string, opts: { id?: string; explain?: boolean }) => {
-      // Checked and env-interpolated here (the user's shell env is the
-      // source of truth, and a missing var must fail before the round
-      // trip), but sent in the file's own spelling: the daemon runs the
-      // same check, and it speaks snake_case like the Python one.
-      const { checkWorkspaceConfigFile } = await import('@struktoai/mirage-node/config')
-      let cfg: unknown
-      try {
-        cfg = checkWorkspaceConfigFile(configPath)
-      } catch (err: unknown) {
-        fail(err instanceof Error ? err.message : String(err), 2)
-      }
-      const body: { config: unknown; id?: string } = { config: cfg }
-      if (opts.id !== undefined) body.id = opts.id
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: true })
-      const explain = opts.explain === true
-      const r = await c.request(
-        'POST',
-        explain ? '/v1/workspaces?explain=true' : '/v1/workspaces',
-        {
-          body: JSON.stringify(body),
-        },
-      )
-      if (explain) {
-        emit(
-          (await handleResponse(r)) as Parameters<typeof formatWorkspaceExplanation>[0],
-          formatWorkspaceExplanation,
+    .action(
+      async (
+        configPath: string | undefined,
+        opts: { template?: string; workspace?: string; id?: string; explain?: boolean },
+      ) => {
+        if ((configPath === undefined) === (opts.template === undefined)) {
+          fail('give a config file or --template NAME, not both', 2)
+        }
+        const body: { config?: unknown; template?: string; id?: string } = {}
+        if (opts.template !== undefined) {
+          body.template = opts.template
+        } else if (configPath !== undefined) {
+          // Checked and env-interpolated here (the user's shell env is the
+          // source of truth, and a missing var must fail before the round
+          // trip), but sent in the file's own spelling: the daemon runs the
+          // same check, and it speaks snake_case like the Python one.
+          const { checkWorkspaceConfigFile } = await import('@struktoai/mirage-node/config')
+          try {
+            body.config = checkWorkspaceConfigFile(configPath)
+          } catch (err: unknown) {
+            fail(err instanceof Error ? err.message : String(err), 2)
+          }
+        }
+        const id = opts.workspace ?? opts.id
+        if (id !== undefined) body.id = id
+        const c = makeClient()
+        await c.ensureRunning({ allowSpawn: true })
+        const explain = opts.explain === true
+        const r = await c.request(
+          'POST',
+          explain ? '/v1/workspaces?explain=true' : '/v1/workspaces',
+          {
+            body: JSON.stringify(body),
+          },
         )
-        return
-      }
-      emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
-    })
+        if (explain) {
+          emit(
+            (await handleResponse(r)) as Parameters<typeof formatWorkspaceExplanation>[0],
+            formatWorkspaceExplanation,
+          )
+          return
+        }
+        const created = (await handleResponse(r)) as WorkspaceDetail
+        header(`created ${created.id}`)
+        emit(created, formatWorkspaceDetail)
+      },
+    )
 
   ws.command('list')
     .description('List active workspaces.')
@@ -326,20 +345,29 @@ export function registerWorkspaceCommands(program: Command): void {
       )
     })
 
+  ws.command('use')
+    .description("Make a workspace the current context's, for the commands that take -w.")
+    .argument('<id>', 'Workspace id')
+    .action(async (id: string) => {
+      const c = makeClient()
+      await c.ensureRunning({ allowSpawn: false })
+      await handleResponse(await c.request('GET', `/v1/workspaces/${encodeURIComponent(id)}`))
+      useWorkspace(c.settings.context, id)
+      header(`using ${id}`, c.settings.context)
+      emit({ workspace: id }, () => `Using workspace ${id}.`)
+    })
+
   ws.command('delete')
     .description('Stop and remove a workspace.')
     .argument('<id>')
     .action(async (id: string) => {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
-      emit(
-        (await handleResponse(
-          await c.request('DELETE', `/v1/workspaces/${encodeURIComponent(id)}`),
-        )) as {
-          id: string
-        },
-        (d) => `Deleted workspace ${d.id}.`,
-      )
+      const deleted = (await handleResponse(
+        await c.request('DELETE', `/v1/workspaces/${encodeURIComponent(id)}`),
+      )) as { id: string }
+      header(`deleted ${id}`)
+      emit(deleted, (d) => `Deleted workspace ${d.id}.`)
     })
 
   ws.command('close')
@@ -348,14 +376,11 @@ export function registerWorkspaceCommands(program: Command): void {
     .action(async (id: string) => {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
-      emit(
-        (await handleResponse(
-          await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/close`),
-        )) as {
-          id: string
-        },
-        (d) => `Closed workspace ${d.id}.`,
-      )
+      const closed = (await handleResponse(
+        await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/close`),
+      )) as { id: string }
+      header(`closed ${id}`)
+      emit(closed, (d) => `Closed workspace ${d.id}.`)
     })
 
   ws.command('cancel')
@@ -586,7 +611,10 @@ export function registerWorkspaceCommands(program: Command): void {
                 name: 'snapshot',
                 data: createReadStream(tarPath),
               })
-        emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
+        const created = (await handleResponse(r)) as WorkspaceDetail
+        header(`created ${created.id}`)
+        emit(created, formatWorkspaceDetail)
       },
     )
+  return ws
 }

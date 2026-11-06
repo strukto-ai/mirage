@@ -61,7 +61,9 @@ function json(res: ServerResponse, status: number, data: unknown): void {
  * `partSize` instead, as drive9 falls back to its own. Objects are served on `localhost` while the API is on
  * `127.0.0.1`, a different origin, and refuse a request carrying the bearer
  * token. `partDelay` holds each part upload so `peak` shows how many run at
- * once; `dropReadUrls` leaves read URLs out of an append plan.
+ * once; `dropReadUrls` leaves read URLs out of an append plan;
+ * `racingAppend` is what another writer adds to the file just before the next
+ * append plan reads its size.
  */
 export class FakeDrive9 {
   readonly files = new Map<string, Uint8Array>()
@@ -76,6 +78,7 @@ export class FakeDrive9 {
   failParts = false
   partDelay = 0
   dropReadUrls = false
+  racingAppend = new Uint8Array()
   inFlight = 0
   peak = 0
   url = ''
@@ -322,10 +325,18 @@ export class FakeDrive9 {
   }
 
   private async append(req: IncomingMessage, res: ServerResponse, path: string): Promise<void> {
-    const data = this.files.get(path)
+    let data = this.files.get(path)
     if (data === undefined) {
       json(res, 404, { error: `stat append target "${path}": not found` })
       return
+    }
+    if (this.racingAppend.byteLength > 0) {
+      const grown = new Uint8Array(data.byteLength + this.racingAppend.byteLength)
+      grown.set(data)
+      grown.set(this.racingAppend, data.byteLength)
+      data = grown
+      this.files.set(path, data)
+      this.racingAppend = new Uint8Array()
     }
     if (data.byteLength < this.inlineThreshold) {
       json(res, 400, { error: `file is not S3-stored: ${path}` })

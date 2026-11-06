@@ -17,6 +17,7 @@ import { CommandTimeoutError } from '../errors/types.ts'
 import { WorkspaceBinding } from '../runtime/binding.ts'
 import { SCRIPT_EVAL_TIMEOUT } from '../runtime/constants.ts'
 import type { LanguageRuntime } from '../runtime/language.ts'
+import { compileError } from '../runtime/python/monty/execution.ts'
 import { MontyRuntime } from '../runtime/python/monty/runtime.ts'
 import type { MountResolver } from '../runtime/resolver.ts'
 import { scriptEngine } from '../runtime/script.ts'
@@ -307,6 +308,28 @@ export function programSource(source: string, method: PolicyMethod): string {
     'import json as _mirage_json, os as _mirage_os\n' +
     `print(_mirage_json.dumps(${call}))\n`
   )
+}
+
+/**
+ * Whether a policy program can answer at each method it is given, found
+ * without running it: monty parses and compiles it once (`compileError`),
+ * and it defines each one's function at its top level (`programSource`), so a typo is refused where the program is written
+ * rather than as a deny on every line it judges. Given no method, only the
+ * parse. Throws a clause about "script" when it cannot, naming the line.
+ * Mirrors the Python `check_program`.
+ */
+export async function checkProgram(
+  source: string,
+  methods: readonly PolicyMethod[],
+): Promise<void> {
+  // The parse first: a program indented whole defines no function at its
+  // top level, but its indent is what to fix.
+  const refused = await compileError(source)
+  if (refused !== null) {
+    const at = refused.line === null ? '' : ` at line ${String(refused.line)}`
+    throw new Error(`script has an error${at}: ${refused.message}`)
+  }
+  for (const method of methods) programSource(source, method)
 }
 
 /**

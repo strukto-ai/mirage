@@ -3726,7 +3726,7 @@ async def test_an_empty_streamed_append_keeps_no_copy_from_before_it_waited():
 @pytest.mark.parametrize(
     "line,expected",
     [
-        ("cat /dst/f >> /dst/f", {"/dst/f": b"a\nb\nca\nb\nc"}),
+        ("head -n 3 /dst/f >> /dst/f", {"/dst/f": b"a\nb\nca\nb\nc"}),
         (
             "sed -n -e 'w /dst/a' -e 'w /dst/b' /dst/f",
             {"/dst/a": b"a\nb\nc", "/dst/b": b"a\nb\nc"},

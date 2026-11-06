@@ -1,5 +1,5 @@
 {
- "baseline": 1672,
+ "baseline": 1669,
  "modules": {
   "server/app": {
    "python_only": {
@@ -162,7 +162,7 @@
   },
   "runtime/sandbox/microsandbox/config": {
    "typescript_only": {
-    "MICROSANDBOX_CONFIG_KEYS": "TypeScript validates interface fields at runtime with an explicit key list; Python's dataclass fields provide that list."
+    "MICROSANDBOX_CONFIG_FIELDS": "A TypeScript runtime lists the keys its config takes, each with its type, so an unknown key fails loud at construction and a saved runtime's form is typed; Python reads both off the config dataclass."
    }
   },
   "core/api/client": {
@@ -382,6 +382,10 @@
   "core/disk/utils": {
    "python_only": {
     "_libc": "Python reaches the native realpath on macOS through ctypes, loading libc once; Node's fs.realpath calls the native realpath itself."
+   },
+   "typescript_only": {
+    "probeName": "Python's path check runs whole on one worker thread; node:fs answers each lstat, open and realpath on its own trip, so TypeScript starts a name's probes together to wait once per name.",
+    "settles": "TypeScript starts a name's probes before it knows it will await them, so a failure nothing awaits needs a logging handler; Python's walk runs each probe in turn on one worker thread."
    }
   },
   "core/disk/readdir": {
@@ -487,7 +491,25 @@
    "python_only": {
     "cancel_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerSessionCommands.",
     "kill_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerSessionCommands.",
-    "update_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
+    "update_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
+    "CREATE_PROFILE": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "DEFAULT_PROFILE": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "MOUNT": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "PROFILE": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "PROFILE_FILE": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "SESSION": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers."
+   },
+   "typescript_only": {
+    "ACTIONS": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "CREATE_PROFILE_HELP": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "CreateOptions": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "Flags": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "MOUNT_HELP": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "collect": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "createSession": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "send": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "updateOptions": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "updateSession": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers."
    }
   },
   "cli/workspace": {
@@ -498,7 +520,8 @@
     "_document_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "skill_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "vfs_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
-    "history_cmd": "Typer commands are module functions; commander registers the same action inline in registerWorkspaceCommands."
+    "history_cmd": "Typer commands are module functions; commander registers the same action inline in registerWorkspaceCommands.",
+    "use_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
    }
   },
   "server/auth/middleware": {
@@ -536,7 +559,8 @@
   "server/schemas": {
    "python_only": {
     "CancelLinesResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",
-    "KillJobsResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal."
+    "KillJobsResponse": "A pydantic response model FastAPI validates the route's answer against; the Fastify route returns the same object literal.",
+    "TemplateList": "FastAPI declares the list answer as a response_model; the TypeScript route returns {items} inline."
    }
   },
   "workspace/snapshot/tar_io": {
@@ -615,10 +639,16 @@
     "login_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
     "logout_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
     "whoami_cmd": "Typer commands are module functions; commander registers the same command inline in registerLoginCommands.",
-    "QuietHandler": "Python's http.server serves through a handler class, whose access log is silenced here; Node's createServer takes the handler as a function and logs nothing."
+    "QuietHandler": "Python's http.server serves through a handler class, whose access log is silenced here; Node's createServer takes the handler as a function and logs nothing.",
+    "context_app": "The Typer group of the context verbs; commander builds the same group in registerContextCommands.",
+    "list_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "use_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "delete_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
    },
    "typescript_only": {
-    "registerLoginCommands": "commander registers commands through a function; Typer's are the module functions login_cmd, logout_cmd and whoami_cmd."
+    "registerLoginCommands": "commander registers commands through a function; Typer's are the module functions login_cmd, logout_cmd and whoami_cmd.",
+    "registerContextCommands": "Commander builds the context group in one function; Typer declares it as context_app.",
+    "ContextRow": "The shape of a `context list` row, which Python leaves as a dict."
    }
   },
   "server/routers/oauth": {
@@ -657,7 +687,8 @@
   },
   "utils/yaml": {
    "python_only": {
-    "_YamlLoader": "PyYAML needs a SafeLoader subclass to recognize exponent-only floats without changing yaml.safe_load globally; TypeScript's yaml package already uses YAML 1.2 exponent resolution. Both loaders read the shared YAML scalar fixture."
+    "_YamlLoader": "PyYAML needs a SafeLoader subclass to recognize exponent-only floats without changing yaml.safe_load globally; TypeScript's yaml package already uses YAML 1.2 exponent resolution. Both loaders read the shared YAML scalar fixture.",
+    "_YamlDumper": "PyYAML quotes a string on dump by the dumper's resolvers, so a SafeDumper subclass shares the loader's; TypeScript sets the same rules with YAML 1.1 stringify options in dumpYaml."
    }
   },
   "utils/dates": {
@@ -717,7 +748,6 @@
   "cli/vfs": {
    "python_only": {
     "app": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
-    "glob_cmd": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
     "EXPLAIN": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly.",
     "SESSION": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly.",
     "WORKSPACE": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly.",
@@ -726,7 +756,9 @@
    "typescript_only": {
     "registerVfsCommands": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
     "Target": "Commander hands an action its options as one camelCased object, which TypeScript types as Target and maps back to the call's snake_case argument names; Typer passes each option as its own keyword argument.",
-    "camel": "Commander hands an action its options as one camelCased object, which TypeScript types as Target and maps back to the call's snake_case argument names; Typer passes each option as its own keyword argument."
+    "camel": "Commander hands an action its options as one camelCased object, which TypeScript types as Target and maps back to the call's snake_case argument names; Typer passes each option as its own keyword argument.",
+    "WORKSPACE_FLAGS": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "WORKSPACE_HELP": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers."
    }
   },
   "server/routers/vfs": {
@@ -917,7 +949,7 @@
   },
   "runtime/python/local/config": {
    "typescript_only": {
-    "LOCAL_CONFIG_KEYS": "A TypeScript config interface lists its keys so an unknown one fails loud at construction; Python's dataclass refuses an unknown field by itself (RuntimeConfig.coerce)."
+    "LOCAL_CONFIG_FIELDS": "A TypeScript runtime lists the keys its config takes, each with its type, so an unknown key fails loud at construction and a saved runtime's form is typed; Python reads both off the config dataclass."
    }
   },
   "runtime/python/local/runtime": {
@@ -1155,7 +1187,9 @@
    "typescript_only": {
     "RAM_OPTIONS": "The TypeScript registry refuses unknown config keys against a per-backend key list, as DISK_OPTIONS does; Python's build_vfs reads the constructor's keywords.",
     "buildVfsFrom": "TypeScript splits its backends across core, node and browser, so each runtime's buildVfs is this one build over its own table; Python keeps every backend in one REGISTRY and needs no table parameter.",
-    "DIRECT_REGISTRY": "The token-holding backends (vfs/direct) node and edge add to core's table and the browser does not, since it reaches the same services through a proxy; Python has one host and one REGISTRY."
+    "DIRECT_REGISTRY": "The token-holding backends (vfs/direct) node and edge add to core's table and the browser does not, since it reaches the same services through a proxy; Python has one host and one REGISTRY.",
+    "CONFIG_SCHEMAS": "A TypeScript registry entry is a factory that imports its config schema inside, so the schemas sit beside it to be read without building a VFS; a Python entry names its config class, which resolve_entry reads.",
+    "ConfigSchemaLoader": "A TypeScript registry entry is a factory that imports its config schema inside, so the schemas sit beside it to be read without building a VFS; a Python entry names its config class, which resolve_entry reads."
    }
   },
   "io/gateway": {
@@ -1250,6 +1284,174 @@
    "typescript_only": {
     "recordBytes": "TypeScript caches each variable record's bytes in a WeakMap keyed by the record; Python's records are slotted and may hold a list, so they cannot be weak keys, and Python measures a record as it sums.",
     "varBytes": "The WeakMap behind recordBytes; see there."
+   }
+  },
+  "server/routers/templates": {
+   "python_only": {
+    "create_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "delete_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "get_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "list_templates": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "restore_template": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "router": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp."
+   },
+   "typescript_only": {
+    "RefParams": "Fastify types a route's path params with an interface; FastAPI reads them from the handler's signature.",
+    "registerTemplatesRoutes": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "stored": "Each FastAPI handler maps a store refusal in its own try; the TypeScript routes share one wrapper because a refusal answers through the reply.",
+    "TEMPLATE_FIELDS": "Pydantic's extra='forbid' refuses unknown fields in Python; the TypeScript route checks them against this set."
+   }
+  },
+  "server/resources/files": {
+   "python_only": {
+    "PlainLoader": "PyYAML drops a resolver by subclassing its loader; the TypeScript yaml package filters its tags in the parse options."
+   }
+  },
+  "cli/main": {
+   "python_only": {
+    "root": "The Typer callback that takes the root --context option; commander takes it with a preAction hook in buildProgram."
+   }
+  },
+  "cli/template": {
+   "python_only": {
+    "app": "The Typer group of the template verbs; commander builds the same group in registerTemplateCommands.",
+    "_format_list": "The list's terminal table; commander formats it inline in the list action.",
+    "create_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "list_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "get_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "delete_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function.",
+    "restore_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
+   },
+   "typescript_only": {
+    "registerTemplateCommands": "Commander builds the template group in one function; Typer declares it as the module's app.",
+    "Template": "The shape of a template answer, which Python leaves as a dict.",
+    "call": "One client request per verb; each Typer verb opens its client inline."
+   }
+  },
+  "cli/credentials": {
+   "typescript_only": {
+    "Env": "An environment map passed to the readers, so tests need no process.env; Python reads os.environ.",
+    "emptyContext": "A fresh Context record; Python's Context dataclass has these defaults."
+   }
+  },
+  "cli/settings": {
+   "typescript_only": {
+    "Env": "An environment map passed to the readers, so tests need no process.env; Python reads os.environ."
+   }
+  },
+  "server/routers/policies": {
+   "python_only": {
+    "create_policy": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "delete_policy": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "get_policy": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "list_policies": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "router": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "update_policy": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp."
+   },
+   "typescript_only": {
+    "RefParams": "Fastify types a route's path params with an interface; FastAPI reads them from the handler's signature.",
+    "registerPoliciesRoutes": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "stored": "Each FastAPI handler maps a store refusal in its own try; the TypeScript routes share one wrapper because a refusal answers through the reply.",
+    "Refusal": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves and answer with this status and detail.",
+    "bodyOf": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves and answer with this status and detail.",
+    "isRefusal": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves and answer with this status and detail."
+   }
+  },
+  "cli/policy": {
+   "python_only": {
+    "NAME": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "SOURCE": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "app": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "create_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "delete_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "get_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "list_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "update_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands."
+   },
+   "typescript_only": {
+    "registerPolicyCommands": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "PolicyBody": "The Python CLI reads the daemon's JSON as untyped dicts; TypeScript names the shapes it reads.",
+    "PolicyName": "The Python CLI reads the daemon's JSON as untyped dicts; TypeScript names the shapes it reads."
+   }
+  },
+  "cli/connections": {
+   "python_only": {
+    "APPS": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
+    "FILE": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
+    "SECRETS": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
+    "SETS": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
+    "UNSETS": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
+    "kind_app": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it."
+   },
+   "typescript_only": {
+    "Spec": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
+    "StdinLines": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
+    "collect": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
+    "editOptions": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
+    "emptyDraft": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
+    "prompt": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
+    "registerConnectionCommands": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it.",
+    "registerKindCommands": "Typer registers each kind's verbs on a Typer app built by kind_app and kept in APPS, with the shared options as module constants; commander registers the same verbs inline in registerKindCommands, whose option helpers and stdin reader are local to it."
+   }
+  },
+  "server/resources/fields": {
+   "python_only": {
+    "LISTS": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
+    "SCALARS": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
+    "TYPES": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
+    "dataclass_fields": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
+    "described": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
+    "members": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
+    "nested_model": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
+    "vfs_model": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys."
+   },
+   "typescript_only": {
+    "Schema": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
+    "configName": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
+    "def": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
+    "meta": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys.",
+    "unwrap": "Python reads pydantic models and runtime config dataclasses, so it walks annotations (members, nested_model, kind_of) and runs one table of builders; TypeScript reads zod schemas through their defs (def, meta, unwrap, configName) and a runtime's static configKeys."
+   }
+  },
+  "server/resources/values": {
+   "python_only": {
+    "POINTER_KEYS": "Python names the pointer's keys and each field type's Python types as tables; TypeScript tests them inline with typeof.",
+    "TYPEOF": "Python names the pointer's keys and each field type's Python types as tables; TypeScript tests them inline with typeof.",
+    "pointer_of": "Python checks a pointer in its own function; TypeScript checks it inline in valueOf."
+   },
+   "typescript_only": {
+    "StorePointer": "TypeScript narrows a pointer to an interface; Python's is_pointer narrows to a dict."
+   }
+  },
+  "server/routers/entries": {
+   "python_only": {
+    "ROUTERS": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper.",
+    "entry_router": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper."
+   },
+   "typescript_only": {
+    "ListQuery": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper.",
+    "RefParams": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper.",
+    "answered": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper.",
+    "registerEntryRoutes": "FastAPI builds one APIRouter per kind (entry_router, collected in ROUTERS); Fastify registers the same routes per kind in registerEntryRoutes, with its own param and query types and one refusal wrapper."
+   }
+  },
+  "resources/refs": {
+   "python_only": {
+    "walk_refs": "Python walks a config with a module function; TypeScript's secretRefs closes over its own walk."
+   }
+  },
+  "runtime/config": {
+   "typescript_only": {
+    "ConfigField": "A TypeScript interface is erased at runtime, so the keys a runtime's config takes and their types are a table of these; Python reads them off the config dataclass.",
+    "ConfigFields": "A TypeScript interface is erased at runtime, so the keys a runtime's config takes and their types are a table of these; Python reads them off the config dataclass."
+   }
+  },
+  "cli/output": {
+   "python_only": {
+    "OUTPUT": "Typer reads a command's options off its function signature, so the shared -o option is a module-level Option value; commander takes the flag, its help and its parser inline on each command."
+   },
+   "typescript_only": {
+    "outputOf": "Commander hands an option's raw string to a parser, so TypeScript refuses anything but yaml in outputOf; Typer checks the value against the Output enum itself."
    }
   }
  }

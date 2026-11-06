@@ -25,11 +25,17 @@ import {
   Workspace,
 } from '@struktoai/mirage-node'
 import { buildCliEntries } from '@struktoai/mirage-node/config'
+import { CONFIG_SCHEMAS } from '@struktoai/mirage-node/vfs/registry'
 import { watchNetwork } from '@struktoai/mirage-node/io/network'
 import { quoteName } from '@struktoai/mirage-node/workspace/record/disk'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { registerMetrics } from './metrics.ts'
+import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { type RateLimit, registerRateLimits, resolveRateLimits } from './rate_limit.ts'
+import { STRUKTO } from '@struktoai/mirage-core/resources/constants'
+import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
+import { buildResourceStore, resolveResourceStore } from './resources/config.ts'
+import { StruktoSourceConfig, fetchStrukto } from './resources/strukto.ts'
 import {
   OWNERS_PREFIX,
   resolveCeilings,
@@ -145,6 +151,12 @@ export interface BuildAppOptions {
    * else sets no ceiling.
    */
   maxEnv?: string | number
+  /**
+   * Where saved vfs, cli, runtime, policy and template configs are kept.
+   * Undefined reads `$MIRAGE_RESOURCE_STORE` or the `resource_store`
+   * config key, else files under the mirage home.
+   */
+  resourceStore?: ResourceStore
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -168,6 +180,7 @@ function noop(): void {
 
 export function buildApp(options: BuildAppOptions = {}) {
   validateDaemonTable(readDaemonTable(mirageHome()))
+  registerSecrets(STRUKTO, StruktoSourceConfig, fetchStrukto)
   const startedAt = Date.now() / 1000
   const exitFn = options.onIdleExit ?? noop
   const authConfig = options.authConfig ?? resolveAuthConfig()
@@ -176,6 +189,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     Workspace,
     workspaceArgs: configToWorkspaceArgs,
     buildVfs,
+    vfsSchemas: CONFIG_SCHEMAS,
     buildCliEntries,
     loadProfile: loadProfilePolicy,
     // Daemon default is disk (a created workspace survives restart with
@@ -245,6 +259,7 @@ export function buildApp(options: BuildAppOptions = {}) {
   app.addContentTypeParser(/^multipart\//, (_req, _payload, done) => {
     done(null)
   })
+  const resources = options.resourceStore ?? buildResourceStore(resolveResourceStore())
   const mcp = registerApi(fastifyRoutes(app), {
     registry,
     host,
@@ -252,6 +267,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     startedAt,
     exit: exitFn,
     snapshotStore: options.snapshotStore,
+    resources,
   })
   const ssh: SSHEndpoint = {
     config: options.sshConfig ?? resolveSSHConfig(),
@@ -296,5 +312,5 @@ export function buildApp(options: BuildAppOptions = {}) {
       }
     }
   })
-  return Object.assign(app, { registry, jobs, pidFile, ssh, mcp })
+  return Object.assign(app, { registry, jobs, pidFile, ssh, mcp, resources })
 }

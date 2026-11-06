@@ -15,11 +15,12 @@
 from mirage.accessor.tidb_filesystem import TiDBFilesystemAccessor
 from mirage.core.generic.rewrite import expect_offset
 from mirage.core.tidb_filesystem.client import append_to, shrink_to
+from mirage.core.tidb_filesystem.errors import has_status
 from mirage.core.tidb_filesystem.path import backend_path
 from mirage.core.tidb_filesystem.read import read
 from mirage.core.tidb_filesystem.stat import stat
 from mirage.core.tidb_filesystem.write import write
-from mirage.errors.fs import eisdir, enotsup
+from mirage.errors.fs import eisdir, enotsup, stale_write
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.spool import ByteSpool
 from mirage.observe.context import record, start_op
@@ -56,8 +57,8 @@ async def truncate(
     the zeros, refused when the file changed size since its stat. A file
     drive9 keeps inline sits in one TiDB row that any change rewrites
     whole, so it is read and written back, as is a missing file, which is
-    made, and a file whose append was refused. drive9 has no create-only
-    write, so ``no_create`` is refused before anything is sent.
+    made. drive9 has no create-only write, so ``no_create`` is refused
+    before anything is sent.
 
     Args:
         accessor (TiDBFilesystemAccessor): the file system's accessor.
@@ -67,6 +68,8 @@ async def truncate(
 
     Raises:
         IsADirectoryError: the path is a directory.
+        StaleWriteError: another writer changed the file's size while it
+            grew; nothing was written.
     """
     if no_create:
         raise enotsup("tidb_filesystem", "truncate --no-create", path)
@@ -83,7 +86,14 @@ async def truncate(
         else:
             async with ByteSpool() as added:
                 await _pad(added, length - size)
-                done = await append_to(accessor, remote, added, base_size=size)
+                try:
+                    done = await append_to(
+                        accessor, remote, added, base_size=size
+                    )
+                except Exception as exc:
+                    if has_status(exc, 412):
+                        raise stale_write(path) from exc
+                    raise
         if done:
             record("truncate", path.virtual, "tidb_filesystem", 0, timer)
             return

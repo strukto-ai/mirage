@@ -33,10 +33,13 @@ def _connect_kwargs(config: SSHConfig) -> dict[str, Any]:
         config.username,
         config.identity_file,
         config.timeout,
+        None
+        if config.private_key is None
+        else reveal_secret(config.private_key),
     )
     if config.password is not None:
         kwargs["password"] = reveal_secret(config.password)
-    if config.identity_file:
+    if config.identity_file or config.private_key is not None:
         if config.passphrase is not None:
             kwargs["passphrase"] = reveal_secret(config.passphrase)
     kwargs["known_hosts"] = config.known_hosts

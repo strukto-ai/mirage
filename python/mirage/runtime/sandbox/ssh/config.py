@@ -35,6 +35,9 @@ class SSHRuntimeConfig(SandboxConfig):
         username (str | None): login user; None lets the client pick.
         identity_file (str | None): private key path (``~`` expands);
             None uses the running agent and default keys.
+        private_key (str | None): a private key's own text, such as
+            one a credential pointer reads from a secret store; offered
+            after ``identity_file``'s.
         timeout (int): connect timeout in seconds.
     """
 
@@ -43,6 +46,7 @@ class SSHRuntimeConfig(SandboxConfig):
     port: int | None = None
     username: str | None = None
     identity_file: str | None = None
+    private_key: str | None = None
     timeout: int = 30
 
     def __post_init__(self) -> None:

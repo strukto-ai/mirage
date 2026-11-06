@@ -120,6 +120,26 @@ function holdsPointer(value: unknown): boolean {
 }
 
 /**
+ * The values the pointers in `raw` read, as they landed in `resolved`.
+ *
+ * `resolved` is `raw` after `resolveConfigSecrets`, so the two walk
+ * together: a pointer in one is the fetched string in the other. What a
+ * refusal over the resolved config masks before it is shown.
+ */
+export function fetchedValues(raw: unknown, resolved: unknown): string[] {
+  if (isConfigPointer(raw)) return typeof resolved === 'string' ? [resolved] : []
+  if (isPlainObject(raw) && isPlainObject(resolved)) {
+    return Object.entries(raw).flatMap(([key, child]) =>
+      fetchedValues(child, Object.hasOwn(resolved, key) ? resolved[key] : undefined),
+    )
+  }
+  if (Array.isArray(raw) && Array.isArray(resolved)) {
+    return raw.flatMap((item: unknown, i) => fetchedValues(item, resolved[i]))
+  }
+  return []
+}
+
+/**
  * The declared instances, built only when one of `configs` names one.
  *
  * Every loader that builds a mount or a CLI from data comes through here

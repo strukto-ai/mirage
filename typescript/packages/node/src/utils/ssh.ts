@@ -18,7 +18,12 @@ import { resolve } from 'node:path'
 import { debuglog } from 'node:util'
 import type { AnyAuthMethod, ConnectConfig } from 'ssh2'
 
-/** Shared SSH connection and authentication options for the VFS and runtime. */
+/**
+ * Shared SSH connection and authentication options for the VFS and runtime.
+ * `privateKey` is a key's own text, offered after the one at
+ * `identityFile`; either one given leaves the default keys untried, as
+ * asyncssh's explicit `client_keys` does.
+ */
 export async function connectOptions(
   host: string,
   hostname: string | undefined,
@@ -28,6 +33,7 @@ export async function connectOptions(
   timeout: number,
   password?: string,
   passphrase?: string,
+  privateKey?: string,
 ): Promise<ConnectConfig> {
   const user = username ?? userInfo().username
   const options: ConnectConfig = {
@@ -41,7 +47,11 @@ export async function connectOptions(
   if (agent) methods.push({ type: 'agent', username: user, agent })
   const paths =
     identityFile === undefined
-      ? ['id_ed25519', 'id_ecdsa', 'id_rsa', 'id_dsa'].map((key) => resolve(homedir(), '.ssh', key))
+      ? privateKey === undefined
+        ? ['id_ed25519', 'id_ecdsa', 'id_rsa', 'id_dsa'].map((key) =>
+            resolve(homedir(), '.ssh', key),
+          )
+        : []
       : [
           identityFile === '~'
             ? homedir()
@@ -62,6 +72,14 @@ export async function connectOptions(
       type: 'publickey',
       username: user,
       key,
+      ...(passphrase === undefined ? {} : { passphrase }),
+    })
+  }
+  if (privateKey !== undefined) {
+    methods.push({
+      type: 'publickey',
+      username: user,
+      key: privateKey,
       ...(passphrase === undefined ? {} : { passphrase }),
     })
   }

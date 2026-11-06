@@ -32,6 +32,31 @@ describe('ByteWriter', () => {
     expect(size).toBe(CAPACITY + CHUNK_SIZE)
   })
 
+  // A joined writer hands a busy consumer what was written meanwhile as one
+  // chunk, so a backend writing each chunk makes one write, not one per call.
+  it.each([
+    [false, 4],
+    [true, 2],
+  ])('joined %s takes what came while it was busy in %i reads', async (joined, reads) => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const received: string[] = []
+    const writer = new ByteWriter(async (source) => {
+      for await (const chunk of source as AsyncIterable<Uint8Array>) {
+        received.push(new TextDecoder().decode(chunk))
+        await gate
+      }
+    }, joined)
+    await writer.write(new TextEncoder().encode('a'))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    for (const part of ['b', 'c', 'd']) await writer.write(new TextEncoder().encode(part))
+    release()
+    await writer.finish()
+    expect([received.join(''), received.length]).toEqual(['abcd', reads])
+  })
+
   it('aborts without committing', async () => {
     let entered!: () => void
     const seen = new Promise<void>((resolve) => {

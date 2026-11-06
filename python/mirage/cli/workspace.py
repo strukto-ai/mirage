@@ -30,6 +30,7 @@ from mirage.cli.output import (
     format_table,
     handle_response,
 )
+from mirage.cli.settings import header, use_workspace
 from mirage.utils.yaml import parse_yaml
 
 app = typer.Typer(no_args_is_help=True, help="Manage workspaces.")
@@ -237,11 +238,14 @@ def _format_asks(items: list[dict[str, Any]]) -> str:
 
 @app.command("create")
 def create_cmd(
-    config_path: Path = typer.Argument(
-        ..., exists=True, readable=True, help="YAML/JSON workspace config."
+    config_path: Path | None = typer.Argument(
+        None, exists=True, readable=True, help="YAML/JSON workspace config."
+    ),
+    template: str | None = typer.Option(
+        None, "--template", help="Create from this saved template."
     ),
     workspace_id: str | None = typer.Option(
-        None, "--id", help="Explicit workspace id."
+        None, "--workspace", "-w", "--id", help="Explicit workspace id."
     ),
     explain: bool = typer.Option(
         False,
@@ -249,12 +253,19 @@ def create_cmd(
         help="Say what the server's policies make of it; create nothing.",
     ),
 ) -> None:
-    """Create a workspace; daemon auto-spawns if not running.
+    """Create a workspace from a config file or a saved template; daemon
+    auto-spawns if not running.
 
     ``--explain`` asks the server's policies about the config without
     creating anything.
     """
-    body: dict[str, Any] = {"config": resolve_config(config_path)}
+    if (config_path is None) == (template is None):
+        fail("give a config file or --template NAME, not both", 2)
+    body: dict[str, Any] = (
+        {"template": template}
+        if config_path is None
+        else {"config": resolve_config(config_path)}
+    )
     if workspace_id:
         body["id"] = workspace_id
     with make_client() as client:
@@ -265,8 +276,11 @@ def create_cmd(
             json=body,
             params={"explain": "true"} if explain else None,
         )
+    created = handle_response(r)
+    if not explain and isinstance(created, dict):
+        header(f"created {created.get('id')}")
     emit(
-        handle_response(r),
+        created,
         human=_format_workspace_explanation
         if explain
         else _format_workspace_detail,
@@ -301,6 +315,27 @@ def get_cmd(
     emit(handle_response(r), human=_format_workspace_detail)
 
 
+@app.command("use")
+def use_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+) -> None:
+    """Make a workspace the current context's, for the commands that
+    take ``-w``."""
+    with make_client() as client:
+        client.ensure_running(allow_spawn=False)
+        r = client.request(
+            "GET", f"/v1/workspaces/{quote(workspace_id, safe='')}"
+        )
+        context = client.settings.context
+    handle_response(r)
+    use_workspace(context, workspace_id)
+    header(f"using {workspace_id}", context)
+    emit(
+        {"workspace": workspace_id},
+        human=lambda d: f"Using workspace {workspace_id}.",
+    )
+
+
 @app.command("delete")
 def delete_cmd(workspace_id: str = typer.Argument(...)) -> None:
     """Stop and remove a workspace."""
@@ -309,7 +344,9 @@ def delete_cmd(workspace_id: str = typer.Argument(...)) -> None:
         r = client.request(
             "DELETE", f"/v1/workspaces/{quote(workspace_id, safe='')}"
         )
-    emit(handle_response(r), human=lambda d: f"Deleted workspace {d['id']}.")
+    deleted = handle_response(r)
+    header(f"deleted {workspace_id}")
+    emit(deleted, human=lambda d: f"Deleted workspace {d['id']}.")
 
 
 @app.command("close")
@@ -320,7 +357,9 @@ def close_cmd(workspace_id: str = typer.Argument(...)) -> None:
         r = client.request(
             "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/close"
         )
-    emit(handle_response(r), human=lambda d: f"Closed workspace {d['id']}.")
+    closed = handle_response(r)
+    header(f"closed {workspace_id}")
+    emit(closed, human=lambda d: f"Closed workspace {d['id']}.")
 
 
 @app.command("cancel")

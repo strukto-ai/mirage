@@ -12,12 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import aiofiles.os
+import os
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.dest import mkdir_component_error
 from mirage.core.disk.errors import disk_error, disk_errors
-from mirage.core.disk.utils import resolve_inside
+from mirage.core.disk.utils import resolve_inside_sync
 from mirage.observe.context import record, start_op
 from mirage.types import PathSpec
 from mirage.utils.path import norm
@@ -28,14 +29,27 @@ async def mkdir(
 ) -> None:
     path = path_spec.mount_path
     root = accessor.root
-    p = await resolve_inside(root, path_spec, path)
+    resolved = False
+
+    def make() -> None:
+        nonlocal resolved
+        p = resolve_inside_sync(root, path_spec, path)
+        resolved = True
+        if parents:
+            os.makedirs(p, exist_ok=True)
+            return
+        with disk_errors(path_spec.virtual):
+            os.mkdir(p)
+
     timer = start_op()
     if parents:
         # Not `disk_errors`: that restamps every OSError against the
         # operand, which would undo the component naming below.
         try:
-            await aiofiles.os.makedirs(p, exist_ok=True)
+            await run_blocking(make)
         except NotADirectoryError as exc:
+            if not resolved:
+                raise
             # The kernel names the whole path; GNU names the component it
             # tripped on, so the chain is walked only now that it is known
             # to be broken. A failure the walk cannot explain keeps the
@@ -43,18 +57,20 @@ async def mkdir(
             named = await mkdir_component_error(root, path_spec, norm(path))
             raise (named or disk_error(exc, path_spec.virtual)) from exc
         except OSError as exc:
+            if not resolved:
+                raise
             raise disk_error(exc, path_spec.virtual) from exc
         finally:
             # Also when it raised: the chain may have made its first
             # directories before a later one failed.
-            record("mkdir", path_spec.virtual, "disk", 0, timer)
+            if resolved:
+                record("mkdir", path_spec.virtual, "disk", 0, timer)
         return
     # An existing target is EEXIST, not success: only -p is idempotent.
     done = True
     try:
-        with disk_errors(path_spec.virtual):
-            await aiofiles.os.mkdir(p)
-    except OSError:
+        await run_blocking(make)
+    except Exception:
         done = False
         raise
     finally:

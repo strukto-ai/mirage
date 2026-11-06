@@ -29,9 +29,16 @@ export const SSHConfig = z.object({
     .describe(
       'Path to a private key; `~` is expanded. Unset tries the SSH agent and the default keys in `~/.ssh` (`id_ed25519`, `id_ecdsa`, `id_rsa`, `id_dsa`).',
     ),
+  privateKey: secretStr()
+    .optional()
+    .describe(
+      "A private key's own text, such as one a credential pointer reads from a secret store; offered after `identityFile`'s.",
+    ),
   passphrase: secretStr()
     .optional()
-    .describe('Passphrase of an encrypted private key, from `identityFile` or a default key.'),
+    .describe(
+      'Passphrase of an encrypted private key, from `identityFile`, `privateKey` or a default key.',
+    ),
   root: z
     .string()
     .optional()

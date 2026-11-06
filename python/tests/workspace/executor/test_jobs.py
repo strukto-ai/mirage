@@ -609,6 +609,41 @@ async def test_kill_marks_a_known_job_killed():
     assert table.get(job.id).status == JobStatus.KILLED
 
 
+# bash starts a job ignoring INT and QUIT, so kill -INT or -QUIT reaches
+# it and the job runs on; TERM still ends it. Pinned on bash 5.2, once
+# the job has started (a kill right after `&` races bash's own setup).
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line,out",
+    [
+        ("sleep 0.5 & sleep 0.1; kill -INT $!; wait $!; echo $?", "0\n"),
+        ("sleep 0.5 & sleep 0.1; kill -s QUIT %1; wait %1; echo $?", "0\n"),
+        (
+            "(sleep 0.5; echo x $?) & sleep 0.1; kill -2 $!; wait $!; echo $?",
+            "x 0\n0\n",
+        ),
+        (
+            "f() { sleep 0.5; echo f; }; f & sleep 0.1; kill -INT $!; "
+            "wait $!; echo $?",
+            "f\n0\n",
+        ),
+        (
+            "bash -c 'sleep 0.5; echo y' & sleep 0.1; kill -INT $!; wait; "
+            "echo $?",
+            "y\n0\n",
+        ),
+        ("sleep 5 & sleep 0.1; kill -TERM $!; wait $!; echo $?", "143\n"),
+    ],
+)
+async def test_int_and_quit_from_kill_leave_a_job_running(line, out):
+    ws = _workspace()
+    try:
+        io = await ws.shell(line)
+        assert (await io.stdout_str(), io.exit_code) == (out, 0)
+    finally:
+        await ws.close()
+
+
 @pytest.mark.asyncio
 async def test_jobs_prints_nothing_when_the_table_is_empty():
     out, io, _ = await handle_jobs(JobTable(), ["jobs"])

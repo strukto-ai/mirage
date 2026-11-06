@@ -19,6 +19,7 @@ import { SecretsError } from './errors.ts'
 import { fetchSecret, registerSecrets } from './registry.ts'
 import {
   configValue,
+  fetchedValues,
   isConfigPointer,
   resolveConfigSecrets,
   resolveSources,
@@ -416,5 +417,21 @@ describe('resolveSourcesFor', () => {
     // A list from an untyped REST override is not a mapping; the
     // constructor refuses it with the wording every loader shares.
     expect(await resolveSourcesFor([brokenBootstrap()], [{ token: pointer }])).toBeUndefined()
+  })
+})
+
+describe('fetchedValues', () => {
+  it('pairs each pointer with what it read', () => {
+    const pointer = { from: 'env', key: 'TOKEN' }
+    const raw = {
+      apiKey: pointer,
+      sandboxId: 'sbx-1',
+      auth: { token: pointer },
+      hosts: ['a', pointer],
+      note: { from: 'a mapping that is not a pointer', extra: 1 },
+    }
+    const resolved = { ...raw, apiKey: 'k1', auth: { token: 'k2' }, hosts: ['a', 'k3'] }
+    expect(fetchedValues(raw, resolved)).toEqual(['k1', 'k2', 'k3'])
+    expect(fetchedValues({ sandboxId: 'sbx-1' }, { sandboxId: 'sbx-1' })).toEqual([])
   })
 })

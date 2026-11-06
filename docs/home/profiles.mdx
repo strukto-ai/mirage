@@ -113,7 +113,7 @@ Name the profile when you create a session:
 | --- | --- |
 | Python | `ws.create_session("s1", profile="researcher")` or `await ws.session("s1", profile="researcher")` |
 | TypeScript | `ws.createSession('s1', { profile: 'researcher' })` |
-| [CLI](/home/access/cli#workspaces) | `mirage session create ID -p researcher` |
+| [CLI](/home/access/cli#workspaces) | `mirage workspace session create -w ID -p researcher` |
 
 A session that names no profile gets the one `profile:` selects. Without
 `profile:`, it gets the profile named `default` if the workspace defines one,
@@ -131,7 +131,7 @@ workspace YAML is never rewritten.
 | Python | `ws.set_profile(name, doc)` | `await ws.set_session_profile(id, name)` |
 | TypeScript | `ws.setProfile(name, doc)` | `await ws.setSessionProfile(id, name)` |
 | [HTTP](/home/access/http#set-a-profile) | `PUT /v1/workspaces/{id}/profiles/{name}` | `PATCH /v1/workspaces/{id}/sessions/{session_id}` |
-| [CLI](/home/access/cli#workspaces) | `mirage workspace set-profile ID NAME FILE` | `mirage session update ID S -p NAME` |
+| [CLI](/home/access/cli#workspaces) | `mirage workspace set-profile ID NAME FILE` | `mirage workspace session update -w ID -s S -p NAME` |
 
 An agent cannot reach these: they are host operations, so no builtin, MCP tool
 or RPC method changes a profile.

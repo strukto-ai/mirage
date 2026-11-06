@@ -118,6 +118,10 @@ COPY_OPS = call_names(_VFS_CALLS, effects={Effect.COPY})
 # judged as a write, and on the mount that serves the path.
 DESTINATION_OPS = frozenset({"rename"}) | COPY_OPS
 
+# Ops that take a name, and every name below it, from the file there: a
+# redirect writing that file follows a rename and loses it to a removal.
+UNLINKING_OPS = call_names(_VFS_CALLS, effects={Effect.REMOVE, Effect.RENAME})
+
 # Ops that reach everything below their paths: a read-only region or a
 # path rule anywhere under one is theirs to answer for.
 SUBTREE_OPS = frozenset(name for name, mark in CALLS.items() if mark.subtree)

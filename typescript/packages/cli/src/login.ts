@@ -23,19 +23,41 @@ import {
   PROTECTED_RESOURCE_PATH,
 } from '@struktoai/mirage-server/auth/config'
 
+import { readDaemonTable } from '@struktoai/mirage-server/daemon_config'
+import { mirageHome } from '@struktoai/mirage-server/paths'
+import { HOSTED, HOSTED_URL, LOCAL } from './constants.ts'
 import {
+  ContextError,
   LoginError,
+  checkName,
+  chosenName,
+  contextNames,
+  currentName,
+  emptyContext,
   endsAt,
   jsonBody,
+  loginPath,
+  readContext,
+  readCurrent,
   readLogin,
+  removeContext,
   removeLogin,
   renewBy,
   tokenClaims,
+  writeContext,
+  writeCurrent,
   writeLogin,
   type Login,
 } from './credentials.ts'
-import { emit, fail } from './output.ts'
-import { isLocalUrl, loadDaemonSettings } from './settings.ts'
+import { emit, fail, formatTable } from './output.ts'
+import {
+  currentWorkspace,
+  defaultLocalUrl,
+  header,
+  isLocalUrl,
+  loadDaemonSettings,
+  localUrl,
+} from './settings.ts'
 
 const CALLBACK_PATH = '/callback'
 const CALLBACK_TIMEOUT_SECONDS = 300
@@ -255,15 +277,61 @@ export async function tokenLogin(url: string, token: string): Promise<Login> {
   }
 }
 
+/** The context a login makes when given no `--name`: `strukto` for the hosted API, `local` for this machine, else the server's host. */
+function contextName(url: string): string {
+  if (url === HOSTED_URL) return HOSTED
+  if (isLocalUrl(url)) return LOCAL
+  return new URL(url).hostname.toLowerCase()
+}
+
+/** The team a login acts for, as the server's `/v1/me` names it, or null when it names none. */
+async function teamOf(url: string, token: string): Promise<string | null> {
+  let reply: Response
+  try {
+    reply = await fetch(`${url}/v1/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(30_000),
+    })
+  } catch (err) {
+    console.debug(`${url}/v1/me is out of reach: ${String(err)}`)
+    return null
+  }
+  const team = reply.ok ? (await jsonBody(reply)).team_id : undefined
+  return typeof team === 'string' && team !== '' ? team : null
+}
+
+/**
+ * Keep a context for `url` and make it current. It keeps its workspace
+ * while it points at the same server; `local` keeps no URL when `url` is
+ * the one it follows anyway.
+ */
+async function saveContext(name: string, url: string, login: Login | null): Promise<void> {
+  const team = login !== null ? await teamOf(url, login.access_token) : null
+  const table = readDaemonTable(mirageHome(process.env))
+  const kept = readContext(name)
+  const stored = name === LOCAL && url === defaultLocalUrl(table) ? '' : url
+  writeContext(name, {
+    url: stored,
+    team,
+    workspace: kept?.url === stored ? kept.workspace : null,
+  })
+  writeCurrent(name)
+}
+
 export function registerLoginCommands(program: Command): void {
   program
     .command('login')
-    .description('Log in to the server the CLI points at.')
+    .description('Log in to a server and make it the current context.')
+    .argument('[url]', 'The server; the hosted API when left out')
+    .option(
+      '--name <name>',
+      "Name the context; by default strukto for the hosted API, local for this machine, else the server's host",
+    )
     .option(
       '--token <token>',
       'Keep this token instead of using the browser; - reads it from stdin',
     )
-    .action(async (opts: { token?: string }) => {
+    .action(async (given: string | undefined, opts: { name?: string; token?: string }) => {
       let token = opts.token
       if (token === '-') {
         const chunks: Buffer[] = []
@@ -271,43 +339,119 @@ export function registerLoginCommands(program: Command): void {
         token = Buffer.concat(chunks).toString('utf-8').trim()
         if (token === '') fail('no token on stdin')
       }
-      const url = rstripSlash(loadDaemonSettings().url)
+      const url = rstripSlash(given ?? HOSTED_URL)
+      const name = checkName(opts.name ?? contextName(url))
       const login =
         token !== undefined && token !== '' ? await tokenLogin(url, token) : await browserLogin(url)
+      await saveContext(name, url, login)
       if (login === null) {
+        removeLogin(loginPath(name))
         process.stdout.write(noLogin(url) + '\n')
         return
       }
-      writeLogin(login)
+      writeLogin(login, loginPath(name))
+      header('logged in', name)
       const account = tokenClaims(login.access_token).sub
       const who = typeof account === 'string' ? ` as ${account}.` : '.'
       process.stdout.write(`Logged in to ${url}${who}\n`)
     })
   program
     .command('logout')
-    .description('Forget the stored login.')
+    .description('Sign out of the current context; the context stays.')
     .action(() => {
       const login = removeLogin()
       process.stdout.write(login !== null ? `Logged out of ${login.url}.\n` : 'Not logged in.\n')
     })
   program
     .command('whoami')
-    .description('Print who the login is for, and when to log in again.')
+    .description(
+      'Print the current context: its server, team, user and workspace, and when to log in again.',
+    )
     .action(() => {
       const url = rstripSlash(loadDaemonSettings().url)
-      const login = readLogin()
-      if (login?.url !== url) fail(`not logged in to ${url}`)
-      const account = tokenClaims(login.access_token).sub
+      const name = currentName()
+      const stored = readLogin(loginPath(name))
+      const login = stored?.url === url ? stored : null
+      const account = login !== null ? tokenClaims(login.access_token).sub : undefined
       emit(
         {
-          account: typeof account === 'string' ? account : null,
+          context: name,
           url,
-          renew_by: new Date(renewBy(login) * 1000).toISOString().slice(0, 10),
+          team: readContext(name)?.team ?? null,
+          user: typeof account === 'string' ? account : null,
+          workspace: currentWorkspace(),
+          renew_by:
+            login !== null ? new Date(renewBy(login) * 1000).toISOString().slice(0, 10) : null,
         },
         (row) =>
           Object.entries(row)
-            .map(([k, v]) => `${k}: ${String(v)}`)
+            .map(([k, v]) => `${k}: ${v ?? '-'}`)
             .join('\n'),
       )
+    })
+}
+
+interface ContextRow {
+  name: string
+  url: string
+  team: string | null
+  workspace: string | null
+  current: boolean
+}
+
+export function registerContextCommands(program: Command): void {
+  const context = program
+    .command('context')
+    .description('The servers the CLI talks to: list, switch, forget.')
+
+  context
+    .command('list')
+    .description('List the contexts; the current one is marked.')
+    .action(() => {
+      const current = chosenName()
+      const table = readDaemonTable(mirageHome(process.env))
+      const rows: ContextRow[] = contextNames().map((name) => {
+        const entry = readContext(name) ?? emptyContext()
+        return {
+          name,
+          url: entry.url !== '' ? entry.url : localUrl(table),
+          team: entry.team,
+          workspace: entry.workspace,
+          current: name === current,
+        }
+      })
+      emit(rows, (items) =>
+        formatTable(
+          ['', 'NAME', 'URL', 'TEAM', 'WORKSPACE'],
+          items.map((r) => [r.current ? '*' : '', r.name, r.url, r.team ?? '', r.workspace ?? '']),
+        ),
+      )
+    })
+
+  context
+    .command('use')
+    .argument('<name>', 'Context name')
+    .description('Make a context the current one.')
+    .action((name: string) => {
+      if (readContext(name) === null) {
+        throw new ContextError(`no context '${name}'; run \`mirage context list\``)
+      }
+      writeCurrent(name)
+      header('now current', name)
+      emit({ current: name }, () => `Using context ${name}.`)
+    })
+
+  context
+    .command('delete')
+    .argument('<name>', 'Context name')
+    .description('Forget a context and its login; `local` stays.')
+    .action((name: string) => {
+      if (name === LOCAL) throw new ContextError('the local context cannot be deleted')
+      if (readContext(name) === null) {
+        throw new ContextError(`no context '${name}'; run \`mirage context list\``)
+      }
+      if (readCurrent() === name) writeCurrent(LOCAL)
+      removeContext(name)
+      emit({ deleted: name }, () => `Deleted context ${name}.`)
     })
 }

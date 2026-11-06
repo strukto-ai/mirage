@@ -15,10 +15,12 @@
 import { buffer } from 'node:stream/consumers'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
+import { resolveWorkspace } from './settings.ts'
 import { emit, handleResponse } from './output.ts'
 
 interface Target {
-  workspace: string
+  /** The workspace; the current one when left out. */
+  workspace?: string
   session?: string
 }
 
@@ -31,11 +33,12 @@ async function callTool(
   name: string,
   args: Record<string, unknown>,
 ): Promise<void> {
+  const workspace = resolveWorkspace(target.workspace)
   const c = makeClient()
   await c.ensureRunning({ allowSpawn: false })
   const query =
     target.session === undefined ? '' : `?session_id=${encodeURIComponent(target.session)}`
-  const path = `/v1/workspaces/${encodeURIComponent(target.workspace)}/tools/${name}${query}`
+  const path = `/v1/workspaces/${encodeURIComponent(workspace)}/tools/${name}${query}`
   const response = (await handleResponse(
     await c.request('POST', path, { body: JSON.stringify(args) }),
   )) as { text: string; is_error: boolean }
@@ -47,14 +50,14 @@ function toolCommand(program: Command, name: string, description: string): Comma
   return program
     .command(name)
     .description(description)
-    .requiredOption('-w, --workspace <id>', 'Workspace id')
+    .option('-w, --workspace <id>', 'Workspace id; the current workspace when left out')
     .option('-s, --session <id>', 'Session id')
 }
 
-/** `mirage tools <tool>`: the session's agent tools, one verb each, run as MCP runs them. */
+/** `mirage workspace tools <tool>`: the session's agent tools, one verb each, run as MCP runs them. */
 export function registerToolCommands(parent: Command): void {
   const program = parent
-    .command('tools')
+    .command('tools', { hidden: true })
     .description("The session's agent tools, as MCP serves them.")
   toolCommand(program, 'shell', 'Run a command line and read its output as the agent does.')
     .argument('<command>', 'The command line to run')

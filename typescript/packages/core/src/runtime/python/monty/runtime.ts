@@ -15,7 +15,12 @@
 import type { Context } from '../../../commands/config.ts'
 import { PythonRuntime } from '../base.ts'
 import type { OutputFn, Program, RunResult } from '../../types.ts'
-import { memoryLimit, type RuntimeOptions } from '../../config.ts'
+import {
+  memoryLimit,
+  type ConfigField,
+  type ConfigFields,
+  type RuntimeOptions,
+} from '../../config.ts'
 import { RuntimeFiles } from '../../files.ts'
 import { unhonoredNotice } from '../flags.ts'
 import type { MontyConfig } from './config.ts'
@@ -51,6 +56,9 @@ import { MontyExecution } from './execution.ts'
  * reads runs on the shared pool make and must not wait behind them.
  */
 export class MontyRuntime extends PythonRuntime<MontyExecution> {
+  static override readonly configFields: ConfigFields = {
+    maxMemory: { type: 'string' },
+  } satisfies Record<keyof MontyConfig, ConfigField>
   readonly name = 'monty'
   protected override readonly versionSuffix = ' (monty)'
   // The interpreter is an in-process guest with no host syscalls: its
@@ -68,7 +76,7 @@ export class MontyRuntime extends PythonRuntime<MontyExecution> {
   private readonly maxMemory: number | null
 
   constructor(options: RuntimeOptions<MontyConfig> = {}) {
-    super(options, ['maxMemory'] satisfies (keyof MontyConfig)[])
+    super(options, MontyRuntime.configFields)
     this.maxMemory = memoryLimit(this.config.maxMemory)
   }
 

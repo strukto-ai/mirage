@@ -21,7 +21,8 @@ import typer
 
 from mirage.cli.client import make_client
 from mirage.cli.output import emit, fail
-from mirage.cli.vfs import answer, post
+from mirage.cli.settings import resolve_workspace
+from mirage.cli.vfs import WORKSPACE, answer, post
 
 app = typer.Typer(
     invoke_without_command=True, help="Run a shell line in a workspace."
@@ -30,9 +31,7 @@ app = typer.Typer(
 
 @app.callback(invoke_without_command=True)
 def shell_cmd(
-    workspace_id: str = typer.Option(
-        ..., "--workspace_id", "--workspace", "-w", help="Workspace id."
-    ),
+    workspace_id: str | None = WORKSPACE,
     command: str = typer.Option(
         ..., "--command", "-c", help="Shell line to run."
     ),
@@ -68,6 +67,7 @@ def shell_cmd(
     concurrently in either mode. Ctrl-C cancels the request and exits 130.
     ``--explain`` describes the line without running it.
     """
+    workspace_id = resolve_workspace(workspace_id)
     query: dict[str, str] = {"session_id": session_id} if session_id else {}
     payload: dict[str, Any] = {"command": command}
     if cwd:

@@ -19,6 +19,7 @@ from mirage.secrets.summary import (
     MAX_LISTED_FIELDS,
     error_summary,
     field_summary,
+    mask_values,
 )
 
 
@@ -89,4 +90,22 @@ def test_error_summary_never_carries_the_input():
 def test_error_summary_joins_every_issue():
     assert error_summary(refusal(port="x", token="sk-1")) == (
         "port: int_parsing; token: value_error"
+    )
+
+
+def test_mask_values_hides_a_value_however_it_was_quoted():
+    message = "e2b mount_type must be one of ssh, fuse, both, not 'ab\"cd'"
+    assert mask_values(message, ['ab"cd']) == (
+        "e2b mount_type must be one of ssh, fuse, both, not '***'"
+    )
+    assert mask_values('not "ab\\"cd"', ['ab"cd']) == 'not "***"'
+
+
+def test_mask_values_masks_a_value_holding_another_whole():
+    assert mask_values("got sk-1234", ["sk", "sk-1234"]) == "got ***"
+
+
+def test_mask_values_leaves_a_message_without_them_alone():
+    assert mask_values("needs a sandbox_id", ["sk-1234", ""]) == (
+        "needs a sandbox_id"
     )

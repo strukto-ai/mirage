@@ -47,16 +47,18 @@ def not_running_hint(
 
 
 def stop_signal(runner: ProcessHandle | None) -> int | None:
-    """The signal a ``kill`` stopped ``runner`` with, when a program may
-    handle it: None for KILL, or for a run no ``kill`` stopped, which is
-    killed at once.
+    """The signal a ``kill`` stopped ``runner`` with, or an interrupt
+    stops the program it runs with (``ProcessHandle.interrupted``), when
+    a program may handle it: None for KILL, or for a run nothing stopped,
+    which is killed at once.
 
     Args:
         runner (ProcessHandle | None): the caller's runner, if any.
     """
-    if runner is None or runner.signal in (None, 9):
+    if runner is None:
         return None
-    return runner.signal
+    signal = runner.signal if runner.signal is not None else runner.interrupted
+    return None if signal in (None, 9) else signal
 
 
 MOUNT_TYPES: tuple[MountType, ...] = ("ssh", "fuse", "both")

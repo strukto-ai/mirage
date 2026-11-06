@@ -37,6 +37,7 @@ from mirage.commands.builtin.utils.links import (
     links_of,
     mount_root,
     mounts_of,
+    own_output,
 )
 from mirage.commands.builtin.utils.stream import (
     is_stdin,
@@ -366,6 +367,16 @@ async def grep_generic(
     # one leads to, and a directory it reaches again is a loop.
     follow = links if f.recursive and f.dereference else None
     walked_st = partial(followed_stat, st, follow)
+    # GNU refuses to search the file its own output goes into, unless it
+    # prints no lines, or stops at the first.
+    writes = own_output(ctx)
+    guarded = not (
+        f.count_only
+        or f.quiet
+        or f.files_only
+        or f.files_without_match
+        or (f.max_count is not None and f.max_count <= 1)
+    )
     failed = False
     diagnostics: list[bytes] = []
     matched = False
@@ -458,6 +469,9 @@ async def grep_generic(
         ):
             return
         if not file_admitted(p.virtual, f.filters):
+            return
+        if guarded and writes(p):
+            warn(f"grep: {p.raw_path}: input file is also the output")
             return
         file_io = IOResult(exit_code=1)
         try:

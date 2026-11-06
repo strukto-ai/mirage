@@ -16,7 +16,7 @@ import { PathSpec } from '../../types.ts'
 import { LanguageRuntime } from '../language.ts'
 import type { Argv0Rules } from '../source.ts'
 import type { RunResult, Language } from '../types.ts'
-import type { RuntimeOptions } from '../config.ts'
+import type { ConfigFields, RuntimeOptions } from '../config.ts'
 import { PYTHON_COMMANDS } from '../constants.ts'
 import { PAYLOAD_ARGV0, STDIN_ARGV0 } from './execution.ts'
 
@@ -119,7 +119,7 @@ export abstract class PythonRuntime<E = unknown> extends LanguageRuntime<E> {
     )
   }
 
-  constructor(options: RuntimeOptions<object> = {}, configKeys: readonly string[] = []) {
-    super(options, PythonRuntime.commands, configKeys)
+  constructor(options: RuntimeOptions<object> = {}, configFields: ConfigFields = {}) {
+    super(options, PythonRuntime.commands, configFields)
   }
 }

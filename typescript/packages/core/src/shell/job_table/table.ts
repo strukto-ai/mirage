@@ -26,6 +26,7 @@ import {
 import {
   GENERATION_BITS,
   HANGUP_EXIT_CODE,
+  IGNORED_SIGNALS,
   KILLED_EXIT_CODE,
   LIST_CHECK_SECONDS,
   LIST_MAX_RETRIES,
@@ -373,6 +374,7 @@ export class JobTable {
           init.abort.abort()
         },
         limit: init.limit ?? null,
+        ignores: IGNORED_SIGNALS,
       })
     } catch (error) {
       await this.remove(sessionId, new Set([name]), true)
@@ -558,7 +560,9 @@ export class JobTable {
    *
    * Another workspace's job is killed by ending its console; its owner
    * sees the ending and stops the runner. Should the job have ended
-   * first, the ending it wrote stands and the job was not killed.
+   * first, the ending it wrote stands and the job was not killed. INT and
+   * QUIT reach a running job and do nothing, as bash starts each job
+   * ignoring them.
    *
    * @param signal the signal the job is stopped with; its status is 128
    *   plus it, KILL's 137 by default.
@@ -566,6 +570,7 @@ export class JobTable {
   async kill(jobId: number, sessionId = '', signal = 9): Promise<boolean> {
     const job = this.get(jobId, sessionId)
     if (job?.status !== JobStatus.RUNNING) return false
+    if (IGNORED_SIGNALS.has(signal)) return true
     if (job.process !== null) {
       await this.stopRunner(job, job.process, signal)
       return true

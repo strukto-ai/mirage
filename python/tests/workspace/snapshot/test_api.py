@@ -217,6 +217,25 @@ async def test_a_target_that_takes_nothing_fails_the_snapshot():
 
 
 @pytest.mark.asyncio
+async def test_a_snapshot_round_trips_what_the_shell_keeps_between_lines():
+    ws = Workspace({"/": (RAMVFS(), MountMode.WRITE)})
+    await ws.shell(
+        "alias ll='ls -l' && set -o pipefail && shopt -s nullglob && umask 077"
+    )
+    await ws.shell("trap 'echo bye' EXIT")
+    check = (
+        "alias ll; set -o | grep pipefail; shopt nullglob; umask; trap -p EXIT"
+    )
+    before = await (await ws.shell(check)).stdout_str()
+    assert "0077" in before
+    buffer = io.BytesIO()
+    await ws.snapshot(buffer)
+    buffer.seek(0)
+    restored = await Workspace.load(buffer)
+    assert await (await restored.shell(check)).stdout_str() == before
+
+
+@pytest.mark.asyncio
 async def test_a_snapshot_round_trips_through_bytes():
     buffer = io.BytesIO()
     size = await (await _written()).snapshot(buffer)

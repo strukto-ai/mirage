@@ -25,7 +25,7 @@ import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
 import { type ByteSource, materialize } from '../../../io/types.ts'
 import { abortable } from '../../../utils/abort.ts'
 import { concat } from '../../../utils/bytes.ts'
-import { memoryLimit, type RuntimeOptions } from '../../config.ts'
+import { memoryLimit, type ConfigFields, type RuntimeOptions } from '../../config.ts'
 import type { WorkspaceBinding } from '../../binding.ts'
 import {
   createPyodideInterrupter,
@@ -46,7 +46,7 @@ import { classify } from '../../../errors/index.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import { errnoError } from './fs/errors.ts'
 import { decodeBase64, encodeBase64 } from '../../../utils/base64.ts'
-import { KEYS, type PyodideConfig } from './config.ts'
+import { FIELDS, type PyodideConfig } from './config.ts'
 import { PyodideWorkerClient } from './worker/client.ts'
 import type { HostStdio } from './worker/types.ts'
 import { CANNOT_EXECUTE_STATUS } from '../../../shell/constants.ts'
@@ -213,6 +213,7 @@ export function stripDeniedImports(code: string, denyPackages: ReadonlySet<strin
 }
 
 export class PyodideRuntime extends PythonRuntime<undefined> {
+  static override readonly configFields: ConfigFields = FIELDS
   readonly name = 'pyodide'
   protected override readonly versionSuffix = ' (pyodide)'
   // The WASM guest's filesystem is the workspace-backed Emscripten FS,
@@ -272,7 +273,7 @@ export class PyodideRuntime extends PythonRuntime<undefined> {
     private readonly sync?: SyncVFS,
     private readonly interruptBuffer?: SharedArrayBuffer,
   ) {
-    super(options, KEYS)
+    super(options, PyodideRuntime.configFields)
     const config = this.config as PyodideConfig
     const { maxConcurrency = 1 } = config
     if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency < 1)

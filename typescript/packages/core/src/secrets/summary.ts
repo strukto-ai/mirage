@@ -70,3 +70,26 @@ function issueDetail(issue: z.core.$ZodIssue): string {
     path !== '' ? path : issue.code === 'unrecognized_keys' ? issue.keys.join(', ') : 'config'
   return `${where}: ${issue.code}`
 }
+
+/**
+ * `message` with each value fetched into a config replaced by `***`.
+ *
+ * For a refusal raised over a config a secret was read into, whose check
+ * quotes the value it refused (`not "ssh2"`): the create route answers
+ * that message as its detail, and would hand the secret back. A value is
+ * masked as it is and as JSON escapes it, the longest form first, so a
+ * value holding another is masked whole. Mirrors Python's `mask_values`,
+ * which also masks the form `repr` quotes.
+ */
+export function maskValues(message: string, values: Iterable<string>): string {
+  const forms = new Set<string>()
+  for (const value of values) {
+    if (value === '') continue
+    forms.add(value)
+    forms.add(JSON.stringify(value).slice(1, -1))
+  }
+  let out = message
+  for (const form of [...forms].sort((a, b) => b.length - a.length))
+    out = out.split(form).join('***')
+  return out
+}

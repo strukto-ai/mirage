@@ -22,9 +22,9 @@ import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/runti
 import { requireId } from '@struktoai/mirage-core/runtime/sandbox/config'
 import { registerRuntime } from '@struktoai/mirage-core/runtime/table'
 import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
-import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
+import type { ConfigFields, RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type Ssh2Sdk } from './sdk.ts'
-import { SSH_RUNTIME_CONFIG_KEYS, type SSHRuntimeConfig } from './config.ts'
+import { SSH_RUNTIME_CONFIG_FIELDS, type SSHRuntimeConfig } from './config.ts'
 import { EXEC_ID, stopSignal, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
 import { feed } from '@struktoai/mirage-core/io/stream'
@@ -49,12 +49,13 @@ import type { Client, ClientChannel } from 'ssh2'
  * the network path as trusted.
  */
 export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeTransport {
+  static override readonly configFields: ConfigFields = SSH_RUNTIME_CONFIG_FIELDS
   readonly [PIPE_TRANSPORT] = true as const
   readonly name = 'ssh'
   private client: Client | null = null
 
   constructor(options: RuntimeOptions<SSHRuntimeConfig> = {}) {
-    super(options, SSH_RUNTIME_CONFIG_KEYS)
+    super(options, SSHRuntime.configFields)
     requireId('ssh', 'host', this.config.host)
   }
 
@@ -73,6 +74,9 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
       this.config.username,
       this.config.identityFile,
       this.config.timeout ?? 30,
+      undefined,
+      undefined,
+      this.config.privateKey,
     )
     await new Promise<void>((resolveFn, rejectFn) => {
       client.on('ready', () => {

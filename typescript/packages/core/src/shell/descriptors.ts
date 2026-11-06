@@ -67,6 +67,13 @@ export function unreadableStdin(): AsyncIterable<Uint8Array> {
   }
 }
 
+/**
+ * An open file description: the name it was opened by (`scope`), which its
+ * errors name, and the file it writes. A streamed redirect's description is
+ * bound (`landed`) to the file its open reached, links followed, as a
+ * descriptor holds an inode: a rename carries it along, and a removal or
+ * another file renamed over it leaves it `lost`, its writes going nowhere.
+ */
 export class FileDescription {
   opened = false
   offset = 0
@@ -74,11 +81,18 @@ export class FileDescription {
   emit: ((data: Uint8Array) => Promise<void>) | null = null
   /** Settles when the last write through this description has. */
   writing: Promise<void> = Promise.resolve()
+  landed: PathSpec | null = null
+  lost = false
   constructor(
     readonly scope: PathSpec,
     readonly append = false,
     readonly pipe = false,
   ) {}
+
+  /** The file the description writes. */
+  get where(): PathSpec {
+    return this.landed ?? this.scope
+  }
 }
 
 export class FileInput extends SharedInput {
@@ -117,14 +131,31 @@ export class Inherited {
  * What one level's command wrote, in order, for the level to route. A chunk
  * on a channel goes through the level's descriptor table; one written to a
  * stream another level owns stays in place on its way up to that level, so it
- * lands among the bytes written around it. Mirrors Python's Recorder.
+ * lands among the bytes written around it. `outputFile` is the regular file
+ * the level's stdout writes, if one does, which a command writing to the level
+ * may not read as its input (`cat f >> f`), or the description a streamed
+ * redirect writes it through, which a rename the line makes moves and which
+ * the levels below share.
+ * Mirrors Python's Recorder.
  */
 export class Recorder extends JobConsole {
   readonly chunks: [Channel | Inherited, number, number][] = []
   readonly owner: StreamOwner = Symbol('recorder')
+  outputFile: string | FileDescription | null = null
   private storage = new ByteSpool()
   private writing = Promise.resolve()
   private pending = 0
+  /**
+   * The file the level's stdout writes as a command starts: a streamed
+   * description's file wherever the line moved it, none once the line removed
+   * it.
+   */
+  get outputTarget(): string | null {
+    const output = this.outputFile
+    if (!(output instanceof FileDescription)) return output
+    return output.lost ? null : output.where.virtual
+  }
+
   /** Whether a write is under way or recorded bytes wait to be taken. Mirrors Python's busy. */
   get busy(): boolean {
     return this.pending > 0 || this.chunks.length > 0

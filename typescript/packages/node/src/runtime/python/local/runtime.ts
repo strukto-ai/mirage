@@ -19,7 +19,11 @@ import { access, stat } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 import { debuglog } from 'node:util'
 import { fsStrerror } from '@struktoai/mirage-core/errors/fs'
-import { resolveHome, type RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
+import {
+  resolveHome,
+  type ConfigFields,
+  type RuntimeOptions,
+} from '@struktoai/mirage-core/runtime/config'
 import { PROCESS_EXECUTOR, type ProcessExecutorMixin } from '@struktoai/mirage-core/runtime/mixin'
 import { PythonRuntime } from '@struktoai/mirage-core/runtime/python/base'
 import { prepareSource } from '@struktoai/mirage-core/runtime/python/execution'
@@ -29,7 +33,7 @@ import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
 import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { PathSpec } from '@struktoai/mirage-core/types'
 import type { OutputFn, Program, RunResult } from '@struktoai/mirage-core/runtime/types'
-import { LOCAL_CONFIG_KEYS, type LocalConfig } from './config.ts'
+import { LOCAL_CONFIG_FIELDS, type LocalConfig } from './config.ts'
 import {
   closeChildren,
   cwdRefusal,
@@ -112,6 +116,7 @@ export class LocalRuntime
   extends PythonRuntime<undefined>
   implements ProcessExecutorMixin<undefined>
 {
+  static override readonly configFields: ConfigFields = LOCAL_CONFIG_FIELDS
   readonly name = 'local'
   readonly [PROCESS_EXECUTOR] = true as const
   // Spawns the host interpreter: a real process with the user's own
@@ -125,7 +130,7 @@ export class LocalRuntime
   private closed = false
 
   constructor(options: RuntimeOptions = {}) {
-    super(options, LOCAL_CONFIG_KEYS)
+    super(options, LocalRuntime.configFields)
     this.home = resolveHome(this.config as LocalConfig, LOCAL_HOME_ENV)
     // A configured path is read from the directory the entry is built in,
     // as Python's twin makes it absolute; a name is found on the PATH as

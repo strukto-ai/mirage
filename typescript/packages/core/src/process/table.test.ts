@@ -427,6 +427,85 @@ it('stopping a runner alone leaves its children running', async () => {
   await child.join()
 })
 
+// A signal to the group reaches the program a runner whose shell ignores it
+// runs right now, which ends with it, and the shell goes on; a runner that
+// does not ignore it stops with it, as its native program would, unless
+// such a shell started it.
+it("a group signal ends an ignoring child's program and stops the rest", async () => {
+  const processes = new ProcessTable()
+  const init = { sessionId: 'a', command: 'sh', cwd: PathSpec.fromStrPath('/') }
+  const release = gate()
+  const parent = processes.start({
+    ...init,
+    cancel: () => {
+      release.release()
+    },
+    run: async () => {
+      await release.promise
+      return 0
+    },
+  })
+  const started = gate()
+  const outcome: [number | null, number | null][] = []
+  const child = processes.start({
+    ...init,
+    parentPid: parent.info.pid,
+    ignores: new Set([2]),
+    cancel: () => undefined,
+    run: async () => {
+      outcome.push(
+        await child.program(
+          (stop) =>
+            new Promise<number>((_resolve, reject) => {
+              started.release()
+              stop.addEventListener('abort', () => {
+                reject(stop.reason as Error)
+              })
+            }),
+        ),
+      )
+      return 0
+    },
+  })
+  const stopped = gate()
+  const other = processes.start({
+    ...init,
+    command: 'sleep',
+    parentPid: parent.info.pid,
+    cancel: () => {
+      stopped.release()
+    },
+    run: async () => {
+      await stopped.promise
+      throw Object.assign(new Error('aborted'), { name: 'AbortError' })
+    },
+  })
+  const forkedRelease = gate()
+  const forked = processes.start({
+    ...init,
+    command: 'sleep',
+    parentPid: child.info.pid,
+    cancel: () => {
+      forkedRelease.release()
+    },
+    run: async () => {
+      await forkedRelease.promise
+      return 0
+    },
+  })
+  await started.promise
+  parent.signalChildren(2)
+  expect(forked.signal).toBeNull()
+  expect((await child.join()).exitCode).toBe(0)
+  expect((await other.join()).exitCode).toBe(130)
+  expect(outcome).toEqual([[null, 2]])
+  expect(other.signal).toBe(2)
+  forked.terminate()
+  await forked.join()
+  parent.terminate()
+  await parent.join()
+})
+
 // A runner that already exited has nothing left to cancel, but stopping it
 // still stops what it left running (`sh -c 'sleep 100 &'`).
 it('stopping an exited runner stops what it left running', async () => {

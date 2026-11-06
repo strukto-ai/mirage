@@ -35,6 +35,7 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { JobRoute, PipeRecorder, handleRedirect } from './redirect.ts'
+import { soleStream } from './create.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { FileDescription, Recorder } from '../../shell/descriptors.ts'
 
@@ -90,6 +91,264 @@ describe('handleRedirect > / >>', () => {
     try {
       await ws.shell('shuf -i 1-1 -o /out > /out')
       expect((await ws.shell('cat /out')).stdoutText).toBe('1\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    "seq 1 2000 | awk '{print}' > /data/out",
+    'seq 1 2000 | sed s/1/x/ > /data/out',
+    'seq 1 2000 | tee /data/copy > /data/out',
+    '{ seq 1 1000; seq 1001 2000; } > /data/out',
+    'for i in 1 2; do seq 1 1000; done > /data/out',
+    'f() { seq 1 2000; }; f > /data/out',
+  ])('%s goes into its file as it is written', async (line) => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    const emit = vi.spyOn(Recorder.prototype, 'emit')
+    try {
+      await ws.shell('mkdir -p /data')
+      emit.mockClear()
+      expect((await ws.shell(line)).exitCode).toBe(0)
+      const held = emit.mock.calls.filter(
+        ([channel], i) =>
+          emit.mock.contexts[i] instanceof PipeRecorder && channel === Channel.STDOUT,
+      )
+      expect(held).toEqual([])
+      expect((await ws.shell('wc -l /data/out')).stdoutText).toBe('2000 /data/out\n')
+    } finally {
+      emit.mockRestore()
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['{ seq 3; wc -l < /data/f; } > /data/f', 0, '1\n2\n3\n3\n', ''],
+    ['{ echo A; head -n 1 /data/link; } > /data/f', 0, 'A\nA\n', ''],
+    ['{ echo A; echo B >> /data/f; echo C; } > /data/f', 0, 'A\nC\n', ''],
+    [
+      'for f in /data/a /data/f; do cat $f; done > /data/f',
+      1,
+      'a\n',
+      'cat: /data/f: input file is output file\n',
+    ],
+    [
+      '{ echo A; grep A /data/link; } > /data/f',
+      2,
+      'A\n',
+      'grep: /data/link: input file is also the output\n',
+    ],
+    ['f() { seq 3; return 4; }; f > /data/f', 4, '1\n2\n3\n', ''],
+    ['( echo A; exit 3 ) > /data/f', 3, 'A\n', ''],
+    [
+      '{ echo A; wc -c < /data/f; echo B; wc -c < /data/f; echo C; } > /data/f',
+      0,
+      'A\n2\nB\n6\nC\n',
+      '',
+    ],
+    ['{ echo BBBB >> /data/f; echo A; } > /data/f', 0, 'A\nBB\n', ''],
+    [
+      '( echo A; grep A /data/f ) > /data/f',
+      2,
+      'A\n',
+      'grep: /data/f: input file is also the output\n',
+    ],
+    ['( echo A; cat /data/f ) > /data/f', 1, 'A\n', 'cat: /data/f: input file is output file\n'],
+    ['( echo A; exec > /data/g; cat /data/f ) > /data/f', 0, 'A\n', ''],
+  ])(
+    'an op on a streamed file finds what was written: %s',
+    async (line, status, content, stderr) => {
+      const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+      try {
+        await ws.shell('mkdir -p /data; echo a > /data/a; ln -s /data/f /data/link')
+        const io = await ws.shell(line)
+        expect(io.exitCode).toBe(status)
+        expect(io.stderrText).toBe(stderr)
+        expect((await ws.shell('cat /data/f')).stdoutText).toBe(content)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  it.each<[string, Record<string, string | null>]>([
+    [
+      '{ echo a; mv /data/lnk2 /data/lnk; echo b; } > /data/lnk',
+      { '/data/open': 'a\nb\n', '/data/other': 'keep\n' },
+    ],
+    [
+      '{ echo a; ln -sfn other /data/lnk; echo b; } > /data/lnk',
+      { '/data/open': 'a\nb\n', '/data/other': 'keep\n' },
+    ],
+    [
+      '{ echo A; ln -s open /data/x; mv /data/x /data/lnk; echo C; } > /data/lnk',
+      { '/data/open': 'A\nC\n' },
+    ],
+    [
+      '{ echo AAAA; rm /data/lnk; echo C; } > /data/lnk',
+      { '/data/open': 'AAAA\nC\n', '/data/lnk': null },
+    ],
+    [
+      'mkdir /data/s/t; ln -s /data/s/t /data/tl;' +
+        ' { echo A; wc -l < /data/tl/../f; echo B; } > /data/tl/../f',
+      { '/data/s/f': 'A\n1\nB\n', '/data/f': 'z\n' },
+    ],
+    [
+      'mkdir -p /data/d /data/o/t; ln -s /data/d /data/q; ln -s /data/o/t /data/x;' +
+        ' { echo A; mv -T /data/q/../x /data/q; echo B; } > /data/o/x',
+      { '/data/o/x': 'A\nB\n' },
+    ],
+    ['{ echo AAAA; rm /data/f; echo C; } > /data/f', { '/data/f': null }],
+    [
+      '{ echo AAAA; mv /data/f /data/g; echo C; } > /data/f',
+      { '/data/f': null, '/data/g': 'AAAA\nC\n' },
+    ],
+    [
+      '{ echo A; mv /data/f /data/g; mv /data/g /data/h; echo B; } > /data/f',
+      { '/data/f': null, '/data/h': 'A\nB\n' },
+    ],
+    [
+      '{ echo A; mv /data/other /data/open; echo C; } > /data/lnk',
+      { '/data/open': 'keep\n', '/data/other': null },
+    ],
+    ['{ echo A; rm /data/f; ls /nonexist; echo C; } > /data/f 2>&1', { '/data/f': null }],
+    [
+      '{ echo A; mv /data/f /data/g; wc -l < /data/g; echo B; } > /data/f',
+      { '/data/f': null, '/data/g': 'A\n1\nB\n' },
+    ],
+    [
+      '{ echo A; mv /data/f /data/g; date +x; echo B; } > /data/f',
+      { '/data/f': null, '/data/g': 'A\nx\nB\n' },
+    ],
+    [
+      '{ echo A; mv /data/f /data/g; echo B; } >> /data/f',
+      { '/data/f': null, '/data/g': 'z\nA\nB\n' },
+    ],
+    [
+      '{ echo A; mv /data/s /data/s2; echo C; } > /data/s/f',
+      { '/data/s/f': null, '/data/s2/f': 'A\nC\n' },
+    ],
+    ['{ echo A; rm -r /data/s; echo C; } > /data/s/f', { '/data/s/f': null }],
+    ['{ echo AAAA; rm /data/f; echo new > /data/f; echo C; } > /data/f', { '/data/f': 'new\n' }],
+    ['{ echo AAAA; mv /data/other /data/f; echo C; } > /data/f', { '/data/f': 'keep\n' }],
+    ['{ echo AAAA; mv /data/f /e/g; echo C; } > /data/f', { '/data/f': null, '/e/g': 'AAAA\n' }],
+    ['{ echo AAAA; cp /data/other /data/f; echo C; } > /data/f', { '/data/f': 'keep\nC\n' }],
+  ])('a streamed redirect writes the file it opened: %s', async (line, files) => {
+    const ws = new Workspace({ '/': new RAMVFS(), '/e/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell(
+        'mkdir -p /data/s; echo keep > /data/other; echo o > /data/open;' +
+          ' ln -s open /data/lnk; ln -s other /data/lnk2; echo z > /data/f',
+      )
+      const io = await ws.shell(line)
+      expect(io.exitCode).toBe(0)
+      expect(io.stderrText).toBe('')
+      for (const [path, content] of Object.entries(files)) {
+        const read = await ws.shell(`cat ${path}`)
+        if (content === null) expect(read.exitCode, path).toBe(1)
+        else expect(read.stdoutText, path).toBe(content)
+      }
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each<[string, number, string, string, string]>([
+    [
+      '{ echo x; mv /data/f /data/g; cat /data/g; } > /data/f',
+      1,
+      'cat: /data/g: input file is output file\n',
+      '/data/g',
+      'x\n',
+    ],
+    [
+      '( echo x; { mv /data/f /data/g; cat /data/g; }; ) > /data/f',
+      1,
+      'cat: /data/g: input file is output file\n',
+      '/data/g',
+      'x\n',
+    ],
+    [
+      '{ echo A; rm /data/f; echo new > /data/f; cat /data/f; } > /data/f',
+      0,
+      '',
+      '/data/f',
+      'new\n',
+    ],
+    [
+      '{ echo A; mv /data/f /data/nope/g; echo C; } > /data/f',
+      0,
+      "mv: cannot move '/data/f' to '/data/nope/g': No such file or directory\n",
+      '/data/f',
+      'A\nC\n',
+    ],
+  ])(
+    'a streamed redirect is judged by the file it writes: %s',
+    async (line, status, stderr, path, content) => {
+      const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+      try {
+        await ws.shell('mkdir -p /data; echo z > /data/f')
+        const io = await ws.shell(line)
+        expect(io.exitCode).toBe(status)
+        expect(io.stderrText).toBe(stderr)
+        expect((await ws.shell(`cat ${path}`)).stdoutText).toBe(content)
+      } finally {
+        await ws.close()
+      }
+    },
+  )
+
+  // A read before the first byte leaves the file empty, so what comes after
+  // still lands as one stream, not as blocks a store would rewrite the file
+  // for one after another.
+  it('a read of an empty target keeps its one stream', async () => {
+    const pwrite = vi.spyOn(RAMVFS.prototype, 'pwrite')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('mkdir -p /data')
+      const io = await ws.shell('{ wc -c < /data/f > /dev/null; seq 1 300000; } > /data/f')
+      expect(io.exitCode).toBe(0)
+      expect(pwrite).not.toHaveBeenCalled()
+      expect((await ws.shell('wc -l < /data/f')).stdoutText.trim()).toBe('300000')
+    } finally {
+      pwrite.mockRestore()
+      await ws.close()
+    }
+  })
+
+  // Another description streaming the same file keeps the claim, so a
+  // resumed writer takes windows instead of replacing what that stream writes.
+  it('a resumed writer into a file another streams takes windows', async () => {
+    const pwrite = vi.spyOn(RAMVFS.prototype, 'pwrite')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('mkdir -p /data')
+      const { dispatcher } = ws as unknown as { dispatcher: { dispatch: DispatchFn } }
+      const other = new FileDescription(PathSpec.fromStrPath('/data/f'))
+      const io = await soleStream(dispatcher.dispatch, other, () =>
+        ws.shell('{ wc -c < /data/f > /dev/null; seq 1 3000; } > /data/f'),
+      )
+      expect(io.exitCode).toBe(0)
+      expect(pwrite).toHaveBeenCalled()
+      expect((await ws.shell('wc -l < /data/f')).stdoutText.trim()).toBe('3000')
+    } finally {
+      pwrite.mockRestore()
+      await ws.close()
+    }
+  })
+
+  it('cat and grep refuse their own output file as GNU does', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('echo x > /f')
+      let io = await ws.shell('cat /f >> /f')
+      expect([io.exitCode, io.stderrText]).toEqual([1, 'cat: /f: input file is output file\n'])
+      expect((await ws.shell('grep -c x /f >> /f')).exitCode).toBe(0)
+      io = await ws.shell('grep x /f >> /f')
+      expect([io.exitCode, io.stderrText]).toEqual([2, 'grep: /f: input file is also the output\n'])
+      expect((await ws.shell('cat /f')).stdoutText).toBe('x\n1\n')
+      expect((await ws.shell('cat /f > /f')).exitCode).toBe(0)
+      expect((await ws.shell('cat /f')).stdoutText).toBe('')
     } finally {
       await ws.close()
     }

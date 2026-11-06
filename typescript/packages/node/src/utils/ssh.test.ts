@@ -48,3 +48,23 @@ it('skips unreadable default keys but not a missing explicit one', async () => {
   )
   expect(read).toHaveBeenLastCalledWith('/test-home/key')
 })
+it('offers a private key given as its text, with its passphrase, and reads no default key', async () => {
+  const options = await connectOptions(
+    'host',
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    2,
+    undefined,
+    'pass',
+    'key-text',
+  )
+  expect(read).not.toHaveBeenCalled()
+  expect(options.authHandler).toContainEqual({
+    type: 'publickey',
+    username: 'agent',
+    key: 'key-text',
+    passphrase: 'pass',
+  })
+})

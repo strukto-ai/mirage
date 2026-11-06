@@ -24,12 +24,13 @@ import { readDaemonTable, validateDaemonTable } from '@struktoai/mirage-server/d
 import { mirageHome } from '@struktoai/mirage-server/paths'
 
 import { ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT, ENV_IDLE_GRACE_SECONDS } from './env.ts'
-import { LoginError, freshToken, readLogin } from './credentials.ts'
+import { LoginError, freshToken, loginCommand, loginPath, readLogin } from './credentials.ts'
 import { isLocalUrl, loadDaemonSettings, type DaemonSettings } from './settings.ts'
 
 const requireFromHere = createRequire(import.meta.url)
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 60_000
+const REMOTE_PROBE_TIMEOUT_SECONDS = 10
 
 /** The daemon is down and may not be spawned, or a spawned one never answered. */
 export class DaemonUnreachable extends Error {
@@ -63,14 +64,17 @@ export class DaemonClient {
       return this.held
     }
     this.refreshing ??= (async () => {
-      const stored = readLogin()
+      const path = loginPath(this.settings.context)
+      const stored = readLogin(path)
       if (stored?.url !== login.url) {
-        throw new LoginError(`not logged in to ${login.url} any more; run \`mirage login\``)
+        throw new LoginError(
+          `not logged in to ${login.url} any more; run \`${loginCommand(login.url, this.settings.context)}\``,
+        )
       }
       if (stored.logged_in_at !== login.logged_in_at) {
         throw new LoginError(`the login to ${login.url} changed; run the command again`)
       }
-      this.held = await freshToken(stored)
+      this.held = await freshToken(stored, path)
       return this.held
     })().finally(() => {
       this.refreshing = undefined
@@ -175,16 +179,20 @@ export class DaemonClient {
    * Ensure the daemon is reachable, optionally spawning it. `timeoutMs` is
    * how long a spawned daemon has to answer `/v1/health`: a first start
    * loads the whole server. A daemon that exits first ends the wait, unless
-   * another daemon already holds the port. Mirrors Python's
+   * another daemon already holds the port. A remote server has
+   * `REMOTE_PROBE_TIMEOUT_SECONDS` to answer `/v1/health`: a new connection
+   * over the internet, or a server woken from idle, can take seconds, where a
+   * local daemon answers at once or is not up. Mirrors Python's
    * `ensure_running`.
    */
   async ensureRunning(opts: { allowSpawn?: boolean; timeoutMs?: number } = {}): Promise<void> {
     const allowSpawn = opts.allowSpawn ?? true
     const timeoutMs = opts.timeoutMs ?? 30_000
-    if (await this.isReachable()) return
     if (!isLocalUrl(this.settings.url)) {
+      if (await this.isReachable(REMOTE_PROBE_TIMEOUT_SECONDS * 1000)) return
       throw new DaemonUnreachable(`daemon not reachable at ${this.settings.url}`)
     }
+    if (await this.isReachable()) return
     if (!allowSpawn) {
       throw new DaemonUnreachable(
         `daemon not reachable at ${this.settings.url}; run \`mirage workspace create CONFIG.yaml\` to spawn one`,

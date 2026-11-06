@@ -12,9 +12,13 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import asyncio
+import threading
+
 import pytest
 
 from mirage.accessor.disk import DiskAccessor
+from mirage.core.disk import mkdir as mkdir_module
 from mirage.core.disk.mkdir import mkdir
 from mirage.types import PathSpec
 
@@ -23,6 +27,36 @@ def spec(virtual: str) -> PathSpec:
     return PathSpec(
         vfs_path=virtual.lstrip("/"), virtual=virtual, directory=virtual
     )
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_mkdir_p_still_records_what_it_made(
+    tmp_path, monkeypatch
+):
+    entered, release = threading.Event(), threading.Event()
+    resolve = mkdir_module.resolve_inside_sync
+
+    def held(root, path_spec, path=None):
+        entered.set()
+        release.wait(5)
+        return resolve(root, path_spec, path)
+
+    rows: list[str] = []
+    monkeypatch.setattr(mkdir_module, "resolve_inside_sync", held)
+    monkeypatch.setattr(
+        mkdir_module, "record", lambda op, path, *_: rows.append(path)
+    )
+    making = asyncio.create_task(
+        mkdir(DiskAccessor(tmp_path), spec("/a/b"), parents=True)
+    )
+    await asyncio.to_thread(entered.wait, 5)
+    making.cancel()
+    await asyncio.sleep(0)
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await making
+    assert (tmp_path / "a" / "b").is_dir()
+    assert rows == ["/a/b"]
 
 
 @pytest.mark.asyncio

@@ -125,6 +125,36 @@ describe('resolveInside', () => {
       message: '/lib64/a.txt',
     })
   })
+  it('probes nothing beneath a host link', async () => {
+    await symlink(outside, join(root, 'out'))
+    const probes = [fs.lstat, fs.open, fs.realpath, fs.readdir, fs.opendir].map((fn) =>
+      vi.mocked(fn),
+    )
+    for (const probe of probes) probe.mockClear()
+    await expect(resolveInside(root, spec('/out/secret.txt/deeper'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    const touched = probes.flatMap((probe) => probe.mock.calls.map(([target]) => String(target)))
+    expect(touched.filter((target) => target.startsWith(join(resolve(root), 'out') + sep))).toEqual(
+      [],
+    )
+  })
+  it('leaves no probe failing unseen when a name early in the path is absent', async () => {
+    expect(await resolveInside(root, spec('/new/a/b/c'))).toBe(
+      join(resolve(root), 'new', 'a', 'b', 'c'),
+    )
+    await new Promise((settled) => setTimeout(settled, 20))
+  })
+  it('logs a failure of a probe the walk never awaits', async () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined)
+    vi.mocked(fs.open).mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EACCES' }))
+    await expect(resolveInside(root, spec('/lib64/a.txt'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+    await new Promise((settled) => setTimeout(settled, 20))
+    expect(debug).toHaveBeenCalledWith('Disk probe failed:', 'EACCES')
+    debug.mockRestore()
+  })
   it('refuses a link out of the root as the leaf', async () => {
     await expect(resolveInside(root, spec('/abs'))).rejects.toMatchObject({ code: 'ENOENT' })
   })

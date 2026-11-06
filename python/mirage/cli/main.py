@@ -12,22 +12,28 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import os
+
 import typer
 
 from mirage.cli import api as api_module
 from mirage.cli import config as config_module
+from mirage.cli import connections as connections_module
 from mirage.cli import daemon as daemon_module
 from mirage.cli import login as login_module
 from mirage.cli import mcp as mcp_module
+from mirage.cli import policy as policy_module
 from mirage.cli import rpc as rpc_module
 from mirage.cli import session as session_module
 from mirage.cli import shell as shell_module
 from mirage.cli import ssh as ssh_module
+from mirage.cli import template as template_module
 from mirage.cli import tools as tools_module
 from mirage.cli import vfs as vfs_module
 from mirage.cli import workspace as workspace_module
 from mirage.cli.client import DaemonUnreachable
-from mirage.cli.credentials import LoginError
+from mirage.cli.credentials import ContextError, LoginError
+from mirage.cli.env import ENV_CONTEXT
 from mirage.server.daemon_config import DaemonConfigError
 
 app = typer.Typer(
@@ -35,11 +41,31 @@ app = typer.Typer(
     help="Mirage daemon CLI: manage workspaces and run shell lines.",
     no_args_is_help=True,
 )
+
+
+@app.callback()
+def root(
+    context: str | None = typer.Option(
+        None,
+        "--context",
+        help="Run this one command in another context; "
+        "$MIRAGE_CONTEXT does the same.",
+    ),
+) -> None:
+    """Mirage daemon CLI: manage workspaces and run shell lines."""
+    if context:
+        os.environ[ENV_CONTEXT] = context
+
+
+workspace_module.app.add_typer(shell_module.app, name="shell")
+workspace_module.app.add_typer(vfs_module.app, name="vfs")
+workspace_module.app.add_typer(session_module.app, name="session")
+workspace_module.app.add_typer(tools_module.app, name="tools", hidden=True)
 app.add_typer(workspace_module.app, name="workspace")
-app.add_typer(session_module.app, name="session")
 app.add_typer(shell_module.app, name="shell")
-app.add_typer(vfs_module.app, name="vfs")
-app.command("glob")(vfs_module.glob_cmd)
+app.add_typer(policy_module.app, name="policy")
+for kind_name, kind_app in connections_module.APPS.items():
+    app.add_typer(kind_app, name=kind_name)
 app.command(
     "api",
     context_settings={
@@ -47,9 +73,10 @@ app.command(
         "ignore_unknown_options": True,
     },
 )(api_module.api_cmd)
-app.add_typer(tools_module.app, name="tools")
+daemon_module.app.add_typer(config_module.app, name="config")
 app.add_typer(daemon_module.app, name="daemon")
-app.add_typer(config_module.app, name="config")
+app.add_typer(login_module.context_app, name="context")
+app.add_typer(template_module.app, name="template")
 app.command("mcp")(mcp_module.mcp_cmd)
 app.command("rpc")(rpc_module.rpc_cmd)
 app.command("ssh-proxy")(ssh_module.ssh_proxy_cmd)
@@ -60,7 +87,8 @@ app.command("whoami")(login_module.whoami_cmd)
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Entry point that turns config errors into clean exit-2 lines and
+    """Entry point that turns config and context errors into clean
+    exit-2 lines and
     an unreachable daemon or an ended login into a clean exit-1 line.
 
     Args:
@@ -69,7 +97,7 @@ def main(argv: list[str] | None = None) -> None:
     """
     try:
         app(args=argv)
-    except DaemonConfigError as e:
+    except (DaemonConfigError, ContextError) as e:
         typer.echo(str(e), err=True)
         raise SystemExit(2) from e
     except (DaemonUnreachable, LoginError) as e:

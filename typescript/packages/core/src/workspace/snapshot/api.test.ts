@@ -105,6 +105,17 @@ describe('Workspace.snapshot', () => {
     }
   })
 
+  it('round-trips what the shell keeps between lines', async () => {
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell("alias ll='ls -l' && set -o pipefail && shopt -s nullglob && umask 077")
+    await ws.shell("trap 'echo bye' EXIT")
+    const check = 'alias ll; set -o | grep pipefail; shopt nullglob; umask; trap -p EXIT'
+    const before = (await ws.shell(check)).stdoutText
+    expect(before).toContain('0077')
+    const restored = await Workspace.load(await ws.snapshot())
+    expect((await restored.shell(check)).stdoutText).toBe(before)
+  })
+
   it('round-trips through the bytes it answers', async () => {
     const tar = await (await written()).snapshot()
     expect(tar.byteLength).toBeGreaterThan(0)

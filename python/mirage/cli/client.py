@@ -26,7 +26,13 @@ from urllib.parse import urlparse
 
 import httpx
 
-from mirage.cli.credentials import LoginError, fresh_token, read_login
+from mirage.cli.credentials import (
+    LoginError,
+    fresh_token,
+    login_command,
+    login_path,
+    read_login,
+)
 from mirage.cli.env import ENV_AUTH_MODE, ENV_AUTH_TOKEN, ENV_DAEMON_PORT
 from mirage.cli.settings import (
     DaemonSettings,
@@ -42,6 +48,8 @@ from mirage.server.daemon_config import (
 from mirage.server.paths import mirage_home
 
 logger = logging.getLogger(__name__)
+
+REMOTE_PROBE_TIMEOUT_SECONDS = 10.0
 
 
 class DaemonUnreachable(RuntimeError):
@@ -94,18 +102,19 @@ class DaemonClient:
             self.held = self.settings.auth_token
             return self.held
         bound = self.settings.login
+        path = login_path(self.settings.context)
         with self._refreshing:
-            login = read_login()
+            login = read_login(path)
             if login is None or login.url != bound.url:
                 raise LoginError(
                     f"not logged in to {bound.url} any more; "
-                    "run `mirage login`"
+                    f"run `{login_command(bound.url, self.settings.context)}`"
                 )
             if login.logged_in_at != bound.logged_in_at:
                 raise LoginError(
                     f"the login to {bound.url} changed; run the command again"
                 )
-            self.held = fresh_token(login)
+            self.held = fresh_token(login, path)
             return self.held
 
     def _headers(self) -> dict[str, str]:
@@ -136,6 +145,11 @@ class DaemonClient:
     ) -> None:
         """Ensure the daemon is reachable, optionally spawning it.
 
+        A remote server has ``REMOTE_PROBE_TIMEOUT_SECONDS`` to answer
+        ``/v1/health``: a new connection over the internet, or a server
+        woken from idle, can take seconds, where a local daemon answers
+        at once or is not up.
+
         Args:
             startup_timeout (float): seconds to wait for the spawned
                 daemon to answer ``/v1/health``. A first start imports the
@@ -151,12 +165,14 @@ class DaemonClient:
                 ``allow_spawn=False`` or the spawned daemon failed to
                 come up within ``startup_timeout``.
         """
-        if self.is_reachable():
-            return
         if not is_local_url(self.settings.url):
+            if self.is_reachable(timeout=REMOTE_PROBE_TIMEOUT_SECONDS):
+                return
             raise DaemonUnreachable(
                 f"daemon not reachable at {self.settings.url}"
             )
+        if self.is_reachable():
+            return
         if not allow_spawn:
             raise DaemonUnreachable(
                 f"daemon not reachable at {self.settings.url}; "

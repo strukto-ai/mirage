@@ -39,3 +39,11 @@ export function stateRootPath(
   if (explicit !== undefined) return resolve(explicit)
   return join(mirageHome(env), 'state')
 }
+
+export function resourcesRootPath(
+  explicit?: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  if (explicit !== undefined) return resolve(explicit)
+  return join(mirageHome(env), 'resources')
+}

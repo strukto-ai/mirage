@@ -15,8 +15,9 @@
 import type { Context } from '../../../commands/config.ts'
 import { CommandTimeoutError } from '../../../errors/types.ts'
 import {
-  HOME_CONFIG_KEYS,
+  HOME_CONFIG_FIELDS,
   resolveHome,
+  type ConfigFields,
   type HomeConfig,
   type RuntimeOptions,
 } from '../../config.ts'
@@ -63,6 +64,7 @@ const DEC = new TextDecoder()
  * directory on Node and a URL on a page. Mirrors Python's `QuickJsRuntime`.
  */
 export class QuickJsRuntime extends JsRuntime<WasmExecution> {
+  static override readonly configFields: ConfigFields = HOME_CONFIG_FIELDS
   readonly name = 'quickjs'
   // The engine is a WASI guest whose `std.open`/`os.readdir` wait on the
   // workspace bridge: guest I/O has no way around the gate.
@@ -70,7 +72,7 @@ export class QuickJsRuntime extends JsRuntime<WasmExecution> {
   override readonly filesystem = ['read', 'write', 'list', 'stat'] as const
 
   constructor(options: RuntimeOptions = {}) {
-    super(options, HOME_CONFIG_KEYS)
+    super(options, QuickJsRuntime.configFields)
   }
 
   protected override async openEngine(): Promise<WasmExecution> {

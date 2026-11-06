@@ -14,6 +14,7 @@
 import { CLI } from '@struktoai/mirage-core/commands/cli/types'
 import { Runtime } from '@struktoai/mirage-core/runtime/base'
 import { PyodideRuntime } from '@struktoai/mirage-core/runtime/python/pyodide/runtime'
+import { E2BRuntime } from '@struktoai/mirage-core/runtime/sandbox/e2b/runtime'
 import { ScriptSource } from '@struktoai/mirage-core/runtime/types'
 import { MountMode, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
@@ -26,7 +27,9 @@ import {
   type RedisIndexConfig,
 } from '@struktoai/mirage-core/cache/index/config'
 import { buildFileCache } from '@struktoai/mirage-core/workspace/workspace/cache'
+import { DaytonaRuntime } from './runtime/sandbox/daytona/runtime.ts'
 import { SandlockRuntime } from './runtime/sandbox/sandlock/runtime.ts'
+import { SSHRuntime } from './runtime/sandbox/ssh/runtime.ts'
 import { DiskNamespaceStore } from './workspace/mount/namespace/disk.ts'
 import { RedisNamespaceStore } from './workspace/mount/namespace/redis.ts'
 import { DiskWorkspaceStateStore } from './workspace/store/disk.ts'
@@ -371,6 +374,112 @@ describe('configToWorkspaceArgs', () => {
       runtimes: [{ name: 'monty', config: { max_memory: 'lots' } }],
     })
     await expect(configToWorkspaceArgs(bad)).rejects.toThrow(/max_memory must be a size/)
+  })
+
+  const e2bConfig = (apiKey: unknown, extra: Record<string, unknown> = {}, runtime = 'e2b') =>
+    loadWorkspaceConfig({
+      mounts: { '/data': { vfs: 'ram' } },
+      runtimes: [{ name: runtime, config: { sandbox_id: 'sbx-1', api_key: apiKey } }, 'workspace'],
+      ...extra,
+    })
+
+  it.each([
+    ['e2b', E2BRuntime],
+    ['daytona', DaytonaRuntime],
+  ])('reads a pointer in a %s credential', async (runtime, cls) => {
+    vi.stubEnv('E2B_TEST_KEY', 'key_from_env')
+    try {
+      const args = await configToWorkspaceArgs(
+        e2bConfig({ from: 'env', key: 'E2B_TEST_KEY' }, {}, runtime),
+      )
+      const [sandbox, workspace] = args.options.runtimes ?? []
+      expect(sandbox).toBeInstanceOf(cls)
+      expect((sandbox as E2BRuntime | DaytonaRuntime).config).toMatchObject({
+        apiKey: 'key_from_env',
+        sandboxId: 'sbx-1',
+      })
+      expect((workspace as { name: string }).name).toBe('workspace')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('builds the source a runtime pointer names', async () => {
+    // Only the runtime names the instance, so it is built for it alone.
+    const dir = mkdtempSync(join(tmpdir(), 'mirage-runtime-secret-'))
+    try {
+      writeFileSync(join(dir, '.env'), 'E2B_API_KEY=e2b_from_dotenv\n')
+      const args = await configToWorkspaceArgs(
+        e2bConfig(
+          { from: 'team', ref: join(dir, '.env'), key: 'E2B_API_KEY' },
+          { secrets: { team: { source: 'dotenv', config: { path: 'unused' } } } },
+        ),
+      )
+      const e2b = args.options.runtimes?.[0] as E2BRuntime
+      expect(e2b.config.apiKey).toBe('e2b_from_dotenv')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it("reads a pointer in the ssh runtime's private key", async () => {
+    vi.stubEnv('SSH_TEST_KEY', 'key-from-env')
+    try {
+      const args = await configToWorkspaceArgs(
+        loadWorkspaceConfig({
+          mounts: { '/data': { vfs: 'ram' } },
+          runtimes: [
+            {
+              name: 'ssh',
+              config: { host: 'box', private_key: { from: 'env', key: 'SSH_TEST_KEY' } },
+            },
+          ],
+        }),
+      )
+      const ssh = args.options.runtimes?.[0]
+      expect(ssh).toBeInstanceOf(SSHRuntime)
+      expect((ssh as SSHRuntime).config.privateKey).toBe('key-from-env')
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  const e2bMountType = (mountType: unknown) =>
+    loadWorkspaceConfig({
+      mounts: { '/data': { vfs: 'ram' } },
+      runtimes: [{ name: 'e2b', config: { sandbox_id: 'sbx-1', mount_type: mountType } }],
+    })
+
+  it('never quotes a value a runtime refusal read from a secret', async () => {
+    vi.stubEnv('E2B_TEST_MOUNT', 'sekret-mount')
+    try {
+      const refused = await configToWorkspaceArgs(
+        e2bMountType({ from: 'env', key: 'E2B_TEST_MOUNT' }),
+      ).catch((err: unknown) => err)
+      expect(refused).toBeInstanceOf(Error)
+      const { message, cause } = refused as Error
+      expect(message).toMatch(/mountType must be one of/)
+      expect(message).not.toContain('sekret')
+      expect(message).toContain('***')
+      expect(cause).toBeUndefined()
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it('still quotes a literal a runtime refuses', async () => {
+    await expect(configToWorkspaceArgs(e2bMountType('sshh'))).rejects.toThrow(/not "sshh"/)
+  })
+
+  it('names the runtime when its pointer misses the field', async () => {
+    vi.stubEnv('E2B_TEST_KEY', undefined)
+    try {
+      await expect(
+        configToWorkspaceArgs(e2bConfig({ from: 'env', key: 'E2B_TEST_KEY' })),
+      ).rejects.toThrow(/runtimes\.e2b\.config\.apiKey/)
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 
   it.each([
@@ -1162,7 +1271,7 @@ describe('runtimes name: reference', () => {
     'export class EchoBox extends Runtime {\n' +
     '  [LINE_EXECUTOR] = true\n' +
     "  name = 'echobox'\n" +
-    "  constructor(options = {}) { super(options, ['nvidia-smi'], []) }\n" +
+    "  constructor(options = {}) { super(options, ['nvidia-smi']) }\n" +
     '  runLine(line) { return Promise.resolve({ stdout: new TextEncoder().encode(`box:${line}\\n`), stderr: null, exitCode: 0 }) }\n' +
     '}\n' +
     "export const NOT_A_RUNTIME = { name: 'nope' }\n"

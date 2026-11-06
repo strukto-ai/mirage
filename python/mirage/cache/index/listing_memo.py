@@ -95,7 +95,9 @@ class ListingMemo:
     A read is served again only to the command that made it, only while
     no listing write to the key prefix has finished since the read began,
     for under LISTING_TRUST_WINDOW seconds, and never past the listing's
-    own expiry. Row reads batch at most ROW_READ_BATCH siblings and share
+    own expiry. A command's first lookup of one child in a folder reads
+    only that child and keeps nothing; a later one reads and keeps the
+    whole listing. Row reads batch at most ROW_READ_BATCH siblings and share
     this lifetime, a row the batch did not find is left to a lookup of its
     own, and a row-only write drops that row alone. Each fill drops the
     oldest reads no command can be served any more, so a read stays held
@@ -112,6 +114,8 @@ class ListingMemo:
         self._key_prefix = key_prefix
         self._clock = clock
         self._reads: OrderedDict[tuple[int, str], _Read] = OrderedDict()
+        # The folders each command looked a child up in, and when.
+        self._looked: OrderedDict[tuple[int, str], float] = OrderedDict()
         self._closed = False
         with _PREFIX_LOCK:
             _HOLDERS_BY_PREFIX.setdefault(key_prefix, WeakSet()).add(self)
@@ -166,6 +170,8 @@ class ListingMemo:
         folder: str,
         fetch: Callable[[], Awaitable[tuple[ListResult, float | None]]],
         child: str | None = None,
+        narrow: Callable[[], Awaitable[tuple[ListResult, float | None]]]
+        | None = None,
     ) -> ListResult:
         """A folder's listing, read from Redis at most once per command.
 
@@ -176,13 +182,19 @@ class ListingMemo:
                 expiry, or with None when there is no live listing to keep.
             child (str | None): the one key a lookup asks about, to
                 narrow the entries to.
+            narrow (Callable[[], Awaitable[tuple[ListResult, float | None]]]
+                | None): reads the listing narrowed to ``child`` alone.
         """
         stamp = sole_command_started()
         if stamp is None:
+            if narrow is not None:
+                return (await narrow())[0]
             return _answer((await fetch())[0], child, None)
         kept = self._reads.get((stamp, folder))
         if kept is not None and self._live(kept):
             return _answer(kept.listing, child, kept)
+        if narrow is not None and self._first_lookup(stamp, folder):
+            return (await narrow())[0]
         writes = _WRITES_BY_PREFIX[self._key_prefix]
         read_at = monotonic()
         listing, expires_at = await fetch()
@@ -194,6 +206,18 @@ class ListingMemo:
         self._reads.pop((stamp, folder), None)
         self._reads[stamp, folder] = read
         return _answer(listing, child, read)
+
+    def _first_lookup(self, stamp: int, folder: str) -> bool:
+        now = monotonic()
+        while (
+            self._looked
+            and now - next(iter(self._looked.values())) >= LISTING_TRUST_WINDOW
+        ):
+            self._looked.popitem(last=False)
+        if (stamp, folder) in self._looked:
+            return False
+        self._looked[stamp, folder] = now
+        return True
 
     async def row(
         self,
@@ -277,6 +301,7 @@ class ListingMemo:
         that cycles through prefixes keeps none it no longer uses.
         """
         self._reads.clear()
+        self._looked.clear()
         if self._closed:
             return
         self._closed = True

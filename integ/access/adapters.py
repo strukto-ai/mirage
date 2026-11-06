@@ -52,11 +52,19 @@ from mirage.vfs.s3.config import S3Config
 Answer = dict[str, Any]
 CLI_GROUPS = (
     "workspace",
-    "session",
     "daemon",
-    "config",
+    "context",
+    "template",
+    "policy",
     "vfs",
-    "tools",
+    "cli",
+    "runtime",
+)
+# A group inside a group: its commands are three words.
+NESTED_GROUPS = (
+    ("daemon", "config"),
+    ("workspace", "session"),
+    ("workspace", "vfs"),
 )
 WAITED = "the line waited for all of its input"
 # A case line touches BEGUN as it starts; a cancel case's line then sleeps
@@ -214,7 +222,12 @@ class Recorder:
         return record
 
     def command(self, host: str, args: tuple[str, ...]) -> None:
-        words = args[:2] if args and args[0] in CLI_GROUPS else args[:1]
+        if tuple(args[:2]) in NESTED_GROUPS:
+            words = args[:3]
+        elif args and args[0] in CLI_GROUPS:
+            words = args[:2]
+        else:
+            words = args[:1]
         self.commands.setdefault(host, set()).add(" ".join(words))
 
 
@@ -909,33 +922,56 @@ class CliSteps:
         self, wid: str, session: str, profile: str
     ) -> None:
         await self._json(
-            "session", "create", wid, "--id", session, "-p", profile
+            "workspace",
+            "session",
+            "create",
+            "-w",
+            wid,
+            "-s",
+            session,
+            "-p",
+            profile,
         )
 
     async def session_ids(self, wid: str) -> list[str]:
         return [
-            s["session_id"] for s in await self._json("session", "list", wid)
+            s["session_id"]
+            for s in await self._json(
+                "workspace", "session", "list", "-w", wid
+            )
         ]
 
     async def session_delete(self, wid: str, session: str) -> None:
-        await self._json("session", "delete", wid, session)
+        await self._json(
+            "workspace", "session", "delete", "-w", wid, "-s", session
+        )
 
     async def cancel_lines(self, wid: str, session: str | None) -> int:
-        args = (
-            ("workspace", wid)
-            if session is None
-            else ("session", wid, session)
+        reply = await self._json(
+            *(
+                ("workspace", "cancel", wid)
+                if session is None
+                else (
+                    "workspace",
+                    "session",
+                    "cancel",
+                    "-w",
+                    wid,
+                    "-s",
+                    session,
+                )
+            )
         )
-        reply = await self._json(args[0], "cancel", *args[1:])
         return reply["canceled"]
 
     async def kill_jobs(self, wid: str, session: str | None) -> int:
-        args = (
-            ("workspace", wid)
-            if session is None
-            else ("session", wid, session)
+        reply = await self._json(
+            *(
+                ("workspace", "kill", wid)
+                if session is None
+                else ("workspace", "session", "kill", "-w", wid, "-s", session)
+            )
         )
-        reply = await self._json(args[0], "kill", *args[1:])
         return reply["killed"]
 
     async def document(
@@ -973,7 +1009,9 @@ class CliSteps:
             chosen = ["-p", profile]
         else:
             chosen = ["--default-profile"]
-        await self._json("session", "update", wid, session, *chosen)
+        await self._json(
+            "workspace", "session", "update", "-w", wid, "-s", session, *chosen
+        )
 
     async def set_profile(
         self, wid: str, name: str, profile: dict[str, Any]
@@ -1435,7 +1473,7 @@ def call_params(step: dict[str, Any]) -> dict[str, Any]:
 
 
 def vfs_words(step: dict[str, Any]) -> tuple[list[str], bytes]:
-    """A VFS call as its ``mirage vfs`` command's words, with the bytes
+    """A VFS call as its ``mirage workspace vfs`` command's words, with the bytes
     it reads on stdin.
 
     Args:
@@ -1444,10 +1482,8 @@ def vfs_words(step: dict[str, Any]) -> tuple[list[str], bytes]:
     Returns:
         tuple[list[str], bytes]: the words after ``mirage``, and stdin.
     """
-    if step["call"] == "glob":
-        return ["glob", step["pattern"]], b""
     call = VFS_CALL_BY_NAME[step["call"]]
-    words = ["vfs", call.name.replace("_", "-")]
+    words = ["workspace", "vfs", call.name.replace("_", "-")]
     stdin = b""
     for name, schema in call.params.items():
         if name not in step:
@@ -2016,6 +2052,7 @@ class Cli:
             )
         if op == "tool":
             argv = self.server.cli(
+                "workspace",
                 "tools",
                 step["tool"],
                 "-w",

@@ -115,16 +115,20 @@ mirage shell -w work -c 'ls /repo && echo draft > /scratch/notes.txt'
 
 | Command | Does |
 | --- | --- |
-| `mirage shell -w ID -c LINE` | Run a line, streaming its stdout and stderr. |
-| `mirage vfs CALL ARGS -w ID` | Make one of the 23 [VFS calls](/home/access/http#call-the-vfs). |
-| `mirage glob PATTERN -w ID` | Print every path a pattern matches. |
-| `mirage tools TOOL ARGS -w ID` | Run one of the [agent tools](/home/access/mcp#tools). |
+| `mirage workspace shell -c LINE` | Run a line, streaming its stdout and stderr. |
+| `mirage workspace vfs CALL ARGS` | Make one of the 23 [VFS calls](/home/access/http#call-the-vfs). |
+| `mirage workspace tools TOOL ARGS` | Run one of the [agent tools](/home/access/mcp#tools). |
 
-Each takes `-s SESSION`, the default session when absent. `shell` and `vfs`
+The workspace is `-w`, else `MIRAGE_WORKSPACE`, else the current one that
+`mirage workspace use ID` set for the [context](#log-in). With none, the
+command exits 2. Each takes `-s SESSION`, the default session when absent. `shell` and `vfs`
 take `--explain`, which says what the line or call would do and runs nothing;
 see [Explain](/home/policy/explain).
 
-### `mirage shell`
+`mirage shell` is a short form of `mirage workspace shell`, with the same
+options.
+
+### `mirage workspace shell`
 
 | Option | Does |
 | --- | --- |
@@ -145,7 +149,7 @@ mirage shell -w demo -c 'ls /data' --json | jq .stdout
 
 ### `mirage-bash`
 
-`mirage-bash -c LINE` runs a line as `mirage shell`, for a coding agent that
+`mirage-bash -c LINE` runs a line as `mirage workspace shell`, for a coding agent that
 takes a shell path, such as [Claude Code](/home/agents/claude-code#shell).
 Both packages install it beside `mirage`.
 
@@ -164,17 +168,17 @@ Both packages install it beside `mirage`.
 MIRAGE_WORKSPACE=demo mirage-bash -c 'ls /data | wc -l'
 ```
 
-### `mirage vfs`
+### `mirage workspace vfs`
 
-- Calls are spelled with dashes: `mirage vfs is-dir /data -w demo`.
+- Calls are spelled with dashes: `mirage workspace vfs is-dir /data -w demo`.
 - Required arguments come in order, the rest as `--name VALUE`.
 - Bytes come from `--data` or `--value`, else from stdin.
 - Piped, it prints the call's JSON. In a terminal, `read` prints the text and a
   list prints one entry per line. A call that returns nothing prints nothing.
 
 ```bash
-echo "hello" | mirage vfs write /data/hi.txt -w demo
-mirage vfs read /data/hi.txt -w demo
+echo "hello" | mirage workspace vfs write /data/hi.txt -w demo
+mirage workspace vfs read /data/hi.txt -w demo
 ```
 
 ### Relays
@@ -196,9 +200,11 @@ a `workspace_id`.
 
 | Command | Does |
 | --- | --- |
-| `mirage workspace create CONFIG [--id ID]` | Create a workspace from a YAML or JSON config. |
+| `mirage workspace create CONFIG [-w ID]` | Create a workspace from a YAML or JSON config. `--id` is another name for `-w`. |
+| `mirage workspace create --template NAME [-w ID]` | Create a workspace from a saved [template](#from-a-template). |
 | `mirage workspace create CONFIG --explain` | Show what the [server policies](/home/access/http#server-policies) say of the config, and create nothing. |
 | `mirage workspace list` | List workspaces. |
+| `mirage workspace use ID` | Make it the current workspace of the [context](#log-in). |
 | `mirage workspace get ID [--verbose]` | Show mounts and sessions. |
 | `mirage workspace delete ID` | Close a workspace and delete its state. |
 | `mirage workspace close ID` | Close a workspace and keep its state for the same id. |
@@ -214,6 +220,56 @@ a `workspace_id`.
 | `mirage workspace vfs-md ID [--session S] [--path PATH] [--profile P]` | Print the VFS.md, or expose it as a live file at `PATH`. |
 | `mirage workspace skill-md ID [--session S] [--path PATH] [--profile P]` | The same for SKILL.md. |
 
+### From a template
+
+A template is a saved workspace config. `-f` takes a workspace config, or a
+file with `name`, an optional `description`, and `config`, as
+`mirage template get ID -o yaml` prints one:
+
+```bash
+mirage template create ram-only -f workspace.yaml --description "One RAM mount"
+mirage workspace create --template ram-only -w demo
+```
+
+| Command | Does |
+| --- | --- |
+| `mirage template create NAME -f FILE [--description TEXT]` | Save a config as a template. |
+| `mirage template list` | List templates. |
+| `mirage template get ID [-o yaml]` | Print one; `-o yaml` is a file `create -f` reads back. |
+| `mirage template delete ID` | Delete one. |
+| `mirage template restore ID` | Bring a deleted one back. |
+
+The file is saved as written: `${NAME}` is not read from the environment. The
+server checks the config when it saves the template, as a create would. A
+workspace gets a copy of the template's config, so a later change to the
+template leaves it as it is, and a template's config cannot set
+`workspace_id`: `-w` names the workspace. Give a config file or `--template`,
+not both. The local daemon keeps templates under `~/.mirage/resources`, as
+`resource_store` sets. `get`, `delete` and `restore` take the template's ID or
+its name: a name is unique, so it works as an ID. On the local daemon a
+template's ID is its name.
+
+### Saved policies
+
+`mirage policy` keeps Python programs by name on the daemon, or on the
+hosted API, through the [`/v1/policies`](/home/access/http#saved-policies)
+routes. A name ends in `.py`. `--source @FILE` reads a file; any other value
+is the program itself. `get`, `update` and `delete` take the policy's ID or
+its name, which works as an ID; on the local daemon the two are the same.
+
+| Command | Does |
+| --- | --- |
+| `mirage policy create NAME --source @FILE\|TEXT` | Save a new policy. A name already saved exits 2. |
+| `mirage policy list` | List the saved names. |
+| `mirage policy get ID [-o yaml]` | Show one; in a terminal, its source. |
+| `mirage policy update ID --source @FILE\|TEXT` | Replace its source. |
+| `mirage policy delete ID` | Delete it. |
+
+```bash
+mirage policy create guard.py --source @guard.py
+mirage policy get guard.py -o yaml
+```
+
 ### Asks
 
 | Command | Does |
@@ -222,16 +278,82 @@ a `workspace_id`.
 | `mirage workspace allow ID ASK [--scope once\|session]` | Allow one. |
 | `mirage workspace deny ID ASK` | Deny one. |
 
+## Saved connections
+
+`mirage vfs`, `mirage cli` and `mirage runtime` keep connections on the
+server: a type, its settings and its credentials, saved once under a name. They
+are the [`/v1/vfs`, `/v1/clis` and
+`/v1/runtimes`](/home/access/http#saved-connections) routes, and work the same
+against the local daemon and the hosted API. `ID` is an entry's ID or its
+name: a name is unique, so it works as an ID. On the local daemon an entry's
+ID is its name.
+
+| Command | Does |
+| --- | --- |
+| `mirage vfs types [TYPE]` | List the types, with their required and secret fields; with `TYPE`, its fields. |
+| `mirage vfs create NAME --type TYPE [--set K=V] [--secret K] [-f FILE]` | Save a new entry. |
+| `mirage vfs list [--type TYPE] [-q TEXT]` | List the entries, by name, with how many saved templates use each. |
+| `mirage vfs get ID [-o yaml]` | Show an entry. A secret field shows as `(sealed)`, never its value. |
+| `mirage vfs update ID [--set K=V] [--secret K] [--unset K] [-f FILE]` | Change an entry. Fields not named keep their values. |
+| `mirage vfs delete ID` | Delete an entry and wipe its secrets. There is no restore. |
+
+`mirage cli` and `mirage runtime` take the same commands.
+
+```bash
+mirage vfs types github
+mirage vfs create github --type github --set owner=strukto-ai --set repo=mirage --secret token
+Token for github: ********
+mirage vfs get github
+mirage vfs update github --secret token
+mirage vfs delete github
+```
+
+- `--set KEY=VALUE` sets a plain field and can be repeated. A value that starts
+  with `{` or `[` is read as JSON.
+- `--secret KEY` reads a secret field from a hidden prompt, or from the next
+  line of stdin when stdin is not a terminal. `--secret KEY=@FILE` reads a file,
+  without its last newline. A secret value on the command line is refused, by
+  `--secret KEY=VALUE` and by `--set` alike.
+- `--unset KEY` removes a field, plain or secret.
+- `-f FILE` reads the entry from YAML or JSON: `name`, `type`, `fields`, and
+  `secrets`, a list of the secret fields to read as `--secret` reads them. The
+  output of `get -o yaml` reads back too.
+- In a terminal, a missing required field is prompted for. Otherwise the
+  command exits `2` and names every missing field.
+- Piped, every command prints JSON. `-o yaml` on `get` prints a file that
+  `create -f` and `update -f` read back.
+
+```yaml github.yaml
+name: github
+type: github
+fields:
+  owner: strukto-ai
+  repo: mirage
+secrets: [token]
+```
+
+```bash
+mirage vfs create -f github.yaml < token.txt
+```
+
+`update` keeps a secret field you leave out, so `--secret token` rotates a
+token while the entry stays in use. `delete` is refused while a saved template
+uses the entry. The local
+daemon keeps entries under `~/.mirage/resources`, their secrets in a separate
+file only you can read.
+
 ## Sessions
 
 | Command | Does |
 | --- | --- |
-| `mirage session create ID [--id S] [-p PROFILE] [-m /prefix:mode]...` | Add a session under a [profile](/home/policy/overview), with mounts narrowed to `r`, `rw` or `rwx`. |
-| `mirage session list ID` | List sessions. |
-| `mirage session delete ID S` | Close a session. |
-| `mirage session cancel ID S` | Cancel the session's running lines. |
-| `mirage session kill ID S` | Kill the session's background jobs. |
-| `mirage session update ID S (-p PROFILE \| --profile-file FILE \| --default-profile)` | Replace the session's profile with a profile's current definition, a profile document, or the default; its cwd, env and history stay. |
+| `mirage workspace session create [-s S] [-p PROFILE] [-m /prefix:mode]...` | Add a session under a [profile](/home/policy/overview), with mounts narrowed to `r`, `rw` or `rwx`. |
+| `mirage workspace session list` | List sessions. |
+| `mirage workspace session delete -s S` | Close a session. |
+| `mirage workspace session cancel -s S` | Cancel the session's running lines. |
+| `mirage workspace session kill -s S` | Kill the session's background jobs. |
+| `mirage workspace session update -s S (-p PROFILE \| --profile-file FILE \| --default-profile)` | Replace the session's profile with a profile's current definition, a profile document, or the default; its cwd, env and history stay. |
+
+Each takes `-w ID`, else the current workspace, as `shell` and `vfs` do.
 
 ## Daemon
 
@@ -246,30 +368,44 @@ The server the CLI starts. It exits 30 seconds after its last workspace is delet
 
 ## Log in
 
-A server in `jwt` mode, such as a hosted one, needs a login:
+A context is a server the CLI talks to, with its login, team and current
+workspace. `local` is the daemon on this machine, which needs no login and
+is always there. `mirage login` adds a context and makes it current:
 
 ```bash
-mirage config set url https://mirage.example.com
-mirage login
+mirage login                                   # the hosted API, context "strukto"
+mirage login https://mirage.example.com        # context "mirage.example.com"
+mirage login https://dev.example.com --name dev
+mirage context use local
 ```
 
 | Command | Does |
 | --- | --- |
-| `mirage login [--token TOKEN]` | Log in to the server `url` points at. |
-| `mirage whoami` | Show the account and the date to log in again by. |
-| `mirage logout` | Forget the login. |
+| `mirage login [URL] [--name NAME] [--token TOKEN]` | Log in to `URL`, `https://api.strukto.ai` when left out, and make its context current. The context is `--name`, else `strukto` for the hosted API, `local` for this machine, else the server's host. |
+| `mirage context list` | List the contexts; `*` marks the current one. |
+| `mirage context use NAME` | Make a context current. |
+| `mirage context delete NAME` | Forget a context and its login. `local` stays. |
+| `mirage whoami` | Show the context, its URL, team, user and workspace, and the date to log in again by. |
+| `mirage logout` | Forget the current context's login; the context stays. |
+
+`--context NAME` before a command, or `MIRAGE_CONTEXT=NAME`, runs one command
+in another context. `MIRAGE_DAEMON_URL` points any context at another URL.
+On a terminal, a command that changes something names its context first, as
+`strukto · team acme · created demo`.
 
 <AccordionGroup>
   <Accordion title="How login works">
     - `mirage login` asks the server where to sign in, opens your browser there,
       and waits. If you are already signed in, the browser comes straight back.
-    - The CLI keeps the tokens in `~/.mirage/login.json`, readable only by you.
+    - The CLI keeps each context in `~/.mirage/contexts/NAME.json`, its
+      tokens in `~/.mirage/logins/NAME.json`, and the current context's name
+      in `~/.mirage/current_context`, all readable only by you.
     - On a machine with no browser, `mirage login --token TOKEN` keeps a token
       you paste once the server accepts it. `--token -` reads it from stdin, so
       it stays out of your shell history.
     - Every command sends the login's token, `ssh-proxy` and `codex-exec`
-      included, but only to the server it was made for. `MIRAGE_TOKEN` or
-      `auth_token` wins over it.
+      included, but only to the server it was made for. `MIRAGE_TOKEN` wins
+      over it, and so does `auth_token` in the `local` context.
     - The token refreshes on its own; you log in again 30 days after you
       signed in.
     - A server that publishes no login, such as the one the CLI starts on your
@@ -299,7 +435,7 @@ mirage login
 
 ## Call any route
 
-`mirage api` calls a route of the server `url` points at with the CLI's login
+`mirage api` calls a route of the current context's server with the CLI's login
 or token, as `gh api` does, so a script needs no token of its own:
 
 ```bash
@@ -325,15 +461,16 @@ string of a GET. The answer prints as JSON, a 204 prints nothing, and an error
 exits 2 with its detail. `api` takes only a route, never a URL, so the token
 goes nowhere but its own server.
 
-## Config
+## Daemon config
 
-`mirage config set|get|unset|list` edits `~/.mirage/config.toml`. An environment variable wins over the file. Changes apply on the next start.
+`mirage daemon config set|get|unset|list` edits `~/.mirage/config.toml`. An
+environment variable wins over the file. Changes apply on the next start.
 
 | Key | Env var | Default |
 | --- | --- | --- |
-| `url` | `MIRAGE_DAEMON_URL` | `http://127.0.0.1:8765` |
-| `port` | `MIRAGE_DAEMON_PORT` | the `url`'s port |
-| `auth_token` | `MIRAGE_TOKEN` | your [login](#log-in) for this `url`, else `~/.mirage/auth_token` for a local `url` |
+| `port` | `MIRAGE_DAEMON_PORT` | `8765`; the `local` context follows it |
+| `url` | `MIRAGE_DAEMON_URL` | `http://127.0.0.1:PORT`: the `local` context's URL; `mirage login URL` adds another server |
+| `auth_token` | `MIRAGE_TOKEN` | your [login](#log-in) for the `local` context, else `~/.mirage/auth_token` |
 | `auth_mode` | `MIRAGE_AUTH_MODE` | `local` |
 | `allowed_hosts` | `MIRAGE_ALLOWED_HOSTS` | `127.0.0.1,localhost,::1` |
 | `idle_grace_seconds` | `MIRAGE_IDLE_GRACE_SECONDS` | `30` |
@@ -349,6 +486,7 @@ goes nowhere but its own server.
 | `forwarded_allow_ips` | `MIRAGE_FORWARDED_ALLOW_IPS` | none; the proxies whose `X-Forwarded-For` names the client |
 | `graceful_timeout` | `MIRAGE_GRACEFUL_TIMEOUT` | `0`; seconds running lines get to finish on shutdown |
 | `policy_file` | `MIRAGE_POLICY_FILE` | none; see [Server policies](/home/access/http#server-policies) |
+| `resource_store` | `MIRAGE_RESOURCE_STORE` | `files`, under `~/.mirage/resources`; `memory` keeps saved templates and connections only until the daemon stops, and does not combine with `workers` |
 | `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#set-up) |
 | `jwt_*` | `MIRAGE_JWT_*` | see [Configure authentication](/home/access/http#configure-authentication) |
 | `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [Log in](#log-in) |
