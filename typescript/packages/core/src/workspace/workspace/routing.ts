@@ -33,7 +33,7 @@ import {
   runtimeBindingsFor,
   wholeLineRuntime,
 } from '../../runtime/table.ts'
-import { routedConsumer } from '../lookup/lookup.ts'
+import { mirageProgramAt, routedConsumer } from '../lookup/lookup.ts'
 import { Consumer } from '../lookup/types.ts'
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
@@ -173,11 +173,9 @@ export class Router {
   }
 
   /**
-   * The runtime entry that serves a command under a decision: the `@line`
-   * runtime when one takes the line, where the program a wrapper runs is for
-   * that wrapper as its run places it (`routedConsumer`), the `@external`
-   * runtime for a program no name binds, empty when the workspace runs it
-   * itself. Mirrors Python's `Router.runtime_for`.
+   * The runtime entry that serves a command under a decision, as its run
+   * places it: the `@external` runtime for a program no name binds; empty when
+   * the workspace runs it itself. Mirrors Python's `Router.runtime_for`.
    */
   runtimeFor(one: Judged, placed: RouteDecision<Runtime>): string {
     const whole = wholeLineRuntime(placed.bindings)
@@ -186,6 +184,9 @@ export class Router {
     let decision = placed
     let fallback = placed.fallback
     if (one.ctx !== undefined && one.session !== undefined) {
+      if (mirageProgramAt(command, one.ctx.argv, one.session, this.registry, placed) !== null) {
+        return ''
+      }
       const [consumer, routed] = routedConsumer(
         command,
         one.ctx.argv,

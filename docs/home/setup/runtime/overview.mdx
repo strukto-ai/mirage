@@ -73,15 +73,15 @@ To choose a runtime for each command line, see [Route Runtime](/home/policy/rout
 - `monty`, `wasi`, `pyodide` and `quickjs` take only their own interpreter's
   names; naming another program on one is refused when the workspace is
   built. `local` and sandboxes take any name.
-- A wrapper (`nice`, `nohup`, `stdbuf`, `ionice`, `setsid`) runs where the
-  program it runs is taken by name, so `nice gcc x.c` runs where `gcc` does.
+- `nice`, `nohup`, `stdbuf`, `ionice` and `setsid` run their program where
+  it runs alone: `nice gcc x.c` where `gcc` is taken, `nice grep` in Mirage.
 - A program a captured program starts runs where that one runs: `make`
   running `gcc`, or a script calling `subprocess`. Capture the launcher on
   the same runtime as the tool.
 - An alias is captured as the word it expands to, once `shopt -s
   expand_aliases` is on and the alias was defined on an earlier line.
-- When two runtimes take the same name or group, the first listed wins and
-  Mirage logs a warning for the other.
+- If two runtimes take the same name or group, the first wins and Mirage
+  logs a warning.
 - A program no runtime takes exits 127, `command not found`.
 - A `workspace` entry with `captures` runs only those commands itself: another
   Mirage command exits 126, `no runtime accepted this line`, and an unknown

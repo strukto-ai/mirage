@@ -79,9 +79,8 @@ Mirage, so the machine must see the mounts there. With `mount_type: ssh`,
 Mirage serves every mount over the runtime's own connection and the machine
 mounts each with `sshfs`, as for
 [Docker](/home/setup/runtime/sandbox/docker#connecting-the-workspace). The
-machine needs `sshfs` (`apt-get install sshfs`), and passwordless `sudo` for
-a mountpoint such as `/data` its user cannot create. Without `sshfs`, a line
-fails with `ssh: serving the workspace into a sandbox needs sshfs there`.
+machine needs `sshfs`, and passwordless `sudo` for a mountpoint its user
+cannot create (`/data`).
 
 Without `mount_type`, two ways:
 

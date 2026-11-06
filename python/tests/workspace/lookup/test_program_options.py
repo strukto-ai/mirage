@@ -15,7 +15,7 @@
 import pytest
 
 from mirage.workspace.lookup import end_options_after_program
-from mirage.workspace.lookup.constants import wrapped_program_at
+from mirage.workspace.lookup.constants import read_wrapper
 
 
 def rewrite(words: list[str]) -> list[str]:
@@ -149,9 +149,13 @@ def test_an_attached_short_value_option_consumes_only_its_own_word():
         ("ionice", ["-tc3", "gcc"], 1),
         ("ionice", ["-c", "2", "-n0", "gcc"], 3),
         ("setsid", ["-fw", "gcc"], 1),
+        ("nice", ["--help", "gcc"], None),
+        ("nice", ["--vers", "gcc"], None),
+        ("ionice", ["-p", "1", "gcc"], None),
+        ("ionice", ["-tp1", "gcc"], None),
     ],
 )
 def test_a_wrappers_program_is_its_first_word_past_its_options(
     name, words, at
 ):
-    assert wrapped_program_at(name, words) == at
+    assert read_wrapper(name, words)[0] == at

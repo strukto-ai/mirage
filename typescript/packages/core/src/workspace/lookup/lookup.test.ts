@@ -968,7 +968,6 @@ describe('a wrapper runs where the program it runs is captured', () => {
     [false, 'nice gcc x.c', 'docker'],
     [true, 'make -j2', 'e2b'],
     [true, 'nice make', 'e2b'],
-    [true, 'nice python3 -c 1', 'e2b'],
     [true, 'nice', 'e2b'],
     [true, 'sudo gcc x.c', 'e2b'],
   ] as [boolean, string, string][])('%s %s runs on %s', async (external, line, runs) => {
@@ -980,6 +979,23 @@ describe('a wrapper runs where the program it runs is captured', () => {
       expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, `${runs}\n`])
       const said = await ws.explain(line)
       expect(runtimesOf(said.node)[0]).toBe(runs)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('explains a wrapper around a Mirage command as Mirage runs it', async () => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new Box('e2b', '@external'), 'workspace'] },
+    )
+    try {
+      await ws.shell('echo hit > /data/f')
+      const line = 'nice grep hit /data/f'
+      const io = await ws.shell(line)
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'hit\n'])
+      const said = await ws.explain(line)
+      expect(runtimesOf(said.node)[0]).toBe('')
     } finally {
       await ws.close()
     }
@@ -1076,4 +1092,142 @@ describe('command past a wrapper function', () => {
       await ws.close()
     }
   })
+})
+
+function mirageWorkspace(...entries: RuntimeEntry[]): Workspace {
+  return new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      runtimes: [...entries, 'workspace'],
+      profiles: { tight: { commands: { allow: ['cd', 'grep'] } } },
+    },
+  )
+}
+
+describe("a wrapper around Mirage's program", () => {
+  it.each([
+    [true, 'nice grep python f', 'python here\n'],
+    [false, 'nice grep python f', 'python here\n'],
+    [true, 'nohup cat f', 'python here\n'],
+    [true, 'nice -n 5 grep python f', 'python here\n'],
+    [true, 'nice nohup grep python f', 'python here\n'],
+    [false, 'nice grep -h python *.txt', 'python a\npython b\n'],
+    [true, 'nice python3 -c 1', 'monty\n'],
+    [true, 'stdbuf -oL grep python f', 'python here\n'],
+  ] as [boolean, string, string][])('%s %s runs it in Mirage', async (external, line, out) => {
+    const entries: RuntimeEntry[] = [new Box('docker', 'gcc'), new Monty()]
+    if (external) entries.unshift(new Box('e2b', '@external'))
+    const ws = mirageWorkspace(...entries)
+    try {
+      await ws.vfs.write('/data/f', 'python here\n')
+      await ws.vfs.write('/data/a.txt', 'python a\n')
+      await ws.vfs.write('/data/b.txt', 'python b\n')
+      await ws.shell('cd /data')
+      const io = await ws.shell(line)
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, out])
+      const said = await ws.explain(line)
+      expect(runtimesOf(said.node)[0]).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['foo() { echo hi; }; nice foo', 'hi\n'],
+    ['nice python3 -c 1', 'e2b\n'],
+    ['nice --help grep x', 'e2b\n'],
+    ['ionice -p 1 grep x', 'e2b\n'],
+  ])('runs a function, and keeps its route otherwise: %s', async (line, out) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new Box('e2b', '@external'), 'workspace'] },
+    )
+    try {
+      const io = await ws.shell(line)
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, out])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('is still refused by an allow list that leaves the wrapper out', async () => {
+    const ws = mirageWorkspace(new Box('e2b', '@external'))
+    try {
+      await ws.vfs.write('/data/f', 'python here\n')
+      ws.createSession('s', { profile: 'tight' })
+      expect((await ws.shell('cd /data && grep python f', { sessionId: 's' })).exitCode).toBe(0)
+      const io = await ws.shell('cd /data && nice grep python f', { sessionId: 's' })
+      expect(io.exitCode).toBe(126)
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+describe('a wrapper Mirage runs a program for', () => {
+  const tryHelp = (name: string): string => `Try '${name} --help' for more information.\n`
+
+  it.each([
+    ['nice cd /data', 127, "nice: 'cd': No such file or directory\n"],
+    ['nohup cd /data', 127, "nohup: failed to run command 'cd': No such file or directory\n"],
+    ['stdbuf -oL cd /data', 127, "stdbuf: failed to run command 'cd': No such file or directory\n"],
+    ['ionice -c3 cd /data', 127, 'ionice: failed to execute cd: No such file or directory\n'],
+    ['setsid cd /data', 127, 'setsid: failed to execute cd: No such file or directory\n'],
+    ['nice --bogus rm f', 125, `nice: unrecognized option '--bogus'\n${tryHelp('nice')}`],
+    ['nice -x rm f', 125, `nice: invalid option -- 'x'\n${tryHelp('nice')}`],
+    ['nice -n abc rm f', 125, "nice: invalid adjustment 'abc'\n"],
+    ['nohup -x rm f', 125, `nohup: invalid option -- 'x'\n${tryHelp('nohup')}`],
+    ['stdbuf -o abc rm f', 125, "stdbuf: invalid mode 'abc'\n"],
+    [
+      'stdbuf -o 1Q rm f',
+      125,
+      "stdbuf: invalid mode '1Q': Value too large for defined data type\n",
+    ],
+    ['stdbuf rm f', 125, `stdbuf: you must specify a buffering mode option\n${tryHelp('stdbuf')}`],
+    ['stdbuf -i L rm f', 125, `stdbuf: line buffering stdin is meaningless\n${tryHelp('stdbuf')}`],
+    ['ionice -c abc rm f', 1, "ionice: unknown scheduling class: 'abc'\n"],
+    ['ionice -n 1x rm f', 1, "ionice: invalid class data argument: '1x'\n"],
+    ['setsid -x rm f', 1, `setsid: invalid option -- 'x'\n${tryHelp('setsid')}`],
+  ] as [string, number, string][])('refuses %s as GNU does', async (line, code, said) => {
+    const ws = mirageWorkspace(new Box('e2b', '@external'))
+    try {
+      await ws.vfs.write('/data/f', 'kept\n')
+      const io = await ws.shell(`cd / && ${line}`)
+      expect([io.exitCode, new TextDecoder().decode(io.stderr)]).toEqual([code, said])
+      const after = await ws.shell('pwd; cat /data/f')
+      expect(new TextDecoder().decode(after.stdout)).toBe('/\nkept\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    'nice -n +3 cat /data/f',
+    'nice -10 cat /data/f',
+    'nice --adj 3 cat /data/f',
+    'stdbuf -o 1KB -e0 cat /data/f',
+    'ionice -c idle -n 0 cat /data/f',
+    'setsid -fw cat /data/f',
+  ])('runs %s with good options', async (line) => {
+    const ws = mirageWorkspace(new Box('e2b', '@external'))
+    try {
+      await ws.vfs.write('/data/f', 'kept\n')
+      const io = await ws.shell(line)
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, 'kept\n'])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('streams the program output', async () => {
+    const ws = mirageWorkspace()
+    try {
+      await ws.vfs.write('/data/log', 'one\n')
+      const io = await ws.shell('nice tail -f /data/log | head -n 1')
+      expect(new TextDecoder().decode(io.stdout)).toBe('one\n')
+    } finally {
+      await ws.close()
+    }
+  }, 10000)
 })

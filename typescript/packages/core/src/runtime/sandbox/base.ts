@@ -168,8 +168,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   }
 
   /**
-   * Record the line with the served mounts, connect once, bring the mounts
-   * in step, then run.
+   * Connect once, bring the served mounts in step, then run.
    *
    * @param argv the program and its arguments.
    * @param ctx the run's stdin, environment, cwd and signal.

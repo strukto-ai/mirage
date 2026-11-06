@@ -543,9 +543,8 @@ async function* judgeWords(
     ctx,
     session,
   }
-  // env's command runs in the environment env builds for it, a nested
-  // shell's line in a new shell started from this one, and command's past
-  // the function and alias its name masks, as its run does.
+  // env's command runs in the environment env builds for it, and a nested
+  // shell's line in a new shell started from this one.
   const child = name === 'env' && inners.length > 0 ? envChild(args, session) : null
   const named = name === 'command' ? inners[0]?.argv[0] : undefined
   const masked = named === undefined ? undefined : wordValue(named)

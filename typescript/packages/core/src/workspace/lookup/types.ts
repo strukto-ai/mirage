@@ -68,3 +68,17 @@ export type WordPolicy = (typeof WordPolicy)[keyof typeof WordPolicy]
 export function wordPolicy(consumer: Consumer): WordPolicy {
   return SHELL_CONSUMERS.has(consumer) ? WordPolicy.SHELL : WordPolicy.MOUNT
 }
+
+/** A program-running wrapper's option grammar and its answers. Mirrors Python's `WrapperOptions`. */
+export interface WrapperOptions {
+  /** Options that take a value. */
+  readonly values: readonly string[]
+  /** Options that take none. */
+  readonly flags: readonly string[]
+  /** Options after which it runs no program. */
+  readonly stops: readonly string[]
+  /** Its exit status for a bad option. */
+  readonly status: number
+  /** Its stderr for a program it cannot run, `{}` the program's name. */
+  readonly missing: string
+}

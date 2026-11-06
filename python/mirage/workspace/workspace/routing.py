@@ -43,7 +43,7 @@ from mirage.runtime.types import RouteDecision, RuntimeIdentity
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.utils.abort import MirageAbortError
 from mirage.view.types import FileView, SessionView
-from mirage.workspace.lookup.lookup import routed_consumer
+from mirage.workspace.lookup.lookup import mirage_program_at, routed_consumer
 from mirage.workspace.lookup.types import Consumer
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.node.explain import Judged, Walked
@@ -237,11 +237,9 @@ class Router:
     def runtime_for(
         self, one: Judged, decision: RouteDecision[RuntimeIdentity]
     ) -> str:
-        """The runtime entry that serves a command under a decision: the
-        ``@line`` runtime when one takes the line, where the program a
-        wrapper runs is for that wrapper as its run places it
-        (``routed_consumer``), the ``@external`` runtime for a program
-        no name binds, empty when the workspace runs it itself.
+        """The runtime entry that serves a command under a decision, as
+        its run places it: the ``@external`` runtime for a program no
+        name binds; empty when the workspace runs it itself.
 
         Args:
             one (Judged): the command's judgment and the session it was
@@ -254,6 +252,17 @@ class Router:
         command = one.judgment.command
         fallback = decision.fallback
         if one.ctx is not None and one.session is not None:
+            if (
+                mirage_program_at(
+                    command,
+                    one.ctx.argv,
+                    one.session,
+                    self._registry,
+                    decision,
+                )
+                is not None
+            ):
+                return ""
             consumer, routed = routed_consumer(
                 command, one.ctx.argv, one.session, self._registry, decision
             )

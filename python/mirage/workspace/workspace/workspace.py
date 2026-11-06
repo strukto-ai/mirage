@@ -865,11 +865,7 @@ class Workspace:
         if isinstance(placed, (Deny, Pending)):
             refused = placement_refused(placed, line)
             said = explained_line(
-                line,
-                judged,
-                verdicts,
-                lambda one: "",
-                aliases=aliases,
+                line, judged, verdicts, lambda one: "", aliases=aliases
             )
             return dataclasses.replace(
                 said,

@@ -188,8 +188,7 @@ class RemoteSandbox(
         output: OutputFn | None,
         errors: OutputFn | None,
     ) -> RunResult:
-        """Record the line with the served mounts, connect once, bring
-        the mounts in step, then run.
+        """Connect once, bring the served mounts in step, then run.
 
         Args:
             argv (tuple[str, ...]): the program and its arguments.

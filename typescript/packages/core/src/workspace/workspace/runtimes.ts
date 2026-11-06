@@ -25,7 +25,7 @@ import {
 import { WorkspaceRuntime } from '../../runtime/workspace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
-/** Where a capture that never wins is reported; set `warn` to receive it. */
+/** Set `warn` to receive the captures another runtime shadows. */
 export const logger: { warn?: (message: string) => void } = {}
 
 /**

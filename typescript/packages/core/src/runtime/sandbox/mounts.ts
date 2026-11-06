@@ -252,10 +252,9 @@ export class SandboxMounts {
   }
 
   /**
-   * Record the line for `sync` to end, before the runtime connects, then
-   * refuse one from a cwd other than `/` that ssh serves no mount for (126),
-   * so it answers with no sandbox reached. Null when the line may go on to
-   * `admit`. Mirrors Python's `SandboxMounts.enter`.
+   * Record the line for `sync`, then refuse a cwd other than `/` that ssh
+   * serves no mount for (126), before connecting. Mirrors Python's
+   * `SandboxMounts.enter`.
    */
   enter(binding: WorkspaceBinding | null, cwd: string): RunResult | null {
     const mountPrefixes = binding?.mountPrefixes ?? null
@@ -286,7 +285,7 @@ export class SandboxMounts {
    * refuses it (126), one the sandbox cannot serve because another session
    * or another sshfs holds it, or another mount covers it, fails (1), and
    * one over a mount of the sandbox's own that is gone is refused (126). Null
-   * when the line may run. `enter` recorded the line first.
+   * when the line may run.
    */
   async admit(binding: WorkspaceBinding | null, signal?: AbortSignal): Promise<RunResult | null> {
     const files = binding?.files ?? null
