@@ -37,6 +37,16 @@ EXCEPTIONS = ROOT / "scripts" / "parity" / "parity_exceptions.json"
 HTTP_SPEC = ROOT / "docs" / "openapi.yaml"
 HTTP_DAEMON = SPEC / "python" / "openapi.json"
 HTTP_TYPESCRIPT = SPEC / "typescript" / "node" / "http_routes.json"
+HTTP_METHODS = (
+    "get",
+    "put",
+    "post",
+    "delete",
+    "patch",
+    "head",
+    "options",
+    "trace",
+)
 HTTP_PROTOCOL_ROUTES = {
     "GET /v1/workspaces/{}/mcp": "MCP streamable HTTP, documented on the MCP page",
     "POST /v1/workspaces/{}/mcp": "MCP streamable HTTP, documented on the MCP page",
@@ -721,8 +731,11 @@ def compare_variants(variants: list[dict[str, Any]]) -> list[str]:
     return failures
 
 
-def required_body(doc: dict[str, Any], op: dict[str, Any]) -> list[str]:
-    """The required top-level fields of an operation's request body.
+def request_body(
+    doc: dict[str, Any], op: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Whether an operation's request body is required, and its required
+    top-level fields; ``None`` when it declares no body.
 
     Args:
         doc (dict[str, Any]): the OpenAPI document holding the operation.
@@ -730,38 +743,88 @@ def required_body(doc: dict[str, Any], op: dict[str, Any]) -> list[str]:
     """
     body = op.get("requestBody")
     if not body:
-        return []
+        return None
     media: dict[str, Any] = next(iter(body.get("content", {}).values()), {})
     schema = media.get("schema", {})
     ref = schema.get("$ref")
     if ref:
         schema = doc["components"]["schemas"][ref.rsplit("/", 1)[-1]]
-    return sorted(schema.get("required", []))
+    return {
+        "required": bool(body.get("required", False)),
+        "fields": sorted(schema.get("required", [])),
+    }
 
 
-def http_operations(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    """Each operation's success codes, required body fields and hosts,
-    keyed by ``METHOD /path``.
+def http_methods(doc: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
+    """Every ``(path, method, operation)`` in a document, skipping
+    path-level keys such as ``parameters`` and ``summary``.
 
     Args:
         doc (dict[str, Any]): an OpenAPI document.
     """
-    out: dict[str, dict[str, Any]] = {}
-    for path, ops in doc.get("paths", {}).items():
-        for method, op in ops.items():
-            codes = op.get("responses", {})
-            out[f"{method.upper()} {path}"] = {
-                "success": sorted(c for c in codes if c.startswith("2")),
-                "body": required_body(doc, op),
-                "hosts": op.get("x-hosts", ["daemon"]),
-            }
-    return out
+    return [
+        (path, method, op)
+        for path, item in doc.get("paths", {}).items()
+        for method, op in item.items()
+        if method in HTTP_METHODS
+    ]
+
+
+def http_operations(doc: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Each operation's success codes, request body and hosts, keyed by
+    ``METHOD /path``.
+
+    Args:
+        doc (dict[str, Any]): an OpenAPI document.
+    """
+    return {
+        f"{method.upper()} {path}": {
+            "success": sorted(
+                c for c in op.get("responses", {}) if c.startswith("2")
+            ),
+            "body": request_body(doc, op),
+            "hosts": op.get("x-hosts", ["daemon"]),
+        }
+        for path, method, op in http_methods(doc)
+    }
+
+
+def compare_operation(
+    key: str, served: dict[str, Any], written: dict[str, Any], name: str
+) -> list[str]:
+    """How one operation the daemon serves differs from the document. The
+    document may add success codes and a body the daemon's own metadata
+    cannot declare (a route that reads the raw request), but may not drop
+    what the daemon declares.
+
+    Args:
+        key (str): ``METHOD /path``.
+        served (dict[str, Any]): the daemon's view of the operation.
+        written (dict[str, Any]): the document's view of it.
+        name (str): the document's path, for messages.
+    """
+    failures: list[str] = []
+    if "daemon" not in written["hosts"]:
+        failures.append(
+            f"{key} is served by the daemon but its x-hosts in {name} omit daemon"
+        )
+    missing = sorted(set(served["success"]) - set(written["success"]))
+    if missing:
+        failures.append(
+            f"{key}: success codes {missing} are served but missing from {name}"
+        )
+    if served["body"] is not None and served["body"] != written["body"]:
+        failures.append(
+            f"{key}: the daemon's request body is {served['body']} "
+            f"but {name} has {written['body']}"
+        )
+    return failures
 
 
 def check_http_api() -> list[str]:
     """The structural differences between the routes the Python daemon
     serves and the committed OpenAPI document: missing or extra
-    operations, success codes and required body fields."""
+    operations, hosts, success codes and request bodies."""
     if not HTTP_DAEMON.exists():
         raise SystemExit(
             f"{HTTP_DAEMON} is missing; run scripts/gen_specs.py first"
@@ -770,7 +833,7 @@ def check_http_api() -> list[str]:
     spec = yaml.safe_load(HTTP_SPEC.read_text())
     served = http_operations(daemon)
     written = http_operations(spec)
-    name = HTTP_SPEC.relative_to(ROOT)
+    name = str(HTTP_SPEC.relative_to(ROOT))
     failures: list[str] = []
     for key in sorted(set(served) - set(written)):
         method, path = key.split(" ", 1)
@@ -789,22 +852,16 @@ def check_http_api() -> list[str]:
                 f"{key} is in {name} with x-hosts daemon, but the daemon "
                 "does not serve it"
             )
-    for path, ops in spec.get("paths", {}).items():
-        for method, op in ops.items():
-            absent = [
-                f for f in ("summary", "tags", "x-hosts") if not op.get(f)
-            ]
-            if absent:
-                failures.append(
-                    f"{method.upper()} {path} in {name} has no {', '.join(absent)}"
-                )
+    for path, method, op in http_methods(spec):
+        absent = [f for f in ("summary", "tags", "x-hosts") if not op.get(f)]
+        if absent:
+            failures.append(
+                f"{method.upper()} {path} in {name} has no {', '.join(absent)}"
+            )
     for key in sorted(set(served) & set(written)):
-        for field in ("success", "body"):
-            if served[key][field] != written[key][field]:
-                failures.append(
-                    f"{key}: {field} is {served[key][field]} on the daemon "
-                    f"but {written[key][field]} in {name}"
-                )
+        failures.extend(
+            compare_operation(key, served[key], written[key], name)
+        )
     return failures
 
 

@@ -18,6 +18,7 @@ import logging
 import os
 import pkgutil
 import sys
+import tempfile
 from collections.abc import Sequence
 from dataclasses import MISSING, Field, asdict, fields
 from enum import Enum
@@ -539,10 +540,20 @@ def _emit_vfs_names(registry: dict[str, list[Command]]) -> None:
 
 
 def _emit_http_api() -> None:
+    saved = {
+        key: os.environ.pop(key)
+        for key in list(os.environ)
+        if key.startswith("MIRAGE_") and key != "MIRAGE_SPEC_DIR"
+    }
+    with tempfile.TemporaryDirectory() as home:
+        os.environ["MIRAGE_HOME"] = home
+        try:
+            document = build_app().openapi()
+        finally:
+            del os.environ["MIRAGE_HOME"]
+            os.environ.update(saved)
     path = OUT.parent / "openapi.json"
-    path.write_text(
-        json.dumps(build_app().openapi(), indent=2, sort_keys=True) + "\n"
-    )
+    path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
     print(f"emitted the daemon's OpenAPI document to {path}")
 
 
