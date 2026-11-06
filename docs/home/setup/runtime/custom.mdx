@@ -148,14 +148,14 @@ stand-in service, so it runs on one machine.
     import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, Runtime } from '@struktoai/mirage-node'
 
     export class RemoteRuntime extends Runtime {
+      [PROCESS_EXECUTOR] = true
+      name = 'remote'
+      reach = 'remote'
       static configFields = {
         url: { type: 'string' },
         token: { type: 'string' },
         maxBytes: { type: 'number' },
       }
-      [PROCESS_EXECUTOR] = true
-      name = 'remote'
-      reach = 'remote'
 
       constructor(options = {}) {
         super(options, ['python3', 'python', 'node', EXTERNAL_COMMANDS], RemoteRuntime.configFields)

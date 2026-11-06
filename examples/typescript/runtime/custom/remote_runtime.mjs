@@ -28,14 +28,14 @@ import { EXTERNAL_COMMANDS, PROCESS_EXECUTOR, Runtime } from '@struktoai/mirage-
 const MAX_BYTES = 16 * 1024 * 1024
 
 export class RemoteRuntime extends Runtime {
+  [PROCESS_EXECUTOR] = true
+  name = 'remote'
+  reach = 'remote'
   static configFields = {
     url: { type: 'string' },
     token: { type: 'string' },
     maxBytes: { type: 'number' },
   }
-  [PROCESS_EXECUTOR] = true
-  name = 'remote'
-  reach = 'remote'
 
   constructor(options = {}) {
     super(options, ['python3', 'python', 'node', EXTERNAL_COMMANDS], RemoteRuntime.configFields)
