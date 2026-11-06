@@ -944,13 +944,14 @@ describe('programSource', () => {
 })
 
 describe('checkProgram', () => {
-  it('passes a program that defines the function and parses', async () => {
-    await expect(checkProgram(SOURCE, 'preCommand')).resolves.toBeUndefined()
+  it('passes a program that defines each function and parses', async () => {
+    await expect(checkProgram(SOURCE, ['preCommand', 'preVfs'])).resolves.toBeUndefined()
+    await expect(checkProgram(SOURCE, [])).resolves.toBeUndefined()
   })
 
   it('refuses a program that defines no function for the method', async () => {
     await expect(
-      checkProgram('def pre_command(ctx):\n    return None\n', 'preVfs'),
+      checkProgram('def pre_command(ctx):\n    return None\n', ['preCommand', 'preVfs']),
     ).rejects.toThrow('script defines no pre_vfs(ctx)')
   })
 
@@ -958,7 +959,7 @@ describe('checkProgram', () => {
     await expect(
       checkProgram(
         'def pre_command(ctx):\n    if ctx["command"] == "rm"\n        return None\n',
-        'preCommand',
+        [],
       ),
     ).rejects.toThrow('script has an error at line 2: Expected `:`, found newline')
   })

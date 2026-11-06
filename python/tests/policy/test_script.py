@@ -536,15 +536,17 @@ def test_a_program_must_define_the_methods_function():
 
 
 @pytest.mark.asyncio
-async def test_a_program_that_defines_the_function_and_parses_passes():
-    await check_program(SOURCE, "pre_command")
+async def test_a_program_that_defines_each_function_and_parses_passes():
+    await check_program(SOURCE, ["pre_command", "pre_vfs"])
+    await check_program(SOURCE, [])
 
 
 @pytest.mark.asyncio
 async def test_a_program_checked_for_another_method_is_refused():
     with pytest.raises(ValueError, match=r"script defines no pre_vfs\(ctx\)"):
         await check_program(
-            "def pre_command(ctx):\n    return None\n", "pre_vfs"
+            "def pre_command(ctx):\n    return None\n",
+            ["pre_command", "pre_vfs"],
         )
 
 
@@ -557,7 +559,7 @@ async def test_a_program_monty_cannot_parse_is_refused_at_its_line():
         await check_program(
             'def pre_command(ctx):\n    if ctx["command"] == "rm"\n'
             "        return None\n",
-            "pre_command",
+            [],
         )
 
 

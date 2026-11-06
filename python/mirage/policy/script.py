@@ -18,7 +18,7 @@ import dataclasses
 import json
 import logging
 import re
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from enum import Enum
 from typing import Any
 
@@ -358,24 +358,25 @@ def program_source(source: str, method: str) -> str:
     )
 
 
-async def check_program(source: str, method: str) -> None:
-    """Whether a policy program can answer at one method, found without
-    running it: it defines the method's function at its top level
-    (``program_source``), and monty parses and compiles it
+async def check_program(source: str, methods: Sequence[str]) -> None:
+    """Whether a policy program can answer at each method it is given,
+    found without running it: it defines each one's function at its top
+    level (``program_source``), and monty parses and compiles it once
     (``compile_error``), so a typo is refused where the program is
-    written rather than as a deny on every line it judges. Mirrors the
-    TypeScript ``checkProgram``.
+    written rather than as a deny on every line it judges. Given no
+    method, only the parse. Mirrors the TypeScript ``checkProgram``.
 
     Args:
         source (str): the program.
-        method (str): the method it answers at.
+        methods (Sequence[str]): the methods it answers at.
 
     Raises:
         ValueError: it cannot, as a clause about "script" naming the
             line.
         ImportError: the ``monty`` extra is not installed.
     """
-    program_source(source, method)
+    for method in methods:
+        program_source(source, method)
     refused = await compile_error(source)
     if refused is None:
         return
