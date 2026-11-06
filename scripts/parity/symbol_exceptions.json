@@ -1350,6 +1350,45 @@
    "typescript_only": {
     "Env": "An environment map passed to the readers, so tests need no process.env; Python reads os.environ."
    }
+  },
+  "server/routers/policies": {
+   "python_only": {
+    "create_policy": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "delete_policy": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "get_policy": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "list_policies": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "router": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "update_policy": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp."
+   },
+   "typescript_only": {
+    "RefParams": "Fastify types a route's path params with an interface; FastAPI reads them from the handler's signature.",
+    "registerPoliciesRoutes": "FastAPI routes are module functions on a module router; the TypeScript server registers its routes in one function on the host's RouteApp.",
+    "stored": "Each FastAPI handler maps a store refusal in its own try; the TypeScript routes share one wrapper because a refusal answers through the reply.",
+    "Refusal": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves and answer with this status and detail.",
+    "bodyOf": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves and answer with this status and detail.",
+    "isRefusal": "Pydantic refuses a malformed body before the handler runs in Python; the TypeScript routes check the body themselves and answer with this status and detail.",
+    "exists": "Python's create catches the store's not_found inline with try/else; the TypeScript route names the same check so its wrapper can answer the refusal."
+   }
+  },
+  "cli/policy": {
+   "python_only": {
+    "NAME": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "SOURCE": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "app": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "create_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "delete_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "get_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "list_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "update_cmd": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands."
+   },
+   "typescript_only": {
+    "registerPolicyCommands": "Typer registers each verb as a named module function on a module-level `app`, reading its options off shared Option values; commander registers the same verbs inline in registerPolicyCommands.",
+    "FORMATS": "Typer checks -o against the Format enum; commander takes any string, so the TypeScript CLI checks it against this list.",
+    "formatOf": "Typer checks -o against the Format enum; commander takes any string, so the TypeScript CLI checks it against this list.",
+    "render": "Python prints yaml or json inline in each verb; the TypeScript verbs share one printer that loads yaml lazily.",
+    "PolicyBody": "The Python CLI reads the daemon's JSON as untyped dicts; TypeScript names the shapes it reads.",
+    "PolicyName": "The Python CLI reads the daemon's JSON as untyped dicts; TypeScript names the shapes it reads."
+   }
   }
  }
 }

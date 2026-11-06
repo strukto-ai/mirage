@@ -85,6 +85,7 @@ from mirage.server.routers import (
     vfs,
     workspaces,
 )
+from mirage.server.routers import policies as policy_routes
 from mirage.server.rpc.http import register_rpc_routes
 from mirage.server.ssh.config import SSHConfig, resolve_ssh_config
 from mirage.server.ssh.constants import SERVER_MODULE
@@ -469,6 +470,7 @@ def build_app(
     app.state.ssh = None
     app.include_router(workspaces.router)
     app.include_router(templates.router)
+    app.include_router(policy_routes.router)
     app.include_router(documents.router)
     app.include_router(sessions.router)
     app.include_router(asks.router)

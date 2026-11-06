@@ -249,6 +249,26 @@ template leaves it as it is, and a template's config cannot set
 not both. The local daemon keeps templates under `~/.mirage/resources`, as
 `resource_store` sets.
 
+### Saved policies
+
+`mirage policy` keeps Python programs by name on the daemon, or on the
+console, through the [`/v1/policies`](/home/access/http#saved-policies)
+routes. A name ends in `.py`. `--source @FILE` reads a file; any other value
+is the program itself.
+
+| Command | Does |
+| --- | --- |
+| `mirage policy create NAME --source @FILE\|TEXT` | Save a new policy. A name already saved exits 2. |
+| `mirage policy list [-o yaml\|json]` | List the saved names. |
+| `mirage policy get NAME [-o yaml\|json]` | Show one; in a terminal, its source. |
+| `mirage policy update NAME --source @FILE\|TEXT` | Replace its source. |
+| `mirage policy delete NAME` | Delete it. |
+
+```bash
+mirage policy create guard.py --source @guard.py
+mirage policy get guard.py -o yaml
+```
+
 ### Asks
 
 | Command | Does |

@@ -22,6 +22,7 @@ import { registerAsksRoutes } from './routers/asks.ts'
 import { registerDocumentsRoutes } from './routers/documents.ts'
 import { registerHealthRoutes } from './routers/health.ts'
 import { registerOAuthRoutes } from './routers/oauth.ts'
+import { registerPoliciesRoutes } from './routers/policies.ts'
 import { registerSessionsRoutes } from './routers/sessions.ts'
 import { registerShellRoutes } from './routers/shell.ts'
 import { registerTemplatesRoutes } from './routers/templates.ts'
@@ -59,8 +60,10 @@ export function registerApi(app: RouteApp, deps: ApiDeps): McpEndpoint {
     snapshotStore: deps.snapshotStore,
     resources: deps.resources,
   })
-  if (deps.resources !== undefined)
+  if (deps.resources !== undefined) {
     registerTemplatesRoutes(app, { resources: deps.resources, registry })
+    registerPoliciesRoutes(app, { resources: deps.resources, registry })
+  }
   registerSessionsRoutes(app, { registry, loadProfile: (profile) => host.loadProfile(profile) })
   registerDocumentsRoutes(app, { registry })
   registerAsksRoutes(app, { registry })

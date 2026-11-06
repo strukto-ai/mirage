@@ -451,6 +451,53 @@ Upload the tar as `multipart/form-data`: a `request` part holding the JSON field
 
 Returns HTTP 201 Created with the restored workspace.
 
+## Saved policies
+
+A saved policy is a Python program kept by name, as the console keeps one. Its
+name ends in `.py`, such as `guard.py`, and its source is at most 64 KB. The
+local daemon keeps them under `~/.mirage/resources`, as `resource_store` sets.
+A server of many [accounts](#accounts) answers HTTP 501 on these routes.
+
+### Create a policy
+
+<Badge color="green">POST</Badge> `/v1/policies`
+
+<ParamField body="name" type="string" required>The policy's name, ending in `.py`.</ParamField>
+<ParamField body="source" type="string" required>The program.</ParamField>
+
+Returns HTTP 201 Created with `{"name", "source"}`. A name already saved
+returns HTTP 409 Conflict.
+
+### List policies
+
+<Badge color="blue">GET</Badge> `/v1/policies`
+
+Returns the names, sorted; get one for its source:
+
+```json
+{"items": [{"name": "guard.py"}]}
+```
+
+### Get a policy
+
+<Badge color="blue">GET</Badge> `/v1/policies/{name}`
+
+Returns `{"name", "source"}`.
+
+### Update a policy
+
+<Badge color="orange">PUT</Badge> `/v1/policies/{name}`
+
+<ParamField body="source" type="string" required>The new program.</ParamField>
+
+Returns `{"name", "source"}`. A name not saved returns HTTP 404 Not Found.
+
+### Delete a policy
+
+<Badge color="red">DELETE</Badge> `/v1/policies/{name}`
+
+Returns HTTP 204 No Content.
+
 ## Sessions
 
 A session keeps its own working directory, environment, and history. Requests use the workspace's default session unless they specify `session_id`.

@@ -21,6 +21,7 @@ from mirage.cli import config as config_module
 from mirage.cli import daemon as daemon_module
 from mirage.cli import login as login_module
 from mirage.cli import mcp as mcp_module
+from mirage.cli import policy as policy_module
 from mirage.cli import rpc as rpc_module
 from mirage.cli import session as session_module
 from mirage.cli import shell as shell_module
@@ -61,6 +62,7 @@ workspace_module.app.add_typer(session_module.app, name="session")
 workspace_module.app.add_typer(tools_module.app, name="tools", hidden=True)
 app.add_typer(workspace_module.app, name="workspace")
 app.add_typer(shell_module.app, name="shell")
+app.add_typer(policy_module.app, name="policy")
 app.command(
     "api",
     context_settings={
