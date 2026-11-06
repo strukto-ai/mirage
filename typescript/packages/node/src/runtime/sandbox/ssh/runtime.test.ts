@@ -16,7 +16,9 @@ import { EventEmitter } from 'node:events'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir, userInfo } from 'node:os'
 import type * as Os from 'node:os'
+import type { AddressInfo } from 'node:net'
 import { join } from 'node:path'
+import ssh2 from 'ssh2'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
 import { wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
@@ -185,6 +187,67 @@ describe('SSHRuntime', () => {
       })
     } finally {
       await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('connect offers a private key given as its own text', async () => {
+    const runtime = new SdkFakeRuntime({ config: { host: 'box', privateKey: 'key-text' } })
+    await withAgentSock('/tmp/agent.sock', () => runtime.connect())
+    expect(made[made.length - 1]?.opts?.authHandler).toEqual([
+      { type: 'none', username: userInfo().username },
+      { type: 'agent', username: userInfo().username, agent: '/tmp/agent.sock' },
+      { type: 'publickey', username: userInfo().username, key: 'key-text' },
+    ])
+  })
+
+  it('logs in to a real server with a private key given as its own text', async () => {
+    const { Server, utils } = ssh2
+    const hostKey = utils.generateKeyPairSync('ed25519')
+    const clientKey = utils.generateKeyPairSync('ed25519')
+    const allowed = utils.parseKey(clientKey.public)
+    if (allowed instanceof Error) throw allowed
+    const server = new Server({ hostKeys: [hostKey.private] }, (conn) => {
+      // Only the generated key gets in: no agent, password or default key.
+      conn.on('authentication', (ctx) => {
+        if (
+          ctx.method !== 'publickey' ||
+          ctx.key.algo !== allowed.type ||
+          !ctx.key.data.equals(allowed.getPublicSSH())
+        ) {
+          ctx.reject(['publickey'])
+          return
+        }
+        const { blob, signature } = ctx
+        if (signature === undefined) ctx.accept()
+        else if (blob !== undefined && allowed.verify(blob, signature, ctx.hashAlgo)) ctx.accept()
+        else ctx.reject(['publickey'])
+      })
+      conn.on('ready', () => {
+        conn.on('session', (accept) => {
+          accept().on('exec', (acceptExec) => {
+            const stream = acceptExec()
+            stream.write('in')
+            stream.exit(0)
+            stream.end()
+          })
+        })
+      })
+    })
+    await new Promise<void>((resolveFn) => server.listen(0, '127.0.0.1', resolveFn))
+    const { port } = server.address() as AddressInfo
+    const runtime = new SSHRuntime({
+      config: { host: '127.0.0.1', port, username: 'test', privateKey: clientKey.private },
+    })
+    try {
+      const result = await withAgentSock(undefined, async () => {
+        await runtime.connect()
+        return runtime.execLine('true', null, {}, '/')
+      })
+      expect(result.exitCode).toBe(0)
+      expect(DEC.decode(result.stdout)).toBe('in')
+    } finally {
+      await runtime.close()
+      server.close()
     }
   })
 

@@ -54,6 +54,14 @@ def test_connect_kwargs_password_and_passphrase():
     assert kw["passphrase"] == "pp"
 
 
+def test_connect_kwargs_take_a_private_key_as_its_text():
+    kw = _connect_kwargs(
+        SSHConfig(host="dev", private_key="key-text", passphrase="pp")
+    )
+    assert kw["client_keys"] == [b"key-text"]
+    assert kw["passphrase"] == "pp"
+
+
 def test_connect_kwargs_passphrase_rides_the_identity_file():
     kw = _connect_kwargs(SSHConfig(host="dev", passphrase="pp"))
     assert "passphrase" not in kw

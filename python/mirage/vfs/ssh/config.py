@@ -31,11 +31,14 @@ class SSHConfig(BaseModel):
     identity_file: str | None = None
     """Path to a private key; `~` is expanded. Unset tries the SSH agent
     and the default keys in `~/.ssh`."""
+    private_key: SecretStr | None = None
+    """A private key's own text, such as one a credential pointer reads
+    from a secret store; offered after `identity_file`'s."""
     password: SecretStr | None = None
     """Password for password authentication; prefer `identity_file`."""
     passphrase: SecretStr | None = None
-    """Passphrase of an encrypted `identity_file`; ignored when
-    `identity_file` is unset."""
+    """Passphrase of an encrypted `identity_file` or `private_key`;
+    ignored when both are unset."""
     root: str = "/"
     """Path on the remote that becomes the mount root."""
     timeout: int = 30

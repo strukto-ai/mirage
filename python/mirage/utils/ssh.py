@@ -23,6 +23,7 @@ def connect_options(
     username: str | None,
     identity_file: str | None,
     timeout: int,
+    private_key: str | None = None,
 ) -> dict[str, Any]:
     """Shared SSH connection and authentication options.
 
@@ -33,6 +34,8 @@ def connect_options(
         username (str | None): login user, otherwise the client's default.
         identity_file (str | None): explicit private key path.
         timeout (int): bound on TCP connection and authentication in seconds.
+        private_key (str | None): a private key's own text, offered
+            after the one at ``identity_file``.
     """
     options: dict[str, Any] = {
         "host": hostname or host,
@@ -43,6 +46,11 @@ def connect_options(
         options["port"] = port
     if username is not None:
         options["username"] = username
+    keys: list[str | bytes] = []
     if identity_file is not None:
-        options["client_keys"] = [str(Path(identity_file).expanduser())]
+        keys.append(str(Path(identity_file).expanduser()))
+    if private_key is not None:
+        keys.append(private_key.encode())
+    if keys:
+        options["client_keys"] = keys
     return options
