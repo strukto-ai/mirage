@@ -35,6 +35,10 @@ interface Target {
   explain?: boolean
 }
 
+/** The `-w` option every live command takes. */
+export const WORKSPACE_FLAGS = '-w, --workspace <id>'
+export const WORKSPACE_HELP = 'Workspace id; the current workspace when left out'
+
 type Answer = Record<string, unknown>
 
 /** Send one session call to the daemon. Mirrors Python's `post`. */
@@ -113,7 +117,7 @@ function camel(name: string): string {
 }
 
 /**
- * The `mirage vfs <call>` command for one call: the call's required
+ * The `mirage workspace vfs <call>` command for one call: the call's required
  * arguments in order, then an option for each of the rest. Mirrors
  * Python's `command`.
  */
@@ -136,7 +140,7 @@ function command(vfs: Command, call: VfsCall): void {
     }
   }
   cmd
-    .option('-w, --workspace <id>', 'Workspace id; the current workspace when left out')
+    .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
     .option('-s, --session <id>', 'Session id')
     .option('--explain', 'Say what the call would do; run nothing')
     .action(async (...given: unknown[]) => {
@@ -157,19 +161,24 @@ function command(vfs: Command, call: VfsCall): void {
     })
 }
 
-/** `mirage vfs <call>` for each `session.vfs` call, and `mirage glob`. */
-export function registerVfsCommands(program: Command): void {
-  const vfs = program
-    .command('vfs')
-    .description("The session's VFS calls, one command per call, as POSIX names them.")
-  for (const call of VFS_CALLS) command(vfs, call)
-  program
-    .command('glob')
+/** A `glob` command under `parent`: every path a pattern matches. */
+function globCommand(parent: Command, name: string, hidden: boolean): Command {
+  return parent
+    .command(name, { hidden })
     .description('Every path a pattern matches, as the session sees them.')
     .argument('<pattern>', 'Pathname pattern such as /**/*.py')
-    .option('-w, --workspace <id>', 'Workspace id; the current workspace when left out')
+    .option(WORKSPACE_FLAGS, WORKSPACE_HELP)
     .option('-s, --session <id>', 'Session id')
     .action(async (pattern: string, opts: Target) => {
       emit(await answer(await post(opts, 'glob', { pattern })), lines)
     })
+}
+
+/** `mirage workspace vfs <call>` for each `session.vfs` call, and `glob`. */
+export function registerVfsCommands(parent: Command): void {
+  const vfs = parent
+    .command('vfs')
+    .description("The session's VFS calls, one command per call, as POSIX names them.")
+  for (const call of VFS_CALLS) command(vfs, call)
+  globCommand(vfs, 'glob', false)
 }

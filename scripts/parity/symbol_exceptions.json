@@ -491,7 +491,35 @@
    "python_only": {
     "cancel_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerSessionCommands.",
     "kill_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in registerSessionCommands.",
-    "update_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access."
+    "update_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
+    "CREATE_PROFILE": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "DEFAULT_PROFILE": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "MOUNT": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "PROFILE": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "PROFILE_FILE": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "SESSION": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "workspace_cancel_cmd": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "workspace_create_cmd": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "workspace_delete_cmd": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "workspace_kill_cmd": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "workspace_list_cmd": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "workspace_update_cmd": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "_moved": "The old top-level `mirage session` and `mirage glob` stay one release beside `mirage workspace session` and `mirage workspace vfs glob`: Typer holds the old form as its own app or function, commander registers it with a preAction warning hook.",
+    "moved_app": "The old top-level `mirage session` and `mirage glob` stay one release beside `mirage workspace session` and `mirage workspace vfs glob`: Typer holds the old form as its own app or function, commander registers it with a preAction warning hook."
+   },
+   "typescript_only": {
+    "ACTIONS": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "CREATE_PROFILE_HELP": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "CreateOptions": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "Flags": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "MOUNT_HELP": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "collect": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "createSession": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "send": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "sessionPath": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "updateOptions": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "updateSession": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "registerMovedSessionCommands": "The old top-level `mirage session` and `mirage glob` stay one release beside `mirage workspace session` and `mirage workspace vfs glob`: Typer holds the old form as its own app or function, commander registers it with a preAction warning hook."
    }
   },
   "cli/workspace": {
@@ -733,12 +761,17 @@
     "EXPLAIN": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly.",
     "SESSION": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly.",
     "WORKSPACE": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly.",
-    "_parameter": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly."
+    "_parameter": "Typer reads a command's options off its function signature, so the generated commands are built from shared Option values and an inspect.Parameter per argument; commander adds each option to the command directly.",
+    "moved_glob_cmd": "The old top-level `mirage session` and `mirage glob` stay one release beside `mirage workspace session` and `mirage workspace vfs glob`: Typer holds the old form as its own app or function, commander registers it with a preAction warning hook."
    },
    "typescript_only": {
     "registerVfsCommands": "Typer registers one function per command and holds the group in a module-level `app`; the TypeScript CLI builds the same commands on a commander program inside its register function.",
     "Target": "Commander hands an action its options as one camelCased object, which TypeScript types as Target and maps back to the call's snake_case argument names; Typer passes each option as its own keyword argument.",
-    "camel": "Commander hands an action its options as one camelCased object, which TypeScript types as Target and maps back to the call's snake_case argument names; Typer passes each option as its own keyword argument."
+    "camel": "Commander hands an action its options as one camelCased object, which TypeScript types as Target and maps back to the call's snake_case argument names; Typer passes each option as its own keyword argument.",
+    "registerMovedGlobCommand": "The old top-level `mirage session` and `mirage glob` stay one release beside `mirage workspace session` and `mirage workspace vfs glob`: Typer holds the old form as its own app or function, commander registers it with a preAction warning hook.",
+    "WORKSPACE_FLAGS": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "WORKSPACE_HELP": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers.",
+    "globCommand": "Typer registers each verb as a named module function, with its options as shared Option values; commander registers the same verbs inline on a command, with their options as help strings and shared request helpers."
    }
   },
   "server/routers/vfs": {

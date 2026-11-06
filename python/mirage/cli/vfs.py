@@ -166,7 +166,7 @@ def _value(call: VfsCall, name: str, value: Any) -> Any:
 
 
 def command(call: VfsCall) -> Callable[..., None]:
-    """The ``mirage vfs <call>`` command for one call: the call's
+    """The ``mirage workspace vfs <call>`` command for one call: the call's
     required arguments in order, then an option for each of the rest.
 
     Args:
@@ -215,6 +215,7 @@ for _call in VFS_CALLS:
     app.command(_call.name.replace("_", "-"))(command(_call))
 
 
+@app.command("glob")
 def glob_cmd(
     pattern: str = typer.Argument(
         ..., help="Pathname pattern such as /**/*.py."

@@ -115,10 +115,10 @@ mirage shell -w work -c 'ls /repo && echo draft > /scratch/notes.txt'
 
 | Command | Does |
 | --- | --- |
-| `mirage shell [-w ID] -c LINE` | Run a line, streaming its stdout and stderr. |
-| `mirage vfs CALL ARGS [-w ID]` | Make one of the 23 [VFS calls](/home/access/http#call-the-vfs). |
-| `mirage glob PATTERN [-w ID]` | Print every path a pattern matches. |
-| `mirage tools TOOL ARGS [-w ID]` | Run one of the [agent tools](/home/access/mcp#tools). |
+| `mirage workspace shell -c LINE` | Run a line, streaming its stdout and stderr. |
+| `mirage workspace vfs CALL ARGS` | Make one of the 23 [VFS calls](/home/access/http#call-the-vfs). |
+| `mirage workspace vfs glob PATTERN` | Print every path a pattern matches. |
+| `mirage workspace tools TOOL ARGS` | Run one of the [agent tools](/home/access/mcp#tools). |
 
 The workspace is `-w`, else `MIRAGE_WORKSPACE`, else the current one that
 `mirage workspace use ID` set for the [context](#log-in). With none, the
@@ -126,7 +126,10 @@ command exits 2. Each takes `-s SESSION`, the default session when absent. `shel
 take `--explain`, which says what the line or call would do and runs nothing;
 see [Explain](/home/policy/explain).
 
-### `mirage shell`
+`mirage shell` is a short form of `mirage workspace shell`, with the same
+options.
+
+### `mirage workspace shell`
 
 | Option | Does |
 | --- | --- |
@@ -147,7 +150,7 @@ mirage shell -w demo -c 'ls /data' --json | jq .stdout
 
 ### `mirage-bash`
 
-`mirage-bash -c LINE` runs a line as `mirage shell`, for a coding agent that
+`mirage-bash -c LINE` runs a line as `mirage workspace shell`, for a coding agent that
 takes a shell path, such as [Claude Code](/home/agents/claude-code#shell).
 Both packages install it beside `mirage`.
 
@@ -166,17 +169,18 @@ Both packages install it beside `mirage`.
 MIRAGE_WORKSPACE=demo mirage-bash -c 'ls /data | wc -l'
 ```
 
-### `mirage vfs`
+### `mirage workspace vfs`
 
-- Calls are spelled with dashes: `mirage vfs is-dir /data -w demo`.
+- Calls are spelled with dashes: `mirage workspace vfs is-dir /data -w demo`.
 - Required arguments come in order, the rest as `--name VALUE`.
 - Bytes come from `--data` or `--value`, else from stdin.
 - Piped, it prints the call's JSON. In a terminal, `read` prints the text and a
   list prints one entry per line. A call that returns nothing prints nothing.
 
 ```bash
-echo "hello" | mirage vfs write /data/hi.txt -w demo
-mirage vfs read /data/hi.txt -w demo
+echo "hello" | mirage workspace vfs write /data/hi.txt -w demo
+mirage workspace vfs read /data/hi.txt -w demo
+mirage workspace vfs glob '/**/*.py' -w demo
 ```
 
 ### Relays
@@ -257,12 +261,14 @@ not both. The local daemon keeps templates under `~/.mirage/resources`, as
 
 | Command | Does |
 | --- | --- |
-| `mirage session create ID [--id S] [-p PROFILE] [-m /prefix:mode]...` | Add a session under a [profile](/home/policy/overview), with mounts narrowed to `r`, `rw` or `rwx`. |
-| `mirage session list ID` | List sessions. |
-| `mirage session delete ID S` | Close a session. |
-| `mirage session cancel ID S` | Cancel the session's running lines. |
-| `mirage session kill ID S` | Kill the session's background jobs. |
-| `mirage session update ID S (-p PROFILE \| --profile-file FILE \| --default-profile)` | Replace the session's profile with a profile's current definition, a profile document, or the default; its cwd, env and history stay. |
+| `mirage workspace session create [-s S] [-p PROFILE] [-m /prefix:mode]...` | Add a session under a [profile](/home/policy/overview), with mounts narrowed to `r`, `rw` or `rwx`. |
+| `mirage workspace session list` | List sessions. |
+| `mirage workspace session delete -s S` | Close a session. |
+| `mirage workspace session cancel -s S` | Cancel the session's running lines. |
+| `mirage workspace session kill -s S` | Kill the session's background jobs. |
+| `mirage workspace session update -s S (-p PROFILE \| --profile-file FILE \| --default-profile)` | Replace the session's profile with a profile's current definition, a profile document, or the default; its cwd, env and history stay. |
+
+Each takes `-w ID`, else the current workspace, as `shell` and `vfs` do.
 
 ## Daemon
 

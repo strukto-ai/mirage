@@ -91,7 +91,7 @@ No credentials or services are needed.
     EOF
 
     mirage workspace create workspace.yaml --id hello
-    echo "hello mirage" | mirage vfs write /data/hello.txt -w hello
+    echo "hello mirage" | mirage workspace vfs write /data/hello.txt -w hello
     mirage shell -w hello -c 'grep -n hello /data/hello.txt'
     ```
   </Tab>

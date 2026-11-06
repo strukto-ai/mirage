@@ -235,7 +235,7 @@ function formatAsks(items: AskRecord[]): string {
   )
 }
 
-export function registerWorkspaceCommands(program: Command): void {
+export function registerWorkspaceCommands(program: Command): Command {
   const ws = program.command('workspace').description('Manage workspaces.')
   for (const kind of ['vfs', 'skill']) {
     ws.command(`${kind}-md`)
@@ -616,4 +616,5 @@ export function registerWorkspaceCommands(program: Command): void {
         emit(created, formatWorkspaceDetail)
       },
     )
+  return ws
 }
