@@ -266,6 +266,54 @@
           }
         }
       ]
+    },
+    {
+      "id": "mount_type_ssh_refuses_a_cwd_the_box_cannot_see",
+      "sdk_only": "The case serves /served into the one shared docker box over sshfs; the CLI lanes of both hosts run beside the SDK drivers on that box, so it runs on the SDK pass only, serialized like the rest of sandbox/mounts.",
+      "runtimes": [
+        "docker"
+      ],
+      "requires": [
+        "env:MIRAGE_INTEG_BOX_MOUNTS"
+      ],
+      "world": {
+        "mounts": {
+          "/served": {
+            "vfs": "ram"
+          }
+        }
+      },
+      "entry": {
+        "captures": [
+          "@external"
+        ],
+        "config": {
+          "mount_type": "ssh"
+        }
+      },
+      "steps": [
+        {
+          "command": "mkdir -p /notes",
+          "expect": {
+            "exit": 0
+          }
+        },
+        {
+          "command": "cd /notes && make",
+          "expect": {
+            "exit": 126,
+            "stdout": "",
+            "stderr": "docker: the sandbox cannot see the working directory /notes; cd into a mount first\n"
+          }
+        },
+        {
+          "command": "cd /served && dash -c pwd",
+          "expect": {
+            "exit": 0,
+            "stdout": "/served\n"
+          }
+        }
+      ]
     }
   ]
 }

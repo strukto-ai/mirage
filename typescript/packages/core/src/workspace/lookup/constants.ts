@@ -21,6 +21,7 @@ import { PARSES_KEPT } from '../../commands/spec/constants.ts'
 import { BUILTIN_GROUP } from '../../shell/constants.ts'
 import { BuiltinGroup, ShellBuiltin } from '../../shell/types.ts'
 import { Follow, LineFacts, type PathSpec } from '../../types.ts'
+import type { WrapperOptions } from './types.ts'
 
 // Bash builtins the parser accepts but the executor cannot honor; they
 // still lookup to the shell layer so the error names a capability gap.
@@ -283,6 +284,173 @@ function clusterWords(word: string, valueSpellings: readonly string[]): number {
     if (valueSpellings.includes(`-${word[j] ?? ''}`)) return word.slice(j + 1) !== '' ? 1 : 2
   }
   return 1
+}
+
+// As GNU coreutils 9.7 and util-linux 2.41 answer on debian:stable-slim.
+export const PROGRAM_WRAPPERS: ReadonlyMap<string, WrapperOptions> = new Map([
+  [
+    'nice',
+    {
+      values: ['-n', '--adjustment'],
+      flags: [],
+      stops: [],
+      status: 125,
+      missing: "nice: '{}': No such file or directory\n",
+    },
+  ],
+  [
+    'nohup',
+    {
+      values: [],
+      flags: [],
+      stops: [],
+      status: 125,
+      missing: "nohup: failed to run command '{}': No such file or directory\n",
+    },
+  ],
+  [
+    'stdbuf',
+    {
+      values: ['-i', '-o', '-e', '--input', '--output', '--error'],
+      flags: [],
+      stops: [],
+      status: 125,
+      missing: "stdbuf: failed to run command '{}': No such file or directory\n",
+    },
+  ],
+  [
+    'ionice',
+    {
+      values: ['-c', '-n', '--class', '--classdata'],
+      flags: ['-t', '--ignore'],
+      stops: ['-p', '-P', '-u', '--pid', '--pgid', '--uid'],
+      status: 1,
+      missing: 'ionice: failed to execute {}: No such file or directory\n',
+    },
+  ],
+  [
+    'setsid',
+    {
+      values: [],
+      flags: ['-c', '-f', '-w', '--ctty', '--fork', '--wait'],
+      stops: [],
+      status: 1,
+      missing: 'setsid: failed to execute {}: No such file or directory\n',
+    },
+  ],
+])
+
+const SIZE = /^\s*\+?(\d*)(?:([kKMGTPEZYRQ])(B|iB)?)?$/
+
+/**
+ * Where the program a wrapper runs stands in its words, and the stderr its
+ * first bad option or value gets; null for either when there is none. An
+ * option that runs no program (`--help`, `ionice -p`) leaves both null.
+ * Mirrors Python's `read_wrapper`.
+ *
+ * Args:
+ *   name: a `PROGRAM_WRAPPERS` name.
+ *   words: the wrapper's words, argv[0] excluded.
+ */
+export function readWrapper(
+  name: string,
+  words: readonly string[],
+): [number | null, string | null] {
+  const grammar = PROGRAM_WRAPPERS.get(name)
+  if (grammar === undefined) return [null, null]
+  const usage = `Try '${name} --help' for more information.\n`
+  const stops = [...grammar.stops, '--help', '--version']
+  const spellings = [...grammar.values, ...grammar.flags, ...stops].filter((o) => o[1] === '-')
+  let error: string | null = null
+  let moded = false
+  let i = 0
+  while (i < words.length) {
+    const word = words[i] ?? ''
+    if (word === '--') {
+      i += 1
+      break
+    }
+    if (!word.startsWith('-') || word === '-') break
+    i += 1
+    if (name === 'nice' && /^\d+$/.test(word.slice(1))) continue
+    if (word.startsWith('--')) {
+      const cut = word.indexOf('=')
+      const option = cut < 0 ? word : word.slice(0, cut)
+      const known = spellings.find((o) => o.startsWith(option))
+      if (known === undefined) {
+        error ??= `${name}: unrecognized option '${word}'\n${usage}`
+        continue
+      }
+      if (stops.includes(known)) return [null, null]
+      if (grammar.values.includes(known)) {
+        let given = cut < 0 ? '' : word.slice(cut + 1)
+        if (cut < 0) {
+          if (i === words.length) return [null, null]
+          given = words[i] ?? ''
+          i += 1
+        }
+        error ??= badValue(name, known, given, usage)
+        moded = true
+      }
+      continue
+    }
+    for (let j = 1; j < word.length; j++) {
+      const letter = word[j] ?? ''
+      const option = `-${letter}`
+      if (stops.includes(option)) return [null, null]
+      if (grammar.flags.includes(option)) continue
+      if (!grammar.values.includes(option)) {
+        error ??= `${name}: invalid option -- '${letter}'\n${usage}`
+        continue
+      }
+      let given = word.slice(j + 1)
+      if (given === '') {
+        if (i === words.length) return [null, null]
+        given = words[i] ?? ''
+        i += 1
+      }
+      error ??= badValue(name, option, given, usage)
+      moded = true
+      break
+    }
+  }
+  if (i === words.length) return [null, null]
+  if (name === 'stdbuf' && !moded)
+    error ??= `stdbuf: you must specify a buffering mode option\n${usage}`
+  return [i, error]
+}
+
+/** The stderr a wrapper's option value gets, null when it is good. */
+function badValue(name: string, option: string, value: string, usage: string): string | null {
+  if (name === 'nice') {
+    return /^\s*[+-]?\d+$/.test(value) ? null : `nice: invalid adjustment '${value}'\n`
+  }
+  if (name === 'ionice' && (option === '-c' || option === '--class')) {
+    if (/^\s*\d+$/.test(value)) {
+      const number = Number.parseInt(value, 10)
+      return number <= 3 ? null : `ionice: unknown prio class ${String(number)}\n`
+    }
+    if (['none', 'realtime', 'best-effort', 'idle'].includes(value.toLowerCase())) return null
+    return `ionice: unknown scheduling class: '${value}'\n`
+  }
+  if (name === 'ionice') {
+    return /^\s*[+-]?\d+$/.test(value) ? null : `ionice: invalid class data argument: '${value}'\n`
+  }
+  if (value === 'L') {
+    return option === '-i' || option === '--input'
+      ? `stdbuf: line buffering stdin is meaningless\n${usage}`
+      : null
+  }
+  const size = SIZE.exec(value)
+  if (size === null || (size[1] === '' && size[2] === undefined)) {
+    return `stdbuf: invalid mode '${value}'\n`
+  }
+  const power = size[2] === undefined ? 0 : 'KMGTPEZYRQ'.indexOf(size[2].toUpperCase()) + 1
+  const base = size[3] === 'B' ? 1000n : 1024n
+  if (BigInt(size[1] === '' ? 1 : (size[1] ?? 1)) * base ** BigInt(power) >= 2n ** 64n) {
+    return `stdbuf: invalid mode '${value}': Value too large for defined data type\n`
+  }
+  return null
 }
 
 /**

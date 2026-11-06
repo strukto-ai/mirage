@@ -546,12 +546,20 @@ async function* judgeWords(
   // env's command runs in the environment env builds for it, and a nested
   // shell's line in a new shell started from this one.
   const child = name === 'env' && inners.length > 0 ? envChild(args, session) : null
+  const named = name === 'command' ? inners[0]?.argv[0] : undefined
+  const masked = named === undefined ? undefined : wordValue(named)
   let innerSession = session
   if (child !== null && typeof child !== 'string') {
     innerSession = session.fork()
     innerSession.vars = envVars(session, child[1])
   } else if ((name === 'sh' || name === 'bash') && inners.length > 0) {
     innerSession = session.newShell()
+  } else if (masked !== undefined) {
+    innerSession = session.fork()
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete innerSession.functions[masked]
+    // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+    delete innerSession.aliases[masked]
   }
   for (const inner of inners) {
     if (!innerReadable(inner)) continue
@@ -1485,7 +1493,7 @@ export function explainedLine(
   line: string,
   judged: readonly Judged[],
   verdicts: readonly Judged[],
-  runtimeOf: (command: string) => string,
+  runtimeOf: (one: Judged) => string,
   reparse: (line: string) => TSNodeLike,
   wholeLine = false,
 ): ShellExplanation {
@@ -1591,7 +1599,7 @@ function scopeNode(
   kind: string,
   scope: Scope,
   scopes: readonly Scope[],
-  runtimeOf: (command: string) => string,
+  runtimeOf: (one: Judged) => string,
   reparse: (line: string) => TSNodeLike,
 ): ShellNode {
   const text = scope.source
@@ -1650,7 +1658,7 @@ function commandOf(
   one: Judged,
   text: string,
   children: readonly ShellNode[],
-  runtimeOf: (command: string) => string,
+  runtimeOf: (one: Judged) => string,
 ): CommandExplanation {
   const judgment = one.judgment
   const [outcome, reason, source] = verdictOf(judgment)
@@ -1665,7 +1673,7 @@ function commandOf(
     source,
     answers: judgment.answers,
     refusal: judgment.refusal,
-    runtime: runtimeOf(judgment.command),
+    runtime: runtimeOf(one),
     text,
     children,
   }

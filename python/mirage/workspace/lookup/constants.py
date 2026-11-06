@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 
@@ -24,6 +25,7 @@ from mirage.commands.spec.types import FlagValue, WordKind
 from mirage.shell.constants import BUILTIN_GROUP
 from mirage.shell.types import BuiltinGroup, ShellBuiltin
 from mirage.types import Follow, LineFacts, PathSpec
+from mirage.workspace.lookup.types import WrapperOptions
 
 # Bash builtins the parser accepts but the executor cannot honor; they
 # still route to the shell layer so the error names a capability gap.
@@ -339,6 +341,173 @@ def end_options_after_program(name: str, words: list[str]) -> list[str]:
             return words
         return words[:after] + ["--"] + words[after:]
     return words
+
+
+# As GNU coreutils 9.7 and util-linux 2.41 answer on debian:stable-slim.
+PROGRAM_WRAPPERS: dict[str, WrapperOptions] = {
+    "nice": WrapperOptions(
+        ("-n", "--adjustment"),
+        (),
+        (),
+        125,
+        "nice: '{}': No such file or directory\n",
+    ),
+    "nohup": WrapperOptions(
+        (),
+        (),
+        (),
+        125,
+        "nohup: failed to run command '{}': No such file or directory\n",
+    ),
+    "stdbuf": WrapperOptions(
+        ("-i", "-o", "-e", "--input", "--output", "--error"),
+        (),
+        (),
+        125,
+        "stdbuf: failed to run command '{}': No such file or directory\n",
+    ),
+    "ionice": WrapperOptions(
+        ("-c", "-n", "--class", "--classdata"),
+        ("-t", "--ignore"),
+        ("-p", "-P", "-u", "--pid", "--pgid", "--uid"),
+        1,
+        "ionice: failed to execute {}: No such file or directory\n",
+    ),
+    "setsid": WrapperOptions(
+        (),
+        ("-c", "-f", "-w", "--ctty", "--fork", "--wait"),
+        (),
+        1,
+        "setsid: failed to execute {}: No such file or directory\n",
+    ),
+}
+
+_SIZE = re.compile(r"\s*\+?(\d*)(?:([kKMGTPEZYRQ])(B|iB)?)?")
+
+
+def read_wrapper(
+    name: str, words: Sequence[str]
+) -> tuple[int | None, str | None]:
+    """Where the program a wrapper runs stands in its words, and the
+    stderr its first bad option or value gets; None for either when
+    there is none. An option that runs no program (``--help``,
+    ``ionice -p``) leaves both None.
+
+    Args:
+        name (str): a ``PROGRAM_WRAPPERS`` name.
+        words (Sequence[str]): the wrapper's words, argv[0] excluded.
+    """
+    grammar = PROGRAM_WRAPPERS[name]
+    usage = f"Try '{name} --help' for more information.\n"
+    stops = (*grammar.stops, "--help", "--version")
+    spellings = [
+        o for o in (*grammar.values, *grammar.flags, *stops) if o[1] == "-"
+    ]
+    error: str | None = None
+    moded = False
+    i = 0
+    while i < len(words):
+        word = words[i]
+        if word == "--":
+            i += 1
+            break
+        if not word.startswith("-") or word == "-":
+            break
+        i += 1
+        if name == "nice" and word[1:].isdigit():
+            continue
+        if word.startswith("--"):
+            option, equals, given = word.partition("=")
+            known = next((o for o in spellings if o.startswith(option)), None)
+            if known is None:
+                error = (
+                    error or f"{name}: unrecognized option '{word}'\n{usage}"
+                )
+                continue
+            if known in stops:
+                return None, None
+            if known in grammar.values:
+                if not equals:
+                    if i == len(words):
+                        return None, None
+                    given = words[i]
+                    i += 1
+                error = error or _bad_value(name, known, given, usage)
+                moded = True
+            continue
+        for j, letter in enumerate(word[1:], 2):
+            option = f"-{letter}"
+            if option in stops:
+                return None, None
+            if option in grammar.flags:
+                continue
+            if option not in grammar.values:
+                error = (
+                    error or f"{name}: invalid option -- '{letter}'\n{usage}"
+                )
+                continue
+            given = word[j:]
+            if not given:
+                if i == len(words):
+                    return None, None
+                given = words[i]
+                i += 1
+            error = error or _bad_value(name, option, given, usage)
+            moded = True
+            break
+    if i == len(words):
+        return None, None
+    if name == "stdbuf" and not moded:
+        error = (
+            error
+            or f"stdbuf: you must specify a buffering mode option\n{usage}"
+        )
+    return i, error
+
+
+def _bad_value(name: str, option: str, value: str, usage: str) -> str | None:
+    """The stderr a wrapper's option value gets, None when it is good.
+
+    Args:
+        name (str): the wrapper.
+        option (str): the option as its grammar spells it.
+        value (str): the value given.
+        usage (str): the wrapper's ``Try ... --help`` line.
+    """
+    if name == "nice":
+        if re.fullmatch(r"\s*[+-]?\d+", value):
+            return None
+        return f"nice: invalid adjustment '{value}'\n"
+    if name == "ionice" and option in ("-c", "--class"):
+        if re.fullmatch(r"\s*\d+", value):
+            number = int(value)
+            return (
+                None
+                if number <= 3
+                else f"ionice: unknown prio class {number}\n"
+            )
+        if value.lower() in ("none", "realtime", "best-effort", "idle"):
+            return None
+        return f"ionice: unknown scheduling class: '{value}'\n"
+    if name == "ionice":
+        if re.fullmatch(r"\s*[+-]?\d+", value):
+            return None
+        return f"ionice: invalid class data argument: '{value}'\n"
+    if value == "L":
+        if option in ("-i", "--input"):
+            return f"stdbuf: line buffering stdin is meaningless\n{usage}"
+        return None
+    size = _SIZE.fullmatch(value)
+    if size is None or not (size[1] or size[2]):
+        return f"stdbuf: invalid mode '{value}'\n"
+    power = "KMGTPEZYRQ".index(size[2].upper()) + 1 if size[2] else 0
+    base = 1000 if size[3] == "B" else 1024
+    if int(size[1] or 1) * base**power >= 2**64:
+        return (
+            f"stdbuf: invalid mode '{value}': "
+            "Value too large for defined data type\n"
+        )
+    return None
 
 
 # Commands the router must not resolve the last component for, even

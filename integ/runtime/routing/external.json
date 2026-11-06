@@ -436,6 +436,145 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_wrapper_runs_where_the_program_it_runs_is_captured",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "captures": [
+              "@external"
+            ]
+          },
+          {
+            "name": "echobox",
+            "captures": [
+              "gcc"
+            ]
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "nice -n 5 gcc x.c",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nice -n 5 gcc x.c\n"
+          }
+        },
+        {
+          "command": "nice nohup gcc x.c",
+          "expect": {
+            "exit": 0,
+            "stdout": "box:nice nohup gcc x.c\n"
+          }
+        },
+        {
+          "command": "nice make",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"nice\",\"make\"]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_wrapper_around_a_mirage_command_runs_it_in_mirage",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "captures": [
+              "@external"
+            ]
+          },
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "f": "python here\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "nice -n 5 grep python /ram/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "python here\n"
+          }
+        },
+        {
+          "command": "nice nohup cat /ram/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "python here\n"
+          }
+        },
+        {
+          "command": "nice make",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"nice\",\"make\"]\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "a_wrapper_refuses_a_shell_word_and_a_bad_option_as_gnu_does",
+      "world": {
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "f": "kept\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "nice cd /ram",
+          "expect": {
+            "exit": 127,
+            "stdout": "",
+            "stderr": "nice: 'cd': No such file or directory\n"
+          }
+        },
+        {
+          "command": "pwd",
+          "expect": {
+            "exit": 0,
+            "stdout": "/\n"
+          }
+        },
+        {
+          "command": "nice --bogus rm /ram/f",
+          "expect": {
+            "exit": 125,
+            "stdout": "",
+            "stderr": "nice: unrecognized option '--bogus'\nTry 'nice --help' for more information.\n"
+          }
+        },
+        {
+          "command": "cat /ram/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "kept\n"
+          }
+        }
+      ]
     }
   ]
 }

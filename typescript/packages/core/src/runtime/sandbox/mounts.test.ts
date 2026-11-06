@@ -387,6 +387,59 @@ describe('SandboxMounts', () => {
     expect(sandbox.table.size).toBe(0)
   })
 
+  it.each([
+    ['/notes', false],
+    ['/data', true],
+    ['/', true],
+  ])('refuses a line from a cwd the sandbox cannot see: %s', async (cwd, ran) => {
+    const sandbox = new FakeSandbox('ssh')
+    const ws = workspace(sandbox)
+    expect((await ws.shell('mkdir -p /notes')).exitCode).toBe(0)
+    const result = await ws.shell(`cd ${cwd} && python3 job.py`)
+    const said = [result.exitCode, DEC.decode(result.stderr)]
+    if (ran) expect(said).toEqual([0, ''])
+    else {
+      expect(said).toEqual([
+        126,
+        'fake: the sandbox cannot see the working directory /notes; cd into a mount first\n',
+      ])
+      expect([sandbox.commands, sandbox.pipes]).toEqual([[], []])
+    }
+    await ws.close()
+  })
+
+  it('refuses a cwd the sandbox cannot see before connecting', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    sandbox.connect = () => Promise.reject(new Error('offline'))
+    const ws = workspace(sandbox)
+    expect((await ws.shell('mkdir -p /notes')).exitCode).toBe(0)
+    const result = await ws.shell('cd /notes && python3 job.py')
+    expect([result.exitCode, DEC.decode(result.stderr)]).toEqual([
+      126,
+      'fake: the sandbox cannot see the working directory /notes; cd into a mount first\n',
+    ])
+    const mounts = (sandbox as unknown as { mounts: { lines: unknown[] } }).mounts
+    expect(mounts.lines).toHaveLength(0)
+    await ws.close()
+  })
+
+  it('leaves a running branch admitted when another is refused for its cwd', async () => {
+    const sandbox = new FakeSandbox('ssh')
+    const ws = workspace(sandbox)
+    expect((await ws.shell('mkdir -p /notes')).exitCode).toBe(0)
+    const controller = new AbortController()
+    const line = ws.shell('cd /data && python3 slow.py | (cd /notes && python3 job.py)', {
+      signal: controller.signal,
+    })
+    await until(() => sandbox.commands.includes('python3 slow.py'))
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    const mounts = (sandbox as unknown as { mounts: { lines: unknown[] } }).mounts
+    expect(mounts.lines).toHaveLength(1)
+    controller.abort()
+    await line.catch(() => undefined)
+    await ws.close()
+  })
+
   it('refuses a second session rather than show it the first view', async () => {
     const sandbox = new FakeSandbox('ssh')
     const ws = workspace(sandbox)

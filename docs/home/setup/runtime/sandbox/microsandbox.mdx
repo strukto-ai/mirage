@@ -21,7 +21,7 @@ msb create my-registry/mirage-fuse:latest --name mirage-box
 ## Usage
 
 `captures` defaults to [`@external`](/home/setup/runtime/overview#captures).
-Add `python3` to run Python programs in the guest too.
+Add `python3` and `python` to run Python programs in the guest too.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -30,7 +30,7 @@ Add `python3` to run Python programs in the guest too.
     from mirage.runtime.sandbox.microsandbox import MicrosandboxRuntime
 
     runtime = MicrosandboxRuntime(
-        captures=["python3", "@external"],
+        captures=["python3", "python", "@external"],
         config={"sandbox": "mirage-box"},
     )
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
@@ -42,7 +42,7 @@ Add `python3` to run Python programs in the guest too.
     import { MountMode, RAMVFS, MicrosandboxRuntime, Workspace } from '@struktoai/mirage-node'
 
     const runtime = new MicrosandboxRuntime({
-      captures: ['python3', '@external'],
+      captures: ['python3', 'python', '@external'],
       config: { sandbox: 'mirage-box' },
     })
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
@@ -54,7 +54,7 @@ Add `python3` to run Python programs in the guest too.
     mode: exec
     runtimes:
       - name: microsandbox
-        captures: ["python3", "@external"]
+        captures: ["python3", "python", "@external"]
         config:
           sandbox: mirage-box
     mounts:
@@ -79,7 +79,8 @@ Mirage. Set `mount_type` in Python or YAML, or `mountType` in TypeScript:
 Add `mount_type: ssh` to the config (`mountType: 'ssh'` in TypeScript).
 Install `mirage-ai[ssh]` on a Python host or `ssh2` on a Node host. The
 guest needs `sshfs` and access to `/dev/fuse`, but no Mirage installation,
-SSH keys or open port. In `ssh` and `both`, each runtime instance serves
+SSH keys or open port (`apt-get install sshfs`). In `ssh` and `both`, each
+runtime instance serves
 its first session only. If the guest restarts, Mirage mounts the paths
 again; a command caught mid-restart exits 126 without running.
 

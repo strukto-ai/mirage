@@ -35,8 +35,8 @@ docker run -d --cap-add SYS_ADMIN --device /dev/fuse \
 ## Usage
 
 `captures` defaults to [`@external`](/home/setup/runtime/overview#captures):
-every program Mirage does not have itself. Name `python3` to run it in the
-container too.
+every program Mirage does not have itself. Name `python3` and `python` to run
+them in the container too.
 
 <Tabs>
   <Tab title="Python" icon="/images/python-logo.svg">
@@ -45,7 +45,7 @@ container too.
     from mirage.runtime.sandbox.docker import DockerRuntime
 
     runtime = DockerRuntime(
-        captures=["python3", "@external"],
+        captures=["python3", "python", "@external"],
         config={"container": "my-sandbox", "mount_type": "ssh"},
     )
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=[runtime])
@@ -57,7 +57,7 @@ container too.
     import { DockerRuntime, MountMode, RAMVFS, Workspace } from '@struktoai/mirage-node'
 
     const runtime = new DockerRuntime({
-      captures: ['python3', '@external'],
+      captures: ['python3', 'python', '@external'],
       config: { container: 'my-sandbox', mountType: 'ssh' },
     })
     const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.EXEC, runtimes: [runtime] })
@@ -69,7 +69,7 @@ container too.
     mode: exec
     runtimes:
       - name: docker
-        captures: ["python3", "@external"]
+        captures: ["python3", "python", "@external"]
         config:
           container: my-sandbox
           mount_type: ssh

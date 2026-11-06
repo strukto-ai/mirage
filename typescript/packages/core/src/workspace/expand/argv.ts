@@ -28,11 +28,11 @@ import {
   Consumer,
   WordPolicy,
   endOptionsAfterProgram,
-  lookup,
   runsAs,
   runtimeRefused,
   wordPolicy,
 } from '../lookup/index.ts'
+import { mirageProgramAt, routedConsumer } from '../lookup/lookup.ts'
 
 import { classifyParts } from './classify/index.ts'
 import { globNeedsShell, globOptions, resolveGlobs } from './globs.ts'
@@ -134,8 +134,13 @@ export async function expandArgv(
   // function for its inner run, which is exactly when the rewrite
   // applies again. A CLI cannot reach here at all, since registerCli
   // refuses a shell builtin's name.
-  const consumer = lookup(name, session, registry, context.frame.routing)
-  const refused = runtimeRefused(name, session, registry, context.frame.routing)
+  const typed = expanded.slice(consumed).map(unmarkGlobs)
+  const [routed, routing] = routedConsumer(name, typed, session, registry, context.frame.routing)
+  const consumer =
+    routed === Consumer.UNKNOWN && mirageProgramAt(name, typed, session, registry, routing) !== null
+      ? Consumer.EXTERNAL
+      : routed
+  const refused = runtimeRefused(name, session, registry, routing)
   const shadowed = Object.hasOwn(session.functions, name) || consumer === Consumer.EXTERNAL
   const line = expanded.slice(consumed)
   const tail = shadowed ? line : endOptionsAfterProgram(name, line)

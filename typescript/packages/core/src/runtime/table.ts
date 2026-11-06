@@ -246,6 +246,25 @@ export function bindCommands(entries: readonly Runtime[]): Record<string, Runtim
 }
 
 /**
+ * Each capture an earlier entry already takes, as [capture, winner,
+ * shadowed], in list order. Mirrors Python's `shadowed_captures`.
+ *
+ * @param entries runtime instances in precedence order.
+ */
+export function shadowedCaptures(entries: readonly Runtime[]): [string, string, string][] {
+  const winners = new Map<string, string>()
+  const shadowed: [string, string, string][] = []
+  for (const entry of entries) {
+    for (const capture of new Set(entry.captures)) {
+      const winner = winners.get(capture)
+      if (winner !== undefined) shadowed.push([capture, winner, entry.name])
+      else winners.set(capture, entry.name)
+    }
+  }
+  return shadowed
+}
+
+/**
  * The runtime that runs this entire line, if any.
  *
  * Only an explicit WHOLE_LINE capture claims a whole line. Named captures
@@ -259,6 +278,16 @@ export function wholeLineRuntime(
   const whole = Object.hasOwn(bindings, WHOLE_LINE) ? bindings[WHOLE_LINE] : null
   if (whole != null && isLineExecutor(whole)) return whole
   return null
+}
+
+/**
+ * Whether a runtime is a sandbox: a line executor on another machine.
+ * Mirrors Python's `is_sandbox`.
+ *
+ * @param entry the runtime, null or undefined for none.
+ */
+export function isSandbox(entry: Runtime | null | undefined): entry is Runtime & LineExecutorMixin {
+  return entry != null && isLineExecutor(entry) && entry.reach === 'remote'
 }
 
 /**

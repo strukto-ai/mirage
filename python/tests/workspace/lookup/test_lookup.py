@@ -11,6 +11,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+import asyncio
+
 import pytest
 
 from mirage.commands.cli.types import CLI, CLIHandler
@@ -18,10 +20,10 @@ from mirage.commands.config import command
 from mirage.commands.spec.types import CommandSpec
 from mirage.io import IOResult
 from mirage.policy.match.allow import head_allowed
-from mirage.policy.types import AdmissionRules
+from mirage.policy.types import AdmissionRules, CommandExplanation
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS
-from mirage.runtime.mixin import ProcessExecutorMixin
+from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.python.base import PythonRuntime
 from mirage.runtime.types import Program, RunResult
 from mirage.types import MountMode
@@ -364,3 +366,349 @@ def test_program_note_names_the_runtime_a_capture_runs_on():
         "gcc runs on the workspace's sandbox runtime."
     )
     assert program_note("native-tool", session, ws._registry) is None
+
+
+class _Box(Runtime, LineExecutorMixin):
+    """A line runtime that answers its own name."""
+
+    reach = "remote"
+
+    def __init__(self, name: str, *captures: str) -> None:
+        super().__init__(captures=captures)
+        self.name = name
+
+    async def run_line(self, engine, paths, texts, ctx):
+        return RunResult(
+            stdout=f"{self.name}\n".encode(), stderr=None, exit_code=0
+        )
+
+
+class _Monty(PythonRuntime):
+    name = "monty"
+
+    async def interpret(self, engine, program: Program, ctx) -> RunResult:
+        return RunResult(stdout=b"monty\n", stderr=None, exit_code=0)
+
+
+def _commands(node) -> list[str]:
+    found = [node.runtime] if isinstance(node, CommandExplanation) else []
+    for child in getattr(node, "children", ()) or ():
+        found += _commands(child)
+    return found
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "external, line, runs",
+    [
+        (True, "nice gcc x.c", "docker"),
+        (True, "nice -n -5 gcc x.c", "docker"),
+        (True, "nice -- gcc x.c", "docker"),
+        (True, "nohup gcc x.c", "docker"),
+        (True, "nice nohup gcc x.c", "docker"),
+        (True, "stdbuf -o L gcc x.c", "docker"),
+        (True, "ionice -c2 gcc x.c", "docker"),
+        (True, "setsid -w gcc x.c", "docker"),
+        (False, "nice gcc x.c", "docker"),
+        (True, "nice make", "e2b"),
+        (True, "nice", "e2b"),
+        (True, "sudo gcc x.c", "e2b"),
+    ],
+)
+async def test_a_wrapper_runs_where_the_program_it_runs_is_captured(
+    external, line, runs
+):
+    entries = [_Box("docker", "gcc"), _Monty(), "workspace"]
+    if external:
+        entries.insert(0, _Box("e2b", "@external"))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=entries)
+    try:
+        io = await ws.shell(line)
+        assert (io.exit_code, await io.stdout_str()) == (0, f"{runs}\n")
+        said = await ws.explain(line)
+        assert _commands(said.node)[0] == ("" if runs == "e2b" else runs)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_wrapper_a_runtime_captures_runs_there():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[_Box("niced", "nice"), _Box("docker", "gcc"), "workspace"],
+    )
+    try:
+        io = await ws.shell("nice gcc x.c")
+        assert await io.stdout_str() == "niced\n"
+    finally:
+        await ws.close()
+
+
+class _Echo(_Box):
+    """A line runtime that answers the line it was handed."""
+
+    async def run_line(self, engine, paths, texts, ctx):
+        return RunResult(
+            stdout=f"{ctx.flags['c']}\n".encode(), stderr=None, exit_code=0
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("external", [False, True])
+async def test_a_wrapped_programs_globs_expand_as_the_programs_do(external):
+    entries = [_Echo("docker", "gcc"), "workspace"]
+    if external:
+        entries.insert(0, _Box("e2b", "@external"))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=entries)
+    try:
+        await ws.vfs.write("/data/a.c", b"")
+        await ws.vfs.write("/data/b.c", b"")
+        io = await ws.shell("cd /data && nice gcc *.c")
+        assert await io.stdout_str() == "nice gcc a.c b.c\n"
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("external", [False, True])
+async def test_a_function_named_like_a_wrapper_is_explained_as_it_runs(
+    external,
+):
+    entries = [_Box("docker", "gcc"), "workspace"]
+    if external:
+        entries.insert(0, _Box("e2b", "@external"))
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.EXEC, runtimes=entries)
+    try:
+        await ws.shell("nice() { echo local; }")
+        io = await ws.shell("nice gcc x.c")
+        assert await io.stdout_str() == "local\n"
+        said = await ws.explain("nice gcc x.c")
+        assert _commands(said.node)[0] == ""
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_command_past_a_wrapper_function_is_explained_as_it_runs():
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[_Box("docker", "gcc"), "workspace"],
+    )
+    try:
+        await ws.shell("nice() { echo local; }")
+        io = await ws.shell("command nice gcc x.c")
+        assert await io.stdout_str() == "docker\n"
+        said = await ws.explain("command nice gcc x.c")
+        assert _commands(said.node) == ["", "docker", "docker"]
+        assert "nice" in ws.get_session(ws.default_session_id).functions
+    finally:
+        await ws.close()
+
+
+def _mirage_workspace(*entries) -> Workspace:
+    return Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[*entries, "workspace"],
+        profiles={"tight": {"commands": {"allow": ["cd", "grep"]}}},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "external, line, out",
+    [
+        (True, "nice grep python f", "python here\n"),
+        (False, "nice grep python f", "python here\n"),
+        (True, "nohup cat f", "python here\n"),
+        (True, "nice -n 5 grep python f", "python here\n"),
+        (True, "nice nohup grep python f", "python here\n"),
+        (False, "nice grep -h python *.txt", "python a\npython b\n"),
+        (True, "nice python3 -c 1", "monty\n"),
+        (True, "stdbuf -oL grep python f", "python here\n"),
+    ],
+)
+async def test_a_wrapper_around_mirages_program_runs_it_in_mirage(
+    external, line, out
+):
+    entries = [_Box("docker", "gcc"), _Monty()]
+    if external:
+        entries.insert(0, _Box("e2b", "@external"))
+    ws = _mirage_workspace(*entries)
+    try:
+        await ws.vfs.write("/data/f", b"python here\n")
+        await ws.vfs.write("/data/a.txt", b"python a\n")
+        await ws.vfs.write("/data/b.txt", b"python b\n")
+        await ws.shell("cd /data")
+        io = await ws.shell(line)
+        assert (io.exit_code, await io.stdout_str()) == (0, out)
+        said = await ws.explain(line)
+        assert _commands(said.node)[0] == ""
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, out",
+    [
+        ("foo() { echo hi; }; nice foo", "hi\n"),
+        ("nice python3 -c 1", "e2b\n"),
+        ("nice --help grep x", "e2b\n"),
+        ("ionice -p 1 grep x", "e2b\n"),
+    ],
+)
+async def test_a_wrapper_runs_a_function_and_keeps_its_route_otherwise(
+    line, out
+):
+    ws = Workspace(
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        runtimes=[_Box("e2b", "@external"), "workspace"],
+    )
+    try:
+        io = await ws.shell(line)
+        assert (io.exit_code, await io.stdout_str()) == (0, out)
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_wrapper_the_allow_list_leaves_out_is_still_refused():
+    ws = _mirage_workspace(_Box("e2b", "@external"))
+    try:
+        await ws.vfs.write("/data/f", b"python here\n")
+        ws.create_session("s", profile="tight")
+        assert (
+            await ws.shell("cd /data && grep python f", session_id="s")
+        ).exit_code == 0
+        io = await ws.shell("cd /data && nice grep python f", session_id="s")
+        assert io.exit_code == 126
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line, code, said",
+    [
+        ("nice cd /data", 127, "nice: 'cd': No such file or directory\n"),
+        (
+            "nohup cd /data",
+            127,
+            "nohup: failed to run command 'cd': No such file or directory\n",
+        ),
+        (
+            "stdbuf -oL cd /data",
+            127,
+            "stdbuf: failed to run command 'cd': No such file or directory\n",
+        ),
+        (
+            "ionice -c3 cd /data",
+            127,
+            "ionice: failed to execute cd: No such file or directory\n",
+        ),
+        (
+            "setsid cd /data",
+            127,
+            "setsid: failed to execute cd: No such file or directory\n",
+        ),
+        (
+            "nice --bogus rm f",
+            125,
+            "nice: unrecognized option '--bogus'\n"
+            "Try 'nice --help' for more information.\n",
+        ),
+        (
+            "nice -x rm f",
+            125,
+            "nice: invalid option -- 'x'\n"
+            "Try 'nice --help' for more information.\n",
+        ),
+        ("nice -n abc rm f", 125, "nice: invalid adjustment 'abc'\n"),
+        (
+            "nohup -x rm f",
+            125,
+            "nohup: invalid option -- 'x'\n"
+            "Try 'nohup --help' for more information.\n",
+        ),
+        ("stdbuf -o abc rm f", 125, "stdbuf: invalid mode 'abc'\n"),
+        (
+            "stdbuf -o 1Q rm f",
+            125,
+            "stdbuf: invalid mode '1Q': Value too large for defined data type\n",
+        ),
+        (
+            "stdbuf rm f",
+            125,
+            "stdbuf: you must specify a buffering mode option\n"
+            "Try 'stdbuf --help' for more information.\n",
+        ),
+        (
+            "stdbuf -i L rm f",
+            125,
+            "stdbuf: line buffering stdin is meaningless\n"
+            "Try 'stdbuf --help' for more information.\n",
+        ),
+        ("ionice -c abc rm f", 1, "ionice: unknown scheduling class: 'abc'\n"),
+        (
+            "ionice -n 1x rm f",
+            1,
+            "ionice: invalid class data argument: '1x'\n",
+        ),
+        (
+            "setsid -x rm f",
+            1,
+            "setsid: invalid option -- 'x'\n"
+            "Try 'setsid --help' for more information.\n",
+        ),
+    ],
+)
+async def test_a_wrapper_mirage_runs_for_refuses_as_gnu_does(line, code, said):
+    ws = _mirage_workspace(_Box("e2b", "@external"))
+    try:
+        await ws.vfs.write("/data/f", b"kept\n")
+        io = await ws.shell(f"cd / && {line}")
+        assert (io.exit_code, await io.stderr_str()) == (code, said)
+        assert await (await ws.shell("pwd; cat /data/f")).stdout_str() == (
+            "/\nkept\n"
+        )
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "line",
+    [
+        "nice -n +3 cat /data/f",
+        "nice -10 cat /data/f",
+        "nice --adj 3 cat /data/f",
+        "stdbuf -o 1KB -e0 cat /data/f",
+        "ionice -c idle -n 0 cat /data/f",
+        "setsid -fw cat /data/f",
+    ],
+)
+async def test_a_wrapper_with_good_options_runs_its_program(line):
+    ws = _mirage_workspace(_Box("e2b", "@external"))
+    try:
+        await ws.vfs.write("/data/f", b"kept\n")
+        io = await ws.shell(line)
+        assert (io.exit_code, await io.stdout_str()) == (0, "kept\n")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_wrapped_program_streams_its_output():
+    ws = _mirage_workspace()
+    try:
+        await ws.vfs.write("/data/log", b"one\n")
+        io = await asyncio.wait_for(
+            ws.shell("nice tail -f /data/log | head -n 1"), 10
+        )
+        assert await io.stdout_str() == "one\n"
+    finally:
+        await ws.close()

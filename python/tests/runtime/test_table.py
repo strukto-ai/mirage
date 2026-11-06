@@ -31,6 +31,7 @@ from mirage.runtime.table import (
     known_runtimes,
     register_runtime,
     runtime_bindings_for,
+    shadowed_captures,
     whole_line_runtime,
 )
 from mirage.runtime.types import RunResult
@@ -198,3 +199,25 @@ def test_register_runtime_replaces_a_custom_name():
         assert isinstance(build_runtime("fake"), Other)
     finally:
         NAMED.pop("fake", None)
+
+
+class Named(Runtime):
+    def __init__(self, name: str, *captures: str) -> None:
+        super().__init__(captures=captures)
+        self.name = name
+
+
+def test_shadowed_captures_names_each_capture_an_earlier_entry_wins():
+    entries = [
+        Named("e2b", "@external", "gcc"),
+        Named("docker", "gcc", "@external", "make"),
+        Named("box", "@line"),
+        Named("other", "@line"),
+        WorkspaceRuntime(),
+    ]
+    assert shadowed_captures(entries) == [
+        ("gcc", "e2b", "docker"),
+        ("@external", "e2b", "docker"),
+        ("@line", "box", "other"),
+    ]
+    assert shadowed_captures([Named("a", "x"), Named("b", "y")]) == []

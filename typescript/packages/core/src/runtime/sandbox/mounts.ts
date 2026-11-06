@@ -252,6 +252,34 @@ export class SandboxMounts {
   }
 
   /**
+   * Record the line for `sync`, then refuse a cwd other than `/` that ssh
+   * serves no mount for (126), before connecting. Mirrors Python's
+   * `SandboxMounts.enter`.
+   */
+  enter(binding: WorkspaceBinding | null, cwd: string): RunResult | null {
+    const mountPrefixes = binding?.mountPrefixes ?? null
+    if (mountPrefixes === null) {
+      throw new Error(`${this.runtime}: mountType needs the runtime in a workspace`)
+    }
+    const { stop, writeHeld } = currentCaller()
+    this.lines.push({ stop, writeHeld, lent: new Set() })
+    const seen = rstripSlash(cwd)
+    if (
+      this.mountType === 'ssh' &&
+      seen !== '' &&
+      ![...mountPaths(mountPrefixes())].some((p) => seen === p || seen.startsWith(`${p}/`))
+    )
+      return {
+        stdout: new Uint8Array(),
+        stderr: new TextEncoder().encode(
+          `${this.runtime}: the sandbox cannot see the working directory ${seen}; cd into a mount first\n`,
+        ),
+        exitCode: CANNOT_EXECUTE_STATUS,
+      }
+    return null
+  }
+
+  /**
    * Bring the mounts in step, then refuse a line that may not run: one the
    * session's restrictions reach past the dispatcher is refused as a policy
    * refuses it (126), one the sandbox cannot serve because another session
@@ -283,8 +311,6 @@ export class SandboxMounts {
         `${this.runtime}: mountType serves a session's view, and this line runs as none`,
       )
     }
-    const { stop, writeHeld } = currentCaller()
-    this.lines.push({ stop, writeHeld, lent: new Set() })
     return this.locked(async () => {
       const served = this.session
       const session = getSession(current.sessionId)

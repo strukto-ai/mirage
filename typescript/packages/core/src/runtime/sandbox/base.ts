@@ -183,6 +183,8 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     // Served here rather than in the constructor, which runs before a
     // subclass names itself.
     if (this.mounts === null) this.serveMounts(this.config.mountType ?? null)
+    const unseen = this.mounts?.enter(this.binding, ctx.cwd.virtual) ?? null
+    if (unseen !== null) return unseen
     await this.ensureConnected(ctx.signal)
     const refusal = (await this.mounts?.admit(this.binding, ctx.signal)) ?? null
     if (refusal !== null) return refusal

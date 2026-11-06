@@ -14,7 +14,7 @@
 
 import importlib
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, TypeGuard
 
 from mirage.runtime.base import Runtime
 from mirage.runtime.constants import EXTERNAL_COMMANDS, WHOLE_LINE
@@ -230,6 +230,26 @@ def bind_commands(entries: list[Runtime[Any]]) -> dict[str, Runtime[Any]]:
     return bindings
 
 
+def shadowed_captures(
+    entries: list[Runtime[Any]],
+) -> list[tuple[str, str, str]]:
+    """Each capture an earlier entry already takes, as (capture,
+    winner, shadowed), in list order.
+
+    Args:
+        entries (list[Runtime]): runtime instances in precedence order.
+    """
+    winners: dict[str, str] = {}
+    shadowed: list[tuple[str, str, str]] = []
+    for entry in entries:
+        for capture in dict.fromkeys(entry.captures):
+            if capture in winners:
+                shadowed.append((capture, winners[capture], entry.name))
+            else:
+                winners[capture] = entry.name
+    return shadowed
+
+
 def whole_line_runtime(
     bindings: Mapping[str, RuntimeIdentity | None],
 ) -> LineExecutorMixin[Any] | None:
@@ -249,6 +269,20 @@ def whole_line_runtime(
     if isinstance(whole, LineExecutorMixin):
         return whole
     return None
+
+
+def is_sandbox(entry: RuntimeIdentity | None) -> TypeGuard[Runtime[Any]]:
+    """Whether a runtime is a sandbox: a line executor on another
+    machine.
+
+    Args:
+        entry (RuntimeIdentity | None): the runtime, None for none.
+    """
+    return (
+        isinstance(entry, Runtime)
+        and isinstance(entry, LineExecutorMixin)
+        and entry.reach == "remote"
+    )
 
 
 def catch_all(entries: list[Runtime[Any]]) -> Runtime[Any] | None:
