@@ -1029,6 +1029,9 @@ importers:
       ws:
         specifier: ^8.21.3
         version: 8.21.3
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.1
     devDependencies:
       '@opentelemetry/sdk-metrics':
         specifier: ^3.0.0
@@ -9551,7 +9554,7 @@ snapshots:
     dependencies:
       '@opentelemetry/api': 1.10.0
       '@opentelemetry/core': 2.12.0(@opentelemetry/api@1.10.0)
-      yaml: 2.9.0
+      yaml: 2.9.1
 
   '@opentelemetry/context-async-hooks@2.12.0(@opentelemetry/api@1.10.0)':
     dependencies:
@@ -11240,7 +11243,7 @@ snapshots:
       multipasta: 0.2.8
       toml: 5.0.1
       uuid: 14.0.2
-      yaml: 2.9.0
+      yaml: 2.9.1
 
   emoji-regex@10.6.0: {}
 
@@ -12227,7 +12230,7 @@ snapshots:
       strip-json-comments: 5.0.3
       tinyglobby: 0.2.17
       unbash: 4.0.2
-      yaml: 2.9.0
+      yaml: 2.9.1
       zod: 4.6.7
 
   kubernetes-types@1.30.0: {}

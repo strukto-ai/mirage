@@ -29,7 +29,9 @@ import { watchNetwork } from '@struktoai/mirage-node/io/network'
 import { quoteName } from '@struktoai/mirage-node/workspace/record/disk'
 import type { Policy } from '@struktoai/mirage-core/policy/base'
 import { registerMetrics } from './metrics.ts'
+import type { ResourceStore } from '@struktoai/mirage-core/resources/base'
 import { type RateLimit, registerRateLimits, resolveRateLimits } from './rate_limit.ts'
+import { buildResourceStore, resolveResourceStore } from './resources/config.ts'
 import {
   OWNERS_PREFIX,
   resolveCeilings,
@@ -145,6 +147,12 @@ export interface BuildAppOptions {
    * else sets no ceiling.
    */
   maxEnv?: string | number
+  /**
+   * Where saved vfs, cli, runtime, policy and template configs are kept.
+   * Undefined reads `$MIRAGE_RESOURCE_STORE` or the `resource_store`
+   * config key, else files under the mirage home.
+   */
+  resourceStore?: ResourceStore
 }
 
 export type MirageApp = ReturnType<typeof buildApp>
@@ -296,5 +304,6 @@ export function buildApp(options: BuildAppOptions = {}) {
       }
     }
   })
-  return Object.assign(app, { registry, jobs, pidFile, ssh, mcp })
+  const resources = options.resourceStore ?? buildResourceStore(resolveResourceStore())
+  return Object.assign(app, { registry, jobs, pidFile, ssh, mcp, resources })
 }
