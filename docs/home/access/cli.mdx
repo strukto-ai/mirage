@@ -121,7 +121,7 @@ mirage shell -w work -c 'ls /repo && echo draft > /scratch/notes.txt'
 | `mirage tools TOOL ARGS [-w ID]` | Run one of the [agent tools](/home/access/mcp#tools). |
 
 The workspace is `-w`, else `MIRAGE_WORKSPACE`, else the current one that
-`mirage workspace use ID` set for the [context](#contexts). With none, the
+`mirage workspace use ID` set for the [context](#log-in). With none, the
 command exits 2. Each takes `-s SESSION`, the default session when absent. `shell` and `vfs`
 take `--explain`, which says what the line or call would do and runs nothing;
 see [Explain](/home/policy/explain).
@@ -202,7 +202,7 @@ a `workspace_id`.
 | `mirage workspace create --template NAME [-w ID]` | Create a workspace from a saved [template](#from-a-template). |
 | `mirage workspace create CONFIG --explain` | Show what the [server policies](/home/access/http#server-policies) say of the config, and create nothing. |
 | `mirage workspace list` | List workspaces. |
-| `mirage workspace use ID` | Make it the current workspace of the [context](#contexts). |
+| `mirage workspace use ID` | Make it the current workspace of the [context](#log-in). |
 | `mirage workspace get ID [--verbose]` | Show mounts and sessions. |
 | `mirage workspace delete ID` | Close a workspace and delete its state. |
 | `mirage workspace close ID` | Close a workspace and keep its state for the same id. |
@@ -275,7 +275,7 @@ The server the CLI starts. It exits 30 seconds after its last workspace is delet
 | `mirage daemon restart [--eager]` | Stop it; the next command, or `--eager`, starts a new one. Workspaces are lost. |
 | `mirage daemon kill` | Kill it. A last resort. |
 
-## Contexts
+## Log in
 
 A context is a server the CLI talks to, with its login, team and current
 workspace. `local` is the daemon on this machine, which needs no login and
@@ -378,7 +378,7 @@ environment variable wins over the file. Changes apply on the next start.
 | --- | --- | --- |
 | `port` | `MIRAGE_DAEMON_PORT` | `8765`; the `local` context follows it |
 | `url` | `MIRAGE_DAEMON_URL` | `http://127.0.0.1:PORT`: the `local` context's URL; `mirage login URL` adds another server |
-| `auth_token` | `MIRAGE_TOKEN` | your [login](#contexts) for the `local` context, else `~/.mirage/auth_token` |
+| `auth_token` | `MIRAGE_TOKEN` | your [login](#log-in) for the `local` context, else `~/.mirage/auth_token` |
 | `auth_mode` | `MIRAGE_AUTH_MODE` | `local` |
 | `allowed_hosts` | `MIRAGE_ALLOWED_HOSTS` | `127.0.0.1,localhost,::1` |
 | `idle_grace_seconds` | `MIRAGE_IDLE_GRACE_SECONDS` | `30` |
@@ -397,6 +397,6 @@ environment variable wins over the file. Changes apply on the next start.
 | `resource_store` | `MIRAGE_RESOURCE_STORE` | `files`, under `~/.mirage/resources`; `memory` keeps saved templates only until the daemon stops, and does not combine with `workers` |
 | `ssh_*` | `MIRAGE_SSH_*` | see [SSH](/home/access/ssh#set-up) |
 | `jwt_*` | `MIRAGE_JWT_*` | see [Configure authentication](/home/access/http#configure-authentication) |
-| `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [Contexts](#contexts) |
+| `login_client_id` | `MIRAGE_LOGIN_CLIENT_ID` | see [Log in](#log-in) |
 
 `MIRAGE_HOME` moves everything under `~/.mirage`.
