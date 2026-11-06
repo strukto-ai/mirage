@@ -392,7 +392,7 @@ export async function handleTimeout(
   const send = (number: number): void => {
     const ignored = IGNORED_SIGNALS.has(number)
     process.terminate(number, !foreground && !ignored)
-    if (ignored && !foreground) process.interruptChildren(number)
+    if (ignored && !foreground) process.signalChildren(number)
   }
   const watch = supervise(run, abort.signal, send, sink, held, seconds, lineSignal, {
     signal,

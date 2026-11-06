@@ -13,7 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import logging
 from collections.abc import AsyncIterator
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 
 from mirage.context import DEFAULT_UMASK
 from mirage.errors.constants import FS_ERRORS
@@ -203,17 +203,8 @@ async def _first_write(
     data: ByteSource,
 ) -> bool:
     """Land an opened description's first write into a file still empty
-    as one stream, and answer whether it did.
-
-    The same bytes from offset 0 in ``pwrite`` windows cost a copy of the
-    file each on a store whose ``pwrite`` rewrites it, so ``cmd > f``
-    would move the file's size squared. The backing file (the store and
-    its key, alike for every workspace mounting that store) is claimed
-    before the size is read and kept until the stream ends, so another
-    description of it writing meanwhile takes the windows, which
-    interleave as two descriptors do, instead of replacing what this one
-    wrote; a file in another store never contends. A stream that fails
-    leaves the offset at what landed.
+    as one stream (``sole_stream``), and answer whether it did. A stream
+    that fails leaves the offset at what landed.
 
     Args:
         dispatch (DispatchFn): operation dispatcher.
@@ -222,6 +213,39 @@ async def _first_write(
         data (ByteSource): bytes emitted by the command, untouched when
             this answers False.
     """
+    async with sole_stream(dispatch, file) as sole:
+        if not sole:
+            return False
+        try:
+            file.offset = await create_counted(
+                dispatch, session, file.scope, data
+            )
+        except BaseException:
+            file.offset = await _size_of(dispatch, file.scope) or 0
+            raise
+        return True
+
+
+@asynccontextmanager
+async def sole_stream(
+    dispatch: DispatchFn, file: FileDescription
+) -> AsyncIterator[bool]:
+    """Claim a description's file for a write from offset 0 as one
+    stream, yielding whether the file is claimed and still empty.
+
+    The same bytes from offset 0 in ``pwrite`` windows cost a copy of the
+    file each on a store whose ``pwrite`` rewrites it, so ``cmd > f``
+    would move the file's size squared. The backing file (the store and
+    its key, alike for every workspace mounting that store) is claimed
+    before the size is read and kept until the stream ends, so another
+    description of it writing meanwhile takes the windows, which
+    interleave as two descriptors do, instead of replacing what this one
+    wrote; a file in another store never contends.
+
+    Args:
+        dispatch (DispatchFn): operation dispatcher.
+        file (FileDescription): the description, at offset 0.
+    """
     report = OpReport()
     try:
         await dispatch("stat", file.scope, admit_only=True, report=report)
@@ -229,26 +253,19 @@ async def _first_write(
         logger.debug(
             "write target %s has no store: %s", file.scope.raw_path, exc
         )
-        return False
+        yield False
+        return
     store = report.store or file.scope.virtual
     if _streaming.setdefault(store, id(file)) != id(file):
-        return False
+        yield False
+        return
     try:
-        if await size_of(dispatch, file.scope) != 0:
-            return False
-        try:
-            file.offset = await create_counted(
-                dispatch, session, file.scope, data
-            )
-        except BaseException:
-            file.offset = await size_of(dispatch, file.scope) or 0
-            raise
-        return True
+        yield await _size_of(dispatch, file.scope) == 0
     finally:
         del _streaming[store]
 
 
-async def size_of(dispatch: DispatchFn, scope: PathSpec) -> int | None:
+async def _size_of(dispatch: DispatchFn, scope: PathSpec) -> int | None:
     """The size of the file a description opened, None when unknown.
 
     Args:

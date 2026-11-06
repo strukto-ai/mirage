@@ -166,16 +166,9 @@ const streaming = new Set<string>()
 
 /**
  * Land an opened description's first write into a file still empty as one
- * stream, and answer whether it did. The same bytes from offset 0 in `pwrite`
- * windows cost a copy of the file each on a store whose `pwrite` rewrites it,
- * so `cmd > f` would move the file's size squared. The backing file (the store
- * and its key, alike for every workspace mounting that store) is claimed
- * before the size is read and kept until the stream ends, so another
- * description of it writing meanwhile takes the windows, which interleave as
- * two descriptors do, instead of replacing what this one wrote; a file in
- * another store never contends. A stream that fails leaves the offset at what
- * landed. `data` is untouched when this answers false. Mirrors
- * Python's _first_write.
+ * stream (`soleStream`), and answer whether it did. A stream that fails
+ * leaves the offset at what landed. `data` is untouched when this answers
+ * false. Mirrors Python's _first_write.
  */
 async function firstWrite(
   dispatch: DispatchFn,
@@ -183,19 +176,8 @@ async function firstWrite(
   file: FileDescription,
   data: ByteSource,
 ): Promise<boolean> {
-  const report = new OpReport()
-  try {
-    await dispatch('stat', file.scope, [], { admit_only: true }, report)
-  } catch (err) {
-    if (!isFsError(err)) throw err
-    console.debug(`write target ${file.scope.rawPath} has no store: ${String(err)}`)
-    return false
-  }
-  const store = report.store ?? file.scope.virtual
-  if (streaming.has(store)) return false
-  streaming.add(store)
-  try {
-    if ((await sizeOf(dispatch, file.scope)) !== 0) return false
+  return soleStream(dispatch, file, async (sole) => {
+    if (!sole) return false
     try {
       file.offset = await createCounted(dispatch, session, file.scope, data)
     } catch (err) {
@@ -203,13 +185,46 @@ async function firstWrite(
       throw err
     }
     return true
+  })
+}
+
+/**
+ * Claim a description's file for a write from offset 0 as one stream, and
+ * run `write` with whether the file is claimed and still empty. The same
+ * bytes from offset 0 in `pwrite` windows cost a copy of the file each on a
+ * store whose `pwrite` rewrites it, so `cmd > f` would move the file's size
+ * squared. The backing file (the store and its key, alike for every
+ * workspace mounting that store) is claimed before the size is read and kept
+ * until the stream ends, so another description of it writing meanwhile
+ * takes the windows, which interleave as two descriptors do, instead of
+ * replacing what this one wrote; a file in another store never contends.
+ * Mirrors Python's sole_stream.
+ */
+export async function soleStream<T>(
+  dispatch: DispatchFn,
+  file: FileDescription,
+  write: (sole: boolean) => Promise<T>,
+): Promise<T> {
+  const report = new OpReport()
+  try {
+    await dispatch('stat', file.scope, [], { admit_only: true }, report)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    console.debug(`write target ${file.scope.rawPath} has no store: ${String(err)}`)
+    return write(false)
+  }
+  const store = report.store ?? file.scope.virtual
+  if (streaming.has(store)) return write(false)
+  streaming.add(store)
+  try {
+    return await write((await sizeOf(dispatch, file.scope)) === 0)
   } finally {
     streaming.delete(store)
   }
 }
 
-/** The size of the file a description opened, null when unknown. Mirrors Python's size_of. */
-export async function sizeOf(dispatch: DispatchFn, scope: PathSpec): Promise<number | null> {
+/** The size of the file a description opened, null when unknown. Mirrors Python's _size. */
+async function sizeOf(dispatch: DispatchFn, scope: PathSpec): Promise<number | null> {
   let stat: unknown
   try {
     ;[stat] = await dispatch('stat', scope)

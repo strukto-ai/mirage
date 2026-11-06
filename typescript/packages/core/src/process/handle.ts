@@ -43,7 +43,7 @@ export class ProcessHandle {
     private readonly finished: (pid: number) => void,
     private readonly cancelChildren: (signal: number) => void = () => undefined,
     private readonly bind: ExecutionBind = (_id, run) => run(),
-    private readonly interruptChildrenOf: (signal: number) => void = () => undefined,
+    private readonly signalChildrenOf: (signal: number) => void = () => undefined,
     readonly ignores: ReadonlySet<number> = new Set(),
   ) {
     this.current = Object.freeze(info)
@@ -173,9 +173,13 @@ export class ProcessHandle {
     }
   }
 
-  /** `interrupt` every runner this one started, and theirs. */
-  interruptChildren(signal: number): void {
-    this.interruptChildrenOf(signal)
+  /**
+   * Deliver a signal to every runner this one started, and theirs, as a
+   * process group gets it: one that ignores it hands it to its program
+   * (`interrupt`), any other stops with it.
+   */
+  signalChildren(signal: number): void {
+    this.signalChildrenOf(signal)
   }
 
   /**

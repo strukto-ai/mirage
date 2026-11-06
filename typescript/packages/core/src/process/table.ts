@@ -119,7 +119,7 @@ export class ProcessTable {
       },
       this.bind,
       (signal) => {
-        this.interruptChildren(pid, signal)
+        this.signalChildren(pid, signal)
       },
       init.ignores,
     )
@@ -147,11 +147,27 @@ export class ProcessTable {
   }
 
   /**
-   * Deliver a signal their shells ignore to every live runner under `pid`
-   * (`ProcessHandle.interrupt`). Mirrors Python's interrupt_children.
+   * Deliver a signal to every live runner under `pid`, as a process group
+   * gets it: a runner that ignores it (a job's shell) hands it to the program
+   * it runs right now (`ProcessHandle.interrupt`), and any other stops with
+   * it, so a native program it started receives that signal. A runner such a
+   * shell started is one of its programs, which the shell sees end and goes
+   * on past, so the signal reaches it through that shell. Mirrors Python's
+   * signal_children.
    */
-  interruptChildren(pid: number, signal: number): void {
-    for (const child of this.under(pid)) child.interrupt(signal)
+  signalChildren(pid: number, signal: number): void {
+    for (const child of this.under(pid)) {
+      if (child.ignores.has(signal)) child.interrupt(signal)
+      else if (!this.ignoredAbove(child.info.pid, pid, signal)) child.terminate(signal, false)
+    }
+  }
+
+  private ignoredAbove(pid: number, top: number, signal: number): boolean {
+    const chain = this.ancestors.get(pid) ?? []
+    const at = chain.indexOf(top)
+    return chain
+      .slice(at < 0 ? chain.length : at + 1)
+      .some((ancestor) => this.runners.get(ancestor)?.handle.ignores.has(signal) === true)
   }
 
   private under(pid: number): ProcessHandle[] {

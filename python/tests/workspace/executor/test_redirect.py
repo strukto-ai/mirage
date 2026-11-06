@@ -30,6 +30,7 @@ from mirage.shell.descriptors import FileDescription, Recorder
 from mirage.types import FileStat, PathSpec
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.create import sole_stream
 from mirage.workspace.executor.redirect import JobRoute, PipeRecorder
 from mirage.workspace.session.session import SessionState
 
@@ -167,6 +168,31 @@ async def test_a_read_of_an_empty_target_keeps_its_one_stream(monkeypatch):
     assert io.exit_code == 0
     assert "pwrite" not in ops
     assert (await _out(ws, "wc -l < /data/f")).strip() == "300000"
+
+
+# Another description streaming the same file keeps the claim, so a
+# resumed writer takes windows instead of replacing what that stream writes.
+@pytest.mark.asyncio
+async def test_a_resumed_writer_into_a_file_another_streams_takes_windows(
+    monkeypatch,
+):
+    ops: list[str] = []
+    dispatch = Dispatcher.dispatch
+
+    async def spy(self, name, path, /, **kwargs):
+        ops.append(name)
+        return await dispatch(self, name, path, **kwargs)
+
+    monkeypatch.setattr(Dispatcher, "dispatch", spy)
+    ws = await _workspace()
+    other = FileDescription(PathSpec.from_str_path("/data/f"))
+    async with sole_stream(ws._dispatcher.dispatch, other):
+        io = await ws.shell(
+            "{ wc -c < /data/f > /dev/null; seq 1 3000; } > /data/f"
+        )
+    assert io.exit_code == 0
+    assert "pwrite" in ops
+    assert (await _out(ws, "wc -l < /data/f")).strip() == "3000"
 
 
 @pytest.mark.asyncio

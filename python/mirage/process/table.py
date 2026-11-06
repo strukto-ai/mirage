@@ -138,7 +138,7 @@ class ProcessTable:
                 self._retire,
                 lambda signal: self.terminate_children(pid, signal),
                 self._bind,
-                lambda signal: self.interrupt_children(pid, signal),
+                lambda signal: self.signal_children(pid, signal),
                 ignores,
             )
             eager = started is not None and not self.queued()
@@ -169,16 +169,34 @@ class ProcessTable:
         for child in self._under(pid):
             child.terminate(signal)
 
-    def interrupt_children(self, pid: int, signal: int) -> None:
-        """Deliver a signal their shells ignore to every live runner
-        under ``pid`` (``ProcessHandle.interrupt``).
+    def signal_children(self, pid: int, signal: int) -> None:
+        """Deliver a signal to every live runner under ``pid``, as a
+        process group gets it: a runner that ignores it (a job's shell)
+        hands it to the program it runs right now
+        (``ProcessHandle.interrupt``), and any other stops with it, so a
+        native program it started receives that signal. A runner such a
+        shell started is one of its programs, which the shell sees end
+        and goes on past, so the signal reaches it through that shell.
 
         Args:
             pid (int): the parent or ancestor.
             signal (int): the signal.
         """
         for child in self._under(pid):
-            child.interrupt(signal)
+            if signal in child.ignores:
+                child.interrupt(signal)
+            elif not self._ignored_above(child.info.pid, pid, signal):
+                child.terminate(signal, children=False)
+
+    def _ignored_above(self, pid: int, top: int, signal: int) -> bool:
+        with self._lock:
+            chain = self._ancestors.get(pid, ())
+            above = chain[chain.index(top) + 1 :] if top in chain else ()
+            return any(
+                (live := self._live.get(ancestor)) is not None
+                and signal in live[1].ignores
+                for ancestor in above
+            )
 
     def _under(self, pid: int) -> list[ProcessHandle]:
         with self._lock:

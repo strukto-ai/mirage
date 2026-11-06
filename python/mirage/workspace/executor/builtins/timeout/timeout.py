@@ -579,7 +579,7 @@ async def _stop(process: ProcessHandle, signal: int, foreground: bool) -> None:
     ignored = signal in IGNORED_SIGNALS
     process.terminate(signal, children=not foreground and not ignored)
     if ignored and not foreground:
-        process.interrupt_children(signal)
+        process.signal_children(signal)
     await _cancel(process.task)
 
 

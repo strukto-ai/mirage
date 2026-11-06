@@ -35,6 +35,7 @@ import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { CommandTimeoutError } from '../../errors/types.ts'
 import { Workspace } from '../workspace/workspace.ts'
 import { JobRoute, PipeRecorder, handleRedirect } from './redirect.ts'
+import { soleStream } from './create.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { FileDescription, Recorder } from '../../shell/descriptors.ts'
 
@@ -182,6 +183,27 @@ describe('handleRedirect > / >>', () => {
       expect(io.exitCode).toBe(0)
       expect(pwrite).not.toHaveBeenCalled()
       expect((await ws.shell('wc -l < /data/f')).stdoutText.trim()).toBe('300000')
+    } finally {
+      pwrite.mockRestore()
+      await ws.close()
+    }
+  })
+
+  // Another description streaming the same file keeps the claim, so a
+  // resumed writer takes windows instead of replacing what that stream writes.
+  it('a resumed writer into a file another streams takes windows', async () => {
+    const pwrite = vi.spyOn(RAMVFS.prototype, 'pwrite')
+    const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      await ws.shell('mkdir -p /data')
+      const { dispatcher } = ws as unknown as { dispatcher: { dispatch: DispatchFn } }
+      const other = new FileDescription(PathSpec.fromStrPath('/data/f'))
+      const io = await soleStream(dispatcher.dispatch, other, () =>
+        ws.shell('{ wc -c < /data/f > /dev/null; seq 1 3000; } > /data/f'),
+      )
+      expect(io.exitCode).toBe(0)
+      expect(pwrite).toHaveBeenCalled()
+      expect((await ws.shell('wc -l < /data/f')).stdoutText.trim()).toBe('3000')
     } finally {
       pwrite.mockRestore()
       await ws.close()

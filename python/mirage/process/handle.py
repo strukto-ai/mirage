@@ -52,7 +52,7 @@ class ProcessHandle:
         finished: Callable[[int], None],
         cancel_children: Callable[[int], None] = lambda signal: None,
         bind: ExecutionBind | None = None,
-        interrupt_children: Callable[[int], None] = lambda signal: None,
+        signal_children: Callable[[int], None] = lambda signal: None,
         ignores: frozenset[int] = frozenset(),
     ) -> None:
         self._info = info
@@ -62,7 +62,7 @@ class ProcessHandle:
         self._lock = RLock()
         self._finished = finished
         self._cancel_children = cancel_children
-        self._interrupt_children = interrupt_children
+        self._signal_children = signal_children
         self._programs: dict[asyncio.Task[Any], int | None] = {}
         self._takes: dict[asyncio.Task[Any], frozenset[int] | None] = {}
         self._signal: int | None = None
@@ -224,13 +224,15 @@ class ProcessHandle:
         for task in running:
             task.get_loop().call_soon_threadsafe(task.cancel)
 
-    def interrupt_children(self, signal: int) -> None:
-        """``interrupt`` every runner this one started, and theirs.
+    def signal_children(self, signal: int) -> None:
+        """Deliver a signal to every runner this one started, and theirs,
+        as a process group gets it: one that ignores it hands it to its
+        program (``interrupt``), any other stops with it.
 
         Args:
             signal (int): the signal.
         """
-        self._interrupt_children(signal)
+        self._signal_children(signal)
 
     def terminate(self, signal: int = 9, children: bool = True) -> bool:
         """Request cancellation without waiting for the runner to exit.

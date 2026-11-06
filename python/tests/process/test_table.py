@@ -505,10 +505,12 @@ async def test_stopping_a_runner_alone_leaves_its_children_running():
     await child.join()
 
 
-# A signal the runners' shells ignore reaches the program each runs right
-# now, which ends with it, and the shell goes on.
+# A signal to the group reaches the program a runner whose shell ignores it
+# runs right now, which ends with it, and the shell goes on; a runner that
+# does not ignore it stops with it, as its native program would, unless
+# such a shell started it.
 @pytest.mark.asyncio
-async def test_an_interrupt_ends_the_program_a_child_runs_and_not_the_child():
+async def test_a_group_signal_ends_an_ignoring_childs_program_and_stops_the_rest():
     processes = ProcessTable()
     parent = processes.start(
         session_id="a",
@@ -533,12 +535,32 @@ async def test_an_interrupt_ends_the_program_a_child_runs_and_not_the_child():
         cwd=PathSpec.from_str_path("/"),
         run=shell,
         parent_pid=parent.info.pid,
+        ignores=frozenset({2}),
+    )
+    other = processes.start(
+        session_id="a",
+        command="sleep",
+        cwd=PathSpec.from_str_path("/"),
+        run=_hangs,
+        parent_pid=parent.info.pid,
+    )
+    forked = processes.start(
+        session_id="a",
+        command="sleep",
+        cwd=PathSpec.from_str_path("/"),
+        run=_hangs,
+        parent_pid=child.info.pid,
     )
     async with asyncio.timeout(5):
         await started.wait()
-        parent.interrupt_children(2)
+        parent.signal_children(2)
+        assert forked.signal is None
         assert (await child.join()).exit_code == 0
+        assert (await other.join()).exit_code == 130
     assert outcome == [(None, 2)]
+    assert other.signal == 2
+    forked.terminate()
+    await forked.join()
     parent.terminate()
     await parent.join()
 

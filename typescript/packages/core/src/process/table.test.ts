@@ -427,9 +427,11 @@ it('stopping a runner alone leaves its children running', async () => {
   await child.join()
 })
 
-// A signal the runners' shells ignore reaches the program each runs right
-// now, which ends with it, and the shell goes on.
-it('an interrupt ends the program a child runs and not the child', async () => {
+// A signal to the group reaches the program a runner whose shell ignores it
+// runs right now, which ends with it, and the shell goes on; a runner that
+// does not ignore it stops with it, as its native program would, unless
+// such a shell started it.
+it("a group signal ends an ignoring child's program and stops the rest", async () => {
   const processes = new ProcessTable()
   const init = { sessionId: 'a', command: 'sh', cwd: PathSpec.fromStrPath('/') }
   const release = gate()
@@ -448,6 +450,7 @@ it('an interrupt ends the program a child runs and not the child', async () => {
   const child = processes.start({
     ...init,
     parentPid: parent.info.pid,
+    ignores: new Set([2]),
     cancel: () => undefined,
     run: async () => {
       outcome.push(
@@ -464,10 +467,41 @@ it('an interrupt ends the program a child runs and not the child', async () => {
       return 0
     },
   })
+  const stopped = gate()
+  const other = processes.start({
+    ...init,
+    command: 'sleep',
+    parentPid: parent.info.pid,
+    cancel: () => {
+      stopped.release()
+    },
+    run: async () => {
+      await stopped.promise
+      throw Object.assign(new Error('aborted'), { name: 'AbortError' })
+    },
+  })
+  const forkedRelease = gate()
+  const forked = processes.start({
+    ...init,
+    command: 'sleep',
+    parentPid: child.info.pid,
+    cancel: () => {
+      forkedRelease.release()
+    },
+    run: async () => {
+      await forkedRelease.promise
+      return 0
+    },
+  })
   await started.promise
-  parent.interruptChildren(2)
+  parent.signalChildren(2)
+  expect(forked.signal).toBeNull()
   expect((await child.join()).exitCode).toBe(0)
+  expect((await other.join()).exitCode).toBe(130)
   expect(outcome).toEqual([[null, 2]])
+  expect(other.signal).toBe(2)
+  forked.terminate()
+  await forked.join()
   parent.terminate()
   await parent.join()
 })
