@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { TiDBFilesystemAccessor } from '../../accessor/tidb_filesystem.ts'
-import { eisdir, enotsup, isEnoent } from '../../errors/fs.ts'
+import { eisdir, enotsup, isEnoent, staleWrite } from '../../errors/fs.ts'
 import { callerSignal } from '../../context/session_context.ts'
 import { CHUNK_SIZE } from '../../io/cooperative.ts'
 import { ByteSpool } from '../../io/spool.ts'
@@ -22,6 +22,7 @@ import { record, startOp } from '../../observe/context.ts'
 import { FileType, VFSName, type FileStat, type PathSpec } from '../../types.ts'
 import { expectOffset } from '../generic/rewrite.ts'
 import { appendTo, shrinkTo } from './client.ts'
+import { hasStatus } from './errors.ts'
 import { backendPath } from './path.ts'
 import { read } from './read.ts'
 import { stat } from './stat.ts'
@@ -53,9 +54,9 @@ async function fileAt(accessor: TiDBFilesystemAccessor, path: PathSpec): Promise
  * the cut falls in, and grown by a native append of the zeros, refused when
  * the file changed size since its stat. A file drive9 keeps inline sits in one
  * TiDB row that any change rewrites whole, so it is read and written back, as
- * is a missing file, which is made, and a file whose append was refused.
- * drive9 has no create-only write, so `noCreate` is refused before anything
- * is sent.
+ * is a missing file, which is made. A grow another writer raced is refused
+ * with STALE_WRITE and writes nothing. drive9 has no create-only write, so
+ * `noCreate` is refused before anything is sent.
  */
 export async function truncate(
   accessor: TiDBFilesystemAccessor,
@@ -79,6 +80,9 @@ export async function truncate(
       try {
         await pad(added, length - size)
         done = await appendTo(accessor, remote, added, size)
+      } catch (exc) {
+        if (hasStatus(exc, 412)) throw staleWrite(path)
+        throw exc
       } finally {
         await added.close()
       }
