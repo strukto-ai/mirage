@@ -241,11 +241,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo original > /data/execinput; ( exec 1</data/execinput; echo code=$? >&2; echo hi; echo code=$? >&2 ); echo visible; cat /data/execinput",
+      "command": "echo original > /data/execinput; ( exec 1</data/execinput; echo code=$? >&2; echo hi; echo code=$? >&2 ); echo visible; cat /data/execinput; ( { exec 1</data/execinput; echo B; echo status=$? >&2; } > /data/execout; echo after=$? ); cat /data/execout; rm /data/execout",
       "expect": {
         "exit": 0,
-        "stdout": "visible\noriginal\n",
-        "stderr": "code=0\necho: write error: Bad file descriptor\ncode=1\n"
+        "stdout": "visible\noriginal\nafter=0\n",
+        "stderr": "code=0\nbash: line 1: echo: write error: Bad file descriptor\ncode=1\nbash: line 1: echo: write error: Bad file descriptor\nstatus=1\n"
       },
       "note": "bash accepts a standard descriptor opened in the other direction (pinned on 5.2): fd 0 for writing is write-only, so a read is EBADF; fd 1 or 2 for reading is read-only, so a write fails. In a subshell so the battery's shared session keeps its streams."
     },

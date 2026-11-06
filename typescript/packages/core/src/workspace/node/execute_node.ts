@@ -1557,6 +1557,7 @@ async function executeNodeBody(
       origin: definedAt(node, deps.handed ?? null),
       aliases: aliasView(session, node, aliasMark(session, readRow(node))),
       name: session.parseName ?? 'environment',
+      row: session.lineNumber - 1,
     })
     return result(`function ${name}`)
   }

@@ -172,7 +172,7 @@
       "expect": {
         "exit": 0,
         "stdout": "code=1\n",
-        "stderr": "echo: write error: Bad file descriptor\n"
+        "stderr": "bash: line 1: echo: write error: Bad file descriptor\n"
       }
     },
     {
@@ -277,7 +277,7 @@
       "expect": {
         "exit": 0,
         "stdout": "code=1\ncode=1\n",
-        "stderr": "echo: write error: Bad file descriptor\n"
+        "stderr": "bash: line 1: echo: write error: Bad file descriptor\n"
       }
     },
     {
@@ -312,7 +312,7 @@
       "expect": {
         "exit": 0,
         "stdout": "x\ncode=0\ncode=1\ncode=1\n[hi]\ntwo\nthree\nrw\n",
-        "stderr": "echo: write error: Bad file descriptor\ncat: -: Bad file descriptor\n"
+        "stderr": "bash: line 1: echo: write error: Bad file descriptor\ncat: -: Bad file descriptor\n"
       }
     },
     {
@@ -342,7 +342,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "echo: write error: Bad file descriptor\n"
+        "stderr": "bash: line 1: echo: write error: Bad file descriptor\n"
       }
     },
     {

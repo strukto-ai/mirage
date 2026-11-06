@@ -80,6 +80,7 @@ from mirage.workspace.executor.statement import (
     Written,
     answer_closed,
     record_status,
+    write_error_line,
     writer_forks,
 )
 from mirage.workspace.executor.traps import clear_traps
@@ -603,11 +604,12 @@ async def route_rebound(
     session: SessionState,
     channel: Channel,
     data: bytes,
-) -> tuple[ByteSource | None, ByteSource | None] | None:
+) -> tuple[ByteSource | None, ByteSource | None, bool] | None:
     """Send one write where an ``exec`` binding points its channel, for
     a redirect level whose own descriptor the binding shadows: None
     while the channel is unbound, else what is left for the level's
-    stdout and stderr (``exec >&2`` crosses over, a file takes it all).
+    stdout and stderr (``exec >&2`` crosses over, a file takes it all)
+    and whether the binding refused the write (``exec 1<f``).
 
     Args:
         dispatch (DispatchFn): op dispatcher.
@@ -619,10 +621,9 @@ async def route_rebound(
     binding = session.exec_stdout if stdout else session.exec_stderr
     if binding is None:
         return None
-    out, err, _ = await _route(
+    return await _route(
         dispatch, session, binding, data, TO_STDOUT if stdout else TO_STDERR
     )
-    return out, err
 
 
 def _stdout_to_stderr(node: TSNodeLike) -> bool:
@@ -747,10 +748,7 @@ async def divert_statement(
             unwritable = unwritable or channel == Channel.STDERR
     if failed:
         words = command.split()
-        line = encode_text(
-            f"{words[0] if words else 'bash'}: write error: "
-            "Bad file descriptor\n"
-        )
+        line = write_error_line(words[0] if words else "bash")
         io.exit_code = 1
         await _routed(dispatch, session, Channel.STDERR, line, rest)
     elif unwritable and io.exit_code == 0 and _stdout_to_stderr(statement):

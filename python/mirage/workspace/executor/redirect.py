@@ -101,6 +101,7 @@ from mirage.workspace.executor.create import (
     write_description,
 )
 from mirage.workspace.executor.jobs import drained, pump
+from mirage.workspace.executor.statement import write_error_line
 from mirage.workspace.mount.registry import DEV_PREFIX
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.session.shell_dirs import home_dir
@@ -413,7 +414,11 @@ class PipeRecorder(Recorder):
                 self.dispatch, self.session, channel, data
             )
             if routed is not None:
-                for to, part in zip((Channel.STDOUT, Channel.STDERR), routed):
+                out, err, refused = routed
+                self.refused = self.refused or (
+                    refused and channel == Channel.STDOUT
+                )
+                for to, part in ((Channel.STDOUT, out), (Channel.STDERR, err)):
                     if part:
                         await self.emit_level(to, await materialize(part))
                 return
@@ -1588,11 +1593,9 @@ def _closed_write_line(
         unwound (Exception | None): the signal it left by, if any.
     """
     if isinstance(unwound, ExitSignal) and unwound.replaced is not None:
-        name = unwound.replaced
-    else:
-        words = get_text(command).split()
-        name = words[0] if words else "redirect"
-    return encode_text(f"{name}: write error: Bad file descriptor\n")
+        return write_error_line(unwound.replaced)
+    words = get_text(command).split()
+    return write_error_line(words[0] if words else "redirect")
 
 
 def _redirect_failure(

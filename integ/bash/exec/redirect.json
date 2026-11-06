@@ -297,7 +297,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\nback\n",
-        "stderr": "echo: write error: Bad file descriptor\nrc=1\necho: write error: Bad file descriptor\n"
+        "stderr": "bash: line 1: echo: write error: Bad file descriptor\nrc=1\nbash: line 1: echo: write error: Bad file descriptor\n"
       }
     },
     {
@@ -509,7 +509,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=0\nrc=0\nrc=1\nrc=1\n",
-        "stderr": "rc=0\ncat: -: Bad file descriptor\necho: write error: Bad file descriptor\nrc=1\n"
+        "stderr": "rc=0\ncat: -: Bad file descriptor\nbash: line 1: echo: write error: Bad file descriptor\nrc=1\n"
       },
       "note": "Pinned on bash 5.2: a closed descriptor dups onto itself as a no-op; `exec 0>f` leaves fd 0 write-only (a read is EBADF); `exec 1<f` / `exec 2<f` leave the stream read-only (a write fails). Not modelled: a transient `>&0` reaching the file after `exec 0>f`, or `<&1` reading it after `exec 1<f`."
     },

@@ -177,7 +177,7 @@ async def test_standard_descriptors_open_in_the_other_direction():
         io = await ws.shell("( exec 1</data/source; echo hi; echo rc=$? >&2 )")
         assert await io.stdout_str() == ""
         assert await io.stderr_str() == (
-            "echo: write error: Bad file descriptor\nrc=1\n"
+            "bash: line 1: echo: write error: Bad file descriptor\nrc=1\n"
         )
         io = await ws.shell("( exec 2</data/source; echo hi >&2; echo rc=$? )")
         assert await io.stdout_str() == "rc=1\n"
@@ -276,8 +276,8 @@ async def test_a_stream_bound_to_stdin_cannot_be_written():
         )
         assert (await io.stdout_str(), await io.stderr_str()) == (
             "back\n",
-            "echo: write error: Bad file descriptor\nrc=1\n"
-            "echo: write error: Bad file descriptor\n",
+            "bash: line 1: echo: write error: Bad file descriptor\nrc=1\n"
+            "bash: line 1: echo: write error: Bad file descriptor\n",
         )
         io = await ws.shell("( exec 2>&0; echo hi >&2; echo rc=$? )")
         assert (await io.stdout_str(), await io.stderr_str()) == ("rc=1\n", "")
@@ -447,7 +447,7 @@ async def test_a_stream_bound_to_stdin_cannot_be_written():
         (
             "echo x >&0; echo rc=$?",
             "rc=1\n",
-            "echo: write error: Bad file descriptor\n",
+            "bash: line 1: echo: write error: Bad file descriptor\n",
             0,
         ),
     ],

@@ -252,6 +252,8 @@ async def run_program(
             if runner is not None:
                 runner.drop_run(run_key)
     code = process.returncode if process.returncode is not None else 1
+    if direct and runner is not None and code < 0:
+        runner.program_signaled(-code)
     return RunResult(
         stdout=stdout,
         stderr=stderr or None,

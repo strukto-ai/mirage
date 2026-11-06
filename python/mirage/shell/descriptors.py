@@ -166,7 +166,9 @@ class Recorder(JobConsole, StreamOwner):
     one does, which a command writing to the level may not read as its
     input (``cat f >> f``), or the description a streamed redirect
     writes it through, which a rename the line makes moves and which
-    the levels below share.
+    the levels below share. ``refused`` is set when a stdout write went
+    to a descriptor that takes none (``exec 1<f``), for the statement
+    that wrote it to fail.
     """
 
     def __init__(self) -> None:
@@ -176,6 +178,7 @@ class Recorder(JobConsole, StreamOwner):
         self.writing = asyncio.Lock()
         self.pending = 0
         self.output_file: str | FileDescription | None = None
+        self.refused = False
 
     @property
     def busy(self) -> bool:

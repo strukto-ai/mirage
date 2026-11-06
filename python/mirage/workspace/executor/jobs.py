@@ -57,7 +57,6 @@ from mirage.shell.constants import (
     FD_CLOSE,
     FORK_FAILED,
     FORK_FAILED_STATUS,
-    NESTED_SHELLS,
     NOT_FOUND_STATUS,
     SIGRTMAX,
     TIMEOUT_STATUS,
@@ -93,6 +92,7 @@ from mirage.workspace.executor.statement import (
     answer_closed,
     failed_read,
     forks,
+    nested_shell,
     record_status,
     statement_stdin,
 )
@@ -286,7 +286,7 @@ def _forked(node: TSNodeLike | None, session: SessionState) -> bool:
     return (
         node.type == NT.COMMAND
         and forks(node, session)
-        and command_invocations(node)[0][0] not in NESTED_SHELLS
+        and not nested_shell(node, session)
     )
 
 

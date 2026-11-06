@@ -51,13 +51,8 @@ export function sameLine(root: TSNodeLike, before: TSNodeLike, after: TSNodeLike
 export function sourceRow(node: TSNodeLike, end = false): number {
   const row = (end ? node.endPosition?.row : node.startPosition?.row) ?? 0
   if (!(node instanceof ProgramNode)) return row
-  const { original, offsets } = node.program
   const index = end ? Math.max(node.endIndex - 1, node.startIndex) : node.startIndex
-  const at = offsets[index] ?? index
-  let rows = 0
-  for (let i = original.indexOf('\n'); i !== -1 && i < at; i = original.indexOf('\n', i + 1))
-    rows += 1
-  return rows
+  return node.program.row(node.program.offsets[index] ?? index)
 }
 
 /**

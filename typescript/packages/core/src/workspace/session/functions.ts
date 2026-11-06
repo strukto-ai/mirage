@@ -26,7 +26,9 @@ export function functionSources(value: unknown = {}): Record<string, string> {
  * `aliases` the aliases the body runs, as its definition saw them
  * (`aliasView`), absent or null to read them as they are when it runs;
  * `name` what the body's diagnostics name as their source, the file it was
- * sourced from, absent for `environment`. Mirrors Python's FunctionSite.
+ * sourced from, absent for `environment`; `row` the row the definition starts
+ * on as its text was typed, which the body's `$LINENO` counts from, absent
+ * for 0. Mirrors Python's FunctionSite.
  */
 export interface FunctionSite {
   readonly source: string
@@ -34,4 +36,5 @@ export interface FunctionSite {
   readonly origin: Occurrence | null
   readonly aliases?: Readonly<Record<string, string>> | null
   readonly name?: string
+  readonly row?: number
 }

@@ -43,6 +43,26 @@ function raises(): Promise<number> {
   return Promise.reject(new Error('boom'))
 }
 
+/** A runner that waits until the handle stops it, then fails as aborted. */
+function hung(): ProcessHandle {
+  const stop = new AbortController()
+  const handle = new ProcessHandle(
+    info(),
+    () =>
+      new Promise<number>((_resolve, reject) => {
+        stop.signal.addEventListener('abort', () => {
+          reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+        })
+      }),
+    () => {
+      stop.abort()
+    },
+    ignore,
+  )
+  handle.start(true)
+  return handle
+}
+
 describe('ProcessHandle', () => {
   it('a finished runner reports its code and its pid', async () => {
     const finished: number[] = []
@@ -297,24 +317,6 @@ describe('ProcessHandle', () => {
   // signal that stopped it; one the host stopped (revoked) ends the wait with
   // its error, and so does a waiter whose own shell stopped.
   it('reap answers a status unless the host stopped the runner', async () => {
-    const hung = () => {
-      const stop = new AbortController()
-      const handle = new ProcessHandle(
-        info(),
-        () =>
-          new Promise<number>((_resolve, reject) => {
-            stop.signal.addEventListener('abort', () => {
-              reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
-            })
-          }),
-        () => {
-          stop.abort()
-        },
-        ignore,
-      )
-      handle.start(true)
-      return handle
-    }
     const done = new ProcessHandle(info(), () => Promise.resolve(3), ignore, ignore)
     done.start()
     expect(await done.reap()).toBe(3)

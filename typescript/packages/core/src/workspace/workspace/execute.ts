@@ -793,7 +793,7 @@ async function runPreparedLine(
               innerOpts.sink = capture
             }
 
-            try {
+            const substitute = async (): Promise<IOResult> => {
               let io: IOResult
               try {
                 const res = await env.execute(cmd, innerOpts)
@@ -833,6 +833,48 @@ async function runPreparedLine(
               )
               await capture.emit(Channel.STDOUT, await io.materializeStdout())
               await capture.emit(Channel.STDERR, await io.materializeStderr())
+              return io
+            }
+
+            try {
+              if (!substitution) return await substitute()
+              // bash forks a substitution: a process of its own, whose
+              // `$BASHPID` a signal stops alone (`$(kill -9 $BASHPID)`).
+              const abort = new AbortController()
+              innerOpts.signal =
+                innerOpts.signal === undefined
+                  ? abort.signal
+                  : AbortSignal.any([innerOpts.signal, abort.signal])
+              const done: IOResult[] = []
+              let process: ProcessHandle
+              try {
+                process = (innerOpts.jobTable ?? env.jobTable).processes.start({
+                  sessionId: session.sessionId,
+                  command: cmd,
+                  cwd: PathSpec.fromStrPath(session.cwd),
+                  parentPid: session.processId,
+                  cancel: () => {
+                    abort.abort()
+                  },
+                  limit: session.processes.max,
+                  started: (forked) => {
+                    session.processId = forked.info.pid
+                    innerContext.frame.shell = forked
+                  },
+                  ignores: SHELL_IGNORED_SIGNALS,
+                  run: async () => {
+                    const io = await substitute()
+                    done.push(io)
+                    return io.exitCode
+                  },
+                })
+              } catch (error) {
+                if ((error as { code?: unknown }).code === 'EAGAIN')
+                  throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
+                throw error
+              }
+              const code = await process.reap(opts.signal ?? null)
+              const io = done[0] ?? new IOResult({ exitCode: code })
               await waits.join(rest)
               const [out, err] = capture.take()
               io.stdout = out.byteLength > 0 ? out : null

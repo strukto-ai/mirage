@@ -561,5 +561,5 @@ def test_a_session_speaks_as_what_it_is_reading():
     assert session_voice(None) == "bash: "
     assert session_voice(session) == "bash: line 1: "
     session._parse_name = "environment"
-    session._parse_row = 2
+    session._line_row = 2
     assert session_voice(session) == "environment: line 3: "

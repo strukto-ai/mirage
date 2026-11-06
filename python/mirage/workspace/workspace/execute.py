@@ -356,7 +356,8 @@ async def recurse(
         if opts.get("sink") is not None:
             await capture.attach(opts["sink"])
         opts["sink"] = capture
-    try:
+
+    async def substitute() -> IOResult:
         try:
             io = await ws.execute(
                 cmd,
@@ -397,6 +398,41 @@ async def recurse(
                 (Channel.STDERR, await io.materialize_stderr()),
             ):
                 await capture.emit(channel, data)
+        return io
+
+    try:
+        if not substitution:
+            io = await substitute()
+        else:
+            # bash forks a substitution: a process of its own, whose
+            # `$BASHPID` a signal stops alone (`$(kill -9 $BASHPID)`).
+            done: list[IOResult] = []
+
+            async def run() -> int:
+                done.append(await substitute())
+                return done[0].exit_code
+
+            def started(process: ProcessHandle) -> None:
+                session.process_id = process.info.pid
+                context.frame.shell = process
+
+            try:
+                process = opts["job_table"].processes.start(
+                    session_id=session.session_id,
+                    command=cmd,
+                    cwd=PathSpec.from_str_path(session.cwd),
+                    parent_pid=session.process_id,
+                    run=run,
+                    limit=session.processes.max,
+                    started=started,
+                    ignores=SHELL_IGNORED_SIGNALS,
+                )
+            except BlockingIOError as exc:
+                raise ExitSignal(
+                    FORK_FAILED_STATUS, stderr=FORK_FAILED
+                ) from exc
+            code = await process.reap()
+            io = done[0] if done else IOResult(exit_code=code)
             await waits.join(rest)
             out, err = capture.take()
             io.stdout = out or None

@@ -27,6 +27,7 @@ from mirage.policy.types import HandOff
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
+from mirage.shell.descriptors import Recorder
 from mirage.shell.errors import (
     ArithError,
     ExitSignal,
@@ -49,6 +50,7 @@ from mirage.workspace.executor.statement import (
     ignoring_errexit,
     land,
     record_status,
+    write_error_line,
 )
 from mirage.workspace.executor.traps import (
     err_trap_armed,
@@ -123,6 +125,17 @@ async def execute_body(
             stdout, io, last_exec = await run_program(
                 cmd, context, statement, job_table, sink
             )
+            if isinstance(sink, Recorder) and sink.refused:
+                # A write an `exec` in the body sent where no write goes
+                # (`exec 1<f`) fails the statement that made it.
+                sink.refused = False
+                words = (last_exec.command or "").split()
+                await sink.emit(
+                    Channel.STDERR,
+                    write_error_line(words[0] if words else "bash"),
+                )
+                io.exit_code = 1
+                record_status(session, 1)
             all_stdout.append(stdout)
             merged_io = await merged_io.merge(io)
             merged_io = await land(

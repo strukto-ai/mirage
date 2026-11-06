@@ -381,6 +381,8 @@ export async function runProgram(
         runner?.programExited(child.exitCode)
       throw makeAbortError(signal)
     }
+    if (options.direct === true && child.signalCode !== null)
+      runner?.programSignaled(constants.signals[child.signalCode])
     const stderr = Buffer.concat(err)
     return { stdout: Buffer.concat(out), stderr: stderr.length > 0 ? stderr : null, exitCode: code }
   } finally {

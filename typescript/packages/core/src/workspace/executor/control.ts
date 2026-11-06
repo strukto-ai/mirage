@@ -26,6 +26,7 @@ import type { HandOff } from '../../policy/types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { Channel, type JobConsole } from '../../shell/console/index.ts'
+import { Recorder } from '../../shell/descriptors.ts'
 import { ArithError, ExitSignal, ReadonlyVariableError, ReturnSignal } from '../../shell/errors.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
@@ -48,6 +49,7 @@ import {
   ignoringErrexit,
   land,
   recordStatus,
+  writeErrorLine,
 } from './statement.ts'
 import { errTrapArmed, runErrTrap, runReturnTrap } from './traps.ts'
 
@@ -129,6 +131,18 @@ export async function executeBody(
         sink,
       )
       lastExec = execNode
+      if (sink instanceof Recorder && sink.refused) {
+        // A write an `exec` in the body sent where no write goes (`exec
+        // 1<f`) fails the statement that made it.
+        sink.refused = false
+        const first = (execNode.command ?? '').trim().split(/\s+/)[0]
+        await sink.emit(
+          Channel.STDERR,
+          writeErrorLine(first === undefined || first === '' ? 'bash' : first),
+        )
+        io.exitCode = 1
+        recordStatus(session, 1)
+      }
       allStdout.push(stdout)
       mergedIo = await mergedIo.merge(io)
       mergedIo = await land(

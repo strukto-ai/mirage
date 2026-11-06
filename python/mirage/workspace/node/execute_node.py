@@ -1677,6 +1677,7 @@ async def _execute_node(
             defined_at(node, handed),
             alias_view(session, node, alias_mark(session, read_row(node))),
             session._parse_name or "environment",
+            session.line_number - 1,
         )
         return result(f"function {name}")
 

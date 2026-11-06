@@ -65,6 +65,7 @@ class ProcessHandle:
         self._takes: dict[asyncio.Task[Any], frozenset[int] | None] = {}
         self._signal: int | None = None
         self._program_code: int | None = None
+        self._program_signal: int | None = None
         self._runs: dict[str, dict[str, JsonValue]] = {}
         self._completion: Future[ProcessInfo] = Future()
         self.begun = False
@@ -109,10 +110,17 @@ class ProcessHandle:
     @property
     def ended_by(self) -> int | None:
         """The signal that ended the runner, None while it runs or once
-        it exited on its own (a trap that handled the signal)."""
-        if not self.task.done() or not self.task.cancelled():
+        it exited on its own (a trap that handled the signal): the one
+        it was stopped with, or the one that ended the native program
+        its status is (``program_signaled``)."""
+        if not self.task.done():
             return None
-        return self.signal or 9
+        if self.task.cancelled():
+            return self.signal or 9
+        with self._lock:
+            ended = self._program_signal
+            code = self._info.exit_code
+        return ended if ended is not None and code == 128 + ended else None
 
     @property
     def interrupted(self) -> int | None:
@@ -168,6 +176,17 @@ class ProcessHandle:
         """
         with self._lock:
             self._program_code = code
+
+    def program_signaled(self, signal: int) -> None:
+        """Record that a native program the runner started ended on a
+        signal, which names the runner's end when its status is that
+        program's (``true | python3 -c 'os.kill(os.getpid(), 9)'``).
+
+        Args:
+            signal (int): the signal that ended the program.
+        """
+        with self._lock:
+            self._program_signal = signal
 
     async def program(
         self,

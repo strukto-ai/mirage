@@ -447,7 +447,7 @@ const CASES: [string, string, string, string, number][] = [
     'exec_stream_bound_to_stdin_cannot_be_written',
     '( exec 1>&0; echo hi; echo rc=$? >&2; echo again ); ( exec 2>&0; echo hi >&2; echo rc=$? ); echo back',
     'rc=1\nback\n',
-    'echo: write error: Bad file descriptor\nrc=1\necho: write error: Bad file descriptor\n',
+    'bash: line 1: echo: write error: Bad file descriptor\nrc=1\nbash: line 1: echo: write error: Bad file descriptor\n',
     0,
   ],
   [

@@ -160,21 +160,26 @@ export async function executeProgram(
   // a use on the same parse and row. Restored on the way out so a nested
   // parse (`eval`, `source`, `bash -c`) does not leave its id behind.
   session.parseSeq += 1
-  const outerParse: [number, number, TSNodeLike | null] = [
+  const outerParse: [number, number, number, TSNodeLike | null] = [
     session.parseCurrent,
     session.parseRow,
+    session.lineRow,
     session.lineNode,
   ]
   session.parseCurrent = session.parseSeq
   let start = session.parseFrom
+  let lineStart = start ?? 0
   session.parseFrom = null
   if (start === null) {
     // A nested parse (`eval`, `$( )`) numbers on from the row the running
     // command ends on, as bash's reader stands there.
     const running = session.lineNode
-    start = inline && running !== null ? session.parseRow + sourceRow(running, true) : 0
+    const ends = inline && running !== null ? sourceRow(running, true) : null
+    start = ends === null ? 0 : session.parseRow + ends
+    lineStart = ends === null ? 0 : session.lineRow + ends
   }
   session.parseRow = start
+  session.lineRow = lineStart
   const root = !session.lineOpen
   session.lineOpen = true
   try {
@@ -194,7 +199,7 @@ export async function executeProgram(
       executeFn,
     )
   } finally {
-    ;[session.parseCurrent, session.parseRow, session.lineNode] = outerParse
+    ;[session.parseCurrent, session.parseRow, session.lineRow, session.lineNode] = outerParse
     if (root) {
       session.lineOpen = false
       session.errexitExiting = false

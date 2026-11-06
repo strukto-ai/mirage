@@ -488,6 +488,9 @@ export class SessionState {
   // for a line, a function's definition row for its body, which is parsed
   // again from its own source but reads aliases where it was written.
   parseRow = 0
+  // The same row as `$LINENO` counts it, every line as typed: a row the parse
+  // joined to the next (a backslash before the newline) counts.
+  lineRow = 0
   // What the running parse's diagnostics name as their source: null for the
   // shell's own input, `environment` for a function defined there, the file
   // for one sourced; and the command running in it, whose line is `$LINENO`
@@ -731,6 +734,7 @@ export class SessionState {
     const child = this.fork()
     child.parseCurrent = this.parseCurrent
     child.parseRow = this.parseRow
+    child.lineRow = this.lineRow
     child.parseName = this.parseName
     child.lineNode = this.lineNode
     child.aliasExpansion = this.aliasExpansion
@@ -825,10 +829,10 @@ export class SessionState {
    */
   /**
    * The line of the command running, `$LINENO`: its row in the text that
-   * spelled it, numbered on from where that text's parse starts (`parseRow`).
+   * spelled it, numbered on from where that text's parse starts (`lineRow`).
    */
   get lineNumber(): number {
-    return this.parseRow + (this.lineNode === null ? 0 : sourceRow(this.lineNode)) + 1
+    return this.lineRow + (this.lineNode === null ? 0 : sourceRow(this.lineNode)) + 1
   }
 
   get argv0(): string {

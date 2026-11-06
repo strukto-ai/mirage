@@ -36,8 +36,10 @@ import { Channel, type JobConsole } from '../../shell/console/index.ts'
 import { concat } from '../../utils/bytes.ts'
 import { pipelineTransparent } from '../../shell/node_kind.ts'
 import { getNegatedCommand, getParts, getRedirects } from '../../shell/helpers.ts'
-import { commandInvocations, literalText } from '../../shell/parse/names.ts'
+import { literalText } from '../../shell/parse/names.ts'
 import { commandText } from '../../shell/printer.ts'
+import { encodeText } from '../../shell/bytes.ts'
+import { shellVoice } from '../../shell/voice.ts'
 import { BASH_BUILTINS } from '../lookup/constants.ts'
 import { ERREXIT_EXEMPT_TYPES, NESTED_SHELLS } from '../../shell/constants.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
@@ -186,6 +188,26 @@ export function forks(
   words: readonly string[] | null = null,
 ): boolean {
   if (command?.type !== NT.COMMAND) return command?.type === NT.SUBSHELL
+  const found = invoked(command, words)
+  if (found === null) return false
+  const [rest, functions] = found
+  const name = rest[0]
+  if (name === undefined) return false
+  return (
+    name === null ||
+    (!BASH_BUILTINS.has(name) && !(functions && session.functions[name] !== undefined))
+  )
+}
+
+/**
+ * The words a command runs once `command` and its options are read off, and
+ * whether a function may answer its name (`command X` masks functions); null
+ * for `command -v`, which is the builtin. Mirrors Python's _invoked.
+ */
+function invoked(
+  command: TSNodeLike,
+  words: readonly string[] | null,
+): [(string | null)[], boolean] | null {
   let rest: (string | null)[] =
     words !== null
       ? [...words]
@@ -200,15 +222,10 @@ export function forks(
       const option = rest[0] ?? ''
       rest = rest.slice(1)
       if (option === '--') break
-      if (option.includes('v') || option.includes('V')) return false
+      if (option.includes('v') || option.includes('V')) return null
     }
   }
-  const name = rest[0]
-  if (name === undefined) return false
-  return (
-    name === null ||
-    (!BASH_BUILTINS.has(name) && !(functions && session.functions[name] !== undefined))
-  )
+  return [rest, functions]
 }
 
 /**
@@ -219,7 +236,7 @@ export function forks(
 export function nestedShell(node: TSNodeLike, session: SessionState): boolean {
   const command = node.type === NT.REDIRECTED_STATEMENT ? getRedirects(node)[0] : node
   if (command?.type !== NT.COMMAND || !forks(command, session)) return false
-  const head = commandInvocations(command)[0]?.[0] ?? null
+  const head = invoked(command, null)?.[0][0] ?? null
   return head !== null && NESTED_SHELLS.has(head)
 }
 
@@ -505,6 +522,16 @@ export async function statementOutput(
   if (out !== null) written.push([Channel.STDOUT, out, false])
   if (err !== null) written.push([Channel.STDERR, err, false])
   return written
+}
+
+/**
+ * Bash's line for a write its descriptor refused, in the name of what wrote:
+ * a builtin speaks in the shell's voice (`bash: line 1: echo: write error:
+ * ...`), a program in its own. Mirrors Python's write_error_line.
+ */
+export function writeErrorLine(name: string): Uint8Array {
+  const voice = BASH_BUILTINS.has(name) ? shellVoice() : ''
+  return encodeText(`${voice}${name}: write error: Bad file descriptor\n`)
 }
 
 /**

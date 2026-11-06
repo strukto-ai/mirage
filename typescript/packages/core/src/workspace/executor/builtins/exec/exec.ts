@@ -58,7 +58,13 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { createFile, writeDescription } from '../../create.ts'
 import { programHead } from '../../find_action_dispatch.ts'
-import { answerClosed, recordStatus, writerForks, type Written } from '../../statement.ts'
+import {
+  answerClosed,
+  recordStatus,
+  writeErrorLine,
+  writerForks,
+  type Written,
+} from '../../statement.ts'
 import { clearTraps } from '../../traps.ts'
 import { scanOptions } from '../getopt.ts'
 import { toScope } from '../scope.ts'
@@ -276,12 +282,11 @@ export async function routeRebound(
   session: SessionState,
   channel: Channel,
   data: Uint8Array,
-): Promise<[ByteSource | null, ByteSource | null] | null> {
+): Promise<[ByteSource | null, ByteSource | null, boolean] | null> {
   const stdout = channel === Channel.STDOUT
   const binding = stdout ? session.execStdout : session.execStderr
   if (binding === null) return null
-  const [out, err] = await route(dispatch, session, binding, data, stdout ? TO_STDOUT : TO_STDERR)
-  return [out, err]
+  return route(dispatch, session, binding, data, stdout ? TO_STDOUT : TO_STDERR)
 }
 
 type StreamBindings = Pick<SessionState, (typeof EXEC_STREAM_FIELDS)[number] | 'descriptors'>
@@ -557,7 +562,7 @@ export async function divertStatement(
     const first = command.trim().split(/\s+/)[0]
     const name = first === undefined || first === '' ? 'bash' : first
     io.exitCode = 1
-    const line = encodeText(`${name}: write error: Bad file descriptor\n`)
+    const line = writeErrorLine(name)
     await routed(dispatch, session, Channel.STDERR, line, rest)
   } else if (unwritable && io.exitCode === 0 && stdoutToStderr(statement)) {
     io.exitCode = 1

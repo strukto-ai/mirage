@@ -44,7 +44,6 @@ import {
   FD_CLOSE,
   FORK_FAILED,
   FORK_FAILED_STATUS,
-  NESTED_SHELLS,
   NOT_FOUND_STATUS,
   SIGRTMAX,
   TIMEOUT_STATUS,
@@ -75,7 +74,14 @@ import { ExecutionNode } from '../types.ts'
 import { scanOptions } from './builtins/getopt.ts'
 import { builtinUsage } from './builtins/shared.ts'
 import type { ExecuteNodeFn, ExecuteNodeOpts } from './command/types.ts'
-import { answerClosed, failedRead, forks, recordStatus, statementStdin } from './statement.ts'
+import {
+  answerClosed,
+  failedRead,
+  forks,
+  nestedShell,
+  recordStatus,
+  statementStdin,
+} from './statement.ts'
 import { inheritTraps } from './traps.ts'
 
 // Opt in by assigning a debug sink, as Python's module logger is off until
@@ -243,9 +249,7 @@ function oneProgram(left: TSNodeLike, session: SessionState): boolean {
 function forked(node: TSNodeLike | null, session: SessionState): boolean {
   if (node === null || isBackgrounded(node)) return false
   if (node.type === NT.REDIRECTED_STATEMENT) return forked(getRedirects(node)[0], session)
-  if (node.type !== NT.COMMAND || !forks(node, session)) return false
-  const head = commandInvocations(node)[0]?.[0] ?? null
-  return head === null || !NESTED_SHELLS.has(head)
+  return node.type === NT.COMMAND && forks(node, session) && !nestedShell(node, session)
 }
 
 /**

@@ -39,6 +39,8 @@ class FunctionSite:
             them as they are when it runs.
         name (str): what the body's diagnostics name as their source:
             the file it was sourced from, else ``environment``.
+        row (int): the row the definition starts on as its text was
+            typed, which the body's ``$LINENO`` counts from.
     """
 
     source: str
@@ -46,3 +48,4 @@ class FunctionSite:
     origin: Occurrence | None
     aliases: Mapping[str, str] | None = None
     name: str = "environment"
+    row: int = 0

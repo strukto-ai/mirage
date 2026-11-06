@@ -28,7 +28,10 @@ async def test_closed_stdout_drops_output_and_reports_the_write():
     ws = await _ws()
     io = await ws.shell("echo x >&-; echo code=$?")
     assert await io.stdout_str() == "code=1\n"
-    assert await io.stderr_str() == "echo: write error: Bad file descriptor\n"
+    assert (
+        await io.stderr_str()
+        == "bash: line 1: echo: write error: Bad file descriptor\n"
+    )
 
 
 @pytest.mark.asyncio
@@ -48,7 +51,10 @@ async def test_a_numeric_target_is_routed_by_the_claimed_descriptor():
     assert await io.stderr_str() == ""
     io = await ws.shell("echo x 1<&-; echo code=$?")
     assert await io.stdout_str() == "code=1\n"
-    assert await io.stderr_str() == "echo: write error: Bad file descriptor\n"
+    assert (
+        await io.stderr_str()
+        == "bash: line 1: echo: write error: Bad file descriptor\n"
+    )
     io = await ws.shell("cat /data/missing 2<&1; echo code=$?")
     assert await io.stdout_str() == (
         "cat: /data/missing: No such file or directory\ncode=1\n"
@@ -65,7 +71,10 @@ async def test_a_bare_zero_before_the_operator_is_the_descriptor():
     assert await io.stdout_str() == "acode=0\n"
     io = await ws.shell("echo 0 >&-; echo code=$?")
     assert await io.stdout_str() == "code=1\n"
-    assert await io.stderr_str() == "echo: write error: Bad file descriptor\n"
+    assert (
+        await io.stderr_str()
+        == "bash: line 1: echo: write error: Bad file descriptor\n"
+    )
 
 
 @pytest.mark.asyncio
@@ -89,7 +98,12 @@ async def test_self_dups_change_nothing():
 @pytest.mark.parametrize(
     "line,out,err,code",
     [
-        ("echo x 1>&0", "", "echo: write error: Bad file descriptor\n", 1),
+        (
+            "echo x 1>&0",
+            "",
+            "bash: line 1: echo: write error: Bad file descriptor\n",
+            1,
+        ),
         # A self-dup never reopens a closed descriptor, transient or
         # persistent; a file redirect on it does.
         (
@@ -118,7 +132,7 @@ async def test_self_dups_change_nothing():
         (
             "echo x 1>&0 0>&1",
             "",
-            "echo: write error: Bad file descriptor\n",
+            "bash: line 1: echo: write error: Bad file descriptor\n",
             1,
         ),
         ("echo x 1>&0 2>&1", "", "", 1),
@@ -163,7 +177,7 @@ async def test_self_dups_change_nothing():
         ),
         (
             "echo x 1>&0 2>/data/err; cat /data/err",
-            "echo: write error: Bad file descriptor\n",
+            "bash: line 1: echo: write error: Bad file descriptor\n",
             "",
             0,
         ),

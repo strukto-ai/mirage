@@ -1,7 +1,9 @@
+from bisect import bisect_left
 from collections.abc import Callable, Sequence
 from typing import Any
 
 from mirage._rs import ShellNode
+from mirage.shell.bytes import encode_text
 from mirage.shell.types import TSNodeLike
 
 
@@ -23,7 +25,25 @@ class ParsedProgram:
         self.offsets = tuple(root.offsets)
         self.references = 1
         self._released = False
+        self._newlines: list[int] | None = None
         self.root = ProgramNode(root, self)
+
+    def row(self, offset: int) -> int:
+        """The row a byte of the line as typed is on: the newlines before
+        it, found once per parse.
+
+        Args:
+            offset (int): the byte's offset in the line as typed.
+        """
+        if self._newlines is None:
+            text = encode_text(self.original)
+            found = []
+            at = text.find(b"\n")
+            while at != -1:
+                found.append(at)
+                at = text.find(b"\n", at + 1)
+            self._newlines = found
+        return bisect_left(self._newlines, offset)
 
     def check(self) -> None:
         if self.references == 0:

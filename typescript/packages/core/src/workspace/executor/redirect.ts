@@ -85,6 +85,7 @@ import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
 import { createFile, soleStream, writeDescription } from './create.ts'
 import { drained, pump } from './jobs.ts'
+import { writeErrorLine } from './statement.ts'
 
 // What these return streams into a redirect's file as it is read; a file one
 // reads or writes meanwhile (awk's `print > f`, sed's `w f`, tee's operands)
@@ -349,7 +350,8 @@ export class PipeRecorder extends Recorder {
     if (this.claimed.has(channel) && this.session !== null) {
       const routed = await routeRebound(this.dispatch, this.session, channel, data)
       if (routed !== null) {
-        const [out, err] = routed
+        const [out, err, refused] = routed
+        this.refused ||= refused && channel === Channel.STDOUT
         if (out !== null) await this.emitLevel(Channel.STDOUT, await materialize(out))
         if (err !== null) await this.emitLevel(Channel.STDERR, await materialize(err))
         return
@@ -1277,11 +1279,11 @@ function closedWriteLine(command: TSNodeLike, unwound: Unwinding | null = null):
   const words = getText(command)
     .split(/\s+/)
     .filter((w) => w !== '')
-  const name =
+  return writeErrorLine(
     unwound instanceof ExitSignal && unwound.replaced !== null
       ? unwound.replaced
-      : (words[0] ?? 'redirect')
-  return encodeText(`${name}: write error: Bad file descriptor\n`)
+      : (words[0] ?? 'redirect'),
+  )
 }
 
 /** Shell-attributed IOResult for a redirect target that cannot be opened. */

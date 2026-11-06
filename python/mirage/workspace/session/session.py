@@ -519,6 +519,9 @@ class SessionState:
     # parsed again from its own source but reads aliases where it was
     # written.
     _parse_row: int = field(default=0, repr=False)
+    # The same row as `$LINENO` counts it, every line as typed: a row the
+    # parse joined to the next (a backslash before the newline) counts.
+    _line_row: int = field(default=0, repr=False)
     # What the running parse's diagnostics name as their source: None for
     # the shell's own input, `environment` for a function defined there,
     # the file for one sourced; and the command running in it, whose line
@@ -881,9 +884,9 @@ class SessionState:
     def line_number(self) -> int:
         """The line of the command running, ``$LINENO``: its row in the
         text that spelled it, numbered on from where that text's parse
-        starts (``_parse_row``)."""
+        starts (``_line_row``)."""
         node = self._line_node
-        return self._parse_row + (0 if node is None else source_row(node)) + 1
+        return self._line_row + (0 if node is None else source_row(node)) + 1
 
     @property
     def env(self) -> Mapping[str, str]:
@@ -1022,6 +1025,7 @@ class SessionState:
         child = self.fork()
         child._parse_current = self._parse_current
         child._parse_row = self._parse_row
+        child._line_row = self._line_row
         child._parse_name = self._parse_name
         child._line_node = self._line_node
         child._alias_expansion = self._alias_expansion

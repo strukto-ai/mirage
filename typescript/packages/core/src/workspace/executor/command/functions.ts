@@ -120,9 +120,10 @@ export async function runShellFunction(
   // or reads them as a parse of its own when it came from a stored session.
   // It was read apart from the alias that may have called it, whose guards
   // do not reach it (`alias a=f` still lets `f`'s body run its own `a`).
-  const outerParse: [number, number, string | null, TSNodeLike | null] = [
+  const outerParse: [number, number, number, string | null, TSNodeLike | null] = [
     session.parseCurrent,
     session.parseRow,
+    session.lineRow,
     session.parseName,
     session.lineNode,
   ]
@@ -137,6 +138,7 @@ export async function runShellFunction(
   } else {
     ;[session.parseCurrent, session.parseRow] = site.mark
   }
+  session.lineRow = site?.row ?? 0
   session.parseName = site?.name ?? 'environment'
   session.aliasView = site?.aliases ?? null
   // Its commands stand under the definition's place, on a hand-off of
@@ -196,7 +198,13 @@ export async function runShellFunction(
     if (err instanceof ExitSignal && err.replaced !== null) lifted = [null, null]
     throw err
   } finally {
-    ;[session.parseCurrent, session.parseRow, session.parseName, session.lineNode] = outerParse
+    ;[
+      session.parseCurrent,
+      session.parseRow,
+      session.lineRow,
+      session.parseName,
+      session.lineNode,
+    ] = outerParse
     session.aliasView = outerView
     session.aliasExpansion = outerExpansion
     if (nested !== null && decisions !== null) decisions.handUp(session.sessionId, nested)

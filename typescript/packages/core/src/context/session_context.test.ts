@@ -503,7 +503,7 @@ describe('runLanding', () => {
     expect(sessionVoice(null)).toBe('bash: ')
     expect(sessionVoice(session)).toBe('bash: line 1: ')
     session.parseName = 'environment'
-    session.parseRow = 2
+    session.lineRow = 2
     expect(sessionVoice(session)).toBe('environment: line 3: ')
   })
 })

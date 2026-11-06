@@ -89,7 +89,7 @@ def source_row(node: TSNodeLike, end: bool = False) -> int:
         return node.end_point[0] if end else node.start_point[0]
     program = node.program
     byte = max(node.end_byte - 1, node.start_byte) if end else node.start_byte
-    return encode_text(program.original).count(b"\n", 0, program.offsets[byte])
+    return program.row(program.offsets[byte])
 
 
 def read_row(node: TSNodeLike) -> int:

@@ -36,6 +36,7 @@ export class ProcessHandle {
   private stopSignal: number | null = null
   private stopped = false
   private exitedCode: number | null = null
+  private programSignal: number | null = null
   private readonly nativeRuns = new Map<string, Record<string, JsonValue>>()
   // The programs `program` runs, each with the signal `interrupt` sent it.
   private readonly programs = new Map<AbortController, number | null>()
@@ -94,10 +95,14 @@ export class ProcessHandle {
 
   /**
    * The signal that ended the runner, null while it runs or once it exited
-   * on its own (a trap that handled the signal). Mirrors Python's ended_by.
+   * on its own (a trap that handled the signal): the one it was stopped with,
+   * or the one that ended the native program its status is
+   * (`programSignaled`). Mirrors Python's ended_by.
    */
   get endedBy(): number | null {
-    return this.stopped ? (this.stopSignal ?? 9) : null
+    if (this.stopped) return this.stopSignal ?? 9
+    const ended = this.programSignal
+    return ended !== null && this.current.exitCode === 128 + ended ? ended : null
   }
 
   /** The signal `interrupt` stops the program the runner runs right now with, null while none is stopping. */
@@ -144,6 +149,17 @@ export class ProcessHandle {
    */
   programExited(code: number): void {
     this.exitedCode = code
+  }
+
+  /**
+   * Record that a native program the runner started ended on a signal, which
+   * names the runner's end when its status is that program's (`true | python3
+   * -c 'os.kill(os.getpid(), 9)'`). Mirrors Python's program_signaled.
+   *
+   * @param signal the signal that ended the program.
+   */
+  programSignaled(signal: number): void {
+    this.programSignal = signal
   }
 
   /**

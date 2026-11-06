@@ -142,21 +142,27 @@ async def execute_program(
     outer_parse = (
         session._parse_current,
         session._parse_row,
+        session._line_row,
         session._line_node,
     )
     session._parse_current = session._parse_seq
     start = session._parse_from
     session._parse_from = None
-    if start is None:
+    if start is not None:
+        line_start = start
+    else:
         # A nested parse (`eval`, `$( )`) numbers on from the row the
         # running command ends on, as bash's reader stands there.
         running = session._line_node
-        start = (
-            session._parse_row + source_row(running, end=True)
+        ends = (
+            source_row(running, end=True)
             if inline and running is not None
-            else 0
+            else None
         )
+        start = 0 if ends is None else session._parse_row + ends
+        line_start = 0 if ends is None else session._line_row + ends
     session._parse_row = start
+    session._line_row = line_start
     root = not session._line_open
     session._line_open = True
     try:
@@ -179,6 +185,7 @@ async def execute_program(
         (
             session._parse_current,
             session._parse_row,
+            session._line_row,
             session._line_node,
         ) = outer_parse
         if root:

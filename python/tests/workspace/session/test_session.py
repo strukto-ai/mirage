@@ -51,6 +51,7 @@ TRANSIENT_FIELDS = (
     "_random_last",
     "_parse_current",
     "_parse_row",
+    "_line_row",
     "_parse_name",
     "_line_node",
     "_parse_from",

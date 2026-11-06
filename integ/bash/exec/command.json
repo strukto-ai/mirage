@@ -137,7 +137,7 @@
       "expect": {
         "exit": 1,
         "stdout": "rc=1\n0\n",
-        "stderr": "echo: write error: Bad file descriptor\n"
+        "stderr": "bash: line 1: echo: write error: Bad file descriptor\n"
       }
     },
     {

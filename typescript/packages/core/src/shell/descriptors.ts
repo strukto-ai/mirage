@@ -153,6 +153,11 @@ export class Recorder extends JobConsole {
   readonly chunks: [Channel | Inherited, number, number][] = []
   readonly owner: StreamOwner = Symbol('recorder')
   outputFile: string | FileDescription | null = null
+  /**
+   * Set when a stdout write went to a descriptor that takes none (`exec
+   * 1<f`), for the statement that wrote it to fail. Mirrors Python's refused.
+   */
+  refused = false
   private storage = new ByteSpool()
   private writing = Promise.resolve()
   private pending = 0

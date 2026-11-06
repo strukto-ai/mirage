@@ -769,7 +769,7 @@ describe('handleRedirect numeric targets', () => {
       expect(await runResult(ws, 'echo x 1<&-; echo code=$?')).toEqual([
         0,
         'code=1\n',
-        'echo: write error: Bad file descriptor\n',
+        'bash: line 1: echo: write error: Bad file descriptor\n',
       ])
       expect(await runResult(ws, 'cat /data/missing 2<&1; echo code=$?')).toEqual([
         0,
@@ -789,7 +789,7 @@ describe('handleRedirect numeric targets', () => {
       expect(await runResult(ws, 'echo 0 >&-; echo code=$?')).toEqual([
         0,
         'code=1\n',
-        'echo: write error: Bad file descriptor\n',
+        'bash: line 1: echo: write error: Bad file descriptor\n',
       ])
       expect(await runResult(ws, 'exec 2<&-; cat /data/missing; echo code=$?')).toEqual([
         0,
@@ -1115,7 +1115,7 @@ describe('handleRedirect unwritable > target', () => {
 
 describe('descriptor zero duplication', () => {
   it.each([
-    ['echo x 1>&0', '', 'echo: write error: Bad file descriptor\n', 1],
+    ['echo x 1>&0', '', 'bash: line 1: echo: write error: Bad file descriptor\n', 1],
     // A self-dup never reopens a closed descriptor, transient or
     // persistent; a file redirect on it does.
     [
@@ -1138,7 +1138,7 @@ describe('descriptor zero duplication', () => {
     ],
     ['echo x 2>&0 1>&2', '', '', 1],
     ['echo x 0>&1 1>&0', 'x\n', '', 0],
-    ['echo x 1>&0 0>&1', '', 'echo: write error: Bad file descriptor\n', 1],
+    ['echo x 1>&0 0>&1', '', 'bash: line 1: echo: write error: Bad file descriptor\n', 1],
     ['echo x 1>&0 2>&1', '', '', 1],
     // A dup from a descriptor closed earlier on the line refuses the
     // line, and the command never runs; a self-dup stays a no-op.
@@ -1168,7 +1168,12 @@ describe('descriptor zero duplication', () => {
     ['( echo out; echo err >&2 ) 1>&/data/both; cat /data/both', 'out\nerr\n', '', 0],
     // An output redirect leaves its descriptor write-only.
     ['cat 1>/data/out 0<&1; wc -c < /data/out', '0\n', 'cat: -: Bad file descriptor\n', 0],
-    ['echo x 1>&0 2>/data/err; cat /data/err', 'echo: write error: Bad file descriptor\n', '', 0],
+    [
+      'echo x 1>&0 2>/data/err; cat /data/err',
+      'bash: line 1: echo: write error: Bad file descriptor\n',
+      '',
+      0,
+    ],
     ['echo x 0>/data/out 1>&0; cat /data/out', 'x\n', '', 0],
     ['cat </data/a.txt 1<&0 0<&1 1>/data/out; cat /data/out', 'a', '', 0],
     // bash 5.2: stdout is open for writing only, so the read fails.
@@ -1225,7 +1230,7 @@ it('opens a standard descriptor in the other direction', async () => {
     expect((await ws.shell('cat /data/input')).stdoutText).toBe('')
     const one = await ws.shell('( exec 1</data/source; echo hi; echo rc=$? >&2 )')
     expect(one.stdoutText).toBe('')
-    expect(one.stderrText).toBe('echo: write error: Bad file descriptor\nrc=1\n')
+    expect(one.stderrText).toBe('bash: line 1: echo: write error: Bad file descriptor\nrc=1\n')
     const two = await ws.shell('( exec 2</data/source; echo hi >&2; echo rc=$? )')
     expect(two.stdoutText).toBe('rc=1\n')
   } finally {
@@ -1340,7 +1345,12 @@ describe('descriptor identities survive dups', () => {
     ['exec 0>/data/f; echo x >&0; exec 1>&0; echo y; exec 1>&2; cat /data/f >&2', '', 'x\ny\n', 0],
     ['exec 0>/data/f; echo x 1>&0 2>&0; cat /data/f', 'x\n', '', 0],
     ['exec 0<&1; echo x >&0', 'x\n', '', 0],
-    ['echo x >&0; echo rc=$?', 'rc=1\n', 'echo: write error: Bad file descriptor\n', 0],
+    [
+      'echo x >&0; echo rc=$?',
+      'rc=1\n',
+      'bash: line 1: echo: write error: Bad file descriptor\n',
+      0,
+    ],
   ])('%s', async (line, out, err, code) => {
     const { ws } = makeIntegrationWS()
     try {
