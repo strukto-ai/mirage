@@ -14,7 +14,7 @@
 
 import { shellVoice } from '../../shell/voice.ts'
 import { atoi } from '../../commands/builtin/utils/strtol.ts'
-import type { RedirectResult } from '../../context/session_context.ts'
+import { currentCaller, type RedirectResult } from '../../context/session_context.ts'
 import { lineBuffer } from '../../io/async_line_iterator.ts'
 import { asyncChain } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
@@ -109,6 +109,7 @@ export async function executeBody(
   for (const cmd of body) {
     if (cmd.type === NT.COMMENT) continue
     const armed = errTrapArmed(session)
+    currentCaller().process?.programSignaled(null)
     try {
       const [stdout, io, execNode] = await runProgram(
         cmd,

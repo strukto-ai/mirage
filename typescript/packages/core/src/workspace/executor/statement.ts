@@ -527,10 +527,11 @@ export async function statementOutput(
 /**
  * Bash's line for a write its descriptor refused, in the name of what wrote:
  * a builtin speaks in the shell's voice (`bash: line 1: echo: write error:
- * ...`), a program in its own. Mirrors Python's write_error_line.
+ * ...`), a program in its own, and so does a program `exec` ran (`program`),
+ * whatever its name. Mirrors Python's write_error_line.
  */
-export function writeErrorLine(name: string): Uint8Array {
-  const voice = BASH_BUILTINS.has(name) ? shellVoice() : ''
+export function writeErrorLine(name: string, program = false): Uint8Array {
+  const voice = BASH_BUILTINS.has(name) && !program ? shellVoice() : ''
   return encodeText(`${voice}${name}: write error: Bad file descriptor\n`)
 }
 

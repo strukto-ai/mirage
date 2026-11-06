@@ -177,13 +177,16 @@ class ProcessHandle:
         with self._lock:
             self._program_code = code
 
-    def program_signaled(self, signal: int) -> None:
+    def program_signaled(self, signal: int | None) -> None:
         """Record that a native program the runner started ended on a
         signal, which names the runner's end when its status is that
         program's (``true | python3 -c 'os.kill(os.getpid(), 9)'``).
+        Every statement the runner starts clears it, so only the last
+        one's end counts.
 
         Args:
-            signal (int): the signal that ended the program.
+            signal (int | None): the signal that ended the program; None
+                as a statement starts.
         """
         with self._lock:
             self._program_signal = signal

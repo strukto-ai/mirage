@@ -1279,11 +1279,9 @@ function closedWriteLine(command: TSNodeLike, unwound: Unwinding | null = null):
   const words = getText(command)
     .split(/\s+/)
     .filter((w) => w !== '')
-  return writeErrorLine(
-    unwound instanceof ExitSignal && unwound.replaced !== null
-      ? unwound.replaced
-      : (words[0] ?? 'redirect'),
-  )
+  if (unwound instanceof ExitSignal && unwound.replaced !== null)
+    return writeErrorLine(unwound.replaced, true)
+  return writeErrorLine(words[0] ?? 'redirect')
 }
 
 /** Shell-attributed IOResult for a redirect target that cannot be opened. */

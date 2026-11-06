@@ -671,15 +671,17 @@ async def statement_output(
     return written
 
 
-def write_error_line(name: str) -> bytes:
+def write_error_line(name: str, program: bool = False) -> bytes:
     """Bash's line for a write its descriptor refused, in the name of
     what wrote: a builtin speaks in the shell's voice (``bash: line 1:
     echo: write error: ...``), a program in its own.
 
     Args:
         name (str): the writer, the first word of its command.
+        program (bool): the writer is a program ``exec`` ran, which
+            speaks in its own voice whatever its name.
     """
-    voice = shell_voice() if name in BASH_BUILTINS else ""
+    voice = shell_voice() if name in BASH_BUILTINS and not program else ""
     return encode_text(f"{voice}{name}: write error: Bad file descriptor\n")
 
 

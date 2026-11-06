@@ -154,11 +154,13 @@ export class ProcessHandle {
   /**
    * Record that a native program the runner started ended on a signal, which
    * names the runner's end when its status is that program's (`true | python3
-   * -c 'os.kill(os.getpid(), 9)'`). Mirrors Python's program_signaled.
+   * -c 'os.kill(os.getpid(), 9)'`). Every statement the runner starts clears
+   * it, so only the last one's end counts. Mirrors Python's program_signaled.
    *
-   * @param signal the signal that ended the program.
+   * @param signal the signal that ended the program; null as a statement
+   *   starts.
    */
-  programSignaled(signal: number): void {
+  programSignaled(signal: number | null): void {
     this.programSignal = signal
   }
 

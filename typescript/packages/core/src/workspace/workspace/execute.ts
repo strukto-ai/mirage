@@ -813,7 +813,9 @@ async function runPreparedLine(
                 io = ended(err)
               }
               if (!substitution) return io
-              const { node, handed: outer, signal, executionScope } = opts
+              // Its EXIT action runs as the substitution, which a stop ends.
+              const { node, handed: outer, executionScope } = opts
+              const signal = innerOpts.signal
               const shellJobs = innerOpts.jobTable
               io = await finishShell(
                 (action, o) =>
