@@ -149,8 +149,9 @@ class Recorder(JobConsole, StreamOwner):
     to that level, so it lands among the bytes written around it.
     ``output_file`` is the regular file the level's stdout writes, if
     one does, which a command writing to the level may not read as its
-    input (``cat f >> f``); ``output`` is the description a streamed
-    redirect writes it through, which a rename the line makes moves.
+    input (``cat f >> f``), or the description a streamed redirect
+    writes it through, which a rename the line makes moves and which
+    the levels below share.
     """
 
     def __init__(self) -> None:
@@ -159,17 +160,17 @@ class Recorder(JobConsole, StreamOwner):
         self.storage = ByteSpool()
         self.writing = asyncio.Lock()
         self.pending = 0
-        self.output_file: str | None = None
-        self.output: FileDescription | None = None
+        self.output_file: str | FileDescription | None = None
 
     @property
     def output_target(self) -> str | None:
         """The file the level's stdout writes as a command starts: a
         streamed description's file wherever the line moved it, none
         once the line removed it."""
-        if self.output is None:
-            return self.output_file
-        return None if self.output.lost else self.output.where.virtual
+        output = self.output_file
+        if not isinstance(output, FileDescription):
+            return output
+        return None if output.lost else output.where.virtual
 
     @property
     def busy(self) -> bool:

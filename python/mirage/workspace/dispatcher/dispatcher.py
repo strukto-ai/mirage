@@ -1076,7 +1076,7 @@ class Dispatcher:
                 them.
         """
         reached = {
-            self._followed(p.virtual)
+            self._spelled(p)
             for p in (
                 path,
                 *(v for v in kwargs.values() if isinstance(v, PathSpec)),
@@ -1115,12 +1115,8 @@ class Dispatcher:
             path (PathSpec): its path.
             dst (PathSpec | None): a rename's destination.
         """
-        src = self._followed(path.virtual, last=False).rstrip("/")
-        to = (
-            None
-            if dst is None
-            else self._followed(dst.virtual, last=False).rstrip("/")
-        )
+        src = self._spelled(path, last=False)
+        to = None if dst is None else self._spelled(dst, last=False)
         for file, _ in streamed:
             at = file.where.virtual
             if owner_prefix((src,), at) is not None:
@@ -1131,13 +1127,31 @@ class Dispatcher:
             elif to is not None and owner_prefix((to,), at) is not None:
                 file.lost = True
 
-    def _followed(self, virtual: str, last: bool = True) -> str:
+    def _followed(self, virtual: str) -> str:
         try:
-            if last:
-                return self._namespace.follow(virtual)
-            return self._namespace.follow_parent(virtual)
+            return self._namespace.follow(virtual)
         except CycleError:
             return virtual
+
+    def _spelled(self, path: PathSpec, last: bool = True) -> str:
+        """Where a path leads walked as typed, links before ``..``, its
+        final link followed only when ``last``; a loop of links leaves
+        it as typed.
+
+        Args:
+            path (PathSpec): the path as the caller named it.
+            last (bool): whether to follow a link at the final name.
+        """
+        spelled = walk_spelling(path, self._namespace.follow)
+        try:
+            walked = (
+                self._namespace.follow(spelled)
+                if last
+                else self._namespace.follow_parent(spelled)
+            )
+        except CycleError:
+            walked = spelled
+        return posixpath.normpath(walked)
 
     async def _bound(
         self,

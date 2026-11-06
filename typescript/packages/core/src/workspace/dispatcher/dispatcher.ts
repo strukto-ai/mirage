@@ -890,7 +890,7 @@ export class Dispatcher {
     const reached = new Set(
       [path, ...(args ?? []), ...Object.values(kwargs ?? {})]
         .filter((p): p is PathSpec => p instanceof PathSpec)
-        .map((p) => this.followed(p.virtual)),
+        .map((p) => this.spelled(p)),
     )
     for (const [file, hold] of streamed) {
       const target = this.followed(file.where.virtual)
@@ -914,8 +914,8 @@ export class Dispatcher {
     path: PathSpec,
     dst: PathSpec | null,
   ): void {
-    const src = rstripSlash(this.followed(path.virtual, false))
-    const to = dst === null ? null : rstripSlash(this.followed(dst.virtual, false))
+    const src = this.spelled(path, false)
+    const to = dst === null ? null : this.spelled(dst, false)
     for (const [file] of streamed) {
       const at = file.where.virtual
       if (ownerPrefix([src], at) !== null) {
@@ -927,9 +927,24 @@ export class Dispatcher {
     }
   }
 
-  private followed(virtual: string, last = true): string {
+  /**
+   * Where a path leads walked as typed, links before `..`, its final link
+   * followed only when `last`; a loop of links leaves it as typed.
+   */
+  private spelled(path: PathSpec, last = true): string {
+    const spelled = walkSpelling(path, (p) => this.namespace.follow(p))
+    let walked = spelled
     try {
-      return last ? this.namespace.follow(virtual) : this.namespace.followParent(virtual)
+      walked = last ? this.namespace.follow(spelled) : this.namespace.followParent(spelled)
+    } catch (error) {
+      if (!(error instanceof CycleError)) throw error
+    }
+    return posixNormpath(walked)
+  }
+
+  private followed(virtual: string): string {
+    try {
+      return this.namespace.follow(virtual)
     } catch (error) {
       if (error instanceof CycleError) return virtual
       throw error

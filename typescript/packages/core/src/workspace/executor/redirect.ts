@@ -61,7 +61,8 @@ import { getText, literalWord } from '../../shell/helpers.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { RedirectKind, type Redirect } from '../../shell/types.ts'
 import { FileStat, FileType, PathSpec } from '../../types.ts'
-import { CycleError, endsAtDot } from '../../utils/path.ts'
+import { walkSpelling } from '../../commands/builtin/utils/paths.ts'
+import { CycleError, endsAtDot, posixNormpath } from '../../utils/path.ts'
 import { ownerPrefix } from '../../utils/slash.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { DEV_PREFIX } from '../mount/registry.ts'
@@ -867,7 +868,7 @@ async function runRedirects(
         !oneFile(errs.scope, opened.scope, follow))
     ) {
       opened.landed = PathSpec.fromStrPath(landed)
-      recorder.output = opened
+      recorder.outputFile = opened
       recorder.streamTo(opened)
       if (errs === opened) recorder.streamTo(opened, Channel.STDERR)
     }
@@ -1141,11 +1142,14 @@ async function runRedirects(
   return [stdout, io, new ExecutionNode({ command: 'redirect', exitCode: io.exitCode, refused })]
 }
 
-/** The file a target names once its links are resolved; a loop of links names itself. */
+/**
+ * The file a target names once its links are resolved, walked as typed, links
+ * before `..`, as its open walked it; a loop of links names itself.
+ */
 function followed(scope: PathSpec, follow: ((path: string) => string) | null): string {
   if (follow === null) return scope.virtual
   try {
-    return follow(scope.virtual)
+    return posixNormpath(follow(walkSpelling(scope, follow)))
   } catch (error) {
     if (error instanceof CycleError) return scope.virtual
     throw error

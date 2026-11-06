@@ -13,11 +13,13 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 import asyncio
 import logging
+import posixpath
 from collections.abc import Awaitable, Callable
 from contextlib import aclosing
 from enum import Enum, auto
 from functools import partial
 
+from mirage.commands.builtin.utils.paths import walk_spelling
 from mirage.context import reset_redirect_paths, set_redirect_paths
 from mirage.context.session_context import (
     RedirectGuard,
@@ -1065,7 +1067,7 @@ async def _handle_redirect(
             )
         ):
             target.landed = PathSpec.from_str_path(landed)
-            recorder.output = target
+            recorder.output_file = target
             recorder.stream_to(target)
             if errs is target:
                 recorder.stream_to(target, Channel.STDERR)
@@ -1400,8 +1402,9 @@ async def _handle_redirect(
 
 
 def _followed(scope: PathSpec, follow: Callable[[str], str] | None) -> str:
-    """The file a target names once its links are resolved; a loop of
-    links names itself.
+    """The file a target names once its links are resolved, walked as
+    typed, links before ``..``, as its open walked it; a loop of links
+    names itself.
 
     Args:
         scope (PathSpec): the target.
@@ -1410,7 +1413,7 @@ def _followed(scope: PathSpec, follow: Callable[[str], str] | None) -> str:
     if follow is None:
         return scope.virtual
     try:
-        return follow(scope.virtual)
+        return posixpath.normpath(follow(walk_spelling(scope, follow)))
     except CycleError:
         return scope.virtual
 

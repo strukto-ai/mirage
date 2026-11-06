@@ -133,15 +133,15 @@ export class Inherited {
  * stream another level owns stays in place on its way up to that level, so it
  * lands among the bytes written around it. `outputFile` is the regular file
  * the level's stdout writes, if one does, which a command writing to the level
- * may not read as its input (`cat f >> f`); `output` is the description a
- * streamed redirect writes it through, which a rename the line makes moves.
+ * may not read as its input (`cat f >> f`), or the description a streamed
+ * redirect writes it through, which a rename the line makes moves and which
+ * the levels below share.
  * Mirrors Python's Recorder.
  */
 export class Recorder extends JobConsole {
   readonly chunks: [Channel | Inherited, number, number][] = []
   readonly owner: StreamOwner = Symbol('recorder')
-  outputFile: string | null = null
-  output: FileDescription | null = null
+  outputFile: string | FileDescription | null = null
   private storage = new ByteSpool()
   private writing = Promise.resolve()
   private pending = 0
@@ -151,8 +151,9 @@ export class Recorder extends JobConsole {
    * it.
    */
   get outputTarget(): string | null {
-    if (this.output === null) return this.outputFile
-    return this.output.lost ? null : this.output.where.virtual
+    const output = this.outputFile
+    if (!(output instanceof FileDescription)) return output
+    return output.lost ? null : output.where.virtual
   }
 
   /** Whether a write is under way or recorded bytes wait to be taken. Mirrors Python's busy. */

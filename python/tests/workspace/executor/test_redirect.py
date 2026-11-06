@@ -169,6 +169,11 @@ async def test_an_op_on_a_streamed_file_finds_what_was_written(
             "{ echo AAAA; rm /data/lnk; echo C; } > /data/lnk",
             {"/data/open": "AAAA\nC\n", "/data/lnk": None},
         ),
+        (
+            "mkdir /data/s/t; ln -s /data/s/t /data/tl;"
+            " { echo A; wc -l < /data/tl/../f; echo B; } > /data/tl/../f",
+            {"/data/s/f": "A\n1\nB\n", "/data/f": "z\n"},
+        ),
         ("{ echo AAAA; rm /data/f; echo C; } > /data/f", {"/data/f": None}),
         (
             "{ echo AAAA; mv /data/f /data/g; echo C; } > /data/f",
@@ -249,6 +254,13 @@ async def test_a_streamed_redirect_writes_the_file_it_opened(line, files):
     [
         (
             "{ echo x; mv /data/f /data/g; cat /data/g; } > /data/f",
+            1,
+            "cat: /data/g: input file is output file\n",
+            "/data/g",
+            "x\n",
+        ),
+        (
+            "( echo x; { mv /data/f /data/g; cat /data/g; }; ) > /data/f",
             1,
             "cat: /data/g: input file is output file\n",
             "/data/g",
