@@ -384,3 +384,42 @@ def test_daemon_config_holds_the_daemon_settings(home):
     assert "port = 9100" in (home / "config.toml").read_text()
     assert load_daemon_settings().url == "http://127.0.0.1:9100"
     assert runner.invoke(app, ["config", "list"]).exit_code == 2
+
+
+def test_a_name_that_is_no_safe_file_name_is_refused_everywhere(home):
+    runner = CliRunner()
+    write_context("local", Context(workspace="kept"))
+    for args in (
+        ["context", "delete", "./local"],
+        ["context", "use", "../up"],
+        ["--context", "../up", "whoami"],
+    ):
+        done = runner.invoke(app, args)
+        assert isinstance(done.exception, ContextError), args
+    assert (home / "contexts" / "local.json").exists()
+
+
+def test_list_works_when_the_current_context_is_gone(home):
+    (home / "current_context").write_text("gone\n")
+    done = CliRunner().invoke(app, ["context", "list"])
+    assert done.exit_code == 0, done.output
+    assert [row["name"] for row in json.loads(done.stdout)] == ["local"]
+
+
+def test_relogin_to_local_writes_its_context_once(home, monkeypatch):
+    write_context("local", Context(url="http://127.0.0.1:9100", workspace="w"))
+    writes: list[tuple[str, Context]] = []
+    real = login_module.write_context
+
+    def record(name: str, context: Context) -> None:
+        writes.append((name, context))
+        real(name, context)
+
+    monkeypatch.setattr(login_module, "write_context", record)
+    login_module.save_context("local", "http://127.0.0.1:9100", None)
+    assert writes == [
+        ("local", Context(url="http://127.0.0.1:9100", workspace="w"))
+    ]
+    writes.clear()
+    login_module.save_context("local", "http://127.0.0.1:8765", None)
+    assert writes == [("local", Context())]

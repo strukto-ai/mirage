@@ -71,10 +71,10 @@ type Env = Record<string, string | undefined>
 export const DEFAULT_DAEMON_URL = 'http://127.0.0.1:8765'
 
 /**
- * The `local` context's URL: the one it logged in to, else config.toml's
+ * The URL `local` follows when it keeps none of its own: config.toml's
  * `url`, else this machine at the port a spawned daemon listens on.
  */
-export function localUrl(table: Record<string, string>, env: Env = process.env): string {
+export function defaultLocalUrl(table: Record<string, string>, env: Env = process.env): string {
   const fromEnv = env[ENV_DAEMON_PORT]
   const port =
     fromEnv !== undefined && fromEnv !== ''
@@ -82,10 +82,14 @@ export function localUrl(table: Record<string, string>, env: Env = process.env):
       : table.port !== undefined && table.port !== ''
         ? table.port
         : String(DEFAULT_PORT)
-  const own = readContext(LOCAL, env)?.url ?? ''
-  if (own !== '') return own
   if (table.url !== undefined && table.url !== '') return table.url
   return `http://127.0.0.1:${port}`
+}
+
+/** The `local` context's URL: the one it logged in to, else `defaultLocalUrl`. */
+export function localUrl(table: Record<string, string>, env: Env = process.env): string {
+  const own = readContext(LOCAL, env)?.url ?? ''
+  return own !== '' ? own : defaultLocalUrl(table, env)
 }
 
 /** The workspace a command uses when given none: `$MIRAGE_WORKSPACE`, else the current context's. */
@@ -177,9 +181,10 @@ export function loadDaemonSettings(
   const name = currentName(env)
   const local = name === LOCAL
   const context = readContext(name, env)
+  if (context === null) throw new ContextError(`no context '${name}'; run \`mirage context list\``)
   const settings: DaemonSettings = {
     context: name,
-    url: local || context === null ? localUrl(table, env) : context.url,
+    url: local ? localUrl(table, env) : context.url,
     authToken: local ? (table.auth_token ?? '') : '',
     idleGraceSeconds: Number(table.idle_grace_seconds ?? '30'),
   }

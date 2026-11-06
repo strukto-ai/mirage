@@ -37,6 +37,7 @@ from mirage.cli.credentials import (
     Login,
     LoginError,
     check_name,
+    chosen_name,
     context_names,
     current_name,
     ends_at,
@@ -56,6 +57,7 @@ from mirage.cli.credentials import (
 from mirage.cli.output import emit, fail, format_table
 from mirage.cli.settings import (
     current_workspace,
+    default_local_url,
     header,
     is_local_url,
     load_daemon_settings,
@@ -392,10 +394,10 @@ def save_context(name: str, url: str, login: Login | None) -> None:
     team = team_of(url, login.access_token) if login else None
     kept = read_context(name)
     stored = url
-    if name == LOCAL:
-        write_context(LOCAL, Context())
-        if url == local_url(read_daemon_table(mirage_home())):
-            stored = ""
+    if name == LOCAL and url == default_local_url(
+        read_daemon_table(mirage_home())
+    ):
+        stored = ""
     write_context(
         name,
         Context(
@@ -494,7 +496,7 @@ def whoami_cmd() -> None:
 @context_app.command("list")
 def list_cmd() -> None:
     """List the contexts; the current one is marked."""
-    current = current_name()
+    current = chosen_name()
     table = read_daemon_table(mirage_home())
     rows = []
     for name in context_names():

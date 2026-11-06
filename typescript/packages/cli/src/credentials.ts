@@ -70,12 +70,12 @@ function writeOwnerOnly(path: string, text: string): void {
 
 /** Where a context is kept: one file each, so changing one never touches another. */
 function contextPath(name: string, env: Env): string {
-  return join(mirageHome(env), CONTEXTS_DIR, `${name}.json`)
+  return join(mirageHome(env), CONTEXTS_DIR, `${checkName(name)}.json`)
 }
 
 /** Where a context's login is kept. */
 export function loginPath(name: string, env: Env = process.env): string {
-  return join(mirageHome(env), LOGINS_DIR, `${name}.json`)
+  return join(mirageHome(env), LOGINS_DIR, `${checkName(name)}.json`)
 }
 
 /** A context name, refused unless it is safe as a file name. */
@@ -116,7 +116,8 @@ export function contextNames(env: Env = process.env): string[] {
   const found = new Set([LOCAL])
   if (existsSync(folder)) {
     for (const file of readdirSync(folder)) {
-      if (file.endsWith('.json')) found.add(file.slice(0, -'.json'.length))
+      const name = file.slice(0, -'.json'.length)
+      if (file.endsWith('.json') && CONTEXT_NAME.test(name)) found.add(name)
     }
   }
   return [...found].sort(compareCodePoints)
@@ -140,13 +141,20 @@ export function loginCommand(url: string, name: string): string {
 }
 
 /**
- * The context this command uses: `--context` or `$MIRAGE_CONTEXT`, else
- * the current one, else `local`. Throws `ContextError` when there is none
- * by that name.
+ * The context this command asks for: `--context` or `$MIRAGE_CONTEXT`,
+ * else the current one, else `local`; it may not exist.
+ */
+export function chosenName(env: Env = process.env): string {
+  const fromEnv = env[ENV_CONTEXT]
+  return fromEnv !== undefined && fromEnv !== '' ? fromEnv : readCurrent(env)
+}
+
+/**
+ * The context this command uses, as `chosenName` picks it. Throws
+ * `ContextError` when there is none by that name.
  */
 export function currentName(env: Env = process.env): string {
-  const fromEnv = env[ENV_CONTEXT]
-  const name = fromEnv !== undefined && fromEnv !== '' ? fromEnv : readCurrent(env)
+  const name = chosenName(env)
   if (readContext(name, env) === null) {
     throw new ContextError(`no context '${name}'; run \`mirage context list\``)
   }
