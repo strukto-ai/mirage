@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
-import { emit, fail, formatTable, handleResponse } from './output.ts'
+import { emit, fail, formatTable, handleResponse, outputOf, show, type Output } from './output.ts'
 
 interface PolicyBody {
   name: string
@@ -24,10 +24,6 @@ interface PolicyBody {
 interface PolicyName {
   name: string
 }
-
-type Format = 'yaml' | 'json'
-
-const FORMATS: readonly string[] = ['yaml', 'json']
 
 /** The program `--source` names: `@FILE` reads a file, anything else is the program itself. */
 export function readSource(given: string): string {
@@ -47,12 +43,6 @@ export function itemsOf(answer: unknown): PolicyName[] {
   return items ?? []
 }
 
-function formatOf(output: string | undefined): Format | undefined {
-  if (output === undefined) return undefined
-  if (!FORMATS.includes(output)) fail(`--output must be yaml or json, got ${output}`, 2)
-  return output as Format
-}
-
 /** One request to the daemon's `/v1/policies`, answered as JSON. */
 async function call(method: string, path: string, body?: Record<string, string>): Promise<unknown> {
   const c = makeClient()
@@ -63,23 +53,6 @@ async function call(method: string, path: string, body?: Record<string, string>)
 
 function ref(name: string): string {
   return `/${encodeURIComponent(name)}`
-}
-
-async function render(
-  obj: unknown,
-  format: Format | undefined,
-  human: () => string,
-): Promise<void> {
-  if (format === 'json') {
-    process.stdout.write(JSON.stringify(obj, null, 2) + '\n')
-    return
-  }
-  if (format === 'yaml') {
-    const { stringify } = await import('yaml')
-    process.stdout.write(stringify(obj))
-    return
-  }
-  emit(obj, human)
 }
 
 export function registerPolicyCommands(program: Command): void {
@@ -103,11 +76,9 @@ export function registerPolicyCommands(program: Command): void {
   policy
     .command('list')
     .description('List saved policies by name.')
-    .option('-o, --output <format>', 'yaml or json')
-    .action(async (opts: { output?: string }) => {
-      const format = formatOf(opts.output)
+    .action(async () => {
       const items = itemsOf(await call('GET', ''))
-      await render(items, format, () =>
+      emit(items, () =>
         formatTable(
           ['NAME'],
           items.map((p) => [p.name]),
@@ -119,11 +90,10 @@ export function registerPolicyCommands(program: Command): void {
     .command('get')
     .description('Show one policy; in a terminal, its source.')
     .argument('<name>', "The policy's name, such as guard.py.")
-    .option('-o, --output <format>', 'yaml or json')
-    .action(async (name: string, opts: { output?: string }) => {
-      const format = formatOf(opts.output)
+    .option('-o, --output <format>', 'yaml: a file create -f and update -f read.', outputOf)
+    .action(async (name: string, opts: { output?: Output }) => {
       const got = (await call('GET', ref(name))) as PolicyBody
-      await render(got, format, () => got.source.replace(/\n+$/, ''))
+      await show(got, opts.output, () => got.source.replace(/\n+$/, ''))
     })
 
   policy

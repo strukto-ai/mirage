@@ -120,13 +120,14 @@ describe('mirage vfs against a daemon', () => {
     expect((await run(['vfs', 'create', 'gh', ...GH, '--secret', `token=@${key}`])).code).toBe(0)
     expect((await store.revealEntry('vfs', 'gh')).sealed).toEqual({ token: 't1' })
     expect((await run(['vfs', 'update', 'gh', '--secret', 'token'], 't2\n')).code).toBe(0)
-    const got = JSON.parse((await run(['vfs', 'get', 'gh', '-o', 'json'])).out) as {
+    const got = JSON.parse((await run(['vfs', 'get', 'gh'])).out) as {
       config: unknown
       sealed: string[]
     }
     expect(got.config).toEqual({ owner: 'o', repo: 'r' })
     expect(got.sealed).toEqual(['token'])
     expect((await store.revealEntry('vfs', 'gh')).sealed).toEqual({ token: 't2' })
+    expect((await run(['vfs', 'get', 'gh', '-o', 'json'])).code).toBe(2)
     const unset = await run(['vfs', 'update', 'gh', '--unset', 'token'])
     expect(unset.code).toBe(2)
     expect(unset.err).toContain('token is required')
@@ -161,7 +162,7 @@ describe('mirage vfs against a daemon', () => {
     const change = join(dir, 'change.yaml')
     writeFileSync(change, 'fields:\n  repo: r2\n')
     expect((await run(['vfs', 'update', 'exported', '-f', change])).code).toBe(0)
-    const got = JSON.parse((await run(['vfs', 'get', 'exported', '-o', 'json'])).out) as {
+    const got = JSON.parse((await run(['vfs', 'get', 'exported'])).out) as {
       config: unknown
     }
     expect(got.config).toEqual({ owner: 'o', repo: 'r2' })
@@ -170,14 +171,14 @@ describe('mirage vfs against a daemon', () => {
   })
 
   it('lists types and deletes', async () => {
-    const types = await run(['vfs', 'types', 'github', '-o', 'json'])
+    const types = await run(['vfs', 'types', 'github'])
     const token = (JSON.parse(types.out) as { name: string; secret: boolean }[]).find(
       (f) => f.name === 'token',
     )
     expect(token?.secret).toBe(true)
     expect((await run(['vfs', 'types', 'nope'])).code).toBe(2)
     expect((await run(['vfs', 'create', 'gone', ...GH, '--secret', 'token'], 't\n')).code).toBe(0)
-    const listed = JSON.parse((await run(['vfs', 'list', '-o', 'json'])).out) as {
+    const listed = JSON.parse((await run(['vfs', 'list'])).out) as {
       items: { name: string }[]
     }
     expect(listed.items.map((i) => i.name)).toContain('gone')

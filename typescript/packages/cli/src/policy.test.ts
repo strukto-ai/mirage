@@ -84,7 +84,7 @@ describe('mirage policy', () => {
     await run('create', 'guard.py', '--source', `@${file}`)
     expect(saved.get('guard.py')).toBe('x = 1\n')
     out = ''
-    await run('get', 'guard.py', '-o', 'json')
+    await run('get', 'guard.py')
     expect(JSON.parse(out)).toEqual({ name: 'guard.py', source: 'x = 1\n' })
     out = ''
     await run('get', 'guard.py', '-o', 'yaml')
@@ -94,7 +94,7 @@ describe('mirage policy', () => {
   it('lists, updates and deletes through the routes', async () => {
     await run('create', 'a.py', '--source', 'x = 1')
     out = ''
-    await run('list', '-o', 'json')
+    await run('list')
     expect(JSON.parse(out)).toEqual([{ name: 'a.py' }])
     await run('update', 'a.py', '--source', 'x = 2')
     expect(saved.get('a.py')).toBe('x = 2')

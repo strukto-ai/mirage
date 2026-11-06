@@ -13,28 +13,28 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-import json
-from enum import StrEnum
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 import typer
-import yaml
 
 from mirage.cli.client import make_client
-from mirage.cli.output import emit, fail, format_table, handle_response
+from mirage.cli.output import (
+    OUTPUT,
+    Output,
+    emit,
+    fail,
+    format_table,
+    handle_response,
+    show,
+)
 
 app = typer.Typer(
     no_args_is_help=True,
     help="Manage saved policies: Python programs a workspace config names.",
 )
-
-
-class Format(StrEnum):
-    YAML = "yaml"
-    JSON = "json"
 
 
 NAME = typer.Argument(..., help="The policy's name, such as guard.py.")
@@ -98,17 +98,9 @@ def create_cmd(name: str = NAME, source: str = SOURCE) -> None:
 
 
 @app.command("list")
-def list_cmd(
-    output: Format | None = typer.Option(None, "--output", "-o"),
-) -> None:
+def list_cmd() -> None:
     """List saved policies by name."""
     items = items_of(call("GET", ""))
-    if output == Format.YAML:
-        typer.echo(yaml.safe_dump(items, sort_keys=False), nl=False)
-        return
-    if output == Format.JSON:
-        typer.echo(json.dumps(items, indent=2, ensure_ascii=False))
-        return
     emit(
         items,
         human=lambda ps: format_table(["NAME"], [[p["name"]] for p in ps]),
@@ -118,17 +110,10 @@ def list_cmd(
 @app.command("get")
 def get_cmd(
     name: str = NAME,
-    output: Format | None = typer.Option(None, "--output", "-o"),
+    output: Output | None = OUTPUT,
 ) -> None:
     """Show one policy; in a terminal, its source."""
-    policy = call("GET", ref(name))
-    if output == Format.YAML:
-        typer.echo(yaml.safe_dump(policy, sort_keys=False), nl=False)
-        return
-    if output == Format.JSON:
-        typer.echo(json.dumps(policy, indent=2, ensure_ascii=False))
-        return
-    emit(policy, human=lambda p: p["source"].rstrip("\n"))
+    show(call("GET", ref(name)), output, lambda p: p["source"].rstrip("\n"))
 
 
 @app.command("update")

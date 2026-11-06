@@ -18,7 +18,7 @@ import { Writable } from 'node:stream'
 import type { Command } from 'commander'
 import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import { type DaemonClient, makeClient } from './client.ts'
-import { emit, fail, formatTable, handleResponse } from './output.ts'
+import { emit, fail, formatTable, handleResponse, outputOf, show, type Output } from './output.ts'
 
 /** One kind of saved connection: its command, route and noun. */
 interface Kind {
@@ -32,8 +32,6 @@ const KINDS: readonly Kind[] = [
   { name: 'cli', route: '/v1/clis', noun: 'CLI' },
   { name: 'runtime', route: '/v1/runtimes', noun: 'runtime' },
 ]
-
-const OUTPUTS: readonly string[] = ['json', 'yaml']
 
 const NO_ARGV_SECRET = (key: string): string =>
   `a secret never comes from the command line: use --secret ${key} to be prompted ` +
@@ -268,23 +266,6 @@ async function fill(draft: Draft, name: string, spec: Spec): Promise<void> {
   for (const key of missing) draft.fields[key] = await prompt(label(key, name), secret.has(key))
 }
 
-async function render(
-  obj: unknown,
-  output: string | undefined,
-  human: (o: never) => string,
-): Promise<void> {
-  if (output === undefined) {
-    emit(obj, human as (o: unknown) => string)
-  } else if (output === 'yaml') {
-    const { stringify } = await import('yaml')
-    process.stdout.write(stringify(obj))
-  } else if (output === 'json') {
-    process.stdout.write(JSON.stringify(obj, null, 2) + '\n')
-  } else {
-    fail(`-o takes ${OUTPUTS.join(' or ')}, not ${output}`, 2)
-  }
-}
-
 const text = (value: unknown): string => (typeof value === 'string' ? value : JSON.stringify(value))
 
 function formatEntry(entry: {
@@ -375,16 +356,15 @@ function registerKindCommands(program: Command, kind: Kind): void {
     .command('types')
     .description('List the types an entry can be; with TYPE, its fields.')
     .argument('[type]', "One type's fields.")
-    .option('-o, --output <format>', 'json or yaml.')
-    .action(async (type: string | undefined, opts: { output?: string }) => {
+    .action(async (type: string | undefined) => {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
       if (type === undefined) {
         const types = await handleResponse(await c.request('GET', `${kind.route}/types`))
-        await render(types, opts.output, formatTypes)
+        emit(types, formatTypes as (o: unknown) => string)
         return
       }
-      await render(await typeFields(c, kind, type), opts.output, formatFields)
+      emit(await typeFields(c, kind, type), formatFields as (o: unknown) => string)
     })
 
   group
@@ -392,18 +372,16 @@ function registerKindCommands(program: Command, kind: Kind): void {
     .description('List the saved entries, by name.')
     .option('--type <type>', 'Only TYPE.')
     .option('-q, --query <text>', 'Name has.')
-    .option('-o, --output <format>', 'json or yaml.')
-    .action(async (opts: { type?: string; query?: string; output?: string }) => {
+    .action(async (opts: { type?: string; query?: string }) => {
       const params = new URLSearchParams()
       if (opts.type !== undefined && opts.type !== '') params.set('type', opts.type)
       if (opts.query !== undefined && opts.query !== '') params.set('q', opts.query)
       const query = params.size > 0 ? `?${params.toString()}` : ''
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
-      await render(
+      emit(
         await handleResponse(await c.request('GET', `${kind.route}${query}`)),
-        opts.output,
-        formatEntries,
+        formatEntries as (o: unknown) => string,
       )
     })
 
@@ -411,14 +389,14 @@ function registerKindCommands(program: Command, kind: Kind): void {
     .command('get')
     .description('Show an entry; a sealed field shows by name only.')
     .argument('<name>')
-    .option('-o, --output <format>', 'json or yaml.')
-    .action(async (name: string, opts: { output?: string }) => {
+    .option('-o, --output <format>', 'yaml: a file create -f and update -f read.', outputOf)
+    .action(async (name: string, opts: { output?: Output }) => {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
-      await render(
+      await show(
         await handleResponse(await c.request('GET', entryPath(name))),
         opts.output,
-        formatEntry,
+        formatEntry as (o: unknown) => string,
       )
     })
 

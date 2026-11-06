@@ -17,7 +17,7 @@ import { dirname, resolve } from 'node:path'
 import type { Command } from 'commander'
 import { makeClient } from './client.ts'
 import { header } from './settings.ts'
-import { emit, fail, formatTable, handleResponse, type Formatter } from './output.ts'
+import { emit, fail, formatTable, handleResponse, outputOf, show, type Output } from './output.ts'
 
 interface Template {
   name: string
@@ -25,24 +25,9 @@ interface Template {
   config: Record<string, unknown>
 }
 
-type Output = 'yaml' | 'json'
-
-/** `-o yaml|json`, refused otherwise. */
-function output(value: string): Output {
-  if (value === 'yaml' || value === 'json') return value
-  fail(`-o takes yaml or json, not '${value}'`, 2)
-}
-
 async function asYaml(obj: unknown): Promise<string> {
   const { dumpYaml } = await import('@struktoai/mirage-node/utils/yaml')
   return dumpYaml(obj)
-}
-
-/** Print an answer as `-o` asks, else as `emit` does. */
-async function show<T>(obj: T, out: Output | undefined, human: Formatter<T>): Promise<void> {
-  if (out === 'yaml') process.stdout.write(await asYaml(obj))
-  else if (out === 'json') process.stdout.write(JSON.stringify(obj, null, 2) + '\n')
-  else emit(obj, human)
 }
 
 /**
@@ -125,10 +110,9 @@ export function registerTemplateCommands(program: Command): void {
   template
     .command('list')
     .description('List the saved templates.')
-    .option('-o, --output <format>', 'Print as yaml or json', output)
-    .action(async (opts: { output?: Output }) => {
+    .action(async () => {
       const { items } = (await call('GET', '/v1/templates')) as { items: Template[] }
-      await show(items, opts.output, (rows) =>
+      emit(items, (rows) =>
         formatTable(
           ['NAME', 'DESCRIPTION'],
           rows.map((t) => [t.name, t.description ?? '']),
@@ -140,7 +124,7 @@ export function registerTemplateCommands(program: Command): void {
     .command('get')
     .description('Print a template; `-o yaml` is a file `create -f` reads.')
     .argument('<name>', 'Template name')
-    .option('-o, --output <format>', 'Print as yaml or json', output)
+    .option('-o, --output <format>', 'yaml: a file create -f and update -f read.', outputOf)
     .action(async (name: string, opts: { output?: Output }) => {
       const found = (await call('GET', templatePath(name))) as Template
       const text = await asYaml(found)
