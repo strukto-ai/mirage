@@ -482,6 +482,54 @@
           }
         }
       ]
+    },
+    {
+      "id": "a_wrapper_around_a_mirage_command_runs_it_in_mirage",
+      "world": {
+        "register_runtimes": {
+          "processbox": "processbox"
+        },
+        "runtimes": [
+          {
+            "name": "processbox",
+            "captures": [
+              "@external"
+            ]
+          },
+          "workspace"
+        ],
+        "mounts": {
+          "/ram": {
+            "vfs": "ram",
+            "files": {
+              "f": "python here\n"
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "command": "nice -n 5 grep python /ram/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "python here\n"
+          }
+        },
+        {
+          "command": "nice nohup cat /ram/f",
+          "expect": {
+            "exit": 0,
+            "stdout": "python here\n"
+          }
+        },
+        {
+          "command": "nice make",
+          "expect": {
+            "exit": 0,
+            "stdout": "[\"nice\",\"make\"]\n"
+          }
+        }
+      ]
     }
   ]
 }

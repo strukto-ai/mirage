@@ -22,6 +22,7 @@ import {
   redirectPathsFor,
   redirectRunnerFor,
   redirectSyntaxFor,
+  runAsProgram,
   runWithCaller,
   runWithRedirectPaths,
   sessionAccess,
@@ -56,6 +57,7 @@ import {
   splitEnvPrefix,
 } from '../../shell/helpers.ts'
 import type { JobTable } from '../../shell/job_table/index.ts'
+import { shellJoin } from '../../shell/join.ts'
 import { WORD_BREAKS } from '../../shell/parse/constants.ts'
 import { syntaxRefusal } from '../../shell/parse/index.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
@@ -100,7 +102,7 @@ import { expandBoundaryGlobs } from '../expand/globs.ts'
 import { expandNode } from '../expand/node.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import { Consumer, runtimeRefused, UNSUPPORTED_BUILTINS } from '../lookup/index.ts'
-import { routedConsumer } from '../lookup/lookup.ts'
+import { mirageProgramAt, routedConsumer } from '../lookup/lookup.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { type SessionState, sessionEntry, setSessionEntry } from '../session/session.ts'
@@ -978,6 +980,15 @@ async function routeArgv(
       new IOResult({ exitCode: 2, stderr: err }),
       new ExecutionNode({ command: name, exitCode: 2, stderr: err }),
     ]
+  }
+
+  // A wrapper around Mirage's own program, run without it.
+  const at = mirageProgramAt(name, argv.args, session, registry, context.frame.routing)
+  if (at !== null) {
+    const io = await runAsProgram(session, () =>
+      executeFn(shellJoin(argv.args.slice(at)), { sessionId: session.sessionId, stdin }),
+    )
+    return [io.stdout, io, new ExecutionNode({ command: name, exitCode: io.exitCode })]
   }
 
   const [consumer, routing] = routedConsumer(

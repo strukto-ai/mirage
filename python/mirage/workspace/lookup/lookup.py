@@ -153,6 +153,67 @@ def routed_consumer(
     return consumer, routing
 
 
+def mirage_program_at(
+    name: str,
+    args: Sequence[str],
+    session: SessionState,
+    registry: "MountRegistry",
+    routing: RouteDecision[RuntimeIdentity] | None,
+) -> int | None:
+    """Where in a wrapper's words the program Mirage runs for it stands,
+    None when it runs none.
+
+    A wrapper nothing in Mirage owns (``PROGRAM_WRAPPERS``) whose
+    program no runtime takes by name to run natively
+    (``wrapper_routing``) but Mirage runs itself, as a builtin, function,
+    CLI or mount command, or an interpreter bound to a language runtime,
+    runs that program in Mirage without the wrapper: ``nice grep x f``
+    runs ``grep x f``, and ``nice nohup grep`` follows each wrapper.
+
+    Args:
+        name (str): expanded command name.
+        args (Sequence[str]): its words, argv[0] excluded.
+        session (SessionState): shell session (function table).
+        registry (MountRegistry): mount registry (command registration).
+        routing (RouteDecision | None): the line's placement.
+    """
+    bindings: Mapping[str, RuntimeIdentity | None] = (
+        routing.bindings if routing is not None else registry.runtime_bindings
+    )
+    if (
+        name not in PROGRAM_WRAPPERS
+        or name in bindings
+        or not _outside_mirage(lookup(name, session, registry, routing))
+        or _wrapped(name, args, bindings) is not None
+    ):
+        return None
+    at = wrapped_program_at(name, args)
+    if at is None:
+        return None
+    inner = args[at]
+    if inner in PROGRAM_WRAPPERS:
+        deeper = mirage_program_at(
+            inner, args[at + 1 :], session, registry, routing
+        )
+        return None if deeper is None else at + 1 + deeper
+    if _outside_mirage(lookup(inner, session, registry, routing)):
+        return None
+    if inner in INTERPRETER_NAMES and not isinstance(
+        bindings.get(inner), LanguageRuntime
+    ):
+        return None
+    return at
+
+
+def _outside_mirage(consumer: Consumer) -> bool:
+    """Whether a consumer leaves the command to no layer of Mirage's own.
+
+    Args:
+        consumer (Consumer): ``lookup``'s answer.
+    """
+    return consumer in (Consumer.EXTERNAL, Consumer.UNKNOWN)
+
+
 def _wrapped(
     name: str,
     args: Sequence[str],

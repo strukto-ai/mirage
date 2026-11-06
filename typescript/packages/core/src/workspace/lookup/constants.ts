@@ -286,46 +286,45 @@ function clusterWords(word: string, valueSpellings: readonly string[]): number {
 }
 
 // The standard programs that run their first operand as a program, each
-// with the short and long options that take a value, from the GNU coreutils
-// (nice, nohup, stdbuf) and util-linux (ionice, setsid) manuals. A program
-// such a wrapper runs that a runtime captures by name takes the wrapper's
-// line with it (`nice gcc x.c` runs where gcc does). sudo is left out: some
-// of its options change whether a command runs at all (-e, -l, -v, -k).
+// with the short and long options that take a value and the options that
+// make it run no program at all (besides --help and --version), from the
+// GNU coreutils (nice, nohup, stdbuf) and util-linux (ionice, setsid)
+// manuals. A program such a wrapper runs that a runtime captures by name
+// takes the wrapper's line with it (`nice gcc x.c` runs where gcc does),
+// and one Mirage runs is run in Mirage without the wrapper (`nice grep`).
+// sudo is left out: some of its options change whether a command runs at
+// all (-e, -l, -v, -k).
 export const PROGRAM_WRAPPERS: ReadonlyMap<
   string,
-  readonly [readonly string[], readonly string[]]
+  readonly [readonly string[], readonly string[], readonly string[]]
 > = new Map([
-  ['nice', [['-n'], ['--adjustment']]],
-  ['nohup', [[], []]],
-  [
-    'stdbuf',
-    [
-      ['-i', '-o', '-e'],
-      ['--input', '--output', '--error'],
-    ],
-  ],
+  ['nice', [['-n'], ['--adjustment'], []]],
+  ['nohup', [[], [], []]],
+  ['stdbuf', [['-i', '-o', '-e'], ['--input', '--output', '--error'], []]],
   [
     'ionice',
     [
       ['-c', '-n', '-p', '-P', '-u'],
       ['--class', '--classdata', '--pid', '--pgid', '--uid'],
+      ['-p', '-P', '-u', '--pid', '--pgid', '--uid'],
     ],
   ],
-  ['setsid', [[], []]],
+  ['setsid', [[], [], []]],
 ])
 
 /**
  * Where the program a wrapper runs stands in its words, null when they
  * name none: the first word past the wrapper's options, as getopt reads
  * them (a value attached or in the next word, a long option by any prefix
- * of its name, `--` ending them). Mirrors Python's `wrapped_program_at`.
+ * of its name, `--` ending them), unless an option means no program runs
+ * (`--help`, `ionice -p`). Mirrors Python's `wrapped_program_at`.
  *
  * Args:
  *   name: a `PROGRAM_WRAPPERS` name.
  *   words: the wrapper's words, argv[0] excluded.
  */
 export function wrappedProgramAt(name: string, words: readonly string[]): number | null {
-  const [short, long] = PROGRAM_WRAPPERS.get(name) ?? [[], []]
+  const [short, long, stops] = PROGRAM_WRAPPERS.get(name) ?? [[], [], []]
   let i = 0
   while (i < words.length) {
     const word = words[i] ?? ''
@@ -333,11 +332,17 @@ export function wrappedProgramAt(name: string, words: readonly string[]): number
     if (!word.startsWith('-') || word === '-') return i
     if (word.startsWith('--')) {
       const option = word.split('=', 1)[0] ?? word
+      const stopping = ['--help', '--version', ...stops].filter((o) => o.startsWith('--'))
+      if (stopping.some((o) => o.startsWith(option))) return null
       const takes = !word.includes('=') && long.some((o) => o.startsWith(option))
       i += takes ? 2 : 1
-    } else {
-      i += clusterWords(word, short)
+      continue
     }
+    for (const letter of word.slice(1)) {
+      if (stops.includes(`-${letter}`)) return null
+      if (short.includes(`-${letter}`)) break
+    }
+    i += clusterWords(word, short)
   }
   return null
 }

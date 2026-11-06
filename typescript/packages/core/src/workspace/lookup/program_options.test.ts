@@ -139,6 +139,10 @@ describe('wrappedProgramAt', () => {
     ['ionice', ['-tc3', 'gcc'], 1],
     ['ionice', ['-c', '2', '-n0', 'gcc'], 3],
     ['setsid', ['-fw', 'gcc'], 1],
+    ['nice', ['--help', 'gcc'], null],
+    ['nice', ['--vers', 'gcc'], null],
+    ['ionice', ['-p', '1', 'gcc'], null],
+    ['ionice', ['-tp1', 'gcc'], null],
   ] as [string, string[], number | null][])(
     'finds the program %s runs in %j',
     (name, words, at) => {

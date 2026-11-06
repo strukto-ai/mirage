@@ -37,7 +37,9 @@ from mirage.context import (
     redirect_paths_for,
     redirect_runner_for,
     reset_caller,
+    reset_program_invocation,
     reset_redirect_paths,
+    set_program_invocation,
     set_redirect_paths,
 )
 from mirage.context.session_context import RedirectResult, redirect_syntax_for
@@ -73,6 +75,7 @@ from mirage.shell.helpers import (
     split_env_prefix,
 )
 from mirage.shell.job_table import JobTable
+from mirage.shell.join import shell_join
 from mirage.shell.parse.constants import WORD_BREAKS
 from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope
@@ -125,7 +128,10 @@ from mirage.workspace.lookup import (
     Consumer,
     runtime_refused,
 )
-from mirage.workspace.lookup.lookup import routed_consumer
+from mirage.workspace.lookup.lookup import (
+    mirage_program_at,
+    routed_consumer,
+)
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import (
@@ -1066,6 +1072,26 @@ async def _route_argv(
             None,
             IOResult(exit_code=2, stderr=err),
             ExecutionNode(command=name, exit_code=2, stderr=err),
+        )
+
+    # ── a wrapper around Mirage's own program, run without it ──
+    at = mirage_program_at(
+        name, argv.args, session, registry, context.frame.routing
+    )
+    if at is not None:
+        token = set_program_invocation(session)
+        try:
+            io = await execute_fn(
+                shell_join(argv.args[at:]),
+                session_id=session.session_id,
+                stdin=stdin,
+            )
+        finally:
+            reset_program_invocation(token)
+        return (
+            io.stdout,
+            io,
+            ExecutionNode(command=name, exit_code=io.exit_code),
         )
 
     consumer, routing = routed_consumer(

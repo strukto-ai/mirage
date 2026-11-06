@@ -967,7 +967,6 @@ describe('a wrapper runs where the program it runs is captured', () => {
     [true, 'setsid -w gcc x.c', 'docker'],
     [false, 'nice gcc x.c', 'docker'],
     [true, 'nice make', 'e2b'],
-    [true, 'nice python3 -c 1', 'e2b'],
     [true, 'nice', 'e2b'],
     [true, 'sudo gcc x.c', 'e2b'],
   ] as [boolean, string, string][])('%s %s runs on %s', async (external, line, runs) => {
@@ -1071,6 +1070,77 @@ describe('command past a wrapper function', () => {
       expect(new TextDecoder().decode(io.stdout)).toBe('docker\n')
       const said = await ws.explain('command nice gcc x.c')
       expect(runtimesOf(said.node)).toEqual(['', 'docker', 'docker'])
+    } finally {
+      await ws.close()
+    }
+  })
+})
+
+function mirageWorkspace(...entries: RuntimeEntry[]): Workspace {
+  return new Workspace(
+    { '/data': new RAMVFS() },
+    {
+      mode: MountMode.EXEC,
+      runtimes: [...entries, 'workspace'],
+      profiles: { tight: { commands: { allow: ['cd', 'grep'] } } },
+    },
+  )
+}
+
+describe("a wrapper around Mirage's program", () => {
+  it.each([
+    [true, 'nice grep python f', 'python here\n'],
+    [false, 'nice grep python f', 'python here\n'],
+    [true, 'nohup cat f', 'python here\n'],
+    [true, 'nice -n 5 grep python f', 'python here\n'],
+    [true, 'nice nohup grep python f', 'python here\n'],
+    [false, 'nice grep -h python *.txt', 'python a\npython b\n'],
+    [true, 'nice python3 -c 1', 'monty\n'],
+    [true, 'stdbuf -oL grep python f', 'python here\n'],
+  ] as [boolean, string, string][])('%s %s runs it in Mirage', async (external, line, out) => {
+    const entries: RuntimeEntry[] = [new Box('docker', 'gcc'), new Monty()]
+    if (external) entries.unshift(new Box('e2b', '@external'))
+    const ws = mirageWorkspace(...entries)
+    try {
+      await ws.vfs.write('/data/f', 'python here\n')
+      await ws.vfs.write('/data/a.txt', 'python a\n')
+      await ws.vfs.write('/data/b.txt', 'python b\n')
+      await ws.shell('cd /data')
+      const io = await ws.shell(line)
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, out])
+      const said = await ws.explain(line)
+      expect(runtimesOf(said.node)[0]).toBe('')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it.each([
+    ['foo() { echo hi; }; nice foo', 'hi\n'],
+    ['nice python3 -c 1', 'e2b\n'],
+    ['nice --help grep x', 'e2b\n'],
+    ['ionice -p 1 grep x', 'e2b\n'],
+  ])('runs a function, and keeps its route otherwise: %s', async (line, out) => {
+    const ws = new Workspace(
+      { '/data': new RAMVFS() },
+      { mode: MountMode.EXEC, runtimes: [new Box('e2b', '@external'), 'workspace'] },
+    )
+    try {
+      const io = await ws.shell(line)
+      expect([io.exitCode, new TextDecoder().decode(io.stdout)]).toEqual([0, out])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('is still refused by an allow list that leaves the wrapper out', async () => {
+    const ws = mirageWorkspace(new Box('e2b', '@external'))
+    try {
+      await ws.vfs.write('/data/f', 'python here\n')
+      ws.createSession('s', { profile: 'tight' })
+      expect((await ws.shell('cd /data && grep python f', { sessionId: 's' })).exitCode).toBe(0)
+      const io = await ws.shell('cd /data && nice grep python f', { sessionId: 's' })
+      expect(io.exitCode).toBe(126)
     } finally {
       await ws.close()
     }

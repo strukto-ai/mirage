@@ -131,6 +131,50 @@ export function routedConsumer(
 }
 
 /**
+ * Where in a wrapper's words the program Mirage runs for it stands, null
+ * when it runs none.
+ *
+ * A wrapper nothing in Mirage owns (`PROGRAM_WRAPPERS`) whose program no
+ * runtime takes by name to run natively (`wrapperRouting`) but Mirage runs
+ * itself, as a builtin, function, CLI or mount command, or an interpreter
+ * bound to a language runtime, runs that program in Mirage without the
+ * wrapper: `nice grep x f` runs `grep x f`, and `nice nohup grep` follows
+ * each wrapper. Mirrors Python's `mirage_program_at`.
+ */
+export function mirageProgramAt(
+  name: string,
+  args: readonly string[],
+  session: SessionState,
+  registry: MountRegistry,
+  routing: RouteDecision<Runtime> | undefined,
+): number | null {
+  const bindings = routing?.bindings ?? registry.runtimeBindings
+  if (
+    !PROGRAM_WRAPPERS.has(name) ||
+    Object.hasOwn(bindings, name) ||
+    !outsideMirage(lookup(name, session, registry, routing)) ||
+    wrapped(name, args, bindings) !== null
+  )
+    return null
+  const at = wrappedProgramAt(name, args)
+  if (at === null) return null
+  const inner = args[at] ?? ''
+  if (PROGRAM_WRAPPERS.has(inner)) {
+    const deeper = mirageProgramAt(inner, args.slice(at + 1), session, registry, routing)
+    return deeper === null ? null : at + 1 + deeper
+  }
+  if (outsideMirage(lookup(inner, session, registry, routing))) return null
+  if (INTERPRETER_NAMES.has(inner) && !((bindings[inner] ?? null) instanceof LanguageRuntime))
+    return null
+  return at
+}
+
+/** Whether a consumer leaves the command to no layer of Mirage's own. */
+function outsideMirage(consumer: Consumer): boolean {
+  return consumer === Consumer.EXTERNAL || consumer === Consumer.UNKNOWN
+}
+
+/**
  * The program a wrapper runs that a runtime captures by name and runs
  * natively, nested wrappers followed; null when there is none.
  */
