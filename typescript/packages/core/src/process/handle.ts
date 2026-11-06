@@ -1,5 +1,6 @@
 import { isAborting } from '../errors/fs.ts'
 import type { JsonValue } from '../types.ts'
+import { SignalStop } from '../utils/abort.ts'
 import type { ProcessInfo, ProcessRunner } from './types.ts'
 
 /**
@@ -42,6 +43,7 @@ export class ProcessHandle {
     private readonly cancelChildren: (signal: number) => void = () => undefined,
     private readonly bind: ExecutionBind = (_id, run) => run(),
     private readonly interruptChildrenOf: (signal: number) => void = () => undefined,
+    readonly ignores: ReadonlySet<number> = new Set(),
   ) {
     this.current = Object.freeze(info)
   }
@@ -81,6 +83,12 @@ export class ProcessHandle {
   /** The signal the runner was stopped with, null while it runs. */
   get signal(): number | null {
     return this.stopSignal
+  }
+
+  /** The signal `interrupt` stops the program the runner runs right now with, null while none is stopping. */
+  get interrupted(): number | null {
+    for (const sent of this.programs.values()) if (sent !== null) return sent
+    return null
   }
 
   /** The status a program the runner started exited with on its own after the stop signal, null unless one did. */
@@ -153,7 +161,7 @@ export class ProcessHandle {
     for (const [stop, sent] of this.programs) {
       if (sent !== null) continue
       this.programs.set(stop, signal)
-      stop.abort(new DOMException('interrupted', 'AbortError'))
+      stop.abort(new SignalStop(signal))
     }
   }
 
@@ -168,12 +176,14 @@ export class ProcessHandle {
    * still run (`sh -c 'sleep 100 &'`), so its children are stopped all the
    * same. A KILL while the runner still stops under another signal cuts the
    * grace that signal gave its program short, as a second `kill -KILL` does.
+   * A signal the runner ignores (`ignores`) does nothing.
    *
    * @param signal what the stop stands for, KILL (9) unless a `kill` named another.
    * @param children stop what the runner started too; false leaves its jobs
    *   running, for a signal they ignore.
    */
   terminate(signal = 9, children = true): boolean {
+    if (this.ignores.has(signal)) return false
     if (this.current.state === 'exited') {
       if (children) this.cancelChildren(signal)
       return false

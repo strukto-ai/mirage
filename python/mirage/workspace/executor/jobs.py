@@ -60,12 +60,7 @@ from mirage.shell.constants import (
     TIMEOUT_STATUS,
 )
 from mirage.shell.errors import ExitSignal, ReturnSignal
-from mirage.shell.helpers import (
-    get_pipeline_commands,
-    get_redirects,
-    get_text,
-    is_backgrounded,
-)
+from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
 from mirage.shell.job_table import Job, JobStatus, JobTable
 from mirage.shell.job_table.constants import STOP_WAIT_SECONDS
 from mirage.shell.node_kind import NodeKind, node_kind, simple_command
@@ -256,24 +251,22 @@ def _one_program(left: TSNodeLike, session: SessionState) -> bool:
     )
 
 
-def _programs(node: TSNodeLike | None, session: SessionState) -> int:
-    """How many programs bash forks for a statement: one for a program,
-    one per stage for a pipeline of them, and none for the shell's own
-    work (a builtin, a function, a compound command).
+def _forked(node: TSNodeLike | None, session: SessionState) -> bool:
+    """Whether bash forks a statement as one child: a program or a
+    subshell. The shell's own work (a builtin, a function, a compound
+    command) is not, and a pipeline forks each stage (``handle_pipe``).
 
     Args:
         node (TSNodeLike | None): the statement.
         session (SessionState): the shell it runs in.
     """
     if node is None or is_backgrounded(node):
-        return 0
+        return False
     if node.type == NT.REDIRECTED_STATEMENT:
-        return _programs(get_redirects(node)[0], session)
-    if node.type == NT.PIPELINE:
-        stages, _ = get_pipeline_commands(node)
-        counts = [_programs(stage, session) for stage in stages]
-        return sum(counts) if all(counts) else 0
-    return int(node.type == NT.COMMAND and forks(node, session))
+        return _forked(get_redirects(node)[0], session)
+    return node.type == NT.SUBSHELL or (
+        node.type == NT.COMMAND and forks(node, session)
+    )
 
 
 async def run_program(
@@ -284,11 +277,11 @@ async def run_program(
         Coroutine[Any, Any, tuple[ByteSource | None, IOResult, ExecutionNode]],
     ],
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
-    """Run one statement to the end of its output. A program a
-    background job's shell runs (``sleep 3`` in ``{ sleep 3; echo x; }
-    &``) runs where a signal that shell ignores still stops it, as bash
-    forks each with INT back at its default: the statement ends with 128
-    plus the signal, and the job goes on.
+    """Run one statement to the end of its output. A program or a
+    subshell a background job's shell runs (``sleep 3`` in ``{ sleep 3;
+    echo x; } &``) runs where a signal that shell ignores still stops it,
+    whole, as bash forks each with INT back at its default: the statement
+    ends with 128 plus the signal, and the job goes on.
 
     Args:
         node (TSNodeLike): the statement.
@@ -296,16 +289,20 @@ async def run_program(
         run (Callable): the statement, its output drained.
     """
     job = context.frame.job
-    programs = 0 if job is None else _programs(node, context.session)
-    if job is None or not programs:
+    if job is None or not _forked(node, context.session):
         return await run()
-    result, signal = await job.program(run)
+    # What the child runs is its own, which the signal stops with it.
+    context.frame.job = None
+    try:
+        result, signal = await job.program(run)
+    finally:
+        context.frame.job = job
     if signal is None:
         assert result is not None
         return result
     code = 128 + signal
     if node.type != NT.COMMAND:
-        context.session._pipe_status_pending = (code,) * programs
+        context.session._pipe_status_pending = (code,)
     record_status(context.session, code)
     return (
         None,

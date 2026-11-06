@@ -53,8 +53,10 @@ class ProcessHandle:
         cancel_children: Callable[[int], None] = lambda signal: None,
         bind: ExecutionBind | None = None,
         interrupt_children: Callable[[int], None] = lambda signal: None,
+        ignores: frozenset[int] = frozenset(),
     ) -> None:
         self._info = info
+        self.ignores = ignores
         self._run = run
         self._bind = bind
         self._lock = RLock()
@@ -101,6 +103,16 @@ class ProcessHandle:
         """The signal the runner was stopped with, None while it runs."""
         with self._lock:
             return self._signal
+
+    @property
+    def interrupted(self) -> int | None:
+        """The signal ``interrupt`` stops the program the runner runs
+        right now with, None while none is stopping."""
+        with self._lock:
+            return next(
+                (sent for sent in self._programs.values() if sent is not None),
+                None,
+            )
 
     @property
     def program_code(self) -> int | None:
@@ -215,7 +227,8 @@ class ProcessHandle:
         started may still run (``sh -c 'sleep 100 &'``), so its children
         are stopped all the same. A KILL while the runner still stops
         under another signal cuts the grace that signal gave its program
-        short, as a second ``kill -KILL`` does.
+        short, as a second ``kill -KILL`` does. A signal the runner
+        ignores (``ignores``) does nothing.
 
         Args:
             signal (int): what the stop stands for, KILL (9) unless a
@@ -223,6 +236,8 @@ class ProcessHandle:
             children (bool): stop what the runner started too; False
                 leaves its jobs running, for a signal they ignore.
         """
+        if signal in self.ignores:
+            return False
         with self._lock:
             exited = self._info.state == ProcessState.EXITED
             stopped = not exited and not self._info.cancellation_requested

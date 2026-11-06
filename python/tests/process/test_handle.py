@@ -112,6 +112,34 @@ async def test_a_program_returns_unless_interrupted_and_a_stop_still_stops():
     assert outcome == [(3, None)]
 
 
+# A native run reads the signal an interrupt stops its program with, so
+# it hands the program INT rather than killing it; once the program is
+# gone, nothing is stopping.
+@pytest.mark.asyncio
+async def test_an_interrupted_program_names_its_signal_until_it_ends():
+    started = asyncio.Event()
+    seen: list[int | None] = []
+
+    async def program() -> int:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            seen.append(handle.interrupted)
+        return 0
+
+    async def run() -> int:
+        _, signal = await handle.program(program)
+        seen.append(handle.interrupted)
+        return signal or 0
+
+    handle = ProcessHandle(_info(), run, lambda _pid: None)
+    handle.start()
+    await started.wait()
+    handle.interrupt(2)
+    assert ((await handle.join()).exit_code, seen) == (2, [2, None])
+
+
 # A stop stands for the signal a kill named: the runner reads it from the
 # caller it runs as, and its status is 128 plus it, as bash reports a
 # child that signal ended.

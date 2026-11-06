@@ -112,6 +112,26 @@ async def test_output_goes_into_its_file_as_it_is_written(line, monkeypatch):
         ),
         ("f() { seq 3; return 4; }; f > /data/f", 4, "1\n2\n3\n", ""),
         ("( echo A; exit 3 ) > /data/f", 3, "A\n", ""),
+        (
+            "{ echo A; wc -c < /data/f; echo B; wc -c < /data/f; echo C; }"
+            " > /data/f",
+            0,
+            "A\n2\nB\n6\nC\n",
+            "",
+        ),
+        ("{ echo BBBB >> /data/f; echo A; } > /data/f", 0, "A\nBB\n", ""),
+        (
+            "( echo A; grep A /data/f ) > /data/f",
+            2,
+            "A\n",
+            "grep: /data/f: input file is also the output\n",
+        ),
+        (
+            "( echo A; cat /data/f ) > /data/f",
+            1,
+            "A\n",
+            "cat: /data/f: input file is output file\n",
+        ),
     ],
 )
 async def test_an_op_on_a_streamed_file_finds_what_was_written(

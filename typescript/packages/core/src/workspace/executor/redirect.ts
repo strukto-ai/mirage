@@ -25,8 +25,8 @@ import { posixPhrase } from '../../errors/posix.ts'
 import { share, SharedInput } from '../../io/async_line_iterator.ts'
 import { chunks as byteChunks } from '../../io/cooperative.ts'
 import { PipeClosed } from '../../io/errors.ts'
-import { spooledPair } from '../../io/spool.ts'
-import { asyncChain, discardStreams } from '../../io/stream.ts'
+import { MEMORY_LIMIT, spooledPair } from '../../io/spool.ts'
+import { asyncChain, discardStreams, rechunk } from '../../io/stream.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { DeviceInput, IOResult, materialize, PipeStream } from '../../io/types.ts'
 import { ByteWriter } from '../../io/writer.ts'
@@ -158,6 +158,8 @@ export class PipeRecorder extends Recorder {
   readonly bound = new Map<Channel, FileDescription>()
   readonly writers = new Map<Channel, [FileDescription, ByteWriter]>()
   private readonly broken = new Set<ByteWriter>()
+  // Descriptions an op reached: what they get next lands at their offset.
+  private readonly resumed = new Set<FileDescription>()
   private streaming: Promise<void> = Promise.resolve()
   file: FileDescription | null = null
   failure: unknown = null
@@ -169,7 +171,8 @@ export class PipeRecorder extends Recorder {
   /**
    * The writer a bound channel's first bytes start. None starts before bytes
    * come, so a command that writes the file itself (`shuf -o f > f`) is not
-   * clobbered by an empty write.
+   * clobbered by an empty write. Each write takes all that came while the
+   * last one ran, so a loop's many small writes cost a backend a few.
    */
   private writerFor(channel: Channel, file: FileDescription): [FileDescription, ByteWriter] {
     let live = this.writers.get(channel)
@@ -177,14 +180,26 @@ export class PipeRecorder extends Recorder {
     for (const [held, writer] of this.writers.values()) {
       if (held === file) live = [file, writer]
     }
+    const offset = this.resumed.has(file) && !file.append ? file.offset : null
     live ??= [
       file,
       new ByteWriter(async (source) => {
         // The write is the redirect's own, so it waits on no hold of its file.
-        await runWithCaller({ ...currentCaller(), streamed: [] }, () =>
-          this.dispatch(file.append ? 'append' : 'write', file.scope, [source]),
-        )
-      }),
+        await runWithCaller({ ...currentCaller(), streamed: [] }, async () => {
+          if (offset === null) {
+            await this.dispatch(file.append ? 'append' : 'write', file.scope, [source])
+            return
+          }
+          // What comes once an op reached the file lands at the
+          // description's offset, as a descriptor's write does, a block at
+          // a time.
+          let at = offset
+          for await (const part of rechunk(source, MEMORY_LIMIT)) {
+            await this.dispatch('pwrite', file.scope, [part, at])
+            at += part.length
+          }
+        })
+      }, true),
     ]
     this.writers.set(channel, live)
     return live
@@ -234,9 +249,9 @@ export class PipeRecorder extends Recorder {
 
   /**
    * Commit what went into `file` for an op that reaches it, so the op finds
-   * it there as a descriptor's writes leave it, and record the rest, which
-   * the level's end writes at the description's offset (`{ seq 3; wc -l < f;
-   * } > f`).
+   * it there as a descriptor's writes leave it; what comes after goes in at
+   * the description's offset, for the next op to find (`{ echo A; wc -l < f;
+   * echo B; wc -l < f; } > f`).
    */
   async hold(file: FileDescription): Promise<void> {
     await this.inTurn(async () => {
@@ -248,7 +263,11 @@ export class PipeRecorder extends Recorder {
         }),
       )
       for (const writer of writers) await this.commit(file, writer)
-      this.unbind(channels)
+      this.resumed.add(file)
+      for (const channel of channels) {
+        const live = this.writers.get(channel)
+        if (live !== undefined && !this.broken.has(live[1])) this.writers.delete(channel)
+      }
     })
   }
 
@@ -284,8 +303,8 @@ export class PipeRecorder extends Recorder {
     super()
   }
   /**
-   * Write bytes into the file their channel is bound to; false once a hold
-   * took the channel, so they are recorded instead.
+   * Write bytes into the file their channel is bound to; false once
+   * `finishWriter` let the channel go, so they are recorded instead.
    */
   private async streamed(channel: Channel, data: Uint8Array): Promise<boolean> {
     return this.inTurn(async () => {
@@ -912,7 +931,7 @@ async function runRedirects(
                 ) === null
               )
             )
-              await recorder.hold(target)
+              await recorder.finishWriter()
             // A program's stderr goes into its own file as it is written too.
             if (
               !refused &&

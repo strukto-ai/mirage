@@ -58,7 +58,8 @@ export class ProcessTable {
    * nothing left to do first, so the runner then starts at once, unless a
    * runner started before it has yet to begin: runners begin in the order
    * they were started, so a job's redirect lands before the line that
-   * started it reads the file.
+   * started it reads the file. `ignores` are the signals the runner ignores,
+   * which stop neither it nor what it started.
    */
   start(init: {
     sessionId: string
@@ -70,6 +71,7 @@ export class ProcessTable {
     limit?: number | null
     executionId?: string
     started?: (info: ProcessInfo) => void
+    ignores?: ReadonlySet<number>
   }): ProcessHandle {
     if (this.stopped) throw new Error('process table is stopped')
     const limit = underCeiling(init.limit ?? null, this.ceiling)
@@ -119,6 +121,7 @@ export class ProcessTable {
       (signal) => {
         this.interruptChildren(pid, signal)
       },
+      init.ignores,
     )
     const eager = init.started !== undefined && !this.queued()
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
@@ -194,7 +197,10 @@ export class ProcessTable {
           throw Object.assign(new Error('process spawn is not permitted'), { code: 'EACCES' })
       },
       probe: (pid: number) => signalTarget(pid) !== null,
-      terminate: (pid: number, signal: number) => signalTarget(pid)?.terminate(signal) ?? false,
+      terminate: (pid: number, signal: number) => {
+        const handle = signalTarget(pid)
+        return handle !== null && (handle.ignores.has(signal) || handle.terminate(signal))
+      },
       permissions: () => (valid() ? permissions() : null),
     })
   }

@@ -115,8 +115,13 @@ async def handle_pipe(
     forked = call_stack is not None and call_stack.subshell
     child_nodes: list[ExecutionNode] = [ExecutionNode() for _ in commands]
 
-    # Each segment is a child shell: bash forks one per stage.
+    # Each segment is a child shell: bash forks one per stage. In a
+    # background job each is a program a signal the job ignores still
+    # stops whole (``run_program``), and one that ended keeps its status.
     children = [child_context(context) for _ in commands]
+    job = context.frame.job
+    for child_evaluation in children:
+        child_evaluation.frame.job = None
 
     async def run_segment(i: int, cmd: TSNodeLike) -> int:
         child_evaluation = children[i]
@@ -177,7 +182,14 @@ async def handle_pipe(
             if waits is not None:
                 await waits.join(rest)
         except BaseException as error:
-            output.end(error)
+            # One an interrupt stopped closes its pipe as a killed child
+            # does: the reader sees the end, not the stop.
+            stopped = (
+                isinstance(error, asyncio.CancelledError)
+                and job is not None
+                and job.interrupted is not None
+            )
+            output.end(None if stopped else error)
             raise
         finally:
             if i > 0:
@@ -194,12 +206,22 @@ async def handle_pipe(
             await child.close_inputs()
         return io.exit_code
 
+    async def stage(i: int, cmd: TSNodeLike) -> int:
+        if job is None:
+            return await run_segment(i, cmd)
+        code, signal = await job.program(partial(run_segment, i, cmd))
+        if signal is None:
+            assert code is not None
+            return code
+        ios[i].exit_code = 128 + signal
+        return ios[i].exit_code
+
     tasks: list[asyncio.Task[int]] = []
     failed = False
     try:
         for i, cmd in enumerate(commands):
             if processes is None:
-                tasks.append(asyncio.create_task(run_segment(i, cmd)))
+                tasks.append(asyncio.create_task(stage(i, cmd)))
                 continue
             try:
                 process = processes.start(
@@ -207,7 +229,7 @@ async def handle_pipe(
                     command=decode_text(cmd.text or b""),
                     cwd=PathSpec.from_str_path(session.cwd),
                     parent_pid=session.process_id,
-                    run=partial(run_segment, i, cmd),
+                    run=partial(stage, i, cmd),
                     limit=session.processes.max,
                 )
             except BlockingIOError as exc:
@@ -516,6 +538,8 @@ async def handle_subshell(
             continue
         i += 1
         recorder = Recorder()
+        if isinstance(sink, Recorder):
+            recorder.output_file = sink.output_file
         leave = record_jobs(session, recorder)
 
         async def statement() -> tuple[

@@ -139,6 +139,20 @@ describe('handleRedirect > / >>', () => {
     ],
     ['f() { seq 3; return 4; }; f > /data/f', 4, '1\n2\n3\n', ''],
     ['( echo A; exit 3 ) > /data/f', 3, 'A\n', ''],
+    [
+      '{ echo A; wc -c < /data/f; echo B; wc -c < /data/f; echo C; } > /data/f',
+      0,
+      'A\n2\nB\n6\nC\n',
+      '',
+    ],
+    ['{ echo BBBB >> /data/f; echo A; } > /data/f', 0, 'A\nBB\n', ''],
+    [
+      '( echo A; grep A /data/f ) > /data/f',
+      2,
+      'A\n',
+      'grep: /data/f: input file is also the output\n',
+    ],
+    ['( echo A; cat /data/f ) > /data/f', 1, 'A\n', 'cat: /data/f: input file is output file\n'],
   ])(
     'an op on a streamed file finds what was written: %s',
     async (line, status, content, stderr) => {

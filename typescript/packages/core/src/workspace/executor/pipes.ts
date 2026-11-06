@@ -23,6 +23,7 @@ import type { HandOff } from '../../policy/types.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { ProcessTable } from '../../process/table.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
+import { isAborting } from '../../errors/fs.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { type JobConsole, JobOutput } from '../../shell/console/index.ts'
@@ -108,14 +109,19 @@ export async function handlePipe(
 
   let failed = false
   const tasks: Promise<void>[] = []
+  const job = context.frame.job
   const launch = (cmd: TSNodeLike, i: number): Promise<void> => {
-    // Each segment is a child shell: bash forks one per stage.
+    // Each segment is a child shell: bash forks one per stage. In a
+    // background job each is a program a signal the job ignores still stops
+    // whole (`runProgram`), and one that ended keeps its status.
     const childEvaluation = childContext(context)
+    childEvaluation.frame.job = null
+    const interrupted = new AbortController()
+    const stops = mergeSignals(abort.signal, interrupted.signal) ?? abort.signal
     const child = childEvaluation.session
     inheritTraps(child)
     child.terminalOutput = session.terminalOutput && i === commands.length - 1
-    childEvaluation.frame.abortSignal =
-      mergeSignals(context.frame.abortSignal, abort.signal) ?? abort.signal
+    childEvaluation.frame.abortSignal = mergeSignals(context.frame.abortSignal, stops) ?? stops
     const output = pipes[i]
     if (output === undefined) throw new Error('Missing pipeline segment')
     const upstream = pipes[i - 1]
@@ -148,7 +154,7 @@ export async function handlePipe(
           stageStack,
           executeNode(cmd, childEvaluation, input, stageStack, {
             sink: output,
-            signal: abort.signal,
+            signal: stops,
           }),
         )
         io = result
@@ -168,7 +174,9 @@ export async function handlePipe(
           await pump(output, Channel.STDERR, unwound.stderr)
           await waits?.join(rest)
         } else {
-          output.end(error)
+          // One an interrupt stopped closes its pipe as a killed child
+          // does: the reader sees the end, not the stop.
+          output.end(interrupted.signal.aborted && isAborting(error) ? undefined : error)
           throw error
         }
       } finally {
@@ -182,8 +190,23 @@ export async function handlePipe(
         await child.closeInputs()
       }
     }
-    const execute = () =>
+    const isolated = () =>
       asyncContextIsolatesTasks ? runWithEvaluation(childEvaluation, run) : run()
+    const execute = async (): Promise<void> => {
+      if (job === null) return isolated()
+      const [, signal] = await job.program(async (stop) => {
+        stop.addEventListener(
+          'abort',
+          () => {
+            interrupted.abort(stop.reason)
+          },
+          { once: true },
+        )
+        await isolated()
+      })
+      const io = ios[i]
+      if (signal !== null && io !== undefined) io.exitCode = 128 + signal
+    }
     if (processes === undefined) return execute()
     let process: ProcessHandle
     try {
@@ -497,6 +520,7 @@ export async function handleSubshell(
     }
     i += 1
     const recorder = new Recorder()
+    if (sink instanceof Recorder) recorder.outputFile = sink.outputFile
     const leave = recordJobs(session, recorder)
     let io: IOResult
     try {

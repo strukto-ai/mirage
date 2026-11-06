@@ -63,6 +63,7 @@ class ProcessTable:
         limit: int | None = None,
         execution_id: str | None = None,
         started: Callable[[ProcessInfo], None] | None = None,
+        ignores: frozenset[int] = frozenset(),
     ) -> ProcessHandle:
         """Track a runner; its caller owns admission before command effects.
 
@@ -87,6 +88,8 @@ class ProcessTable:
                 they were started, so a job's redirect lands before the
                 line that started it reads the file. Without it the
                 runner starts on the loop's next turn.
+            ignores (frozenset[int]): the signals the runner ignores,
+                which stop neither it nor what it started.
 
         Raises:
             BlockingIOError: the session already holds ``limit``
@@ -136,6 +139,7 @@ class ProcessTable:
                 lambda signal: self.terminate_children(pid, signal),
                 self._bind,
                 lambda signal: self.interrupt_children(pid, signal),
+                ignores,
             )
             eager = started is not None and not self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
@@ -242,7 +246,9 @@ class ProcessTable:
         def terminate(pid: int, signal: int) -> bool:
             with self._lock:
                 handle = signal_target(pid)
-                return handle is not None and handle.terminate(signal)
+                return handle is not None and (
+                    signal in handle.ignores or handle.terminate(signal)
+                )
 
         def granted() -> ProcessPermissions | None:
             return permissions() if valid() else None

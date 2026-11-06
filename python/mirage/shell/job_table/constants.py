@@ -56,3 +56,7 @@ GENERATION_BITS = 52
 # How many times a job-list write retries against other writers before
 # it gives up: every workspace of a session writes the one record.
 LIST_MAX_RETRIES = 32
+
+# What bash starts a background job ignoring when job control is off:
+# `kill -INT` or `kill -QUIT` reaches it and nothing happens.
+IGNORED_SIGNALS = frozenset({2, 3})

@@ -2,16 +2,20 @@ import { BytePipe } from './pipe.ts'
 import { PipeClosed } from './errors.ts'
 import type { ByteSource } from './types.ts'
 
-/** Feed one consuming write through a bounded pipe; finish waits for commit. */
+/**
+ * Feed one consuming write through a bounded pipe; finish waits for commit.
+ * `joined` hands the consumer everything buffered in each read
+ * (`BytePipe.stream`), so writes that come while it is busy reach it as one.
+ */
 export class ByteWriter {
   readonly pipe = new BytePipe()
   private readonly task: Promise<void>
   private failed = false
   private failure: unknown
 
-  constructor(consume: (source: ByteSource) => Promise<void>) {
+  constructor(consume: (source: ByteSource) => Promise<void>, joined = false) {
     this.task = Promise.resolve()
-      .then(() => consume(this.pipe.stream()))
+      .then(() => consume(this.pipe.stream(joined)))
       .catch((error: unknown) => {
         this.failed = true
         this.failure = error

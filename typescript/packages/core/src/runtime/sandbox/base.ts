@@ -206,7 +206,8 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
       if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forget()
       return done
     } catch (error) {
-      if (ctx.signal?.aborted === true) await this.reapRun(execId, runner?.signal ?? 15)
+      if (ctx.signal?.aborted === true)
+        await this.reapRun(execId, runner?.signal ?? runner?.interrupted ?? 15)
       throw error
     } finally {
       runner?.dropRun(`box:${execId}`)

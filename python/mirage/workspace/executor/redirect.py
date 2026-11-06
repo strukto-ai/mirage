@@ -35,8 +35,13 @@ from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, share
 from mirage.io.cooperative import chunks as byte_chunks
 from mirage.io.errors import PipeClosed
-from mirage.io.spool import spooled_pair
-from mirage.io.stream import async_chain, discard_streams, materialize
+from mirage.io.spool import MEMORY_LIMIT, spooled_pair
+from mirage.io.stream import (
+    async_chain,
+    discard_streams,
+    materialize,
+    rechunk,
+)
 from mirage.io.types import ByteSource, DeviceInput, PipeStream
 from mirage.io.writer import ByteWriter
 from mirage.runtime.types import DispatchFn
@@ -220,6 +225,7 @@ class PipeRecorder(Recorder):
         self.bound: dict[Channel, FileDescription] = {}
         self.writers: dict[Channel, tuple[FileDescription, ByteWriter]] = {}
         self.broken: set[int] = set()
+        self.resumed: set[int] = set()
         self.file: FileDescription | None = None
         self.failure: Exception | None = None
         self.streaming = asyncio.Lock()
@@ -236,6 +242,22 @@ class PipeRecorder(Recorder):
         finally:
             reset_caller(token)
 
+    async def resume(
+        self, file: FileDescription, offset: int, source: ByteSource
+    ) -> None:
+        # What comes once an op reached the file lands at the description's
+        # offset, as a descriptor's write does, a block at a time.
+        token = bind_caller(current_caller().changed({"streamed": ()}))
+        try:
+            async with aclosing(rechunk(source, MEMORY_LIMIT)) as parts:
+                async for part in parts:
+                    await self.dispatch(
+                        "pwrite", file.scope, data=part, offset=offset
+                    )
+                    offset += len(part)
+        finally:
+            reset_caller(token)
+
     def stream_to(
         self, file: FileDescription, channel: Channel = Channel.STDOUT
     ) -> None:
@@ -246,6 +268,8 @@ class PipeRecorder(Recorder):
         channels bound to one description so they keep their order. None
         starts before bytes come, so a command that writes the file
         itself (``shuf -o f > f``) is not clobbered by an empty write.
+        Each write takes all that came while the last one ran, so a
+        loop's many small writes cost a backend a few.
 
         Args:
             channel (Channel): a channel ``stream_to`` bound.
@@ -259,7 +283,12 @@ class PipeRecorder(Recorder):
                 live = (file, writer)
                 break
         else:
-            live = (file, ByteWriter(partial(self.consume, file)))
+            consume = (
+                partial(self.resume, file, file.offset)
+                if id(file) in self.resumed and not file.append
+                else partial(self.consume, file)
+            )
+            live = (file, ByteWriter(consume, joined=True))
         self.writers[channel] = live
         return live
 
@@ -280,9 +309,9 @@ class PipeRecorder(Recorder):
 
     async def hold(self, file: FileDescription) -> None:
         """Commit what went into ``file`` for an op that reaches it, so
-        the op finds it there as a descriptor's writes leave it, and
-        record the rest, which the level's end writes at the
-        description's offset (``{ seq 3; wc -l < f; } > f``).
+        the op finds it there as a descriptor's writes leave it; what
+        comes after goes in at the description's offset, for the next
+        op to find (``{ echo A; wc -l < f; echo B; wc -l < f; } > f``).
 
         Args:
             file (FileDescription): a description ``stream_to`` bound.
@@ -295,7 +324,11 @@ class PipeRecorder(Recorder):
                 if (entry := self.writers.get(c)) is not None
             }.values():
                 await self._commit(file, writer)
-            self._unbind(channels)
+            self.resumed.add(id(file))
+            for channel in channels:
+                live = self.writers.get(channel)
+                if live is not None and id(live[1]) not in self.broken:
+                    del self.writers[channel]
 
     async def _commit(self, file: FileDescription, writer: ByteWriter) -> None:
         try:
@@ -327,7 +360,8 @@ class PipeRecorder(Recorder):
 
     async def _streamed(self, channel: Channel, data: bytes) -> bool:
         """Write bytes into the file their channel is bound to; False
-        once a hold took the channel, so they are recorded instead.
+        once ``finish_writer`` let the channel go, so they are recorded
+        instead.
 
         Args:
             channel (Channel): a channel ``stream_to`` bound.
@@ -1113,7 +1147,7 @@ async def _handle_redirect(
                         is None
                     )
                 ):
-                    await recorder.hold(target)
+                    await recorder.finish_writer()
                 # A program's stderr goes into its own file as it is
                 # written too.
                 if (

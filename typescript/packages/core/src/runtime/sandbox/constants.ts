@@ -38,12 +38,13 @@ export function notRunningHint(
 }
 
 /**
- * The signal a `kill` stopped `runner` with, when a program may handle it:
- * null for KILL, or for a run no `kill` stopped, which is killed at once.
- * Mirrors Python's `stop_signal`.
+ * The signal a `kill` stopped `runner` with, or an interrupt stops the
+ * program it runs with (`ProcessHandle.interrupted`), when a program may
+ * handle it: null for KILL, or for a run nothing stopped, which is killed
+ * at once. Mirrors Python's `stop_signal`.
  */
 export function stopSignal(runner: ProcessHandle | null): number | null {
-  const signal = runner?.signal ?? null
+  const signal = runner?.signal ?? runner?.interrupted ?? null
   return signal === null || signal === 9 ? null : signal
 }
 

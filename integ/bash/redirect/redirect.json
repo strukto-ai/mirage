@@ -1520,11 +1520,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/r7 && cd /data/r7 && echo hi > f && { cat f; } > f && wc -c < f && echo hi > g && for i in 1; do cat g; done > g && wc -c < g && echo hi > h && cat < h > h && wc -c < h; { seq 3; wc -l < f; } > f; cat f; echo a > a; for x in a f; do cat $x; done > f; echo $?; { echo A; grep A f; } > f; echo $?; cat f >> f; echo $?; { echo A; echo B >> f; echo C; } > f; cat f; cd /",
+      "command": "mkdir -p /data/r7 && cd /data/r7 && echo hi > f && { cat f; } > f && wc -c < f && echo hi > g && for i in 1; do cat g; done > g && wc -c < g && echo hi > h && cat < h > h && wc -c < h; { seq 3; wc -l < f; } > f; cat f; echo a > a; for x in a f; do cat $x; done > f; echo $?; { echo A; grep A f; } > f; echo $?; cat f >> f; echo $?; { echo A; echo B >> f; echo C; } > f; cat f; { echo A; wc -c < f; echo B; wc -c < f; echo C; } > f; cat f; ( echo A; grep A f ) > f; echo $?; cd /",
       "expect": {
         "exit": 0,
-        "stdout": "0\n0\n0\n1\n2\n3\n3\n1\n2\n1\nA\nC\n",
-        "stderr": "cat: f: input file is output file\ngrep: f: input file is also the output\ncat: f: input file is output file\n"
+        "stdout": "0\n0\n0\n1\n2\n3\n3\n1\n2\n1\nA\nC\nA\n2\nB\n6\nC\n2\n",
+        "stderr": "cat: f: input file is output file\ngrep: f: input file is also the output\ncat: f: input file is output file\ngrep: f: input file is also the output\n"
       }
     },
     {

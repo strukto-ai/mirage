@@ -55,3 +55,7 @@ export const GENERATION_BITS = 52
 // How many times a job-list write retries against other writers before it
 // gives up: every workspace of a session writes the one record.
 export const LIST_MAX_RETRIES = 32
+
+// What bash starts a background job ignoring when job control is off:
+// `kill -INT` or `kill -QUIT` reaches it and nothing happens.
+export const IGNORED_SIGNALS: ReadonlySet<number> = new Set([2, 3])

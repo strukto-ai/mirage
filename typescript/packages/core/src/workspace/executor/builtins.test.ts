@@ -3065,9 +3065,10 @@ describe('handleTimeout', () => {
     }
   })
 
-  // A job's shell ignores INT, but the program it runs right now takes it,
-  // so the job goes on past it with 130; a function or a builtin the job's
-  // shell runs (`f &`) ends with it.
+  // A job's shell ignores INT, but what it forks right now takes it, so the
+  // job goes on past it with 130: a program, a subshell whole, and each stage
+  // of a pipeline still running, one that ended keeping its status. A
+  // function or a builtin the job's shell runs (`f &`) ends with it.
   it('an INT ends the program a job runs and the job goes on', async () => {
     const ws = new Workspace({ '/': new RAMVFS() }, { mode: MountMode.WRITE })
     try {
@@ -3075,10 +3076,20 @@ describe('handleTimeout', () => {
         "timeout -s INT 0.1 sh -c '{ sleep 30; echo $? > /a; } & " +
           '{ sleep 30 | cat; echo ${PIPESTATUS[@]} > /b; } & ' +
           'sleep 30 && : || echo $? > /c & ' +
+          '{ true | sleep 30 | true; echo ${PIPESTATUS[@]} > /e; } & ' +
+          '{ (sleep 30; echo in > /f); echo $? > /g; } & ' +
           "f() { sleep 30; echo > /d; }; f & sleep 30'; " +
-          'sleep 0.3; cat /a /b /c; test -e /d; echo $?',
+          'sleep 0.3; cat /a /b /c /e /g; test -e /d || test -e /f; echo $?',
       )
-      expect(decode(io.stdout).split('\n')).toEqual(['130', '130 130', '130', '1', ''])
+      expect(decode(io.stdout).split('\n')).toEqual([
+        '130',
+        '130 130',
+        '130',
+        '0 130 0',
+        '130',
+        '1',
+        '',
+      ])
     } finally {
       await ws.close()
     }

@@ -44,7 +44,7 @@ import {
   TIMEOUT_STATUS,
 } from '../../shell/constants.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
-import { getPipelineCommands, getRedirects, isBackgrounded } from '../../shell/helpers.ts'
+import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
 import { STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
 import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
 import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
@@ -223,26 +223,22 @@ function oneProgram(left: TSNodeLike, session: SessionState): boolean {
 }
 
 /**
- * How many programs bash forks for a statement: one for a program, one per
- * stage for a pipeline of them, and none for the shell's own work (a builtin,
- * a function, a compound command). Mirrors Python's _programs.
+ * Whether bash forks a statement as one child: a program or a subshell. The
+ * shell's own work (a builtin, a function, a compound command) is not, and a
+ * pipeline forks each stage (`handlePipe`). Mirrors Python's _forked.
  */
-function programs(node: TSNodeLike | null, session: SessionState): number {
-  if (node === null || isBackgrounded(node)) return 0
-  if (node.type === NT.REDIRECTED_STATEMENT) return programs(getRedirects(node)[0], session)
-  if (node.type === NT.PIPELINE) {
-    const counts = getPipelineCommands(node)[0].map((stage) => programs(stage, session))
-    return counts.every((count) => count > 0) ? counts.reduce((a, b) => a + b, 0) : 0
-  }
-  return node.type === NT.COMMAND && forks(node, session) ? 1 : 0
+function forked(node: TSNodeLike | null, session: SessionState): boolean {
+  if (node === null || isBackgrounded(node)) return false
+  if (node.type === NT.REDIRECTED_STATEMENT) return forked(getRedirects(node)[0], session)
+  return node.type === NT.SUBSHELL || (node.type === NT.COMMAND && forks(node, session))
 }
 
 /**
- * Run one statement to the end of its output. A program a background job's
- * shell runs (`sleep 3` in `{ sleep 3; echo x; } &`) runs where a signal that
- * shell ignores still stops it, as bash forks each with INT back at its
- * default: the statement ends with 128 plus the signal, and the job goes on.
- * Mirrors Python's run_program.
+ * Run one statement to the end of its output. A program or a subshell a
+ * background job's shell runs (`sleep 3` in `{ sleep 3; echo x; } &`) runs
+ * where a signal that shell ignores still stops it, whole, as bash forks each
+ * with INT back at its default: the statement ends with 128 plus the signal,
+ * and the job goes on. Mirrors Python's run_program.
  */
 export async function runProgram(
   node: TSNodeLike,
@@ -250,20 +246,22 @@ export async function runProgram(
   run: () => Promise<RedirectResult>,
 ): Promise<RedirectResult> {
   const job = context.frame.job
-  const count = job === null ? 0 : programs(node, context.session)
-  if (job === null || count === 0) return run()
+  if (job === null || !forked(node, context.session)) return run()
   const outer = context.frame.abortSignal
   const [ran, signal] = await job.program(async (stop) => {
     context.frame.abortSignal = outer === null ? stop : AbortSignal.any([outer, stop])
+    // What the child runs is its own, which the signal stops with it.
+    context.frame.job = null
     try {
       return await run()
     } finally {
       context.frame.abortSignal = outer
+      context.frame.job = job
     }
   })
   if (signal === null) return ran
   const code = 128 + signal
-  if (node.type !== NT.COMMAND) context.session.pipeStatusPending = Array<number>(count).fill(code)
+  if (node.type !== NT.COMMAND) context.session.pipeStatusPending = [code]
   recordStatus(context.session, code)
   return [
     null,
