@@ -416,22 +416,14 @@ async def execute_command(
                 None if old is None else gate_rendering(old.value),
             )
 
-    def seed(k: str, v: str) -> None:
-        # `seed_var` counts nothing, so the write is checked against max_env.
-        old = session.vars.get(k)
-        check_env(
-            session,
-            0 if old is None else entry_bytes(k, old.value),
-            entry_bytes(k, v),
-        )
-        seed_var(session, k, v)
-
     def restore(saved: Mapping[str, Any]) -> None:
         for k, prev in saved.items():
             if prev is None:
                 session.vars.pop(k, None)
             else:
                 session.vars[k] = prev
+        saves = session._prefix_saves
+        saves[:] = [s for s in saves if s is not saved]
 
     if prefix_assignments and not name:
         olds = {k: session.vars.get(k) for k, _ in prefix_assignments}
@@ -473,7 +465,15 @@ async def execute_command(
         # expands them with the values from before the assignment:
         # `x=new echo $x` prints the old x and `IFS=, cmd $v` splits on
         # the old IFS.
+        session._prefix_saves.append(saved_env_overrides)
         for k, v in prefix_assignments:
+            # A first write's old record stays held; a repeat drops the earlier value.
+            old = session.vars.get(k) if k in saved_env_overrides else None
+            check_env(
+                session,
+                0 if old is None else entry_bytes(k, old.value),
+                entry_bytes(k, v),
+            )
             saved_env_overrides.setdefault(k, session.vars.get(k))
             # Exported for the duration, which is the whole point of the
             # form: `TOKEN=x printenv TOKEN` prints `x` because bash puts
@@ -483,7 +483,7 @@ async def execute_command(
             # installed CLI, a guest runtime -- once that view narrowed
             # to the exported set. The saved record is put back below, so
             # neither the value nor the attribute outlives the command.
-            seed(k, v)
+            seed_var(session, k, v)
             set_attr(session, k, VarAttr.EXPORT)
         if command in session.functions:
             # A function runs with the prefix as its temporary

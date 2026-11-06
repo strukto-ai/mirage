@@ -526,6 +526,8 @@ export class SessionState {
   // closing one never closes the parent's. Mirrors Python's _borrowed.
   borrowed: SharedInput[] = []
   localFrames: Map<string, ShellVar | null>[] = []
+  // The records running prefix assignments set aside, held until put back.
+  prefixSaves: ReadonlyMap<string, ShellVar | null>[] = []
   // The names a running `declare -g` has put at global scope
   // (`reachGlobal`), each with its frame and the function's local it set
   // aside: arithmetic in the declaration still reads that local.

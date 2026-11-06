@@ -97,13 +97,17 @@ function recordBytes(name: string, record: ShellVar): number {
 
 /**
  * The bytes a session's shell state holds: its variables, functions,
- * aliases and positional parameters, names and values.
+ * aliases and positional parameters, names and values, and the records a
+ * running prefix assignment set aside.
  */
 export function envBytes(session: SessionState): number {
   let held = argsBytes(session.positionalArgs)
   for (const [name, record] of Object.entries(session.vars)) held += recordBytes(name, record)
   for (const [name, body] of Object.entries(session.functions)) held += entryBytes(name, body)
   for (const [name, text] of Object.entries(session.aliases)) held += entryBytes(name, text)
+  for (const saved of session.prefixSaves) {
+    for (const [name, record] of saved) if (record !== null) held += recordBytes(name, record)
+  }
   return held
 }
 

@@ -121,7 +121,7 @@ async def test_a_nested_shell_s_arguments_count_and_it_dies_alone():
         (
             "f() { [ ${#X} -ge 1000 ] && { echo reached; return; };"
             ' X="$X$X" f; }; X=aaaaaaaa f; echo after',
-            129,
+            65,
         ),
         ("X=$(seq 1 100) eval :; echo after", 292),
     ],
@@ -133,6 +133,38 @@ async def test_a_prefix_assignment_counts(line: str, size: int):
         " bytes, a mirage workspace setting)\n",
         2,
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("line", "size"),
+    [
+        (
+            "X=$(printf %0100d 0); X= eval 'Y=$(printf %0100d 0)'; echo after",
+            101,
+        ),
+        (
+            "X=$(printf %0100d 0); f() { Y=$(printf %0100d 0); }; X= f; echo after",
+            101,
+        ),
+        ("X=$(printf %0100d 0); X=$(printf %099d 0) eval :; echo after", 100),
+    ],
+)
+async def test_the_value_a_prefix_sets_aside_counts(line: str, size: int):
+    assert await run(line) == (
+        "",
+        f"bash: xmalloc: cannot allocate {size} bytes (past max_env of 200"
+        " bytes, a mirage workspace setting)\n",
+        2,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_prefix_s_set_aside_value_stops_counting_once_restored():
+    out, _, code = await run(
+        "X=$(printf %0100d 0); X= eval :; Y=$(printf %050d 0); echo ok"
+    )
+    assert (out, code) == ("ok\n", 0)
 
 
 @pytest.mark.asyncio

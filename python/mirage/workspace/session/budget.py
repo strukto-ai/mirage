@@ -96,7 +96,8 @@ def frames_bytes(call_stack: CallStack) -> int:
 
 def env_bytes(session: SessionState) -> int:
     """The bytes a session's shell state holds: its variables, functions,
-    aliases and positional parameters, names and values.
+    aliases and positional parameters, names and values, and the records
+    a running prefix assignment set aside.
 
     Args:
         session (SessionState): the session.
@@ -106,6 +107,12 @@ def env_bytes(session: SessionState) -> int:
         + sum(entry_bytes(n, body) for n, body in session.functions.items())
         + sum(entry_bytes(n, text) for n, text in session.aliases.items())
         + args_bytes(session.positional_args)
+        + sum(
+            entry_bytes(n, var.value)
+            for saved in session._prefix_saves
+            for n, var in saved.items()
+            if var is not None
+        )
     )
 
 

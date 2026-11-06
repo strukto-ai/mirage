@@ -116,7 +116,7 @@ describe('max_env', () => {
     for (const [line, bytes] of [
       [
         'f() { [ ${#X} -ge 1000 ] && { echo reached; return; }; X="$X$X" f; }; X=aaaaaaaa f; echo after',
-        129,
+        65,
       ],
       ['X=$(seq 1 100) eval :; echo after', 292],
     ] as const) {
@@ -126,6 +126,25 @@ describe('max_env', () => {
         2,
       ])
     }
+  })
+
+  it('counts the value a prefix sets aside', async () => {
+    for (const [line, bytes] of [
+      [`X=$(printf %0100d 0); X= eval 'Y=$(printf %0100d 0)'; echo after`, 101],
+      ['X=$(printf %0100d 0); f() { Y=$(printf %0100d 0); }; X= f; echo after', 101],
+      ['X=$(printf %0100d 0); X=$(printf %099d 0) eval :; echo after', 100],
+    ] as const) {
+      expect(await run(line)).toEqual([
+        '',
+        `bash: xmalloc: cannot allocate ${String(bytes)} bytes (past max_env of 200 bytes, a mirage workspace setting)\n`,
+        2,
+      ])
+    }
+  })
+
+  it('stops counting the set-aside value once the prefix is restored', async () => {
+    const [out, , code] = await run('X=$(printf %0100d 0); X= eval :; Y=$(printf %050d 0); echo ok')
+    expect([out, code]).toEqual(['ok\n', 0])
   })
 
   it('runs a nested shell and a prefix under it', async () => {

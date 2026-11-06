@@ -447,6 +447,10 @@ class SessionState:
     _reached: list[tuple[str, dict[str, ShellVar | None], ShellVar | None]] = (
         field(default_factory=list, repr=False)
     )
+    # The records running prefix assignments set aside, held until put back.
+    _prefix_saves: list[dict[str, ShellVar | None]] = field(
+        default_factory=list, repr=False
+    )
     # Hidden `getopts` state: the 1-based char offset within the current
     # word being scanned, plus the OPTIND value that offset belongs to.
     # A caller resetting OPTIND (e.g. to 1) makes the seen value stale,

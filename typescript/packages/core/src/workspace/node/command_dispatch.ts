@@ -338,13 +338,6 @@ export async function executeCommand(
     }
   }
 
-  // `seedVar` counts nothing, so the write is checked against max_env.
-  const seed = (k: string, v: string): void => {
-    const old = sessionEntry(session.vars, k)
-    checkEnv(session, old === undefined ? 0 : entryBytes(k, old.value), entryBytes(k, v))
-    seedVar(session, k, v)
-  }
-
   const restore = (saved: ReadonlyMap<string, ShellVar | null>): void => {
     for (const [k, prev] of saved) {
       if (prev === null) {
@@ -354,6 +347,7 @@ export async function executeCommand(
         setSessionEntry(session.vars, k, prev)
       }
     }
+    session.prefixSaves = session.prefixSaves.filter((s) => s !== saved)
   }
 
   if (prefixAssignments.length > 0 && name === '') {
@@ -385,7 +379,11 @@ export async function executeCommand(
   // with the values from before the assignment: `x=new echo $x` prints the
   // old x and `IFS=, cmd $v` splits on the old IFS.
   const seedPrefix = async (command: string): Promise<void> => {
+    session.prefixSaves.push(savedEnvOverrides)
     for (const [k, v] of prefixAssignments) {
+      // A first write's old record stays held; a repeat drops the earlier value.
+      const old = savedEnvOverrides.has(k) ? sessionEntry(session.vars, k) : undefined
+      checkEnv(session, old === undefined ? 0 : entryBytes(k, old.value), entryBytes(k, v))
       if (!savedEnvOverrides.has(k)) {
         savedEnvOverrides.set(k, sessionEntry(session.vars, k) ?? null)
       }
@@ -397,7 +395,7 @@ export async function executeCommand(
       // runtime — once that view narrowed to the exported set. The saved
       // record is put back below, so neither the value nor the attribute
       // outlives the command.
-      seed(k, v)
+      seedVar(session, k, v)
       setAttr(session, k, VarAttr.Export)
     }
     // A function runs with the prefix as its temporary environment, a
