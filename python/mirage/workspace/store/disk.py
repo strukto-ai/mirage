@@ -17,8 +17,8 @@ import os
 import shutil
 from urllib.parse import quote
 
-from mirage.execution.job.ram import RAMJobStore
-from mirage.execution.job.store import JobStore
+from mirage.execution.base import ExecutionStore
+from mirage.execution.ram import RAMExecutionStore
 from mirage.observe.disk_store import DiskObserverStore
 from mirage.observe.store import ObserverStore
 from mirage.workspace.mount.namespace.disk import DiskNamespaceStore
@@ -55,10 +55,10 @@ class DiskWorkspaceStateStore(WorkspaceStateStore):
     CLI-created workspace survives restart like ``git init``. Local
     filesystems only; anything cross-machine belongs on redis or s3.
 
-    Jobs stay in this process's memory: a job never outlives the
-    process that runs it, and a stream other processes could follow
-    needs Redis, so the jobs plane of processes sharing a disk store is
-    a redis ``jobs`` group.
+    The execution plane stays in this process's memory: a job never
+    outlives the process that runs it, and a stream other processes
+    could follow needs Redis, so the execution plane of processes
+    sharing a disk store is a redis ``execution`` group.
     """
 
     def __init__(
@@ -68,20 +68,20 @@ class DiskWorkspaceStateStore(WorkspaceStateStore):
         namespace: WorkspaceStateStore | None = None,
         observer: WorkspaceStateStore | None = None,
         workspace: WorkspaceStateStore | None = None,
-        jobs: WorkspaceStateStore | None = None,
+        execution: WorkspaceStateStore | None = None,
     ) -> None:
         super().__init__(
             namespace=namespace,
             observer=observer,
             workspace=workspace,
-            jobs=jobs,
+            execution=execution,
         )
         self._root = os.path.expanduser(root)
         self._meta: dict[str, DiskRecordClient] = {}
         self._namespaces: dict[str, DiskNamespaceStore] = {}
         self._observers: dict[str, DiskObserverStore] = {}
         self._sessions: dict[str, RecordNamespaceStore] = {}
-        self._jobs: dict[str, RAMJobStore] = {}
+        self._execution: dict[str, RAMExecutionStore] = {}
 
     def _ws_root(self, workspace_id: str) -> str:
         # The id is one path segment, quoted so a separator cannot leave
@@ -121,10 +121,10 @@ class DiskWorkspaceStateStore(WorkspaceStateStore):
             )
         return self._sessions[workspace_id]
 
-    def _make_jobs(self, workspace_id: str) -> JobStore:
-        if workspace_id not in self._jobs:
-            self._jobs[workspace_id] = RAMJobStore()
-        return self._jobs[workspace_id]
+    def _make_execution(self, workspace_id: str) -> ExecutionStore:
+        if workspace_id not in self._execution:
+            self._execution[workspace_id] = RAMExecutionStore()
+        return self._execution[workspace_id]
 
     async def _load_meta(self, workspace_id: str) -> WorkspaceFields | None:
         fields, _ = await self._meta_client(workspace_id).get("workspace")
@@ -141,7 +141,7 @@ class DiskWorkspaceStateStore(WorkspaceStateStore):
         )
 
     async def _forget(self, workspace_id: str) -> None:
-        self._jobs.pop(workspace_id, None)
+        self._execution.pop(workspace_id, None)
         for handles in (
             self._namespaces,
             self._observers,

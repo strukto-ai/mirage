@@ -76,6 +76,30 @@ async def test_shell_refuses_an_unknown_field():
         assert "provision" in r.json()["detail"]
 
 
+# A line on a workspace another daemon holds is refused, naming that
+# daemon; once it gives the lease up, the line runs here.
+@pytest.mark.asyncio
+async def test_shell_refuses_a_workspace_another_daemon_holds():
+    app = build_app(idle_grace_seconds=10.0)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
+        wid = await _create_workspace(client)
+        store = app.state.registry.get(wid).runner.ws.job_table.store
+        assert await store.lease("elsewhere") is None
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell", json={"command": "echo hello"}
+        )
+        assert r.status_code == 409, r.text
+        assert "'elsewhere'" in r.json()["detail"]
+        await store.release("elsewhere")
+        r = await client.post(
+            f"/v1/workspaces/{wid}/shell", json={"command": "echo hello"}
+        )
+        assert r.status_code == 200, r.text
+
+
 @pytest.mark.asyncio
 async def test_shell_honors_cwd():
     app = build_app(idle_grace_seconds=10.0)

@@ -57,6 +57,7 @@ from mirage.server.multipart import (
     PartEvent,
     part_events,
 )
+from mirage.server.paths import load_daemon_id
 from mirage.server.registry import Claim, WorkspaceEntry
 from mirage.server.resources.strukto import with_entries
 from mirage.server.routers.templates import (
@@ -198,6 +199,7 @@ async def _construct(
     rule: NetworkRule | None,
     workspace_id: str,
     state_root: str,
+    daemon_id: str,
     max_sessions: int | None,
     ceilings: Ceilings,
 ) -> Workspace:
@@ -218,6 +220,8 @@ async def _construct(
         rule (NetworkRule | None): the network the workspace is held to.
         workspace_id (str): the id it is created under.
         state_root (str): where the default disk store keeps its state.
+        daemon_id (str): the server's id, which the workspace's lease
+            names while the server runs its lines.
         max_sessions (int | None): the server's session cap.
         ceilings (Ceilings): the server's ceilings, which hold the
             config's limits.
@@ -230,6 +234,7 @@ async def _construct(
         mcp_clis=await run_with_network(rule, build_mcp_clis(resolved))
     )
     kwargs["workspace_id"] = workspace_id
+    kwargs["daemon_id"] = daemon_id
     kwargs["ceilings"] = ceilings
     if "store" not in kwargs:
         kwargs["store"] = DiskWorkspaceStateStore(state_root)
@@ -479,6 +484,9 @@ async def _open_workspace(
                         registry.rule_for(config.network),
                         wid,
                         str(request.app.state.state_root),
+                        await run_blocking(
+                            load_daemon_id, request.app.state.state_root
+                        ),
                         registry.max_sessions,
                         registry.ceilings,
                     )

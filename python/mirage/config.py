@@ -266,7 +266,7 @@ class StoreBlock(BaseModel):
 
     The top-level type/url/key_prefix pick the default backend for
     every control-plane group (namespace nodes, observer events,
-    sessions + workspace metadata, jobs). The optional per-group
+    sessions + workspace metadata, execution). The optional per-group
     overrides redirect one group to a different backend, e.g. large
     observer logs to a separate server. Sessions and workspace metadata
     move together by design (the default-session pointer must live
@@ -277,8 +277,8 @@ class StoreBlock(BaseModel):
     store hosts the other planes under ``root`` (lockfile CAS,
     machine-local) and keeps jobs in memory, since a job's console is a
     stream other processes follow; ``root`` is only read when a disk
-    store is selected. The ``jobs`` group (job lists, consoles, owner
-    leases) is therefore ram or redis.
+    store is selected. The ``execution`` group (job lists, consoles, the
+    workspace's lease, process records) is therefore ram or redis.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -290,7 +290,7 @@ class StoreBlock(BaseModel):
     namespace: StoreGroupBlock | None = None
     observer: StoreGroupBlock | None = None
     workspace: StoreGroupBlock | None = None
-    jobs: StoreGroupBlock | None = None
+    execution: StoreGroupBlock | None = None
 
     @model_validator(mode="after")
     def _s3_hosts_only_the_workspace_group(self) -> "StoreBlock":
@@ -299,11 +299,11 @@ class StoreBlock(BaseModel):
         The type alone permits it on any group, but ``S3WorkspaceStateStore``
         raises when asked to build a namespace or observer plane, so
         without this the config loads and the workspace fails to
-        construct. History stays off Redis, and jobs off disk.
+        construct. History stays off Redis, and execution off disk.
 
         Raises:
             ValueError: an s3 group was given for namespace, observer or
-                jobs, redis for observer, or disk for jobs.
+                execution, redis for observer, or disk for execution.
         """
         validate_document("config", self.model_dump(), "store", names="store")
         return self
@@ -1040,7 +1040,11 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
         if block.workspace is not None
         else None
     )
-    jobs = _build_store_group(block.jobs) if block.jobs is not None else None
+    execution = (
+        _build_store_group(block.execution)
+        if block.execution is not None
+        else None
+    )
     if block.type == "redis":
         return _redis_state_store()(
             url=block.url,
@@ -1049,7 +1053,7 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
             namespace=namespace,
             observer=observer,
             workspace=workspace,
-            jobs=jobs,
+            execution=execution,
         )
     if block.type == "disk":
         return DiskWorkspaceStateStore(
@@ -1057,10 +1061,13 @@ def _build_state_store(block: StoreBlock) -> WorkspaceStateStore:
             namespace=namespace,
             observer=observer,
             workspace=workspace,
-            jobs=jobs,
+            execution=execution,
         )
     return RAMWorkspaceStateStore(
-        namespace=namespace, observer=observer, workspace=workspace, jobs=jobs
+        namespace=namespace,
+        observer=observer,
+        workspace=workspace,
+        execution=execution,
     )
 
 

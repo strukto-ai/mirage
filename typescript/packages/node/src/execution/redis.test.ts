@@ -18,7 +18,7 @@ import { Channel } from '@struktoai/mirage-core/shell/console/index'
 import { JobTable } from '@struktoai/mirage-core/execution/job/table'
 import { type Job, type JobRunner, JobStatus } from '@struktoai/mirage-core/execution/job/types'
 import { afterEach, describe, expect, it } from 'vitest'
-import { RedisJobStore } from './redis.ts'
+import { RedisExecutionStore } from './redis.ts'
 
 const REDIS_URL = process.env.REDIS_URL ?? ''
 const DEC = new TextDecoder()
@@ -33,13 +33,13 @@ function pending(abort: AbortController): JobRunner {
     })
 }
 
-describe.skipIf(REDIS_URL === '')('RedisJobStore', () => {
+describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
   let prefix = ''
-  const opened: RedisJobStore[] = []
+  const opened: RedisExecutionStore[] = []
 
-  function open(leaseSeconds: number | null = 30): RedisJobStore {
+  function open(leaseSeconds: number | null = 30): RedisExecutionStore {
     if (opened.length === 0) prefix = `test:jobs:${randomUUID()}:`
-    const store = new RedisJobStore({ url: REDIS_URL, keyPrefix: prefix, leaseSeconds })
+    const store = new RedisExecutionStore({ url: REDIS_URL, keyPrefix: prefix, leaseSeconds })
     opened.push(store)
     return store
   }
@@ -74,13 +74,29 @@ describe.skipIf(REDIS_URL === '')('RedisJobStore', () => {
     expect(chunks.map((c) => DEC.decode(c.data))).toEqual(['hi'])
   })
 
-  it('keeps an owner alive while its lease holds', async () => {
-    const store = open(0.2)
-    expect(await store.alive('o')).toBe(false)
-    await store.renew('o')
-    expect(await store.alive('o')).toBe(true)
+  it('lets one daemon hold the lease while it renews', async () => {
+    const [a, b] = [open(0.2), open(0.2)]
+    expect(await a.holder()).toBeNull()
+    expect(await a.lease('a')).toBeNull()
+    expect(await b.lease('b')).toBe('a')
+    expect(await b.holder()).toBe('a')
+    await b.release('b')
+    expect(await a.lease('a')).toBeNull()
     await new Promise((resolve) => setTimeout(resolve, 300))
-    expect(await store.alive('o')).toBe(false)
+    expect(await b.holder()).toBeNull()
+    expect(await b.lease('b')).toBeNull()
+    expect(await a.lease('a')).toBe('b')
+    await b.release('b')
+    expect(await a.holder()).toBeNull()
+  })
+
+  it('only raises the highest pid, on every store', async () => {
+    const [a, b] = [open(), open()]
+    expect(await b.highestPid()).toBe(0)
+    await a.publish('a', {}, 7)
+    await b.publish('b', {}, 3)
+    expect(await a.highestPid()).toBe(7)
+    expect(await b.highestPid()).toBe(7)
   })
 
   it("a renewal keeps a running job's console", async () => {
@@ -89,17 +105,18 @@ describe.skipIf(REDIS_URL === '')('RedisJobStore', () => {
     const client = createClient({ url: REDIS_URL })
     await client.connect()
     await client.expire(`${prefix}console:c:stream`, 5)
-    await store.renew('o', ['c'])
+    await store.lease('o', ['c'])
     const ttl = await client.ttl(`${prefix}console:c:stream`)
     await client.quit()
     expect(ttl).toBeGreaterThan(5)
   })
 
-  it('clear drops lists, consoles and leases', async () => {
+  it('clear drops lists, consoles and the lease', async () => {
     const store = open()
     await store.casSet('s', { generation: 1 }, 0)
     await store.console('c').append(Channel.STDOUT, new TextEncoder().encode('x'))
-    await store.renew('o')
+    await store.lease('o')
+    await store.publish('o', {}, 4)
     await store.clear()
     expect(await store.load('s')).toBeNull()
     const client = createClient({ url: REDIS_URL })
@@ -112,10 +129,10 @@ describe.skipIf(REDIS_URL === '')('RedisJobStore', () => {
     expect(keys).toEqual([])
   })
 
-  it("reaches an owner's processes and stops from every store, and drops them", async () => {
+  it("reaches a daemon's processes and stops from every store, and drops them", async () => {
     const [a, b] = [open(), open()]
     const record = { pid: 2, command: 'sleep 30', runs: [] }
-    await a.publish('a', { '2': record })
+    await a.publish('a', { '2': record }, 2)
     expect(await b.processes()).toEqual({ a: { '2': record } })
     await b.requestStop('a', 2, 15)
     await b.requestStop('a', 3, 9)
@@ -133,7 +150,7 @@ describe.skipIf(REDIS_URL === '')('RedisJobStore', () => {
       keys.push(...(Array.isArray(k) ? k : [k]))
     }
     await client.quit()
-    expect(keys).toEqual([])
+    expect(keys).toEqual([`${prefix}pid`])
   })
 
   it('lets a table on another store kill and wait on a job', async () => {
@@ -149,7 +166,7 @@ describe.skipIf(REDIS_URL === '')('RedisJobStore', () => {
     await a.close()
   })
 
-  it('ends a job whose owner died as hung up', async () => {
+  it('ends a job whose daemon died as hung up', async () => {
     const a = new JobTable(open(0.3))
     const b = new JobTable(open(0.3))
     await sleeping(a)

@@ -20,9 +20,9 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as aioredis
 
-from mirage.execution.job.redis import RedisJobStore
 from mirage.execution.job.table import JobTable
 from mirage.execution.job.types import Job, JobStatus
+from mirage.execution.redis import RedisExecutionStore
 from mirage.io import IOResult
 from mirage.shell.console import Channel
 from mirage.workspace.types import ExecutionNode
@@ -38,10 +38,10 @@ def prefix() -> str:
 
 @pytest_asyncio.fixture()
 async def stores(prefix):
-    opened: list[RedisJobStore] = []
+    opened: list[RedisExecutionStore] = []
 
-    def open_store(lease_seconds: float | None = 30.0) -> RedisJobStore:
-        store = RedisJobStore(
+    def open_store(lease_seconds: float | None = 30.0) -> RedisExecutionStore:
+        store = RedisExecutionStore(
             url=REDIS_URL, key_prefix=prefix, lease_seconds=lease_seconds
         )
         opened.append(store)
@@ -85,31 +85,39 @@ async def test_a_console_name_reaches_one_stream_from_any_store(stores):
 
 
 @pytest.mark.asyncio
-async def test_an_owner_lives_while_its_lease_holds(stores):
-    store = stores(lease_seconds=0.2)
-    assert not await store.alive("o")
-    await store.renew("o")
-    assert await store.alive("o")
+async def test_one_daemon_holds_the_lease_while_it_renews(stores):
+    a, b = stores(lease_seconds=0.2), stores(lease_seconds=0.2)
+    assert await a.holder() is None
+    assert await a.lease("a") is None
+    assert await b.lease("b") == "a"
+    assert await b.holder() == "a"
+    await b.release("b")
+    assert await a.lease("a") is None
     await asyncio.sleep(0.3)
-    assert not await store.alive("o")
+    assert await b.holder() is None
+    assert await b.lease("b") is None
+    assert await a.lease("a") == "b"
+    await b.release("b")
+    assert await a.holder() is None
 
 
 @pytest.mark.asyncio
-async def test_clear_drops_lists_consoles_and_leases(stores, prefix):
+async def test_clear_drops_lists_consoles_and_the_lease(stores, prefix):
     store = stores()
     await store.cas_set("s", {"generation": 1}, 0)
     await store.console("c").append(Channel.STDOUT, b"x")
-    await store.renew("o")
+    await store.lease("o")
+    await store.publish("o", {}, 4)
     await store.clear()
     assert await store.load("s") is None
     assert [k async for k in store._client.scan_iter(f"{prefix}*")] == []
 
 
 @pytest.mark.asyncio
-async def test_an_owners_processes_reach_every_store_and_go(stores, prefix):
+async def test_a_daemons_processes_reach_every_store_and_go(stores, prefix):
     a, b = stores(), stores()
     record = {"pid": 2, "command": "sleep 30", "runs": []}
-    await a.publish("a", {"2": record})
+    await a.publish("a", {"2": record}, 2)
     assert await b.processes() == {"a": {"2": record}}
     await b.request_stop("a", 2, 15)
     await b.request_stop("a", 3, 9)
@@ -117,7 +125,19 @@ async def test_an_owners_processes_reach_every_store_and_go(stores, prefix):
     assert await a.take_stops("a") == []
     await a.publish("a", {})
     assert await b.processes() == {}
-    assert [k async for k in a._client.scan_iter(f"{prefix}*")] == []
+    assert [k async for k in a._client.scan_iter(f"{prefix}*")] == [
+        f"{prefix}pid".encode()
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_highest_pid_only_rises_on_every_store(stores):
+    a, b = stores(), stores()
+    assert await b.highest_pid() == 0
+    await a.publish("a", {}, 7)
+    await b.publish("b", {}, 3)
+    assert await a.highest_pid() == 7
+    assert await b.highest_pid() == 7
 
 
 @pytest.mark.asyncio
@@ -136,7 +156,7 @@ async def test_a_table_on_another_store_kills_and_waits_on_a_job(stores):
 
 
 @pytest.mark.asyncio
-async def test_a_job_whose_owner_died_ends_as_hung_up(stores):
+async def test_a_job_whose_daemon_died_ends_as_hung_up(stores):
     a = JobTable(stores(lease_seconds=0.3))
     b = JobTable(stores(lease_seconds=0.3))
     await a.submit("sleep 30", _run_forever, "/", session_id="s")
@@ -155,7 +175,7 @@ async def test_a_renewal_keeps_a_running_jobs_console(stores, prefix):
     client = aioredis.from_url(REDIS_URL)
     try:
         await client.expire(f"{prefix}console:c:stream", 5)
-        await store.renew("o", ["c"])
+        await store.lease("o", ["c"])
         assert await client.ttl(f"{prefix}console:c:stream") > 5
     finally:
         await client.aclose()

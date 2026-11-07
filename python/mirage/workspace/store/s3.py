@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.execution.job.store import JobStore
+from mirage.execution.base import ExecutionStore
 from mirage.observe.store import ObserverStore
 from mirage.vfs.s3.config import S3Config
 from mirage.workspace.mount.namespace.store import (
@@ -63,10 +63,10 @@ class S3WorkspaceStateStore(WorkspaceStateStore):
             "the 'workspace' group override."
         )
 
-    def _make_jobs(self, workspace_id: str) -> JobStore:
+    def _make_execution(self, workspace_id: str) -> ExecutionStore:
         raise RuntimeError(
             "The s3 store hosts only the sessions+meta group; keep the "
-            "jobs plane on ram or redis and pass the s3 store as the "
+            "execution plane on ram or redis and pass the s3 store as the "
             "'workspace' group override."
         )
 

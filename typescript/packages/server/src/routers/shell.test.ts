@@ -138,6 +138,30 @@ describe('execute router', () => {
     await app.close()
   })
 
+  // A line on a workspace another daemon holds is refused, naming that
+  // daemon; once it gives the lease up, the line runs here.
+  it('refuses a workspace another daemon holds', async () => {
+    const app = buildApp()
+    await createWs(app, 'held')
+    const store = app.registry.get('held').runner.ws.jobTable.store
+    expect(await store.lease('elsewhere')).toBeNull()
+    const refused = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/held/shell',
+      payload: { command: 'echo hi' },
+    })
+    expect(refused.statusCode).toBe(409)
+    expect(refused.json<{ detail: string }>().detail).toContain("'elsewhere'")
+    await store.release('elsewhere')
+    const ran = await app.inject({
+      method: 'POST',
+      url: '/v1/workspaces/held/shell',
+      payload: { command: 'echo hi' },
+    })
+    expect(ran.statusCode).toBe(200)
+    await app.close()
+  })
+
   it('refuses an unknown field rather than ignoring it', async () => {
     const app = buildApp()
     await createWs(app, 'ew-strict')

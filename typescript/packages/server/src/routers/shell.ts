@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { WorkspaceHeldError } from '@struktoai/mirage-core/execution/errors'
 import { ExecutionStatus, type ExecutionRecord } from '@struktoai/mirage-core/execution/types'
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
@@ -280,6 +281,23 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
           return reply.status(503).send({ detail: 'server is shutting down' })
         }
         return reply.status(404).send({ detail: 'workspace not found' })
+      }
+      const table = entry.runner.ws.jobTable
+      if (!table.claimed) {
+        // Once held, the lease is this daemon's until the workspace closes,
+        // so only a line on a workspace it does not hold yet waits for the
+        // store here.
+        try {
+          await table.claim()
+        } catch (err) {
+          if (!(err instanceof WorkspaceHeldError)) throw err
+          try {
+            await upload.finish()
+          } catch (error) {
+            return refuse(req, reply, error)
+          }
+          return reply.status(409).send({ detail: err.message })
+        }
       }
       let opened!: (execution: ShellExecution | null) => void
       const execution = new Promise<ShellExecution | null>((resolve) => {

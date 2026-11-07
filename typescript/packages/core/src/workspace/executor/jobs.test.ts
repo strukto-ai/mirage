@@ -18,21 +18,14 @@ import { AsyncLineIterator } from '../../io/async_line_iterator.ts'
 import { IOResult } from '../../io/types.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
+import { WorkspaceHeldError } from '../../execution/errors.ts'
 import { type JobResult, type JobRunner, JobStatus, JobTable } from '../../execution/job/index.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 import { ExecutionNode } from '../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
-import {
-  handleFg,
-  handleJobs,
-  handleKill,
-  handlePs,
-  handleWait,
-  logger,
-  ownerTags,
-} from './jobs.ts'
+import { handleFg, handleJobs, handleKill, handlePs, handleWait, logger } from './jobs.ts'
 
 /** A runner that finishes immediately with no output. */
 const quiet: JobRunner = () => Promise.resolve([new IOResult(), new ExecutionNode()] as JobResult)
@@ -950,106 +943,25 @@ function sharing(store: RAMWorkspaceStateStore): Workspace {
   )
 }
 
-it("a workspace lists, kills and waits on another's job", async () => {
+// One daemon runs a workspace's lines at a time: a line on another daemon's
+// workspace is refused, naming the daemon that holds the lease, while that
+// daemon lists, kills and waits on the jobs through the store.
+it('another daemon reaches a job but runs no line', async () => {
   const store = new RAMWorkspaceStateStore()
   const a = sharing(store)
   const b = sharing(store)
   try {
     expect((await a.shell('sleep 30 &', { sessionId: 's' })).exitCode).toBe(0)
-    expect(stdoutStr(await b.shell('jobs', { sessionId: 's' }))).toBe('[1] running sleep 30\n')
-    expect((await b.shell('kill %1', { sessionId: 's' })).exitCode).toBe(0)
-    await a.jobTable.sync('s')
+    const refused = await b.shell('jobs', { sessionId: 's' }).catch((err: unknown) => err)
+    expect(refused).toBeInstanceOf(WorkspaceHeldError)
+    expect((refused as WorkspaceHeldError).holder).toBe(a.jobTable.daemon)
+    await b.jobTable.sync('s')
+    const [seen] = b.jobTable.listJobs('s')
+    expect([seen?.id, seen?.command, seen?.status]).toEqual([1, 'sleep 30', JobStatus.RUNNING])
+    expect(await b.jobTable.kill(1, 's', 15)).toBe(true)
+    expect((await b.jobTable.wait(1, 's')).exitCode).toBe(143)
     const job = a.jobTable.get(1, 's')
     expect(job?.process).not.toBeNull()
-    expect([job?.status, job?.exitCode]).toEqual([JobStatus.KILLED, 143])
-    expect(stdoutStr(await b.shell('wait %1; echo $?', { sessionId: 's' }))).toBe('143\n')
-    expect(stdoutStr(await b.shell('jobs', { sessionId: 's' }))).toBe('')
-    expect(stdoutStr(await a.shell('jobs', { sessionId: 's' }))).toBe('')
-    await job?.process?.join()
-  } finally {
-    await a.close()
-    await b.close()
-  }
-})
-
-it("a workspace waits for another's job status", async () => {
-  const store = new RAMWorkspaceStateStore()
-  const a = sharing(store)
-  const b = sharing(store)
-  try {
-    await a.shell('false &', { sessionId: 's' })
-    expect(stdoutStr(await b.shell('wait %1; echo $?', { sessionId: 's' }))).toBe('1\n')
-    await a.shell('sleep 0.05 & sleep 0.05 &', { sessionId: 's' })
-    expect(stdoutStr(await b.shell('wait; echo $?', { sessionId: 's' }))).toBe('0\n')
-    expect(stdoutStr(await a.shell('jobs', { sessionId: 's' }))).toBe('')
-  } finally {
-    await a.close()
-    await b.close()
-  }
-})
-
-it("a PID names the runner here before another's job number", async () => {
-  const store = new RAMWorkspaceStateStore()
-  const a = sharing(store)
-  const b = sharing(store)
-  try {
-    await a.shell('for i in 1 2 3 4 5 6; do sleep 30 & done', { sessionId: 's' })
-    expect((await b.shell('sleep 30 & kill "$!"', { sessionId: 's' })).exitCode).toBe(0)
-    expect(stdoutStr(await b.shell('false & wait "$!"; echo $?', { sessionId: 's' }))).toBe('1\n')
-    await a.jobTable.sync('s')
-    expect(
-      a.jobTable
-        .listJobs('s')
-        .slice(0, 6)
-        .map((j) => j.status),
-    ).toEqual(Array(6).fill(JobStatus.RUNNING))
-  } finally {
-    await a.close()
-    await b.close()
-  }
-}, 10_000)
-
-it("a substitution lists another's jobs", async () => {
-  const store = new RAMWorkspaceStateStore()
-  const a = sharing(store)
-  const b = sharing(store)
-  try {
-    await a.shell('sleep 30 &', { sessionId: 's' })
-    expect(stdoutStr(await b.shell('echo "$(jobs)"', { sessionId: 's' }))).toBe(
-      '[1] running sleep 30\n',
-    )
-  } finally {
-    await a.close()
-    await b.close()
-  }
-})
-
-/** `ps` on `ws` once it lists `row`, within five seconds. */
-async function listed(ws: Workspace, row: string): Promise<string> {
-  const deadline = Date.now() + 5000
-  for (;;) {
-    const out = stdoutStr(await ws.shell('ps', { sessionId: 's' }))
-    if (out.split('\n').includes(row)) return out
-    if (Date.now() > deadline) throw new Error(`ps never listed ${row}: ${out}`)
-    await new Promise((resolve) => setTimeout(resolve, 10))
-  }
-}
-
-// ps lists the processes another workspace on the store runs as owner:pid,
-// -p selects one of them and -o prints its ids tagged; kill owner:pid asks
-// its owner to stop it.
-it("a workspace lists and kills another's process", async () => {
-  const store = new RAMWorkspaceStateStore()
-  const a = sharing(store)
-  const b = sharing(store)
-  try {
-    await a.shell('sleep 30 &', { sessionId: 's' })
-    const job = a.jobTable.get(1, 's')
-    const name = `${a.jobTable.owner.slice(0, 6)}:${String(job?.pid)}`
-    await listed(b, `${name}\tsleep 30`)
-    const picked = stdoutStr(await b.shell(`ps -p ${name} -o pid=,comm=`, { sessionId: 's' }))
-    expect(picked.split(/\s+/).filter((w) => w !== '')).toEqual([name, 'sleep'])
-    expect(stdoutStr(await b.shell(`kill ${name}; echo $?`, { sessionId: 's' }))).toBe('0\n')
     await job?.process?.join()
     expect([job?.status, job?.exitCode]).toEqual([JobStatus.KILLED, 143])
   } finally {
@@ -1058,84 +970,59 @@ it("a workspace lists and kills another's process", async () => {
   }
 })
 
-// A runner's native runs follow it in the compact rows, on every workspace
-// that lists it.
+// Once the daemon holding the lease closes the workspace, another one runs
+// its lines, numbering its pids past every pid the first gave out.
+it('a workspace runs on another daemon once its own closes', async () => {
+  const store = new RAMWorkspaceStateStore()
+  const a = sharing(store)
+  const b = sharing(store)
+  try {
+    const first = stdoutStr(await a.shell('true & echo $!', { sessionId: 's' }))
+    await a.close()
+    const second = stdoutStr(await b.shell('true & echo $!', { sessionId: 's' }))
+    expect(Number(second)).toBeGreaterThan(Number(first))
+  } finally {
+    await b.close()
+  }
+})
+
+// ps lists this daemon's runners, each followed by the native runs it has
+// going.
 it('ps shows the native runs a process has going', async () => {
-  const store = new RAMWorkspaceStateStore()
-  const a = sharing(store)
-  const b = sharing(store)
-  try {
-    await a.shell('sleep 30 &', { sessionId: 's' })
-    const job = a.jobTable.get(1, 's')
-    job?.process?.addRun('box:t', { runtime: 'docker', tag: '0123456789abcdef', command: 'x' })
-    const run = '-\t└ docker 0123456789ab: x'
-    const own = stdoutStr(await a.shell('ps', { sessionId: 's' })).split('\n')
-    expect(own.slice(0, 2)).toEqual([`${String(job?.pid)}\tsleep 30`, run])
-    const lines = (await listed(b, run)).split('\n')
-    const name = `${a.jobTable.owner.slice(0, 6)}:${String(job?.pid)}`
-    expect(lines[lines.indexOf(`${name}\tsleep 30`) + 1]).toBe(run)
-    await a.shell('kill %1', { sessionId: 's' })
-  } finally {
-    await a.close()
-    await b.close()
-  }
-})
-
-// An owner:pid no live workspace answers to is no such process; one with no
-// owner or no number is no process ID at all.
-it('kill refuses an owner:pid nobody runs', async () => {
   const ws = new Workspace({}, { sessionId: 's' })
   try {
-    const killed = await ws.shell('kill ab12:3 :3 ab12:x', { sessionId: 's' })
+    await ws.shell('sleep 30 &', { sessionId: 's' })
+    const job = ws.jobTable.get(1, 's')
+    job?.process?.addRun('box:t', { runtime: 'docker', tag: '0123456789abcdef', command: 'x' })
+    const run = '-\t└ docker 0123456789ab: x'
+    const own = stdoutStr(await ws.shell('ps', { sessionId: 's' })).split('\n')
+    expect(own.slice(0, 2)).toEqual([`${String(job?.pid)}\tsleep 30`, run])
+    await ws.shell('kill %1', { sessionId: 's' })
+  } finally {
+    await ws.close()
+  }
+})
+
+// A pid is a number: kill and ps refuse any other operand in bash's and
+// procps's words.
+it('kill and ps refuse a pid that is no number', async () => {
+  const ws = new Workspace({}, { sessionId: 's' })
+  try {
+    const killed = await ws.shell('kill ab12:3 :3', { sessionId: 's' })
     expect(killed.exitCode).toBe(1)
     expect(
       stderrStr(killed)
         .split('\n')
         .filter((l) => l !== ''),
     ).toEqual([
-      'bash: line 1: kill: (ab12:3) - No such process',
+      'bash: line 1: kill: ab12:3: arguments must be process or job IDs',
       'bash: line 1: kill: :3: arguments must be process or job IDs',
-      'bash: line 1: kill: ab12:x: arguments must be process or job IDs',
     ])
     const picked = await ws.shell('ps -p ab12:3', { sessionId: 's' })
-    expect([picked.exitCode, stdoutStr(picked)]).toEqual([1, ''])
+    expect(picked.exitCode).toBe(1)
+    expect(stderrStr(picked)).toContain('process ID list syntax error')
   } finally {
     await ws.close()
-  }
-})
-
-// Each owner is named by the shortest start of its id, six characters at
-// least, that no other owner's begins with, so every name ps prints reaches
-// one process.
-it('keeps owner names unique', () => {
-  expect(Object.fromEntries(ownerTags(['abcdef12', 'abcdef34', '0123456789']))).toEqual({
-    abcdef12: 'abcdef1',
-    abcdef34: 'abcdef3',
-    '0123456789': '012345',
-  })
-})
-
-// A child shell, a script and a command substitution list and stop other
-// workspaces' processes as the top-level shell does.
-it("child shells reach another's processes", async () => {
-  const store = new RAMWorkspaceStateStore()
-  const a = sharing(store)
-  const b = sharing(store)
-  try {
-    await a.shell('sleep 30 &', { sessionId: 's' })
-    const job = a.jobTable.get(1, 's')
-    const name = `${a.jobTable.owner.slice(0, 6)}:${String(job?.pid)}`
-    await listed(b, `${name}\tsleep 30`)
-    for (const line of [`bash -c 'ps -p ${name} -o comm='`, `echo $(ps -p ${name} -o comm=)`]) {
-      expect(stdoutStr(await b.shell(line, { sessionId: 's' })), line).toBe('sleep\n')
-    }
-    expect(stdoutStr(await b.shell(`bash -c 'kill ${name}'; echo $?`, { sessionId: 's' }))).toBe(
-      '0\n',
-    )
-    await job?.process?.join()
-  } finally {
-    await a.close()
-    await b.close()
   }
 })
 

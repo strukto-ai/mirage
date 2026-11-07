@@ -20,6 +20,8 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 
+from mirage.execution.base import ExecutionStore
+from mirage.execution.errors import WorkspaceHeldError
 from mirage.execution.job.constants import (
     GENERATION_BITS,
     HANGUP_EXIT_CODE,
@@ -31,12 +33,11 @@ from mirage.execution.job.constants import (
     STOP_WAIT_SECONDS,
     WATCH_RETRY_SECONDS,
 )
-from mirage.execution.job.ram import RAMJobStore
-from mirage.execution.job.store import JobStore
 from mirage.execution.job.types import Job, JobRunner, JobStatus
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
+from mirage.execution.ram import RAMExecutionStore
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import (
     KILLED_OUTCOME,
@@ -282,14 +283,20 @@ class JobTable:
     finishes, and its console ends then, or once the runner had
     ``STOP_WAIT_SECONDS`` to stop and did not.
 
-    The lists live in the workspace's job store, so every workspace on a
-    shared store sees a session's jobs with the same numbers. A job runs
-    on the table that started it, its owner; another table lists it,
-    reads and waits on its console, and kills it by ending that console,
-    which its owner watches for. ``sync`` brings a session's list up to
-    date before a builtin reads it. A job whose owner's lease lapsed with
-    no ending was lost with its owner and is ended as hung up, as a
-    bash's job is when its terminal goes.
+    The lists live in the workspace's execution store, so every daemon
+    on a shared store sees a session's jobs with the same numbers. For
+    now one daemon runs a workspace's lines and jobs at a time: the one
+    holding the workspace's lease, which its table takes (``claim``)
+    before it starts anything and keeps until the workspace closes. A
+    daemon is named by an id it keeps across restarts, so a restarted one
+    takes its workspaces back at once, and ends as hung up the jobs it
+    ran before. Another daemon's table lists the jobs, reads and waits
+    on their consoles, and kills one by ending its console, which the
+    holder watches for; it starts none while the lease holds, and is
+    told which daemon holds it (``WorkspaceHeldError``). ``sync`` brings
+    a session's list up to date before a builtin reads it. A job whose
+    daemon lost the lease with no ending was lost with it and is ended
+    as hung up, as a bash's job is when its terminal goes.
 
     The table is still owned by the workspace rather than by a session,
     because the workspace owns the tasks: teardown must stop every job
@@ -303,15 +310,16 @@ class JobTable:
 
     def __init__(
         self,
-        store: JobStore | None = None,
+        store: ExecutionStore | None = None,
         processes: ProcessTable | None = None,
         parent: "JobTable | None" = None,
         clock: Clock | None = None,
+        daemon: str | None = None,
     ) -> None:
         """Create a table, optionally choosing where its lists live.
 
         Args:
-            store (JobStore | None): the job plane holding each
+            store (ExecutionStore | None): the job plane holding each
                 session's list and each job's console; None keeps them
                 in memory, private to this table.
             processes (ProcessTable | None): where the jobs run.
@@ -320,12 +328,18 @@ class JobTable:
                 bash's does; its ``wait`` and ``kill`` reach none of them.
             clock (Clock | None): the workspace clock a job's
                 ``created_at`` is read on; None is the system clock.
+            daemon (str | None): the id of the daemon this table runs
+                on, which its lease names; None is a fresh one, a daemon
+                no other table shares.
         """
         self.parent = parent
         self.clock: Clock = clock if clock is not None else SystemClock()
         self.processes = processes or ProcessTable()
-        self.store: JobStore = store if store is not None else RAMJobStore()
-        self.owner = uuid.uuid4().hex
+        self.store: ExecutionStore = (
+            store if store is not None else RAMExecutionStore()
+        )
+        self.daemon = daemon if daemon is not None else uuid.uuid4().hex
+        self._claimed = False
         self._jobs: dict[str, dict[int, Job]] = {}
         # Jobs `disown` removed from the table while they still run, and
         # ones another job's number displaced. The shell no longer lists,
@@ -378,9 +392,47 @@ class JobTable:
             parent (JobTable | None): the table a ``$( )`` still lists
                 in ``jobs``.
         """
-        table = JobTable(None, self.processes, parent, self.clock)
+        table = JobTable(None, self.processes, parent, self.clock, self.daemon)
         table._plane = self._plane
         return table
+
+    @property
+    def claimed(self) -> bool:
+        """Whether this table's daemon holds the workspace's lease, as of
+        its ``claim`` or the last renewal."""
+        return self._plane._claimed
+
+    async def claim(self) -> None:
+        """Take the workspace's lease for this table's daemon before it
+        starts a line or a job; once taken it is kept until ``close``, so
+        every later call answers at once.
+
+        Taking it reads the highest pid the store recorded, so this
+        daemon numbers past every pid given out before, and the processes
+        this daemon left before a restart, whose native runs are stopped
+        meanwhile. The processes this table runs are published from then
+        on. A child shell's table claims through the workspace's.
+
+        Raises:
+            WorkspaceHeldError: another daemon holds the lease.
+        """
+        if self._plane is not self:
+            await self._plane.claim()
+            return
+        if self._claimed:
+            return
+        holder = await self.store.lease(self.daemon)
+        if holder is not None:
+            raise WorkspaceHeldError(self.processes.workspace_id, holder)
+        earlier = (await self.store.processes()).get(self.daemon, {})
+        self.processes.continue_after(await self.store.highest_pid())
+        self._claimed = True
+        self._keep_lease()
+        if earlier and not self._reaping_stopped:
+            task = asyncio.ensure_future(self._reap_earlier(earlier))
+            self._reaping.add(task)
+            task.add_done_callback(self._reaping.discard)
+        self.processes_changed()
 
     async def submit(
         self,
@@ -415,10 +467,12 @@ class JobTable:
 
         Raises:
             BlockingIOError: the session is at its process cap.
+            WorkspaceHeldError: another daemon holds the workspace's
+                lease (``claim``).
         """
+        await self.claim()
         name = uuid.uuid4().hex
         created_at = self.clock.now()
-        await self.store.renew(self.owner)
         try:
             job_id = await self._allocate(
                 session_id,
@@ -426,7 +480,7 @@ class JobTable:
                     "command": command,
                     "cwd": cwd,
                     "created_at": created_at,
-                    "owner": self.owner,
+                    "owner": self.daemon,
                     "console": name,
                 },
             )
@@ -449,7 +503,6 @@ class JobTable:
                 watcher.cancel()
                 await self._record_ending(job)
                 self._disowned = [j for j in self._disowned if j is not job]
-                self._drop_lease()
                 self._drop_checking()
 
         try:
@@ -476,7 +529,7 @@ class JobTable:
                 console=console,
                 simple=simple,
                 created_at=created_at,
-                owner=self.owner,
+                owner=self.daemon,
                 console_name=name,
             )
         except Exception:
@@ -490,7 +543,6 @@ class JobTable:
         process.task.add_done_callback(
             lambda _: plane._job_tables.pop(pid, None)
         )
-        self._keep_lease()
         self._keep_checking()
         return job
 
@@ -514,7 +566,7 @@ class JobTable:
         if job.process_id is not None:
             restored.bind_process(job.process_id)
         job.console = restored
-        job.owner = self.owner
+        job.owner = self.daemon
         job.console_name = name
         job.id = await self._insert(
             job.session_id,
@@ -665,8 +717,8 @@ class JobTable:
         the status the kill recorded, and one that has not begun has it
         ended at once: no program ran that could leave its own.
 
-        Another workspace's job is killed by ending its console; its
-        owner sees the ending and stops the runner. Should the job have
+        Another daemon's job is killed by ending its console; that
+        daemon sees the ending and stops the runner. Should the job have
         ended first, the ending it wrote stands and the job was not
         killed. INT and QUIT reach a running job and do nothing, as bash
         starts each job ignoring them.
@@ -685,7 +737,7 @@ class JobTable:
         if job.process is not None:
             await self._stop_runner(job, job.process, signal)
             return True
-        if not await self.store.alive(job.owner):
+        if not await self._running(job.owner):
             await self._reap_owner(job.owner)
         await _mark_killed(job.console, 128 + signal)
         await self._refresh(job)
@@ -738,7 +790,7 @@ class JobTable:
                 await self.kill(job.id, session_id)
                 stopped[job.console_name] = job
             for name, entry in (fields or {}).get("disowned", {}).items():
-                if entry["owner"] != self.owner:
+                if entry["owner"] != self.daemon:
                     console = JobConsole(self.store.console(name))
                     await _mark_killed(console, KILLED_EXIT_CODE)
             if await self.store.delete(session_id, generation_of(fields)):
@@ -773,12 +825,13 @@ class JobTable:
         return running
 
     async def close(self) -> None:
-        """Stop renewing this table's lease, at workspace teardown.
+        """Give the workspace's lease up, at workspace teardown, so
+        another daemon may run it.
 
         Called after ``kill_all``, so every job this table ran has
-        ended and other workspaces need no lease to settle them; a
-        killed job whose runner is still stopping has its console ended
-        now rather than at its bound. The store itself belongs to the
+        ended and other daemons need no lease to settle them; a killed
+        job whose runner is still stopping has its console ended now
+        rather than at its bound. The store itself belongs to the
         workspace's state store.
         """
         for task in (self._lease, self._checking, self._publishing):
@@ -787,10 +840,15 @@ class JobTable:
         self._lease = self._checking = self._publishing = None
         for task in list(self._reaping):
             task.cancel()
-        try:
-            await self.store.publish(self.owner, {})
-        except Exception as exc:
-            logger.debug("process record not dropped: %s", exc)
+        if self._claimed:
+            self._claimed = False
+            try:
+                await self.store.publish(
+                    self.daemon, {}, self.processes.last_pid
+                )
+                await self.store.release(self.daemon)
+            except Exception as exc:
+                logger.debug("workspace lease not released: %s", exc)
         stopping = dict(self._stopping)
         for task in stopping:
             task.cancel()
@@ -824,9 +882,9 @@ class JobTable:
         runner is joined too, for at most ``STOP_WAIT_SECONDS``, so what
         its task holds is let go before this returns.
 
-        Another workspace's job answers the status its ending records.
-        While none is stored its owner's lease is checked every third of
-        it, and a lapsed one ends the job as hung up.
+        Another daemon's job answers the status its ending records.
+        While none is stored the lease is checked every third of its
+        length, and one that daemon lost ends the job as hung up.
 
         Args:
             job_id (int): the job to wait for.
@@ -900,8 +958,11 @@ class JobTable:
     def processes_changed(self) -> None:
         """Publish the processes this table's workspace runs, now that
         one started: the publishing goes on while any runs
-        (``_publish``)."""
-        if self._publishing is not None and not self._publishing.done():
+        (``_publish``). Only the daemon holding the lease publishes, from
+        its ``claim`` on."""
+        if not self._claimed or (
+            self._publishing is not None and not self._publishing.done()
+        ):
             return
         try:
             asyncio.get_running_loop()
@@ -910,44 +971,43 @@ class JobTable:
         self._publishing = asyncio.ensure_future(self._publish())
 
     async def remote_processes(self) -> dict[str, dict[str, RecordFields]]:
-        """The processes other workspaces on the store run, owner to PID
-        to process, as each last published them.
+        """The processes other daemons on the store run in this
+        workspace, daemon to PID to process, as each last published them.
 
-        A lapsed owner's are left out: whatever it ran was lost with it,
-        and the native runs it left are stopped meanwhile.
+        A daemon that lost the lease is left out: whatever it ran was
+        lost with it, and the native runs it left are stopped meanwhile.
         """
         if self._plane is not self:
             return await self._plane.remote_processes()
         found: dict[str, dict[str, RecordFields]] = {}
-        for owner, records in (await self.store.processes()).items():
-            if owner == self.owner or not records:
+        for daemon, records in (await self.store.processes()).items():
+            if daemon == self.daemon or not records:
                 continue
-            if await self.store.alive(owner):
-                found[owner] = records
+            if await self._running(daemon):
+                found[daemon] = records
             else:
-                self._reap_later(owner)
+                self._reap_later(daemon)
         return found
 
     async def signal_remote(
         self,
-        owner: str,
         pid: int,
         signal: int,
         session_id: str,
         permissions: Callable[[], ProcessPermissions | None],
     ) -> bool:
-        """Signal a process another workspace runs, named by a prefix of
-        its owner's id and the owner's PID: its owner stops it once it
-        takes the stop, within ``PUBLISH_SECONDS``.
+        """Signal a process another daemon runs in this workspace, by
+        its pid: that daemon stops it once it takes the stop, within
+        ``PUBLISH_SECONDS``.
 
-        Signal 0 only probes. A lapsed owner's process is gone, and the
-        native runs it left are stopped instead. The grants are read once
-        the store has answered, just before anything is stopped, so a
-        profile replaced meanwhile stops nothing under the old one.
+        Signal 0 only probes. The process of a daemon that lost the lease
+        is gone, and the native runs it left are stopped instead. The
+        grants are read once the store has answered, just before anything
+        is stopped, so a profile replaced meanwhile stops nothing under
+        the old one.
 
         Args:
-            owner (str): a prefix of the owner's id, as ``ps`` shows it.
-            pid (int): the process, by the owner's PID.
+            pid (int): the process.
             signal (int): the signal, 0 to probe.
             session_id (str): the calling session.
             permissions (Callable[[], ProcessPermissions | None]): whose
@@ -963,35 +1023,33 @@ class JobTable:
         """
         if self._plane is not self:
             return await self._plane.signal_remote(
-                owner, pid, signal, session_id, permissions
+                pid, signal, session_id, permissions
             )
         records = await self.store.processes()
-        owners = [
+        daemons = [
             found
             for found, processes in records.items()
-            if found != self.owner
-            and found.startswith(owner)
-            and str(pid) in processes
+            if found != self.daemon and str(pid) in processes
         ]
-        if len(owners) > 1:
-            owners = [
-                found for found in owners if await self.store.alive(found)
+        if len(daemons) > 1:
+            daemons = [
+                found for found in daemons if await self._running(found)
             ]
-        if len(owners) != 1:
+        if len(daemons) != 1:
             return False
-        record = records[owners[0]][str(pid)]
+        record = records[daemons[0]][str(pid)]
         own = record.get("session") == session_id
-        lapsed = not await self.store.alive(owners[0])
+        lapsed = not await self._running(daemons[0])
         granted = permissions()
         if granted is None or (granted.list == "session" and not own):
             return False
         if lapsed:
-            await self._reap_owner(owners[0])
+            await self._reap_owner(daemons[0])
             return False
         if granted.kill == "session" and not own:
             raise PermissionError(errno.EPERM, "Operation not permitted")
         if signal != 0:
-            await self.store.request_stop(owners[0], pid, signal)
+            await self.store.request_stop(daemons[0], pid, signal)
         return True
 
     def _remote(
@@ -1032,7 +1090,6 @@ class JobTable:
         if not process.begun:
             await _stop(job, signal)
             await self._record_ending(job)
-            self._drop_lease()
             self._drop_checking()
             return
         cancel_job(job, signal)
@@ -1073,7 +1130,6 @@ class JobTable:
             return
         await _mark_killed(job.console, job.exit_code)
         await self._record_ending(job)
-        self._drop_lease()
         self._drop_checking()
 
     async def _record_ending(self, job: Job) -> None:
@@ -1115,15 +1171,15 @@ class JobTable:
             logger.debug("job %d ending not kept: %s", job.id, exc)
 
     async def _refresh(self, job: Job) -> None:
-        """Settle another workspace's job from its console's ending, or
-        end it as hung up when its owner's lease lapsed with none.
+        """Settle another daemon's job from its console's ending, or end
+        it as hung up when that daemon lost the lease with none.
 
         Args:
-            job (Job): another workspace's running job.
+            job (Job): another daemon's running job.
         """
         outcome = await job.console.outcome()
         if outcome is None:
-            if await self.store.alive(job.owner):
+            if await self._running(job.owner):
                 return
             self._reap_later(job.owner)
             await _mark_killed(job.console, HANGUP_EXIT_CODE)
@@ -1298,34 +1354,23 @@ class JobTable:
         return await self.store.cas_set(session_id, record, expected)
 
     def _keep_lease(self) -> None:
-        """Renew this table's lease while it runs jobs on a store that
-        leases owners."""
+        """Renew the workspace's lease from ``claim`` until ``close``, on
+        a store whose leases lapse."""
         lease = self.store.lease_seconds
         if lease is None or self._lease is not None:
             return
         self._lease = asyncio.ensure_future(self._renew(lease / 3))
 
-    def _drop_lease(self) -> None:
-        """Stop renewing once every job this table runs has ended its
-        console and no process it publishes runs: a killed one still
-        stopping keeps the lease, or other workspaces would end it as
-        hung up, and a published process keeps it, or they would take
-        its record for lapsed; the publishing drops it as it stops."""
-        if (
-            self._lease is None
-            or (
-                self._publishing is not None
-                and not self._publishing.done()
-                and self.processes.live()
-            )
-            or any(
-                j.process is not None and not j.console.finished
-                for j in [*self.all_jobs(), *self._disowned]
-            )
-        ):
-            return
-        self._lease.cancel()
-        self._lease = None
+    async def _running(self, daemon: str) -> bool:
+        """Whether a daemon still runs what it started here: it holds the
+        workspace's lease and is not this table's own, whose jobs and
+        processes from before a restart went with that life (the ones
+        this table runs have their runners here).
+
+        Args:
+            daemon (str): the daemon's id.
+        """
+        return daemon != self.daemon and await self.store.holder() == daemon
 
     def _keep_checking(self) -> None:
         """Check the lists of the jobs this table runs every
@@ -1400,21 +1445,19 @@ class JobTable:
 
     async def _publish(self) -> None:
         """Publish the processes this workspace runs every
-        ``PUBLISH_SECONDS`` while it runs any, and stop those other
-        workspaces asked it to stop. Once it runs none, its record goes
-        and the publishing stops.
+        ``PUBLISH_SECONDS`` while it runs any, with the highest pid it
+        handed out, and stop those other daemons asked it to stop. Once
+        it runs none, its record goes and the publishing stops.
 
-        The owner's lease is renewed once ahead of the first record it
-        vouches for, then kept by the table's lease renewal
-        (``_keep_lease``) while any process runs, on its own timer
-        whatever a round costs. The record is written again every third
-        of the lease, so it outlives its store's expiry and comes back
-        should a workspace have taken this one for lapsed. Each record
-        carries ``seen_at``, when its processes were read, the last time
-        this workspace vouched for them and their native runs, on the
-        host's clock, which a host reap compares with ``ps``. A failed
-        round is logged and tried again the next one, and a stop that
-        fails leaves the others it came with to be applied.
+        The lease that vouches for the record is kept by ``_keep_lease``
+        from the table's ``claim`` on, on its own timer whatever a round
+        costs. The record is written again every third of the lease, so
+        it outlives its store's expiry. Each record carries ``seen_at``,
+        when its processes were read, the last time this daemon vouched
+        for them and their native runs, on the host's clock, which a host
+        reap compares with ``ps``. A failed round is logged and tried
+        again the next one, and a stop that fails leaves the others it
+        came with to be applied.
         """
         published: dict[str, RecordFields] | None = None
         lease = self.store.lease_seconds
@@ -1423,26 +1466,22 @@ class JobTable:
             if lease is not None
             else 0
         )
-        renewed = lease is None
         rounds = 0
         while True:
             seen = time.time()
             records = self._records()
             try:
-                if not renewed:
-                    await self.store.renew(self.owner)
-                    renewed = True
-                    self._keep_lease()
                 if records != published or (rewrite and rounds % rewrite == 0):
                     await self.store.publish(
-                        self.owner,
+                        self.daemon,
                         {
                             pid: {**record, "seen_at": seen}
                             for pid, record in records.items()
                         },
+                        self.processes.last_pid,
                     )
                     published = records
-                for pid, signal in await self.store.take_stops(self.owner):
+                for pid, signal in await self.store.take_stops(self.daemon):
                     try:
                         await self._stop_asked(pid, signal)
                     except Exception as exc:
@@ -1450,14 +1489,13 @@ class JobTable:
             except Exception as exc:
                 logger.debug("process publish failed: %s", exc)
             if published == {} and not self._records():
-                self._drop_lease()
                 return
             rounds += 1
             await asyncio.sleep(PUBLISH_SECONDS)
 
     async def _stop_asked(self, pid: int, signal: int) -> None:
-        """Stop one of this workspace's processes another workspace
-        asked to stop: a job's runner the way ``kill`` stops a job,
+        """Stop one of this workspace's processes another daemon asked
+        to stop: a job's runner the way ``kill`` stops a job,
         through the table that holds it, a child shell's included; any
         other runner directly.
 
@@ -1480,11 +1518,11 @@ class JobTable:
                 return
 
     def reap_lapsed(self) -> None:
-        """Stop what the lapsed instances on the store left running,
+        """Stop what the daemons that lost the lease left running,
         without waiting: the workspace calls it as it starts, so what a
-        crashed instance ran stops before anything lists it. Once per
-        table, and only on a store that leases owners: on any other, no
-        owner lapses."""
+        crashed daemon ran stops before anything lists it. Once per
+        table, and only on a store whose leases lapse: on any other, no
+        daemon loses one but by closing."""
         if (
             self._swept
             or self._reaping_stopped
@@ -1497,9 +1535,9 @@ class JobTable:
         task.add_done_callback(self._reaping.discard)
 
     async def _sweep(self) -> None:
-        """Reap the lapsed owners on the store, and once more a lease
-        later while any other owner still held one: an instance that died
-        just before this one started still holds its lease until then."""
+        """Reap the daemons that lost the lease, and once more a lease
+        later while another daemon still held it: one that died just
+        before this one started still holds it until then."""
         try:
             live = await self.remote_processes()
             lease = self.store.lease_seconds
@@ -1511,13 +1549,14 @@ class JobTable:
                     remaining = deadline - time.monotonic()
                 await self.remote_processes()
         except Exception as exc:
-            logger.debug("lapsed owners not swept: %s", exc)
+            logger.debug("lapsed daemons not swept: %s", exc)
 
     def _reap_later(self, owner: str) -> None:
-        """Stop the native runs a lapsed owner left, without waiting.
+        """Stop the native runs a daemon that lost the lease left,
+        without waiting.
 
         Args:
-            owner (str): the lapsed owner.
+            owner (str): the daemon's id.
         """
         if self._reaping_stopped or owner in self._reaped:
             return
@@ -1527,48 +1566,79 @@ class JobTable:
         task.add_done_callback(self._reaping.discard)
 
     async def _reap_owner(self, owner: str) -> None:
-        """Stop the native runs a lapsed owner left, those this
-        workspace reaches, and keep its record holding only the rest, for
-        a workspace that reaches them. The owner's lease is checked again
-        before each run is stopped, so one that renewed meanwhile keeps
-        its runs, and its record as it is. Each run goes to the reaper
-        with its record's ``seen_at``.
+        """Stop the native runs a daemon that lost the lease left, those
+        this workspace reaches, and keep its record holding only the
+        rest, for a daemon that reaches them. This table's own daemon's
+        record is its own life's, so it is never reaped here.
 
         Args:
-            owner (str): the lapsed owner.
+            owner (str): the daemon's id.
         """
+        if owner == self.daemon:
+            return
         try:
             records = (await self.store.processes()).get(owner, {})
-            left: list[dict[str, JsonValue]] = []
-            for record in records.values():
-                for run in record["runs"]:
-                    if await self.store.alive(owner):
-                        return
-                    if self.reaper is None or await self.reaper(
-                        [{**run, "seen_at": record.get("seen_at")}], 15
-                    ):
-                        left.append(run)
-            kept = {
-                pid: {
-                    **record,
-                    "runs": [r for r in record["runs"] if r in left],
-                }
-                for pid, record in records.items()
-                if any(run in left for run in record["runs"])
-            }
-            if not await self.store.alive(owner):
+            kept = await self._reap_runs(owner, records)
+            if not await self._running(owner):
                 await self.store.publish(owner, kept)
         except Exception as exc:
-            logger.debug("lapsed owner %s not reaped: %s", owner, exc)
+            logger.debug("lapsed daemon %s not reaped: %s", owner, exc)
+
+    async def _reap_earlier(self, records: dict[str, RecordFields]) -> None:
+        """Stop the native runs this daemon left before a restart, which
+        ``claim`` found under its id; this life's first publish replaces
+        the record.
+
+        Args:
+            records (dict[str, RecordFields]): PID to process, as the
+                earlier life last published them.
+        """
+        try:
+            await self._reap_runs(self.daemon, records)
+        except Exception as exc:
+            logger.debug("runs left before a restart not reaped: %s", exc)
+
+    async def _reap_runs(
+        self, owner: str, records: dict[str, RecordFields]
+    ) -> dict[str, RecordFields]:
+        """Hand each native run a daemon's records list to the reaper,
+        with its record's ``seen_at``, and answer the records holding
+        only the runs this workspace could not reach. The lease is
+        checked again before each run is stopped, so a daemon that took
+        it back meanwhile keeps its runs, and its records as they are.
+
+        Args:
+            owner (str): the daemon's id.
+            records (dict[str, RecordFields]): PID to process.
+        """
+        left: list[dict[str, JsonValue]] = []
+        for record in records.values():
+            for run in record["runs"]:
+                if await self._running(owner):
+                    return records
+                if self.reaper is None or await self.reaper(
+                    [{**run, "seen_at": record.get("seen_at")}], 15
+                ):
+                    left.append(run)
+        return {
+            pid: {
+                **record,
+                "runs": [r for r in record["runs"] if r in left],
+            }
+            for pid, record in records.items()
+            if any(run in left for run in record["runs"])
+        }
 
     async def _renew(self, interval: float) -> None:
-        """Renew this table's lease every ``interval`` seconds, with the
-        consoles of the jobs it still runs, so a quiet one keeps its
-        output while this table lives.
+        """Renew the workspace's lease every ``interval`` seconds, with
+        the consoles of the jobs this table still runs, so a quiet one
+        keeps its output while this table lives.
 
-        A failed renewal is logged and retried: should the lease lapse
-        meanwhile, other workspaces end this table's jobs as hung up and
-        the watchers here stop them, so the two never disagree.
+        A failed renewal is logged and retried. Should the lease lapse
+        meanwhile and another daemon take it, the renewal stops and the
+        next line or job asks for it again (``claim``), and is refused;
+        the other daemons end this table's jobs as hung up and the
+        watchers here stop them, so the two never disagree.
 
         Args:
             interval (float): seconds between renewals.
@@ -1576,8 +1646,8 @@ class JobTable:
         while True:
             await asyncio.sleep(interval)
             try:
-                await self.store.renew(
-                    self.owner,
+                holder = await self.store.lease(
+                    self.daemon,
                     [
                         j.console_name
                         for j in [*self.all_jobs(), *self._disowned]
@@ -1585,4 +1655,10 @@ class JobTable:
                     ],
                 )
             except Exception as exc:
-                logger.debug("job lease renewal failed: %s", exc)
+                logger.debug("workspace lease renewal failed: %s", exc)
+                continue
+            if holder is not None:
+                logger.debug("workspace lease taken by %s", holder)
+                self._claimed = False
+                self._lease = None
+                return

@@ -19,12 +19,13 @@ from functools import partial
 
 import pytest
 
+from mirage.execution.errors import WorkspaceHeldError
 from mirage.execution.job import table as table_module
-from mirage.execution.job.ram import RAMJobStore
 from mirage.execution.job.table import JobTable
 from mirage.execution.job.types import Job, JobStatus
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.table import ProcessTable
+from mirage.execution.ram import RAMExecutionStore
 from mirage.io import IOResult
 from mirage.shell.console import (
     Channel,
@@ -84,7 +85,7 @@ async def _run_forever(job: Job) -> tuple[IOResult, ExecutionNode]:
     return IOResult(), ExecutionNode()
 
 
-class _BrokenConsoles(RAMJobStore):
+class _BrokenConsoles(RAMExecutionStore):
     """A job store that cannot open a console."""
 
     def console(self, name: str) -> ConsoleStore:
@@ -148,7 +149,7 @@ async def test_wait_all_joins_a_killed_job_still_appending():
 
 @pytest.mark.asyncio
 async def test_a_child_table_keeps_its_jobs_off_the_shared_store():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     table = JobTable(store)
     child = table.child().child(table)
     job = await child.submit(command="deaf", run=_run_forever, cwd="/")
@@ -418,7 +419,7 @@ async def test_process_ids_do_not_restart_with_shell_job_numbers():
 
 @pytest.mark.asyncio
 async def test_a_refused_job_gives_its_number_back():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     table = JobTable(store)
     release = asyncio.Event()
 
@@ -501,7 +502,7 @@ async def _exit_with(code: int, job: Job) -> tuple[IOResult, ExecutionNode]:
 
 @pytest.mark.asyncio
 async def test_another_table_lists_waits_on_and_kills_a_job():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     a, b = JobTable(store), JobTable(store)
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
     await asyncio.sleep(0)
@@ -524,7 +525,7 @@ async def test_another_table_lists_waits_on_and_kills_a_job():
 
 @pytest.mark.asyncio
 async def test_another_table_waits_for_a_job_to_end():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     a, b = JobTable(store), JobTable(store)
     gate = asyncio.Event()
 
@@ -542,24 +543,60 @@ async def test_another_table_waits_for_a_job_to_end():
         assert (await waiter).exit_code == 1
 
 
+# One daemon runs a workspace's jobs at a time: another one is told which
+# daemon holds the lease, and once that one closes it runs them, numbering
+# its pids past every pid the first gave out.
 @pytest.mark.asyncio
-async def test_two_tables_never_hand_out_one_number():
-    store = RAMJobStore()
+async def test_a_second_daemon_starts_no_job_while_the_lease_holds():
+    store = RAMExecutionStore()
     a, b = JobTable(store), JobTable(store)
     first, second = await asyncio.gather(
         a.submit("one", _run_forever, "/", session_id="s"),
-        b.submit("two", _run_forever, "/", session_id="s"),
+        a.submit("two", _run_forever, "/", session_id="s"),
     )
     assert {first.id, second.id} == {1, 2}
+    with pytest.raises(WorkspaceHeldError) as held:
+        await b.submit("three", _run_forever, "/", session_id="s")
+    assert held.value.holder == a.daemon
+    assert a.daemon in str(held.value)
     await b.sync("s")
     assert [j.id for j in b.list_jobs("s")] == [1, 2]
     await a.kill_all()
+    await a.close()
+    third = await b.submit("three", _run_forever, "/", session_id="s")
+    assert third.pid > max(first.pid, second.pid)
     await b.kill_all()
 
 
+# A daemon keeps its id across a restart, so it holds its workspace again at
+# once, and the jobs it ran before end as hung up.
 @pytest.mark.asyncio
-async def test_a_job_whose_owner_lapsed_ends_as_hung_up():
-    store = RAMJobStore(lease_seconds=0.05)
+async def test_a_restarted_daemon_holds_its_workspace_again():
+    store = RAMExecutionStore(lease_seconds=30.0)
+    before = JobTable(store, daemon="d")
+    lost = await before.submit("sleep 30", _run_forever, "/", session_id="s")
+    assert before._lease is not None
+    before._lease.cancel()
+    after = JobTable(store, daemon="d")
+    await after.submit("next", _run_forever, "/", session_id="s")
+    await after.sync("s")
+    [old, new] = after.list_jobs("s")
+    assert (old.command, old.status, old.exit_code) == (
+        "sleep 30",
+        JobStatus.KILLED,
+        129,
+    )
+    assert (new.command, new.status) == ("next", JobStatus.RUNNING)
+    assert lost.process is not None
+    async with asyncio.timeout(2):
+        await lost.process.join()
+    await after.kill_all()
+    await after.close()
+
+
+@pytest.mark.asyncio
+async def test_a_job_whose_daemon_lost_the_lease_ends_as_hung_up():
+    store = RAMExecutionStore(lease_seconds=0.05)
     a, b = JobTable(store), JobTable(store)
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
     await asyncio.sleep(0)
@@ -579,7 +616,7 @@ async def test_a_job_whose_owner_lapsed_ends_as_hung_up():
 
 @pytest.mark.asyncio
 async def test_a_reap_elsewhere_drops_the_job_from_its_owner():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     a, b = JobTable(store), JobTable(store)
     await a.submit("true", partial(_exit_with, 0), "/", session_id="s")
     await b.sync("s")
@@ -593,10 +630,11 @@ async def test_a_reap_elsewhere_drops_the_job_from_its_owner():
 
 @pytest.mark.asyncio
 async def test_a_stale_reap_never_drops_a_job_that_took_its_number():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     a, b = JobTable(store), JobTable(store)
     await a.submit("true", partial(_exit_with, 0), "/", session_id="s")
     await a.wait(1, "s")
+    await a.close()
     await b.sync("s")
     await b.reap(1, "s")
     fresh = await b.submit("sleep 30", _run_forever, "/", session_id="s")
@@ -609,10 +647,11 @@ async def test_a_stale_reap_never_drops_a_job_that_took_its_number():
 
 @pytest.mark.asyncio
 async def test_a_sync_takes_the_job_that_took_a_reaped_number():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     a, b = JobTable(store), JobTable(store)
     await a.submit("true", partial(_exit_with, 0), "/", session_id="s")
     await a.wait(1, "s")
+    await a.close()
     await b.sync("s")
     await b.reap(1, "s")
     await b.submit("sleep 30", _run_forever, "/", session_id="s")
@@ -629,7 +668,7 @@ async def test_a_sync_takes_the_job_that_took_a_reaped_number():
 # every workspace reads carries it, not the signal's.
 @pytest.mark.asyncio
 async def test_a_handled_kill_answers_one_status_everywhere():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     a, b = JobTable(store), JobTable(store)
     stopped: list[str] = []
     job, started = await _submit_handling(a, True, stopped)
@@ -707,7 +746,7 @@ class _FailsFirstWatch:
         await self._inner.close()
 
 
-class _DroppedWatches(RAMJobStore):
+class _DroppedWatches(RAMExecutionStore):
     """A job store whose consoles each fail their first watch."""
 
     def console(self, name: str) -> ConsoleStore:
@@ -729,7 +768,7 @@ async def test_a_watch_that_failed_a_read_still_heeds_a_kill(monkeypatch):
     assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
 
 
-class _ExpiringOutput(RAMJobStore):
+class _ExpiringOutput(RAMExecutionStore):
     """A job store whose consoles' output can expire, as Redis's does."""
 
     def __init__(self, lease_seconds: float | None = None) -> None:
@@ -791,7 +830,7 @@ class _CountedWaits:
         await self._inner.close()
 
 
-class _CountingWaits(RAMJobStore):
+class _CountingWaits(RAMExecutionStore):
     """A job store whose consoles count the reads parked on them."""
 
     def __init__(self, lease_seconds: float | None = None) -> None:
@@ -822,7 +861,7 @@ async def test_a_long_wait_elsewhere_keeps_one_read_across_lease_checks():
     assert store.count["most"] == 1
 
 
-class _HookAfterRead(RAMJobStore):
+class _HookAfterRead(RAMExecutionStore):
     """A job store that runs one hook right after a list read, as another
     workspace's write landing between a read and what follows it."""
 
@@ -863,13 +902,13 @@ async def test_a_sync_never_attaches_a_console_reaped_after_its_read():
 
 @pytest.mark.asyncio
 async def test_a_close_elsewhere_stops_a_disowned_job():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     a, b = JobTable(store), JobTable(store)
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
     await asyncio.sleep(0)
     await b.sync("s")
     assert await b.disown(1, "s")
-    assert (await b.submit("next", _run_forever, "/", session_id="s")).id == 1
+    assert (await a.submit("next", _run_forever, "/", session_id="s")).id == 1
     await b.close_session("s")
     assert job.process is not None
     async with asyncio.timeout(2):
@@ -879,7 +918,7 @@ async def test_a_close_elsewhere_stops_a_disowned_job():
 
 @pytest.mark.asyncio
 async def test_a_disowned_job_drops_its_record_when_it_ends():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     table = JobTable(store)
     gate = asyncio.Event()
 
@@ -920,7 +959,7 @@ async def test_a_job_started_during_a_sync_stays_this_tables_own():
 
 @pytest.mark.asyncio
 async def test_a_disown_never_parks_a_job_that_already_ended():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     a, b = JobTable(store), JobTable(store)
     gate = asyncio.Event()
 
@@ -938,7 +977,7 @@ async def test_a_disown_never_parks_a_job_that_already_ended():
     assert stored is not None and "disowned" not in stored
 
 
-class _CancelledAfterWrite(RAMJobStore):
+class _CancelledAfterWrite(RAMExecutionStore):
     """A job store whose first list write lands but whose caller is
     cancelled before it hears so, as a cancel racing a Redis reply."""
 
@@ -974,9 +1013,9 @@ async def test_a_launch_cancelled_after_its_write_leaves_no_entry():
 
 @pytest.mark.asyncio
 async def test_a_restore_never_hides_a_job_that_holds_its_number():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     a, b = JobTable(store), JobTable(store)
-    live = await b.submit("sleep 30", _run_forever, "/", session_id="s")
+    live = await a.submit("sleep 30", _run_forever, "/", session_id="s")
     restored = Job(
         id=live.id,
         command="old",
@@ -986,14 +1025,14 @@ async def test_a_restore_never_hides_a_job_that_holds_its_number():
         session_id="s",
         console=JobConsole(finished=True),
     )
-    await a.load(restored)
+    await b.load(restored)
     assert restored.id == live.id + 1
-    await b.sync("s")
-    assert [(j.id, j.command) for j in b.list_jobs("s")] == [
+    await a.sync("s")
+    assert [(j.id, j.command) for j in a.list_jobs("s")] == [
         (live.id, "sleep 30"),
         (live.id + 1, "old"),
     ]
-    await b.kill_all()
+    await a.kill_all()
 
 
 class _Unwatched(_FailsFirstWatch):
@@ -1004,22 +1043,25 @@ class _Unwatched(_FailsFirstWatch):
         await asyncio.Event().wait()
 
 
-class _UnwatchedConsoles(RAMJobStore):
+class _UnwatchedConsoles(RAMExecutionStore):
     """A job store whose owners never notice an ending on their own."""
 
     def console(self, name: str) -> ConsoleStore:
         return _Unwatched(super().console(name))
 
 
+# A daemon that lost the lease while its job still ran, unaware, lists
+# the job the daemon that took the lease started under the same number.
 @pytest.mark.asyncio
 async def test_a_number_retaken_elsewhere_lists_the_new_job():
-    store = _UnwatchedConsoles()
+    store = _UnwatchedConsoles(lease_seconds=0.05)
     a, b = JobTable(store), JobTable(store)
     old = await a.submit("sleep 30", _run_forever, "/", session_id="s")
-    await asyncio.sleep(0)
+    assert a._lease is not None
+    a._lease.cancel()
+    await asyncio.sleep(0.1)
     await b.sync("s")
-    assert await b.kill(1, "s", 15)
-    assert (await b.wait(1, "s")).exit_code == 143
+    assert (await b.wait(1, "s")).exit_code == 129
     await b.reap(1, "s")
     await b.submit("next", _run_forever, "/", session_id="s")
     await a.sync("s")
@@ -1035,19 +1077,21 @@ async def test_a_number_retaken_elsewhere_lists_the_new_job():
 
 @pytest.mark.asyncio
 async def test_a_kill_before_the_runner_begins_keeps_its_ending_and_lease():
-    store = RAMJobStore(lease_seconds=30)
+    store = RAMExecutionStore(lease_seconds=30)
     table = JobTable(store)
     job = await table.submit("never", _run_forever, "/", session_id="s")
     assert await table.kill(job.id, "s", 15)
     stored = await store.load("s")
     assert stored is not None
     assert stored["jobs"][str(job.id)]["ending"] == "killed:143"
+    assert await store.holder() == table.daemon
+    await table.close()
     assert table._lease is None
 
 
-class _StartsOnDelete(RAMJobStore):
-    """A job store on which another table starts a job just as a list is
-    about to go; with ``replaces``, after another close deleted it."""
+class _StartsOnDelete(RAMExecutionStore):
+    """A job store on which a job starts just as a list is about to go;
+    with ``replaces``, after another close deleted it."""
 
     def __init__(self, replaces: bool = False) -> None:
         super().__init__()
@@ -1072,8 +1116,8 @@ class _StartsOnDelete(RAMJobStore):
 @pytest.mark.parametrize("replaces", [False, True])
 async def test_a_close_stops_a_job_started_while_it_closed(replaces):
     store = _StartsOnDelete(replaces)
-    a, b = JobTable(store), JobTable(store)
-    store.peer = b
+    a = JobTable(store)
+    store.peer = a
     await a.submit("sleep 30", _run_forever, "/", session_id="s")
     stopped = await a.close_session("s")
     [late] = store.started
@@ -1088,7 +1132,7 @@ async def test_a_close_stops_a_job_started_while_it_closed(replaces):
 @pytest.mark.asyncio
 async def test_a_job_whose_list_was_deleted_elsewhere_stops(monkeypatch):
     monkeypatch.setattr("mirage.execution.job.table.LIST_CHECK_SECONDS", 0.02)
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     table = JobTable(store)
     job = await table.submit("sleep 30", _run_forever, "/", session_id="s")
     await asyncio.sleep(0)
@@ -1102,7 +1146,7 @@ async def test_a_job_whose_list_was_deleted_elsewhere_stops(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_listed_or_disowned_job_runs_on_past_its_checks(monkeypatch):
     monkeypatch.setattr("mirage.execution.job.table.LIST_CHECK_SECONDS", 0.02)
-    table = JobTable(RAMJobStore())
+    table = JobTable(RAMExecutionStore())
     listed = await table.submit("one", _run_forever, "/", session_id="s")
     disowned = await table.submit("two", _run_forever, "/", session_id="s")
     assert await table.disown(disowned.id, "s")
@@ -1115,7 +1159,7 @@ async def test_a_listed_or_disowned_job_runs_on_past_its_checks(monkeypatch):
 async def test_a_dropped_job_deaf_to_its_stop_still_ends(monkeypatch):
     monkeypatch.setattr("mirage.execution.job.table.LIST_CHECK_SECONDS", 0.02)
     monkeypatch.setattr("mirage.execution.job.table.STOP_WAIT_SECONDS", 0.05)
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     table = JobTable(store)
     release = asyncio.Event()
 
@@ -1155,7 +1199,7 @@ class _FailsReads(_FailsFirstWatch):
         return await super().read_from(seq, limit)
 
 
-class _FailingReads(RAMJobStore):
+class _FailingReads(RAMExecutionStore):
     """A job store whose consoles fail its next ``failures`` reads."""
 
     def __init__(self) -> None:
@@ -1182,12 +1226,12 @@ async def test_a_list_check_that_failed_a_read_checks_again(monkeypatch):
     assert store.failures == 0
 
 
-def _publishing(store: RAMJobStore) -> JobTable:
+def _publishing(store: RAMExecutionStore) -> JobTable:
     """A table whose processes are published on ``store``, as a
     workspace's are.
 
     Args:
-        store (RAMJobStore): the shared store.
+        store (RAMExecutionStore): the shared store.
     """
     processes = ProcessTable(changed=lambda: table.processes_changed())
     table = JobTable(store, processes)
@@ -1212,17 +1256,17 @@ async def _until(check: Callable[[], Awaitable[bool]]) -> None:
 @pytest.mark.asyncio
 async def test_a_table_publishes_its_processes_while_it_runs_any(monkeypatch):
     monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
-    store = RAMJobStore(lease_seconds=30.0)
+    store = RAMExecutionStore(lease_seconds=30.0)
     processes = ProcessTable(changed=lambda: a.processes_changed())
     a = JobTable(store, processes, None, ManualClock())
     b = _publishing(store)
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
 
     async def listed() -> bool:
-        return a.owner in await b.remote_processes()
+        return a.daemon in await b.remote_processes()
 
     await _until(listed)
-    record = (await b.remote_processes())[a.owner][str(job.pid)]
+    record = (await b.remote_processes())[a.daemon][str(job.pid)]
     assert (record["command"], record["session"], record["runs"]) == (
         "sleep 30",
         "s",
@@ -1245,25 +1289,23 @@ async def test_a_table_publishes_its_processes_while_it_runs_any(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_stop_asked_elsewhere_stops_the_owners_job(monkeypatch):
     monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
-    store = RAMJobStore(lease_seconds=30.0)
+    store = RAMExecutionStore(lease_seconds=30.0)
     a, b = _publishing(store), _publishing(store)
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
 
     async def listed() -> bool:
-        return a.owner in await b.remote_processes()
+        return a.daemon in await b.remote_processes()
 
     await _until(listed)
     every = ProcessPermissions(list="workspace", kill="workspace")
-    assert await b.signal_remote(a.owner[:6], job.pid, 0, "t", lambda: every)
+    assert await b.signal_remote(job.pid, 0, "t", lambda: every)
     assert job.status == JobStatus.RUNNING
-    assert await b.signal_remote(a.owner[:6], job.pid, 15, "t", lambda: every)
+    assert await b.signal_remote(job.pid, 15, "t", lambda: every)
     assert job.process is not None
     async with asyncio.timeout(5):
         await job.process.join()
     assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
-    assert not await b.signal_remote(
-        "ffffffff", job.pid, 15, "t", lambda: every
-    )
+    assert not await b.signal_remote(job.pid + 1, 15, "t", lambda: every)
     await a.close()
     await b.close()
 
@@ -1274,12 +1316,12 @@ async def test_a_stop_asked_elsewhere_stops_the_owners_job(monkeypatch):
 @pytest.mark.asyncio
 async def test_int_and_quit_leave_a_job_running_from_any_table(monkeypatch):
     monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
-    store = RAMJobStore(lease_seconds=30.0)
+    store = RAMExecutionStore(lease_seconds=30.0)
     a, b = _publishing(store), _publishing(store)
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
 
     async def listed() -> bool:
-        return a.owner in await b.remote_processes()
+        return a.daemon in await b.remote_processes()
 
     await _until(listed)
     await b.sync("s")
@@ -1287,10 +1329,8 @@ async def test_int_and_quit_leave_a_job_running_from_any_table(monkeypatch):
     for signal in (2, 3):
         assert await a.kill(job.id, "s", signal)
         assert await b.kill(job.id, "s", signal)
-        assert await b.signal_remote(
-            a.owner, job.pid, signal, "t", lambda: every
-        )
-    assert await b.signal_remote(a.owner, job.pid, 15, "t", lambda: every)
+        assert await b.signal_remote(job.pid, signal, "t", lambda: every)
+    assert await b.signal_remote(job.pid, 15, "t", lambda: every)
     assert job.process is not None
     async with asyncio.timeout(5):
         await job.process.join()
@@ -1304,20 +1344,20 @@ async def test_int_and_quit_leave_a_job_running_from_any_table(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_remote_signal_keeps_to_the_sessions_view(monkeypatch):
     monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
-    store = RAMJobStore(lease_seconds=30.0)
+    store = RAMExecutionStore(lease_seconds=30.0)
     a, b = _publishing(store), _publishing(store)
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
 
     async def listed() -> bool:
-        return a.owner in await b.remote_processes()
+        return a.daemon in await b.remote_processes()
 
     await _until(listed)
     own = ProcessPermissions()
     seen = ProcessPermissions(list="workspace", kill="session")
-    assert not await b.signal_remote(a.owner, job.pid, 15, "t", lambda: own)
+    assert not await b.signal_remote(job.pid, 15, "t", lambda: own)
     with pytest.raises(PermissionError):
-        await b.signal_remote(a.owner, job.pid, 15, "t", lambda: seen)
-    assert await b.signal_remote(a.owner, job.pid, 15, "s", lambda: own)
+        await b.signal_remote(job.pid, 15, "t", lambda: seen)
+    assert await b.signal_remote(job.pid, 15, "s", lambda: own)
     await a.close()
     await b.close()
 
@@ -1327,12 +1367,12 @@ async def test_a_remote_signal_keeps_to_the_sessions_view(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_remote_signal_reads_the_grants_after_the_store(monkeypatch):
     monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
-    store = RAMJobStore(lease_seconds=30.0)
+    store = RAMExecutionStore(lease_seconds=30.0)
     a, b = _publishing(store), _publishing(store)
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
 
     async def listed() -> bool:
-        return a.owner in await b.remote_processes()
+        return a.daemon in await b.remote_processes()
 
     await _until(listed)
     every = ProcessPermissions(list="workspace", kill="workspace")
@@ -1344,22 +1384,20 @@ async def test_a_remote_signal_reads_the_grants_after_the_store(monkeypatch):
         return await listing()
 
     monkeypatch.setattr(store, "processes", revoking)
-    assert not await b.signal_remote(
-        a.owner, job.pid, 15, "t", view.permissions
-    )
-    assert await store.take_stops(a.owner) == []
+    assert not await b.signal_remote(job.pid, 15, "t", view.permissions)
+    assert await store.take_stops(a.daemon) == []
     assert job.status == JobStatus.RUNNING
     await a.close()
     await b.close()
 
 
-# A lapsed owner's processes are not listed; the native runs it left are
-# handed to the reaper, each with when its owner last vouched for it, and
-# its record keeps only the runs nobody here reached.
+# The processes of a daemon that lost the lease are not listed; the native
+# runs it left are handed to the reaper, each with when that daemon last
+# vouched for it, and its record keeps only the runs nobody here reached.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("unreached", [False, True])
-async def test_a_lapsed_owners_runs_are_reaped(unreached):
-    store = RAMJobStore(lease_seconds=30.0)
+async def test_a_lapsed_daemons_runs_are_reaped(unreached):
+    store = RAMExecutionStore(lease_seconds=30.0)
     host = {"host": "h", "pid": 41, "started_at": 1.0, "command": "x"}
     box = {"runtime": "docker", "tag": "t", "command": "y"}
     await store.publish(
@@ -1395,14 +1433,46 @@ async def test_a_lapsed_owners_runs_are_reaped(unreached):
     await b.close()
 
 
-# A table that closes drops its record, so it never reads as lapsed.
+# A table that closes drops its record, so it never reads as lapsed, and
+# gives the lease up for another daemon to take.
 @pytest.mark.asyncio
-async def test_a_closed_table_drops_its_record():
-    store = RAMJobStore(lease_seconds=30.0)
+async def test_a_closed_table_drops_its_record_and_the_lease():
+    store = RAMExecutionStore(lease_seconds=30.0)
     a = JobTable(store)
-    await store.publish(a.owner, {"2": {"pid": 2, "runs": []}})
+    await a.claim()
+    assert a.claimed
+    await store.publish(a.daemon, {"2": {"pid": 2, "runs": []}})
     await a.close()
     assert await store.processes() == {}
+    assert await store.holder() is None
+
+
+# A daemon taking the lease stops the native runs it left before a restart
+# and numbers its pids past the highest the store recorded.
+@pytest.mark.asyncio
+async def test_a_claim_reaps_this_daemons_runs_from_before_a_restart():
+    store = RAMExecutionStore()
+    run = {"runtime": "docker", "tag": "t", "command": "x"}
+    await store.publish(
+        "d", {"7": {"pid": 7, "session": "s", "runs": [run]}}, 7
+    )
+    reaped: list[list] = []
+
+    async def reaper(runs: list, signum: int) -> list:
+        reaped.append(runs)
+        return []
+
+    a = JobTable(store, daemon="d")
+    a.reaper = reaper
+    await a.claim()
+    async with asyncio.timeout(5):
+        while a._reaping:
+            await asyncio.sleep(0.01)
+    assert reaped == [[{**run, "seen_at": None}]]
+    job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
+    assert job.pid == 8
+    await a.kill_all()
+    await a.close()
 
 
 async def _forever() -> int:
@@ -1411,31 +1481,32 @@ async def _forever() -> int:
     return 0
 
 
-class _VouchedStore(RAMJobStore):
+class _VouchedStore(RAMExecutionStore):
     """A store that notes, at every write of a non-empty record, whether
-    the owner's lease vouched for it."""
+    the daemon's lease vouched for it."""
 
     def __init__(self) -> None:
         super().__init__(lease_seconds=30.0)
         self.vouched: list[bool] = []
 
-    async def publish(self, owner, processes) -> None:
+    async def publish(self, daemon, processes, last_pid=0) -> None:
         if processes:
-            self.vouched.append(await self.alive(owner))
-        await super().publish(owner, processes)
+            self.vouched.append(await self.holder() == daemon)
+        await super().publish(daemon, processes, last_pid)
 
 
-# The lease goes ahead of the record it vouches for, so no workspace ever
-# reads a record whose owner it takes for lapsed, even for a process that
-# is no job (a line, a spawned child) and so renewed nothing first; and
-# the record is written again with every renewal, so it outlives its
-# store's expiry and comes back after a workspace dropped it.
+# The lease goes ahead of the record it vouches for, so no daemon ever
+# reads a record whose daemon it takes for lapsed, even for a process that
+# is no job (a line, a spawned child); and the record is written again
+# with every renewal, so it outlives its store's expiry and comes back
+# after a daemon dropped it.
 @pytest.mark.asyncio
 async def test_a_record_is_vouched_for_and_written_again(monkeypatch):
     monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
     store = _VouchedStore()
     store.lease_seconds = 0.03
     a = _publishing(store)
+    await a.claim()
     runner = a.processes.start(
         session_id="s",
         command="sleep 30",
@@ -1447,10 +1518,10 @@ async def test_a_record_is_vouched_for_and_written_again(monkeypatch):
         return len(store.vouched) >= 3
 
     await _until(written_again)
-    await RAMJobStore.publish(store, a.owner, {})
+    await RAMExecutionStore.publish(store, a.daemon, {})
 
     async def back() -> bool:
-        return a.owner in await store.processes()
+        return a.daemon in await store.processes()
 
     await _until(back)
     assert all(store.vouched)
@@ -1459,22 +1530,23 @@ async def test_a_record_is_vouched_for_and_written_again(monkeypatch):
     await a.close()
 
 
-class _Revives(RAMJobStore):
-    """A store whose one owner reads as lapsed once, then as renewed."""
+class _Revives(RAMExecutionStore):
+    """A store whose lease reads as lapsed once, then as held by
+    ``back`` again."""
 
     def __init__(self) -> None:
         super().__init__(lease_seconds=30.0)
         self.asked = 0
 
-    async def alive(self, owner: str) -> bool:
+    async def holder(self) -> str | None:
         self.asked += 1
-        return self.asked > 1
+        return "back" if self.asked > 1 else None
 
 
-# An owner that renews while its runs are being reaped keeps them: the
-# lease is read again before each run is stopped.
+# A daemon that takes the lease back while its runs are being reaped keeps
+# them: the lease is read again before each run is stopped.
 @pytest.mark.asyncio
-async def test_an_owner_that_renews_keeps_its_runs():
+async def test_a_daemon_that_renews_keeps_its_runs():
     store = _Revives()
     run = {"runtime": "docker", "tag": "t", "command": "x"}
     await store.publish(
@@ -1501,7 +1573,7 @@ async def test_an_owner_that_renews_keeps_its_runs():
 # a reap under way is cancelled and no listing starts another.
 @pytest.mark.asyncio
 async def test_teardown_stops_the_reaping():
-    store = RAMJobStore(lease_seconds=30.0)
+    store = RAMExecutionStore(lease_seconds=30.0)
     run = {"runtime": "docker", "tag": "t", "command": "x"}
     await store.publish(
         "dead", {"2": {"pid": 2, "session": "s", "runs": [run]}}
@@ -1529,18 +1601,18 @@ async def test_teardown_stops_the_reaping():
     await b.close()
 
 
-# A start reaps the lapsed owners on the store, and once more a lease
-# later: an owner that still held its lease at the start, as one that died
+# A start reaps the daemons on the store that lost the lease, and once more
+# a lease later: a daemon that still held it at the start, as one that died
 # just before it would, is reaped once it lapsed.
 @pytest.mark.asyncio
-async def test_a_start_reaps_lapsed_owners():
-    store = RAMJobStore(lease_seconds=0.5)
+async def test_a_start_reaps_lapsed_daemons():
+    store = RAMExecutionStore(lease_seconds=0.5)
     for owner in ("dead", "dying"):
         run = {"runtime": "docker", "tag": owner, "command": "x"}
         await store.publish(
             owner, {"2": {"pid": 2, "session": "s", "runs": [run]}}
         )
-    await store.renew("dying")
+    await store.lease("dying")
     reaped: list[str] = []
 
     async def reaper(runs: list, signum: int) -> list:
@@ -1580,7 +1652,7 @@ async def test_a_start_finishes_the_lease_wait_after_an_early_timer(
 
     monkeypatch.setattr(table_module.time, "monotonic", clock.monotonic)
     monkeypatch.setattr(table_module.asyncio, "sleep", sleep)
-    store = RAMJobStore(lease_seconds=0.5)
+    store = RAMExecutionStore(lease_seconds=0.5)
     await store.publish(
         "dying",
         {
@@ -1593,7 +1665,7 @@ async def test_a_start_finishes_the_lease_wait_after_an_early_timer(
             }
         },
     )
-    await store.renew("dying")
+    await store.lease("dying")
     b = JobTable(store)
     b.reaper = reaper
     try:
@@ -1606,10 +1678,11 @@ async def test_a_start_finishes_the_lease_wait_after_an_early_timer(
         await b.close()
 
 
-# A store that leases no owner has no lapsed one, so a start sweeps nothing.
+# A store whose leases never lapse has no lapsed daemon, so a start sweeps
+# nothing.
 @pytest.mark.asyncio
 async def test_a_start_on_a_store_without_leases_sweeps_nothing():
-    b = JobTable(RAMJobStore())
+    b = JobTable(RAMExecutionStore())
     b.reap_lapsed()
     assert not b._reaping
     await b.close()
@@ -1618,8 +1691,8 @@ async def test_a_start_on_a_store_without_leases_sweeps_nothing():
 # Teardown ends a start's sweep that waits for a lease to pass.
 @pytest.mark.asyncio
 async def test_teardown_ends_the_sweep():
-    store = RAMJobStore(lease_seconds=30.0)
-    await store.renew("live")
+    store = RAMExecutionStore(lease_seconds=30.0)
+    await store.lease("live")
     await store.publish("live", {"2": {"pid": 2, "session": "s", "runs": []}})
     b = JobTable(store)
     b.reap_lapsed()
@@ -1635,7 +1708,7 @@ async def test_teardown_ends_the_sweep():
 @pytest.mark.asyncio
 async def test_one_failed_stop_leaves_the_others(monkeypatch):
     monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
-    store = RAMJobStore(lease_seconds=30.0)
+    store = RAMExecutionStore(lease_seconds=30.0)
     a = _publishing(store)
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
     applied: list[int] = []
@@ -1648,8 +1721,8 @@ async def test_one_failed_stop_leaves_the_others(monkeypatch):
         await stop(pid, signal)
 
     monkeypatch.setattr(a, "_stop_asked", stopping)
-    await store.request_stop(a.owner, 999, 15)
-    await store.request_stop(a.owner, job.pid, 15)
+    await store.request_stop(a.daemon, 999, 15)
+    await store.request_stop(a.daemon, job.pid, 15)
     assert job.process is not None
     async with asyncio.timeout(5):
         await job.process.join()
@@ -1662,17 +1735,17 @@ async def test_one_failed_stop_leaves_the_others(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_child_shells_table_reaches_the_process_plane(monkeypatch):
     monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
-    store = RAMJobStore(lease_seconds=30.0)
+    store = RAMExecutionStore(lease_seconds=30.0)
     a, b = _publishing(store), _publishing(store)
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
     child = b.child().child()
 
     async def listed() -> bool:
-        return a.owner in await child.remote_processes()
+        return a.daemon in await child.remote_processes()
 
     await _until(listed)
     every = ProcessPermissions(list="workspace", kill="workspace")
-    assert await child.signal_remote(a.owner, job.pid, 15, "s", lambda: every)
+    assert await child.signal_remote(job.pid, 15, "s", lambda: every)
     assert job.process is not None
     async with asyncio.timeout(5):
         await job.process.join()
@@ -1687,7 +1760,7 @@ async def test_a_child_shells_table_reaches_the_process_plane(monkeypatch):
 async def test_a_stop_asked_elsewhere_reaches_a_child_shells_job(monkeypatch):
     monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
     monkeypatch.setattr(table_module, "STOP_WAIT_SECONDS", 0.05)
-    store = RAMJobStore(lease_seconds=30.0)
+    store = RAMExecutionStore(lease_seconds=30.0)
     a, b = _publishing(store), _publishing(store)
     child = a.child()
     release = asyncio.Event()
@@ -1702,11 +1775,11 @@ async def test_a_stop_asked_elsewhere_reaches_a_child_shells_job(monkeypatch):
     job = await child.submit("deaf", run, "/", session_id="s", simple=True)
 
     async def listed() -> bool:
-        return a.owner in await b.remote_processes()
+        return a.daemon in await b.remote_processes()
 
     await _until(listed)
     every = ProcessPermissions(list="workspace", kill="workspace")
-    assert await b.signal_remote(a.owner, job.pid, 15, "t", lambda: every)
+    assert await b.signal_remote(job.pid, 15, "t", lambda: every)
     async with asyncio.timeout(2):
         assert (await child.wait(job.id, "s")).exit_code == 143
     release.set()
@@ -1718,30 +1791,47 @@ async def test_a_stop_asked_elsewhere_reaches_a_child_shells_job(monkeypatch):
     await b.close()
 
 
-# The lease of a workspace that runs only processes, no job, is kept on
-# the table's own renewal timer while they run, whatever a publish round
-# costs, and dropped once the publishing stops.
+# The lease is the workspace's from the table's claim until it closes,
+# whether anything runs or not.
 @pytest.mark.asyncio
-async def test_a_plain_process_holds_the_lease_while_it_runs(monkeypatch):
-    monkeypatch.setattr(table_module, "PUBLISH_SECONDS", 0.01)
-    store = RAMJobStore(lease_seconds=30.0)
+async def test_the_lease_is_kept_from_the_claim_until_close():
+    store = RAMExecutionStore(lease_seconds=30.0)
     a = _publishing(store)
+    await a.claim()
     runner = a.processes.start(
         session_id="s",
         command="sleep 30",
         cwd=PathSpec.from_str_path("/"),
         run=_forever,
     )
-
-    async def leased() -> bool:
-        return a._lease is not None and await store.alive(a.owner)
-
-    await _until(leased)
     runner.terminate()
     await runner.join()
-
-    async def dropped() -> bool:
-        return a._lease is None
-
-    await _until(dropped)
+    assert a._lease is not None
+    assert await store.holder() == a.daemon
     await a.close()
+    assert a._lease is None
+    assert await store.holder() is None
+
+
+# A daemon whose lease lapsed and was taken by another stops renewing it,
+# and its next job is refused, naming the daemon that holds it now.
+@pytest.mark.asyncio
+async def test_a_lease_taken_elsewhere_refuses_the_next_job():
+    store = RAMExecutionStore(lease_seconds=0.03)
+    a, b = JobTable(store), JobTable(store)
+    await a.claim()
+    assert a._lease is not None
+    a._lease.cancel()
+    a._lease = None
+    await asyncio.sleep(0.05)
+    await b.claim()
+    a._keep_lease()
+
+    async def lost() -> bool:
+        return not a.claimed
+
+    await _until(lost)
+    with pytest.raises(WorkspaceHeldError) as held:
+        await a.submit("sleep 30", _run_forever, "/", session_id="s")
+    assert held.value.holder == b.daemon
+    await b.close()

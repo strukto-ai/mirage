@@ -17,7 +17,7 @@ import threading
 import time
 from collections.abc import Mapping, Sequence
 
-from mirage.execution.job.store import JobStore
+from mirage.execution.base import ExecutionStore
 from mirage.shell.console import ConsoleStore, RAMConsoleStore
 from mirage.workspace.record.types import RecordFields, generation_of
 
@@ -34,25 +34,28 @@ def _console_names(fields: RecordFields | None) -> set[str]:
     return listed | set(fields.get("disowned", {}))
 
 
-class RAMJobStore(JobStore):
-    """JobStore held in process memory (the default).
+class RAMExecutionStore(ExecutionStore):
+    """ExecutionStore held in process memory (the default).
 
     Workspaces that share one provider in a process share their jobs
     through it, from any thread: a sync workspace runs its loop on a
-    thread of its own, so a list is compared and written under a lock.
-    A console is dropped once no list names it; a reader already holding
-    it keeps reading, as a console outlives its entry.
+    thread of its own, so a list and the lease are compared and written
+    under a lock. A console is dropped once no list names it; a reader
+    already holding it keeps reading, as a console outlives its entry.
 
     Args:
-        lease_seconds (float | None): see JobStore; None by default,
-            since every owner here shares the process.
+        lease_seconds (float | None): see ExecutionStore; None by default,
+            since the one process holding the store cannot die apart
+            from it, so the lease holds until its workspace closes.
     """
 
     def __init__(self, lease_seconds: float | None = None) -> None:
         super().__init__(lease_seconds)
         self._lists: dict[str, RecordFields] = {}
         self._consoles: dict[str, RAMConsoleStore] = {}
-        self._leases: dict[str, float] = {}
+        self._holder: str | None = None
+        self._expires = 0.0
+        self._highest = 0
         self._processes: dict[str, dict[str, RecordFields]] = {}
         self._stops: dict[str, list[tuple[int, int]]] = {}
         self._lock = threading.Lock()
@@ -85,41 +88,67 @@ class RAMJobStore(JobStore):
     def console(self, name: str) -> ConsoleStore:
         return self._consoles.setdefault(name, RAMConsoleStore())
 
-    async def renew(self, owner: str, consoles: Sequence[str] = ()) -> None:
-        if self.lease_seconds is not None:
-            self._leases[owner] = time.monotonic() + self.lease_seconds
+    async def lease(
+        self, daemon: str, consoles: Sequence[str] = ()
+    ) -> str | None:
+        now = time.monotonic()
+        with self._lock:
+            if self._holder is not None and self._holder != daemon:
+                if self.lease_seconds is None or self._expires > now:
+                    return self._holder
+            self._holder = daemon
+            if self.lease_seconds is not None:
+                self._expires = now + self.lease_seconds
+        return None
 
-    async def alive(self, owner: str) -> bool:
-        if self.lease_seconds is None:
-            return True
-        return self._leases.get(owner, 0.0) > time.monotonic()
+    async def holder(self) -> str | None:
+        with self._lock:
+            if self._holder is None or (
+                self.lease_seconds is not None
+                and self._expires <= time.monotonic()
+            ):
+                return None
+            return self._holder
+
+    async def release(self, daemon: str) -> None:
+        with self._lock:
+            if self._holder == daemon:
+                self._holder = None
 
     async def publish(
-        self, owner: str, processes: Mapping[str, RecordFields]
+        self,
+        daemon: str,
+        processes: Mapping[str, RecordFields],
+        last_pid: int = 0,
     ) -> None:
         with self._lock:
+            self._highest = max(self._highest, last_pid)
             if processes:
-                self._processes[owner] = copy.deepcopy(dict(processes))
+                self._processes[daemon] = copy.deepcopy(dict(processes))
             else:
-                self._processes.pop(owner, None)
-                self._stops.pop(owner, None)
+                self._processes.pop(daemon, None)
+                self._stops.pop(daemon, None)
 
     async def processes(self) -> dict[str, dict[str, RecordFields]]:
         with self._lock:
             return copy.deepcopy(self._processes)
 
-    async def request_stop(self, owner: str, pid: int, signal: int) -> None:
-        with self._lock:
-            self._stops.setdefault(owner, []).append((pid, signal))
+    async def highest_pid(self) -> int:
+        return self._highest
 
-    async def take_stops(self, owner: str) -> list[tuple[int, int]]:
+    async def request_stop(self, daemon: str, pid: int, signal: int) -> None:
         with self._lock:
-            return self._stops.pop(owner, [])
+            self._stops.setdefault(daemon, []).append((pid, signal))
+
+    async def take_stops(self, daemon: str) -> list[tuple[int, int]]:
+        with self._lock:
+            return self._stops.pop(daemon, [])
 
     async def clear(self) -> None:
         self._lists.clear()
         self._consoles.clear()
-        self._leases.clear()
+        self._holder = None
+        self._highest = 0
         self._processes.clear()
         self._stops.clear()
 

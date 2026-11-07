@@ -638,7 +638,8 @@ async def _run_line(
     Every line of a session runs under one pid, its ``$$``, as one shell
     runs them all; the session runs one line at a time. A signal that
     stops the shell (``kill $$``) ends the line with 128 plus it, its jobs
-    left running.
+    left running. The workspace's lease is taken first, so the pid comes
+    after every one the workspace gave out (``JobTable.claim``).
 
     Args:
         ws (ExecuteEnv): the workspace.
@@ -647,7 +648,11 @@ async def _run_line(
         cwd (str | None): the per-call directory, if any.
         run_line (Callable): the line.
         execution_scope (ExecutionScope): the admitted line's identity.
+
+    Raises:
+        WorkspaceHeldError: another daemon holds the workspace's lease.
     """
+    await ws.job_table.claim()
     if session.process_id is None:
         results: list[IOResult] = []
 

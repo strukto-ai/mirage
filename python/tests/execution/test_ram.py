@@ -17,7 +17,7 @@ import threading
 
 import pytest
 
-from mirage.execution.job.ram import RAMJobStore
+from mirage.execution.ram import RAMExecutionStore
 from mirage.shell.console import Channel
 from mirage.workspace.record.types import generation_of
 
@@ -32,7 +32,7 @@ def _list(*names: str, generation: int = 1) -> dict:
 
 @pytest.mark.asyncio
 async def test_a_list_is_written_under_its_generation():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     assert await store.load("s") is None
     assert await store.cas_set("s", _list("a"), 0)
     assert not await store.cas_set("s", _list("a", "b"), 0)
@@ -48,7 +48,7 @@ async def test_a_list_is_written_under_its_generation():
 
 @pytest.mark.asyncio
 async def test_a_loaded_list_is_a_copy():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     await store.cas_set("s", _list("a"), 0)
     loaded = await store.load("s")
     assert loaded is not None
@@ -60,7 +60,7 @@ async def test_a_loaded_list_is_a_copy():
 
 @pytest.mark.asyncio
 async def test_a_console_is_dropped_once_no_list_names_it():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
     await store.cas_set("s", _list("a"), 0)
     held = store.console("a")
     await held.append(Channel.STDOUT, b"kept")
@@ -72,27 +72,36 @@ async def test_a_console_is_dropped_once_no_list_names_it():
 
 
 @pytest.mark.asyncio
-async def test_owners_never_lapse_without_a_lease():
-    store = RAMJobStore()
-    assert await store.alive("never-renewed")
+async def test_one_daemon_holds_the_lease_until_it_releases_it():
+    store = RAMExecutionStore()
+    assert await store.holder() is None
+    assert await store.lease("a") is None
+    assert await store.lease("a") is None
+    assert await store.lease("b") == "a"
+    assert await store.holder() == "a"
+    await store.release("b")
+    assert await store.holder() == "a"
+    await store.release("a")
+    assert await store.lease("b") is None
+    assert await store.holder() == "b"
 
 
 @pytest.mark.asyncio
-async def test_an_owner_lives_while_its_lease_holds():
-    store = RAMJobStore(lease_seconds=0.05)
-    assert not await store.alive("o")
-    await store.renew("o")
-    assert await store.alive("o")
+async def test_a_lease_lapses_unless_renewed():
+    store = RAMExecutionStore(lease_seconds=0.05)
+    assert await store.lease("a") is None
+    assert await store.lease("b") == "a"
     await asyncio.sleep(0.1)
-    assert not await store.alive("o")
+    assert await store.holder() is None
+    assert await store.lease("b") is None
 
 
 @pytest.mark.asyncio
-async def test_an_owners_processes_are_published_and_dropped():
-    store = RAMJobStore()
+async def test_a_daemons_processes_are_published_and_dropped():
+    store = RAMExecutionStore()
     record = {"pid": 2, "command": "sleep 30", "runs": []}
-    await store.publish("a", {"2": record})
-    await store.publish("b", {"5": {"pid": 5, "runs": []}})
+    await store.publish("a", {"2": record}, 2)
+    await store.publish("b", {"5": {"pid": 5, "runs": []}}, 5)
     found = await store.processes()
     assert found == {"a": {"2": record}, "b": {"5": {"pid": 5, "runs": []}}}
     found["a"]["2"]["pid"] = 9
@@ -102,8 +111,17 @@ async def test_an_owners_processes_are_published_and_dropped():
 
 
 @pytest.mark.asyncio
-async def test_stops_asked_of_an_owner_are_taken_once():
-    store = RAMJobStore()
+async def test_the_highest_pid_only_rises():
+    store = RAMExecutionStore()
+    assert await store.highest_pid() == 0
+    await store.publish("a", {}, 7)
+    await store.publish("b", {}, 3)
+    assert await store.highest_pid() == 7
+
+
+@pytest.mark.asyncio
+async def test_stops_asked_of_a_daemon_are_taken_once():
+    store = RAMExecutionStore()
     await store.request_stop("a", 2, 15)
     await store.request_stop("a", 3, 9)
     await store.request_stop("b", 4, 9)
@@ -113,7 +131,7 @@ async def test_stops_asked_of_an_owner_are_taken_once():
 
 
 def test_lists_written_from_many_threads_lose_no_write():
-    store = RAMJobStore()
+    store = RAMExecutionStore()
 
     async def bump(times: int) -> None:
         for _ in range(times):

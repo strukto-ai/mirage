@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.execution.job.store import JobStore
+from mirage.execution.base import ExecutionStore
 from mirage.observe.store import ObserverStore
 from mirage.vfs.sql.types import SqlDriver
 from mirage.workspace.mount.namespace.store import (
@@ -35,8 +35,8 @@ class SqlWorkspaceStateStore(WorkspaceStateStore):
 
     So a workspace whose process restarts on the same file keeps its
     sessions' cwd, variables, functions, aliases, options, umask and
-    traps, and its links. Observer events and jobs are per-process
-    planes and stay in memory. Mirrors TypeScript's
+    traps, and its links. Observer events and the execution plane are
+    per-process and stay in memory. Mirrors TypeScript's
     ``SqlWorkspaceStateStore``.
     """
 
@@ -49,7 +49,7 @@ class SqlWorkspaceStateStore(WorkspaceStateStore):
         namespace: WorkspaceStateStore | None = None,
         observer: WorkspaceStateStore | None = None,
         workspace: WorkspaceStateStore | None = None,
-        jobs: WorkspaceStateStore | None = None,
+        execution: WorkspaceStateStore | None = None,
     ) -> None:
         """Args:
         driver (SqlDriver): the database the records live in.
@@ -63,13 +63,14 @@ class SqlWorkspaceStateStore(WorkspaceStateStore):
             instead.
         workspace (WorkspaceStateStore | None): serves the metadata and
             sessions instead.
-        jobs (WorkspaceStateStore | None): serves the jobs plane instead.
+        execution (WorkspaceStateStore | None): serves the execution
+            plane instead.
         """
         super().__init__(
             namespace=namespace,
             observer=observer,
             workspace=workspace,
-            jobs=jobs,
+            execution=execution,
         )
         self._driver = driver
         self._scope = scope
@@ -95,8 +96,8 @@ class SqlWorkspaceStateStore(WorkspaceStateStore):
     def _make_sessions(self, workspace_id: str) -> NamespaceStore:
         return self._table(workspace_id, "sessions")
 
-    def _make_jobs(self, workspace_id: str) -> JobStore:
-        return self._memory.jobs(workspace_id)
+    def _make_execution(self, workspace_id: str) -> ExecutionStore:
+        return self._memory.execution(workspace_id)
 
     async def _load_meta(self, workspace_id: str) -> WorkspaceFields | None:
         fields, _ = await self._meta.get(workspace_id)

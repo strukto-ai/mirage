@@ -12,6 +12,8 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { randomUUID } from 'node:crypto'
+import { link, mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { ENV_HOME } from './env.ts'
@@ -46,4 +48,32 @@ export function resourcesRootPath(
 ): string {
   if (explicit !== undefined) return resolve(explicit)
   return join(mirageHome(env), 'resources')
+}
+
+/**
+ * This daemon's id, kept in `daemon-id` under the state root and made the
+ * first time. A workspace's lease names the daemon that runs it, so a
+ * daemon restarted on the same state root holds its workspaces again at
+ * once. Daemons that start together on one root agree on one id: the first
+ * to link its file in place wins, and the others read it. Mirrors Python's
+ * `load_daemon_id`.
+ */
+export async function loadDaemonId(stateRoot: string): Promise<string> {
+  const path = join(stateRoot, 'daemon-id')
+  try {
+    return (await readFile(path, 'utf8')).trim()
+  } catch (err) {
+    if ((err as { code?: unknown }).code !== 'ENOENT') throw err
+  }
+  await mkdir(stateRoot, { recursive: true })
+  const draft = join(stateRoot, `daemon-id.${randomUUID().replaceAll('-', '')}`)
+  await writeFile(draft, randomUUID().replaceAll('-', ''), 'utf8')
+  try {
+    await link(draft, path)
+  } catch (err) {
+    if ((err as { code?: unknown }).code !== 'EEXIST') throw err
+  } finally {
+    await unlink(draft)
+  }
+  return (await readFile(path, 'utf8')).trim()
 }

@@ -782,7 +782,7 @@
       }
     },
     {
-      "name": "store s3 group: hosts only sessions+meta, not the jobs plane",
+      "name": "store s3 group: hosts only sessions+meta, not the execution plane",
       "config": {
         "mounts": {
           "/d": {
@@ -791,7 +791,7 @@
         },
         "store": {
           "type": "ram",
-          "jobs": {
+          "execution": {
             "type": "s3",
             "bucket": "b"
           }
@@ -799,7 +799,7 @@
       }
     },
     {
-      "name": "store jobs group: a console is a stream, so never disk",
+      "name": "store execution group: a console is a stream, so never disk",
       "config": {
         "mounts": {
           "/d": {
@@ -808,14 +808,14 @@
         },
         "store": {
           "type": "ram",
-          "jobs": {
+          "execution": {
             "type": "disk"
           }
         }
       }
     },
     {
-      "name": "console block: gone, job consoles live in the store's jobs plane",
+      "name": "console block: gone, job consoles live in the store's execution plane",
       "config": {
         "mounts": {
           "/d": {

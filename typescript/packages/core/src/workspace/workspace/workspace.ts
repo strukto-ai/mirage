@@ -351,7 +351,13 @@ export class Workspace {
     this.registry.processView = (session) => this.processView(session)
     this.registry.fillEnv = (session, names) => this.fillTreeEnv(session, names)
     const stores = resolveControlStores(this.wsId, options)
-    this.jobTable = new JobTable(stores.jobs, this.processes, null, this.clock)
+    this.jobTable = new JobTable(
+      stores.execution,
+      this.processes,
+      null,
+      this.clock,
+      options.daemonId ?? null,
+    )
     this.jobTable.reaper = (runs, signum) => this.reapRuns(runs, signum)
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
@@ -944,6 +950,7 @@ export class Workspace {
       },
       run: async () => {
         try {
+          await this.jobTable.claim()
           await this.ensureSessionsLoaded()
           if (this.sessionManager.get(session.sessionId) !== owner)
             throw new Error(

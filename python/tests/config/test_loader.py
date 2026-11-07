@@ -35,8 +35,8 @@ from mirage.config import (
     load_config,
     resolve_secrets,
 )
-from mirage.execution.job import RAMJobStore
-from mirage.execution.job.redis import RedisJobStore
+from mirage.execution.ram import RAMExecutionStore
+from mirage.execution.redis import RedisExecutionStore
 from mirage.io.memory import MAX_MEMORY
 from mirage.policy import DEFAULT_DENY_REASON, CommandRule
 from mirage.policy.profile import (
@@ -275,7 +275,7 @@ def test_a_redis_block_without_a_prefix_is_its_workspaces_own():
         ({"index": {"type": "redis"}}, "RedisIndexConfig requires"),
         ({"store": {"type": "redis"}}, "A redis store requires"),
         (
-            {"store": {"type": "ram", "jobs": {"type": "redis"}}},
+            {"store": {"type": "ram", "execution": {"type": "redis"}}},
             "A redis store requires",
         ),
     ],
@@ -1316,35 +1316,35 @@ def test_shared_yaml_scalars(case, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_store_jobs_group_puts_job_lists_and_consoles_on_redis():
+async def test_store_execution_group_puts_job_lists_and_consoles_on_redis():
     cfg = load_config(
         {
             "store": {
                 "type": "ram",
-                "jobs": {
+                "execution": {
                     "type": "redis",
                     "url": "redis://localhost:6379/5",
-                    "key_prefix": "test_jobs:",
+                    "key_prefix": "test_execution:",
                 },
             },
             "mounts": {"/": {"vfs": "ram"}},
         }
     )
-    assert isinstance(cfg.store.jobs, RedisStoreBlock)
+    assert isinstance(cfg.store.execution, RedisStoreBlock)
     store = cfg.to_workspace_kwargs()["store"]
     assert isinstance(store, RAMWorkspaceStateStore)
     assert isinstance(store.namespace("ws1"), RAMNamespaceStore)
-    jobs = store.jobs("ws1")
-    assert isinstance(jobs, RedisJobStore)
-    first, second = jobs.console("a"), jobs.console("b")
+    execution = store.execution("ws1")
+    assert isinstance(execution, RedisExecutionStore)
+    first, second = execution.console("a"), execution.console("b")
     assert isinstance(first, RedisConsoleStore)
-    assert first.key_prefix == "test_jobs:ws1:jobs:console:a:"
+    assert first.key_prefix == "test_execution:ws1:execution:console:a:"
     assert first.key_prefix != second.key_prefix
     await store.close()
 
 
 @pytest.mark.asyncio
-async def test_a_disk_store_keeps_jobs_in_memory(tmp_path):
+async def test_a_disk_store_keeps_execution_in_memory(tmp_path):
     cfg = load_config(
         {
             "store": {"type": "disk", "root": str(tmp_path)},
@@ -1352,15 +1352,15 @@ async def test_a_disk_store_keeps_jobs_in_memory(tmp_path):
         }
     )
     store = cfg.to_workspace_kwargs()["store"]
-    assert isinstance(store.jobs("ws1"), RAMJobStore)
+    assert isinstance(store.execution("ws1"), RAMExecutionStore)
 
 
 @pytest.mark.parametrize("backend", ["disk", "s3"])
-def test_store_jobs_group_refuses_a_backend_that_cannot_stream(backend):
-    with pytest.raises(ValueError, match="store.jobs"):
+def test_store_execution_group_refuses_a_backend_that_cannot_stream(backend):
+    with pytest.raises(ValueError, match="store.execution"):
         load_config(
             {
-                "store": {"type": "ram", "jobs": {"type": backend}},
+                "store": {"type": "ram", "execution": {"type": backend}},
                 "mounts": {"/": {"vfs": "ram"}},
             }
         )

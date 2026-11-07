@@ -316,17 +316,17 @@ moves one part to a backend of its own.
 | `namespace` | unset | A separate store block for symlinks and file attributes. |
 | `observer` | unset | A separate store block for command history. |
 | `workspace` | unset | A separate store block for sessions and workspace metadata. |
-| `jobs` | unset | A separate store block for background jobs: each session's job list and each job's output, and the processes each instance of the workspace runs. |
+| `execution` | unset | A separate store block for background jobs: each session's job list and each job's output, the processes the workspace runs and which instance runs them. |
 
 A group block takes the same keys with `type` `ram`, `disk` or `redis`. Only
 `workspace` also accepts `s3`, which takes the [S3 config fields](/home/setup/s3)
-with `key_prefix` defaulting to `mirage/`. `jobs` takes `ram` or `redis` only,
+with `key_prefix` defaulting to `mirage/`. `execution` takes `ram` or `redis` only,
 and a `disk` store keeps its jobs in memory. Redis keeps a job's output for a
 day after its last write.
 
-Processes that build one workspace on a shared store are instances of it:
-they share each session's background jobs and list each other's processes, as
-described in [Shell](/home/core/shell#jobs-across-instances).
+Processes that build one workspace on a shared store are instances of it,
+and one of them runs its lines at a time, as described in
+[Shell](/home/core/shell#jobs-across-instances).
 [Infrastructure](/home/infrastructure/overview) shows each block in YAML, Python and
 TypeScript.
 

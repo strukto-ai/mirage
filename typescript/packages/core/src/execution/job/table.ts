@@ -34,8 +34,9 @@ import {
   STOP_WAIT_SECONDS,
   WATCH_RETRY_SECONDS,
 } from './constants.ts'
-import { RAMJobStore } from './ram.ts'
-import type { JobStore } from './store.ts'
+import type { ExecutionStore } from '../base.ts'
+import { WorkspaceHeldError } from '../errors.ts'
+import { RAMExecutionStore } from '../ram.ts'
 import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { sleep } from '../../utils/abort.ts'
@@ -207,13 +208,19 @@ function heldConsoles(fields: RecordFields | null): Set<string> {
  * the runner actually finishes, and its console ends then, or once the
  * runner had `STOP_WAIT_SECONDS` to stop and did not.
  *
- * The lists live in the workspace's job store, so every workspace on a
- * shared store sees a session's jobs with the same numbers. A job runs on
- * the table that started it, its owner; another table lists it, reads and
- * waits on its console, and kills it by ending that console, which its
- * owner watches for. `sync` brings a session's list up to date before a
- * builtin reads it. A job whose owner's lease lapsed with no ending was
- * lost with its owner and is ended as hung up, as a bash's job is when its
+ * The lists live in the workspace's execution store, so every daemon on a
+ * shared store sees a session's jobs with the same numbers. For now one
+ * daemon runs a workspace's lines and jobs at a time: the one holding the
+ * workspace's lease, which its table takes (`claim`) before it starts
+ * anything and keeps until the workspace closes. A daemon is named by an id
+ * it keeps across restarts, so a restarted one takes its workspaces back at
+ * once, and ends as hung up the jobs it ran before. Another daemon's table
+ * lists the jobs, reads and waits on their consoles, and kills one by
+ * ending its console, which the holder watches for; it starts none while
+ * the lease holds, and is told which daemon holds it
+ * (`WorkspaceHeldError`). `sync` brings a session's list up to date before
+ * a builtin reads it. A job whose daemon lost the lease with no ending was
+ * lost with it and is ended as hung up, as a bash's job is when its
  * terminal goes.
  *
  * The table is still owned by the workspace rather than by a session,
@@ -225,8 +232,10 @@ function heldConsoles(fields: RecordFields | null): Set<string> {
  * caller with no session (a bare table in a test) shares.
  */
 export class JobTable {
-  store: JobStore
-  readonly owner = crypto.randomUUID().replaceAll('-', '')
+  store: ExecutionStore
+  // The id of the daemon this table runs on, which its lease names.
+  readonly daemon: string
+  private held = false
   private jobs = new Map<string, Map<number, Job>>()
   // Jobs `disown` removed while still running, and ones another job's
   // number displaced: the shell forgets them, the workspace still owns
@@ -242,7 +251,7 @@ export class JobTable {
   private publishTick: { timer: ReturnType<typeof setTimeout>; wake: () => void } | null = null
   private closed = false
   private reaping = new Set<Promise<void>>()
-  // Lapsed owners this table already set about reaping, so a listing that
+  // Lapsed daemons this table already set about reaping, so a listing that
   // finds one again does not stop its runs again; and whether teardown
   // stopped the reaping, which its runtimes are closing for.
   private reaped = new Set<string>()
@@ -251,7 +260,7 @@ export class JobTable {
   // The startup sweep's pending wait for a lease to pass, which a teardown
   // ends at once.
   private sweepTick: { timer: ReturnType<typeof setTimeout>; wake: () => void } | null = null
-  // The table whose store and owner the process plane is read and written
+  // The table whose store and daemon the process plane is read and written
   // through: this one, or for a child shell's table the workspace's, since
   // a child shell keeps only its job list private.
   private plane: JobTable = this
@@ -260,7 +269,7 @@ export class JobTable {
   // workspace asks for has to find them.
   private jobTables = new Map<number, JobTable>()
   /**
-   * Stops the native runs a lapsed owner left, given them and the first
+   * Stops the native runs a lapsed daemon left, given them and the first
    * signal, and answers the ones this workspace cannot reach; the workspace
    * sets it, since it holds the runtimes that reach them.
    */
@@ -273,15 +282,19 @@ export class JobTable {
    *   console; null keeps them in memory, private to this table.
    */
   constructor(
-    store: JobStore | null = null,
+    store: ExecutionStore | null = null,
     readonly processes = new ProcessTable(),
     // The table of the shell a `$( )` is part of, whose jobs `jobs` still
     // lists there, as bash's does; its `wait` and `kill` reach none of them.
     readonly parent: JobTable | null = null,
     // The workspace clock a job's `createdAt` is read on.
     readonly clock: Clock = new SystemClock(),
+    // The daemon this table runs on; omitted is a fresh one, a daemon no
+    // other table shares.
+    daemon: string | null = null,
   ) {
-    this.store = store ?? new RAMJobStore()
+    this.store = store ?? new RAMExecutionStore()
+    this.daemon = daemon ?? crypto.randomUUID().replaceAll('-', '')
   }
 
   /**
@@ -293,9 +306,50 @@ export class JobTable {
    * workspace's store.
    */
   child(parent: JobTable | null = null): JobTable {
-    const table = new JobTable(null, this.processes, parent, this.clock)
+    const table = new JobTable(null, this.processes, parent, this.clock, this.daemon)
     table.plane = this.plane
     return table
+  }
+
+  /**
+   * Whether this table's daemon holds the workspace's lease, as of its
+   * `claim` or the last renewal.
+   */
+  get claimed(): boolean {
+    return this.plane.held
+  }
+
+  /**
+   * Take the workspace's lease for this table's daemon before it starts a
+   * line or a job; once taken it is kept until `close`, so every later call
+   * answers at once.
+   *
+   * Taking it reads the highest pid the store recorded, so this daemon
+   * numbers past every pid given out before, and the processes this daemon
+   * left before a restart, whose native runs are stopped meanwhile. The
+   * processes this table runs are published from then on. A child shell's
+   * table claims through the workspace's. Throws `WorkspaceHeldError` when
+   * another daemon holds the lease.
+   */
+  async claim(): Promise<void> {
+    if (this.plane !== this) {
+      await this.plane.claim()
+      return
+    }
+    if (this.held) return
+    const holder = await this.store.lease(this.daemon)
+    if (holder !== null) throw new WorkspaceHeldError(this.processes.workspaceId, holder)
+    const earlier = (await this.store.processes())[this.daemon] ?? {}
+    this.processes.continueAfter(await this.store.highestPid())
+    this.held = true
+    this.keepLease()
+    if (Object.keys(earlier).length > 0 && !this.reapingStopped) {
+      const reaping = this.reapEarlier(earlier).finally(() => {
+        this.reaping.delete(reaping)
+      })
+      this.reaping.add(reaping)
+    }
+    this.processesChanged()
   }
 
   private sessionJobs(sessionId: string): Map<number, Job> {
@@ -315,7 +369,8 @@ export class JobTable {
    * reserved next, and a refused one gives the number back. The runner is
    * deferred until the job and console are ready; failed setup cancels the
    * reservation without entering the supplied runner. Only fully
-   * initialized jobs join the table.
+   * initialized jobs join the table. Throws `WorkspaceHeldError` when
+   * another daemon holds the workspace's lease (`claim`).
    */
   async submit(init: {
     command: string
@@ -330,15 +385,15 @@ export class JobTable {
     // Runs as the job's process ends, whether or not its runner began.
     ended?: () => Promise<void>
   }): Promise<Job> {
+    await this.claim()
     const sessionId = init.sessionId ?? ''
     const name = crypto.randomUUID().replaceAll('-', '')
     const createdAt = this.clock.now()
-    await this.store.renew(this.owner)
     const jobId = await this.allocate(sessionId, {
       command: init.command,
       cwd: init.cwd,
       created_at: createdAt,
-      owner: this.owner,
+      owner: this.daemon,
       console: name,
     })
     let job: Job | null = null
@@ -363,7 +418,6 @@ export class JobTable {
               watching.abort()
               await this.recordEnding(job)
               this.disowned = this.disowned.filter((j) => j !== job)
-              this.dropLease()
               this.dropChecking()
             }
           } finally {
@@ -392,7 +446,7 @@ export class JobTable {
         console: jobConsole,
         simple: init.simple ?? false,
         createdAt,
-        owner: this.owner,
+        owner: this.daemon,
         consoleName: name,
       })
     } catch (error) {
@@ -416,7 +470,6 @@ export class JobTable {
     void process.join().then(() => {
       init.abort.signal.removeEventListener('abort', onAbort)
     })
-    this.keepLease()
     this.keepChecking()
     return job
   }
@@ -436,7 +489,7 @@ export class JobTable {
     const restored = new JobConsole(store, true)
     if (job.processId !== null) restored.bindProcess(job.processId)
     job.console = restored
-    job.owner = this.owner
+    job.owner = this.daemon
     job.consoleName = name
     job.id = await this.insert(job.sessionId, job.id, {
       command: job.command,
@@ -558,7 +611,7 @@ export class JobTable {
    * the status the kill recorded, and one that has not begun has it ended
    * at once: no program ran that could leave its own.
    *
-   * Another workspace's job is killed by ending its console; its owner
+   * Another daemon's job is killed by ending its console; that daemon
    * sees the ending and stops the runner. Should the job have ended
    * first, the ending it wrote stands and the job was not killed. INT and
    * QUIT reach a running job and do nothing, as bash starts each job
@@ -575,7 +628,7 @@ export class JobTable {
       await this.stopRunner(job, job.process, signal)
       return true
     }
-    if (!(await this.store.alive(job.owner))) await this.reapOwner(job.owner)
+    if (!(await this.running(job.owner))) await this.reapOwner(job.owner)
     await markKilled(job.console, 128 + signal)
     await this.refresh(job)
     return (job.status as JobStatus) === JobStatus.KILLED
@@ -625,7 +678,7 @@ export class JobTable {
       for (const [name, entry] of Object.entries(
         (fields?.disowned ?? {}) as Record<string, ListEntry>,
       ))
-        if (entry.owner !== this.owner)
+        if (entry.owner !== this.daemon)
           await markKilled(new JobConsole(this.store.console(name)), KILLED_EXIT_CODE)
       if (await this.store.delete(sessionId, generationOf(fields))) {
         this.jobs.delete(sessionId)
@@ -658,11 +711,11 @@ export class JobTable {
   }
 
   /**
-   * Stop renewing this table's lease, at workspace teardown. Called after
-   * killAll(), so every job this table ran has ended and other workspaces
-   * need no lease to settle them; a killed job whose runner is still
-   * stopping has its console ended now rather than at its bound. The
-   * store itself belongs to the workspace's state store.
+   * Give the workspace's lease up, at workspace teardown, so another
+   * daemon may run it. Called after killAll(), so every job this table ran
+   * has ended and other daemons need no lease to settle them; a killed job
+   * whose runner is still stopping has its console ended now rather than
+   * at its bound. The store itself belongs to the workspace's state store.
    */
   async close(): Promise<void> {
     if (this.lease !== null) clearTimeout(this.lease)
@@ -676,10 +729,14 @@ export class JobTable {
       tick.wake()
     }
     await this.publishing
-    try {
-      await this.store.publish(this.owner, {})
-    } catch (err) {
-      console.debug('process record not dropped:', err)
+    if (this.held) {
+      this.held = false
+      try {
+        await this.store.publish(this.daemon, {}, this.processes.lastPid)
+        await this.store.release(this.daemon)
+      } catch (err) {
+        console.debug('workspace lease not released:', err)
+      }
     }
     const stopping = [...this.stopping.values()]
     for (const { cut } of stopping) cut()
@@ -792,75 +849,69 @@ export class JobTable {
     return completed
   }
 
-  /** Another workspace's job, as its list entry describes it. */
   /**
    * Publish the processes this table's workspace runs, now that one
-   * started: the publishing goes on while any runs (`publish`).
+   * started: the publishing goes on while any runs (`publish`). Only the
+   * daemon holding the lease publishes, from its `claim` on.
    */
   processesChanged(): void {
-    if (this.publishing !== null || this.closed) return
+    if (!this.held || this.publishing !== null || this.closed) return
     this.publishing = this.publish()
   }
 
   /**
-   * The processes other workspaces on the store run, owner to PID to
-   * process, as each last published them. A lapsed owner's are left out:
-   * whatever it ran was lost with it, and the native runs it left are
-   * stopped meanwhile.
+   * The processes other daemons on the store run in this workspace, daemon
+   * to PID to process, as each last published them. A daemon that lost the
+   * lease is left out: whatever it ran was lost with it, and the native runs
+   * it left are stopped meanwhile.
    */
   async remoteProcesses(): Promise<Record<string, Record<string, RecordFields>>> {
     if (this.plane !== this) return this.plane.remoteProcesses()
     const found: Record<string, Record<string, RecordFields>> = {}
-    for (const [owner, records] of Object.entries(await this.store.processes())) {
-      if (owner === this.owner || Object.keys(records).length === 0) continue
-      if (await this.store.alive(owner)) found[owner] = records
-      else this.reapLater(owner)
+    for (const [daemon, records] of Object.entries(await this.store.processes())) {
+      if (daemon === this.daemon || Object.keys(records).length === 0) continue
+      if (await this.running(daemon)) found[daemon] = records
+      else this.reapLater(daemon)
     }
     return found
   }
 
   /**
-   * Signal a process another workspace runs, named by a prefix of its
-   * owner's id and the owner's PID: its owner stops it once it takes the
-   * stop, within `PUBLISH_SECONDS`. Signal 0 only probes. A lapsed owner's
-   * process is gone, and the native runs it left are stopped instead. The
-   * grants are read once the store has answered, just before anything is
-   * stopped, so a profile replaced meanwhile stops nothing under the old
-   * one. Answers whether one live process was signalled; throws EPERM for
-   * one the session sees but may not stop.
+   * Signal a process another daemon runs in this workspace, by its pid:
+   * that daemon stops it once it takes the stop, within `PUBLISH_SECONDS`.
+   * Signal 0 only probes. The process of a daemon that lost the lease is
+   * gone, and the native runs it left are stopped instead. The grants are
+   * read once the store has answered, just before anything is stopped, so a
+   * profile replaced meanwhile stops nothing under the old one. Answers
+   * whether one live process was signalled; throws EPERM for one the
+   * session sees but may not stop.
    *
-   * @param owner a prefix of the owner's id, as `ps` shows it.
-   * @param pid the process, by the owner's PID.
+   * @param pid the process.
    * @param signal the signal, 0 to probe.
    * @param sessionId the calling session.
    * @param permissions whose processes it may see and stop, null once the
    *   caller's view is revoked.
    */
   async signalRemote(
-    owner: string,
     pid: number,
     signal: number,
     sessionId: string,
     permissions: () => ProcessPermissions | null,
   ): Promise<boolean> {
-    if (this.plane !== this)
-      return this.plane.signalRemote(owner, pid, signal, sessionId, permissions)
+    if (this.plane !== this) return this.plane.signalRemote(pid, signal, sessionId, permissions)
     const records = await this.store.processes()
-    let owners = Object.keys(records).filter(
-      (found) =>
-        found !== this.owner &&
-        found.startsWith(owner) &&
-        Object.hasOwn(records[found] ?? {}, String(pid)),
+    let daemons = Object.keys(records).filter(
+      (found) => found !== this.daemon && Object.hasOwn(records[found] ?? {}, String(pid)),
     )
-    if (owners.length > 1) {
-      const live = await Promise.all(owners.map((found) => this.store.alive(found)))
-      owners = owners.filter((_, at) => live[at])
+    if (daemons.length > 1) {
+      const live = await Promise.all(daemons.map((found) => this.running(found)))
+      daemons = daemons.filter((_, at) => live[at])
     }
-    const [found] = owners
-    if (owners.length !== 1 || found === undefined) return false
+    const [found] = daemons
+    if (daemons.length !== 1 || found === undefined) return false
     const record = records[found]?.[String(pid)] ?? {}
     const own = record.session === sessionId
-    const lapsed = !(await this.store.alive(found))
+    const lapsed = !(await this.running(found))
     const granted = permissions()
     if (granted === null || (granted.list === 'session' && !own)) return false
     if (lapsed) {
@@ -873,6 +924,7 @@ export class JobTable {
     return true
   }
 
+  /** Another daemon's job, as its list entry describes it. */
   private remote(jobId: number, sessionId: string, entry: ListEntry): Job {
     return new Job({
       id: jobId,
@@ -904,7 +956,6 @@ export class JobTable {
     if (!process.begun) {
       await stop(job, signal)
       await this.recordEnding(job)
-      this.dropLease()
       this.dropChecking()
       return
     }
@@ -943,7 +994,6 @@ export class JobTable {
     if (job.console.finished) return
     await markKilled(job.console, job.exitCode)
     await this.recordEnding(job)
-    this.dropLease()
     this.dropChecking()
   }
 
@@ -980,13 +1030,13 @@ export class JobTable {
   }
 
   /**
-   * Settle another workspace's job from its console's ending, or end it as
-   * hung up when its owner's lease lapsed with none.
+   * Settle another daemon's job from its console's ending, or end it as
+   * hung up when that daemon lost the lease with none.
    */
   private async refresh(job: Job): Promise<void> {
     let outcome = await job.console.outcome()
     if (outcome === null) {
-      if (await this.store.alive(job.owner)) return
+      if (await this.running(job.owner)) return
       this.reapLater(job.owner)
       await markKilled(job.console, HANGUP_EXIT_CODE)
       outcome = await job.console.outcome()
@@ -1129,11 +1179,6 @@ export class JobTable {
     return this.store.casSet(sessionId, record, expected)
   }
 
-  /**
-   * Renew this table's lease while it runs jobs on a store that leases
-   * owners, with the consoles of the jobs it still runs, so a quiet one
-   * keeps its output while this table lives.
-   */
   /** Check the lists of the jobs this table runs every
    * `LIST_CHECK_SECONDS` while it runs any. */
   private keepChecking(): void {
@@ -1224,46 +1269,39 @@ export class JobTable {
 
   /**
    * Publish the processes this workspace runs every `PUBLISH_SECONDS`
-   * while it runs any, and stop those other workspaces asked it to stop.
-   * Once it runs none, its record goes and the publishing stops. The
-   * owner's lease is renewed once ahead of the first record it vouches for,
-   * then kept by the table's lease renewal (`keepLease`) while any process
-   * runs, on its own timer whatever a round costs. The record is written
-   * again every third of the lease, so it outlives its store's expiry and
-   * comes back should a workspace have taken this one for lapsed. Each
-   * record carries `seen_at`, when its processes were read, the last time
-   * this workspace vouched for them and their native runs, on the host's
-   * clock, which a host reap compares with `ps`. A failed
-   * round is logged and tried again the next one, and a stop that fails
-   * leaves the others it came with to be applied; the sleep between rounds
-   * keeps no host alive on its own.
+   * while it runs any, with the highest pid it handed out, and stop those
+   * other daemons asked it to stop. Once it runs none, its record goes and
+   * the publishing stops. The lease that vouches for the record is kept by
+   * `keepLease` from the table's `claim` on, on its own timer whatever a
+   * round costs. The record is written again every third of the lease, so
+   * it outlives its store's expiry. Each record carries `seen_at`, when its
+   * processes were read, the last time this daemon vouched for them and
+   * their native runs, on the host's clock, which a host reap compares with
+   * `ps`. A failed round is logged and tried again the next one, and a stop
+   * that fails leaves the others it came with to be applied; the sleep
+   * between rounds keeps no host alive on its own.
    */
   private async publish(): Promise<void> {
     let published: string | null = null
     const lease = this.store.leaseSeconds
     const rewrite = lease !== null ? Math.max(1, Math.floor(lease / 3 / PUBLISH_SECONDS)) : 0
-    let renewed = lease === null
     let rounds = 0
     for (;;) {
       const seen = Date.now() / 1000
       const records = this.records()
       const text = JSON.stringify(records)
       try {
-        if (!renewed) {
-          await this.store.renew(this.owner)
-          renewed = true
-          this.keepLease()
-        }
         if (text !== published || (rewrite > 0 && rounds % rewrite === 0)) {
           await this.store.publish(
-            this.owner,
+            this.daemon,
             Object.fromEntries(
               Object.entries(records).map(([pid, record]) => [pid, { ...record, seen_at: seen }]),
             ),
+            this.processes.lastPid,
           )
           published = text
         }
-        for (const [pid, signal] of await this.store.takeStops(this.owner)) {
+        for (const [pid, signal] of await this.store.takeStops(this.daemon)) {
           try {
             await this.stopAsked(pid, signal)
           } catch (err) {
@@ -1275,7 +1313,6 @@ export class JobTable {
       }
       if (this.closed || (published === '{}' && this.processes.live().length === 0)) {
         this.publishing = null
-        this.dropLease()
         return
       }
       rounds += 1
@@ -1289,8 +1326,7 @@ export class JobTable {
   }
 
   /**
-   * Stop one of this workspace's processes another workspace asked to
-   * stop: a job's runner the way `kill` stops a job, through the table
+   * Stop one of this workspace's processes another daemon asked to stop: a job's runner the way `kill` stops a job, through the table
    * that holds it, a child shell's included; any other runner directly.
    */
   private async stopAsked(pid: number, signal: number): Promise<void> {
@@ -1310,10 +1346,10 @@ export class JobTable {
   }
 
   /**
-   * Stop what the lapsed instances on the store left running, without
-   * waiting: the workspace calls it as it starts, so what a crashed instance
+   * Stop what the daemons that lost the lease left running, without
+   * waiting: the workspace calls it as it starts, so what a crashed daemon
    * ran stops before anything lists it. Once per table, and only on a store
-   * that leases owners: on any other, no owner lapses.
+   * whose leases lapse: on any other, no daemon loses one but by closing.
    */
   reapLapsed(): void {
     if (this.swept || this.reapingStopped || this.store.leaseSeconds === null) return
@@ -1325,9 +1361,9 @@ export class JobTable {
   }
 
   /**
-   * Reap the lapsed owners on the store, and once more a lease later while
-   * any other owner still held one: an instance that died just before this
-   * one started still holds its lease until then.
+   * Reap the daemons that lost the lease, and once more a lease later while
+   * another daemon still held it: one that died just before this one
+   * started still holds it until then.
    */
   private async sweep(): Promise<void> {
     try {
@@ -1350,11 +1386,11 @@ export class JobTable {
       }
       await this.remoteProcesses()
     } catch (err) {
-      console.debug('lapsed owners not swept:', err)
+      console.debug('lapsed daemons not swept:', err)
     }
   }
 
-  /** Stop the native runs a lapsed owner left, without waiting. */
+  /** Stop the native runs a daemon that lost the lease left, without waiting. */
   private reapLater(owner: string): void {
     if (this.reapingStopped || this.reaped.has(owner)) return
     this.reaped.add(owner)
@@ -1365,73 +1401,108 @@ export class JobTable {
   }
 
   /**
-   * Stop the native runs a lapsed owner left, those this workspace reaches,
-   * and keep its record holding only the rest, for a workspace that reaches
-   * them. The owner's lease is checked again before each run is stopped, so
-   * one that renewed meanwhile keeps its runs, and its record as it is. Each
-   * run goes to the reaper with its record's `seen_at`.
+   * Stop the native runs a daemon that lost the lease left, those this
+   * workspace reaches, and keep its record holding only the rest, for a
+   * daemon that reaches them. This table's own daemon's record is its own
+   * life's, so it is never reaped here.
    */
   private async reapOwner(owner: string): Promise<void> {
+    if (owner === this.daemon) return
     try {
       const records = (await this.store.processes())[owner] ?? {}
-      const runsOf = (record: RecordFields) => record.runs as Record<string, JsonValue>[]
-      const left: Record<string, JsonValue>[] = []
-      for (const record of Object.values(records)) {
-        for (const run of runsOf(record)) {
-          if (await this.store.alive(owner)) return
-          const vouched = { ...run, seen_at: (record.seen_at ?? null) as JsonValue }
-          if (this.reaper === null || (await this.reaper([vouched], 15)).length > 0) left.push(run)
-        }
-      }
-      const kept: Record<string, RecordFields> = {}
-      for (const [pid, record] of Object.entries(records)) {
-        const remaining = runsOf(record).filter((run) => left.includes(run))
-        if (remaining.length > 0) kept[pid] = { ...record, runs: remaining }
-      }
-      if (!(await this.store.alive(owner))) await this.store.publish(owner, kept)
+      const kept = await this.reapRuns(owner, records)
+      if (!(await this.running(owner))) await this.store.publish(owner, kept)
     } catch (err) {
-      console.debug(`lapsed owner ${owner} not reaped:`, err)
+      console.debug(`lapsed daemon ${owner} not reaped:`, err)
     }
   }
 
+  /**
+   * Stop the native runs this daemon left before a restart, which `claim`
+   * found under its id; this life's first publish replaces the record.
+   */
+  private async reapEarlier(records: Record<string, RecordFields>): Promise<void> {
+    try {
+      await this.reapRuns(this.daemon, records)
+    } catch (err) {
+      console.debug('runs left before a restart not reaped:', err)
+    }
+  }
+
+  /**
+   * Hand each native run a daemon's records list to the reaper, with its
+   * record's `seen_at`, and answer the records holding only the runs this
+   * workspace could not reach. The lease is checked again before each run
+   * is stopped, so a daemon that took it back meanwhile keeps its runs, and
+   * its records as they are.
+   */
+  private async reapRuns(
+    owner: string,
+    records: Record<string, RecordFields>,
+  ): Promise<Record<string, RecordFields>> {
+    const runsOf = (record: RecordFields) => record.runs as Record<string, JsonValue>[]
+    const left: Record<string, JsonValue>[] = []
+    for (const record of Object.values(records)) {
+      for (const run of runsOf(record)) {
+        if (await this.running(owner)) return records
+        const vouched = { ...run, seen_at: (record.seen_at ?? null) as JsonValue }
+        if (this.reaper === null || (await this.reaper([vouched], 15)).length > 0) left.push(run)
+      }
+    }
+    const kept: Record<string, RecordFields> = {}
+    for (const [pid, record] of Object.entries(records)) {
+      const remaining = runsOf(record).filter((run) => left.includes(run))
+      if (remaining.length > 0) kept[pid] = { ...record, runs: remaining }
+    }
+    return kept
+  }
+
+  /**
+   * Whether a daemon still runs what it started here: it holds the
+   * workspace's lease and is not this table's own, whose jobs and processes
+   * from before a restart went with that life (the ones this table runs
+   * have their runners here).
+   */
+  private async running(daemon: string): Promise<boolean> {
+    return daemon !== this.daemon && (await this.store.holder()) === daemon
+  }
+
+  /**
+   * Renew the workspace's lease from `claim` until `close`, on a store
+   * whose leases lapse, with the consoles of the jobs this table still
+   * runs, so a quiet one keeps its output while this table lives. A failed
+   * renewal is logged and retried. Should the lease lapse meanwhile and
+   * another daemon take it, the renewal stops and the next line or job asks
+   * for it again (`claim`), and is refused; the other daemons end this
+   * table's jobs as hung up and the watchers here stop them, so the two
+   * never disagree.
+   */
   private keepLease(): void {
     const lease = this.store.leaseSeconds
     if (lease === null || this.lease !== null) return
     const renew = () => {
       this.lease = setTimeout(
         () => {
-          // A failed renewal is logged and retried: should the lease lapse
-          // meanwhile, other workspaces end this table's jobs as hung up and
-          // the watchers here stop them, so the two never disagree.
           const consoles = [...this.allJobs(), ...this.disowned]
             .filter((j) => j.process !== null && !j.console.finished)
             .map((j) => j.consoleName)
-          this.store.renew(this.owner, consoles).catch((err: unknown) => {
-            console.debug('job lease renewal failed:', err)
-          })
+          this.store.lease(this.daemon, consoles).then(
+            (holder) => {
+              if (holder === null) return
+              console.debug('workspace lease taken by', holder)
+              if (this.lease !== null) clearTimeout(this.lease)
+              this.lease = null
+              this.held = false
+            },
+            (err: unknown) => {
+              console.debug('workspace lease renewal failed:', err)
+            },
+          )
           if (this.lease !== null) renew()
         },
         (lease * 1000) / 3,
       )
     }
     renew()
-  }
-
-  /**
-   * Stop renewing once every job this table runs has ended its console and
-   * no process it publishes runs: a killed one still stopping keeps the
-   * lease, or other workspaces would end it as hung up, and a published
-   * process keeps it, or they would take its record for lapsed; the
-   * publishing drops it as it stops.
-   */
-  private dropLease(): void {
-    if (this.lease === null) return
-    if (
-      (this.publishing !== null && this.processes.live().length > 0) ||
-      [...this.allJobs(), ...this.disowned].some((j) => j.process !== null && !j.console.finished)
-    )
-      return
-    clearTimeout(this.lease)
-    this.lease = null
   }
 }

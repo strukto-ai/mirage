@@ -18,7 +18,7 @@ import { runWithSession } from '../../context/session_context.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import { RemoteSandbox } from '../../runtime/sandbox/base.ts'
 import type { RunResult } from '../../runtime/types.ts'
-import { RAMJobStore } from '../../execution/job/ram.ts'
+import { RAMExecutionStore } from '../../execution/ram.ts'
 import { MountMode } from '../../types.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { SeededIdSource, SystemIdSource } from '../../utils/ids.ts'
@@ -452,7 +452,7 @@ it('reaps a lapsed instance as it starts', async () => {
   const box = new ReapedBox(['t1'])
   const ws = new Workspace({}, { runtimes: [box] })
   try {
-    const store = new RAMJobStore(30)
+    const store = new RAMExecutionStore(30)
     ws.jobTable.store = store
     const run = { runtime: 'reapbox', tag: 't1', command: 'x' }
     await store.publish('dead', { '2': { pid: 2, session: 's', runs: [run] } })

@@ -14,7 +14,7 @@
 
 from dataclasses import dataclass
 
-from mirage.execution.job.store import JobStore
+from mirage.execution.base import ExecutionStore
 from mirage.observe.store import ObserverStore
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.store import RAMWorkspaceStateStore, WorkspaceStateStore
@@ -33,7 +33,7 @@ class ControlStores:
     observe: ObserverStore
     namespace: NamespaceStore
     sessions: NamespaceStore
-    jobs: JobStore
+    execution: ExecutionStore
 
 
 def resolve_control_stores(
@@ -73,5 +73,5 @@ def resolve_control_stores(
         observe=observe,
         namespace=namespace_store,
         sessions=session_store,
-        jobs=state_store.jobs(workspace_id),
+        execution=state_store.execution(workspace_id),
     )

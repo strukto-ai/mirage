@@ -36,7 +36,9 @@ const SEAMED = [
   'core/box/client.ts',
   'core/dropbox/client.ts',
   'core/google/client.ts',
+  'execution/base.ts',
   'execution/job',
+  'execution/ram.ts',
   'workspace/files.ts',
   'workspace/mount/mount.ts',
   'workspace/mount/registry.ts',
@@ -77,7 +79,7 @@ const KEPT_ON_SYSTEM_CLOCK: Record<string, string> = {
   'execution/job/table.ts performance.now':
     "waits out another owner's lease on the same process clock the shared store " +
     "uses; a table's injected clock may differ from other tables sharing the store",
-  'execution/job/ram.ts performance.now':
+  'execution/ram.ts performance.now':
     "an owner's lease is compared by every table sharing the store, and those " +
     'tables may hold different clocks, so it stays on the process monotonic ' +
     "clock, as a Redis lease expires on the server's",

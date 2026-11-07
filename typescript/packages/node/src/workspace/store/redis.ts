@@ -23,8 +23,8 @@ import type {
 } from '@struktoai/mirage-core/workspace/store/base'
 import { RedisConnection } from '../../optional_peer.ts'
 import { CAS_SCRIPT, RedisNamespaceStore } from '../mount/namespace/redis.ts'
-import type { JobStore } from '@struktoai/mirage-core/execution/job/store'
-import { RedisJobStore } from '../../execution/job/redis.ts'
+import type { ExecutionStore } from '@struktoai/mirage-core/execution/base'
+import { RedisExecutionStore } from '../../execution/redis.ts'
 import { DEFAULT_STATE_ROOT, DiskWorkspaceStateStore } from './disk.ts'
 
 export interface RedisWorkspaceStateStoreOptions extends WorkspaceStateStoreOverrides {
@@ -53,7 +53,8 @@ function historyRoot(root: string, url: string, keyPrefix: string): string {
  * - `{prefix}workspaces` — hash, workspace id -> metadata JSON
  * - `{prefix}{ws}:namespace:nodes` — node table
  * - `{prefix}{ws}:sessions` — session table
- * - `{prefix}{ws}:jobs:*`: job lists, consoles and owner leases
+ * - `{prefix}{ws}:execution:*`: job lists, consoles, the workspace's
+ *   lease and process records
  *
  * All plane state survives restarts and is visible to every process
  * pointed at the same url and prefix, so a workspace rebuilt from its
@@ -70,7 +71,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
   private readonly redis: RedisConnection
   private readonly namespaces = new Map<string, RedisNamespaceStore>()
   private readonly sessionTables = new Map<string, RedisNamespaceStore>()
-  private readonly jobPlanes = new Map<string, RedisJobStore>()
+  private readonly executionPlanes = new Map<string, RedisExecutionStore>()
 
   constructor(options: RedisWorkspaceStateStoreOptions = {}) {
     const { url, keyPrefix, root, ...overrides } = options
@@ -121,16 +122,16 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
     return table
   }
 
-  protected makeJobs(workspaceId: string): JobStore {
-    let jobs = this.jobPlanes.get(workspaceId)
-    if (jobs === undefined) {
-      jobs = new RedisJobStore({
+  protected makeExecution(workspaceId: string): ExecutionStore {
+    let execution = this.executionPlanes.get(workspaceId)
+    if (execution === undefined) {
+      execution = new RedisExecutionStore({
         url: this.url,
-        keyPrefix: `${this.prefix}${workspaceId}:jobs:`,
+        keyPrefix: `${this.prefix}${workspaceId}:execution:`,
       })
-      this.jobPlanes.set(workspaceId, jobs)
+      this.executionPlanes.set(workspaceId, execution)
     }
-    return jobs
+    return execution
   }
 
   protected async readMeta(workspaceId: string): Promise<WorkspaceFields | null> {
@@ -155,7 +156,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
   }
 
   protected async forgetSelf(workspaceId: string): Promise<void> {
-    for (const handles of [this.namespaces, this.sessionTables, this.jobPlanes]) {
+    for (const handles of [this.namespaces, this.sessionTables, this.executionPlanes]) {
       await handles.get(workspaceId)?.close()
       handles.delete(workspaceId)
     }
@@ -166,7 +167,7 @@ export class RedisWorkspaceStateStore extends WorkspaceStateStore {
   protected async closeSelf(): Promise<void> {
     for (const ns of this.namespaces.values()) await ns.close()
     for (const table of this.sessionTables.values()) await table.close()
-    for (const jobs of this.jobPlanes.values()) await jobs.close()
+    for (const execution of this.executionPlanes.values()) await execution.close()
     await this.redis.close()
   }
 }

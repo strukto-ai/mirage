@@ -15,8 +15,8 @@
 import { RAMObserverStore, type ObserverStore } from '../../observe/store.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import { RAMJobStore } from '../../execution/job/ram.ts'
-import type { JobStore } from '../../execution/job/store.ts'
+import { RAMExecutionStore } from '../../execution/ram.ts'
+import type { ExecutionStore } from '../../execution/base.ts'
 import { generationOf } from '../record/types.ts'
 import {
   WorkspaceStateStore,
@@ -32,7 +32,7 @@ export class RAMWorkspaceStateStore extends WorkspaceStateStore {
   private readonly namespaces = new Map<string, RAMNamespaceStore>()
   private readonly observers = new Map<string, RAMObserverStore>()
   private readonly sessionTables = new Map<string, RAMNamespaceStore>()
-  private readonly jobPlanes = new Map<string, RAMJobStore>()
+  private readonly executionPlanes = new Map<string, RAMExecutionStore>()
   private readonly meta = new Map<string, WorkspaceFields>()
 
   constructor(overrides: WorkspaceStateStoreOverrides = {}) {
@@ -66,13 +66,13 @@ export class RAMWorkspaceStateStore extends WorkspaceStateStore {
     return table
   }
 
-  protected makeJobs(workspaceId: string): JobStore {
-    let jobs = this.jobPlanes.get(workspaceId)
-    if (jobs === undefined) {
-      jobs = new RAMJobStore()
-      this.jobPlanes.set(workspaceId, jobs)
+  protected makeExecution(workspaceId: string): ExecutionStore {
+    let execution = this.executionPlanes.get(workspaceId)
+    if (execution === undefined) {
+      execution = new RAMExecutionStore()
+      this.executionPlanes.set(workspaceId, execution)
     }
-    return jobs
+    return execution
   }
 
   protected readMeta(workspaceId: string): Promise<WorkspaceFields | null> {
@@ -95,7 +95,7 @@ export class RAMWorkspaceStateStore extends WorkspaceStateStore {
     this.namespaces.delete(workspaceId)
     this.observers.delete(workspaceId)
     this.sessionTables.delete(workspaceId)
-    this.jobPlanes.delete(workspaceId)
+    this.executionPlanes.delete(workspaceId)
     this.meta.delete(workspaceId)
     return Promise.resolve()
   }

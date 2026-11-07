@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ObserverStore } from '../../observe/store.ts'
-import type { JobStore } from '../../execution/job/store.ts'
+import type { ExecutionStore } from '../../execution/base.ts'
 import type { SqlDriver } from '../../vfs/sql/types.ts'
 import { RecordNamespaceStore, type NamespaceStore } from '../mount/namespace/store.ts'
 import { SqlRecordClient } from '../record/sql.ts'
@@ -42,7 +42,8 @@ export interface SqlWorkspaceStateStoreOptions extends WorkspaceStateStoreOverri
  * So a workspace whose host forgets its memory (a Durable Object woken
  * again, a process restarted on the same file) keeps its sessions' cwd,
  * variables, functions, aliases, options, umask and traps, and its links.
- * Observer events and jobs are per-process planes and stay in memory.
+ * Observer events and the execution plane are per-process and stay in
+ * memory.
  * Mirrors Python's `SqlWorkspaceStateStore`.
  */
 export class SqlWorkspaceStateStore extends WorkspaceStateStore {
@@ -84,8 +85,8 @@ export class SqlWorkspaceStateStore extends WorkspaceStateStore {
     return this.table(workspaceId, 'sessions')
   }
 
-  protected makeJobs(workspaceId: string): JobStore {
-    return this.memory.jobs(workspaceId)
+  protected makeExecution(workspaceId: string): ExecutionStore {
+    return this.memory.execution(workspaceId)
   }
 
   protected async readMeta(workspaceId: string): Promise<WorkspaceFields | null> {

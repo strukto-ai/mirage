@@ -14,22 +14,30 @@
 
 import json
 from collections.abc import Awaitable, Mapping, Sequence
+from importlib.resources import files
 from typing import cast
 
 import redis.asyncio as aioredis
 
+from mirage.execution.base import ExecutionStore
 from mirage.execution.job.constants import (
     CONSOLE_TTL_SECONDS,
     LEASE_SECONDS,
 )
-from mirage.execution.job.store import JobStore
 from mirage.shell.console.redis import RedisConsoleStore
 from mirage.workspace.mount.namespace.redis import CAS_SCRIPT
 from mirage.workspace.record.types import RecordFields
 
+LEASE_SCRIPT = (files("mirage.execution") / "lease.lua").read_text(
+    encoding="utf-8"
+)
+PID_SCRIPT = (files("mirage.execution") / "pid.lua").read_text(
+    encoding="utf-8"
+)
 
-class RedisJobStore(JobStore):
-    """JobStore on one Redis server, shared by every process on it.
+
+class RedisExecutionStore(ExecutionStore):
+    """ExecutionStore on one Redis server, shared by every process on it.
 
     Key layout under one prefix:
 
@@ -37,20 +45,22 @@ class RedisJobStore(JobStore):
       with the session table's compare-and-set script
     - ``{prefix}console:{name}:*``: one console stream per job
       (``RedisConsoleStore``), expiring a day after its last write or
-      its owner's last renewal
-    - ``{prefix}owner:{id}``: an owner's lease, a key that expires
-    - ``{prefix}processes:{id}``: the processes an owner runs, as JSON,
-      kept a day after its last publish so a lapsed owner's runs can
-      still be found
-    - ``{prefix}stops:{id}``: a list of the stops asked of an owner
+      the last renewal of the lease while its job ran
+    - ``{prefix}lease``: the id of the daemon holding the workspace's
+      lease, a key that expires, taken and released by ``lease.lua``
+    - ``{prefix}pid``: the highest pid published, raised by ``pid.lua``
+    - ``{prefix}processes:{id}``: the processes a daemon runs, as JSON,
+      kept a day after its last publish so the runs of one that lost
+      the lease can still be found
+    - ``{prefix}stops:{id}``: a list of the stops asked of a daemon
 
-    One client serves the lists, the leases and every console, so a
+    One client serves the lists, the lease and every console, so a
     workspace holds one connection pool however many jobs it follows.
 
     Args:
         url (str): Redis connection URL.
         key_prefix (str): namespace for the plane's keys.
-        lease_seconds (float | None): see ``JobStore``.
+        lease_seconds (float | None): see ``ExecutionStore``.
     """
 
     def __init__(
@@ -64,7 +74,12 @@ class RedisJobStore(JobStore):
         self._prefix = key_prefix
         self._client = aioredis.from_url(url)
         self._lists = f"{key_prefix}lists"
+        self._lease = f"{key_prefix}lease"
+        self._pid = f"{key_prefix}pid"
         self._cas = self._client.register_script(CAS_SCRIPT)
+        self._lease_script = self._client.register_script(LEASE_SCRIPT)
+        self._pid_script = self._client.register_script(PID_SCRIPT)
+        self._raised = 0
 
     async def load(self, session_id: str) -> RecordFields | None:
         raw = await cast(
@@ -96,36 +111,56 @@ class RedisJobStore(JobStore):
             client=self._client,
         )
 
-    async def renew(self, owner: str, consoles: Sequence[str] = ()) -> None:
-        """One round trip however many jobs the owner runs, so the lease
-        is never late behind its consoles."""
-        pipe = self._client.pipeline(transaction=False)
-        if self.lease_seconds is not None:
-            pipe.set(
-                f"{self._prefix}owner:{owner}",
-                b"1",
-                px=int(self.lease_seconds * 1000),
+    async def lease(
+        self, daemon: str, consoles: Sequence[str] = ()
+    ) -> str | None:
+        """One round trip with no consoles to keep, and one pipeline
+        however many jobs the daemon runs, so the lease is never late
+        behind its consoles."""
+        expiry = (
+            str(int(self.lease_seconds * 1000))
+            if self.lease_seconds is not None
+            else ""
+        )
+        args = [daemon, "take", expiry]
+        if not consoles:
+            held = await self._lease_script(keys=[self._lease], args=args)
+        else:
+            pipe = self._client.pipeline(transaction=False)
+            await self._lease_script(
+                keys=[self._lease], args=args, client=pipe
             )
-        for name in consoles:
-            for key in self.console(name).keys:
-                pipe.expire(key, CONSOLE_TTL_SECONDS)
-        await pipe.execute()
+            for name in consoles:
+                for key in self.console(name).keys:
+                    pipe.expire(key, CONSOLE_TTL_SECONDS)
+            held = (await pipe.execute())[0]
+        return held.decode() if held is not None else None
 
-    async def alive(self, owner: str) -> bool:
-        if self.lease_seconds is None:
-            return True
-        return bool(await self._client.exists(f"{self._prefix}owner:{owner}"))
+    async def holder(self) -> str | None:
+        held = await self._client.get(self._lease)
+        return held.decode() if held is not None else None
+
+    async def release(self, daemon: str) -> None:
+        await self._lease_script(
+            keys=[self._lease], args=[daemon, "release", ""]
+        )
 
     async def publish(
-        self, owner: str, processes: Mapping[str, RecordFields]
+        self,
+        daemon: str,
+        processes: Mapping[str, RecordFields],
+        last_pid: int = 0,
     ) -> None:
-        key = f"{self._prefix}processes:{owner}"
-        if not processes:
-            await self._client.delete(key, f"{self._prefix}stops:{owner}")
-            return
-        await self._client.set(
-            key, json.dumps(dict(processes)), ex=CONSOLE_TTL_SECONDS
-        )
+        key = f"{self._prefix}processes:{daemon}"
+        if last_pid > self._raised:
+            await self._pid_script(keys=[self._pid], args=[last_pid])
+            self._raised = last_pid
+        if processes:
+            await self._client.set(
+                key, json.dumps(dict(processes)), ex=CONSOLE_TTL_SECONDS
+            )
+        else:
+            await self._client.delete(key, f"{self._prefix}stops:{daemon}")
 
     async def processes(self) -> dict[str, dict[str, RecordFields]]:
         head = f"{self._prefix}processes:"
@@ -139,15 +174,18 @@ class RedisJobStore(JobStore):
             if value is not None
         }
 
-    async def request_stop(self, owner: str, pid: int, signal: int) -> None:
-        key = f"{self._prefix}stops:{owner}"
+    async def highest_pid(self) -> int:
+        return int(await self._client.get(self._pid) or 0)
+
+    async def request_stop(self, daemon: str, pid: int, signal: int) -> None:
+        key = f"{self._prefix}stops:{daemon}"
         pipe = self._client.pipeline(transaction=False)
         pipe.rpush(key, json.dumps([pid, signal]))
         pipe.expire(key, CONSOLE_TTL_SECONDS)
         await pipe.execute()
 
-    async def take_stops(self, owner: str) -> list[tuple[int, int]]:
-        key = f"{self._prefix}stops:{owner}"
+    async def take_stops(self, daemon: str) -> list[tuple[int, int]]:
+        key = f"{self._prefix}stops:{daemon}"
         pipe = self._client.pipeline(transaction=True)
         pipe.lrange(key, 0, -1)
         pipe.delete(key)
@@ -160,6 +198,7 @@ class RedisJobStore(JobStore):
         ]
         if keys:
             await self._client.delete(*keys)
+        self._raised = 0
 
     async def close(self) -> None:
         await self._client.aclose()

@@ -29,7 +29,8 @@ import {
   STOP_WAIT_SECONDS,
   WATCH_RETRY_SECONDS,
 } from './constants.ts'
-import { RAMJobStore } from './ram.ts'
+import { WorkspaceHeldError } from '../errors.ts'
+import { RAMExecutionStore } from '../ram.ts'
 import { ProcessTable } from '../process/table.ts'
 import { PathSpec } from '../../types.ts'
 import { JobTable } from './table.ts'
@@ -102,7 +103,7 @@ class GatedStore implements ConsoleStore {
 }
 
 /** A job store whose consoles park their appends behind the gate. */
-class GatedJobs extends RAMJobStore {
+class GatedJobs extends RAMExecutionStore {
   constructor(private readonly gate: Promise<void>) {
     super()
   }
@@ -113,7 +114,7 @@ class GatedJobs extends RAMJobStore {
 }
 
 /** A job store that cannot open a console. */
-class BrokenConsoles extends RAMJobStore {
+class BrokenConsoles extends RAMExecutionStore {
   override console(): ConsoleStore {
     throw new Error('console unavailable')
   }
@@ -490,7 +491,7 @@ describe('JobTable.popCompleted', () => {
   })
 
   it('a child table keeps its jobs off the shared store', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     const jt = new JobTable(store)
     const child = jt.child().child(jt)
     const j = await child.submit({
@@ -683,7 +684,7 @@ it('settles an already aborted job without entering its runner', async () => {
 })
 
 it('a refused job gives its number back', async () => {
-  const store = new RAMJobStore()
+  const store = new RAMExecutionStore()
   const table = new JobTable(store)
   const abort = new AbortController()
   const job = await table.submit({
@@ -770,7 +771,7 @@ async function sleeping(jt: JobTable): Promise<Job> {
 
 describe('JobTable on a shared store', () => {
   it('another table lists, waits on and kills a job', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     const a = new JobTable(store)
     const b = new JobTable(store)
     const job = await sleeping(a)
@@ -786,7 +787,7 @@ describe('JobTable on a shared store', () => {
   })
 
   it('another table waits for a job to end', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     const a = new JobTable(store)
     const b = new JobTable(store)
     let release = (): void => undefined
@@ -816,20 +817,51 @@ describe('JobTable on a shared store', () => {
     expect((await waiter).exitCode).toBe(1)
   })
 
-  it('two tables never hand out one number', async () => {
-    const store = new RAMJobStore()
+  // One daemon runs a workspace's jobs at a time: another one is told which
+  // daemon holds the lease, and once that one closes it runs them,
+  // numbering its pids past every pid the first gave out.
+  it('a second daemon starts no job while the lease holds', async () => {
+    const store = new RAMExecutionStore()
     const a = new JobTable(store)
     const b = new JobTable(store)
-    const [first, second] = await Promise.all([sleeping(a), sleeping(b)])
+    const [first, second] = await Promise.all([sleeping(a), sleeping(a)])
     expect(new Set([first.id, second.id])).toEqual(new Set([1, 2]))
+    const refused = await sleeping(b).catch((err: unknown) => err)
+    expect(refused).toBeInstanceOf(WorkspaceHeldError)
+    expect((refused as WorkspaceHeldError).holder).toBe(a.daemon)
+    expect((refused as Error).message).toContain(a.daemon)
     await b.sync('s')
     expect(b.listJobs('s').map((j) => j.id)).toEqual([1, 2])
     await a.killAll()
+    await a.close()
+    const third = await sleeping(b)
+    expect(third.pid).toBeGreaterThan(Math.max(first.pid, second.pid))
     await b.killAll()
   })
 
-  it('a job whose owner lapsed ends as hung up', async () => {
-    const store = new RAMJobStore(0.05)
+  // A daemon keeps its id across a restart, so it holds its workspace again
+  // at once, and the jobs it ran before end as hung up.
+  it('a restarted daemon holds its workspace again', async () => {
+    const store = new RAMExecutionStore(30)
+    const before = new JobTable(store, undefined, null, undefined, 'd')
+    const lost = await sleeping(before)
+    const held = before as unknown as { lease: ReturnType<typeof setTimeout> | null }
+    if (held.lease !== null) clearTimeout(held.lease)
+    held.lease = null
+    const after = new JobTable(store, undefined, null, undefined, 'd')
+    const abort = new AbortController()
+    await after.submit({ command: 'next', run: pending(abort), abort, cwd: '/', sessionId: 's' })
+    await after.sync('s')
+    const [old, fresh] = after.listJobs('s')
+    expect([old?.command, old?.status, old?.exitCode]).toEqual(['sleep 30', JobStatus.KILLED, 129])
+    expect([fresh?.command, fresh?.status]).toEqual(['next', JobStatus.RUNNING])
+    await lost.process?.join()
+    await after.killAll()
+    await after.close()
+  })
+
+  it('a job whose daemon lost the lease ends as hung up', async () => {
+    const store = new RAMExecutionStore(0.05)
     const a = new JobTable(store)
     const b = new JobTable(store)
     const job = await sleeping(a)
@@ -846,7 +878,7 @@ describe('JobTable on a shared store', () => {
   })
 
   it('a reap elsewhere drops the job from its owner', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     const a = new JobTable(store)
     const b = new JobTable(store)
     await a.submit({
@@ -910,7 +942,7 @@ class FailsFirstWatch implements ConsoleStore {
 }
 
 /** A job store whose consoles each fail their first watch. */
-class DroppedWatches extends RAMJobStore {
+class DroppedWatches extends RAMExecutionStore {
   override console(name: string): ConsoleStore {
     return new FailsFirstWatch(super.console(name))
   }
@@ -953,7 +985,7 @@ class FailsReads implements ConsoleStore {
 }
 
 /** A job store whose consoles fail its next `failures` reads. */
-class FailingReads extends RAMJobStore {
+class FailingReads extends RAMExecutionStore {
   failures = 0
 
   override console(name: string): ConsoleStore {
@@ -961,9 +993,9 @@ class FailingReads extends RAMJobStore {
   }
 }
 
-/** A job store on which another table starts a job just as a list is about
- * to go; with `replaces`, after another close deleted it. */
-class StartsOnDelete extends RAMJobStore {
+/** A job store on which a job starts just as a list is about to go; with
+ * `replaces`, after another close deleted it. */
+class StartsOnDelete extends RAMExecutionStore {
   peer: JobTable | null = null
   readonly started: Job[] = []
 
@@ -982,7 +1014,7 @@ class StartsOnDelete extends RAMJobStore {
 }
 
 /** A job store whose consoles' output can expire, as Redis's does. */
-class ExpiringOutput extends RAMJobStore {
+class ExpiringOutput extends RAMExecutionStore {
   readonly expired = new Set<string>()
 
   override console(name: string): ConsoleStore {
@@ -1029,7 +1061,7 @@ class CountedWaits implements ConsoleStore {
 }
 
 /** A job store whose consoles count the reads parked on them. */
-class CountingWaits extends RAMJobStore {
+class CountingWaits extends RAMExecutionStore {
   readonly count = { parked: 0, most: 0 }
 
   override console(name: string): ConsoleStore {
@@ -1039,12 +1071,13 @@ class CountingWaits extends RAMJobStore {
 
 describe('JobTable on a shared store, across reuse and failure', () => {
   it('a stale reap never drops a job that took its number', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     const a = new JobTable(store)
     const b = new JobTable(store)
     const abort = new AbortController()
     await a.submit({ command: 'true', run: exitWith(0), abort, cwd: '/', sessionId: 's' })
     await a.wait(1, 's')
+    await a.close()
     await b.sync('s')
     await b.reap(1, 's')
     expect((await sleeping(b)).id).toBe(1)
@@ -1055,12 +1088,13 @@ describe('JobTable on a shared store, across reuse and failure', () => {
   })
 
   it('a sync takes the job that took a reaped number', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     const a = new JobTable(store)
     const b = new JobTable(store)
     const abort = new AbortController()
     await a.submit({ command: 'true', run: exitWith(0), abort, cwd: '/', sessionId: 's' })
     await a.wait(1, 's')
+    await a.close()
     await b.sync('s')
     await b.reap(1, 's')
     await sleeping(b)
@@ -1076,7 +1110,7 @@ describe('JobTable on a shared store, across reuse and failure', () => {
   // A program that handled the kill leaves its own status, and the ending
   // every workspace reads carries it, not the signal's.
   it('a handled kill answers one status everywhere', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     const a = new JobTable(store)
     const b = new JobTable(store)
     const abort = new AbortController()
@@ -1185,7 +1219,7 @@ describe('JobTable on a shared store, across reuse and failure', () => {
  * A job store that runs one hook right after a list read, as another
  * workspace's write landing between a read and what follows it.
  */
-class HookAfterRead extends RAMJobStore {
+class HookAfterRead extends RAMExecutionStore {
   afterRead: (() => Promise<void>) | null = null
 
   override async load(sessionId: string): Promise<RecordFields | null> {
@@ -1224,20 +1258,20 @@ describe('JobTable on a shared store, across reaps and closes', () => {
   })
 
   it('a close elsewhere stops a disowned job', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     const a = new JobTable(store)
     const b = new JobTable(store)
     const job = await sleeping(a)
     await b.sync('s')
     expect(await b.disown(1, 's')).toBe(true)
-    expect((await sleeping(b)).id).toBe(1)
+    expect((await sleeping(a)).id).toBe(1)
     await b.closeSession('s')
     await job.process?.join()
     expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 137])
   })
 
   it('a disowned job drops its record when it ends', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     const jt = new JobTable(store)
     let release = (): void => undefined
     const gate = new Promise<void>((resolve) => {
@@ -1278,7 +1312,7 @@ describe('JobTable on a shared store, across launches, restores and abandoned wa
   })
 
   it('a disown never parks a job that already ended', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     const a = new JobTable(store)
     const b = new JobTable(store)
     let release = (): void => undefined
@@ -1301,7 +1335,7 @@ describe('JobTable on a shared store, across launches, restores and abandoned wa
   })
 
   it('a restore never hides a job that holds its number', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     const a = new JobTable(store)
     const b = new JobTable(store)
     const live = await sleeping(b)
@@ -1358,21 +1392,26 @@ class Unwatched extends FailsFirstWatch {
 }
 
 /** A job store whose owners never notice an ending on their own. */
-class UnwatchedConsoles extends RAMJobStore {
+class UnwatchedConsoles extends RAMExecutionStore {
   override console(name: string): ConsoleStore {
     return new Unwatched(super.console(name))
   }
 }
 
 describe('JobTable on a shared store, across retaken numbers and early kills', () => {
+  // A daemon that lost the lease while its job still ran, unaware, lists the
+  // job the daemon that took the lease started under the same number.
   it('a number retaken elsewhere lists the new job', async () => {
-    const store = new UnwatchedConsoles()
+    const store = new UnwatchedConsoles(0.05)
     const a = new JobTable(store)
     const b = new JobTable(store)
     const old = await sleeping(a)
+    const held = a as unknown as { lease: ReturnType<typeof setTimeout> | null }
+    if (held.lease !== null) clearTimeout(held.lease)
+    held.lease = null
+    await new Promise((resolve) => setTimeout(resolve, 100))
     await b.sync('s')
-    expect(await b.kill(1, 's', 15)).toBe(true)
-    expect((await b.wait(1, 's')).exitCode).toBe(143)
+    expect((await b.wait(1, 's')).exitCode).toBe(129)
     await b.reap(1, 's')
     const abort = new AbortController()
     await b.submit({ command: 'next', run: pending(abort), abort, cwd: '/', sessionId: 's' })
@@ -1384,8 +1423,8 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
     await b.killAll()
   })
 
-  it('a killed job keeps its ending and drops the lease', async () => {
-    const store = new RAMJobStore(30)
+  it('a killed job keeps its ending and the lease', async () => {
+    const store = new RAMExecutionStore(30)
     const jt = new JobTable(store)
     const abort = new AbortController()
     const job = await jt.submit({
@@ -1399,6 +1438,8 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
     await job.process?.join()
     const stored = (await store.load('s'))?.jobs as Record<string, { ending?: string }>
     expect(stored[job.id.toString()]?.ending).toBe('killed:143')
+    expect(await store.holder()).toBe(jt.daemon)
+    await jt.close()
     expect((jt as unknown as { lease: unknown }).lease).toBeNull()
   })
 
@@ -1407,7 +1448,7 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
     async (replaces) => {
       const store = new StartsOnDelete(replaces)
       const a = new JobTable(store)
-      store.peer = new JobTable(store)
+      store.peer = a
       await sleeping(a)
       const stopped = await a.closeSession('s')
       const [late] = store.started
@@ -1422,7 +1463,7 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
   it('a job whose list was deleted elsewhere stops', async () => {
     vi.useFakeTimers()
     try {
-      const store = new RAMJobStore()
+      const store = new RAMExecutionStore()
       const job = await sleeping(new JobTable(store))
       await vi.advanceTimersByTimeAsync(0)
       await store.clear()
@@ -1437,7 +1478,7 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
   it('a listed or disowned job runs on past its checks', async () => {
     vi.useFakeTimers()
     try {
-      const jt = new JobTable(new RAMJobStore())
+      const jt = new JobTable(new RAMExecutionStore())
       const listed = await sleeping(jt)
       const disowned = await sleeping(jt)
       expect(await jt.disown(disowned.id, 's')).toBe(true)
@@ -1469,7 +1510,7 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
   it('a dropped job deaf to its stop still ends', async () => {
     vi.useFakeTimers()
     try {
-      const store = new RAMJobStore()
+      const store = new RAMExecutionStore()
       const jt = new JobTable(store)
       const release: { fire?: () => void } = {}
       const abort = new AbortController()
@@ -1495,7 +1536,7 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
 })
 
 /** A table whose processes are published on `store`, as a workspace's are. */
-function publishing(store: RAMJobStore): JobTable {
+function publishing(store: RAMExecutionStore): JobTable {
   const processes: ProcessTable = new ProcessTable(undefined, undefined, undefined, () => {
     table.processesChanged()
   })
@@ -1518,7 +1559,7 @@ describe('JobTable process plane', () => {
   // clock the table keeps, and its record goes once it runs none; another
   // table lists them.
   it('publishes its processes while it runs any', async () => {
-    const store = new RAMJobStore(30)
+    const store = new RAMExecutionStore(30)
     const processes: ProcessTable = new ProcessTable(undefined, undefined, undefined, () => {
       a.processesChanged()
     })
@@ -1532,8 +1573,8 @@ describe('JobTable process plane', () => {
       cwd: '/',
       sessionId: 's',
     })
-    await until(async () => a.owner in (await b.remoteProcesses()))
-    const record = (await b.remoteProcesses())[a.owner]?.[String(job.pid)]
+    await until(async () => a.daemon in (await b.remoteProcesses()))
+    const record = (await b.remoteProcesses())[a.daemon]?.[String(job.pid)]
     expect([record?.command, record?.session, record?.runs]).toEqual(['sleep 30', 's', []])
     expect(Math.abs((record?.seen_at as number) - Date.now() / 1000)).toBeLessThan(5)
     expect(await a.remoteProcesses()).toEqual({})
@@ -1546,7 +1587,7 @@ describe('JobTable process plane', () => {
   // A stop another table asks of a process reaches its owner, which stops it
   // as kill does: a job's runner ends the job killed by that signal.
   it("stops the owner's job when another table asks", async () => {
-    const store = new RAMJobStore(30)
+    const store = new RAMExecutionStore(30)
     const [a, b] = [publishing(store), publishing(store)]
     const abort = new AbortController()
     const job = await a.submit({
@@ -1556,14 +1597,14 @@ describe('JobTable process plane', () => {
       cwd: '/',
       sessionId: 's',
     })
-    await until(async () => a.owner in (await b.remoteProcesses()))
+    await until(async () => a.daemon in (await b.remoteProcesses()))
     const every = { list: 'workspace', kill: 'workspace', max: null } as const
-    expect(await b.signalRemote(a.owner.slice(0, 6), job.pid, 0, 't', () => every)).toBe(true)
+    expect(await b.signalRemote(job.pid, 0, 't', () => every)).toBe(true)
     expect(job.status).toBe(JobStatus.RUNNING)
-    expect(await b.signalRemote(a.owner.slice(0, 6), job.pid, 15, 't', () => every)).toBe(true)
+    expect(await b.signalRemote(job.pid, 15, 't', () => every)).toBe(true)
     await job.process?.join()
     expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 143])
-    expect(await b.signalRemote('ffffffff', job.pid, 15, 't', () => every)).toBe(false)
+    expect(await b.signalRemote(job.pid + 1, 15, 't', () => every)).toBe(false)
     await a.close()
     await b.close()
   })
@@ -1572,7 +1613,7 @@ describe('JobTable process plane', () => {
   // table, by another table on the store or as a stop asked through it,
   // leaves the job running, so the TERM after them is what ends it.
   it('leaves a job running on INT and QUIT from any table', async () => {
-    const store = new RAMJobStore(30)
+    const store = new RAMExecutionStore(30)
     const [a, b] = [publishing(store), publishing(store)]
     const abort = new AbortController()
     const job = await a.submit({
@@ -1582,15 +1623,15 @@ describe('JobTable process plane', () => {
       cwd: '/',
       sessionId: 's',
     })
-    await until(async () => a.owner in (await b.remoteProcesses()))
+    await until(async () => a.daemon in (await b.remoteProcesses()))
     await b.sync('s')
     const every = { list: 'workspace', kill: 'workspace', max: null } as const
     for (const signal of [2, 3]) {
       expect(await a.kill(job.id, 's', signal)).toBe(true)
       expect(await b.kill(job.id, 's', signal)).toBe(true)
-      expect(await b.signalRemote(a.owner, job.pid, signal, 't', () => every)).toBe(true)
+      expect(await b.signalRemote(job.pid, signal, 't', () => every)).toBe(true)
     }
-    expect(await b.signalRemote(a.owner, job.pid, 15, 't', () => every)).toBe(true)
+    expect(await b.signalRemote(job.pid, 15, 't', () => every)).toBe(true)
     await job.process?.join()
     expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 143])
     await a.close()
@@ -1600,7 +1641,7 @@ describe('JobTable process plane', () => {
   // Another table's process is seen and stopped within the session's view:
   // one another session runs is not found, or not permitted to stop.
   it("keeps a remote signal to the session's view", async () => {
-    const store = new RAMJobStore(30)
+    const store = new RAMExecutionStore(30)
     const [a, b] = [publishing(store), publishing(store)]
     const abort = new AbortController()
     const job = await a.submit({
@@ -1610,14 +1651,14 @@ describe('JobTable process plane', () => {
       cwd: '/',
       sessionId: 's',
     })
-    await until(async () => a.owner in (await b.remoteProcesses()))
+    await until(async () => a.daemon in (await b.remoteProcesses()))
     const own = { list: 'session', kill: 'session', max: null } as const
     const seen = { list: 'workspace', kill: 'session', max: null } as const
-    expect(await b.signalRemote(a.owner, job.pid, 15, 't', () => own)).toBe(false)
-    await expect(b.signalRemote(a.owner, job.pid, 15, 't', () => seen)).rejects.toMatchObject({
+    expect(await b.signalRemote(job.pid, 15, 't', () => own)).toBe(false)
+    await expect(b.signalRemote(job.pid, 15, 't', () => seen)).rejects.toMatchObject({
       code: 'EPERM',
     })
-    expect(await b.signalRemote(a.owner, job.pid, 15, 's', () => own)).toBe(true)
+    expect(await b.signalRemote(job.pid, 15, 's', () => own)).toBe(true)
     await a.close()
     await b.close()
   })
@@ -1625,7 +1666,7 @@ describe('JobTable process plane', () => {
   // The grants are read once the store has answered: a view revoked while
   // it answered stops nothing under the grants it had before.
   it('reads the grants of a remote signal after the store', async () => {
-    const store = new RAMJobStore(30)
+    const store = new RAMExecutionStore(30)
     const [a, b] = [publishing(store), publishing(store)]
     const abort = new AbortController()
     const job = await a.submit({
@@ -1635,7 +1676,7 @@ describe('JobTable process plane', () => {
       cwd: '/',
       sessionId: 's',
     })
-    await until(async () => a.owner in (await b.remoteProcesses()))
+    await until(async () => a.daemon in (await b.remoteProcesses()))
     const every = { list: 'workspace', kill: 'workspace', max: null } as const
     const view = b.processes.view('t', () => every)
     const listing = store.processes.bind(store)
@@ -1644,11 +1685,11 @@ describe('JobTable process plane', () => {
       return listing()
     })
     try {
-      expect(await b.signalRemote(a.owner, job.pid, 15, 't', view.permissions)).toBe(false)
+      expect(await b.signalRemote(job.pid, 15, 't', view.permissions)).toBe(false)
     } finally {
       spy.mockRestore()
     }
-    expect(await store.takeStops(a.owner)).toEqual([])
+    expect(await store.takeStops(a.daemon)).toEqual([])
     expect(job.status).toBe(JobStatus.RUNNING)
     abort.abort()
     await a.close()
@@ -1659,7 +1700,7 @@ describe('JobTable process plane', () => {
   // handed to the reaper, each with when its owner last vouched for it, and
   // its record keeps only the runs nobody here reached.
   it.each([false, true])("reaps a lapsed owner's runs (one unreached: %s)", async (unreached) => {
-    const store = new RAMJobStore(30)
+    const store = new RAMExecutionStore(30)
     const host = { host: 'h', pid: 41, started_at: 1, command: 'x' }
     const box = { runtime: 'docker', tag: 't', command: 'y' }
     await store.publish('dead', {
@@ -1686,16 +1727,16 @@ describe('JobTable process plane', () => {
     await b.close()
   })
 
-  // A start reaps the lapsed owners on the store, and once more a lease
-  // later: an owner that still held its lease at the start, as one that died
-  // just before it would, is reaped once it lapsed.
-  it('reaps lapsed owners as it starts', async () => {
-    const store = new RAMJobStore(0.5)
+  // A start reaps the daemons on the store that lost the lease, and once
+  // more a lease later: a daemon that still held it at the start, as one
+  // that died just before it would, is reaped once it lapsed.
+  it('reaps lapsed daemons as it starts', async () => {
+    const store = new RAMExecutionStore(0.5)
     for (const owner of ['dead', 'dying']) {
       const run = { runtime: 'docker', tag: owner, command: 'x' }
       await store.publish(owner, { '2': { pid: 2, session: 's', runs: [run] } })
     }
-    await store.renew('dying')
+    await store.lease('dying')
     const reaped: unknown[] = []
     const b = new JobTable(store)
     b.reaper = (runs) => {
@@ -1714,7 +1755,7 @@ describe('JobTable process plane', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     let elapsed = 0
     const now = vi.spyOn(performance, 'now').mockImplementation(() => elapsed)
-    const store = new RAMJobStore(0.5)
+    const store = new RAMExecutionStore(0.5)
     const b = new JobTable(store)
     const reaped: unknown[] = []
     b.reaper = (runs) => {
@@ -1725,7 +1766,7 @@ describe('JobTable process plane', () => {
       await store.publish('dying', {
         '2': { pid: 2, session: 's', runs: [{ runtime: 'docker', tag: 'dying', command: 'x' }] },
       })
-      await store.renew('dying')
+      await store.lease('dying')
       b.reapLapsed()
       await vi.advanceTimersByTimeAsync(0)
       elapsed = 499
@@ -1742,9 +1783,10 @@ describe('JobTable process plane', () => {
     }
   })
 
-  // A store that leases no owner has no lapsed one, so a start sweeps nothing.
+  // A store whose leases never lapse has no lapsed daemon, so a start sweeps
+  // nothing.
   it('sweeps nothing on a store without leases', async () => {
-    const b = new JobTable(new RAMJobStore())
+    const b = new JobTable(new RAMExecutionStore())
     b.reapLapsed()
     expect((b as unknown as { reaping: Set<Promise<void>> }).reaping.size).toBe(0)
     await b.close()
@@ -1752,8 +1794,8 @@ describe('JobTable process plane', () => {
 
   // Teardown ends a start's sweep that waits for a lease to pass.
   it('ends the sweep at teardown', async () => {
-    const store = new RAMJobStore(30)
-    await store.renew('live')
+    const store = new RAMExecutionStore(30)
+    await store.lease('live')
     await store.publish('live', { '2': { pid: 2, session: 's', runs: [] } })
     const b = new JobTable(store)
     b.reapLapsed()
@@ -1767,48 +1809,50 @@ describe('JobTable process plane', () => {
   // A teardown while the sweep's first read is still out leaves no wait to
   // start once the read answers.
   it('starts no wait once teardown came during the first read', async () => {
-    class HeldReads extends RAMJobStore {
-      release: () => void = () => undefined
-      private readonly held = new Promise<void>((resolve) => {
-        this.release = resolve
+    class HeldReads extends RAMExecutionStore {
+      answer: () => void = () => undefined
+      private readonly gate = new Promise<void>((resolve) => {
+        this.answer = resolve
       })
 
       override async processes(): Promise<Record<string, Record<string, RecordFields>>> {
-        await this.held
+        await this.gate
         return super.processes()
       }
     }
     const store = new HeldReads(30)
-    await store.renew('live')
+    await store.lease('live')
     await store.publish('live', { '2': { pid: 2, session: 's', runs: [] } })
     const b = new JobTable(store)
     b.reapLapsed()
     const started = Date.now()
     const killing = b.killAll()
-    store.release()
+    store.answer()
     await killing
     expect(Date.now() - started).toBeLessThan(5000)
     await b.close()
   })
 
-  // The lease goes ahead of the record it vouches for, so no workspace ever
-  // reads a record whose owner it takes for lapsed, even for a process that
-  // is no job (a line, a spawned child) and so renewed nothing first; and
-  // the record is written again with every renewal, so it outlives its
-  // store's expiry and comes back after a workspace dropped it.
+  // The lease goes ahead of the record it vouches for, so no daemon ever
+  // reads a record whose daemon it takes for lapsed, even for a process that
+  // is no job (a line, a spawned child); and the record is written again
+  // with every renewal, so it outlives its store's expiry and comes back
+  // after a daemon dropped it.
   it('vouches for its record and writes it again', async () => {
     const vouched: boolean[] = []
-    class VouchedStore extends RAMJobStore {
+    class VouchedStore extends RAMExecutionStore {
       override async publish(
-        owner: string,
+        daemon: string,
         processes: Readonly<Record<string, RecordFields>>,
+        lastPid = 0,
       ): Promise<void> {
-        if (Object.keys(processes).length > 0) vouched.push(await this.alive(owner))
-        await super.publish(owner, processes)
+        if (Object.keys(processes).length > 0) vouched.push((await this.holder()) === daemon)
+        await super.publish(daemon, processes, lastPid)
       }
     }
     const store = new VouchedStore(3 * PUBLISH_SECONDS)
     const a = publishing(store)
+    await a.claim()
     const abort = new AbortController()
     const runner = a.processes.start({
       sessionId: 's',
@@ -1825,22 +1869,22 @@ describe('JobTable process plane', () => {
         }),
     })
     await until(() => Promise.resolve(vouched.length >= 3))
-    await RAMJobStore.prototype.publish.call(store, a.owner, {})
-    await until(async () => a.owner in (await store.processes()))
+    await RAMExecutionStore.prototype.publish.call(store, a.daemon, {})
+    await until(async () => a.daemon in (await store.processes()))
     expect(vouched.every(Boolean)).toBe(true)
     runner.terminate()
     await runner.join()
     await a.close()
   }, 15_000)
 
-  // An owner that renews while its runs are being reaped keeps them: the
-  // lease is read again before each run is stopped.
-  it('lets an owner that renews keep its runs', async () => {
+  // A daemon that takes the lease back while its runs are being reaped keeps
+  // them: the lease is read again before each run is stopped.
+  it('lets a daemon that renews keep its runs', async () => {
     let asked = 0
-    class Revives extends RAMJobStore {
-      override alive(): Promise<boolean> {
+    class Revives extends RAMExecutionStore {
+      override holder(): Promise<string | null> {
         asked += 1
-        return Promise.resolve(asked > 1)
+        return Promise.resolve(asked > 1 ? 'back' : null)
       }
     }
     const store = new Revives(30)
@@ -1862,7 +1906,7 @@ describe('JobTable process plane', () => {
   // Teardown stops the reaping, before the runtimes it goes through close:
   // a reap under way is waited for, and no listing starts another.
   it('stops the reaping at teardown', async () => {
-    const store = new RAMJobStore(30)
+    const store = new RAMExecutionStore(30)
     const run = { runtime: 'docker', tag: 't', command: 'x' }
     await store.publish('dead', { '2': { pid: 2, session: 's', runs: [run] } })
     let calls = 0
@@ -1887,7 +1931,7 @@ describe('JobTable process plane', () => {
 
   // A stop that fails to apply leaves the others it came with to be applied.
   it('applies the other stops when one fails', async () => {
-    const store = new RAMJobStore(30)
+    const store = new RAMExecutionStore(30)
     const a = publishing(store)
     const abort = new AbortController()
     const job = await a.submit({
@@ -1905,8 +1949,8 @@ describe('JobTable process plane', () => {
       applied.push(pid)
       await stop(pid, signal)
     }
-    await store.requestStop(a.owner, 999, 15)
-    await store.requestStop(a.owner, job.pid, 15)
+    await store.requestStop(a.daemon, 999, 15)
+    await store.requestStop(a.daemon, job.pid, 15)
     await job.process?.join()
     expect(applied).toEqual([job.pid])
     await a.close()
@@ -1915,7 +1959,7 @@ describe('JobTable process plane', () => {
   // A child shell's table keeps its job list private but reaches the other
   // workspaces' processes through the workspace's.
   it("reaches the process plane from a child shell's table", async () => {
-    const store = new RAMJobStore(30)
+    const store = new RAMExecutionStore(30)
     const [a, b] = [publishing(store), publishing(store)]
     const abort = new AbortController()
     const job = await a.submit({
@@ -1926,9 +1970,9 @@ describe('JobTable process plane', () => {
       sessionId: 's',
     })
     const child = b.child().child()
-    await until(async () => a.owner in (await child.remoteProcesses()))
+    await until(async () => a.daemon in (await child.remoteProcesses()))
     const every = { list: 'workspace', kill: 'workspace', max: null } as const
-    expect(await child.signalRemote(a.owner, job.pid, 15, 's', () => every)).toBe(true)
+    expect(await child.signalRemote(job.pid, 15, 's', () => every)).toBe(true)
     await job.process?.join()
     await a.close()
     await b.close()
@@ -1938,7 +1982,7 @@ describe('JobTable process plane', () => {
   // the child's table, as its own kill would: the job answers killed at
   // once, though its runner ignores the stop.
   it("reaches a child shell's job with a stop asked elsewhere", async () => {
-    const store = new RAMJobStore(30)
+    const store = new RAMExecutionStore(30)
     const [a, b] = [publishing(store), publishing(store)]
     const child = a.child()
     let release = (): void => undefined
@@ -1956,9 +2000,9 @@ describe('JobTable process plane', () => {
       sessionId: 's',
       simple: true,
     })
-    await until(async () => a.owner in (await b.remoteProcesses()))
+    await until(async () => a.daemon in (await b.remoteProcesses()))
     const every = { list: 'workspace', kill: 'workspace', max: null } as const
-    expect(await b.signalRemote(a.owner, job.pid, 15, 't', () => every)).toBe(true)
+    expect(await b.signalRemote(job.pid, 15, 't', () => every)).toBe(true)
     await until(() => Promise.resolve(job.status === JobStatus.KILLED))
     expect(job.exitCode).toBe(143)
     release()
@@ -1967,12 +2011,12 @@ describe('JobTable process plane', () => {
     await b.close()
   })
 
-  // The lease of a workspace that runs only processes, no job, is kept on
-  // the table's own renewal timer while they run, whatever a publish round
-  // costs, and dropped once the publishing stops.
-  it('holds the lease for a plain process while it runs', async () => {
-    const store = new RAMJobStore(30)
+  // The lease is the workspace's from the table's claim until it closes,
+  // whether anything runs or not.
+  it('keeps the lease from the claim until close', async () => {
+    const store = new RAMExecutionStore(30)
     const a = publishing(store)
+    await a.claim()
     const abort = new AbortController()
     const runner = a.processes.start({
       sessionId: 's',
@@ -1988,20 +2032,70 @@ describe('JobTable process plane', () => {
           })
         }),
     })
-    const table = a as unknown as { lease: unknown }
-    await until(async () => table.lease !== null && (await store.alive(a.owner)))
+    await until(async () => a.daemon in (await store.processes()))
     runner.terminate()
     await runner.join()
-    await until(() => Promise.resolve(table.lease === null))
+    const table = a as unknown as { lease: unknown }
+    expect(table.lease).not.toBeNull()
+    expect(await store.holder()).toBe(a.daemon)
     await a.close()
+    expect(table.lease).toBeNull()
+    expect(await store.holder()).toBeNull()
   })
 
-  // A table that closes drops its record, so it never reads as lapsed.
-  it('drops its record once closed', async () => {
-    const store = new RAMJobStore(30)
+  // A daemon whose lease lapsed and was taken by another stops renewing it,
+  // and its next job is refused, naming the daemon that holds it now.
+  it('refuses the next job once another daemon took the lease', async () => {
+    const store = new RAMExecutionStore(0.03)
     const a = new JobTable(store)
-    await store.publish(a.owner, { '2': { pid: 2, runs: [] } })
+    const b = new JobTable(store)
+    await a.claim()
+    const held = a as unknown as {
+      lease: ReturnType<typeof setTimeout> | null
+      keepLease: () => void
+    }
+    if (held.lease !== null) clearTimeout(held.lease)
+    held.lease = null
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    await b.claim()
+    held.keepLease.call(a)
+    await until(() => Promise.resolve(!a.claimed))
+    const refused = await sleeping(a).catch((err: unknown) => err)
+    expect((refused as WorkspaceHeldError).holder).toBe(b.daemon)
+    await b.close()
+  })
+
+  // A table that closes drops its record, so it never reads as lapsed, and
+  // gives the lease up for another daemon to take.
+  it('drops its record and the lease once closed', async () => {
+    const store = new RAMExecutionStore(30)
+    const a = new JobTable(store)
+    await a.claim()
+    expect(a.claimed).toBe(true)
+    await store.publish(a.daemon, { '2': { pid: 2, runs: [] } })
     await a.close()
     expect(await store.processes()).toEqual({})
+    expect(await store.holder()).toBeNull()
+  })
+
+  // A daemon taking the lease stops the native runs it left before a restart
+  // and numbers its pids past the highest the store recorded.
+  it("reaps this daemon's runs from before a restart as it claims", async () => {
+    const store = new RAMExecutionStore()
+    const run = { runtime: 'docker', tag: 't', command: 'x' }
+    await store.publish('d', { '7': { pid: 7, session: 's', runs: [run] } }, 7)
+    const reaped: unknown[] = []
+    const a = new JobTable(store, undefined, null, undefined, 'd')
+    a.reaper = (runs) => {
+      reaped.push(runs)
+      return Promise.resolve([])
+    }
+    await a.claim()
+    await until(() => Promise.resolve(reaped.length > 0))
+    expect(reaped).toEqual([[{ ...run, seen_at: null }]])
+    const job = await sleeping(a)
+    expect(job.pid).toBe(8)
+    await a.killAll()
+    await a.close()
   })
 })

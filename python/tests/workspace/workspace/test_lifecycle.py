@@ -32,7 +32,8 @@ from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Command
 from mirage.commands.spec import Argument, CommandSpec
 from mirage.core.api.client import SessionPool
-from mirage.execution.job import JobStatus, RAMJobStore
+from mirage.execution.job import JobStatus
+from mirage.execution.ram import RAMExecutionStore
 from mirage.io import IOResult
 from mirage.runtime.base import Runtime
 from mirage.runtime.python.host.fs import HostFs
@@ -556,7 +557,7 @@ class _LateWriteStore(RAMConsoleStore):
         return await super().append(channel, data)
 
 
-class _OneConsole(RAMJobStore):
+class _OneConsole(RAMExecutionStore):
     """A job store whose every job writes one given console.
 
     Args:

@@ -44,7 +44,10 @@ SEAMED = (
     "core/box/client.py",
     "core/dropbox/client.py",
     "core/google/client.py",
+    "execution/base.py",
     "execution/job",
+    "execution/ram.py",
+    "execution/redis.py",
     "workspace/files.py",
     "workspace/mount/mount.py",
     "workspace/mount/registry.py",
@@ -107,7 +110,7 @@ KEPT_ON_SYSTEM_CLOCK = {
         "shared store uses; a table's injected clock may differ from "
         "other tables sharing the store"
     ),
-    ("execution/job/ram.py", "time.monotonic"): (
+    ("execution/ram.py", "time.monotonic"): (
         "an owner's lease is compared by every table sharing the store, "
         "and those tables may hold different clocks, so it stays on the "
         "process monotonic clock, as a Redis lease expires on the server's"

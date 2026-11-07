@@ -13,9 +13,9 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
-import { Channel } from '../../shell/console/index.ts'
-import type { RecordFields } from '../../workspace/record/types.ts'
-import { RAMJobStore } from './ram.ts'
+import { Channel } from '../shell/console/index.ts'
+import type { RecordFields } from '../workspace/record/types.ts'
+import { RAMExecutionStore } from './ram.ts'
 
 const enc = (text: string): Uint8Array => new TextEncoder().encode(text)
 const dec = (b: Uint8Array): string => new TextDecoder().decode(b)
@@ -28,9 +28,9 @@ function list(names: string[], generation = 1): RecordFields {
   }
 }
 
-describe('RAMJobStore', () => {
+describe('RAMExecutionStore', () => {
   it('writes a list under its generation', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     expect(await store.load('s')).toBeNull()
     expect(await store.casSet('s', list(['a']), 0)).toBe(true)
     expect(await store.casSet('s', list(['a', 'b']), 0)).toBe(false)
@@ -43,7 +43,7 @@ describe('RAMJobStore', () => {
   })
 
   it('hands out a copy of a loaded list', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     await store.casSet('s', list(['a']), 0)
     const loaded = (await store.load('s'))?.jobs as Record<string, { console: string }>
     for (const job of Object.values(loaded)) job.console = 'changed'
@@ -52,7 +52,7 @@ describe('RAMJobStore', () => {
   })
 
   it('drops a console once no list names it', async () => {
-    const store = new RAMJobStore()
+    const store = new RAMExecutionStore()
     await store.casSet('s', list(['a']), 0)
     const held = store.console('a')
     await held.append(Channel.STDOUT, enc('kept'))
@@ -63,11 +63,11 @@ describe('RAMJobStore', () => {
     expect(chunks.map((c) => dec(c.data))).toEqual(['kept'])
   })
 
-  it("publishes an owner's processes and drops them", async () => {
-    const store = new RAMJobStore()
+  it("publishes a daemon's processes and drops them", async () => {
+    const store = new RAMExecutionStore()
     const record = { pid: 2, command: 'sleep 30', runs: [] }
-    await store.publish('a', { '2': record })
-    await store.publish('b', { '5': { pid: 5, runs: [] } })
+    await store.publish('a', { '2': record }, 2)
+    await store.publish('b', { '5': { pid: 5, runs: [] } }, 5)
     const found = await store.processes()
     expect(found).toEqual({ a: { '2': record }, b: { '5': { pid: 5, runs: [] } } })
     ;(found.a?.['2'] as { pid: number }).pid = 9
@@ -76,8 +76,8 @@ describe('RAMJobStore', () => {
     expect(Object.keys(await store.processes())).toEqual(['b'])
   })
 
-  it('takes the stops asked of an owner once', async () => {
-    const store = new RAMJobStore()
+  it('takes the stops asked of a daemon once', async () => {
+    const store = new RAMExecutionStore()
     await store.requestStop('a', 2, 15)
     await store.requestStop('a', 3, 9)
     await store.requestStop('b', 4, 9)
@@ -89,16 +89,34 @@ describe('RAMJobStore', () => {
     expect(await store.takeStops('b')).toEqual([[4, 9]])
   })
 
-  it('never lapses an owner without a lease', async () => {
-    expect(await new RAMJobStore().alive('never-renewed')).toBe(true)
+  it('lets one daemon hold the lease until it releases it', async () => {
+    const store = new RAMExecutionStore()
+    expect(await store.holder()).toBeNull()
+    expect(await store.lease('a')).toBeNull()
+    expect(await store.lease('a')).toBeNull()
+    expect(await store.lease('b')).toBe('a')
+    expect(await store.holder()).toBe('a')
+    await store.release('b')
+    expect(await store.holder()).toBe('a')
+    await store.release('a')
+    expect(await store.lease('b')).toBeNull()
+    expect(await store.holder()).toBe('b')
   })
 
-  it('keeps an owner alive while its lease holds', async () => {
-    const store = new RAMJobStore(0.05)
-    expect(await store.alive('o')).toBe(false)
-    await store.renew('o')
-    expect(await store.alive('o')).toBe(true)
+  it('lapses a lease unless renewed', async () => {
+    const store = new RAMExecutionStore(0.05)
+    expect(await store.lease('a')).toBeNull()
+    expect(await store.lease('b')).toBe('a')
     await new Promise((resolve) => setTimeout(resolve, 100))
-    expect(await store.alive('o')).toBe(false)
+    expect(await store.holder()).toBeNull()
+    expect(await store.lease('b')).toBeNull()
+  })
+
+  it('only raises the highest pid', async () => {
+    const store = new RAMExecutionStore()
+    expect(await store.highestPid()).toBe(0)
+    await store.publish('a', {}, 7)
+    await store.publish('b', {}, 3)
+    expect(await store.highestPid()).toBe(7)
   })
 })

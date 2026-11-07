@@ -16,7 +16,7 @@ import type { ObserverStore } from '../../observe/store.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
 import type { WorkspaceStateStore } from '../store/base.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
-import type { JobStore } from '../../execution/job/store.ts'
+import type { ExecutionStore } from '../../execution/base.ts'
 import type { WorkspaceOptions } from './types.ts'
 
 /**
@@ -29,7 +29,7 @@ export interface ControlStores {
   observe: ObserverStore
   namespace: NamespaceStore
   sessions: NamespaceStore
-  jobs: JobStore
+  execution: ExecutionStore
 }
 
 /**
@@ -50,6 +50,6 @@ export function resolveControlStores(wsId: string, options: WorkspaceOptions): C
     observe: options.observe ?? stateStore.observer(wsId),
     namespace: options.namespaceStore ?? stateStore.namespace(wsId),
     sessions: options.sessionStore ?? stateStore.sessions(wsId),
-    jobs: stateStore.jobs(wsId),
+    execution: stateStore.execution(wsId),
   }
 }

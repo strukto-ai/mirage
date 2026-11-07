@@ -19,8 +19,8 @@ from typing import Any
 import pytest
 
 from mirage.bridge.sync import handed
+from mirage.execution.errors import WorkspaceHeldError
 from mirage.execution.job import Job, JobStatus, JobTable
-from mirage.execution.job import table as job_table_module
 from mirage.execution.process.types import ProcessState
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import (
@@ -36,7 +36,6 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.executor import jobs as jobs_executor
 from mirage.workspace.executor.jobs import (
-    _owner_tags,
     handle_disown,
     handle_fg,
     handle_jobs,
@@ -1466,212 +1465,90 @@ def _sharing(store: RAMWorkspaceStateStore) -> Workspace:
     )
 
 
+# One daemon runs a workspace's lines at a time: a line on another daemon's
+# workspace is refused, naming the daemon that holds the lease, while that
+# daemon lists, kills and waits on the jobs through the store.
 @pytest.mark.asyncio
-async def test_a_workspace_lists_kills_and_waits_on_anothers_job():
+async def test_another_daemon_reaches_a_job_but_runs_no_line():
     store = RAMWorkspaceStateStore()
     a, b = _sharing(store), _sharing(store)
     try:
         assert (await a.shell("sleep 30 &", session_id="s")).exit_code == 0
-        listed = await b.shell("jobs", session_id="s")
-        assert listed.stdout == b"[1] running sleep 30\n"
-        assert (await b.shell("kill %1", session_id="s")).exit_code == 0
-        await a.job_table.sync("s")
+        with pytest.raises(WorkspaceHeldError) as held:
+            await b.shell("jobs", session_id="s")
+        assert held.value.holder == a.job_table.daemon
+        await b.job_table.sync("s")
+        [seen] = b.job_table.list_jobs("s")
+        assert (seen.id, seen.command, seen.status) == (
+            1,
+            "sleep 30",
+            JobStatus.RUNNING,
+        )
+        assert await b.job_table.kill(1, "s", 15)
+        assert (await b.job_table.wait(1, "s")).exit_code == 143
         job = a.job_table.get(1, "s")
         assert job is not None and job.process is not None
-        assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
-        waited = await b.shell("wait %1; echo $?", session_id="s")
-        assert waited.stdout == b"143\n"
-        assert (await b.shell("jobs", session_id="s")).stdout == b""
-        assert (await a.shell("jobs", session_id="s")).stdout == b""
         async with asyncio.timeout(2):
             await job.process.join()
-    finally:
-        await a.close()
-        await b.close()
-
-
-@pytest.mark.asyncio
-async def test_a_workspace_waits_for_anothers_job_status():
-    store = RAMWorkspaceStateStore()
-    a, b = _sharing(store), _sharing(store)
-    try:
-        await a.shell("false &", session_id="s")
-        waited = await b.shell("wait %1; echo $?", session_id="s")
-        assert waited.stdout == b"1\n"
-        await a.shell("sleep 0.05 & sleep 0.05 &", session_id="s")
-        assert (await b.shell("wait; echo $?", session_id="s")).stdout == (
-            b"0\n"
-        )
-        assert (await a.shell("jobs", session_id="s")).stdout == b""
-    finally:
-        await a.close()
-        await b.close()
-
-
-@pytest.mark.asyncio
-async def test_a_pid_names_the_runner_here_before_anothers_job_number():
-    store = RAMWorkspaceStateStore()
-    a, b = _sharing(store), _sharing(store)
-    try:
-        await a.shell(
-            "for i in 1 2 3 4 5 6; do sleep 30 & done", session_id="s"
-        )
-        killed = await b.shell('sleep 30 & kill "$!"', session_id="s")
-        assert killed.exit_code == 0
-        async with asyncio.timeout(5):
-            waited = await b.shell(
-                'false & wait "$!"; echo $?', session_id="s"
-            )
-        assert waited.stdout == b"1\n"
-        await a.job_table.sync("s")
-        assert [j.status for j in a.job_table.list_jobs("s")][:6] == [
-            JobStatus.RUNNING
-        ] * 6
-    finally:
-        await a.close()
-        await b.close()
-
-
-@pytest.mark.asyncio
-async def test_a_substitution_lists_anothers_jobs():
-    store = RAMWorkspaceStateStore()
-    a, b = _sharing(store), _sharing(store)
-    try:
-        await a.shell("sleep 30 &", session_id="s")
-        listed = await b.shell('echo "$(jobs)"', session_id="s")
-        assert listed.stdout == b"[1] running sleep 30\n"
-    finally:
-        await a.close()
-        await b.close()
-
-
-async def _listed(ws: Workspace, row: str) -> str:
-    """``ps`` on ``ws`` once it lists ``row``, within five seconds.
-
-    Args:
-        ws (Workspace): the workspace to list on.
-        row (str): a line the listing has to hold.
-    """
-    async with asyncio.timeout(5):
-        while True:
-            out = (await ws.shell("ps", session_id="s")).stdout.decode()
-            if row in out.splitlines():
-                return out
-            await asyncio.sleep(0.01)
-
-
-# ps lists the processes another workspace on the store runs as
-# owner:pid, -p selects one of them and -o prints its ids tagged; kill
-# owner:pid asks its owner to stop it.
-@pytest.mark.asyncio
-async def test_a_workspace_lists_and_kills_anothers_process(monkeypatch):
-    monkeypatch.setattr(job_table_module, "PUBLISH_SECONDS", 0.01)
-    store = RAMWorkspaceStateStore()
-    a, b = _sharing(store), _sharing(store)
-    try:
-        await a.shell("sleep 30 &", session_id="s")
-        job = a.job_table.get(1, "s")
-        assert job is not None and job.process is not None
-        name = f"{a.job_table.owner[:6]}:{job.pid}"
-        await _listed(b, f"{name}\tsleep 30")
-        picked = await b.shell(f"ps -p {name} -o pid=,comm=", session_id="s")
-        assert picked.stdout.decode().split() == [name, "sleep"]
-        killed = await b.shell(f"kill {name}; echo $?", session_id="s")
-        assert killed.stdout == b"0\n"
-        async with asyncio.timeout(5):
-            await job.process.join()
         assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
     finally:
         await a.close()
         await b.close()
 
 
-# A runner's native runs follow it in the compact rows, on every
-# workspace that lists it.
+# Once the daemon holding the lease closes the workspace, another one runs
+# its lines, numbering its pids past every pid the first gave out.
 @pytest.mark.asyncio
-async def test_ps_shows_the_native_runs_a_process_has_going(monkeypatch):
-    monkeypatch.setattr(job_table_module, "PUBLISH_SECONDS", 0.01)
+async def test_a_workspace_runs_on_another_daemon_once_its_own_closes():
     store = RAMWorkspaceStateStore()
     a, b = _sharing(store), _sharing(store)
     try:
-        await a.shell("sleep 30 &", session_id="s")
-        job = a.job_table.get(1, "s")
+        first = await a.shell("true & echo $!", session_id="s")
+        await a.close()
+        second = await b.shell("true & echo $!", session_id="s")
+        assert int(second.stdout) > int(first.stdout)
+    finally:
+        await b.close()
+
+
+# ps lists this daemon's runners, each followed by the native runs it has
+# going.
+@pytest.mark.asyncio
+async def test_ps_shows_the_native_runs_a_process_has_going():
+    ws = Workspace({}, session_id="s")
+    try:
+        await ws.shell("sleep 30 &", session_id="s")
+        job = ws.job_table.get(1, "s")
         assert job is not None and job.process is not None
         job.process.add_run(
             "box:t",
             {"runtime": "docker", "tag": "0123456789abcdef", "command": "x"},
         )
         run = "-\t└ docker 0123456789ab: x"
-        own = (await a.shell("ps", session_id="s")).stdout.decode()
+        own = (await ws.shell("ps", session_id="s")).stdout.decode()
         assert own.splitlines()[:2] == [f"{job.pid}\tsleep 30", run]
-        listed = await _listed(b, run)
-        name = f"{a.job_table.owner[:6]}:{job.pid}"
-        lines = listed.splitlines()
-        assert lines[lines.index(f"{name}\tsleep 30") + 1] == run
-        await a.shell("kill %1", session_id="s")
-    finally:
-        await a.close()
-        await b.close()
-
-
-# An owner:pid no live workspace answers to is no such process; one with
-# no owner or no number is no process ID at all.
-@pytest.mark.asyncio
-async def test_kill_refuses_an_owner_pid_nobody_runs():
-    ws = Workspace({}, session_id="s")
-    try:
-        killed = await ws.shell("kill ab12:3 :3 ab12:x", session_id="s")
-        assert killed.exit_code == 1
-        assert killed.stderr.decode().splitlines() == [
-            "bash: line 1: kill: (ab12:3) - No such process",
-            "bash: line 1: kill: :3: arguments must be process or job IDs",
-            "bash: line 1: kill: ab12:x: arguments must be process or job IDs",
-        ]
-        listed = await ws.shell("ps -p ab12:3", session_id="s")
-        assert (listed.exit_code, listed.stdout) == (1, b"")
+        await ws.shell("kill %1", session_id="s")
     finally:
         await ws.close()
 
 
-# Each owner is named by the shortest start of its id, six characters at
-# least, that no other owner's begins with, so every name ps prints
-# reaches one process.
-def test_owner_names_stay_unique():
-    assert _owner_tags(["abcdef12", "abcdef34", "0123456789"]) == {
-        "abcdef12": "abcdef1",
-        "abcdef34": "abcdef3",
-        "0123456789": "012345",
-    }
-
-
-# A child shell, a script and a command substitution list and stop other
-# workspaces' processes as the top-level shell does.
+# A pid is a number: kill and ps refuse any other operand in bash's and
+# procps's words.
 @pytest.mark.asyncio
-async def test_child_shells_reach_anothers_processes(monkeypatch):
-    monkeypatch.setattr(job_table_module, "PUBLISH_SECONDS", 0.01)
-    store = RAMWorkspaceStateStore()
-    a, b = _sharing(store), _sharing(store)
+async def test_kill_and_ps_refuse_a_pid_that_is_no_number():
+    ws = Workspace({}, session_id="s")
     try:
-        await a.shell("sleep 30 &", session_id="s")
-        job = a.job_table.get(1, "s")
-        assert job is not None and job.process is not None
-        name = f"{a.job_table.owner[:6]}:{job.pid}"
-        await _listed(b, f"{name}\tsleep 30")
-        for line in (
-            f"bash -c 'ps -p {name} -o comm='",
-            f"echo $(ps -p {name} -o comm=)",
-        ):
-            listed = await b.shell(line, session_id="s")
-            assert listed.stdout == b"sleep\n", line
-        killed = await b.shell(
-            f"bash -c 'kill {name}'; echo $?", session_id="s"
-        )
-        assert killed.stdout == b"0\n"
-        async with asyncio.timeout(5):
-            await job.process.join()
+        killed = await ws.shell("kill ab12:3 :3", session_id="s")
+        assert killed.exit_code == 1
+        assert killed.stderr.decode().splitlines() == [
+            "bash: line 1: kill: ab12:3: arguments must be process or job IDs",
+            "bash: line 1: kill: :3: arguments must be process or job IDs",
+        ]
+        listed = await ws.shell("ps -p ab12:3", session_id="s")
+        assert listed.exit_code == 1
+        assert b"process ID list syntax error" in listed.stderr
     finally:
-        await a.close()
-        await b.close()
+        await ws.close()
 
 
 class _Held(JobConsole):

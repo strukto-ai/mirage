@@ -188,14 +188,14 @@
       "error": "history only grows"
     },
     {
-      "id": "jobs_cannot_use_disk",
+      "id": "execution_cannot_use_disk",
       "op": "config",
       "where": "store",
       "options": {
         "names": "store"
       },
       "value": {
-        "jobs": {
+        "execution": {
           "type": "disk"
         }
       },

@@ -18,7 +18,8 @@ import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { CapacityState } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { type JobRunner, JobStatus, RAMJobStore } from '../../execution/job/index.ts'
+import { type JobRunner, JobStatus } from '../../execution/job/index.ts'
+import { RAMExecutionStore } from '../../execution/ram.ts'
 import {
   type Channel,
   type ConsoleChunk,
@@ -142,7 +143,7 @@ class LateWriteStore extends RAMConsoleStore {
 }
 
 /** A job store whose every job writes one given console. */
-class OneConsole extends RAMJobStore {
+class OneConsole extends RAMExecutionStore {
   constructor(private readonly store: RAMConsoleStore) {
     super()
   }

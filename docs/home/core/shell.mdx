@@ -65,42 +65,27 @@ These are common options, not an exhaustive flag reference.
 A workspace runs as several instances when more than one process builds it
 under the same `workspace_id` on one shared
 [store](/home/configuration#cache-index-and-store), as
-[Infrastructure](/home/infrastructure/jobs#run-several-instances-of-one-workspace)
-shows. The instances share each session's background jobs: in one process
-through a RAM store, and across processes through a store that keeps jobs on
-Redis. On any of them, `jobs` lists the session's jobs under the same
-numbers, `wait` returns a job's exit status, the same on every one of them,
-`kill %N` stops it and `fg %N` waits for it. Two instances never hand out the
-same job number.
+[Infrastructure](/home/infrastructure/jobs#several-instances-of-one-workspace)
+shows. One of them runs its lines at a time, the first to run one; a line on
+any other is refused with an error naming it until it closes the workspace.
+Process IDs continue from the highest the workspace has used, so an instance
+that takes over never reuses one.
 
-A job runs in the instance that started it. If that instance goes away
-without stopping it, the others report the job ended with status 129, as
-Bash reports a hangup, about 30 seconds later. `jobs -l` shows another
-instance's job under its job number in place of a PID, and `$!` is set only
-where the job started.
+If the running instance goes away without closing the workspace, another
+can run its lines about 30 seconds later. It reports the jobs left behind as
+ended with status 129, as Bash reports a hangup, and stops what they ran
+outside Mirage: a sandbox run through a runtime of the same name, or a host
+program on the same machine whose PID still matches.
 
-`ps` lists the processes the other instances run too, within the session's
-process view, as `owner:pid`: the start of the instance's id, then its own
-PID. `ps -p owner:pid` selects one, and `kill owner:pid` stops it within
-about a second. An instance's own processes keep plain PIDs. Each process in
-`ps`'s rows is followed by what it runs outside Mirage: a host program by its
-host PID, a sandbox run by its runtime and tag.
+Each process in `ps`'s rows is followed by what it runs outside Mirage: a
+host program by its host PID, a sandbox run by its runtime and tag.
 
 ```
 1	ps
-f8f8ed:2	sleep 300
-f8f8ed:3	python3 train.py
+2	sleep 300
+3	python3 train.py
 -	└ host 19443: python3 train.py
 ```
-
-When an instance exits unexpectedly without stopping running processes,
-subsequent instances clean up the orphaned processes: a sandbox run through
-a runtime of the same name, or a host program on the same machine whose PID
-still matches the original process. An instance is marked inactive 30 seconds
-after its last heartbeat; a newly started instance re-checks for abandoned
-processes 30 seconds after launch. Any currently running instance also cleans
-up orphaned processes from inactive instances whenever it lists processes or
-waits on a job.
 
 ### Per-session mount modes
 

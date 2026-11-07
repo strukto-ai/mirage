@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from mirage.concurrency.limiter import run_blocking
+from mirage.execution.errors import WorkspaceHeldError
 from mirage.execution.types import ExecutionRecord, ExecutionStatus
 from mirage.io.types import ByteSource
 from mirage.server.io_serde import explanation_to_dict, io_result_to_dict
@@ -165,6 +166,17 @@ async def shell(
                 status_code=503, detail="server is shutting down"
             )
         raise HTTPException(status_code=404, detail="workspace not found")
+    table = entry.runner.ws.job_table
+    if not table.claimed:
+        # Once held, the lease is this daemon's until the workspace
+        # closes, so only a line on a workspace it does not hold yet waits
+        # for the store here.
+        try:
+            await entry.runner.call(table.claim())
+        except WorkspaceHeldError as exc:
+            if upload is not None:
+                await _finish_upload(upload, part)
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     job = jobs.submit(
         workspace_id=workspace_id,
         command=req_obj.command,

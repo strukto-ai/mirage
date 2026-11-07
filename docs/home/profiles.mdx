@@ -46,8 +46,7 @@ profiles:
 ```
 
 `processes.list` and `processes.kill` take `session`, the default, for the
-session's own processes, or `workspace`, for every session's. Both reach
-every [instance](/home/core/shell#jobs-across-instances) of the workspace.
+session's own processes, or `workspace`, for every session's.
 `kill` cannot reach past `list`, and a bare scope such as
 `processes: workspace` sets both. `max` counts every pipeline stage,
 subshell and background job the session has running; it is 128 unless a

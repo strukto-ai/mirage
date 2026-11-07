@@ -45,10 +45,10 @@ afterEach(async () => {
   for (const ws of open.splice(0)) await ws.close()
 })
 
-function mkWs(store: RAMWorkspaceStateStore, workspaceId: string, ram?: RAMVFS) {
+function mkWs(store: RAMWorkspaceStateStore, workspaceId: string, ram?: RAMVFS, daemonId?: string) {
   const ws = new Workspace(
     { '/data': ram ?? new RAMVFS() },
-    { mode: MountMode.EXEC, workspaceId, store },
+    { mode: MountMode.EXEC, workspaceId, store, ...(daemonId !== undefined ? { daemonId } : {}) },
   )
   open.push(ws)
   return ws
@@ -229,17 +229,19 @@ describe('Workspace on a WorkspaceStateStore', () => {
     expect(denied.exitCode).not.toBe(0)
   })
 
+  // A daemon restarted on the same store, under the id it keeps, finds the
+  // shell as it left it.
   it('a workspace on the same store finds the shell as the last one left it', async () => {
     const store = new RAMWorkspaceStateStore()
     const ram = new RAMVFS()
-    const wsA = mkWs(store, 'kept', ram)
+    const wsA = mkWs(store, 'kept', ram, 'd')
     const set = await wsA.shell(
       "mkdir -p /data/real && ln -s /data/real /data/link && cd /data/link && alias ll='ls -l' && set -o pipefail && shopt -s nullglob && umask 077 && trap 'echo bye' EXIT",
     )
     expect(set.exitCode).toBe(0)
     await wsA.flushSessions()
 
-    const wsB = mkWs(store, 'kept', ram)
+    const wsB = mkWs(store, 'kept', ram, 'd')
     const result = await wsB.shell(
       'alias ll; set -o | grep pipefail; shopt nullglob; umask; pwd; trap -p EXIT',
     )
@@ -251,14 +253,14 @@ describe('Workspace on a WorkspaceStateStore', () => {
   it('a reloaded function runs the aliases its definition saw', async () => {
     const store = new RAMWorkspaceStateStore()
     const ram = new RAMVFS()
-    const wsA = mkWs(store, 'fn', ram)
+    const wsA = mkWs(store, 'fn', ram, 'd')
     await wsA.shell('shopt -s expand_aliases')
     await wsA.shell('f() { echo old; }')
     await wsA.shell("alias echo='printf changed'")
     expect((await wsA.shell('f')).stdoutText).toBe('old\n')
     await wsA.flushSessions()
 
-    const wsB = mkWs(store, 'fn', ram)
+    const wsB = mkWs(store, 'fn', ram, 'd')
     expect((await wsB.shell('f; echo now')).stdoutText).toBe('old\nchanged')
   })
 
@@ -273,13 +275,15 @@ describe('Workspace on a WorkspaceStateStore', () => {
     expect(wsB.listSessions().every((s) => s.sessionId !== 'narrow')).toBe(true)
   })
 
+  // The second runs its lines once the first closed, as one daemon runs a
+  // workspace's lines at a time.
   it('shares history through the provider', async () => {
     const store = new RAMWorkspaceStateStore()
-    const ram = new RAMVFS()
-    const wsA = mkWs(store, 'shared', ram)
+    const wsA = mkWs(store, 'shared')
     await wsA.shell('echo one')
+    await wsA.close()
 
-    const wsB = mkWs(store, 'shared', ram)
+    const wsB = mkWs(store, 'shared')
     const result = await wsB.shell('history')
     expect(result.stdoutText).toContain('echo one')
   })
@@ -293,6 +297,7 @@ describe('Workspace on a WorkspaceStateStore', () => {
     )
     open.push(ws)
     await ws.shell('echo hi')
+    await ws.close()
 
     const sibling = mkWs(store, 'ws-a')
     const result = await sibling.shell('history')

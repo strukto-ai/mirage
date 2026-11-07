@@ -27,7 +27,7 @@ from mirage.context.session_context import (
     set_explaining,
     set_refusal_sink,
 )
-from mirage.execution.job import RAMJobStore
+from mirage.execution.ram import RAMExecutionStore
 from mirage.policy import (
     Action,
     Ask,
@@ -1387,7 +1387,7 @@ async def test_a_path_the_pass_cannot_read_is_left_to_the_gate():
         await ws.close()
 
 
-class _NoConsoles(RAMJobStore):
+class _NoConsoles(RAMExecutionStore):
     """A job store that cannot open a console."""
 
     def console(self, name: str) -> ConsoleStore:

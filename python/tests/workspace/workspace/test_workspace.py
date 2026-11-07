@@ -27,7 +27,7 @@ from mirage.cache.index import IndexConfig
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.cli.builtin.gws import GWS
 from mirage.context import reset_current_session, set_current_session
-from mirage.execution.job.ram import RAMJobStore
+from mirage.execution.ram import RAMExecutionStore
 from mirage.runtime.sandbox import RemoteSandbox
 from mirage.types import MountBackend, MountMode
 from mirage.utils.clock import ManualClock
@@ -860,7 +860,7 @@ async def test_a_workspace_reaps_a_lapsed_instance_as_it_starts():
     box = _ReapedBox(("t1",))
     ws = Workspace({}, runtimes=[box])
     try:
-        store = RAMJobStore(lease_seconds=30.0)
+        store = RAMExecutionStore(lease_seconds=30.0)
         ws.job_table.store = store
         run = {"runtime": "reapbox", "tag": "t1", "command": "x"}
         await store.publish(

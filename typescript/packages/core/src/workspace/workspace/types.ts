@@ -141,6 +141,14 @@ export interface WorkspaceOptions {
   namespaceStore?: NamespaceStore
   sessionStore?: NamespaceStore
   workspaceId?: string
+  /**
+   * The id of the daemon this workspace runs on, which the workspace's
+   * lease in its store names. One daemon runs a workspace's lines at a
+   * time; a server passes the id it keeps on disk, so a restarted one
+   * holds its workspaces again. Omitted is a fresh one. Mirrors Python's
+   * `daemon_id`.
+   */
+  daemonId?: string
   store?: WorkspaceStateStore
   /**
    * Whether a passed `store` is this workspace's to close. A provider

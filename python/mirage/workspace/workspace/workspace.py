@@ -285,6 +285,7 @@ class Workspace:
         command_limits: Mapping[str, Limit] | None = None,
         session_id: str | None = None,
         workspace_id: str | None = None,
+        daemon_id: str | None = None,
         store: WorkspaceStateStore | None = None,
         owns_store: bool = False,
         observe: ObserverStore | None = None,
@@ -421,8 +422,14 @@ class Workspace:
             ),
         )
         self.processes.ceiling = self._registry.ceilings.max_processes
+        # One daemon runs a workspace's lines at a time, the one holding
+        # its lease in the store; a server passes the id it keeps on disk,
+        # so a restarted one holds its workspaces again.
         self.job_table = JobTable(
-            stores.jobs, self.processes, clock=self._clock
+            stores.execution,
+            self.processes,
+            clock=self._clock,
+            daemon=daemon_id,
         )
         self.job_table.reaper = self._reap_runs
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
@@ -1440,6 +1447,7 @@ class Workspace:
         )
 
         async def run() -> int:
+            await self.job_table.claim()
             await self.ensure_sessions_loaded()
             if self._session_mgr.get(session.session_id) is not owner:
                 raise RuntimeError(

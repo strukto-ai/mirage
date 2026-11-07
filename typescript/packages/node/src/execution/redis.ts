@@ -12,51 +12,63 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { readFileSync } from 'node:fs'
+import { ExecutionStore } from '@struktoai/mirage-core/execution/base'
 import { CONSOLE_TTL_SECONDS, LEASE_SECONDS } from '@struktoai/mirage-core/execution/job/constants'
-import { JobStore } from '@struktoai/mirage-core/execution/job/store'
 import type { RecordFields } from '@struktoai/mirage-core/workspace/record/types'
-import { RedisConnection } from '../../optional_peer.ts'
-import { RedisConsoleStore } from '../../shell/console/redis/index.ts'
-import { CAS_SCRIPT } from '../../workspace/mount/namespace/redis.ts'
+import { RedisConnection } from '../optional_peer.ts'
+import { RedisConsoleStore } from '../shell/console/redis/index.ts'
+import { CAS_SCRIPT } from '../workspace/mount/namespace/redis.ts'
 
-export interface RedisJobStoreOptions {
+export const LEASE_SCRIPT = readFileSync(new URL('./lease.lua', import.meta.url), 'utf8')
+export const PID_SCRIPT = readFileSync(new URL('./pid.lua', import.meta.url), 'utf8')
+
+export interface RedisExecutionStoreOptions {
   url?: string
   keyPrefix?: string
-  /** See `JobStore`; null means owners never lapse. */
+  /** See `ExecutionStore`; null means a lease holds until released. */
   leaseSeconds?: number | null
 }
 
 /**
- * JobStore on one Redis server, shared by every process on it.
+ * ExecutionStore on one Redis server, shared by every process on it.
  *
  * Key layout under one prefix:
  *
  * - `{prefix}lists`: a hash of session id to job list JSON, written with
  *   the session table's compare-and-set script
  * - `{prefix}console:{name}:*`: one console stream per job
- *   (`RedisConsoleStore`), expiring a day after its last write or its
- *   owner's last renewal
- * - `{prefix}owner:{id}`: an owner's lease, a key that expires
- * - `{prefix}processes:{id}`: the processes an owner runs, as JSON, kept a
- *   day after its last publish so a lapsed owner's runs can still be found
- * - `{prefix}stops:{id}`: a list of the stops asked of an owner
+ *   (`RedisConsoleStore`), expiring a day after its last write or the last
+ *   renewal of the lease while its job ran
+ * - `{prefix}lease`: the id of the daemon holding the workspace's lease, a
+ *   key that expires, taken and released by `lease.lua`
+ * - `{prefix}pid`: the highest pid published, raised by `pid.lua`
+ * - `{prefix}processes:{id}`: the processes a daemon runs, as JSON, kept a
+ *   day after its last publish so the runs of one that lost the lease can
+ *   still be found
+ * - `{prefix}stops:{id}`: a list of the stops asked of a daemon
  *
- * One connection serves the lists, the leases and every console, so a
+ * One connection serves the lists, the lease and every console, so a
  * workspace holds one client however many jobs it follows. Mirrors
- * Python's `RedisJobStore`.
+ * Python's `RedisExecutionStore`.
  */
-export class RedisJobStore extends JobStore {
+export class RedisExecutionStore extends ExecutionStore {
   readonly url: string
   private readonly prefix: string
   private readonly listsKey: string
+  private readonly leaseKey: string
+  private readonly pidKey: string
   private readonly redis: RedisConnection
+  private raised = 0
 
-  constructor(options: RedisJobStoreOptions = {}) {
+  constructor(options: RedisExecutionStoreOptions = {}) {
     super(options.leaseSeconds === undefined ? LEASE_SECONDS : options.leaseSeconds)
     this.url = options.url ?? 'redis://localhost:6379/0'
     this.prefix = options.keyPrefix ?? 'mirage:jobs:'
     this.listsKey = `${this.prefix}lists`
-    this.redis = new RedisConnection(this.url, 'RedisJobStore')
+    this.leaseKey = `${this.prefix}lease`
+    this.pidKey = `${this.prefix}pid`
+    this.redis = new RedisConnection(this.url, 'RedisExecutionStore')
   }
 
   async load(sessionId: string): Promise<RecordFields | null> {
@@ -97,31 +109,51 @@ export class RedisJobStore extends JobStore {
   }
 
   /**
-   * One round trip however many jobs the owner runs, so the lease is never
-   * late behind its consoles.
+   * One round trip with no consoles to keep, and one transaction however
+   * many jobs the daemon runs, so the lease is never late behind its
+   * consoles.
    */
-  async renew(owner: string, consoles: readonly string[] = []): Promise<void> {
-    if (this.leaseSeconds === null && consoles.length === 0) return
+  async lease(daemon: string, consoles: readonly string[] = []): Promise<string | null> {
     const c = await this.redis.client()
-    const pipe = c.multi()
-    if (this.leaseSeconds !== null)
-      pipe.set(`${this.prefix}owner:${owner}`, '1', { PX: Math.round(this.leaseSeconds * 1000) })
+    const options = {
+      keys: [this.leaseKey],
+      arguments: [
+        daemon,
+        'take',
+        this.leaseSeconds === null ? '' : String(Math.round(this.leaseSeconds * 1000)),
+      ],
+    }
+    if (consoles.length === 0) return (await c.eval(LEASE_SCRIPT, options)) as string | null
+    const pipe = c.multi().eval(LEASE_SCRIPT, options)
     for (const name of consoles)
       for (const key of this.console(name).keys) pipe.expire(key, CONSOLE_TTL_SECONDS)
-    await pipe.exec()
+    const [held] = (await pipe.exec()) as unknown as [string | null]
+    return held
   }
 
-  async alive(owner: string): Promise<boolean> {
-    if (this.leaseSeconds === null) return true
+  async holder(): Promise<string | null> {
     const c = await this.redis.client()
-    return (await c.exists(`${this.prefix}owner:${owner}`)) > 0
+    return await c.get(this.leaseKey)
   }
 
-  async publish(owner: string, processes: Readonly<Record<string, RecordFields>>): Promise<void> {
+  async release(daemon: string): Promise<void> {
     const c = await this.redis.client()
-    const key = `${this.prefix}processes:${owner}`
+    await c.eval(LEASE_SCRIPT, { keys: [this.leaseKey], arguments: [daemon, 'release', ''] })
+  }
+
+  async publish(
+    daemon: string,
+    processes: Readonly<Record<string, RecordFields>>,
+    lastPid = 0,
+  ): Promise<void> {
+    const c = await this.redis.client()
+    const key = `${this.prefix}processes:${daemon}`
+    if (lastPid > this.raised) {
+      await c.eval(PID_SCRIPT, { keys: [this.pidKey], arguments: [String(lastPid)] })
+      this.raised = lastPid
+    }
     if (Object.keys(processes).length === 0) {
-      await c.del([key, `${this.prefix}stops:${owner}`])
+      await c.del([key, `${this.prefix}stops:${daemon}`])
       return
     }
     await c.set(key, JSON.stringify(processes), { EX: CONSOLE_TTL_SECONDS })
@@ -145,9 +177,14 @@ export class RedisJobStore extends JobStore {
     return found
   }
 
-  async requestStop(owner: string, pid: number, signal: number): Promise<void> {
+  async highestPid(): Promise<number> {
     const c = await this.redis.client()
-    const key = `${this.prefix}stops:${owner}`
+    return Number((await c.get(this.pidKey)) ?? 0)
+  }
+
+  async requestStop(daemon: string, pid: number, signal: number): Promise<void> {
+    const c = await this.redis.client()
+    const key = `${this.prefix}stops:${daemon}`
     await c
       .multi()
       .rPush(key, JSON.stringify([pid, signal]))
@@ -155,9 +192,9 @@ export class RedisJobStore extends JobStore {
       .exec()
   }
 
-  async takeStops(owner: string): Promise<[number, number][]> {
+  async takeStops(daemon: string): Promise<[number, number][]> {
     const c = await this.redis.client()
-    const key = `${this.prefix}stops:${owner}`
+    const key = `${this.prefix}stops:${daemon}`
     const [raw] = (await c.multi().lRange(key, 0, -1).del(key).exec()) as unknown as [string[]]
     return raw.map((item) => JSON.parse(item) as [number, number])
   }
@@ -169,6 +206,7 @@ export class RedisJobStore extends JobStore {
       keys.push(...(Array.isArray(k) ? k : [k]))
     }
     if (keys.length > 0) await c.del(keys)
+    this.raised = 0
   }
 
   async close(): Promise<void> {

@@ -1,24 +1,24 @@
 ---
 title: Jobs
-description: Where a workspace keeps background jobs and processes, and how several instances of one workspace share them.
+description: Where a workspace keeps background jobs and processes, and which instance of it runs them.
 icon: list-check
 ---
 
-The jobs store keeps:
+The execution store keeps:
 
 - Each session's background jobs, the ones `cmd &` starts, and each job's
   output.
-- The processes each instance of the workspace runs, which `ps` lists.
-- When each instance was last seen, so the others can tell it is gone.
+- The processes the workspace runs, which `ps` lists.
+- Which instance of the workspace runs them, and when it was last seen.
 
 | `type` | Keeps them | Keys |
 | --- | --- | --- |
 | `ram` | In the process's memory. Jobs end with the process. | |
 | `redis` | On Redis, under `key_prefix` and the workspace id. A job's output stays a day after its last write. | `url`, `key_prefix`, default `mirage:` |
 
-The group key is `store.jobs`. A job's output is a stream other processes
-follow, so `disk` is refused here, and a `disk` store keeps its jobs in
-memory.
+The group key is `store.execution`. A job's output is a stream other
+processes follow, so `disk` is refused here, and a `disk` store keeps its
+jobs in memory.
 
 ## On Redis
 
@@ -29,7 +29,7 @@ memory.
     store:
       type: disk
       root: /var/lib/mirage
-      jobs:
+      execution:
         type: redis
         url: redis://redis.internal:6379/0
     ```
@@ -41,7 +41,7 @@ memory.
 
     store = DiskWorkspaceStateStore(
         root="/var/lib/mirage",
-        jobs=RedisWorkspaceStateStore(url="redis://redis.internal:6379/0"),
+        execution=RedisWorkspaceStateStore(url="redis://redis.internal:6379/0"),
     )
     ws = Workspace(mounts, workspace_id="agent", store=store, owns_store=True)
     ```
@@ -52,7 +52,7 @@ memory.
 
     const store = new DiskWorkspaceStateStore({
       root: '/var/lib/mirage',
-      jobs: new RedisWorkspaceStateStore({ url: 'redis://redis.internal:6379/0' }),
+      execution: new RedisWorkspaceStateStore({ url: 'redis://redis.internal:6379/0' }),
     })
     const ws = new Workspace(mounts, { workspaceId: 'agent', store, ownsStore: true })
     ```
@@ -62,7 +62,7 @@ memory.
 Here the rest of the state stays on the machine's disk, and every process on
 the machine that builds the workspace sees the same jobs.
 
-## Run several instances of one workspace
+## Several instances of one workspace
 
 Every process that builds the workspace under the same id on one Redis is an
 instance of it, on one machine or several, behind a load balancer or as
@@ -125,16 +125,18 @@ replicas of one agent.
 </Tabs>
 
 On the servers, `workspace.json` holds `{"id": "agent", "config": {...}}`
-with the same config on each. The instances then share:
+with the same config on each. Then:
 
-- Each session's background jobs: `jobs`, `wait`, `kill %N` and `fg %N`
-  work on any instance, whichever started the job.
-- Processes: `ps` lists the other instances' as `owner:pid`, and
-  `kill owner:pid` stops one.
-- Cleanup: an instance counts as gone 30 seconds after it was last seen, and
-  the next one to start stops the programs it left running.
-- Sessions and symlinks, since the whole store is on Redis.
+- One instance runs the workspace's lines at a time: the first to run one.
+  Any other is refused with an error naming that instance, which a server
+  answers with `409`, until it closes the workspace.
+- If it stops without closing, the workspace is free 30 seconds after it
+  was last seen. The next instance to run a line reports the jobs it left
+  as ended with status 129 and stops the programs they left running.
+- A server keeps its id under its state root, so a restarted server runs its
+  workspaces again at once.
+- Sessions and symlinks are shared, since the whole store is on Redis.
 
-A session sees only its own processes, on every instance; a profile with
+A session sees only its own processes; a profile with
 [`processes: workspace`](/home/profiles) widens that to every session's.
 [Shell](/home/core/shell#jobs-across-instances) describes the details.

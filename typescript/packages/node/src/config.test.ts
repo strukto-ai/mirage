@@ -20,7 +20,7 @@ import { MountMode, ReadPolicy, WritePolicy } from '@struktoai/mirage-core/types
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { RAMNamespaceStore } from '@struktoai/mirage-core/workspace/mount/namespace/ram'
 import { RAMWorkspaceStateStore } from '@struktoai/mirage-core/workspace/store/ram'
-import { RAMJobStore } from '@struktoai/mirage-core/execution/job/ram'
+import { RAMExecutionStore } from '@struktoai/mirage-core/execution/ram'
 import { normalizeCacheConfig } from '@struktoai/mirage-core/cache/file/config'
 import {
   normalizeIndexConfig,
@@ -35,7 +35,7 @@ import { RedisNamespaceStore } from './workspace/mount/namespace/redis.ts'
 import { DiskWorkspaceStateStore } from './workspace/store/disk.ts'
 import { RedisWorkspaceStateStore } from './workspace/store/redis.ts'
 import { RedisConsoleStore } from './shell/console/redis/index.ts'
-import { RedisJobStore } from './execution/job/redis.ts'
+import { RedisExecutionStore } from './execution/redis.ts'
 import { RedisFileCacheStore } from './cache/file/redis.ts'
 import { Workspace } from './workspace.ts'
 import { DiskVFS } from './vfs/disk/disk.ts'
@@ -1083,48 +1083,52 @@ describe('configToWorkspaceArgs', () => {
     ).toThrow(/unknown field `extends`/)
   })
 
-  it('a jobs group puts job lists and consoles on redis', async () => {
+  it('an execution group puts job lists and consoles on redis', async () => {
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
       store: {
         type: 'ram',
-        jobs: { type: 'redis', url: 'redis://localhost:6379/5', key_prefix: 'test_jobs:' },
+        execution: {
+          type: 'redis',
+          url: 'redis://localhost:6379/5',
+          key_prefix: 'test_execution:',
+        },
       },
     })
     const args = await configToWorkspaceArgs(cfg)
     const store = args.options.store
     expect(store).toBeInstanceOf(RAMWorkspaceStateStore)
     expect(store?.namespace('ws1')).toBeInstanceOf(RAMNamespaceStore)
-    const jobs = store?.jobs('ws1')
-    expect(jobs).toBeInstanceOf(RedisJobStore)
-    const first = jobs?.console('a')
-    const second = jobs?.console('b')
+    const execution = store?.execution('ws1')
+    expect(execution).toBeInstanceOf(RedisExecutionStore)
+    const first = execution?.console('a')
+    const second = execution?.console('b')
     if (!(first instanceof RedisConsoleStore) || !(second instanceof RedisConsoleStore)) {
       throw new Error('expected a RedisConsoleStore')
     }
-    expect(first.keyPrefix).toBe('test_jobs:ws1:jobs:console:a:')
+    expect(first.keyPrefix).toBe('test_execution:ws1:execution:console:a:')
     expect(first.keyPrefix).not.toBe(second.keyPrefix)
     await store?.close()
   })
 
-  it('a disk store keeps jobs in memory', async () => {
+  it('a disk store keeps the execution plane in memory', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-store-'))
     const cfg = loadWorkspaceConfig({
       mounts: { '/': { vfs: 'ram' } },
       store: { type: 'disk', root: dir },
     })
     const args = await configToWorkspaceArgs(cfg)
-    expect(args.options.store?.jobs('ws1')).toBeInstanceOf(RAMJobStore)
+    expect(args.options.store?.execution('ws1')).toBeInstanceOf(RAMExecutionStore)
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it.each(['disk', 's3'])('a jobs group refuses %s, which cannot stream', (backend) => {
+  it.each(['disk', 's3'])('an execution group refuses %s, which cannot stream', (backend) => {
     expect(() =>
       loadWorkspaceConfig({
         mounts: { '/': { vfs: 'ram' } },
-        store: { type: 'ram', jobs: { type: backend } },
+        store: { type: 'ram', execution: { type: backend } },
       }),
-    ).toThrow(/store\.jobs/)
+    ).toThrow(/store\.execution/)
   })
 
   it('the console block is gone', () => {

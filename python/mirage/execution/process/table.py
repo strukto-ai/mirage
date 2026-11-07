@@ -30,8 +30,11 @@ def deliver(handle: ProcessHandle, signal: int) -> None:
 class ProcessTable:
     """Own live runners independently of shell job-table membership.
 
-    IDs are workspace-local and never reused. Exited runners leave this
-    live registry; holders of their handles retain the final result.
+    IDs are workspace-local and never reused. For now one daemon runs a
+    workspace at a time, the one holding its lease, and numbers its pids
+    on from the highest the workspace's store recorded
+    (``continue_after``). Exited runners leave this live registry;
+    holders of their handles retain the final result.
 
     Args:
         workspace_id (str): the workspace whose pids these are.
@@ -182,6 +185,24 @@ class ProcessTable:
         if self._changed is not None:
             self._changed()
         return handle
+
+    @property
+    def last_pid(self) -> int:
+        """The highest pid handed out so far, 0 before the first."""
+        return self._next_pid - 1
+
+    def continue_after(self, pid: int) -> None:
+        """Hand out the pids that follow past ``pid``.
+
+        The highest pid the workspace's store recorded, read once when
+        this table's daemon takes the workspace's lease, so a pid another
+        daemon, or this one before a restart, gave out never repeats.
+
+        Args:
+            pid (int): the highest pid already given out.
+        """
+        with self._lock:
+            self._next_pid = max(self._next_pid, pid + 1)
 
     def terminate_children(self, pid: int, signal: int = 9) -> None:
         """Request cancellation of every live runner under ``pid``.

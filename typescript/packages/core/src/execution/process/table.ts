@@ -17,7 +17,13 @@ export function deliver(handle: ProcessHandle, signal: number): void {
   else handle.terminate(signal, false)
 }
 
-/** Workspace-owned live runners; exited handles retain their own results. */
+/**
+ * Workspace-owned live runners; exited handles retain their own results.
+ *
+ * IDs are workspace-local and never reused. For now one daemon runs a
+ * workspace at a time, the one holding its lease, and numbers its pids on
+ * from the highest the workspace's store recorded (`continueAfter`).
+ */
 export class ProcessTable {
   private nextPid = 1
   private readonly runners = new Map<number, { generation: number; handle: ProcessHandle }>()
@@ -148,6 +154,21 @@ export class ProcessTable {
     handle.start(eager)
     this.changed?.()
     return handle
+  }
+
+  /** The highest pid handed out so far, 0 before the first. */
+  get lastPid(): number {
+    return this.nextPid - 1
+  }
+
+  /**
+   * Hand out the pids that follow past `pid`: the highest pid the
+   * workspace's store recorded, read once when this table's daemon takes
+   * the workspace's lease, so a pid another daemon, or this one before a
+   * restart, gave out never repeats.
+   */
+  continueAfter(pid: number): void {
+    this.nextPid = Math.max(this.nextPid, pid + 1)
   }
 
   /**

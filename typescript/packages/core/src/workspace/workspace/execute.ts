@@ -349,7 +349,11 @@ async function runLine(
     executionScope,
     ...(tty !== null ? { sink: tty } : {}),
   }
+  // The workspace's lease is taken first, so the line's pid comes after
+  // every one the workspace gave out; another daemon holding it refuses the
+  // line with WorkspaceHeldError.
   const run = async (): Promise<ExecuteResult> => {
+    await env.jobTable.claim()
     if (targetSession.processId !== null) {
       return runPreparedLine(env, command, targetSession, lineOptions, frame, argv)
     }

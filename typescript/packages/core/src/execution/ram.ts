@@ -12,9 +12,9 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { RAMConsoleStore, type ConsoleStore } from '../../shell/console/index.ts'
-import { generationOf, type RecordFields } from '../../workspace/record/types.ts'
-import { JobStore } from './store.ts'
+import { RAMConsoleStore, type ConsoleStore } from '../shell/console/index.ts'
+import { generationOf, type RecordFields } from '../workspace/record/types.ts'
+import { ExecutionStore } from './base.ts'
 
 /** The consoles a job list names, its disowned jobs' included. */
 function consoleNames(fields: RecordFields | undefined): Set<string> {
@@ -24,17 +24,21 @@ function consoleNames(fields: RecordFields | undefined): Set<string> {
 }
 
 /**
- * JobStore held in process memory (the default).
+ * ExecutionStore held in process memory (the default).
  *
  * Workspaces that share one provider in a process share their jobs through
  * it. A console is dropped once no list names it; a reader already holding
- * it keeps reading, as a console outlives its entry. Mirrors Python's
- * `RAMJobStore`.
+ * it keeps reading, as a console outlives its entry. With no
+ * `leaseSeconds` (the default) the lease holds until its workspace closes,
+ * since the one process holding the store cannot die apart from it.
+ * Mirrors Python's `RAMExecutionStore`.
  */
-export class RAMJobStore extends JobStore {
+export class RAMExecutionStore extends ExecutionStore {
   private readonly lists = new Map<string, RecordFields>()
   private readonly consoles = new Map<string, RAMConsoleStore>()
-  private readonly leases = new Map<string, number>()
+  private held: string | null = null
+  private expires = 0
+  private highest = 0
   private readonly published = new Map<string, Record<string, RecordFields>>()
   private readonly stops = new Map<string, [number, number][]>()
 
@@ -69,23 +73,43 @@ export class RAMJobStore extends JobStore {
     return store
   }
 
-  renew(owner: string, _consoles: readonly string[] = []): Promise<void> {
-    if (this.leaseSeconds !== null) {
-      this.leases.set(owner, performance.now() + this.leaseSeconds * 1000)
+  lease(daemon: string, _consoles: readonly string[] = []): Promise<string | null> {
+    const now = performance.now()
+    if (
+      this.held !== null &&
+      this.held !== daemon &&
+      (this.leaseSeconds === null || this.expires > now)
+    ) {
+      return Promise.resolve(this.held)
     }
+    this.held = daemon
+    if (this.leaseSeconds !== null) this.expires = now + this.leaseSeconds * 1000
+    return Promise.resolve(null)
+  }
+
+  holder(): Promise<string | null> {
+    if (this.held === null) return Promise.resolve(null)
+    if (this.leaseSeconds !== null && this.expires <= performance.now()) {
+      return Promise.resolve(null)
+    }
+    return Promise.resolve(this.held)
+  }
+
+  release(daemon: string): Promise<void> {
+    if (this.held === daemon) this.held = null
     return Promise.resolve()
   }
 
-  alive(owner: string): Promise<boolean> {
-    if (this.leaseSeconds === null) return Promise.resolve(true)
-    return Promise.resolve((this.leases.get(owner) ?? 0) > performance.now())
-  }
-
-  publish(owner: string, processes: Readonly<Record<string, RecordFields>>): Promise<void> {
-    if (Object.keys(processes).length > 0) this.published.set(owner, structuredClone(processes))
+  publish(
+    daemon: string,
+    processes: Readonly<Record<string, RecordFields>>,
+    lastPid = 0,
+  ): Promise<void> {
+    this.highest = Math.max(this.highest, lastPid)
+    if (Object.keys(processes).length > 0) this.published.set(daemon, structuredClone(processes))
     else {
-      this.published.delete(owner)
-      this.stops.delete(owner)
+      this.published.delete(daemon)
+      this.stops.delete(daemon)
     }
     return Promise.resolve()
   }
@@ -94,23 +118,28 @@ export class RAMJobStore extends JobStore {
     return Promise.resolve(structuredClone(Object.fromEntries(this.published)))
   }
 
-  requestStop(owner: string, pid: number, signal: number): Promise<void> {
-    const asked = this.stops.get(owner) ?? []
+  highestPid(): Promise<number> {
+    return Promise.resolve(this.highest)
+  }
+
+  requestStop(daemon: string, pid: number, signal: number): Promise<void> {
+    const asked = this.stops.get(daemon) ?? []
     asked.push([pid, signal])
-    this.stops.set(owner, asked)
+    this.stops.set(daemon, asked)
     return Promise.resolve()
   }
 
-  takeStops(owner: string): Promise<[number, number][]> {
-    const asked = this.stops.get(owner) ?? []
-    this.stops.delete(owner)
+  takeStops(daemon: string): Promise<[number, number][]> {
+    const asked = this.stops.get(daemon) ?? []
+    this.stops.delete(daemon)
     return Promise.resolve(asked)
   }
 
   clear(): Promise<void> {
     this.lists.clear()
     this.consoles.clear()
-    this.leases.clear()
+    this.held = null
+    this.highest = 0
     this.published.clear()
     this.stops.clear()
     return Promise.resolve()

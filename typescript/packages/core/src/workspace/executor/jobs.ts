@@ -35,7 +35,6 @@ import type { HandOff } from '../../policy/types.ts'
 import type { ProcessHandle } from '../../execution/process/handle.ts'
 import type { ProcessTable } from '../../execution/process/table.ts'
 import type { Process, ProcessRunner, ProcessState } from '../../execution/process/types.ts'
-import { LineId, MachineId, ProcessId } from '../../execution/types.ts'
 import type { ProcessView } from '../../execution/process/view.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { concat } from '../../utils/bytes.ts'
@@ -81,7 +80,6 @@ import type { ExecutionFrame } from '../frame.ts'
 import { ExecutionScope } from '../execution.ts'
 import { CAPTURABLE_BUILTINS, SHELL_NAMES } from '../lookup/constants.ts'
 import { occurrenceOf } from '../node/occurrence.ts'
-import type { RecordFields } from '../record/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { scanOptions } from './builtins/getopt.ts'
@@ -1235,9 +1233,9 @@ function killPid(jobs: readonly Job[], operand: string): [number | null, string]
 
 /**
  * The job a `%N` operand names when it has no runner here: another
- * workspace runs it, or it was restored from a snapshot. It is killed
- * through the job table, which ends another workspace's job by ending its
- * console for its owner to see, and never through this workspace's process
+ * daemon runs it, or it was restored from a snapshot. It is killed through
+ * the job table, which ends another daemon's job by ending its console for
+ * that daemon to see, and never through this workspace's process
  * table, where its stand-in PID may name a runner of this workspace's own.
  * Mirrors Python's `_runnerless`.
  */
@@ -1254,10 +1252,9 @@ function runnerless(jobs: Job[], operand: string): Job | null {
  * named in bash's words; the status is 0 when any operand was signalled,
  * as bash's is. A job spec is `%N`; a negative number is a process group,
  * the session's `-$$` among them, whose every runner gets the signal
- * (killpg). `owner:pid` names another workspace's runner, as `ps` lists it:
- * its owner stops it once it takes the stop. A signal that stops the shell
- * running `kill` lands before the next statement, as bash's signal to itself
- * does: its abort fails that statement's checkpoint.
+ * (killpg). A signal that stops the shell running `kill` lands before the
+ * next statement, as bash's signal to itself does: its abort fails that
+ * statement's checkpoint.
  */
 export async function handleKill(
   jobTable: JobTable,
@@ -1309,36 +1306,6 @@ export async function handleKill(
   let signalled = false
   await jobTable.sync(sid)
   for (const operand of words) {
-    const colon = operand.indexOf(':')
-    if (colon >= 0 && !operand.startsWith('%')) {
-      const owner = operand.slice(0, colon)
-      const owned = operand.slice(colon + 1)
-      if (owner === '' || !/^[0-9]+$/.test(owned)) {
-        errors.push(`${voice}kill: ${operand}: arguments must be process or job IDs`)
-        continue
-      }
-      let found: boolean
-      try {
-        // A signal that leaves a process running only probes it.
-        found = await jobTable.signalRemote(
-          owner,
-          Number(owned),
-          KEPT_SIGNALS.has(signal) ? 0 : signal,
-          sid,
-          processes.permissions,
-        )
-      } catch (err) {
-        if ((err as { code?: unknown }).code !== 'EPERM') throw err
-        errors.push(`${voice}kill: (${operand}) - Operation not permitted`)
-        continue
-      }
-      if (!found) {
-        errors.push(`${voice}kill: (${operand}) - No such process`)
-        continue
-      }
-      signalled = true
-      continue
-    }
     const jobs = jobTable.listJobs(sid)
     const [pid, refusal] = killPid(jobs, operand)
     if (pid === null) {
@@ -1639,32 +1606,18 @@ const PS_STATES: Readonly<Record<ProcessState, string>> = {
 // Letters that select every process: SysV -e/-A/-a/-x, BSD a/x.
 const PS_ALL = new Set(['e', 'A', 'a', 'x'])
 
-/**
- * What a ps line selects and prints. `remote` selects other workspaces'
- * processes, `owner:pid`, by owner prefix.
- */
+/** What a ps line selects and prints. */
 interface PsOptions {
   readonly pids: ReadonlySet<number>
-  readonly remote: readonly (readonly [string, number])[]
   readonly all: boolean
   readonly columns: readonly (readonly [string, string])[]
 }
 
-/**
- * One `-p` list, refused in procps's words: this workspace's PIDs, and
- * other workspaces' as `owner:pid`.
- */
-function psPids(value: string, option: string): (number | [string, number])[] {
+/** One `-p` list, refused in procps's words. */
+function psPids(value: string, option: string): number[] {
   const tokens = value.split(/[\s,]+/).filter((t) => t !== '')
   if (tokens.length === 0) throw new Error(`list of process IDs must follow ${option}`)
   return tokens.map((token) => {
-    const colon = token.indexOf(':')
-    if (colon >= 0) {
-      const owner = token.slice(0, colon)
-      const pid = token.slice(colon + 1)
-      if (owner === '' || !/^[0-9]+$/.test(pid)) throw new Error('process ID list syntax error')
-      return [owner, Number(pid)]
-    }
     if (!/^[+-]?[0-9]+$/.test(token)) throw new Error('process ID list syntax error')
     const number = Number(token)
     if (number <= 0 || number > MAX_PID_OPERAND) throw new Error('process ID out of range')
@@ -1697,12 +1650,8 @@ function psColumns(value: string, option: string): [string, string][] {
  */
 function parsePs(words: string[]): PsOptions {
   const pids = new Set<number>()
-  const remote: [string, number][] = []
-  const select = (picked: (number | [string, number])[]) => {
-    for (const pid of picked) {
-      if (typeof pid === 'number') pids.add(pid)
-      else remote.push(pid)
-    }
+  const select = (picked: number[]) => {
+    for (const pid of picked) pids.add(pid)
   }
   const columns: [string, string][] = []
   let all = false
@@ -1739,7 +1688,7 @@ function parsePs(words: string[]): PsOptions {
       else for (const item of psColumns(value, '-o')) columns.push(item)
     }
   }
-  return { pids, remote, all, columns }
+  return { pids, all, columns }
 }
 
 /** One row in procps's layout: each column padded but the last. */
@@ -1807,19 +1756,18 @@ function started(fact: string, info: Process, ctx: PsContext): string {
  * profile this one cannot name. A runner of the calling session belongs to the
  * session `$$` leads; another session's to its own group.
  */
-function psCell(key: string, info: Process, ctx: PsContext, owner = ''): string {
+function psCell(key: string, info: Process, ctx: PsContext): string {
   const fact = PS_COLUMNS[key]?.[3] ?? ''
   const fixed = PS_FIXED[fact]
   if (fixed !== undefined) return fixed
-  const tag = owner !== '' ? `${owner}:` : ''
   const session =
-    owner === '' && info.sessionId === ctx.sessionId && ctx.shellPid !== null
+    info.sessionId === ctx.sessionId && ctx.shellPid !== null
       ? ctx.shellPid
       : info.group || info.id.pid
-  if (fact === 'pid') return `${tag}${String(info.id.pid)}`
-  if (fact === 'ppid') return info.parent ? `${tag}${String(info.parent)}` : '0'
-  if (fact === 'pgid') return `${tag}${String(info.group || info.id.pid)}`
-  if (fact === 'sid') return `${tag}${String(session)}`
+  if (fact === 'pid') return String(info.id.pid)
+  if (fact === 'ppid') return info.parent ? String(info.parent) : '0'
+  if (fact === 'pgid') return String(info.group || info.id.pid)
+  if (fact === 'sid') return String(session)
   if (fact === 'stat' || fact === 'state') {
     return PS_STATES[info.state] + (fact === 'stat' && info.id.pid === session ? 's' : '')
   }
@@ -1835,47 +1783,6 @@ function psCell(key: string, info: Process, ctx: PsContext, owner = ''): string 
   if (fact === 'etimes') return String(age)
   if (['lstart', 'start', 'stime', 'bsdstart'].includes(fact)) return started(fact, info, ctx)
   return info.command
-}
-
-/** Another workspace's runner as its process record keeps it. */
-function remoteInfo(workspaceId: string, record: RecordFields): Process {
-  const line = record.line as string | null
-  return {
-    id: new ProcessId(workspaceId, record.pid as number),
-    sessionId: record.session as string,
-    line: line === null ? null : new LineId(line),
-    parent: record.parent as number | null,
-    group: record.group as number,
-    command: record.command as string,
-    cwd: PathSpec.fromStrPath(record.cwd as string),
-    machine: MachineId.parse(record.machine as string),
-    startedAt: record.started_at as number,
-    runtime: null,
-    machinePid: null,
-    state: record.state as ProcessState,
-    endedAt: null,
-    exit: null,
-    signal: null,
-    error: null,
-  }
-}
-
-/**
- * The shortest start of each owner's id, six characters at least, that no
- * other owner's begins with, as `ps` names their processes.
- */
-export function ownerTags(owners: readonly string[]): Map<string, string> {
-  const tags = new Map<string, string>()
-  for (const owner of owners) {
-    let size = 6
-    while (
-      size < owner.length &&
-      owners.some((other) => other !== owner && other.startsWith(owner.slice(0, size)))
-    )
-      size += 1
-    tags.set(owner, owner.slice(0, size))
-  }
-  return tags
 }
 
 /**
@@ -1896,13 +1803,12 @@ function runWhere(run: Record<string, JsonValue>): string {
  * of an absent PID) exits 1, as procps does, and an option error is
  * procps's message and usage.
  *
- * The runners other workspaces on a shared store run follow this
- * workspace's, as `owner:pid` with the owner's id shortened as far as it
- * stays unique, within the same view. In the compact rows each runner is followed by the native runs
- * it has going, a host program by its host PID and a sandbox's by its
- * runtime and tag, each as `-<TAB>└ where: command`.
+ * The daemon running the line holds the workspace's lease, so its runners
+ * are every one the workspace has. In the compact rows each runner is
+ * followed by the native runs it has going, a host program by its host PID
+ * and a sandbox's by its runtime and tag, each as `-<TAB>└ where: command`.
  */
-export async function handlePs(
+export function handlePs(
   jobTable: JobTable,
   parts: string[],
   session: SessionState | null = null,
@@ -1913,35 +1819,18 @@ export async function handlePs(
   try {
     options = parsePs(parts.slice(1))
   } catch (err) {
-    return jobResult(cmdStr, `error: ${(err as Error).message}\n${PS_USAGE}`, 1)
+    return Promise.resolve(jobResult(cmdStr, `error: ${(err as Error).message}\n${PS_USAGE}`, 1))
   }
   const sid = sessionOf(session)
   const processes = processView(jobTable, session)
-  const every = options.all || (options.pids.size === 0 && options.remote.length === 0)
+  const every = options.all || options.pids.size === 0
   const runs = new Map(
     jobTable.processes.live().map((handle) => [handle.record.id.pid, Object.values(handle.runs)]),
   )
-  const rows: [string, Process, Record<string, JsonValue>[]][] = processes
+  const rows: [Process, Record<string, JsonValue>[]][] = processes
     .list()
     .filter((info) => every || options.pids.has(info.id.pid))
-    .map((info) => ['', info, runs.get(info.id.pid) ?? []])
-  const remote = await jobTable.remoteProcesses()
-  const granted = processes.permissions()
-  const tags = ownerTags(Object.keys(remote))
-  for (const [owner, records] of Object.entries(remote)) {
-    for (const record of Object.values(records)) {
-      if (granted === null || (granted.list === 'session' && record.session !== sid)) continue
-      if (
-        every ||
-        options.remote.some(([prefix, pid]) => owner.startsWith(prefix) && record.pid === pid)
-      )
-        rows.push([
-          tags.get(owner) ?? owner,
-          remoteInfo(jobTable.processes.workspaceId, record),
-          record.runs as Record<string, JsonValue>[],
-        ])
-    }
-  }
+    .map((info) => [info, runs.get(info.id.pid) ?? []])
   let lines: string[]
   if (options.columns.length > 0) {
     const keys = options.columns.map(([key]) => key)
@@ -1952,10 +1841,10 @@ export async function handlePs(
       sessionId: sid,
       shellPid: session?.shellPid ?? null,
     }
-    lines = rows.map(([owner, info]) =>
+    lines = rows.map(([info]) =>
       psRow(
         keys,
-        keys.map((key) => psCell(key, info, ctx, owner)),
+        keys.map((key) => psCell(key, info, ctx)),
       ),
     )
     if (options.columns.some(([, header]) => header !== ''))
@@ -1966,16 +1855,16 @@ export async function handlePs(
         ),
       )
   } else {
-    lines = rows.flatMap(([owner, info, native]) => [
-      `${owner !== '' ? `${owner}:` : ''}${String(info.id.pid)}\t${info.command}`,
+    lines = rows.flatMap(([info, native]) => [
+      `${String(info.id.pid)}\t${info.command}`,
       ...native.map((run) => `-\t└ ${runWhere(run)}: ${run.command as string}`),
     ])
   }
   const code = rows.length > 0 ? 0 : 1
   const out = encodeText(lines.length > 0 ? lines.join('\n') + '\n' : '')
-  return [
+  return Promise.resolve([
     out,
     new IOResult({ exitCode: code }),
     new ExecutionNode({ command: cmdStr, exitCode: code }),
-  ]
+  ])
 }
