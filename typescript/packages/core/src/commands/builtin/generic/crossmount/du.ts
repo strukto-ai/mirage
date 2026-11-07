@@ -16,7 +16,9 @@ import { OPERAND_CONCURRENCY } from '../../constants.ts'
 import { DISPATCH_BUILDERS } from './constants.ts'
 import { mountStarts, reached } from './scopes.ts'
 import type { CrossResult, RunSingle } from './types.ts'
-import { du, leavesOf, parseFlags } from '../du.ts'
+import { du, leavesOf, readFlags } from '../du.ts'
+import { fileStreamOp } from './utils.ts'
+import { stdinStream } from '../../utils/stream.ts'
 import { runDispatch } from '../../generic_bind/dispatch.ts'
 import { specOf } from '../../../spec/builtins.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
@@ -47,7 +49,9 @@ export const RENDERING: ReadonlySet<string> = new Set(['summarize', 'max_depth']
  * (a du not built on `duGeneric`) leaves the line to the one dispatcher walk.
  * With `nested`, `runSingle` answers only its own mount's part, so the mounts
  * below each operand are measured here unless `-x` keeps the walk on one
- * filesystem; otherwise each operand's run composes its own.
+ * filesystem; otherwise each operand's run composes its own. The -X files are
+ * read here, once, and every mount is handed their patterns as --exclude, so
+ * a list read from stdin reaches them all.
  */
 export async function runDu(
   paths: readonly PathSpec[],
@@ -63,10 +67,16 @@ export async function runDu(
   // The line's operand resolution, which the one walk's globs take.
   follow?: FollowOperands,
 ): Promise<CrossResult> {
-  const rendering = parseFlags({ stdin: null, flags: bag, cwd: PathSpec.fromStrPath(cwd) })
+  const rendering = await readFlags(
+    { stdin: null, flags: bag, cwd: PathSpec.fromStrPath(cwd) },
+    stdinStream(fileStreamOp(dispatch), stdin),
+  )
   if (rendering instanceof IOResult) return [null, rendering]
   const bounded = new FlagView(bag, specOf('du')).asBool('one_file_system')
-  const measuring = Object.fromEntries(Object.entries(bag).filter(([k]) => !RENDERING.has(k)))
+  const measuring: Record<string, FlagValue> = Object.fromEntries(
+    Object.entries(bag).filter(([k]) => !RENDERING.has(k) && k !== 'exclude_from'),
+  )
+  if ((rendering.excludes ?? []).length > 0) measuring.exclude = [...(rendering.excludes ?? [])]
   // Each start is then one mount's own part, and keeps only what that mount
   // owns: a part walked through the dispatcher reaches the mounts below it
   // too, which measure themselves.

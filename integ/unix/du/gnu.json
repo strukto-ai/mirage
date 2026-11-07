@@ -66,11 +66,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "du -a /data/sub",
+      "command": "du -a /data/sub; du -ab --exclude=deep /data/sub; printf 'deep\\n' | du -ab -X - /data/sub; du -ab -t 10 /data/sub; du -ab --threshold=-5 /data/sub; du -sb -t 100 /data/sub; du -t -0 /data/sub; echo code=$?; du -s --inodes /data/sub; du -sb -0 /data/sub | od -c | head -1; du -sbD --si /data/sub; du --time=bogus /data/sub; echo code=$?",
       "expect": {
         "exit": 0,
-        "stdout": "5\t/data/sub/deep/deeper.txt\n5\t/data/sub/deep\n15\t/data/sub/nested.txt\n20\t/data/sub\n",
-        "stderr": ""
+        "stdout": "5\t/data/sub/deep/deeper.txt\n5\t/data/sub/deep\n15\t/data/sub/nested.txt\n20\t/data/sub\n15\t/data/sub/nested.txt\n15\t/data/sub\n15\t/data/sub/nested.txt\n15\t/data/sub\n15\t/data/sub/nested.txt\n20\t/data/sub\n5\t/data/sub/deep/deeper.txt\n5\t/data/sub/deep\ncode=1\n4\t/data/sub\n0000000   2   0  \\t   /   d   a   t   a   /   s   u   b  \\0\n20\t/data/sub\ncode=1\n",
+        "stderr": "du: invalid --threshold argument '-0'\ndu: invalid argument 'bogus' for '--time'\nValid arguments are:\n  - 'atime', 'access', 'use'\n  - 'ctime', 'status'\nTry 'du --help' for more information.\n"
       }
     },
     {

@@ -26,10 +26,12 @@ from mirage.commands.builtin.generic.crossmount.types import (
     CrossResult,
     RunSingle,
 )
-from mirage.commands.builtin.generic.du import du, leaves_of, parse_flags
+from mirage.commands.builtin.generic.crossmount.utils import file_stream_op
+from mirage.commands.builtin.generic.du import du, leaves_of, read_flags
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.builtin.utils.paths import virtual_key
+from mirage.commands.builtin.utils.stream import stdin_stream
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -69,7 +71,9 @@ async def run_du(
     du fails adds its diagnostic and status, and the mounts below it
     count only where the walk could still reach them (``reached``); one
     that succeeds without a measurement (a du not built on
-    ``du_generic``) leaves the line to the one dispatcher walk.
+    ``du_generic``) leaves the line to the one dispatcher walk. The
+    ``-X`` files are read here, once, and every mount is handed their
+    patterns as ``--exclude``, so a list read from stdin reaches them all.
 
     Args:
         paths (list[PathSpec]): Operands in command-line order.
@@ -87,11 +91,19 @@ async def run_du(
         follow (FollowOperands | None): The line's operand resolution,
             which the one walk's globs take.
     """
-    rendering = parse_flags(Context(flags=flags))
+    rendering = await read_flags(
+        Context(flags=flags), stdin_stream(file_stream_op(dispatch), stdin)
+    )
     if isinstance(rendering, IOResult):
         return None, rendering
     bounded = FlagView(flags, spec=SPECS["du"]).as_bool("one_file_system")
-    measuring = {k: v for k, v in flags.items() if k not in RENDERING}
+    measuring = {
+        k: v
+        for k, v in flags.items()
+        if k not in RENDERING and k != "exclude_from"
+    }
+    if rendering.excludes:
+        measuring["exclude"] = list(rendering.excludes)
     # Each start is then one mount's own part, and keeps only what that
     # mount owns: a part walked through the dispatcher reaches the mounts
     # below it too, which measure themselves.
