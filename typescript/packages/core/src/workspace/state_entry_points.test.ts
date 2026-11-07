@@ -519,6 +519,19 @@ describe('the remaining session writers clear the same gate', () => {
     expect('SECRET_M' in sess.assocs).toBe(false)
   })
 
+  it('a bare declare -a of a readonly name fires the gate', async () => {
+    // bash converts a readonly scalar all the same, past the readonly
+    // refusal a gated write makes, so the rule is asked on its own.
+    const ws = makeWs([new DenySecretEnv()])
+    const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
+    seedVar(sess, 'SECRET_R', 'v')
+    setAttr(sess, 'SECRET_R', VarAttr.Readonly)
+    const io = await ws.shell('declare -a SECRET_R')
+    expect(io.exitCode).not.toBe(0)
+    expect('SECRET_R' in sess.arrays).toBe(false)
+    expect(sess.env.SECRET_R).toBe('v')
+  })
+
   it('a readonly name refuses a declaration array store', async () => {
     // The staged-array store is the builtin's own; the shell's readonly
     // rule is pre-checked there, before the session view is asked.

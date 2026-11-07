@@ -680,6 +680,23 @@ def test_bare_declare_a_fires_the_gate():
     assert "SECRET_M" not in sess.assocs
 
 
+def test_bare_declare_a_of_a_readonly_name_fires_the_gate():
+    # bash converts a readonly scalar all the same, past the readonly
+    # refusal a gated write makes, so the rule is asked on its own.
+    ws = _two_mounts(policies=[DenySecretEnv()])
+    sess = ws._session_mgr.get(ws._session_mgr.default_id)
+    seed_var(sess, "SECRET_R", "v")
+    set_attr(sess, "SECRET_R", VarAttr.READONLY)
+
+    async def run():
+        return await ws.shell("declare -a SECRET_R")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert "SECRET_R" not in sess.arrays
+    assert sess.env["SECRET_R"] == "v"
+
+
 def test_a_prefix_assignment_clears_the_gate():
     # `SECRET=leak cmd` is a session write like any other, and the form
     # puts it in the command's environment, so a deployment refusing
