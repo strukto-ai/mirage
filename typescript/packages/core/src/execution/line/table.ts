@@ -30,13 +30,24 @@ import type { Line } from './types.ts'
 export class LineTable {
   private readonly handles = new Map<string, LineHandle>()
 
-  /** @param clock the workspace clock ended lines age on. */
-  constructor(readonly clock: Clock = new SystemClock()) {}
+  /**
+   * @param clock the workspace clock ended lines age on.
+   * @param note told each line's record as it is read and each time it
+   *   changes, as the workspace's store keeps it.
+   */
+  constructor(
+    readonly clock: Clock = new SystemClock(),
+    private readonly note: ((record: Line) => void) | null = null,
+  ) {}
 
   /** Track a line from its reading on. */
   start(line: LineHandle): void {
     this.prune()
     this.handles.set(line.id.value, line)
+    if (this.note !== null) {
+      line.noted = this.note
+      this.note(line.record)
+    }
   }
 
   /** A line's record, while the table keeps it. */

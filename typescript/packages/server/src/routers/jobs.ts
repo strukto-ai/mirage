@@ -80,7 +80,7 @@ export function registerJobsRoutes(
 ): void {
   app.get<{ Params: WsIdParams; Querystring: ListJobsQuery }>(
     '/v1/workspaces/:wsId/jobs',
-    (req, reply) => {
+    async (req, reply) => {
       // The jobs the workspace's sessions list, as `jobs` does, a
       // session's, those in a state or those a line started when named.
       const { wsId } = req.params
@@ -92,17 +92,16 @@ export function registerJobsRoutes(
         return reply.status(422).send({ detail: `state must be one of ${STATES.join(', ')}` })
       }
       const ws = deps.registry.get(wsId).runner.ws
-      return ws
-        .jobs({
-          ...(sessionId !== undefined && sessionId !== '' ? { sessionId } : {}),
-          ...(state !== undefined ? { state: state as JobState } : {}),
-          ...(lineId !== undefined && lineId !== '' ? { lineId: new LineId(lineId) } : {}),
-        })
-        .map(toResponse)
+      const records = await ws.jobs({
+        ...(sessionId !== undefined && sessionId !== '' ? { sessionId } : {}),
+        ...(state !== undefined ? { state: state as JobState } : {}),
+        ...(lineId !== undefined && lineId !== '' ? { lineId: new LineId(lineId) } : {}),
+      })
+      return records.map(toResponse)
     },
   )
 
-  app.get<{ Params: WsJobParams }>('/v1/workspaces/:wsId/jobs/:jobId', (req, reply) => {
+  app.get<{ Params: WsJobParams }>('/v1/workspaces/:wsId/jobs/:jobId', async (req, reply) => {
     // One job, named by the id its listing gives, with the pids of the
     // processes it ran that the workspace still keeps: its own and every
     // one under it.
@@ -111,11 +110,11 @@ export function registerJobsRoutes(
       return reply.status(404).send({ detail: 'workspace not found' })
     }
     const ws = deps.registry.get(wsId).runner.ws
-    const record = ws.job(new JobId(ws.workspaceId, jobId))
+    const record = await ws.job(new JobId(ws.workspaceId, jobId))
     if (record === null) return reply.status(404).send({ detail: 'job not found' })
     const detail: JobDetailResponse = {
       ...toResponse(record),
-      processes: ws.processes({ jobId: record.id }).map((process) => process.id.pid),
+      processes: (await ws.processes({ jobId: record.id })).map((process) => process.id.pid),
     }
     return detail
   })

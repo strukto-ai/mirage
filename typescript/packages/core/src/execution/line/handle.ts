@@ -26,6 +26,8 @@ import type { Line } from './types.ts'
  * record from the handle. Mirrors Python's `LineHandle`.
  */
 export class LineHandle {
+  /** Told the record each time it changes, as its table keeps it. */
+  noted: ((record: Line) => void) | null = null
   private readonly budget = new YieldBudget()
   private current: Line
   private stopSignal: number | null = null
@@ -69,7 +71,10 @@ export class LineHandle {
     const onStart = this.onStart
     this.onStart = undefined
     await onStart?.()
-    if (this.current.state === 'waiting') this.current = { ...this.current, state: 'running' }
+    if (this.current.state === 'waiting') {
+      this.current = { ...this.current, state: 'running' }
+      this.tell()
+    }
   }
 
   async checkpoint(signal?: AbortSignal): Promise<void> {
@@ -83,6 +88,7 @@ export class LineHandle {
     if (this.current.endedAt !== null) return
     this.stopSignal = signal
     this.current = { ...this.current, state: 'stopping' }
+    this.tell()
   }
 
   /**
@@ -99,5 +105,11 @@ export class LineHandle {
       signal: this.stopSignal,
       error,
     }
+    this.tell()
+  }
+
+  /** Tell whoever keeps the record that it changed. */
+  private tell(): void {
+    this.noted?.(this.current)
   }
 }

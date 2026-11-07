@@ -49,6 +49,8 @@ export class ProcessTable {
    * @param now the epoch seconds a process starts at, which `ps` shows;
    *   omitted means the running workspace's system time.
    * @param ended told each process's record as it ends.
+   * @param note told each process's record as it starts and each time it
+   *   changes, as the workspace's store keeps it.
    */
   constructor(
     readonly workspaceId = '',
@@ -57,6 +59,7 @@ export class ProcessTable {
     private readonly changed?: () => void,
     private readonly now: () => number = systemNow,
     private readonly ended?: (record: Process) => void,
+    private readonly note?: (record: Process) => void,
   ) {}
 
   /** Whether a runner that was started has yet to begin. */
@@ -167,6 +170,10 @@ export class ProcessTable {
       pid,
       init.parent == null ? [] : [...(this.ancestors.get(init.parent) ?? []), init.parent],
     )
+    if (this.note !== undefined) {
+      handle.noted = this.note
+      this.note(handle.record)
+    }
     init.started?.(handle)
     handle.start(eager)
     this.changed?.()

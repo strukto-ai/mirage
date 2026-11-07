@@ -67,7 +67,7 @@ async def list_lines(
     runner = require_entry(request, workspace_id).runner
 
     async def read() -> list[LineResponse]:
-        records = runner.ws.lines(session_id or None, state)
+        records = await runner.ws.lines(session_id or None, state)
         return [_to_response(r) for r in records]
 
     return await runner.call(read())
@@ -84,13 +84,13 @@ async def get_line(
 
     async def read() -> LineDetailResponse | None:
         ws = runner.ws
-        record = ws.line(LineId(line_id))
+        record = await ws.line(LineId(line_id))
         if record is None:
             return None
-        processes = ws.processes(line_id=record.id)
+        processes = await ws.processes(line_id=record.id)
         return LineDetailResponse(
             **_to_response(record).model_dump(),
-            jobs=[job.id.console for job in ws.jobs(line_id=record.id)],
+            jobs=[job.id.console for job in await ws.jobs(line_id=record.id)],
             processes=[p.pid for p in processes],
             machines=list(dict.fromkeys(str(p.machine) for p in processes)),
         )

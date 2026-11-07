@@ -73,7 +73,7 @@ export function registerLinesRoutes(
 ): void {
   app.get<{ Params: WsIdParams; Querystring: ListLinesQuery }>(
     '/v1/workspaces/:wsId/lines',
-    (req, reply) => {
+    async (req, reply) => {
       // The lines the workspace keeps, oldest first: every one not ended
       // yet and the newest ended ones, a session's or those in a state
       // when named.
@@ -86,16 +86,15 @@ export function registerLinesRoutes(
         return reply.status(422).send({ detail: `state must be one of ${STATES.join(', ')}` })
       }
       const ws = deps.registry.get(wsId).runner.ws
-      return ws
-        .lines({
-          ...(sessionId !== undefined && sessionId !== '' ? { sessionId } : {}),
-          ...(state !== undefined ? { state: state as LineState } : {}),
-        })
-        .map(toResponse)
+      const records = await ws.lines({
+        ...(sessionId !== undefined && sessionId !== '' ? { sessionId } : {}),
+        ...(state !== undefined ? { state: state as LineState } : {}),
+      })
+      return records.map(toResponse)
     },
   )
 
-  app.get<{ Params: WsLineParams }>('/v1/workspaces/:wsId/lines/:lineId', (req, reply) => {
+  app.get<{ Params: WsLineParams }>('/v1/workspaces/:wsId/lines/:lineId', async (req, reply) => {
     // One line, with the ids of the jobs it started, the pids of the
     // processes it ran and the machines those ran on.
     const { wsId, lineId } = req.params
@@ -103,12 +102,12 @@ export function registerLinesRoutes(
       return reply.status(404).send({ detail: 'workspace not found' })
     }
     const ws = deps.registry.get(wsId).runner.ws
-    const record = ws.line(new LineId(lineId))
+    const record = await ws.line(new LineId(lineId))
     if (record === null) return reply.status(404).send({ detail: 'line not found' })
-    const processes = ws.processes({ lineId: record.id })
+    const processes = await ws.processes({ lineId: record.id })
     const detail: LineDetailResponse = {
       ...toResponse(record),
-      jobs: ws.jobs({ lineId: record.id }).map((job) => job.id.console),
+      jobs: (await ws.jobs({ lineId: record.id })).map((job) => job.id.console),
       processes: processes.map((process) => process.id.pid),
       machines: [...new Set(processes.map((process) => process.machine.toString()))],
     }

@@ -14,7 +14,17 @@
 
 import { readFileSync } from 'node:fs'
 import { ExecutionStore } from '@struktoai/mirage-core/execution/base'
+import { HISTORY_MAX_RECORDS, HISTORY_SECONDS } from '@struktoai/mirage-core/execution/constants'
 import { CONSOLE_TTL_SECONDS, LEASE_SECONDS } from '@struktoai/mirage-core/execution/job/constants'
+import type { Line } from '@struktoai/mirage-core/execution/line/types'
+import type { Process } from '@struktoai/mirage-core/execution/process/types'
+import {
+  lineFromFields,
+  lineToFields,
+  processFromFields,
+  processToFields,
+} from '@struktoai/mirage-core/execution/serde'
+import { type LineId, ProcessId } from '@struktoai/mirage-core/execution/types'
 import type { RecordFields } from '@struktoai/mirage-core/workspace/record/types'
 import { RedisConnection } from '../optional_peer.ts'
 import { RedisConsoleStore } from '../shell/console/redis/index.ts'
@@ -22,6 +32,13 @@ import { CAS_SCRIPT } from '../workspace/mount/namespace/redis.ts'
 
 export const LEASE_SCRIPT = readFileSync(new URL('./lease.lua', import.meta.url), 'utf8')
 export const PID_SCRIPT = readFileSync(new URL('./pid.lua', import.meta.url), 'utf8')
+export const HISTORY_SCRIPT = readFileSync(new URL('./history.lua', import.meta.url), 'utf8')
+
+/** The hash a record is kept in, `lines` or `processes`, and its field there. */
+function fieldOf(record: Line | Process): [string, string] {
+  if (record.id instanceof ProcessId) return ['processes', String(record.id.pid)]
+  return ['lines', (record as Line).id.value]
+}
 
 export interface RedisExecutionStoreOptions {
   url?: string
@@ -47,10 +64,15 @@ export interface RedisExecutionStoreOptions {
  *   day after its last publish so the runs of one that lost the lease can
  *   still be found
  * - `{prefix}stops:{id}`: a list of the stops asked of a daemon
+ * - `{prefix}records:lines` and `{prefix}records:processes`: a hash of id to
+ *   record JSON, written by `history.lua`, which keeps each kind's ended ones
+ *   in `{prefix}ended:lines` and `{prefix}ended:processes`, sorted sets by
+ *   end, trimmed to the history; both expire a day after their last write
  *
  * One connection serves the lists, the lease and every console, so a
- * workspace holds one client however many jobs it follows. Mirrors
- * Python's `RedisExecutionStore`.
+ * workspace holds one client however many jobs it follows. Records are
+ * written in the background, in batches, the newest of each winning;
+ * `close` writes what is left. Mirrors Python's `RedisExecutionStore`.
  */
 export class RedisExecutionStore extends ExecutionStore {
   readonly url: string
@@ -60,6 +82,8 @@ export class RedisExecutionStore extends ExecutionStore {
   private readonly pidKey: string
   private readonly redis: RedisConnection
   private raised = 0
+  private readonly pending = new Map<string, Line | Process>()
+  private writing: Promise<void> | null = null
 
   constructor(options: RedisExecutionStoreOptions = {}) {
     super(options.leaseSeconds === undefined ? LEASE_SECONDS : options.leaseSeconds)
@@ -97,6 +121,95 @@ export class RedisExecutionStore extends ExecutionStore {
       arguments: [sessionId, '', String(expectedGeneration)],
     })
     return result === 1
+  }
+
+  note(record: Line | Process): void {
+    this.pending.set(fieldOf(record).join(':'), record)
+    this.writing ??= this.writePending()
+  }
+
+  /** Write the records noted since the last batch, until none are left; a batch that fails is logged and dropped. */
+  private async writePending(): Promise<void> {
+    for (;;) {
+      if (this.pending.size === 0) {
+        this.writing = null
+        return
+      }
+      const batch = [...this.pending.values()]
+      this.pending.clear()
+      try {
+        const c = await this.redis.client()
+        const pipe = c.multi()
+        for (const record of batch) {
+          const [kind, field] = fieldOf(record)
+          const fields =
+            kind === 'lines' ? lineToFields(record as Line) : processToFields(record as Process)
+          pipe.eval(HISTORY_SCRIPT, {
+            keys: [`${this.prefix}records:${kind}`, `${this.prefix}ended:${kind}`],
+            arguments: [
+              field,
+              JSON.stringify(fields),
+              record.endedAt === null ? '' : String(record.endedAt),
+              String(HISTORY_MAX_RECORDS),
+              String(HISTORY_SECONDS),
+              String(CONSOLE_TTL_SECONDS),
+            ],
+          })
+        }
+        await pipe.exec()
+      } catch (err) {
+        console.debug('execution records not written:', err)
+      }
+    }
+  }
+
+  /** The records noted but not written yet, of one kind. */
+  private noted(kind: string): (Line | Process)[] {
+    return [...this.pending.values()].filter((record) => fieldOf(record)[0] === kind)
+  }
+
+  async getLine(lineId: LineId): Promise<Line | null> {
+    const noted = this.pending.get(`lines:${lineId.value}`)
+    if (noted !== undefined) return noted as Line
+    const c = await this.redis.client()
+    const raw = await c.hGet(`${this.prefix}records:lines`, lineId.value)
+    return raw != null ? lineFromFields(JSON.parse(raw) as RecordFields) : null
+  }
+
+  async getProcess(processId: ProcessId): Promise<Process | null> {
+    const noted = this.pending.get(`processes:${String(processId.pid)}`)
+    if (noted !== undefined) return noted as Process
+    const c = await this.redis.client()
+    const raw = await c.hGet(`${this.prefix}records:processes`, String(processId.pid))
+    return raw != null ? processFromFields(JSON.parse(raw) as RecordFields) : null
+  }
+
+  async findLines(sessionId?: string): Promise<Line[]> {
+    const c = await this.redis.client()
+    const raw = await c.hGetAll(`${this.prefix}records:lines`)
+    const found = new Map<string, Line>()
+    for (const value of Object.values(raw)) {
+      const line = lineFromFields(JSON.parse(value) as RecordFields)
+      found.set(line.id.value, line)
+    }
+    for (const line of this.noted('lines') as Line[]) found.set(line.id.value, line)
+    return [...found.values()]
+      .filter((line) => sessionId === undefined || line.sessionId === sessionId)
+      .sort((a, b) => a.startedAt - b.startedAt)
+  }
+
+  async findProcesses(sessionId?: string): Promise<Process[]> {
+    const c = await this.redis.client()
+    const raw = await c.hGetAll(`${this.prefix}records:processes`)
+    const found = new Map<number, Process>()
+    for (const value of Object.values(raw)) {
+      const record = processFromFields(JSON.parse(value) as RecordFields)
+      found.set(record.id.pid, record)
+    }
+    for (const record of this.noted('processes') as Process[]) found.set(record.id.pid, record)
+    return [...found.values()]
+      .filter((record) => sessionId === undefined || record.sessionId === sessionId)
+      .sort((a, b) => a.id.pid - b.id.pid)
   }
 
   console(name: string): RedisConsoleStore {
@@ -200,6 +313,7 @@ export class RedisExecutionStore extends ExecutionStore {
   }
 
   async clear(): Promise<void> {
+    await this.writing
     const c = await this.redis.client()
     const keys: string[] = []
     for await (const k of c.scanIterator({ MATCH: `${this.prefix}*` })) {
@@ -210,6 +324,7 @@ export class RedisExecutionStore extends ExecutionStore {
   }
 
   async close(): Promise<void> {
+    await this.writing
     await this.redis.close()
   }
 }

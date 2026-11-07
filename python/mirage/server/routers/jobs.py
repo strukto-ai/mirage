@@ -75,7 +75,7 @@ async def list_jobs(
     line = LineId(line_id) if line_id else None
 
     async def read() -> list[JobResponse]:
-        records = runner.ws.jobs(session_id or None, state, line)
+        records = await runner.ws.jobs(session_id or None, state, line)
         return [_to_response(r) for r in records]
 
     return await runner.call(read())
@@ -92,12 +92,12 @@ async def get_job(
 
     async def read() -> JobDetailResponse | None:
         ws = runner.ws
-        record = ws.job(JobId(ws.workspace_id, job_id))
+        record = await ws.job(JobId(ws.workspace_id, job_id))
         if record is None:
             return None
         return JobDetailResponse(
             **_to_response(record).model_dump(),
-            processes=[p.pid for p in ws.processes(job_id=record.id)],
+            processes=[p.pid for p in await ws.processes(job_id=record.id)],
         )
 
     detail = await runner.call(read())

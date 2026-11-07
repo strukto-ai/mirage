@@ -13,9 +13,14 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { describe, expect, it } from 'vitest'
+import { PathSpec } from '../types.ts'
 import { Channel } from '../shell/console/index.ts'
 import type { RecordFields } from '../workspace/record/types.ts'
+import { HISTORY_MAX_RECORDS, HISTORY_SECONDS } from './constants.ts'
+import type { Line } from './line/types.ts'
+import type { Process } from './process/types.ts'
 import { RAMExecutionStore } from './ram.ts'
+import { LineId, MachineId, ProcessId } from './types.ts'
 
 const enc = (text: string): Uint8Array => new TextEncoder().encode(text)
 const dec = (b: Uint8Array): string => new TextDecoder().decode(b)
@@ -118,5 +123,82 @@ describe('RAMExecutionStore', () => {
     await store.publish('a', {}, 7)
     await store.publish('b', {}, 3)
     expect(await store.highestPid()).toBe(7)
+  })
+})
+
+function lineOf(n: number, sessionId = 's', endedAt: number | null = null): Line {
+  return {
+    id: new LineId(`line_${String(n)}`),
+    sessionId,
+    command: `echo ${String(n)}`,
+    startedAt: n,
+    state: endedAt === null ? 'running' : 'exited',
+    endedAt,
+    exit: endedAt === null ? null : 0,
+    signal: null,
+    error: null,
+  }
+}
+
+function processOf(pid: number, sessionId = 's'): Process {
+  return {
+    id: new ProcessId('w', pid),
+    sessionId,
+    line: new LineId('line_1'),
+    parent: null,
+    group: pid,
+    command: 'sleep 30',
+    cwd: PathSpec.fromStrPath('/'),
+    machine: new MachineId('host', 'box'),
+    startedAt: 1,
+    runtime: null,
+    machinePid: null,
+    state: 'running',
+    endedAt: null,
+    exit: null,
+    signal: null,
+    error: null,
+  }
+}
+
+describe('RAMExecutionStore records', () => {
+  // A record noted again replaces the one before; lines list oldest first,
+  // processes by pid, each a session's when one is named.
+  it('finds noted records by id and session', async () => {
+    const store = new RAMExecutionStore()
+    store.note(lineOf(2))
+    store.note(lineOf(1, 't'))
+    store.note(lineOf(2, 's', 5))
+    store.note(processOf(9))
+    store.note(processOf(3, 't'))
+    expect((await store.findLines()).map((r) => [r.id.value, r.state])).toEqual([
+      ['line_1', 'running'],
+      ['line_2', 'exited'],
+    ])
+    expect((await store.findLines('t')).map((r) => r.id.value)).toEqual(['line_1'])
+    expect(await store.getLine(new LineId('line_2'))).toEqual(lineOf(2, 's', 5))
+    expect(await store.getLine(new LineId('nope'))).toBeNull()
+    expect((await store.findProcesses()).map((r) => r.id.pid)).toEqual([3, 9])
+    expect((await store.findProcesses('s')).map((r) => r.id.pid)).toEqual([9])
+    expect(await store.getProcess(new ProcessId('w', 9))).toEqual(processOf(9))
+    await store.clear()
+    expect(await store.findLines()).toEqual([])
+    expect(await store.findProcesses()).toEqual([])
+  })
+
+  // Ended records are kept to the history: the newest HISTORY_MAX_RECORDS of
+  // a kind, ended within HISTORY_SECONDS of the newest; a running one stays.
+  it('keeps ended records to the history', async () => {
+    const store = new RAMExecutionStore()
+    store.note(lineOf(0))
+    for (let n = 1; n < HISTORY_MAX_RECORDS + 3; n++) store.note(lineOf(n, 's', n))
+    let kept = (await store.findLines()).map((r) => r.id.value)
+    expect(kept).toHaveLength(HISTORY_MAX_RECORDS + 1)
+    expect(kept.slice(0, 2)).toEqual(['line_0', 'line_3'])
+    store.note(lineOf(5000, 's', HISTORY_SECONDS + 1000.5))
+    kept = (await store.findLines()).map((r) => r.id.value)
+    expect(kept.slice(0, 3)).toEqual(['line_0', 'line_1001', 'line_1002'])
+    expect(kept.at(-1)).toBe('line_5000')
+    expect(kept).toHaveLength(28)
   })
 })

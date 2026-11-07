@@ -20,12 +20,17 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as aioredis
 
+from mirage.execution.constants import HISTORY_MAX_RECORDS
 from mirage.execution.job.handle import JobHandle
 from mirage.execution.job.table import JobTable
 from mirage.execution.job.types import JobState
+from mirage.execution.line.types import Line, LineState
+from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.redis import RedisExecutionStore
+from mirage.execution.types import LineId, MachineId, MachinePid, ProcessId
 from mirage.io import IOResult
 from mirage.shell.console import Channel
+from mirage.types import PathSpec
 from mirage.workspace.types import ExecutionNode
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
@@ -180,3 +185,62 @@ async def test_a_renewal_keeps_a_running_jobs_console(stores, prefix):
         assert await client.ttl(f"{prefix}console:c:stream") > 5
     finally:
         await client.aclose()
+
+
+def _line(n: int, ended_at: float | None = None) -> Line:
+    return Line(
+        LineId(f"line_{n}"),
+        "s",
+        f"echo {n}",
+        float(n),
+        LineState.EXITED if ended_at is not None else LineState.RUNNING,
+        ended_at,
+        0 if ended_at is not None else None,
+    )
+
+
+# A record noted on one store reaches every store on the server once it is
+# written, the newest of each winning, with every field it was noted with.
+@pytest.mark.asyncio
+async def test_a_noted_record_reaches_every_store(stores):
+    a, b = stores(), stores()
+    process = Process(
+        id=ProcessId("w", 7),
+        session_id="s",
+        line=LineId("line_1"),
+        parent=3,
+        group=3,
+        command="sleep 30",
+        cwd=PathSpec.from_str_path("/m"),
+        machine=MachineId("docker", "tools"),
+        started_at=1.5,
+        runtime="docker",
+        machine_pid=MachinePid(4242, 1.25),
+        state=ProcessState.STOPPING,
+    )
+    a.note(_line(1))
+    a.note(_line(1, ended_at=2.0))
+    a.note(process)
+    assert await a.get_line(LineId("line_1")) == _line(1, ended_at=2.0)
+    async with asyncio.timeout(5):
+        while not await b.find_processes():
+            await asyncio.sleep(0.01)
+    assert await b.get_process(ProcessId("w", 7)) == process
+    assert await b.find_lines() == [_line(1, ended_at=2.0)]
+    assert await b.find_lines("other") == []
+
+
+# Ended records are kept to the history, and a running one stays.
+@pytest.mark.asyncio
+async def test_ended_records_are_kept_to_the_history(stores):
+    a, b = stores(), stores()
+    a.note(_line(0))
+    for n in range(1, HISTORY_MAX_RECORDS + 3):
+        a.note(_line(n, ended_at=float(n)))
+    newest = f"line_{HISTORY_MAX_RECORDS + 2}"
+    async with asyncio.timeout(5):
+        while newest not in [r.id.value for r in await b.find_lines()]:
+            await asyncio.sleep(0.01)
+    kept = [r.id.value for r in await b.find_lines()]
+    assert len(kept) == HISTORY_MAX_RECORDS + 1
+    assert kept[:2] == ["line_0", "line_3"]

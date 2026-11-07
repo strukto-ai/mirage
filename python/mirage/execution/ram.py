@@ -15,11 +15,19 @@
 import copy
 import threading
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Hashable, Mapping, Sequence
+from typing import TypeVar
 
 from mirage.execution.base import ExecutionStore
+from mirage.execution.constants import HISTORY_MAX_RECORDS, HISTORY_SECONDS
+from mirage.execution.line.types import Line
+from mirage.execution.process.types import Process
+from mirage.execution.types import LineId, ProcessId
 from mirage.shell.console import ConsoleStore, RAMConsoleStore
 from mirage.workspace.record.types import RecordFields, generation_of
+
+K = TypeVar("K", bound=Hashable)
+R = TypeVar("R", Line, Process)
 
 
 def _console_names(fields: RecordFields | None) -> set[str]:
@@ -32,6 +40,39 @@ def _console_names(fields: RecordFields | None) -> set[str]:
         return set()
     listed = {job["console"] for job in fields.get("jobs", {}).values()}
     return listed | set(fields.get("disowned", {}))
+
+
+def _keep(
+    records: dict[K, R],
+    ends: dict[K, float],
+    key: K,
+    record: R,
+    ended_at: float | None,
+) -> None:
+    """Put a record in place of the one before, and drop the ended ones
+    past the history: beyond ``HISTORY_MAX_RECORDS``, or ended
+    ``HISTORY_SECONDS`` before this one, oldest ended first.
+
+    Args:
+        records (dict[K, R]): the records, by key.
+        ends (dict[K, float]): the ended ones' ends, in the order they
+            ended.
+        key (K): the record's key.
+        record (R): the record.
+        ended_at (float | None): when it ended; None while it runs.
+    """
+    records[key] = record
+    ends.pop(key, None)
+    if ended_at is None:
+        return
+    ends[key] = ended_at
+    cutoff = ended_at - HISTORY_SECONDS
+    while ends:
+        oldest, at = next(iter(ends.items()))
+        if len(ends) <= HISTORY_MAX_RECORDS and at > cutoff:
+            break
+        del ends[oldest]
+        records.pop(oldest, None)
 
 
 class RAMExecutionStore(ExecutionStore):
@@ -58,6 +99,10 @@ class RAMExecutionStore(ExecutionStore):
         self._highest = 0
         self._processes: dict[str, dict[str, RecordFields]] = {}
         self._stops: dict[str, list[tuple[int, int]]] = {}
+        self._lines: dict[LineId, Line] = {}
+        self._line_ends: dict[LineId, float] = {}
+        self._records: dict[int, Process] = {}
+        self._record_ends: dict[int, float] = {}
         self._lock = threading.Lock()
 
     async def load(self, session_id: str) -> RecordFields | None:
@@ -84,6 +129,59 @@ class RAMExecutionStore(ExecutionStore):
             self._lists.pop(session_id, None)
             self._drop(_console_names(stored))
         return True
+
+    def note(self, record: Line | Process) -> None:
+        with self._lock:
+            if isinstance(record, Line):
+                _keep(
+                    self._lines,
+                    self._line_ends,
+                    record.id,
+                    record,
+                    record.ended_at,
+                )
+            else:
+                _keep(
+                    self._records,
+                    self._record_ends,
+                    record.pid,
+                    record,
+                    record.ended_at,
+                )
+
+    async def get_line(self, line_id: LineId) -> Line | None:
+        with self._lock:
+            return self._lines.get(line_id)
+
+    async def get_process(self, process_id: ProcessId) -> Process | None:
+        with self._lock:
+            return self._records.get(process_id.pid)
+
+    async def find_lines(self, session_id: str | None = None) -> list[Line]:
+        with self._lock:
+            lines = list(self._lines.values())
+        return sorted(
+            (
+                line
+                for line in lines
+                if session_id is None or line.session_id == session_id
+            ),
+            key=lambda line: line.started_at,
+        )
+
+    async def find_processes(
+        self, session_id: str | None = None
+    ) -> list[Process]:
+        with self._lock:
+            records = list(self._records.values())
+        return sorted(
+            (
+                record
+                for record in records
+                if session_id is None or record.session_id == session_id
+            ),
+            key=lambda record: record.pid,
+        )
 
     def console(self, name: str) -> ConsoleStore:
         return self._consoles.setdefault(name, RAMConsoleStore())
@@ -151,6 +249,10 @@ class RAMExecutionStore(ExecutionStore):
         self._highest = 0
         self._processes.clear()
         self._stops.clear()
+        self._lines.clear()
+        self._line_ends.clear()
+        self._records.clear()
+        self._record_ends.clear()
 
     async def close(self) -> None:
         pass

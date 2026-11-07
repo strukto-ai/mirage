@@ -435,6 +435,7 @@ class Workspace:
                 else self._registry.system_clock.now()
             ),
             ended=trace_process,
+            note=stores.execution.note,
         )
         self.process_table.ceiling = self._registry.ceilings.max_processes
         # One daemon runs a workspace's lines at a time, the one holding
@@ -448,7 +449,7 @@ class Workspace:
         )
         self.job_table.reaper = self._reap_process
         self.job_table.ended = trace_job
-        self.line_table = LineTable(self._clock)
+        self.line_table = LineTable(self._clock, note=stores.execution.note)
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
         self._shell_executions: dict[ShellExecution, None] = {}
         self._admitting = asyncio.Event()
@@ -2577,46 +2578,73 @@ class Workspace:
     def list_sessions(self) -> list[SessionState]:
         return self._session_mgr.list()
 
-    def lines(
+    async def lines(
         self,
         session_id: str | None = None,
         state: LineState | None = None,
     ) -> list[Line]:
         """The lines the workspace keeps, oldest first: every one not
-        ended yet, and the newest ended ones.
+        ended yet, and the newest ended ones, as its store keeps them, so
+        a daemon that does not hold the workspace's lease lists the same
+        ones; the holder reads its own as they are now.
 
         Args:
             session_id (str | None): only this session's lines.
             state (LineState | None): only the lines in this state.
         """
-        return [
-            line
-            for line in self.line_table.lines(session_id)
-            if state is None or line.state == state
-        ]
+        found = {
+            line.id: line
+            for line in await self.job_table.store.find_lines(session_id)
+        }
+        if self.job_table.claimed:
+            found.update(
+                (line.id, line) for line in self.line_table.lines(session_id)
+            )
+        return sorted(
+            (
+                line
+                for line in found.values()
+                if state is None or line.state == state
+            ),
+            key=lambda line: line.started_at,
+        )
 
-    def line(self, line_id: LineId) -> Line | None:
+    async def line(self, line_id: LineId) -> Line | None:
         """One line's record, while the workspace keeps it.
 
         Args:
             line_id (LineId): the line.
         """
-        return self.line_table.get(line_id)
+        if self.job_table.claimed:
+            record = self.line_table.get(line_id)
+            if record is not None:
+                return record
+        return await self.job_table.store.get_line(line_id)
 
-    def jobs(
+    async def jobs(
         self,
         session_id: str | None = None,
         state: JobState | None = None,
         line_id: LineId | None = None,
     ) -> list[Job]:
         """The jobs the workspace's sessions list, as ``jobs`` does:
-        each until its ending is reported.
+        each until its ending is reported. A daemon that does not hold
+        the workspace's lease reads each session's list from the store
+        first.
 
         Args:
             session_id (str | None): only this session's jobs.
             state (JobState | None): only the jobs in this state.
             line_id (LineId | None): only the jobs this line started.
         """
+        if not self.job_table.claimed:
+            await self.ensure_sessions_loaded()
+            for sid in (
+                [session_id]
+                if session_id is not None
+                else [s.session_id for s in self.list_sessions()]
+            ):
+                await self.job_table.sync(sid)
         handles = (
             self.job_table.all_jobs()
             if session_id is None
@@ -2630,15 +2658,17 @@ class Workspace:
             and (line_id is None or record.line == line_id)
         ]
 
-    def job(self, job_id: JobId) -> Job | None:
+    async def job(self, job_id: JobId) -> Job | None:
         """One job's record, while a session lists it.
 
         Args:
             job_id (JobId): the job.
         """
-        return next((job for job in self.jobs() if job.id == job_id), None)
+        return next(
+            (job for job in await self.jobs() if job.id == job_id), None
+        )
 
-    def processes(
+    async def processes(
         self,
         session_id: str | None = None,
         state: ProcessState | None = None,
@@ -2647,7 +2677,9 @@ class Workspace:
         machine: MachineId | None = None,
     ) -> list[Process]:
         """The processes the workspace keeps, by pid: every live one,
-        and the newest ended ones.
+        and the newest ended ones, as its store keeps them, so a daemon
+        that does not hold the workspace's lease lists the same ones; the
+        holder reads its own as they are now.
 
         Args:
             session_id (str | None): only this session's processes.
@@ -2657,39 +2689,62 @@ class Workspace:
                 own and every one under it, while a session lists it.
             machine (MachineId | None): only the processes run there.
         """
-        records = self.process_table.records()
+        found = {
+            process.pid: process
+            for process in await self.job_table.store.find_processes(
+                session_id
+            )
+        }
+        claimed = self.job_table.claimed
+        if claimed:
+            found.update(
+                (process.pid, process)
+                for process in self.process_table.records()
+                if session_id is None or process.session_id == session_id
+            )
+        records = [found[pid] for pid in sorted(found)]
         tree: set[int] | None = None
         if job_id is not None:
-            job = self.job(job_id)
-            tree = (
-                self.process_table.tree(job.pid)
-                if job is not None and job.pid is not None
-                else set()
-            )
+            job = await self.job(job_id)
+            tree = set()
+            if job is not None and job.pid is not None and claimed:
+                tree = self.process_table.tree(job.pid)
+            elif job is not None and job.pid is not None:
+                tree = {job.pid}
+                grown = True
+                while grown:
+                    grown = False
+                    for process in records:
+                        if process.parent in tree and process.pid not in tree:
+                            tree.add(process.pid)
+                            grown = True
         return [
             process
             for process in records
-            if (session_id is None or process.session_id == session_id)
-            and (state is None or process.state == state)
+            if (state is None or process.state == state)
             and (line_id is None or process.line == line_id)
             and (tree is None or process.pid in tree)
             and (machine is None or process.machine == machine)
         ]
 
-    def process(self, process_id: ProcessId) -> Process | None:
+    async def process(self, process_id: ProcessId) -> Process | None:
         """One process's record, while the workspace keeps it.
 
         Args:
             process_id (ProcessId): the process.
         """
-        return next(
-            (
-                process
-                for process in self.process_table.records()
-                if process.id == process_id
-            ),
-            None,
-        )
+        if self.job_table.claimed:
+            record = next(
+                (
+                    process
+                    for process in self.process_table.records()
+                    if process.id == process_id
+                ),
+                None,
+            )
+            if record is not None:
+                return record
+        return await self.job_table.store.get_process(process_id)
 
     async def ensure_sessions_loaded(self) -> None:
         """Hydrate sessions from the session store (idempotent).

@@ -332,6 +332,9 @@ export class Workspace {
       },
       () => this.registry.systemClock?.now() ?? systemNow(),
       traceProcess,
+      (record) => {
+        this.jobTable.store.note(record)
+      },
     )
     this.cache = buildFileCache(options.cache, options.cacheLimit, this.clock, this.wsId)
     const normalized = normalizeMounts(mounts, this.readDefault, index, {
@@ -371,7 +374,9 @@ export class Workspace {
     )
     this.jobTable.reaper = (record, signum) => this.reapProcess(record, signum)
     this.jobTable.ended = traceJob
-    this.lineTable = new LineTable(this.clock)
+    this.lineTable = new LineTable(this.clock, (record) => {
+      this.jobTable.store.note(record)
+    })
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
     // The env block, translated once: a literal entry becomes an
@@ -1336,24 +1341,47 @@ export class Workspace {
 
   /**
    * The lines the workspace keeps, oldest first: every one not ended yet,
-   * and the newest ended ones; a session's or those in a state when named.
+   * and the newest ended ones, as its store keeps them, so a daemon that
+   * does not hold the workspace's lease lists the same ones; the holder
+   * reads its own as they are now. A session's or those in a state when
+   * named.
    */
-  lines(filter: { sessionId?: string; state?: LineState } = {}): Line[] {
-    return this.lineTable
-      .lines(filter.sessionId)
+  async lines(filter: { sessionId?: string; state?: LineState } = {}): Promise<Line[]> {
+    const found = new Map<string, Line>()
+    for (const line of await this.jobTable.store.findLines(filter.sessionId)) {
+      found.set(line.id.value, line)
+    }
+    if (this.jobTable.claimed) {
+      for (const line of this.lineTable.lines(filter.sessionId)) found.set(line.id.value, line)
+    }
+    return [...found.values()]
       .filter((line) => filter.state === undefined || line.state === filter.state)
+      .sort((a, b) => a.startedAt - b.startedAt)
   }
 
   /** One line's record, while the workspace keeps it. */
-  line(id: LineId): Line | null {
-    return this.lineTable.get(id)
+  async line(id: LineId): Promise<Line | null> {
+    const own = this.jobTable.claimed ? this.lineTable.get(id) : null
+    return own ?? (await this.jobTable.store.getLine(id))
   }
 
   /**
    * The jobs the workspace's sessions list, as `jobs` does: each until its
-   * ending is reported; a session's or those in a state when named.
+   * ending is reported; a session's, those in a state or those a line
+   * started when named. A daemon that does not hold the workspace's lease
+   * reads each session's list from the store first.
    */
-  jobs(filter: { sessionId?: string; state?: JobState; lineId?: LineId } = {}): Job[] {
+  async jobs(
+    filter: { sessionId?: string; state?: JobState; lineId?: LineId } = {},
+  ): Promise<Job[]> {
+    if (!this.jobTable.claimed) {
+      await this.ensureSessionsLoaded()
+      const ids =
+        filter.sessionId !== undefined
+          ? [filter.sessionId]
+          : this.listSessions().map((session) => session.sessionId)
+      for (const id of ids) await this.jobTable.sync(id)
+    }
     const handles =
       filter.sessionId === undefined
         ? this.jobTable.allJobs()
@@ -1369,9 +1397,9 @@ export class Workspace {
   }
 
   /** One job's record, while a session lists it. */
-  job(id: JobId): Job | null {
+  async job(id: JobId): Promise<Job | null> {
     return (
-      this.jobs().find(
+      (await this.jobs()).find(
         (job) => job.id.workspaceId === id.workspaceId && job.id.console === id.console,
       ) ?? null
     )
@@ -1379,11 +1407,13 @@ export class Workspace {
 
   /**
    * The processes the workspace keeps, by pid: every live one, and the
-   * newest ended ones; a session's, those in a state, those a line ran,
+   * newest ended ones, as its store keeps them, so a daemon that does not
+   * hold the workspace's lease lists the same ones; the holder reads its
+   * own as they are now. A session's, those in a state, those a line ran,
    * those a job ran (its own and every one under it, while a session lists
    * it) or those run on a machine when named.
    */
-  processes(
+  async processes(
     filter: {
       sessionId?: string
       state?: ProcessState
@@ -1391,16 +1421,40 @@ export class Workspace {
       jobId?: JobId
       machine?: MachineId
     } = {},
-  ): Process[] {
-    const records = this.processTable.records()
+  ): Promise<Process[]> {
+    const found = new Map<number, Process>()
+    for (const process of await this.jobTable.store.findProcesses(filter.sessionId)) {
+      found.set(process.id.pid, process)
+    }
+    const claimed = this.jobTable.claimed
+    if (claimed) {
+      for (const process of this.processTable.records()) {
+        if (filter.sessionId === undefined || process.sessionId === filter.sessionId)
+          found.set(process.id.pid, process)
+      }
+    }
+    const records = [...found.values()].sort((a, b) => a.id.pid - b.id.pid)
     let tree: Set<number> | null = null
     if (filter.jobId !== undefined) {
-      const pid = this.job(filter.jobId)?.pid ?? null
-      tree = pid === null ? new Set() : this.processTable.tree(pid)
+      const pid = (await this.job(filter.jobId))?.pid ?? null
+      tree = new Set()
+      if (pid !== null && claimed) {
+        tree = this.processTable.tree(pid)
+      } else if (pid !== null) {
+        tree.add(pid)
+        for (let grown = true; grown;) {
+          grown = false
+          for (const process of records) {
+            if (process.parent !== null && tree.has(process.parent) && !tree.has(process.id.pid)) {
+              tree.add(process.id.pid)
+              grown = true
+            }
+          }
+        }
+      }
     }
     return records.filter(
       (process) =>
-        (filter.sessionId === undefined || process.sessionId === filter.sessionId) &&
         (filter.state === undefined || process.state === filter.state) &&
         (filter.lineId === undefined || process.line?.value === filter.lineId.value) &&
         (tree === null || tree.has(process.id.pid)) &&
@@ -1409,14 +1463,15 @@ export class Workspace {
   }
 
   /** One process's record, while the workspace keeps it. */
-  process(id: ProcessId): Process | null {
-    return (
-      this.processTable
-        .records()
-        .find(
-          (process) => process.id.workspaceId === id.workspaceId && process.id.pid === id.pid,
-        ) ?? null
-    )
+  async process(id: ProcessId): Promise<Process | null> {
+    const own = this.jobTable.claimed
+      ? (this.processTable
+          .records()
+          .find(
+            (process) => process.id.workspaceId === id.workspaceId && process.id.pid === id.pid,
+          ) ?? null)
+      : null
+    return own ?? (await this.jobTable.store.getProcess(id))
   }
 
   async closeSession(sessionId: string): Promise<void> {

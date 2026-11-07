@@ -711,7 +711,7 @@ it('sends an ended job and process as spans', async () => {
   const ws = new Workspace({ '/data': new RAMVFS() }, { mode: MountMode.WRITE })
   try {
     await ws.shell('sleep 30 & kill %1; wait')
-    const [line] = ws.lines()
+    const [line] = await ws.lines()
     const [job] = spans.filter((s) => s.name === 'job')
     expect([
       job?.attributes['mirage.job.number'],

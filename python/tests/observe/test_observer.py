@@ -698,7 +698,7 @@ async def test_an_ended_job_and_process_are_spans(monkeypatch):
     ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
     try:
         await ws.shell("sleep 30 & kill %1; wait")
-        [line] = ws.lines()
+        [line] = await ws.lines()
     finally:
         await ws.close()
     spans = exporter.get_finished_spans()

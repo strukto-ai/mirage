@@ -46,6 +46,7 @@ from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.mount.spec import Mount
 from mirage.workspace.shell_execution import ShellExecution
 from mirage.workspace.snapshot import apply_state_dict, read_tar
+from mirage.workspace.store import RAMWorkspaceStateStore
 
 SEED_5_IDS = [
     "00000000-0000-709b-a78b-37e02557f3ef",
@@ -919,28 +920,66 @@ async def test_a_workspace_lists_its_lines_jobs_and_processes():
     ws = Workspace({"/data": RAMVFS()})
     try:
         pid = int((await ws.shell("sleep 30 & echo $!")).stdout)
-        [line] = ws.lines()
+        [line] = await ws.lines()
         assert (line.command, line.state, line.exit) == (
             "sleep 30 & echo $!",
             LineState.EXITED,
             0,
         )
-        assert ws.line(line.id) == line
-        assert ws.lines(session_id="other") == []
-        assert ws.lines(state=LineState.RUNNING) == []
-        [job] = ws.jobs(state=JobState.RUNNING)
+        assert await ws.line(line.id) == line
+        assert await ws.lines(session_id="other") == []
+        assert await ws.lines(state=LineState.RUNNING) == []
+        [job] = await ws.jobs(state=JobState.RUNNING)
         assert (job.command, job.line) == ("sleep 30", line.id)
-        assert ws.job(job.id) == job
-        [running] = ws.processes(state=ProcessState.RUNNING)
+        assert await ws.job(job.id) == job
+        [running] = await ws.processes(state=ProcessState.RUNNING)
         assert running.pid == pid
-        assert ws.process(running.id) == running
-        assert pid in [p.pid for p in ws.processes(line_id=line.id)]
+        assert await ws.process(running.id) == running
+        assert pid in [p.pid for p in await ws.processes(line_id=line.id)]
         await ws.shell("kill %1; wait")
-        ended = ws.process(running.id)
+        ended = await ws.process(running.id)
         assert ended is not None
         assert (ended.state, ended.signal) == (ProcessState.EXITED, 15)
     finally:
         await ws.close()
+
+
+# A daemon that does not hold the workspace's lease lists the lines, jobs
+# and processes the holder runs, as their store keeps them.
+@pytest.mark.asyncio
+async def test_another_daemon_lists_what_the_holder_runs():
+    store = RAMWorkspaceStateStore()
+    a, b = (
+        Workspace(
+            {"/m": (RAMVFS(), MountMode.WRITE)},
+            mode=MountMode.WRITE,
+            workspace_id="shared",
+            session_id="s",
+            store=store,
+        )
+        for _ in range(2)
+    )
+    try:
+        pid = int((await a.shell("sleep 30 & echo $!", session_id="s")).stdout)
+        [line] = await b.lines()
+        assert (line.command, line.state, line.exit) == (
+            "sleep 30 & echo $!",
+            LineState.EXITED,
+            0,
+        )
+        assert await b.line(line.id) == line
+        [running] = await b.processes(state=ProcessState.RUNNING)
+        assert (running.pid, running.line) == (pid, line.id)
+        assert await b.process(running.id) == running
+        [job] = await b.jobs()
+        assert (job.command, job.state) == ("sleep 30", JobState.RUNNING)
+        await a.shell("kill %1; wait", session_id="s")
+        ended = await b.process(running.id)
+        assert ended is not None
+        assert (ended.state, ended.signal) == (ProcessState.EXITED, 15)
+    finally:
+        await a.close()
+        await b.close()
 
 
 # A line queued behind another of its session is listed as waiting, and
@@ -951,18 +990,18 @@ async def test_a_queued_line_is_listed_waiting_until_it_is_cancelled():
     first = asyncio.ensure_future(ws.shell("sleep 30"))
     try:
         async with asyncio.timeout(5):
-            while not ws.lines(state=LineState.RUNNING):
+            while not await ws.lines(state=LineState.RUNNING):
                 await asyncio.sleep(0.01)
         second = asyncio.ensure_future(ws.shell("echo next"))
         async with asyncio.timeout(5):
-            while not ws.lines(state=LineState.WAITING):
+            while not await ws.lines(state=LineState.WAITING):
                 await asyncio.sleep(0.01)
-        [waiting] = ws.lines(state=LineState.WAITING)
+        [waiting] = await ws.lines(state=LineState.WAITING)
         assert waiting.command == "echo next"
         second.cancel()
         with pytest.raises(asyncio.CancelledError):
             await second
-        ended = ws.line(waiting.id)
+        ended = await ws.line(waiting.id)
         assert ended is not None
         assert (ended.state, ended.signal) == (LineState.EXITED, 2)
     finally:

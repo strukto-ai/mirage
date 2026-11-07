@@ -14,6 +14,9 @@
 
 import type { ConsoleStore } from '../shell/console/index.ts'
 import type { RecordFields } from '../workspace/record/types.ts'
+import type { Line } from './line/types.ts'
+import type { Process } from './process/types.ts'
+import type { LineId, ProcessId } from './types.ts'
 
 /**
  * Storage seam for one workspace's execution plane: each session's job
@@ -40,6 +43,12 @@ import type { RecordFields } from '../workspace/record/types.ts'
  * a daemon that takes the lease next numbers past it and no pid repeats
  * in the workspace. A daemon that finds another's record left behind
  * stops the native runs it lists.
+ *
+ * Every line and process has a record here too (`note`), written as it
+ * changes, so a daemon that does not hold the lease lists the same lines
+ * and processes the holder runs; an ended one is kept among the newest
+ * `HISTORY_MAX_RECORDS` of its kind, for `HISTORY_SECONDS` after the newest
+ * ended.
  *
  * Subclasses are infra adapters (RAM, Redis); everything above (job
  * numbers, waits, kills, hangups) is the table's, mirroring the
@@ -79,6 +88,25 @@ export abstract class ExecutionStore {
    * the same stream, so the job's daemon writes it and any other daemon
    * reads or ends it.
    */
+  /**
+   * Keep a line's or a process's record as it reads now, in place of the
+   * one before. It never waits: a store over the network writes it in the
+   * background, the newest of each record winning.
+   */
+  abstract note(record: Line | Process): void
+
+  /** One line's record, while the store keeps it. */
+  abstract getLine(lineId: LineId): Promise<Line | null>
+
+  /** One process's record, while the store keeps it. */
+  abstract getProcess(processId: ProcessId): Promise<Process | null>
+
+  /** The line records the store keeps, oldest first; a session's when named. */
+  abstract findLines(sessionId?: string): Promise<Line[]>
+
+  /** The process records the store keeps, by pid; a session's when named. */
+  abstract findProcesses(sessionId?: string): Promise<Process[]>
+
   abstract console(name: string): ConsoleStore
 
   /**
