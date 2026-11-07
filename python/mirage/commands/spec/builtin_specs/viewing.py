@@ -122,7 +122,12 @@ SPECS: dict[str, CommandSpec] = {
             PATHS_OPERAND,
         )
     ),
-    "rev": CommandSpec(arguments=(PATHS_OPERAND,)),
+    "rev": CommandSpec(
+        arguments=(
+            Argument("-0", "--zero", action="store_true"),
+            PATHS_OPERAND,
+        )
+    ),
     "expand": CommandSpec(
         arguments=(
             Argument("-t", "--tabs", action="append"),
@@ -140,7 +145,9 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "look": CommandSpec(
         arguments=(
-            Argument("-f", action="store_true"),
+            Argument("-f", "--ignore-case", action="store_true"),
+            Argument("-d", "--alphanum", action="store_true"),
+            Argument("-t", "--terminate"),
             TEXT_OPERAND,
             PATH2_OPERAND,
         )

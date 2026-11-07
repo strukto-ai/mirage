@@ -1,14 +1,26 @@
+use serde::Deserialize;
+
 use crate::records::{Records, Take};
 use crate::utf8::previous_lossy as previous;
-use crate::{Stream, StreamError};
+use crate::{Stream, StreamError, parse_config};
 
 const WORK: usize = 16384;
 
-pub(crate) fn open(_config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Config {
+    /// -0: NUL ends a line instead of a newline.
+    #[serde(default)]
+    zero: bool,
+}
+
+pub(crate) fn open(config: &[u8]) -> Result<Box<dyn Stream>, StreamError> {
+    let config: Config = parse_config(config)?;
     Ok(Box::new(Rev {
         records: Records::default(),
         remaining: None,
         busy: false,
+        terminator: if config.zero { 0 } else { b'\n' },
     }))
 }
 
@@ -20,13 +32,14 @@ struct Rev {
     records: Records,
     remaining: Option<usize>,
     busy: bool,
+    terminator: u8,
 }
 
 impl Rev {
     fn pump(&mut self, out: &mut Vec<u8>) {
         let limit = out.len().saturating_add(WORK);
         while out.len() < limit {
-            let Take::Record((line, terminated)) = self.records.peek_span(b'\n') else {
+            let Take::Record((line, terminated)) = self.records.peek_span(self.terminator) else {
                 self.busy = false;
                 return;
             };
@@ -47,7 +60,7 @@ impl Rev {
                 return;
             }
             if terminated {
-                out.push(b'\n');
+                out.push(self.terminator);
             }
             self.remaining = None;
             self.records.advance();
@@ -94,6 +107,12 @@ mod tests {
             run("rev", "{}", &[b"a\xffb\xe2\x82\n"]).0,
             "\u{FFFD}b\u{FFFD}a\n".as_bytes()
         );
+    }
+
+    #[test]
+    fn zero_ends_a_line_at_nul() {
+        let chunks: [&[u8]; 2] = [b"ab\ncd\0e", b"f\0g"];
+        assert_eq!(run("rev", r#"{"zero": true}"#, &chunks).0, b"dc\nba\0fe\0g");
     }
 
     #[test]

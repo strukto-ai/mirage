@@ -78,7 +78,13 @@ export const SPECS: Record<string, CommandSpec> = {
     ],
   }),
   look: new CommandSpec({
-    arguments: [new Argument('-f', { action: 'store_true' }), TEXT_OPERAND, PATH2_OPERAND],
+    arguments: [
+      new Argument(['-f', '--ignore-case'], { action: 'store_true' }),
+      new Argument(['-d', '--alphanum'], { action: 'store_true' }),
+      new Argument(['-t', '--terminate']),
+      TEXT_OPERAND,
+      PATH2_OPERAND,
+    ],
   }),
   nl: new CommandSpec({
     arguments: [
@@ -122,7 +128,7 @@ export const SPECS: Record<string, CommandSpec> = {
     ],
   }),
   rev: new CommandSpec({
-    arguments: [PATHS_OPERAND],
+    arguments: [new Argument(['-0', '--zero'], { action: 'store_true' }), PATHS_OPERAND],
   }),
   tac: new CommandSpec({
     arguments: [

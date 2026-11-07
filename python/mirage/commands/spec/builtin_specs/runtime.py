@@ -194,11 +194,15 @@ SPECS: dict[str, CommandSpec] = {
         arguments=(
             Argument(
                 "-l",
+                "--mathlib",
                 action="store_true",
                 help="Load the standard math library.",
             ),
             Argument(
-                "-q", action="store_true", help="Suppress the welcome banner."
+                "-q",
+                "--quiet",
+                action="store_true",
+                help="Suppress the welcome banner.",
             ),
             PATHS_OPERAND,
         ),
@@ -296,6 +300,24 @@ SPECS: dict[str, CommandSpec] = {
                 "--universal",
                 action="store_true",
                 help="Use Coordinated Universal Time (UTC).",
+            ),
+            Argument(
+                "-r",
+                "--reference",
+                type="path",
+                help="Display the time the given file was last modified.",
+            ),
+            Argument(
+                "-f",
+                "--file",
+                type="path",
+                help="Display the time each line of the given file "
+                "describes, as -d would.",
+            ),
+            Argument(
+                "--resolution",
+                action="store_true",
+                help="Display the resolution of the times shown.",
             ),
             TEXT_OPERAND,
         ),

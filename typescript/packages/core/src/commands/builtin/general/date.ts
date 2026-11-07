@@ -14,8 +14,10 @@
 
 import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
-import { IOResult } from '../../../io/types.ts'
-import { parseDateExprAsync, parsePosixTimeAsync } from '../../../utils/dates.ts'
+import { IOResult, materialize } from '../../../io/types.ts'
+import { isoTimestamp, parseDateExprAsync, parsePosixTimeAsync } from '../../../utils/dates.ts'
+import { fsErrorLine } from '../../../errors/render.ts'
+import { isFsError } from '../../../errors/fs.ts'
 import { command, type CommandFnResult, type Context } from '../../config.ts'
 import { specOf } from '../../spec/builtins.ts'
 import { gnuStrftime } from '../utils/strftime.ts'
@@ -24,9 +26,9 @@ import { extraOperandError, usageExitCode, usageHint } from '../../spec/usage.ts
 import { UsageError } from '../../errors.ts'
 import { CommandName } from '../../spec/types.ts'
 import { FlagView } from '../../spec/flag_view.ts'
-import { LOCAL_ZONE, UTC_ZONE, zoneFromEnv } from '../../../utils/timezone.ts'
+import { LOCAL_ZONE, UTC_ZONE, zoneFromEnv, type Zone } from '../../../utils/timezone.ts'
 import { systemDate } from '../../../utils/clock.ts'
-import { encodeText } from '../../../shell/bytes.ts'
+import { decodeText, encodeText } from '../../../shell/bytes.ts'
 
 const ENC = new TextEncoder()
 
@@ -83,6 +85,68 @@ function invalidDate(text: string): CommandFnResult {
 }
 
 // GNU's refusal of a non-`+` operand beside `-d`, a usage error.
+// GNU's refusal of two of -d, -f, -r and --resolution, a usage error.
+function exclusiveError(): UsageError {
+  return new UsageError(
+    'date: the options to specify dates for printing are mutually exclusive\n' +
+      usageHint(CommandName.DATE),
+    usageExitCode(CommandName.DATE),
+  )
+}
+
+// The moment one -d or -f expression names, or null; a blank expression names
+// today at midnight, as GNU reads it. Mirrors Python's _named.
+async function named(expression: string, zone: Zone, signal?: AbortSignal): Promise<Date | null> {
+  if (expression.trim() === '') {
+    const midnight = await parseDateExprAsync(
+      gnuStrftime(systemDate(), '%Y-%m-%d', zone),
+      zone,
+      undefined,
+      signal,
+    )
+    // Today's own ISO date always parses; the fallback is for the type.
+    return midnight ?? systemDate()
+  }
+  return parseDateExprAsync(expression, zone, undefined, signal)
+}
+
+// -f: each line of the file a -d expression, printed in turn; a line that
+// names no date is reported and the next one still prints, exit 1, and `-`
+// reads standard input. Mirrors Python's _each_line.
+async function eachLine(
+  ctx: Context,
+  datefile: PathSpec,
+  zone: Zone,
+  fmt: string,
+): Promise<CommandFnResult> {
+  let data: Uint8Array
+  try {
+    if (datefile.rawPath === '-') data = await materialize(ctx.stdin)
+    else if (ctx.vfs !== undefined) data = await ctx.vfs.read(datefile)
+    else throw Object.assign(new Error(datefile.rawPath), { code: 'ENOENT' })
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    const line = fsErrorLine(CommandName.DATE, datefile, err)
+    return [null, new IOResult({ exitCode: 1, stderr: encodeText(line) })]
+  }
+  const lines = decodeText(data).split('\n')
+  if (lines.at(-1) === '') lines.pop()
+  let out = ''
+  let err = ''
+  for (const text of lines) {
+    const dt = await named(text, zone, ctx.signal)
+    if (dt === null) {
+      err += `date: invalid date '${quoteText(text)}'\n`
+      continue
+    }
+    out += gnuStrftime(dt, fmt, zone) + '\n'
+  }
+  return [
+    out === '' ? null : encodeText(out),
+    new IOResult({ exitCode: err === '' ? 0 : 1, stderr: err === '' ? null : encodeText(err) }),
+  ]
+}
+
 function lacksPlusError(operand: string): UsageError {
   return new UsageError(
     `date: the argument '${quoteText(operand)}' lacks a leading '+';\n` +
@@ -113,43 +177,56 @@ async function date(
   const fl = new FlagView(ctx.flags, specOf('date'))
   const u = fl.asBool('utc') || fl.asBool('universal')
   const d = fl.asStr('date') ?? null
+  const reference = fl.asPath('reference') ?? null
+  const datefile = fl.asPath('file') ?? null
+  const resolution = fl.asBool('resolution')
   const formats = optionFormats(fl)
   if (formats.length > 1) return multipleFormats()
+  const chosen = [d !== null, reference !== null, datefile !== null, resolution]
+  if (chosen.filter(Boolean).length > 1) throw exclusiveError()
   if (texts.length > 1) throw extraOperandError(CommandName.DATE, texts[1] ?? '')
   let setting = texts[0] ?? null
   if (setting?.startsWith('+') === true) {
     if (formats.length > 0) return multipleFormats()
     formats.push(setting.slice(1))
     setting = null
-  } else if (setting !== null && d !== null) {
+  } else if (setting !== null && chosen.some(Boolean)) {
     throw lacksPlusError(setting)
   }
-  const named = u ? UTC_ZONE : zoneFromEnv(ctx.env)
-  const zone = named ?? LOCAL_ZONE
+  const zone = (u ? UTC_ZONE : zoneFromEnv(ctx.env)) ?? LOCAL_ZONE
+  if (datefile !== null) return eachLine(ctx, datefile, zone, formats[0] ?? DEFAULT_FORMAT)
+  // Times here are kept to the nanosecond, the resolution GNU reports for a
+  // filesystem that keeps them so.
+  if (resolution && formats.length === 0) return [ENC.encode('0.000000001\n'), new IOResult()]
   let dt: Date
   if (setting !== null) {
     const placed = await parsePosixTimeAsync(setting, zone, undefined, ctx.signal)
     if (placed === null) return invalidDate(setting)
     dt = placed
-  } else if (d !== null && d.trim() === '') {
-    // GNU ACCEPTS an empty (or blank) expression, exit 0: with no item at
-    // all it names today at midnight. Measured on coreutils 9.4: `date -d
-    // ''` and `date -d '   '` both print today 00:00:00 in the command's
-    // zone.
-    const midnight = await parseDateExprAsync(
-      gnuStrftime(systemDate(), '%Y-%m-%d', zone),
-      zone,
-      undefined,
-      ctx.signal,
-    )
-    // Today's own ISO date always parses; the fallback is for the type.
-    dt = midnight ?? systemDate()
   } else if (d !== null) {
-    const parsed = await parseDateExprAsync(d, zone, undefined, ctx.signal)
+    // GNU ACCEPTS an empty (or blank) expression, exit 0: with no item at all
+    // it names today at midnight. Measured on coreutils 9.4: `date -d ''` and
+    // `date -d '   '` both print today 00:00:00 in the command's zone.
+    const parsed = await named(d, zone, ctx.signal)
     // GNU's refusal, exit 1: a NaN render with exit 0 poisons whatever
     // consumed it (the 0NaN-NaN-NaN corpus failure).
     if (parsed === null) return invalidDate(d)
     dt = parsed
+  } else if (reference !== null) {
+    // -r: when the file was last modified; a backend that reports no time
+    // for it answers the epoch.
+    try {
+      if (ctx.vfs === undefined) {
+        throw Object.assign(new Error(reference.rawPath), { code: 'ENOENT' })
+      }
+      dt = new Date((isoTimestamp((await ctx.vfs.stat(reference)).modified) ?? 0) * 1000)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      const line = fsErrorLine(CommandName.DATE, reference, err)
+      return [null, new IOResult({ exitCode: 1, stderr: encodeText(line) })]
+    }
+  } else if (resolution) {
+    dt = new Date(0)
   } else {
     dt = systemDate()
   }
