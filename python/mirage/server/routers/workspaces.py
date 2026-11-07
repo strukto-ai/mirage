@@ -645,14 +645,14 @@ async def workspace_logs(
     records = await entry.runner.call(
         entry.runner.ws.observer.events(selected_session)
     )
-    logs = completed_logs(records)
+    logs = await run_blocking(completed_logs, records)
     if format == "jsonl":
         return StreamingResponse(
             log_lines(logs),
             media_type="application/x-ndjson",
             headers={"Content-Disposition": log_attachment(workspace_id)},
         )
-    return log_page(logs, limit, after)
+    return await run_blocking(log_page, logs, limit, after)
 
 
 @router.delete("/{workspace_id}", response_model=DeleteWorkspaceResponse)

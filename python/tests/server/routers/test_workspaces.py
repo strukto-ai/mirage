@@ -2303,3 +2303,38 @@ async def test_logs_support_existing_session_ids_and_unicode_workspaces():
                 for line in exported.text.splitlines()
             ] == [sid, sid]
     await app.state.registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_large_log_reads_do_not_block_health_requests(monkeypatch):
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    entered = threading.Event()
+    release = threading.Event()
+    original = workspaces_router.completed_logs
+
+    def paused(records):
+        entered.set()
+        release.wait(5)
+        return original(records)
+
+    monkeypatch.setattr(workspaces_router, "completed_logs", paused)
+    watchdog = threading.Timer(5, release.set)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wid = (
+            await client.post("/v1/workspaces", json=_minimal_config())
+        ).json()["id"]
+        watchdog.start()
+        pending = asyncio.create_task(client.get(f"/v1/workspaces/{wid}/logs"))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            health = await asyncio.wait_for(client.get("/v1/health"), 1)
+            assert health.status_code == 200
+            assert not release.is_set()
+        finally:
+            release.set()
+            watchdog.cancel()
+            await pending
+            await asyncio.to_thread(watchdog.join)
+    await app.state.registry.close_all()
