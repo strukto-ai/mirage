@@ -137,12 +137,13 @@ export class WorkerProxy {
       })
       return
     }
-    if (own && resource === 'ready') {
+    const daemon = resource === 'daemon' && parts.length === 3
+    if (daemon && id === 'ready' && method === 'GET') {
       const status = this.draining ? 'shutting_down' : this.hasRoom(1) ? 'ready' : 'full'
       sendJson(res, status === 'ready' ? 200 : 503, { status })
       return
     }
-    if (resource === 'shutdown' && parts.length === 2 && method === 'POST') {
+    if (daemon && id === 'shutdown' && method === 'POST') {
       // A worker answers whether the caller may stop the daemon.
       const answer = await this.fetch(first, req, null, true)
       if (answer.status !== 200) {

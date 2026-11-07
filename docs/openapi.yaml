@@ -3328,10 +3328,10 @@ paths:
       x-hosts:
         - daemon
       security: []
-  /v1/ready:
+  /v1/daemon/ready:
     get:
       summary: Check readiness
-      operationId: ready_v1_ready_get
+      operationId: ready_v1_daemon_ready_get
       responses:
         '200':
           description: OK
@@ -3349,10 +3349,10 @@ paths:
       x-hosts:
         - daemon
       security: []
-  /v1/shutdown:
+  /v1/daemon/shutdown:
     post:
       summary: Shut down the server
-      operationId: shutdown_v1_shutdown_post
+      operationId: shutdown_v1_daemon_shutdown_post
       responses:
         '200':
           description: OK

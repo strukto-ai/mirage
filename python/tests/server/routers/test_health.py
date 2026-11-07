@@ -28,15 +28,15 @@ async def test_ready_answers_503_while_full_or_shutting_down():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
-        r = await client.get("/v1/ready")
+        r = await client.get("/v1/daemon/ready")
         assert (r.status_code, r.json()) == (200, {"status": "ready"})
         assert (
             await client.post("/v1/workspaces", json=_config())
         ).status_code == 201
-        r = await client.get("/v1/ready")
+        r = await client.get("/v1/daemon/ready")
         assert (r.status_code, r.json()) == (503, {"status": "full"})
         await app.state.registry.drain(0)
-        r = await client.get("/v1/ready")
+        r = await client.get("/v1/daemon/ready")
         assert (r.status_code, r.json()) == (503, {"status": "shutting_down"})
         assert (await client.get("/v1/health")).status_code == 200
     await app.state.registry.close_all()
@@ -49,7 +49,7 @@ async def test_ready_counts_a_workspace_still_being_built():
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         async with app.state.registry.creating("w", "config"):
-            r = await client.get("/v1/ready")
+            r = await client.get("/v1/daemon/ready")
             assert (r.status_code, r.json()) == (503, {"status": "full"})
-        r = await client.get("/v1/ready")
+        r = await client.get("/v1/daemon/ready")
         assert (r.status_code, r.json()) == (200, {"status": "ready"})

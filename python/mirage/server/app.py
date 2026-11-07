@@ -118,7 +118,7 @@ async def _watch_exit(
     exit_event: asyncio.Event, on_exit: Callable[[], None]
 ) -> None:
     """Call ``on_exit`` once ``exit_event`` is set: the idle timer fired
-    or ``POST /v1/shutdown`` asked.
+    or ``POST /v1/daemon/shutdown`` asked.
 
     Args:
         exit_event (asyncio.Event): the app's exit event.
@@ -172,7 +172,7 @@ def _drain_on_signals(
     """Have SIGTERM and SIGINT drain the app before the server's own
     handlers stop it, when ``graceful_timeout`` is set: running lines get
     that long to finish while new workspaces are refused and
-    ``/v1/ready`` answers 503, then the server stops as it would have.
+    ``/v1/daemon/ready`` answers 503, then the server stops as it would have.
     Whatever runs the app (uvicorn, a gunicorn worker, hypercorn) has
     installed its handlers by the time the lifespan starts. A handler is
     process-wide and only the main thread may set one, so nothing is
@@ -333,7 +333,7 @@ def build_app(
         idle_grace_seconds (float): seconds to wait after the last
             workspace is removed before signalling shutdown.
         exit_event (asyncio.Event | None): event the registry trips
-            when the idle timer fires, and ``POST /v1/shutdown`` sets.
+            when the idle timer fires, and ``POST /v1/daemon/shutdown`` sets.
             Defaults to a fresh event.
         on_idle_exit (Callable[[], None] | None): called once the exit
             event is set. None (default) keeps the app serving; the

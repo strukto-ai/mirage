@@ -91,7 +91,7 @@ describe('registerRateLimits', () => {
     expect(wait).toBeGreaterThanOrEqual(1)
     expect(wait).toBeLessThanOrEqual(60)
     expect((await get('/v1/health')).statusCode).toBe(200)
-    expect((await get('/v1/ready')).statusCode).toBe(200)
+    expect((await get('/v1/daemon/ready')).statusCode).toBe(200)
     await app.close()
   })
 
@@ -164,7 +164,7 @@ describe('registerRateLimits around sign-in', () => {
       expect(refused.json()).toEqual({ detail: 'Too Many Requests' })
       expect(Number(refused.headers['retry-after'])).toBe(60)
       expect((await app.inject({ url: '/v1/health' })).statusCode).toBe(200)
-      expect((await app.inject({ url: '/v1/ready' })).statusCode).toBe(200)
+      expect((await app.inject({ url: '/v1/daemon/ready' })).statusCode).toBe(200)
       vi.setSystemTime(Date.now() + 60_001)
       expect((await get('right')).statusCode).toBe(200)
     } finally {
@@ -279,7 +279,9 @@ describe('refusal log', () => {
 
   it('leaves readiness public when its URL carries a query', async () => {
     const app = buildApp({ authConfig: { mode: AuthMode.Local, localToken: 'right' } })
-    expect((await app.inject({ method: 'GET', url: '/v1/ready?probe=1' })).statusCode).toBe(200)
+    expect((await app.inject({ method: 'GET', url: '/v1/daemon/ready?probe=1' })).statusCode).toBe(
+      200,
+    )
     await app.close()
   })
 })

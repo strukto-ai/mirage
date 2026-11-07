@@ -155,7 +155,7 @@ Returns `{"status": "ok", "workspaces": 2, "uptime_s": 12.5}` without requiring 
 
 ### Check readiness
 
-<Badge color="blue">GET</Badge> `/v1/ready`
+<Badge color="blue">GET</Badge> `/v1/daemon/ready`
 
 Whether the server takes new workspaces, without requiring a token. Returns
 `{"status": "ready"}` with `200`, or `503` with `{"status": "full"}` at
@@ -231,7 +231,7 @@ forwarded_allow_ips = "10.0.0.0/8"
 | `header:<name>` | That header's value. |
 
 A request with no value for a key (no account, no workspace in its path, no such
-header) is not counted by that limit. `/v1/health`, `/v1/ready` and the OAuth
+header) is not counted by that limit. `/v1/health`, `/v1/daemon/ready` and the OAuth
 protected-resource metadata are never counted. WebSocket handshakes consume the
 same budget as HTTP requests; messages on an established connection do not.
 In code, a key may also be a function of the request that returns the value to
@@ -263,7 +263,7 @@ const app = buildApp({
 
 ### Shut down
 
-<Badge color="green">POST</Badge> `/v1/shutdown`
+<Badge color="green">POST</Badge> `/v1/daemon/shutdown`
 
 Requests the server to shut down, returning `{"status": "shutting_down", "pid": 4242}`.
 A server you launch stops only if you gave it `on_idle_exit` (`onIdleExit` in
@@ -944,7 +944,7 @@ joins an account with its `mirage-account` option.
     before the server used `jwt` mode has no owner, and no account can create
     its id.
   - Snapshot keys live under `accounts/<account>/` in the snapshot store.
-  - `POST /v1/shutdown` returns HTTP 403 Forbidden.
+  - `POST /v1/daemon/shutdown` returns HTTP 403 Forbidden.
 </Accordion>
 
 <Warning>
@@ -952,7 +952,7 @@ joins an account with its `mirage-account` option.
   mount a host directory or run the `local` runtime, unless a
   [server policy](#server-policies) refuses it. In `local` and `token` mode,
   any accepted token can use every route and every workspace, including
-  `POST /v1/shutdown`.
+  `POST /v1/daemon/shutdown`.
 </Warning>
 
 ## Server policies

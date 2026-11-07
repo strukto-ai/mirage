@@ -679,7 +679,7 @@ describe('AuthMiddleware integration', () => {
       try {
         const r = await app.inject({
           method: 'POST',
-          url: '/v1/shutdown',
+          url: '/v1/daemon/shutdown',
           headers: await bearer({ sub: 'alice' }),
         })
         expect(r.statusCode).toBe(403)

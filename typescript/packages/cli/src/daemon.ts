@@ -117,7 +117,7 @@ export function registerDaemonCommands(program: Command): void {
       const c = makeClient()
       let r: Response
       try {
-        r = await c.request('POST', '/v1/shutdown')
+        r = await c.request('POST', '/v1/daemon/shutdown')
       } catch (err: unknown) {
         fail(`daemon not reachable: ${String(err)}`)
       }
@@ -146,7 +146,7 @@ export function registerDaemonCommands(program: Command): void {
     .action(async (opts: { timeout: string; eager?: boolean }) => {
       const timeoutMs = Number(opts.timeout) * 1000
       try {
-        await makeClient().request('POST', '/v1/shutdown')
+        await makeClient().request('POST', '/v1/daemon/shutdown')
       } catch {
         // already unreachable; fall through to pid cleanup
       }

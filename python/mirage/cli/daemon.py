@@ -123,14 +123,14 @@ def stop_cmd(
 ) -> None:
     """Gracefully stop the daemon.
 
-    Calls ``POST /v1/shutdown`` which trips the daemon's exit event.
+    Calls ``POST /v1/daemon/shutdown`` which trips the daemon's exit event.
     The daemon closes active workspaces and exits. If the daemon
     doesn't exit within ``--timeout``, fall back to SIGTERM via the
     PID file.
     """
     with make_client() as client:
         try:
-            r = client.request("POST", "/v1/shutdown")
+            r = client.request("POST", "/v1/daemon/shutdown")
         except httpx.RequestError as e:
             fail(f"daemon not reachable: {e}", exit_code=1)
         if r.status_code >= 400:
@@ -176,7 +176,7 @@ def restart_cmd(
     """
     with make_client() as client:
         try:
-            client.request("POST", "/v1/shutdown")
+            client.request("POST", "/v1/daemon/shutdown")
         except httpx.RequestError:
             # daemon not listening: fall through to the signal-based stop
             pass
