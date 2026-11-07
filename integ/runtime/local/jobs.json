@@ -104,6 +104,47 @@
           }
         }
       ]
+    },
+    {
+      "id": "local_programs_a_job_forks_are_its_children",
+      "world": {
+        "runtimes": [
+          {
+            "name": "local",
+            "captures": [
+              "python3",
+              "@external"
+            ]
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; python3 -c 'import sys, time; open(sys.argv[1], \"w\").close(); time.sleep(1)' \"$F\" & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; echo \"[$(ps -o ppid=,comm= | awk -v j=$! '$1 == j { print $2 }')]\"; wait; perl -e 'unlink @ARGV' \"$F\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; find / -maxdepth 0 -exec python3 -c 'import sys, time; open(sys.argv[1], \"w\").close(); time.sleep(1)' \"$F\" \\; & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; echo \"[$(ps -o ppid=,comm= | awk -v j=$! '$1 == j { print $2 }')]\"; wait; perl -e 'unlink @ARGV' \"$F\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[python3]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; xargs python3 -c 'import sys, time; open(sys.argv[1], \"w\").close(); time.sleep(1)' \"$F\" </dev/null & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; echo \"[$(ps -o ppid=,comm= | awk -v j=$! '$1 == j { print $2 }')]\"; wait; perl -e 'unlink @ARGV' \"$F\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[python3]\n",
+            "stderr": ""
+          }
+        }
+      ]
     }
   ]
 }
