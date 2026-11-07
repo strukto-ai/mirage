@@ -20,7 +20,7 @@ import type { CommandFnResult, Context } from '../../../config.ts'
 import { UsageError } from '../../../errors.ts'
 import { StreamRefusal } from '../../../../rs/errors.ts'
 import type { PathSpec } from '../../../../types.ts'
-import { runViewCmd, workflowViewCmd } from './actions.ts'
+import { runViewCmd, workflowRunCmd, workflowViewCmd } from './actions.ts'
 import { context } from '../../../../../tests/workspace/fixtures/context.ts'
 
 const ENC = new TextEncoder()
@@ -301,5 +301,36 @@ describe('gh workflow view --yaml', () => {
     await expect(workflowViewCmd(...args(['ci.yml'], { yaml: true, ...flags }))).rejects.toThrow(
       message,
     )
+  })
+})
+
+describe('gh workflow run', () => {
+  // gh never reads the checkout's branch here, so the install's `branch`
+  // leaves the dispatch on the repository's default branch.
+  it.each([
+    [{}, 'main', ['GET /repos/o/r', 'POST /repos/o/r/actions/workflows/ci.yml/dispatches']],
+    [{ ref: 'dev' }, 'dev', ['POST /repos/o/r/actions/workflows/ci.yml/dispatches']],
+  ])('dispatches on --ref, else the default branch (%o)', async (flags, branch, calls) => {
+    const sent: unknown[] = []
+    class Recording extends RouteTransport {
+      override request(
+        method: string,
+        path: string,
+        body?: unknown,
+        params?: Record<string, string>,
+      ): Promise<unknown> {
+        if (method === 'POST') sent.push(body)
+        return super.request(method, path, body, params)
+      }
+    }
+    ROUTES.set('GET /repos/o/r', { default_branch: 'main' })
+    ROUTES.set('POST /repos/o/r/actions/workflows/ci.yml/dispatches', {})
+    const account = new GitHubAccount(
+      { token: 't', repo: 'o/r', branch: 'feature' },
+      new Recording(),
+    )
+    await workflowRunCmd(account, [], ['ci.yml'], context({ flags }))
+    expect(sent).toEqual([{ ref: branch, inputs: {} }])
+    expect(CALLS).toEqual(calls)
   })
 })
