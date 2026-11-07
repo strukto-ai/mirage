@@ -12,98 +12,27 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { ProcessHandle } from '../process/handle.ts'
-import type { IOResult } from '../../io/types.ts'
-import type { ExecutionNode } from '../../workspace/types.ts'
-import { JobConsole } from '../../shell/console/index.ts'
+import type { JobId } from '../types.ts'
 
-export const JobStatus = Object.freeze({
-  RUNNING: 'running',
-  COMPLETED: 'completed',
-  KILLED: 'killed',
-} as const)
-
-export type JobStatus = (typeof JobStatus)[keyof typeof JobStatus]
-
-export type JobResult = [IOResult, ExecutionNode]
-
-/** Produces a job's output and its result. */
-export type JobRunner = (job: Job) => Promise<JobResult>
+export type JobState = 'running' | 'stopping' | 'exited'
 
 /**
- * One background command, and everything it has printed.
+ * One background job, as every daemon on its store reads it: what a
+ * `cmd &` started, numbered `%N` in its session's list.
  *
- * Output lives in `console` rather than in byte fields, so a reader can
- * watch a job while it runs instead of waiting for it to end. A `simple`
- * job is one simple command, which the job is, so a program it ran that
- * handled a `kill` leaves the job its own status. Its `owner` is the job
- * table that runs it; a job another workspace runs has no `process` here.
- * Its `consoleName` is the name its job store keeps the console under,
- * which tells apart two jobs a reused number gave the same id. A `reported`
- * job's shell printed the report of the signal that ended it, so `jobs` and
- * a `%N` no longer name it, and its pid still answers `wait`.
+ * A job a `kill` reached is `stopping` until its runner stops. `endedAt` is
+ * set exactly when `state` is final, with `exit` the status `wait` answers
+ * and `signal` the signal a kill or a hangup ended it with, if one did.
  */
-export class Job {
-  id: number
-  readonly command: string
-  // null for jobs restored from a snapshot (already finished, no runner)
-  // and for jobs another workspace runs.
-  process: ProcessHandle | null = null
-  readonly abort: AbortController | null
-  readonly cwd: string
+export interface Job {
+  readonly id: JobId
+  readonly number: number
   readonly sessionId: string
-  readonly createdAt: number
-  console: JobConsole
-  readonly simple: boolean
-  owner: string
-  consoleName: string
-
-  status: JobStatus = JobStatus.RUNNING
-  exitCode = 0
-  reported = false
-
-  constructor(init: {
-    id: number
-    command: string
-    abort?: AbortController | null
-    cwd: string
-    sessionId?: string
-    createdAt: number
-    status?: JobStatus
-    exitCode?: number
-    console?: JobConsole
-    simple?: boolean
-    owner?: string
-    consoleName?: string
-  }) {
-    this.id = init.id
-    this.command = init.command
-    this.abort = init.abort ?? null
-    this.cwd = init.cwd
-    this.sessionId = init.sessionId ?? ''
-    this.createdAt = init.createdAt
-    this.console = init.console ?? new JobConsole()
-    this.simple = init.simple ?? false
-    this.owner = init.owner ?? ''
-    this.consoleName = init.consoleName ?? ''
-    if (init.status !== undefined) this.status = init.status
-    if (init.exitCode !== undefined) this.exitCode = init.exitCode
-  }
-
-  /**
-   * The managed PID `$!`, `jobs -p` and `wait -p` report. A job restored
-   * from a snapshot or run by another workspace has no runner here, so its
-   * job number stands in.
-   */
-  get pid(): number {
-    return this.process?.record.id.pid ?? this.id
-  }
-
-  /**
-   * The id of the process the job runs as, as text: its runner's here, its
-   * console's for a job restored or run elsewhere.
-   */
-  get processId(): string | null {
-    return this.process?.record.id.toString() ?? this.console.process
-  }
+  readonly command: string
+  readonly cwd: string
+  readonly startedAt: number
+  readonly state: JobState
+  readonly endedAt: number | null
+  readonly exit: number | null
+  readonly signal: number | null
 }

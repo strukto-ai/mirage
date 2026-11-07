@@ -547,7 +547,7 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     })
     expect(state.jobs.length).toBe(1)
     expect(state.jobs[0]?.command).toBe('sleep 0')
-    expect(state.jobs[0]?.status).toBe('completed')
+    expect(state.jobs[0]?.signal).toBeNull()
 
     const ws2 = await Workspace.fromState(state, {
       mode: MountMode.WRITE,
@@ -568,7 +568,7 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     const jobs2 = ws2.jobTable.listJobs('worker')
     expect(jobs2.length).toBe(1)
     expect(jobs2[0]?.command).toBe('sleep 0')
-    expect(jobs2[0]?.status).toBe('completed')
+    expect([jobs2[0]?.state, jobs2[0]?.signal]).toEqual(['exited', null])
     expect(jobs2[0]?.cwd).toBe('/data')
     expect(jobs2[0]?.sessionId).toBe('worker')
 

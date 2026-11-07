@@ -31,21 +31,15 @@ from mirage.execution.job.constants import (
     LIST_MAX_RETRIES,
     PUBLISH_SECONDS,
     STOP_WAIT_SECONDS,
-    WATCH_RETRY_SECONDS,
 )
-from mirage.execution.job.types import Job, JobRunner, JobStatus
+from mirage.execution.job.handle import JobHandle, JobRunner, mark_killed
+from mirage.execution.job.types import Job, JobState
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.ram import RAMExecutionStore
-from mirage.shell.bytes import encode_text
-from mirage.shell.console import (
-    KILLED_OUTCOME,
-    Channel,
-    JobConsole,
-    exit_outcome,
-    killed_outcome,
-)
+from mirage.execution.types import JobId
+from mirage.shell.console import JobConsole
 from mirage.types import JsonValue, PathSpec
 from mirage.utils.clock import Clock, SystemClock
 from mirage.workspace.record.types import RecordFields, generation_of
@@ -53,208 +47,40 @@ from mirage.workspace.record.types import RecordFields, generation_of
 logger = logging.getLogger(__name__)
 
 
-def cancel_job(job: Job, signal: int = 9) -> None:
-    """Ask a job to stop, from any thread, without waiting for it.
-
-    Routed through the task's own loop because the caller is often
-    somewhere else entirely: a sync teardown path, an agent adapter on a
-    pool thread, a server request handler. Tolerates a loop that has
-    already shut down, which is the normal case during interpreter exit.
+def _entry(record: Job, owner: str) -> RecordFields:
+    """A job's entry in its session's list: its record, but for its
+    number, which keys the entry, and its session, which keys the list,
+    and the daemon running it.
 
     Args:
-        job (Job): the job to cancel.
-        signal (int): what the stop stands for, KILL (9) unless a
-            ``kill`` named another.
+        record (Job): the job's record.
+        owner (str): the id of the daemon running it.
     """
-    try:
-        if job.process is not None:
-            job.process.terminate(signal)
-    except RuntimeError as exc:
-        # The loop that was running this job is gone, so the job is too.
-        logger.debug("job %d loop is gone: %s", job.id, exc)
+    return {
+        "command": record.command,
+        "cwd": record.cwd,
+        "started_at": record.started_at,
+        "console": record.id.console,
+        "owner": owner,
+        "state": record.state.value,
+        "ended_at": record.ended_at,
+        "exit": record.exit,
+        "signal": record.signal,
+    }
 
 
-def _ended(outcome: str) -> tuple[JobStatus, int]:
-    """The status and exit code a console's ending records.
+def _take_entry(job: JobHandle, entry: RecordFields) -> None:
+    """Take how another daemon's job ended from its list entry, should
+    the entry record an ending.
 
     Args:
-        outcome (str): the ending's text, ``exit:<code>`` or
-            ``killed:<code>``.
+        job (JobHandle): the job.
+        entry (RecordFields): its list entry.
     """
-    form, _, code = outcome.partition(":")
-    status = (
-        JobStatus.KILLED if form == KILLED_OUTCOME else JobStatus.COMPLETED
-    )
-    return status, int(code)
-
-
-def _outcome_of(job: Job) -> str:
-    """The ending text an ended job's status and exit code record.
-
-    Args:
-        job (Job): an ended job.
-    """
-    if job.status == JobStatus.KILLED:
-        return killed_outcome(job.exit_code)
-    return exit_outcome(job.exit_code)
-
-
-async def _mark_killed(console: JobConsole, exit_code: int) -> None:
-    """Write the kill marker and the ending chunk.
-
-    Args:
-        console (JobConsole): the killed job's console.
-        exit_code (int): the status the job answers.
-    """
-    await console.emit(Channel.STDERR, b"Killed")
-    await console.finish(killed_outcome(exit_code))
-
-
-async def _record(job: Job, status: JobStatus, exit_code: int) -> None:
-    """End a job's console with how it ended, then take the ending the
-    console holds.
-
-    Another workspace's ``kill``, or the bound on a killed job's stop,
-    may have ended the console first; the store keeps the first ending,
-    and every workspace answers that one. Status is set before the
-    console is finished, so a reader released by the ending chunk always
-    sees settled fields.
-
-    Args:
-        job (Job): the job that ended.
-        status (JobStatus): how it ended.
-        exit_code (int): the status it answers.
-    """
-    job.status, job.exit_code = status, exit_code
-    if status == JobStatus.KILLED:
-        await _mark_killed(job.console, exit_code)
-    else:
-        await job.console.finish(exit_outcome(exit_code))
-    if job.console.store.closed:
+    if entry["state"] != JobState.EXITED.value:
         return
-    outcome = await job.console.outcome()
-    if outcome is not None:
-        job.status, job.exit_code = _ended(outcome)
-
-
-async def _stop(job: Job, signal: int = 9) -> None:
-    """Stop a running job and settle it as killed by ``signal``.
-
-    Args:
-        job (Job): the running job.
-        signal (int): the signal it is stopped with; its status is 128
-            plus it.
-    """
-    cancel_job(job, signal)
-    job.status = JobStatus.KILLED
-    job.exit_code = 128 + signal
-    await _mark_killed(job.console, job.exit_code)
-
-
-def _stopped_status(job: Job) -> int:
-    """The status a stopped job answers: the one its program exited with
-    after handling the signal, when the job is that one program, else
-    128 plus the signal, KILL's 137 without one.
-
-    Args:
-        job (Job): the stopped job.
-    """
-    if job.process is None:
-        return KILLED_EXIT_CODE
-    code = job.process.program_code
-    if job.simple and code is not None:
-        return code
-    signal = job.process.signal
-    return KILLED_EXIT_CODE if signal is None else 128 + signal
-
-
-async def _settle(run: JobRunner, job: Job) -> int:
-    """Run a job to completion and record how it ended.
-
-    A job's console ends here, in the job's own task, once its runner
-    has: ``kill`` only stops the runner, so a program that handled the
-    signal leaves its own status (``_stopped_status``) in the ending
-    every workspace reads. A job something stopped ends as killed however
-    its runner finished.
-
-    Args:
-        run (JobRunner): produces the job's output and its result.
-        job (Job): the job being run.
-    """
-    try:
-        io_result, _ = await run(job)
-    except asyncio.CancelledError:
-        # This task is already unwinding from a cancel, and a store that
-        # suspends (Redis) would take a second cancellation mid-write
-        # and lose the ending readers are parked on. The shielded task
-        # keeps running to completion even if this one is cancelled
-        # again; RAM completes without ever suspending either way.
-        ending = asyncio.ensure_future(
-            _record(job, JobStatus.KILLED, _stopped_status(job))
-        )
-        while not ending.done():
-            try:
-                await asyncio.shield(ending)
-            except asyncio.CancelledError:
-                logger.debug("job %d cancelled again while ending", job.id)
-        ending.result()
-        raise
-    except Exception as exc:
-        # Recorded as the job's output and exit status rather than
-        # re-raised: nobody awaits this task, so re-raising would only
-        # strand the error in an unretrieved future.
-        logger.debug("background job %d failed: %s", job.id, exc)
-        if job.status != JobStatus.RUNNING:
-            await _record(job, JobStatus.KILLED, _stopped_status(job))
-            return 1
-        await job.console.emit(Channel.STDERR, encode_text(str(exc)))
-        await _record(job, JobStatus.COMPLETED, 1)
-        return 1
-    if job.status != JobStatus.RUNNING:
-        await _record(job, JobStatus.KILLED, _stopped_status(job))
-    else:
-        await _record(job, JobStatus.COMPLETED, io_result.exit_code)
-    return io_result.exit_code
-
-
-async def _adopt_ending(job: Job) -> None:
-    """Stop a job this table runs if another workspace ended its console.
-
-    A ``kill`` elsewhere ends the job's console, the one record of how
-    the job ended, and this cancels the runner the way a local kill
-    does, with the signal the ending implies.
-
-    Args:
-        job (Job): a job this table runs.
-    """
-    if job.status != JobStatus.RUNNING:
-        return
-    outcome = await job.console.outcome()
-    if outcome is None or job.status != JobStatus.RUNNING:
-        return
-    job.status, job.exit_code = _ended(outcome)
-    cancel_job(job, job.exit_code - 128 if job.exit_code > 128 else 9)
-
-
-async def _watch(job: Job) -> None:
-    """Stop a job this table runs once another workspace ends it.
-
-    A failed read is retried until the runner settles, which cancels
-    the watch: one that gave up would leave a kill from elsewhere
-    unheeded while the job ran on.
-
-    Args:
-        job (Job): a job this table runs.
-    """
-    store = job.console.store
-    while not store.closed:
-        try:
-            await store.wait_ended()
-            await _adopt_ending(job)
-            return
-        except Exception as exc:
-            logger.debug("job %d watch failed: %s", job.id, exc)
-        await asyncio.sleep(WATCH_RETRY_SECONDS)
+    job.state, job.ended_at = JobState.EXITED, entry["ended_at"]
+    job.exit_code, job.signal = entry["exit"], entry["signal"]
 
 
 def _held_consoles(fields: RecordFields | None) -> set[str]:
@@ -340,12 +166,12 @@ class JobTable:
         )
         self.daemon = daemon if daemon is not None else uuid.uuid4().hex
         self._claimed = False
-        self._jobs: dict[str, dict[int, Job]] = {}
+        self._jobs: dict[str, dict[int, JobHandle]] = {}
         # Jobs `disown` removed from the table while they still run, and
         # ones another job's number displaced. The shell no longer lists,
         # waits for or reports them, but the workspace still owns their
         # tasks, so teardown can stop them; each leaves once it finishes.
-        self._disowned: list[Job] = []
+        self._disowned: list[JobHandle] = []
         self._lease: asyncio.Task[None] | None = None
         self._checking: asyncio.Task[None] | None = None
         self._publishing: asyncio.Task[None] | None = None
@@ -377,7 +203,7 @@ class JobTable:
         ) = None
         # The bounds on killed jobs' stops (``_end_killed``), each with
         # its job.
-        self._stopping: dict[asyncio.Task[None], Job] = {}
+        self._stopping: dict[asyncio.Task[None], JobHandle] = {}
 
     def child(self, parent: "JobTable | None" = None) -> "JobTable":
         """A table for a child shell (``bash -c``, a script, ``( )``,
@@ -443,7 +269,7 @@ class JobTable:
         parent: int | None = None,
         limit: int | None = None,
         simple: bool = False,
-    ) -> Job:
+    ) -> JobHandle:
         """Register a job in its session's list and start it.
 
         The job's number is taken from the store first, so two
@@ -463,7 +289,8 @@ class JobTable:
                 job.
             limit (int | None): the session's process cap
                 (``processes.max``); None for no cap.
-            simple (bool): the job is one simple command (``Job.simple``).
+            simple (bool): the job is one simple command
+                (``JobHandle.simple``).
 
         Raises:
             BlockingIOError: the session is at its process cap.
@@ -476,29 +303,33 @@ class JobTable:
         try:
             job_id = await self._allocate(
                 session_id,
-                {
-                    "command": command,
-                    "cwd": cwd,
-                    "created_at": created_at,
-                    "owner": self.daemon,
-                    "console": name,
-                },
+                _entry(
+                    Job(
+                        JobId(self.processes.workspace_id, name),
+                        0,
+                        session_id,
+                        command,
+                        cwd,
+                        created_at,
+                    ),
+                    self.daemon,
+                ),
             )
         except BaseException:
             # A cancel can land after the store took the entry but before
             # its answer did; the entry names a job no runner will start.
             await self._remove(session_id, {name}, give_back=True)
             raise
-        job: Job | None = None
+        job: JobHandle | None = None
 
         async def execute() -> int:
             if job is None:
                 return KILLED_EXIT_CODE
-            if job.status != JobStatus.RUNNING:
+            if job.state != JobState.RUNNING:
                 return job.exit_code
-            watcher = asyncio.ensure_future(_watch(job))
+            watcher = asyncio.ensure_future(job.watch())
             try:
-                return await _settle(run, job)
+                return await job.settle(run)
             finally:
                 watcher.cancel()
                 await self._record_ending(job)
@@ -521,7 +352,7 @@ class JobTable:
         try:
             console = JobConsole(self.store.console(name))
             console.bind_process(str(process.record.id))
-            job = Job(
+            job = JobHandle(
                 id=job_id,
                 command=command,
                 cwd=cwd,
@@ -531,6 +362,8 @@ class JobTable:
                 created_at=created_at,
                 owner=self.daemon,
                 console_name=name,
+                workspace_id=self.processes.workspace_id,
+                now=self.clock.now,
             )
         except Exception:
             process.terminate()
@@ -546,7 +379,7 @@ class JobTable:
         self._keep_checking()
         return job
 
-    async def load(self, job: Job) -> None:
+    async def load(self, job: JobHandle) -> None:
         """Insert a finished job restored from a snapshot into its session.
 
         Its output moves onto a console in the store, so every workspace
@@ -555,7 +388,7 @@ class JobTable:
         the next free one rather than hide that job.
 
         Args:
-            job (Job): the restored job.
+            job (JobHandle): the restored job.
         """
         name = uuid.uuid4().hex
         console = self.store.console(name)
@@ -568,17 +401,9 @@ class JobTable:
         job.console = restored
         job.owner = self.daemon
         job.console_name = name
+        job.workspace_id = self.processes.workspace_id
         job.id = await self._insert(
-            job.session_id,
-            job.id,
-            {
-                "command": job.command,
-                "cwd": job.cwd,
-                "created_at": job.created_at,
-                "owner": job.owner,
-                "console": name,
-                "ending": _outcome_of(job),
-            },
+            job.session_id, job.id, _entry(job.record, job.owner)
         )
         self._jobs.setdefault(job.session_id, {})[job.id] = job
 
@@ -608,7 +433,7 @@ class JobTable:
             session_id (str): the session whose list to refresh.
         """
         fields: RecordFields | None = None
-        remotes: dict[str, Job] = {}
+        remotes: dict[str, JobHandle] = {}
         for _ in range(LIST_MAX_RETRIES):
             fields = await self.store.load(session_id)
             listed = fields.get("jobs", {}) if fields else {}
@@ -629,23 +454,18 @@ class JobTable:
         mine = {
             j.console_name: j for j in self._jobs.get(session_id, {}).values()
         }
-        jobs: dict[int, Job] = {}
+        jobs: dict[int, JobHandle] = {}
         for key, entry in entries.items():
             job = mine.pop(entry["console"], None)
             if job is None:
                 job = remotes.get(entry["console"])
             if job is None:
                 continue
-            ending = entry.get("ending")
-            if (
-                job.process is None
-                and job.status == JobStatus.RUNNING
-                and ending is not None
-            ):
-                job.status, job.exit_code = _ended(ending)
+            if job.process is None and job.state == JobState.RUNNING:
+                _take_entry(job, entry)
             jobs[int(key)] = job
         for job in mine.values():
-            if job.process is None or job.status != JobStatus.RUNNING:
+            if job.process is None or job.state != JobState.RUNNING:
                 continue
             if job.console_name in held or job.id in jobs:
                 self._disowned.append(job)
@@ -654,17 +474,17 @@ class JobTable:
         self._jobs[session_id] = dict(sorted(jobs.items()))
         for job in jobs.values():
             if job.process is not None:
-                await _adopt_ending(job)
-            elif job.status == JobStatus.RUNNING:
+                await job.adopt_ending()
+            elif job.state == JobState.RUNNING:
                 await self._refresh(job)
 
-    def get(self, job_id: int, session_id: str = "") -> Job | None:
+    def get(self, job_id: int, session_id: str = "") -> JobHandle | None:
         return self._jobs.get(session_id, {}).get(job_id)
 
-    def list_jobs(self, session_id: str = "") -> list[Job]:
+    def list_jobs(self, session_id: str = "") -> list[JobHandle]:
         return list(self._jobs.get(session_id, {}).values())
 
-    def listing(self, session_id: str = "") -> list[Job]:
+    def listing(self, session_id: str = "") -> list[JobHandle]:
         """The jobs ``jobs`` shows: a ``$( )``'s caller's, then its own.
 
         Args:
@@ -675,14 +495,14 @@ class JobTable:
         )
         return inherited + self.list_jobs(session_id)
 
-    def running_jobs(self, session_id: str = "") -> list[Job]:
+    def running_jobs(self, session_id: str = "") -> list[JobHandle]:
         return [
             j
             for j in self.list_jobs(session_id)
-            if j.status == JobStatus.RUNNING
+            if j.state == JobState.RUNNING
         ]
 
-    def all_jobs(self) -> list[Job]:
+    def all_jobs(self) -> list[JobHandle]:
         """Every session's jobs, for the workspace-wide entry points only.
 
         Snapshot capture and the server summary read this; a shell
@@ -690,8 +510,8 @@ class JobTable:
         """
         return [j for jobs in self._jobs.values() for j in jobs.values()]
 
-    def all_running_jobs(self) -> list[Job]:
-        return [j for j in self.all_jobs() if j.status == JobStatus.RUNNING]
+    def all_running_jobs(self) -> list[JobHandle]:
+        return [j for j in self.all_jobs() if j.state == JobState.RUNNING]
 
     async def kill(
         self, job_id: int, session_id: str = "", signal: int = 9
@@ -730,7 +550,7 @@ class JobTable:
                 is 128 plus it, KILL's 137 by default.
         """
         job = self.get(job_id, session_id)
-        if job is None or job.status != JobStatus.RUNNING:
+        if job is None or job.state != JobState.RUNNING:
             return False
         if signal in IGNORED_SIGNALS:
             return True
@@ -739,9 +559,9 @@ class JobTable:
             return True
         if not await self._running(job.owner):
             await self._reap_owner(job.owner)
-        await _mark_killed(job.console, 128 + signal)
+        await mark_killed(job.console, 128 + signal, signal)
         await self._refresh(job)
-        return job.status == JobStatus.KILLED
+        return job.signal is not None
 
     async def disown(self, job_id: int, session_id: str = "") -> bool:
         """Drop a job from its session's list without stopping it.
@@ -757,13 +577,13 @@ class JobTable:
         job = self._jobs.get(session_id, {}).pop(job_id, None)
         if job is None:
             return False
-        running = job.status == JobStatus.RUNNING
+        running = job.state == JobState.RUNNING
         if job.process is not None and running:
             self._disowned.append(job)
         await self._remove(session_id, {job.console_name}, disowned=running)
         return True
 
-    async def close_session(self, session_id: str) -> list[Job]:
+    async def close_session(self, session_id: str) -> list[JobHandle]:
         """Drop a session's job list when the session closes, stopping
         what is still running, and return what was stopped.
 
@@ -782,7 +602,7 @@ class JobTable:
         Args:
             session_id (str): the session being closed.
         """
-        stopped: dict[str, Job] = {}
+        stopped: dict[str, JobHandle] = {}
         for _ in range(LIST_MAX_RETRIES):
             fields = await self.store.load(session_id)
             await self.sync(session_id)
@@ -792,7 +612,9 @@ class JobTable:
             for name, entry in (fields or {}).get("disowned", {}).items():
                 if entry["owner"] != self.daemon:
                     console = JobConsole(self.store.console(name))
-                    await _mark_killed(console, KILLED_EXIT_CODE)
+                    await mark_killed(
+                        console, KILLED_EXIT_CODE, KILLED_EXIT_CODE - 128
+                    )
             if await self.store.delete(session_id, generation_of(fields)):
                 self._jobs.pop(session_id, None)
                 self.processes.revoke_session(session_id)
@@ -802,7 +624,7 @@ class JobTable:
             "with another writer"
         )
 
-    async def kill_all(self) -> list[Job]:
+    async def kill_all(self) -> list[JobHandle]:
         """Stop every running job this table runs in every session,
         returning the ones that were running.
 
@@ -819,8 +641,8 @@ class JobTable:
         await asyncio.gather(*reaping, return_exceptions=True)
         running = [j for j in self.all_running_jobs() if j.process is not None]
         for job in [*running, *self._disowned]:
-            if job.status == JobStatus.RUNNING and job.process is not None:
-                await _stop(job)
+            if job.state == JobState.RUNNING and job.process is not None:
+                await job.stop()
         self._disowned = []
         return running
 
@@ -862,7 +684,7 @@ class JobTable:
         for job in stopping.values():
             await self._end_stopping(job)
 
-    async def wait(self, job_id: int, session_id: str = "") -> Job:
+    async def wait(self, job_id: int, session_id: str = "") -> JobHandle:
         """Block until a job ends, then return it.
 
         Joined on the console's ending chunk, never on the status field:
@@ -892,11 +714,11 @@ class JobTable:
         """
         job = self._jobs[session_id][job_id]
         if job.process is None:
-            if job.status == JobStatus.RUNNING:
+            if job.state == JobState.RUNNING:
                 await self._join_remote(job)
             return job
         await job.console.wait_finished()
-        await _adopt_ending(job)
+        await job.adopt_ending()
         try:
             async with asyncio.timeout(STOP_WAIT_SECONDS):
                 await job.process.join()
@@ -904,7 +726,7 @@ class JobTable:
             logger.debug("job %d still stopping after wait", job.id)
         return job
 
-    async def wait_all(self, session_id: str = "") -> list[Job]:
+    async def wait_all(self, session_id: str = "") -> list[JobHandle]:
         """Join every job in a session's list, returning the ones still
         running.
 
@@ -937,7 +759,7 @@ class JobTable:
         if job is not None:
             await self._remove(session_id, {job.console_name})
 
-    async def pop_completed(self, session_id: str = "") -> list[Job]:
+    async def pop_completed(self, session_id: str = "") -> list[JobHandle]:
         """Return a session's completed/killed jobs and remove them from
         its list.
 
@@ -948,7 +770,7 @@ class JobTable:
             session_id (str): the session whose list is pruned.
         """
         jobs = self._jobs.get(session_id, {})
-        completed = [j for j in jobs.values() if j.status != JobStatus.RUNNING]
+        completed = [j for j in jobs.values() if j.state != JobState.RUNNING]
         for j in completed:
             del jobs[j.id]
         if completed:
@@ -1054,7 +876,7 @@ class JobTable:
 
     def _remote(
         self, job_id: int, session_id: str, entry: RecordFields
-    ) -> Job:
+    ) -> JobHandle:
         """Another workspace's job, as its list entry describes it.
 
         Args:
@@ -1062,19 +884,23 @@ class JobTable:
             session_id (str): the session whose list names it.
             entry (RecordFields): the job's list entry.
         """
-        return Job(
+        job = JobHandle(
             id=job_id,
             command=entry["command"],
             cwd=entry["cwd"],
-            created_at=entry["created_at"],
+            created_at=entry["started_at"],
             console=JobConsole(self.store.console(entry["console"])),
             session_id=session_id,
             owner=entry["owner"],
             console_name=entry["console"],
+            workspace_id=self.processes.workspace_id,
+            now=self.clock.now,
         )
+        _take_entry(job, entry)
+        return job
 
     async def _stop_runner(
-        self, job: Job, process: ProcessHandle, signal: int
+        self, job: JobHandle, process: ProcessHandle, signal: int
     ) -> None:
         """Stop a job this table runs and record it as killed by ``signal``.
 
@@ -1083,23 +909,23 @@ class JobTable:
         ended once its runner stops, or ``STOP_WAIT_SECONDS`` later.
 
         Args:
-            job (Job): the running job.
+            job (JobHandle): the running job.
             process (ProcessHandle): its runner.
             signal (int): the signal it is stopped with.
         """
         if not process.begun:
-            await _stop(job, signal)
+            await job.stop(signal)
             await self._record_ending(job)
             self._drop_checking()
             return
-        cancel_job(job, signal)
-        job.status = JobStatus.KILLED
-        job.exit_code = 128 + signal
+        job.kill(signal)
         task = asyncio.ensure_future(self._end_killed(job, process))
         self._stopping[task] = job
         task.add_done_callback(self._stopping.pop)
 
-    async def _end_killed(self, job: Job, process: ProcessHandle) -> None:
+    async def _end_killed(
+        self, job: JobHandle, process: ProcessHandle
+    ) -> None:
         """End a killed job's console once its runner has stopped, or
         ``STOP_WAIT_SECONDS`` after the kill, whichever comes first.
 
@@ -1109,7 +935,7 @@ class JobTable:
         still stopping.
 
         Args:
-            job (Job): the killed job.
+            job (JobHandle): the killed job.
             process (ProcessHandle): its runner.
         """
         try:
@@ -1119,20 +945,23 @@ class JobTable:
             logger.debug("job %d still stopping after its kill", job.id)
         await self._end_stopping(job)
 
-    async def _end_stopping(self, job: Job) -> None:
+    async def _end_stopping(self, job: JobHandle) -> None:
         """End a killed job's console with the status its kill recorded,
         unless its runner already ended it.
 
         Args:
-            job (Job): the killed job.
+            job (JobHandle): the killed job.
         """
         if job.console.finished:
             return
-        await _mark_killed(job.console, job.exit_code)
+        await job.end(
+            job.exit_code,
+            job.signal if job.signal is not None else KILLED_EXIT_CODE - 128,
+        )
         await self._record_ending(job)
         self._drop_checking()
 
-    async def _record_ending(self, job: Job) -> None:
+    async def _record_ending(self, job: JobHandle) -> None:
         """Keep how a job this table ran ended in its list entry, or drop
         its disowned record, which nothing else would.
 
@@ -1142,9 +971,9 @@ class JobTable:
         A failed write is logged: the console still holds the ending.
 
         Args:
-            job (Job): a job this table ran, now ended.
+            job (JobHandle): a job this table ran, now ended.
         """
-        ending = _outcome_of(job)
+        kept = _entry(job.record, job.owner)
         try:
             for _ in range(LIST_MAX_RETRIES):
                 fields = await self.store.load(job.session_id)
@@ -1157,10 +986,10 @@ class JobTable:
                     if (
                         entry is None
                         or entry["console"] != job.console_name
-                        or entry.get("ending") == ending
+                        or entry == kept
                     ):
                         return
-                    jobs[str(job.id)] = {**entry, "ending": ending}
+                    jobs[str(job.id)] = kept
                 following = int(fields.get("next", 1))
                 if await self._write(
                     job.session_id, fields, jobs, following, held
@@ -1170,32 +999,34 @@ class JobTable:
         except Exception as exc:
             logger.debug("job %d ending not kept: %s", job.id, exc)
 
-    async def _refresh(self, job: Job) -> None:
+    async def _refresh(self, job: JobHandle) -> None:
         """Settle another daemon's job from its console's ending, or end
         it as hung up when that daemon lost the lease with none.
 
         Args:
-            job (Job): another daemon's running job.
+            job (JobHandle): another daemon's running job.
         """
         outcome = await job.console.outcome()
         if outcome is None:
             if await self._running(job.owner):
                 return
             self._reap_later(job.owner)
-            await _mark_killed(job.console, HANGUP_EXIT_CODE)
+            await mark_killed(
+                job.console, HANGUP_EXIT_CODE, HANGUP_EXIT_CODE - 128
+            )
             outcome = await job.console.outcome()
             if outcome is None:
                 return
-        job.status, job.exit_code = _ended(outcome)
+        job.take(outcome)
 
-    async def _join_remote(self, job: Job) -> None:
+    async def _join_remote(self, job: JobHandle) -> None:
         """Block until another workspace's job ends.
 
         Args:
-            job (Job): another workspace's running job.
+            job (JobHandle): another workspace's running job.
         """
         lease = self.store.lease_seconds
-        while job.status == JobStatus.RUNNING:
+        while job.state == JobState.RUNNING:
             if lease is None:
                 await job.console.wait_finished()
             else:
@@ -1302,7 +1133,8 @@ class JobTable:
                 held |= {
                     v["console"]: v
                     for k, v in stored.items()
-                    if int(k) in dropped and "ending" not in v
+                    if int(k) in dropped
+                    and v["state"] == JobState.RUNNING.value
                 }
             if await self._write(session_id, fields, jobs, following, held):
                 return
@@ -1403,9 +1235,9 @@ class JobTable:
         """
         while True:
             await asyncio.sleep(LIST_CHECK_SECONDS)
-            sessions: dict[str, list[Job]] = {}
+            sessions: dict[str, list[JobHandle]] = {}
             for job in [*self.all_jobs(), *self._disowned]:
-                if job.process is not None and job.status == JobStatus.RUNNING:
+                if job.process is not None and job.state == JobState.RUNNING:
                     sessions.setdefault(job.session_id, []).append(job)
             for session_id, jobs in sessions.items():
                 try:
@@ -1413,9 +1245,9 @@ class JobTable:
                     for job in jobs:
                         if job.console_name in held:
                             continue
-                        await _adopt_ending(job)
+                        await job.adopt_ending()
                         if (
-                            job.status == JobStatus.RUNNING
+                            job.state == JobState.RUNNING
                             and job.process is not None
                         ):
                             await self._stop_runner(job, job.process, 9)
@@ -1508,7 +1340,7 @@ class JobTable:
             if (
                 job.process is not None
                 and job.pid == pid
-                and job.status == JobStatus.RUNNING
+                and job.state == JobState.RUNNING
             ):
                 await table.kill(job.id, job.session_id, signal)
                 return

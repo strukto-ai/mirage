@@ -12,7 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.execution.job.types import Job
+from mirage.execution.job.handle import JobHandle
 from mirage.shell.console import Channel, JobConsole, JobOutput, OwnedStream
 
 
@@ -33,7 +33,7 @@ class JobWaits:
         output: JobOutput,
         channels: frozenset[Channel] = frozenset({Channel.STDOUT}),
     ) -> None:
-        self.jobs: list[Job] = []
+        self.jobs: list[JobHandle] = []
         self.output = output
         self.channels = channels
 
@@ -63,11 +63,11 @@ class JobWaits:
             for stream in left
         )
 
-    def add(self, job: Job) -> None:
+    def add(self, job: JobHandle) -> None:
         """Count a job the capture has to outlast.
 
         Args:
-            job (Job): the job.
+            job (JobHandle): the job.
         """
         self.jobs.append(job)
 

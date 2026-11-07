@@ -34,7 +34,7 @@ import { RAMExecutionStore } from '../ram.ts'
 import { ProcessTable } from '../process/table.ts'
 import { PathSpec } from '../../types.ts'
 import { JobTable } from './table.ts'
-import { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
+import { JobHandle, type JobResult, type JobRunner } from './handle.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { generationOf, type RecordFields } from '../../workspace/record/types.ts'
 
@@ -121,7 +121,7 @@ class BrokenConsoles extends RAMExecutionStore {
 }
 
 /** A live job whose console appends are parked behind the gate. */
-async function gatedJob(gate: Promise<void>): Promise<[JobTable, Job]> {
+async function gatedJob(gate: Promise<void>): Promise<[JobTable, JobHandle]> {
   const jt = new JobTable(new GatedJobs(gate))
   const abort = new AbortController()
   return [jt, await jt.submit({ command: 'deaf', run: pending(abort), abort, cwd: '/' })]
@@ -173,7 +173,7 @@ describe('JobTable.submit', () => {
     const jt = new JobTable()
     const j = await jt.submit({ command: 'a', run: quiet, abort: new AbortController(), cwd: '/' })
     expect(j.sessionId).toBe('')
-    expect(j.status).toBe(JobStatus.RUNNING)
+    expect(j.state).toBe('running')
   })
 
   it('hands the runner a job that already has a console', async () => {
@@ -213,7 +213,8 @@ describe('JobTable.kill', () => {
     const j = await jt.submit({ command: 'sleep', run: pending(abort, 'up'), abort, cwd: '/' })
     while (dec(await j.console.snapshot(Channel.STDOUT)) === '') await Promise.resolve()
     expect(await jt.kill(j.id, '', signal)).toBe(true)
-    expect([j.status, j.exitCode]).toEqual([JobStatus.KILLED, code])
+    expect(j.signal).not.toBeNull()
+    expect(j.exitCode).toBe(code)
     expect((await j.process?.join())?.exit).toBe(code)
   })
 
@@ -286,7 +287,7 @@ describe('JobTable.kill', () => {
 
     expect(await jt.kill(j.id)).toBe(true)
 
-    expect(j.status).toBe(JobStatus.KILLED)
+    expect(j.signal).not.toBeNull()
     expect(j.exitCode).toBe(137)
     expect(dec(await j.console.snapshot(Channel.STDOUT))).toBe('partial')
     expect(dec(await j.console.snapshot(Channel.STDERR))).toBe('Killed')
@@ -298,7 +299,7 @@ describe('JobTable.kill', () => {
     const abort = new AbortController()
     const j = await jt.submit({ command: 'sleep', run: pending(abort), abort, cwd: '/' })
     expect(await jt.kill(j.id)).toBe(true)
-    expect(j.status).toBe(JobStatus.KILLED)
+    expect(j.signal).not.toBeNull()
     await j.process?.join()
     expect(j.console.finished).toBe(true)
   })
@@ -313,16 +314,16 @@ describe('JobTable.kill', () => {
     // here would hang the shell on exactly the runaway job being stopped.
     expect(await jt.kill(j.id)).toBe(true)
 
-    expect(j.status).toBe(JobStatus.KILLED)
+    expect(j.signal).not.toBeNull()
     expect(j.exitCode).toBe(137)
     expect(j.console.finished).toBe(false)
 
     // The runner finishing afterwards must not relabel the job.
     release.fire?.()
     await j.process?.join()
-    expect(j.status).toBe(JobStatus.KILLED)
+    expect(j.signal).not.toBeNull()
     expect(j.exitCode).toBe(137)
-    expect(await j.console.outcome()).toBe('killed:137')
+    expect(await j.console.outcome()).toBe('killed:137:9')
   })
 
   it('returns false for unknown and already-finished jobs', async () => {
@@ -356,7 +357,7 @@ describe('JobTable.wait', () => {
     }
     const j = await jt.submit({ command: 'foo', run, abort: new AbortController(), cwd: '/' })
     const result = await jt.wait(j.id)
-    expect(result.status).toBe(JobStatus.COMPLETED)
+    expect([result.state, result.signal]).toEqual(['exited', null])
     expect(result.exitCode).toBe(2)
     expect(dec(await result.console.snapshot(Channel.STDOUT))).toBe('hi')
     expect(dec(await result.console.snapshot(Channel.STDERR))).toBe('oops')
@@ -364,8 +365,8 @@ describe('JobTable.wait', () => {
 
   it('returns an already-completed job without re-awaiting', async () => {
     const jt = new JobTable()
-    const j = new Job({ id: 99, command: 'a', cwd: '/', createdAt: 0 })
-    j.status = JobStatus.COMPLETED
+    const j = new JobHandle({ id: 99, command: 'a', cwd: '/', createdAt: 0 })
+    j.state = 'exited'
     await jt.load(j)
     const result = await jt.wait(99)
     expect(result).toBe(j)
@@ -376,7 +377,7 @@ describe('JobTable.wait', () => {
     const run: JobRunner = () => Promise.reject(new Error('boom'))
     const j = await jt.submit({ command: 'a', run, abort: new AbortController(), cwd: '/' })
     const result = await jt.wait(j.id)
-    expect(result.status).toBe(JobStatus.COMPLETED)
+    expect([result.state, result.signal]).toEqual(['exited', null])
     expect(result.exitCode).toBe(1)
     expect(dec(await result.console.snapshot(Channel.STDERR))).toBe('boom')
   })
@@ -398,7 +399,7 @@ describe('JobTable.wait ordering', () => {
     const killP = jt.kill(job.id)
     // kill's synchronous prefix has already flipped the status; the
     // marker appends are parked behind the gate.
-    expect(job.status).toBe(JobStatus.KILLED)
+    expect(job.signal).not.toBeNull()
     let settled = false
     const waiter = jt.wait(job.id).then((j) => {
       settled = true
@@ -421,7 +422,7 @@ describe('JobTable.wait ordering', () => {
     })
     const [jt, job] = await gatedJob(gate)
     const killP = jt.kill(job.id)
-    expect(job.status).toBe(JobStatus.KILLED)
+    expect(job.signal).not.toBeNull()
     let settled = false
     const allP = jt.waitAll().then((jobs) => {
       settled = true
@@ -518,7 +519,7 @@ describe('JobTable.popCompleted', () => {
 })
 
 /** A live job in one session, ended only by its own abort. */
-async function live(jt: JobTable, sessionId: string): Promise<Job> {
+async function live(jt: JobTable, sessionId: string): Promise<JobHandle> {
   const abort = new AbortController()
   return jt.submit({ command: 'x', run: pending(abort), abort, cwd: '/', sessionId })
 }
@@ -557,8 +558,8 @@ describe('JobTable per-session scoping', () => {
     const b1 = await live(jt, 'b')
     const killed = await jt.killAll()
     expect(new Set(killed.map((j) => j.sessionId))).toEqual(new Set(['a', 'b']))
-    expect(a1.status).toBe(JobStatus.KILLED)
-    expect(b1.status).toBe(JobStatus.KILLED)
+    expect(a1.signal).not.toBeNull()
+    expect(b1.signal).not.toBeNull()
     expect(jt.allRunningJobs()).toEqual([])
   })
 
@@ -580,26 +581,26 @@ describe('JobTable per-session scoping', () => {
     const b1 = await live(jt, 'b')
     expect(await jt.disown(a2.id, 'a')).toBe(true)
     expect(await jt.closeSession('a')).toEqual([a1])
-    expect(a1.status).toBe(JobStatus.KILLED)
+    expect(a1.signal).not.toBeNull()
     // Disowned: off the list, still running, bash's own rule.
-    expect(a2.status).toBe(JobStatus.RUNNING)
+    expect(a2.state).toBe('running')
     expect(jt.listJobs('a')).toEqual([])
     expect(jt.get(1, 'a')).toBeNull()
     expect(jt.listJobs('b')).toEqual([b1])
     // A session reusing the id starts from one and inherits nothing.
     expect((await live(jt, 'a')).id).toBe(1)
     await jt.killAll()
-    expect(a2.status).toBe(JobStatus.KILLED)
+    expect(a2.signal).not.toBeNull()
   })
 
   it('loadJob restores a job into its session', async () => {
     const jt = new JobTable()
-    const restored = new Job({
+    const restored = new JobHandle({
       id: 3,
       command: 'x',
       cwd: '/',
       createdAt: 0,
-      status: JobStatus.COMPLETED,
+      state: 'exited',
       sessionId: 'a',
       console: new JobConsole(),
     })
@@ -630,7 +631,7 @@ it('keeps a disowned process visible until its cancelled runner really exits', a
   expect(table.listJobs('a')).toEqual([])
   expect(view.list().map((info) => info.id.pid)).toEqual([process.record.id.pid])
   await table.killAll()
-  expect(job.status).toBe(JobStatus.KILLED)
+  expect(job.signal).not.toBeNull()
   expect(view.list().map((info) => info.state)).toEqual(['stopping'])
   if (release.fire === undefined) throw new Error('runner did not start')
   release.fire()
@@ -679,7 +680,7 @@ it('settles an already aborted job without entering its runner', async () => {
   })
   await table.wait(job.id)
   expect(entered).toBe(false)
-  expect(job.status).toBe(JobStatus.KILLED)
+  expect(job.signal).not.toBeNull()
   expect(await job.process?.join()).toMatchObject({ exit: 137, signal: 9 })
 })
 
@@ -764,7 +765,7 @@ function exitWith(code: number): JobRunner {
 }
 
 /** A job in session `s` that ends only through its abort. */
-async function sleeping(jt: JobTable): Promise<Job> {
+async function sleeping(jt: JobTable): Promise<JobHandle> {
   const abort = new AbortController()
   return jt.submit({ command: 'sleep 30', run: pending(abort), abort, cwd: '/', sessionId: 's' })
 }
@@ -777,12 +778,12 @@ describe('JobTable on a shared store', () => {
     const job = await sleeping(a)
     await b.sync('s')
     const [seen] = b.listJobs('s')
-    expect([seen?.id, seen?.command, seen?.status]).toEqual([1, 'sleep 30', JobStatus.RUNNING])
+    expect([seen?.id, seen?.command, seen?.state]).toEqual([1, 'sleep 30', 'running'])
     expect(seen?.process).toBeNull()
     expect(await b.kill(1, 's', 15)).toBe(true)
     expect((await b.wait(1, 's')).exitCode).toBe(143)
     await job.process?.join()
-    expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 143])
+    expect([job.signal, job.exitCode]).toEqual([15, 143])
     expect(dec(await job.console.snapshot(Channel.STDERR))).toBe('Killed')
   })
 
@@ -853,8 +854,8 @@ describe('JobTable on a shared store', () => {
     await after.submit({ command: 'next', run: pending(abort), abort, cwd: '/', sessionId: 's' })
     await after.sync('s')
     const [old, fresh] = after.listJobs('s')
-    expect([old?.command, old?.status, old?.exitCode]).toEqual(['sleep 30', JobStatus.KILLED, 129])
-    expect([fresh?.command, fresh?.status]).toEqual(['next', JobStatus.RUNNING])
+    expect([old?.command, old?.signal, old?.exitCode]).toEqual(['sleep 30', 1, 129])
+    expect([fresh?.command, fresh?.state]).toEqual(['next', 'running'])
     await lost.process?.join()
     await after.killAll()
     await after.close()
@@ -872,9 +873,9 @@ describe('JobTable on a shared store', () => {
     expect(b.runningJobs('s')).not.toEqual([])
     await new Promise((resolve) => setTimeout(resolve, 100))
     expect((await b.wait(1, 's')).exitCode).toBe(129)
-    expect(b.get(1, 's')?.status).toBe(JobStatus.KILLED)
+    expect(b.get(1, 's')?.signal).not.toBeNull()
     await job.process?.join()
-    expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 129])
+    expect([job.signal, job.exitCode]).toEqual([1, 129])
   })
 
   it('a reap elsewhere drops the job from its owner', async () => {
@@ -997,7 +998,7 @@ class FailingReads extends RAMExecutionStore {
  * `replaces`, after another close deleted it. */
 class StartsOnDelete extends RAMExecutionStore {
   peer: JobTable | null = null
-  readonly started: Job[] = []
+  readonly started: JobHandle[] = []
 
   constructor(private readonly replaces = false) {
     super()
@@ -1100,7 +1101,7 @@ describe('JobTable on a shared store, across reuse and failure', () => {
     await sleeping(b)
     await a.sync('s')
     const [seen] = a.listJobs('s')
-    expect([seen?.command, seen?.status]).toEqual(['sleep 30', JobStatus.RUNNING])
+    expect([seen?.command, seen?.state]).toEqual(['sleep 30', 'running'])
     expect(await a.popCompleted('s')).toEqual([])
     await b.sync('s')
     expect(b.listJobs('s').map((j) => j.command)).toEqual(['sleep 30'])
@@ -1153,7 +1154,7 @@ describe('JobTable on a shared store, across reuse and failure', () => {
     expect(await jt.kill(j.id, '', 15)).toBe(true)
     expect(j.console.finished).toBe(false)
     await jt.close()
-    expect(await j.console.outcome()).toBe('killed:143')
+    expect(await j.console.outcome()).toBe('killed:143:15')
     release.fire?.()
     await j.process?.join()
   })
@@ -1170,7 +1171,7 @@ describe('JobTable on a shared store, across reuse and failure', () => {
       expect(await b.kill(1, 's', 15)).toBe(true)
       await vi.advanceTimersByTimeAsync(WATCH_RETRY_SECONDS * 1000 * 3)
       await job.process?.join()
-      expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 143])
+      expect([job.signal, job.exitCode]).toEqual([15, 143])
     } finally {
       vi.useRealTimers()
     }
@@ -1193,7 +1194,7 @@ describe('JobTable on a shared store, across reuse and failure', () => {
     const fresh = new JobTable(store)
     await fresh.sync('s')
     const [seen] = fresh.listJobs('s')
-    expect([seen?.status, seen?.exitCode]).toEqual([JobStatus.COMPLETED, 0])
+    expect([seen?.state, seen?.signal, seen?.exitCode]).toEqual(['exited', null, 0])
   })
 
   it('a long wait elsewhere keeps one read across lease checks', async () => {
@@ -1267,7 +1268,7 @@ describe('JobTable on a shared store, across reaps and closes', () => {
     expect((await sleeping(a)).id).toBe(1)
     await b.closeSession('s')
     await job.process?.join()
-    expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 137])
+    expect([job.signal, job.exitCode]).toEqual([9, 137])
   })
 
   it('a disowned job drops its record when it ends', async () => {
@@ -1290,7 +1291,7 @@ describe('JobTable on a shared store, across reaps and closes', () => {
     release()
     await job.process?.join()
     expect((await store.load('s'))?.disowned).toBeUndefined()
-    expect((jt as unknown as { disowned: Job[] }).disowned).toEqual([])
+    expect((jt as unknown as { disowned: JobHandle[] }).disowned).toEqual([])
   })
 })
 
@@ -1298,7 +1299,7 @@ describe('JobTable on a shared store, across launches, restores and abandoned wa
   it('a job started during a sync stays this table own', async () => {
     const store = new HookAfterRead()
     const jt = new JobTable(store)
-    const started: Job[] = []
+    const started: JobHandle[] = []
     store.afterRead = async () => {
       started.push(await sleeping(jt))
     }
@@ -1339,12 +1340,12 @@ describe('JobTable on a shared store, across launches, restores and abandoned wa
     const a = new JobTable(store)
     const b = new JobTable(store)
     const live = await sleeping(b)
-    const restored = new Job({
+    const restored = new JobHandle({
       id: live.id,
       command: 'old',
       cwd: '/',
       createdAt: 0,
-      status: JobStatus.COMPLETED,
+      state: 'exited',
       sessionId: 's',
       console: new JobConsole(null, true),
     })
@@ -1371,7 +1372,7 @@ describe('JobTable on a shared store, across launches, restores and abandoned wa
     abandon.abort()
     await waiting
     expect(store.count.parked).toBe(0)
-    expect(job.status).toBe(JobStatus.RUNNING)
+    expect(job.state).toBe('running')
     await a.killAll()
   })
 })
@@ -1417,7 +1418,7 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
     await b.submit({ command: 'next', run: pending(abort), abort, cwd: '/', sessionId: 's' })
     await a.sync('s')
     expect(a.get(1, 's')?.command).toBe('next')
-    expect(old.status).toBe(JobStatus.RUNNING)
+    expect(old.state).toBe('running')
     await a.killAll()
     await old.process?.join()
     await b.killAll()
@@ -1436,8 +1437,12 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
     })
     expect(await jt.kill(job.id, 's', 15)).toBe(true)
     await job.process?.join()
-    const stored = (await store.load('s'))?.jobs as Record<string, { ending?: string }>
-    expect(stored[job.id.toString()]?.ending).toBe('killed:143')
+    const stored = (await store.load('s'))?.jobs as Record<
+      string,
+      { state: string; exit: number | null; signal: number | null }
+    >
+    const entry = stored[job.id.toString()]
+    expect([entry?.state, entry?.exit, entry?.signal]).toEqual(['exited', 143, 15])
     expect(await store.holder()).toBe(jt.daemon)
     await jt.close()
     expect((jt as unknown as { lease: unknown }).lease).toBeNull()
@@ -1455,7 +1460,7 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
       expect(stopped.map((j) => j.consoleName)).toEqual(expect.arrayContaining([late?.consoleName]))
       expect(stopped).toHaveLength(2)
       await late?.process?.join()
-      expect([late?.status, late?.exitCode]).toEqual([JobStatus.KILLED, 137])
+      expect([late?.signal, late?.exitCode]).toEqual([9, 137])
       expect(await store.load('s')).toBeNull()
     },
   )
@@ -1469,7 +1474,7 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
       await store.clear()
       await vi.advanceTimersByTimeAsync(LIST_CHECK_SECONDS * 1000 * 2)
       await job.process?.join()
-      expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 137])
+      expect([job.signal, job.exitCode]).toEqual([9, 137])
     } finally {
       vi.useRealTimers()
     }
@@ -1483,7 +1488,7 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
       const disowned = await sleeping(jt)
       expect(await jt.disown(disowned.id, 's')).toBe(true)
       await vi.advanceTimersByTimeAsync(LIST_CHECK_SECONDS * 1000 * 3)
-      expect([listed.status, disowned.status]).toEqual([JobStatus.RUNNING, JobStatus.RUNNING])
+      expect([listed.state, disowned.state]).toEqual(['running', 'running'])
       await jt.killAll()
     } finally {
       vi.useRealTimers()
@@ -1500,7 +1505,7 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
       await store.clear()
       await vi.advanceTimersByTimeAsync(LIST_CHECK_SECONDS * 1000 * 3)
       await job.process?.join()
-      expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 137])
+      expect([job.signal, job.exitCode]).toEqual([9, 137])
       expect(store.failures).toBe(0)
     } finally {
       vi.useRealTimers()
@@ -1526,7 +1531,7 @@ describe('JobTable on a shared store, across retaken numbers and early kills', (
       const waited = jt.wait(job.id, 's')
       await vi.advanceTimersByTimeAsync((LIST_CHECK_SECONDS + STOP_WAIT_SECONDS) * 1000 * 2)
       const ended = await waited
-      expect([ended.status, ended.exitCode]).toEqual([JobStatus.KILLED, 137])
+      expect([ended.signal, ended.exitCode]).toEqual([9, 137])
       release.fire?.()
       await job.process?.join()
     } finally {
@@ -1600,10 +1605,10 @@ describe('JobTable process plane', () => {
     await until(async () => a.daemon in (await b.remoteProcesses()))
     const every = { list: 'workspace', kill: 'workspace', max: null } as const
     expect(await b.signalRemote(job.pid, 0, 't', () => every)).toBe(true)
-    expect(job.status).toBe(JobStatus.RUNNING)
+    expect(job.state).toBe('running')
     expect(await b.signalRemote(job.pid, 15, 't', () => every)).toBe(true)
     await job.process?.join()
-    expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 143])
+    expect([job.signal, job.exitCode]).toEqual([15, 143])
     expect(await b.signalRemote(job.pid + 1, 15, 't', () => every)).toBe(false)
     await a.close()
     await b.close()
@@ -1633,7 +1638,7 @@ describe('JobTable process plane', () => {
     }
     expect(await b.signalRemote(job.pid, 15, 't', () => every)).toBe(true)
     await job.process?.join()
-    expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 143])
+    expect([job.signal, job.exitCode]).toEqual([15, 143])
     await a.close()
     await b.close()
   })
@@ -1690,7 +1695,7 @@ describe('JobTable process plane', () => {
       spy.mockRestore()
     }
     expect(await store.takeStops(a.daemon)).toEqual([])
-    expect(job.status).toBe(JobStatus.RUNNING)
+    expect(job.state).toBe('running')
     abort.abort()
     await a.close()
     await b.close()
@@ -2003,7 +2008,7 @@ describe('JobTable process plane', () => {
     await until(async () => a.daemon in (await b.remoteProcesses()))
     const every = { list: 'workspace', kill: 'workspace', max: null } as const
     expect(await b.signalRemote(job.pid, 15, 't', () => every)).toBe(true)
-    await until(() => Promise.resolve(job.status === JobStatus.KILLED))
+    await until(() => Promise.resolve(job.signal !== null))
     expect(job.exitCode).toBe(143)
     release()
     await job.process?.join()

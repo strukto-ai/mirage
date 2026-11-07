@@ -18,7 +18,7 @@ import { CommandSpec, Argument } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
 import { CapacityState } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
-import { type JobRunner, JobStatus } from '../../execution/job/index.ts'
+import type { JobRunner } from '../../execution/job/index.ts'
 import { RAMExecutionStore } from '../../execution/ram.ts'
 import {
   type Channel,
@@ -185,7 +185,7 @@ describe('closeWorkspace', () => {
     await ws.jobTable.disown(job.id)
     expect(job.process?.terminate()).toBe(true)
     await vi.waitFor(() => {
-      expect(job.status).toBe(JobStatus.KILLED)
+      expect(job.signal).not.toBeNull()
     })
     const closing = ws.close()
     await new Promise((resolve) => setTimeout(resolve, 50))
@@ -209,7 +209,7 @@ describe('closeWorkspace', () => {
       abort: new AbortController(),
       cwd: '/',
     })
-    expect(job.status).toBe(JobStatus.RUNNING)
+    expect(job.state).toBe('running')
 
     const closing = ws.close()
     await job.console.waitFinished()
@@ -217,14 +217,14 @@ describe('closeWorkspace', () => {
     release.fire?.()
     await closing
 
-    expect(job.status).toBe(JobStatus.KILLED)
+    expect(job.signal).not.toBeNull()
     expect(job.exitCode).toBe(137)
     await job.console.waitFinished()
 
     // The runner unwinding afterwards must not reopen or relabel it.
     release.fire?.()
     await Promise.resolve()
-    expect(job.status).toBe(JobStatus.KILLED)
+    expect(job.signal).not.toBeNull()
   })
 
   // A JS promise cannot be cancelled, so such a runner gets the grace a
@@ -241,7 +241,7 @@ describe('closeWorkspace', () => {
     })
     await ws.close()
 
-    expect(job.status).toBe(JobStatus.KILLED)
+    expect(job.signal).not.toBeNull()
     expect(job.process?.record.state).toBe('stopping')
     release.fire?.()
     await job.process?.join()
@@ -264,7 +264,7 @@ describe('closeWorkspace', () => {
     await closing
     await ws.close()
 
-    expect(job.status).toBe(JobStatus.KILLED)
+    expect(job.signal).not.toBeNull()
     release.fire?.()
   })
 })

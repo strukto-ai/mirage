@@ -18,25 +18,27 @@ from mirage.utils.loader import lazy_exports
 
 if TYPE_CHECKING:
     from mirage.execution.job.constants import KILLED_EXIT_CODE
-    from mirage.execution.job.table import JobTable, cancel_job
-    from mirage.execution.job.types import Job, JobRunner, JobStatus
+    from mirage.execution.job.handle import JobHandle, JobRunner
+    from mirage.execution.job.table import JobTable
+    from mirage.execution.job.types import Job, JobState
     from mirage.execution.job.waits import JobWaits
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.execution.job.constants": ("KILLED_EXIT_CODE",),
-    "mirage.execution.job.table": ("JobTable", "cancel_job"),
-    "mirage.execution.job.types": ("Job", "JobRunner", "JobStatus"),
+    "mirage.execution.job.handle": ("JobHandle", "JobRunner"),
+    "mirage.execution.job.table": ("JobTable",),
+    "mirage.execution.job.types": ("Job", "JobState"),
     "mirage.execution.job.waits": ("JobWaits",),
 }
 
 __all__ = [
     "KILLED_EXIT_CODE",
     "Job",
+    "JobHandle",
     "JobRunner",
-    "JobStatus",
+    "JobState",
     "JobTable",
     "JobWaits",
-    "cancel_job",
 ]
 
 __getattr__ = lazy_exports(__name__, _EXPORTS)

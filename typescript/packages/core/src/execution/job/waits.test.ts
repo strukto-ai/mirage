@@ -17,7 +17,7 @@ import { IOResult } from '../../io/types.ts'
 import { ExecutionNode } from '../../workspace/types.ts'
 import { Channel, JobConsole, JobOutput } from '../../shell/console/index.ts'
 import { JobTable } from './table.ts'
-import type { JobResult } from './types.ts'
+import type { JobResult } from './handle.ts'
 import { JobWaits } from './waits.ts'
 
 describe('JobWaits', () => {

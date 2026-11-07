@@ -32,7 +32,7 @@ from mirage.context import (
     session_voice,
 )
 from mirage.errors.types import CommandTimeoutError
-from mirage.execution.job import Job, JobStatus, JobTable
+from mirage.execution.job import JobHandle, JobState, JobTable
 from mirage.execution.job.constants import (
     ENDING_SIGNALS,
     STOP_WAIT_SECONDS,
@@ -351,16 +351,12 @@ def report_jobs(
         process = job.process
         if (
             job.reported
-            or job.status == JobStatus.RUNNING
+            or job.state == JobState.RUNNING
             or process is None
             or process.record.parent != session.process_id
         ):
             continue
-        ended = (
-            job.exit_code - 128
-            if job.status == JobStatus.KILLED
-            else process.ended_by
-        )
+        ended = job.signal if job.signal is not None else process.ended_by
         if ended is None or ended < 1 or job.exit_code != 128 + ended:
             continue
         report = signal_report(
@@ -586,7 +582,7 @@ async def handle_background(
         command is not None and command.type == NT.SUBSHELL
     )
 
-    async def _run_bg(job: Job) -> tuple[IOResult, ExecutionNode]:
+    async def _run_bg(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         child_evaluation.frame.shell = None if in_place else job.process
         # Background jobs don't receive stdin, matching real shell
         # behavior where bg processes get /dev/null. This prevents
@@ -914,18 +910,18 @@ def _process_view(
     )
 
 
-def _job_numbered(jobs: list[Job], job_id: int) -> Job | None:
+def _job_numbered(jobs: list[JobHandle], job_id: int) -> JobHandle | None:
     """The job whose number is `job_id`, the one `%N` names: none once
     its report was printed, as bash then drops it from its list.
 
     Args:
-        jobs (list[Job]): the jobs the builtin can see.
+        jobs (list[JobHandle]): the jobs the builtin can see.
         job_id (int): the job number.
     """
     return next((j for j in jobs if j.id == job_id and not j.reported), None)
 
 
-def _job_with_pid(jobs: list[Job], pid: int) -> Job | None:
+def _job_with_pid(jobs: list[JobHandle], pid: int) -> JobHandle | None:
     """The job a bare PID names.
 
     A job whose runner is here answers by its runner's PID. One with no
@@ -935,7 +931,7 @@ def _job_with_pid(jobs: list[Job], pid: int) -> Job | None:
     ``%2`` can share a number with a PID handed out here.
 
     Args:
-        jobs (list[Job]): the jobs the builtin can see.
+        jobs (list[JobHandle]): the jobs the builtin can see.
         pid (int): the PID as typed.
     """
     ran = next(
@@ -946,7 +942,9 @@ def _job_with_pid(jobs: list[Job], pid: int) -> Job | None:
     return next((j for j in jobs if j.process is None and j.pid == pid), None)
 
 
-def _resolve_spec(jobs: list[Job], spec: str) -> tuple[Job | None, str]:
+def _resolve_spec(
+    jobs: list[JobHandle], spec: str
+) -> tuple[JobHandle | None, str]:
     """The job a `wait`/`disown` operand names, or bash's refusal.
 
     A `%N` spec that names no job is `no such job`; a bare number is a
@@ -955,7 +953,7 @@ def _resolve_spec(jobs: list[Job], spec: str) -> tuple[Job | None, str]:
     is `not a pid or valid job spec`.
 
     Args:
-        jobs (list[Job]): the jobs the builtin can see.
+        jobs (list[JobHandle]): the jobs the builtin can see.
         spec (str): the operand as typed.
     """
     if spec.startswith("%"):
@@ -970,15 +968,15 @@ def _resolve_spec(jobs: list[Job], spec: str) -> tuple[Job | None, str]:
     return None, f"`{spec}': not a pid or valid job spec"
 
 
-async def _wait_first(job_table: JobTable, jobs: list[Job]) -> Job:
+async def _wait_first(job_table: JobTable, jobs: list[JobHandle]) -> JobHandle:
     """Block until the first of several jobs ends, and return it.
 
     Args:
         job_table (JobTable): the session's jobs.
-        jobs (list[Job]): the candidates, all present in the table.
+        jobs (list[JobHandle]): the candidates, all present in the table.
     """
     for job in jobs:
-        if job.status != JobStatus.RUNNING:
+        if job.state != JobState.RUNNING:
             return await job_table.wait(job.id, job.session_id)
     tasks = {
         asyncio.ensure_future(job_table.wait(job.id, job.session_id)): job
@@ -994,7 +992,7 @@ async def _wait_first(job_table: JobTable, jobs: list[Job]) -> Job:
 
 
 async def _reaped(
-    job_table: JobTable, job: Job, cmd_str: str
+    job_table: JobTable, job: JobHandle, cmd_str: str
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Report one finished job's status, and reap it.
 
@@ -1002,7 +1000,7 @@ async def _reaped(
 
     Args:
         job_table (JobTable): the session's jobs.
-        job (Job): the job, already finished.
+        job (JobHandle): the job, already finished.
         cmd_str (str): the command line, for the node.
     """
     # Reaped like GNU bash reaps a job waited on by id, so a later bare
@@ -1104,7 +1102,7 @@ async def handle_wait(
         if view is not None:
             await view.unset(var)
     errors: list[str] = []
-    picked: list[Job] = []
+    picked: list[JobHandle] = []
     await job_table.sync(sid)
     visible = job_table.list_jobs(sid)
     for spec in specs:
@@ -1156,7 +1154,7 @@ async def handle_wait(
     finished = [await job_table.wait(job.id, sid) for job in picked]
     told = _wait_reports(session, job_table)
     last_code = 0
-    last_job: Job | None = None
+    last_job: JobHandle | None = None
     for job in finished:
         _, io, _ = await _reaped(job_table, job, cmd_str)
         last_code = io.exit_code
@@ -1226,7 +1224,7 @@ async def handle_disown(
     running_only = "r" in scan.letters
     keep = "h" in scan.letters
     specs = scan.operands
-    targets: list[Job] = []
+    targets: list[JobHandle] = []
     errors: list[str] = []
     await job_table.sync(sid)
     jobs = job_table.list_jobs(sid)
@@ -1239,7 +1237,7 @@ async def handle_disown(
             targets.append(job)
     elif all_jobs or running_only:
         targets = (
-            [j for j in jobs if j.status == JobStatus.RUNNING]
+            [j for j in jobs if j.state == JobState.RUNNING]
             if running_only
             else jobs
         )
@@ -1299,7 +1297,7 @@ async def handle_fg(
                 IOResult(exit_code=1, stderr=err),
                 ExecutionNode(command=cmd_str, exit_code=1, stderr=err),
             )
-        running = [j for j in jobs if j.status == JobStatus.RUNNING]
+        running = [j for j in jobs if j.state == JobState.RUNNING]
         target = (running or jobs)[-1]
     else:
         raw = parts[1].lstrip("%")
@@ -1377,11 +1375,11 @@ def _kill_list(
     )
 
 
-def _kill_pid(jobs: list[Job], operand: str) -> tuple[int | None, str]:
+def _kill_pid(jobs: list[JobHandle], operand: str) -> tuple[int | None, str]:
     """The managed PID one kill operand names, or bash's refusal.
 
     Args:
-        jobs (list[Job]): the jobs the builtin can see.
+        jobs (list[JobHandle]): the jobs the builtin can see.
         operand (str): the operand as typed.
     """
     if operand == "":
@@ -1402,7 +1400,7 @@ def _kill_pid(jobs: list[Job], operand: str) -> tuple[int | None, str]:
     return int(operand), ""
 
 
-def _runnerless(jobs: list[Job], operand: str) -> Job | None:
+def _runnerless(jobs: list[JobHandle], operand: str) -> JobHandle | None:
     """The job a ``%N`` operand names when it has no runner here.
 
     Another daemon runs it, or it was restored from a snapshot. It is
@@ -1412,7 +1410,7 @@ def _runnerless(jobs: list[Job], operand: str) -> Job | None:
     of this workspace's own.
 
     Args:
-        jobs (list[Job]): the jobs the builtin can see.
+        jobs (list[JobHandle]): the jobs the builtin can see.
         operand (str): the operand as typed.
     """
     raw = operand[1:] if operand.startswith("%") else ""
@@ -1516,7 +1514,7 @@ async def handle_kill(
         runnerless = _runnerless(jobs, operand)
         if runnerless is not None:
             if signal in _KEPT_SIGNALS:
-                found = runnerless.status == JobStatus.RUNNING
+                found = runnerless.state == JobState.RUNNING
             else:
                 found = await job_table.kill(runnerless.id, sid, signal)
             if not found:
@@ -1560,7 +1558,7 @@ async def handle_kill(
 async def _kill_group(
     job_table: JobTable,
     processes: ProcessView,
-    jobs: list[Job],
+    jobs: list[JobHandle],
     group: int,
     signal: int,
     session_id: str,
@@ -1571,7 +1569,7 @@ async def _kill_group(
     Args:
         job_table (JobTable): the session's jobs.
         processes (ProcessView): the session's view of the runners.
-        jobs (list[Job]): the jobs the builtin can see.
+        jobs (list[JobHandle]): the jobs the builtin can see.
         group (int): the group.
         signal (int): the signal; a kept one probes.
         session_id (str): the calling session.
@@ -1596,16 +1594,23 @@ async def _kill_group(
 _JOBS_FLAGS = frozenset("lnprs")
 
 
-def _job_row(job: Job, long: bool) -> str:
+def _job_row(job: JobHandle, long: bool) -> str:
     """One `jobs` line in mirage's own row shape.
 
     Args:
-        job (Job): the job.
+        job (JobHandle): the job.
         long (bool): `-l`, which includes the managed process id.
     """
+    status = (
+        "running"
+        if job.state == JobState.RUNNING
+        else "killed"
+        if job.signal is not None
+        else "completed"
+    )
     if long:
-        return f"[{job.id}] {job.pid} {job.status.value} {job.command}"
-    return f"[{job.id}] {job.status.value} {job.command}"
+        return f"[{job.id}] {job.pid} {status} {job.command}"
+    return f"[{job.id}] {status} {job.command}"
 
 
 async def handle_jobs(
@@ -1656,7 +1661,7 @@ async def handle_jobs(
         table = table.parent
     jobs = [j for j in job_table.listing(sid) if not j.reported]
     if specs:
-        picked: list[Job] = []
+        picked: list[JobHandle] = []
         for spec in specs:
             raw = spec.lstrip("%")
             job = _job_numbered(jobs, int(raw)) if raw.isdigit() else None
@@ -1672,11 +1677,11 @@ async def handle_jobs(
             picked.append(job)
         jobs = picked
     if "r" in flags:
-        jobs = [j for j in jobs if j.status == JobStatus.RUNNING]
+        jobs = [j for j in jobs if j.state == JobState.RUNNING]
     if "s" in flags:
         jobs = []
     if "n" in flags:
-        jobs = [j for j in jobs if j.status != JobStatus.RUNNING]
+        jobs = [j for j in jobs if j.state != JobState.RUNNING]
     if "p" in flags:
         lines = [str(j.pid) for j in jobs]
     else:

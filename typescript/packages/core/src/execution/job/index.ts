@@ -14,4 +14,5 @@
 
 export { JobTable } from './table.ts'
 export { JobWaits } from './waits.ts'
-export { Job, type JobResult, type JobRunner, JobStatus } from './types.ts'
+export { JobHandle, type JobResult, type JobRunner } from './handle.ts'
+export type { Job, JobState } from './types.ts'

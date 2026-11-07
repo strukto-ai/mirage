@@ -21,8 +21,9 @@ import pytest
 
 from mirage.execution.errors import WorkspaceHeldError
 from mirage.execution.job import table as table_module
+from mirage.execution.job.handle import JobHandle
 from mirage.execution.job.table import JobTable
-from mirage.execution.job.types import Job, JobStatus
+from mirage.execution.job.types import JobState
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.ram import RAMExecutionStore
@@ -75,11 +76,11 @@ class _GatedStore:
         await self._inner.close()
 
 
-async def _run_forever(job: Job) -> tuple[IOResult, ExecutionNode]:
+async def _run_forever(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
     """A runner that never finishes on its own.
 
     Args:
-        job (Job): the job being run.
+        job (JobHandle): the job being run.
     """
     await asyncio.Event().wait()
     return IOResult(), ExecutionNode()
@@ -92,7 +93,7 @@ class _BrokenConsoles(RAMExecutionStore):
         raise ValueError("console unavailable")
 
 
-async def _submit_gated(table: JobTable, gate: asyncio.Event) -> Job:
+async def _submit_gated(table: JobTable, gate: asyncio.Event) -> JobHandle:
     job = await table.submit(command="deaf", run=_run_forever, cwd="/")
     job.console = JobConsole(store=_GatedStore(gate))
     return job
@@ -112,7 +113,7 @@ async def test_wait_joins_a_kill_still_appending_its_marker():
     job = await _submit_gated(table, gate)
     kill_task = asyncio.create_task(table.kill(job.id))
     await asyncio.sleep(0)
-    assert job.status is JobStatus.KILLED
+    assert job.signal is not None
     waiter = asyncio.create_task(table.wait(job.id))
     await asyncio.sleep(0)
     # The status has flipped but the marker has not landed; a wait that
@@ -137,7 +138,7 @@ async def test_wait_all_joins_a_killed_job_still_appending():
     job = await _submit_gated(table, gate)
     kill_task = asyncio.create_task(table.kill(job.id))
     await asyncio.sleep(0)
-    assert job.status is JobStatus.KILLED
+    assert job.signal is not None
     all_waiter = asyncio.create_task(table.wait_all())
     await asyncio.sleep(0)
     assert not all_waiter.done()
@@ -188,7 +189,7 @@ async def test_settle_kill_marker_survives_second_cancel():
     assert job.process is not None
     job.process.task.cancel()
     await asyncio.sleep(0.01)
-    assert job.status is JobStatus.KILLED
+    assert job.signal is not None
     job.process.task.cancel()
     await asyncio.sleep(0.01)
     gate.set()
@@ -198,7 +199,9 @@ async def test_settle_kill_marker_survives_second_cancel():
     assert await job.console.snapshot(Channel.STDERR) == b"Killed"
 
 
-async def _submit(table: JobTable, session_id: str, command: str = "x") -> Job:
+async def _submit(
+    table: JobTable, session_id: str, command: str = "x"
+) -> JobHandle:
     return await table.submit(
         command=command, run=_run_forever, cwd="/", session_id=session_id
     )
@@ -235,8 +238,8 @@ async def test_kill_all_reaches_every_session():
     b1 = await _submit(table, "b")
     killed = await table.kill_all()
     assert {j.session_id for j in killed} == {"a", "b"}
-    assert a1.status is JobStatus.KILLED
-    assert b1.status is JobStatus.KILLED
+    assert a1.signal is not None
+    assert b1.signal is not None
     assert table.all_running_jobs() == []
 
 
@@ -248,17 +251,17 @@ async def test_a_job_killed_with_a_signal_exits_128_plus_it(signal, code):
     job = await _submit(table, "a")
     await asyncio.sleep(0)
     assert await table.kill(job.id, "a", signal)
-    assert (job.status, job.exit_code) == (JobStatus.KILLED, code)
+    assert job.signal is not None and job.exit_code == code
     assert job.process is not None
     assert (await job.process.join()).exit == code
 
 
 async def _submit_handling(
     table: JobTable, simple: bool, stopped: list[str]
-) -> tuple[Job, asyncio.Event]:
+) -> tuple[JobHandle, asyncio.Event]:
     started = asyncio.Event()
 
-    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+    async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         started.set()
         try:
             await asyncio.Event().wait()
@@ -301,7 +304,7 @@ async def test_wait_answers_the_kill_once_a_runner_outlasts_the_bound(
     table = JobTable()
     release = asyncio.Event()
 
-    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+    async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         try:
             await asyncio.Event().wait()
         finally:
@@ -338,27 +341,27 @@ async def test_close_session_stops_and_forgets_its_jobs():
     b1 = await _submit(table, "b")
     assert await table.disown(a2.id, "a")
     assert await table.close_session("a") == [a1]
-    assert a1.status is JobStatus.KILLED
+    assert a1.signal is not None
     # Disowned: off the list, still running, bash's own rule.
-    assert a2.status is JobStatus.RUNNING
+    assert a2.state is JobState.RUNNING
     assert table.list_jobs("a") == []
     assert table.get(1, "a") is None
     assert table.list_jobs("b") == [b1]
     # A session reusing the id starts from one and inherits nothing.
     assert (await _submit(table, "a")).id == 1
     await table.kill_all()
-    assert a2.status is JobStatus.KILLED
+    assert a2.signal is not None
 
 
 @pytest.mark.asyncio
 async def test_load_restores_a_job_into_its_session():
     table = JobTable()
-    restored = Job(
+    restored = JobHandle(
         id=3,
         command="x",
         cwd="/",
         created_at=0.0,
-        status=JobStatus.COMPLETED,
+        state=JobState.EXITED,
         session_id="a",
     )
     await table.load(restored)
@@ -391,7 +394,7 @@ async def test_disowned_job_keeps_process_identity_until_runner_really_exits():
     assert table.list_jobs("a") == []
     assert [i.pid for i in view.list()] == [process.record.pid]
     await table.kill_all()
-    assert job.status == JobStatus.KILLED
+    assert job.signal is not None
     assert [i.state for i in view.list()] == ["stopping"]
     release.set()
     result = await process.join()
@@ -490,12 +493,14 @@ async def test_jobs_are_stamped_on_the_table_clock():
         await child.kill_all()
 
 
-async def _exit_with(code: int, job: Job) -> tuple[IOResult, ExecutionNode]:
+async def _exit_with(
+    code: int, job: JobHandle
+) -> tuple[IOResult, ExecutionNode]:
     """A runner that exits at once with ``code``.
 
     Args:
         code (int): the exit status.
-        job (Job): the job being run.
+        job (JobHandle): the job being run.
     """
     return IOResult(exit_code=code), ExecutionNode(exit_code=code)
 
@@ -508,10 +513,10 @@ async def test_another_table_lists_waits_on_and_kills_a_job():
     await asyncio.sleep(0)
     await b.sync("s")
     [seen] = b.list_jobs("s")
-    assert (seen.id, seen.command, seen.status) == (
+    assert (seen.id, seen.command, seen.state) == (
         1,
         "sleep 30",
-        JobStatus.RUNNING,
+        JobState.RUNNING,
     )
     assert seen.process is None
     assert await b.kill(1, "s", 15)
@@ -519,7 +524,7 @@ async def test_another_table_lists_waits_on_and_kills_a_job():
     assert job.process is not None
     async with asyncio.timeout(2):
         await job.process.join()
-    assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
+    assert (job.signal, job.exit_code) == (15, 143)
     assert await job.console.snapshot(Channel.STDERR) == b"Killed"
 
 
@@ -529,7 +534,7 @@ async def test_another_table_waits_for_a_job_to_end():
     a, b = JobTable(store), JobTable(store)
     gate = asyncio.Event()
 
-    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+    async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         await gate.wait()
         return IOResult(exit_code=1), ExecutionNode(exit_code=1)
 
@@ -581,12 +586,8 @@ async def test_a_restarted_daemon_holds_its_workspace_again():
     await after.submit("next", _run_forever, "/", session_id="s")
     await after.sync("s")
     [old, new] = after.list_jobs("s")
-    assert (old.command, old.status, old.exit_code) == (
-        "sleep 30",
-        JobStatus.KILLED,
-        129,
-    )
-    assert (new.command, new.status) == ("next", JobStatus.RUNNING)
+    assert (old.command, old.signal, old.exit_code) == ("sleep 30", 1, 129)
+    assert (new.command, new.state) == ("next", JobState.RUNNING)
     assert lost.process is not None
     async with asyncio.timeout(2):
         await lost.process.join()
@@ -607,11 +608,11 @@ async def test_a_job_whose_daemon_lost_the_lease_ends_as_hung_up():
     await asyncio.sleep(0.1)
     async with asyncio.timeout(2):
         assert (await b.wait(1, "s")).exit_code == 129
-    assert b.get(1, "s").status is JobStatus.KILLED
+    assert b.get(1, "s").signal is not None
     assert job.process is not None
     async with asyncio.timeout(2):
         await job.process.join()
-    assert (job.status, job.exit_code) == (JobStatus.KILLED, 129)
+    assert (job.signal, job.exit_code) == (1, 129)
 
 
 @pytest.mark.asyncio
@@ -657,7 +658,7 @@ async def test_a_sync_takes_the_job_that_took_a_reaped_number():
     await b.submit("sleep 30", _run_forever, "/", session_id="s")
     await a.sync("s")
     [seen] = a.list_jobs("s")
-    assert (seen.command, seen.status) == ("sleep 30", JobStatus.RUNNING)
+    assert (seen.command, seen.state) == ("sleep 30", JobState.RUNNING)
     assert await a.pop_completed("s") == []
     await b.sync("s")
     assert [j.command for j in b.list_jobs("s")] == ["sleep 30"]
@@ -696,7 +697,7 @@ async def test_close_ends_a_killed_job_still_stopping():
     table = JobTable()
     release = asyncio.Event()
 
-    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+    async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         try:
             await asyncio.Event().wait()
         finally:
@@ -708,7 +709,7 @@ async def test_close_ends_a_killed_job_still_stopping():
     assert await table.kill(job.id, "", 15)
     assert not job.console.finished
     await table.close()
-    assert await job.console.outcome() == "killed:143"
+    assert await job.console.outcome() == "killed:143:15"
     release.set()
     assert job.process is not None
     await job.process.join()
@@ -755,7 +756,9 @@ class _DroppedWatches(RAMExecutionStore):
 
 @pytest.mark.asyncio
 async def test_a_watch_that_failed_a_read_still_heeds_a_kill(monkeypatch):
-    monkeypatch.setattr("mirage.execution.job.table.WATCH_RETRY_SECONDS", 0.01)
+    monkeypatch.setattr(
+        "mirage.execution.job.handle.WATCH_RETRY_SECONDS", 0.01
+    )
     store = _DroppedWatches()
     a, b = JobTable(store), JobTable(store)
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
@@ -765,7 +768,7 @@ async def test_a_watch_that_failed_a_read_still_heeds_a_kill(monkeypatch):
     assert job.process is not None
     async with asyncio.timeout(2):
         await job.process.join()
-    assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
+    assert (job.signal, job.exit_code) == (15, 143)
 
 
 class _ExpiringOutput(RAMExecutionStore):
@@ -793,7 +796,11 @@ async def test_a_finished_job_outlives_its_expired_output():
     fresh = JobTable(store)
     await fresh.sync("s")
     [seen] = fresh.list_jobs("s")
-    assert (seen.status, seen.exit_code) == (JobStatus.COMPLETED, 0)
+    assert (seen.state, seen.signal, seen.exit_code) == (
+        JobState.EXITED,
+        None,
+        0,
+    )
 
 
 class _CountedWaits:
@@ -847,7 +854,7 @@ async def test_a_long_wait_elsewhere_keeps_one_read_across_lease_checks():
     a, b = JobTable(store), JobTable(store)
     gate = asyncio.Event()
 
-    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+    async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         await gate.wait()
         return IOResult(), ExecutionNode()
 
@@ -883,7 +890,7 @@ async def test_a_sync_never_attaches_a_console_reaped_after_its_read():
     a, b = JobTable(store), JobTable(store)
     gate = asyncio.Event()
 
-    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+    async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         await gate.wait()
         return IOResult(), ExecutionNode()
 
@@ -913,7 +920,7 @@ async def test_a_close_elsewhere_stops_a_disowned_job():
     assert job.process is not None
     async with asyncio.timeout(2):
         await job.process.join()
-    assert (job.status, job.exit_code) == (JobStatus.KILLED, 137)
+    assert (job.signal, job.exit_code) == (9, 137)
 
 
 @pytest.mark.asyncio
@@ -922,7 +929,7 @@ async def test_a_disowned_job_drops_its_record_when_it_ends():
     table = JobTable(store)
     gate = asyncio.Event()
 
-    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+    async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         await gate.wait()
         return IOResult(), ExecutionNode()
 
@@ -942,7 +949,7 @@ async def test_a_disowned_job_drops_its_record_when_it_ends():
 async def test_a_job_started_during_a_sync_stays_this_tables_own():
     store = _HookAfterRead()
     table = JobTable(store)
-    started: list[Job] = []
+    started: list[JobHandle] = []
 
     async def launch() -> None:
         started.append(
@@ -963,7 +970,7 @@ async def test_a_disown_never_parks_a_job_that_already_ended():
     a, b = JobTable(store), JobTable(store)
     gate = asyncio.Event()
 
-    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+    async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         await gate.wait()
         return IOResult(), ExecutionNode()
 
@@ -1016,12 +1023,12 @@ async def test_a_restore_never_hides_a_job_that_holds_its_number():
     store = RAMExecutionStore()
     a, b = JobTable(store), JobTable(store)
     live = await a.submit("sleep 30", _run_forever, "/", session_id="s")
-    restored = Job(
+    restored = JobHandle(
         id=live.id,
         command="old",
         cwd="/",
         created_at=0.0,
-        status=JobStatus.COMPLETED,
+        state=JobState.EXITED,
         session_id="s",
         console=JobConsole(finished=True),
     )
@@ -1067,7 +1074,7 @@ async def test_a_number_retaken_elsewhere_lists_the_new_job():
     await a.sync("s")
     listed = a.get(1, "s")
     assert listed is not None and listed.command == "next"
-    assert old.status is JobStatus.RUNNING
+    assert old.state is JobState.RUNNING
     await a.kill_all()
     assert old.process is not None
     async with asyncio.timeout(2):
@@ -1083,7 +1090,12 @@ async def test_a_kill_before_the_runner_begins_keeps_its_ending_and_lease():
     assert await table.kill(job.id, "s", 15)
     stored = await store.load("s")
     assert stored is not None
-    assert stored["jobs"][str(job.id)]["ending"] == "killed:143"
+    entry = stored["jobs"][str(job.id)]
+    assert (entry["state"], entry["exit"], entry["signal"]) == (
+        "exited",
+        143,
+        15,
+    )
     assert await store.holder() == table.daemon
     await table.close()
     assert table._lease is None
@@ -1097,7 +1109,7 @@ class _StartsOnDelete(RAMExecutionStore):
         super().__init__()
         self.replaces = replaces
         self.peer: JobTable | None = None
-        self.started: list[Job] = []
+        self.started: list[JobHandle] = []
 
     async def delete(self, session_id: str, expected_generation: int) -> bool:
         if self.peer is not None and not self.started:
@@ -1125,7 +1137,7 @@ async def test_a_close_stops_a_job_started_while_it_closed(replaces):
     assert late.process is not None
     async with asyncio.timeout(2):
         await late.process.join()
-    assert (late.status, late.exit_code) == (JobStatus.KILLED, 137)
+    assert (late.signal, late.exit_code) == (9, 137)
     assert await store.load("s") is None
 
 
@@ -1140,7 +1152,7 @@ async def test_a_job_whose_list_was_deleted_elsewhere_stops(monkeypatch):
     assert job.process is not None
     async with asyncio.timeout(2):
         await job.process.join()
-    assert (job.status, job.exit_code) == (JobStatus.KILLED, 137)
+    assert (job.signal, job.exit_code) == (9, 137)
 
 
 @pytest.mark.asyncio
@@ -1151,7 +1163,7 @@ async def test_a_listed_or_disowned_job_runs_on_past_its_checks(monkeypatch):
     disowned = await table.submit("two", _run_forever, "/", session_id="s")
     assert await table.disown(disowned.id, "s")
     await asyncio.sleep(0.1)
-    assert [listed.status, disowned.status] == [JobStatus.RUNNING] * 2
+    assert [listed.state, disowned.state] == [JobState.RUNNING] * 2
     await table.kill_all()
 
 
@@ -1163,7 +1175,7 @@ async def test_a_dropped_job_deaf_to_its_stop_still_ends(monkeypatch):
     table = JobTable(store)
     release = asyncio.Event()
 
-    async def deaf(job: Job) -> tuple[IOResult, ExecutionNode]:
+    async def deaf(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         while not release.is_set():
             try:
                 await release.wait()
@@ -1176,7 +1188,7 @@ async def test_a_dropped_job_deaf_to_its_stop_still_ends(monkeypatch):
     await store.clear()
     async with asyncio.timeout(2):
         ended = await table.wait(job.id, "s")
-    assert (ended.status, ended.exit_code) == (JobStatus.KILLED, 137)
+    assert (ended.signal, ended.exit_code) == (9, 137)
     release.set()
     assert job.process is not None
     await job.process.join()
@@ -1222,7 +1234,7 @@ async def test_a_list_check_that_failed_a_read_checks_again(monkeypatch):
     assert job.process is not None
     async with asyncio.timeout(2):
         await job.process.join()
-    assert (job.status, job.exit_code) == (JobStatus.KILLED, 137)
+    assert (job.signal, job.exit_code) == (9, 137)
     assert store.failures == 0
 
 
@@ -1299,12 +1311,12 @@ async def test_a_stop_asked_elsewhere_stops_the_owners_job(monkeypatch):
     await _until(listed)
     every = ProcessPermissions(list="workspace", kill="workspace")
     assert await b.signal_remote(job.pid, 0, "t", lambda: every)
-    assert job.status == JobStatus.RUNNING
+    assert job.state == JobState.RUNNING
     assert await b.signal_remote(job.pid, 15, "t", lambda: every)
     assert job.process is not None
     async with asyncio.timeout(5):
         await job.process.join()
-    assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
+    assert (job.signal, job.exit_code) == (15, 143)
     assert not await b.signal_remote(job.pid + 1, 15, "t", lambda: every)
     await a.close()
     await b.close()
@@ -1334,7 +1346,7 @@ async def test_int_and_quit_leave_a_job_running_from_any_table(monkeypatch):
     assert job.process is not None
     async with asyncio.timeout(5):
         await job.process.join()
-    assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
+    assert (job.signal, job.exit_code) == (15, 143)
     await a.close()
     await b.close()
 
@@ -1386,7 +1398,7 @@ async def test_a_remote_signal_reads_the_grants_after_the_store(monkeypatch):
     monkeypatch.setattr(store, "processes", revoking)
     assert not await b.signal_remote(job.pid, 15, "t", view.permissions)
     assert await store.take_stops(a.daemon) == []
-    assert job.status == JobStatus.RUNNING
+    assert job.state == JobState.RUNNING
     await a.close()
     await b.close()
 
@@ -1765,7 +1777,7 @@ async def test_a_stop_asked_elsewhere_reaches_a_child_shells_job(monkeypatch):
     child = a.child()
     release = asyncio.Event()
 
-    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+    async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         try:
             await asyncio.Event().wait()
         finally:

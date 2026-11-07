@@ -57,6 +57,17 @@ export class ProcessId {
 }
 
 /**
+ * One job of a workspace, named by its console, which no other job shares
+ * even when it takes a number a reaped one had.
+ */
+export class JobId {
+  constructor(
+    readonly workspaceId: string,
+    readonly console: string,
+  ) {}
+}
+
+/**
  * Where a process runs: the provider that reaches the machine and the
  * machine's name there, written `docker:tools`.
  */

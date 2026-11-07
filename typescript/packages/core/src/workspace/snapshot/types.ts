@@ -68,11 +68,12 @@ export interface JobSnapshot {
   id: number
   command: string
   cwd: string
-  status: string
+  signal: number | null
   stdout: Uint8Array
   stderr: Uint8Array
   exit_code: number
   created_at: number
+  ended_at: number | null
   session_id: string
 }
 

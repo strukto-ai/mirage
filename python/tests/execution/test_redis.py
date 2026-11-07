@@ -20,8 +20,9 @@ import pytest
 import pytest_asyncio
 import redis.asyncio as aioredis
 
+from mirage.execution.job.handle import JobHandle
 from mirage.execution.job.table import JobTable
-from mirage.execution.job.types import Job, JobStatus
+from mirage.execution.job.types import JobState
 from mirage.execution.redis import RedisExecutionStore
 from mirage.io import IOResult
 from mirage.shell.console import Channel
@@ -53,11 +54,11 @@ async def stores(prefix):
         await store.close()
 
 
-async def _run_forever(job: Job) -> tuple[IOResult, ExecutionNode]:
+async def _run_forever(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
     """A runner that never finishes on its own.
 
     Args:
-        job (Job): the job being run.
+        job (JobHandle): the job being run.
     """
     await asyncio.Event().wait()
     return IOResult(), ExecutionNode()
@@ -145,13 +146,13 @@ async def test_a_table_on_another_store_kills_and_waits_on_a_job(stores):
     a, b = JobTable(stores()), JobTable(stores())
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
     await b.sync("s")
-    assert [j.status for j in b.list_jobs("s")] == [JobStatus.RUNNING]
+    assert [j.state for j in b.list_jobs("s")] == [JobState.RUNNING]
     assert await b.kill(1, "s", 15)
     assert (await b.wait(1, "s")).exit_code == 143
     assert job.process is not None
     async with asyncio.timeout(5):
         await job.process.join()
-    assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
+    assert (job.signal, job.exit_code) == (15, 143)
     await a.close()
 
 

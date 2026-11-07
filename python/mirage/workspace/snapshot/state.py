@@ -30,7 +30,7 @@ from mirage.commands.cli.types import CLI
 from mirage.commands.spec.types import CommandSpec
 from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.utils import open_regular
-from mirage.execution.job import Job, JobStatus, JobTable
+from mirage.execution.job import JobHandle, JobState, JobTable
 from mirage.execution.process.config import ProcessPermissions
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY
@@ -396,7 +396,7 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
     finished_jobs = [
         await _job_to_dict(j)
         for j in ws.job_table.all_jobs()
-        if j.status != JobStatus.RUNNING
+        if j.state != JobState.RUNNING
         and (j.process is None or j.console.finished)
     ]
 
@@ -1005,7 +1005,7 @@ async def _restore_jobs(ws: WorkspaceLike, state: dict[str, Any]) -> None:
         await ws.job_table.load(_job_from_dict(job_d))
 
 
-async def _job_to_dict(job: Job) -> dict[str, Any]:
+async def _job_to_dict(job: JobHandle) -> dict[str, Any]:
     """Serialize one finished job.
 
     Output is stored per channel rather than chunk by chunk: the manifest
@@ -1015,31 +1015,33 @@ async def _job_to_dict(job: Job) -> dict[str, Any]:
     affects jobs that have already ended.
 
     Args:
-        job (Job): the finished job to serialize.
+        job (JobHandle): the finished job to serialize.
     """
     return {
         JobKey.ID: job.id,
         JobKey.COMMAND: job.command,
         JobKey.CWD: job.cwd,
-        JobKey.STATUS: job.status.value,
+        JobKey.SIGNAL: job.signal,
         JobKey.STDOUT: await job.console.snapshot(Channel.STDOUT),
         JobKey.STDERR: await job.console.snapshot(Channel.STDERR),
         JobKey.EXIT_CODE: job.exit_code,
         JobKey.CREATED_AT: job.created_at,
+        JobKey.ENDED_AT: job.ended_at,
         JobKey.SESSION_ID: job.session_id,
         JobKey.PROCESS: job.process_id,
     }
 
 
 def _restored_console(
-    d: dict[str, Any], exit_code: int, status: JobStatus
+    d: dict[str, Any], exit_code: int, signal: int | None
 ) -> JobConsole:
     """Rebuild a finished job's console from its serialized output.
 
     Args:
         d (dict[str, Any]): the serialized job.
         exit_code (int): the job's exit status.
-        status (JobStatus): how the job ended.
+        signal (int | None): the signal that stopped it, None for a job
+            that ran to completion.
     """
     ts = d.get(JobKey.CREATED_AT, 0.0)
     chunks: list[ConsoleChunk] = []
@@ -1055,8 +1057,8 @@ def _restored_console(
                 )
             )
     outcome = (
-        killed_outcome(exit_code)
-        if status == JobStatus.KILLED
+        killed_outcome(exit_code, signal)
+        if signal is not None
         else exit_outcome(exit_code)
     )
     chunks.append(
@@ -1073,16 +1075,18 @@ def _restored_console(
     return console
 
 
-def _job_from_dict(d: dict[str, Any]) -> Job:
-    status = JobStatus(d.get(JobKey.STATUS, JobStatus.COMPLETED.value))
+def _job_from_dict(d: dict[str, Any]) -> JobHandle:
+    signal = d.get(JobKey.SIGNAL)
     exit_code = d.get(JobKey.EXIT_CODE, 0)
-    return Job(
+    return JobHandle(
         id=d[JobKey.ID],
         command=d[JobKey.COMMAND],
         cwd=d.get(JobKey.CWD, "/"),
-        status=status,
+        state=JobState.EXITED,
         exit_code=exit_code,
-        console=_restored_console(d, exit_code, status),
+        signal=signal,
+        ended_at=d.get(JobKey.ENDED_AT),
+        console=_restored_console(d, exit_code, signal),
         created_at=d.get(JobKey.CREATED_AT, 0.0),
         session_id=d.get(JobKey.SESSION_ID, "default"),
     )

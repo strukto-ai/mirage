@@ -74,11 +74,12 @@ class JobKey(StrEnum):
     ID = "id"
     COMMAND = "command"
     CWD = "cwd"
-    STATUS = "status"
+    SIGNAL = "signal"
     STDOUT = "stdout"
     STDERR = "stderr"
     EXIT_CODE = "exit_code"
     CREATED_AT = "created_at"
+    ENDED_AT = "ended_at"
     SESSION_ID = "session_id"
 
 

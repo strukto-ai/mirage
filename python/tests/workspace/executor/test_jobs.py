@@ -20,7 +20,7 @@ import pytest
 
 from mirage.bridge.sync import handed
 from mirage.execution.errors import WorkspaceHeldError
-from mirage.execution.job import Job, JobStatus, JobTable
+from mirage.execution.job import JobHandle, JobState, JobTable
 from mirage.execution.process.types import ProcessState
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import (
@@ -436,12 +436,15 @@ def test_stderr_is_routed_to_its_own_channel():
 
 
 async def _emit_and_settle(
-    job: Job, stdout: bytes = b"", stderr: bytes = b"", exit_code: int = 0
+    job: JobHandle,
+    stdout: bytes = b"",
+    stderr: bytes = b"",
+    exit_code: int = 0,
 ) -> tuple[IOResult, ExecutionNode]:
     """A runner that prints to its console and ends with a status.
 
     Args:
-        job (Job): the job being run.
+        job (JobHandle): the job being run.
         stdout (bytes): what the job prints on stdout.
         stderr (bytes): what the job prints on stderr.
         exit_code (int): the job's exit status.
@@ -453,24 +456,24 @@ async def _emit_and_settle(
     return IOResult(exit_code=exit_code), ExecutionNode()
 
 
-async def _run_forever(job: Job) -> tuple[IOResult, ExecutionNode]:
+async def _run_forever(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
     """A runner that never finishes on its own.
 
     Args:
-        job (Job): the job being run.
+        job (JobHandle): the job being run.
     """
     await asyncio.Event().wait()
     return IOResult(), ExecutionNode()
 
 
 async def _emit_after(
-    job: Job, gate: asyncio.Event
+    job: JobHandle, gate: asyncio.Event
 ) -> tuple[IOResult, ExecutionNode]:
     """A runner that prints only once the test opens ``gate``, so it is
     still running while ``fg`` picks a job.
 
     Args:
-        job (Job): the job being run.
+        job (JobHandle): the job being run.
         gate (asyncio.Event): what the runner waits on before printing.
     """
     await gate.wait()
@@ -483,7 +486,7 @@ async def _submit_settled(
     stdout: bytes = b"",
     stderr: bytes = b"",
     exit_code: int = 0,
-) -> Job:
+) -> JobHandle:
     return await table.submit(
         command=command,
         run=partial(
@@ -493,7 +496,9 @@ async def _submit_settled(
     )
 
 
-async def _submit_pending(table: JobTable, command: str = "sleep") -> Job:
+async def _submit_pending(
+    table: JobTable, command: str = "sleep"
+) -> JobHandle:
     return await table.submit(command=command, run=_run_forever, cwd="/")
 
 
@@ -507,7 +512,7 @@ async def test_wait_without_an_id_waits_for_every_job():
     # Bare `wait` adopts and reaps, so the table entry is gone but the
     # job object itself has settled.
     assert table.get(job.id) is None
-    assert job.status == JobStatus.COMPLETED
+    assert (job.state, job.signal) == (JobState.EXITED, None)
 
 
 @pytest.mark.asyncio
@@ -606,7 +611,7 @@ async def test_kill_marks_a_known_job_killed():
     job = await _submit_pending(table)
     _, io, _ = await handle_kill(table, ["kill", str(job.id)])
     assert io.exit_code == 0
-    assert table.get(job.id).status == JobStatus.KILLED
+    assert table.get(job.id).signal is not None
 
 
 # bash starts a job ignoring INT and QUIT, so kill -INT or -QUIT reaches
@@ -1075,7 +1080,7 @@ async def test_closing_a_session_purges_its_jobs():
         old = ws.job_table.get(2, "a")
         assert old is not None
         await ws.close_session("a")
-        assert old.status is JobStatus.KILLED
+        assert old.signal is not None
         assert ws.job_table.list_jobs("a") == []
         # A session reusing the id starts from one and inherits nothing.
         ws.create_session("a")
@@ -1104,7 +1109,7 @@ async def test_closing_the_other_sessions_keeps_the_default_ones_jobs():
         assert ws.job_table.list_jobs("a") == []
         assert ws.job_table.list_jobs("b") == []
         kept = ws.job_table.get(1, ws.default_session_id)
-        assert kept is not None and kept.status is JobStatus.RUNNING
+        assert kept is not None and kept.state is JobState.RUNNING
     finally:
         await ws.close()
 
@@ -1125,7 +1130,7 @@ async def test_a_followed_tail_streams_to_its_job_console_until_killed():
         await asyncio.sleep(0.25)
         job = ws.job_table.get(1, ws.default_session_id)
         assert job is not None
-        assert job.status is JobStatus.RUNNING
+        assert job.state is JobState.RUNNING
         assert await job.console.snapshot(Channel.STDOUT) == b"l1\nl2\n"
         assert (await ws.shell("kill %1")).exit_code == 0
     finally:
@@ -1479,10 +1484,10 @@ async def test_another_daemon_reaches_a_job_but_runs_no_line():
         assert held.value.holder == a.job_table.daemon
         await b.job_table.sync("s")
         [seen] = b.job_table.list_jobs("s")
-        assert (seen.id, seen.command, seen.status) == (
+        assert (seen.id, seen.command, seen.state) == (
             1,
             "sleep 30",
-            JobStatus.RUNNING,
+            JobState.RUNNING,
         )
         assert await b.job_table.kill(1, "s", 15)
         assert (await b.job_table.wait(1, "s")).exit_code == 143
@@ -1490,7 +1495,7 @@ async def test_another_daemon_reaches_a_job_but_runs_no_line():
         assert job is not None and job.process is not None
         async with asyncio.timeout(2):
             await job.process.join()
-        assert (job.status, job.exit_code) == (JobStatus.KILLED, 143)
+        assert (job.signal, job.exit_code) == (15, 143)
     finally:
         await a.close()
         await b.close()

@@ -64,7 +64,7 @@ import {
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
 import { ENDING_SIGNALS, STOP_WAIT_SECONDS } from '../../execution/job/constants.ts'
-import { type Job, JobStatus, type JobTable } from '../../execution/job/index.ts'
+import type { JobHandle, JobTable } from '../../execution/job/index.ts'
 import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
 import { commandInvocations } from '../../shell/parse/names.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
@@ -354,14 +354,10 @@ export function reportJobs(context: EvaluationContext, jobTable: JobTable | null
   const told: string[] = []
   for (const job of jobTable.listJobs(sessionOf(session))) {
     const process = job.process ?? null
-    if (
-      job.reported ||
-      job.status === JobStatus.RUNNING ||
-      process?.record.parent !== session.processId
-    ) {
+    if (job.reported || job.state === 'running' || process?.record.parent !== session.processId) {
       continue
     }
-    const ended = job.status === JobStatus.KILLED ? job.exitCode - 128 : process.endedBy
+    const ended = job.signal ?? process.endedBy
     if (ended === null || ended < 1 || job.exitCode !== 128 + ended) continue
     const report = signalReport(shellVoice(), [[job.pid, job.exitCode, ended, job.command]], false)
     if (report !== '') {
@@ -514,7 +510,7 @@ export async function handleBackground(
   const stopped = AbortSignal.any([killed, expiry.signal])
   childEvaluation.frame.abortSignal = stopped
   const cmdStrInner = left.text
-  const runBg = async (job: Job): Promise<[IOResult, ExecutionNode]> => {
+  const runBg = async (job: JobHandle): Promise<[IOResult, ExecutionNode]> => {
     childEvaluation.frame.shell = inPlace ? null : job.process
     // What the job writes stays in its console and goes where its shell
     // writes as it is written: the terminal, or the substitution or pipe
@@ -680,7 +676,7 @@ export async function handleBackground(
   const cmdStr = left.text
   // Non-interactive bash announces nothing on launch ("[1] <pid>" is
   // interactive-only); the job stays discoverable via $! and `jobs`.
-  let job: Job
+  let job: JobHandle
   try {
     job = await jobTable.submit({
       command: cmdStr,
@@ -813,7 +809,7 @@ function processView(jobTable: JobTable, session: SessionState | null): ProcessV
  * The job whose number is `jobId`, the one `%N` names: none once its report
  * was printed, as bash then drops it from its list.
  */
-function jobNumbered(jobs: readonly Job[], jobId: number): Job | null {
+function jobNumbered(jobs: readonly JobHandle[], jobId: number): JobHandle | null {
   return jobs.find((j) => j.id === jobId && !j.reported) ?? null
 }
 
@@ -824,7 +820,7 @@ function jobNumbered(jobs: readonly Job[], jobId: number): Job | null {
  * here holds that PID: another workspace numbers its jobs on the shared
  * list, so its `%2` can share a number with a PID handed out here.
  */
-function jobWithPid(jobs: readonly Job[], pid: number): Job | null {
+function jobWithPid(jobs: readonly JobHandle[], pid: number): JobHandle | null {
   return (
     jobs.find((j) => j.process !== null && j.pid === pid) ??
     jobs.find((j) => j.process === null && j.pid === pid) ??
@@ -838,7 +834,7 @@ function jobWithPid(jobs: readonly Job[], pid: number): Job | null {
  * also returned by `$!`, so an unknown one is `pid N is not a child of
  * this shell`. Anything else is `not a pid or valid job spec`.
  */
-function resolveSpec(jobs: readonly Job[], spec: string): [Job | null, string] {
+function resolveSpec(jobs: readonly JobHandle[], spec: string): [JobHandle | null, string] {
   if (spec.startsWith('%')) {
     const raw = spec.slice(1)
     const job = /^[0-9]+$/.test(raw) ? jobNumbered(jobs, Number(raw)) : null
@@ -855,9 +851,13 @@ function resolveSpec(jobs: readonly Job[], spec: string): [Job | null, string] {
  * Block until the first of several jobs ends, and return it. Once one has,
  * the other waits are abandoned, as `signal` abandons them all.
  */
-async function waitFirst(jobTable: JobTable, jobs: Job[], signal?: AbortSignal): Promise<Job> {
+async function waitFirst(
+  jobTable: JobTable,
+  jobs: JobHandle[],
+  signal?: AbortSignal,
+): Promise<JobHandle> {
   for (const job of jobs) {
-    if (job.status !== JobStatus.RUNNING) return await jobTable.wait(job.id, job.sessionId, signal)
+    if (job.state !== 'running') return await jobTable.wait(job.id, job.sessionId, signal)
   }
   const losers = new AbortController()
   const done = signal === undefined ? losers.signal : AbortSignal.any([signal, losers.signal])
@@ -872,7 +872,7 @@ async function waitFirst(jobTable: JobTable, jobs: Job[], signal?: AbortSignal):
  * Report one finished job's status, and reap it. Its output already went
  * where its shell writes as it was written.
  */
-async function reaped(jobTable: JobTable, job: Job, cmdStr: string): Promise<RedirectResult> {
+async function reaped(jobTable: JobTable, job: JobHandle, cmdStr: string): Promise<RedirectResult> {
   // Reaped like GNU bash reaps a job waited on by id, so a later bare
   // `wait` does not answer for it again.
   await jobTable.reap(job.id, job.sessionId)
@@ -969,7 +969,7 @@ export async function handleWait(
     if (view !== null) await view.unset(varName)
   }
   const errors: string[] = []
-  const picked: Job[] = []
+  const picked: JobHandle[] = []
   await jobTable.sync(sid)
   const visible = jobTable.listJobs(sid)
   for (const spec of specs) {
@@ -1017,12 +1017,12 @@ export async function handleWait(
     const code = last.endsWith('not a pid or valid job spec') ? 1 : NOT_FOUND_STATUS
     return jobResult(cmdStr, errText, code)
   }
-  const finished: Job[] = []
+  const finished: JobHandle[] = []
   for (const job of picked)
     finished.push(await abortable(jobTable.wait(job.id, sid, signal), signal))
   const told = waitReports(session, jobTable)
   let lastCode = 0
-  let lastJob: Job | null = null
+  let lastJob: JobHandle | null = null
   for (const job of finished) {
     const [, io] = await reaped(jobTable, job, cmdStr)
     lastCode = io.exitCode
@@ -1081,7 +1081,7 @@ export async function handleDisown(
   const runningOnly = scan.letters.includes('r')
   const keep = scan.letters.includes('h')
   const specs = scan.operands
-  let targets: Job[] = []
+  let targets: JobHandle[] = []
   const errors: string[] = []
   await jobTable.sync(sid)
   const jobs = jobTable.listJobs(sid)
@@ -1095,7 +1095,7 @@ export async function handleDisown(
       targets.push(job)
     }
   } else if (allJobs || runningOnly) {
-    targets = runningOnly ? jobs.filter((j) => j.status === JobStatus.RUNNING) : jobs
+    targets = runningOnly ? jobs.filter((j) => j.state === 'running') : jobs
   } else {
     const current = jobs[jobs.length - 1]
     if (current === undefined) {
@@ -1139,9 +1139,9 @@ export async function handleFg(
   const sid = sessionOf(session)
   await jobTable.sync(sid)
   const jobs = jobTable.listJobs(sid)
-  let target: Job
+  let target: JobHandle
   if (parts.length <= 1) {
-    const current = jobs.filter((j) => j.status === JobStatus.RUNNING).at(-1) ?? jobs.at(-1)
+    const current = jobs.filter((j) => j.state === 'running').at(-1) ?? jobs.at(-1)
     if (current === undefined) {
       const err = encodeText(`${shellVoice()}fg: current: no such job\n`)
       return [
@@ -1218,7 +1218,7 @@ function killList(cmdStr: string, operands: string[], voice: string): RedirectRe
 }
 
 /** The managed PID one kill operand names, or bash's refusal. */
-function killPid(jobs: readonly Job[], operand: string): [number | null, string] {
+function killPid(jobs: readonly JobHandle[], operand: string): [number | null, string] {
   if (operand === '') return [null, "`': not a pid or valid job spec"]
   if (operand.startsWith('%')) {
     const raw = operand.slice(1)
@@ -1239,7 +1239,7 @@ function killPid(jobs: readonly Job[], operand: string): [number | null, string]
  * table, where its stand-in PID may name a runner of this workspace's own.
  * Mirrors Python's `_runnerless`.
  */
-function runnerless(jobs: Job[], operand: string): Job | null {
+function runnerless(jobs: JobHandle[], operand: string): JobHandle | null {
   const raw = operand.startsWith('%') ? operand.slice(1) : ''
   const job = /^\d+$/.test(raw) ? jobNumbered(jobs, Number(raw)) : null
   return job !== null && job.process === null ? job : null
@@ -1331,7 +1331,7 @@ export async function handleKill(
     const unrun = runnerless(jobs, operand)
     if (unrun !== null) {
       const found = KEPT_SIGNALS.has(signal)
-        ? unrun.status === JobStatus.RUNNING
+        ? unrun.state === 'running'
         : await jobTable.kill(unrun.id, sid, signal)
       if (!found) {
         errors.push(`${voice}kill: (${String(pid)}) - No such process`)
@@ -1376,7 +1376,7 @@ export async function handleKill(
 async function killGroup(
   jobTable: JobTable,
   processes: ProcessView,
-  jobs: Job[],
+  jobs: JobHandle[],
   group: number,
   signal: number,
   sessionId: string,
@@ -1397,11 +1397,12 @@ async function killGroup(
 const JOBS_FLAGS: ReadonlySet<string> = new Set('lnprs')
 
 /** One `jobs` line; `-l` includes the managed PID. */
-function jobRow(job: Job, long: boolean): string {
+function jobRow(job: JobHandle, long: boolean): string {
   const id = job.id.toString()
+  const status = job.state === 'running' ? 'running' : job.signal !== null ? 'killed' : 'completed'
   return long
-    ? `[${id}] ${String(job.pid)} ${job.status} ${job.command}`
-    : `[${id}] ${job.status} ${job.command}`
+    ? `[${id}] ${String(job.pid)} ${status} ${job.command}`
+    : `[${id}] ${status} ${job.command}`
 }
 
 /**
@@ -1448,7 +1449,7 @@ export async function handleJobs(
     await table.sync(sid)
   let jobs = jobTable.listing(sid).filter((j) => !j.reported)
   if (specs.length > 0) {
-    const picked: Job[] = []
+    const picked: JobHandle[] = []
     for (const spec of specs) {
       const raw = spec.replace(/^%+/, '')
       const job = /^\d+$/.test(raw) ? jobNumbered(jobs, Number(raw)) : null
@@ -1464,9 +1465,9 @@ export async function handleJobs(
     }
     jobs = picked
   }
-  if (flags.has('r')) jobs = jobs.filter((j) => j.status === JobStatus.RUNNING)
+  if (flags.has('r')) jobs = jobs.filter((j) => j.state === 'running')
   if (flags.has('s')) jobs = []
-  if (flags.has('n')) jobs = jobs.filter((j) => j.status !== JobStatus.RUNNING)
+  if (flags.has('n')) jobs = jobs.filter((j) => j.state !== 'running')
   const lines = flags.has('p')
     ? jobs.map((j) => String(j.pid))
     : jobs.map((j) => jobRow(j, flags.has('l')))

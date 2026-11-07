@@ -66,6 +66,15 @@ class ProcessId:
 
 
 @dataclass(frozen=True, slots=True)
+class JobId:
+    """One job of a workspace, named by its console, which no other job
+    shares even when it takes a number a reaped one had."""
+
+    workspace_id: str
+    console: str
+
+
+@dataclass(frozen=True, slots=True)
 class MachineId:
     """Where a process runs: the provider that reaches the machine and
     the machine's name there, written ``docker:tools``."""

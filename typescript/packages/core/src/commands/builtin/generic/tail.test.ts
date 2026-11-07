@@ -32,7 +32,7 @@ import type { FlagValue } from '../../spec/types.ts'
 import type { Handed } from '../../../vfs/types.ts'
 import { record, startOp } from '../../../observe/context.ts'
 import { Channel } from '../../../shell/console/index.ts'
-import type { Job } from '../../../execution/job/types.ts'
+import type { JobHandle } from '../../../execution/job/handle.ts'
 import { RAMVFS } from '../../../vfs/ram/ram.ts'
 import { Workspace } from '../../../workspace/workspace/workspace.ts'
 
@@ -829,7 +829,7 @@ class Stamped extends RAMVFS {
   }
 }
 
-async function printed(job: Job | null, want: string): Promise<string> {
+async function printed(job: JobHandle | null, want: string): Promise<string> {
   let shown = ''
   for (let i = 0; i < 40 && shown !== want; i++) {
     shown = DEC.decode(await job?.console.snapshot(Channel.STDOUT))

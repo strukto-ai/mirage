@@ -19,7 +19,7 @@ import { IOResult } from '../../io/types.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { WorkspaceHeldError } from '../../execution/errors.ts'
-import { type JobResult, type JobRunner, JobStatus, JobTable } from '../../execution/job/index.ts'
+import { type JobResult, type JobRunner, JobTable } from '../../execution/job/index.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { RAMWorkspaceStateStore } from '../store/ram.ts'
@@ -144,7 +144,7 @@ describe('handleKill', () => {
     const j = await jt.submit({ command: 'sleep', run: task, abort, cwd: '/' })
     const [, io] = await handleKill(jt, ['kill', j.id.toString()])
     expect(io.exitCode).toBe(0)
-    expect(jt.get(j.id)?.status).toBe(JobStatus.KILLED)
+    expect(jt.get(j.id)?.signal).not.toBeNull()
   })
 })
 
@@ -298,7 +298,7 @@ describe('handleWait with an invocation signal', () => {
     const waiting = handleWait(jt, ['wait'], null, null, controller.signal)
     controller.abort()
     await expect(waiting).rejects.toMatchObject({ name: 'AbortError' })
-    expect(jt.listJobs()[0]?.status).toBe(JobStatus.RUNNING)
+    expect(jt.listJobs()[0]?.state).toBe('running')
     jobAbort.abort()
     await jt.waitAll()
   })
@@ -382,7 +382,7 @@ describe('handleFg with an invocation signal', () => {
     const waiting = handleFg(jt, ['fg'], null, null, controller.signal)
     controller.abort()
     await expect(waiting).rejects.toMatchObject({ name: 'AbortError' })
-    expect(jt.listJobs()[0]?.status).toBe(JobStatus.RUNNING)
+    expect(jt.listJobs()[0]?.state).toBe('running')
     jobAbort.abort()
     await jt.waitAll()
   })
@@ -605,7 +605,7 @@ describe('jobs are scoped to the session that launched them', () => {
       const old = ws.jobTable.get(2, 'a')
       expect(old).not.toBeNull()
       await ws.closeSession('a')
-      expect(old?.status).toBe(JobStatus.KILLED)
+      expect(old?.signal).not.toBeNull()
       expect(ws.jobTable.listJobs('a')).toEqual([])
       // A session reusing the id starts from one and inherits nothing.
       ws.createSession('a')
@@ -635,7 +635,7 @@ describe('jobs are scoped to the session that launched them', () => {
       expect(ws.jobTable.listJobs('a')).toEqual([])
       expect(ws.jobTable.listJobs('b')).toEqual([])
       const kept = ws.jobTable.get(1, ws.sessionManager.defaultId)
-      expect(kept?.status).toBe(JobStatus.RUNNING)
+      expect(kept?.state).toBe('running')
     } finally {
       await ws.close()
     }
@@ -957,13 +957,13 @@ it('another daemon reaches a job but runs no line', async () => {
     expect((refused as WorkspaceHeldError).holder).toBe(a.jobTable.daemon)
     await b.jobTable.sync('s')
     const [seen] = b.jobTable.listJobs('s')
-    expect([seen?.id, seen?.command, seen?.status]).toEqual([1, 'sleep 30', JobStatus.RUNNING])
+    expect([seen?.id, seen?.command, seen?.state]).toEqual([1, 'sleep 30', 'running'])
     expect(await b.jobTable.kill(1, 's', 15)).toBe(true)
     expect((await b.jobTable.wait(1, 's')).exitCode).toBe(143)
     const job = a.jobTable.get(1, 's')
     expect(job?.process).not.toBeNull()
     await job?.process?.join()
-    expect([job?.status, job?.exitCode]).toEqual([JobStatus.KILLED, 143])
+    expect([job?.signal, job?.exitCode]).toEqual([15, 143])
   } finally {
     await a.close()
     await b.close()

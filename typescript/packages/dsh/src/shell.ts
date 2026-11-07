@@ -393,7 +393,7 @@ class MirageShellExecution implements ShellExecution {
     } else {
       this.status = 'killed'
       this.signal = 'SIGTERM'
-      outcome = killedOutcome(143)
+      outcome = killedOutcome(143, 15)
       // Mirage answers an abort by throwing, so only a throw no abort
       // explains is an infrastructure failure: `result()` rejects with it,
       // and the read path carries it on stderr for a background reader.
@@ -427,7 +427,7 @@ class MirageShellExecution implements ShellExecution {
   private async settleExpired(): Promise<void> {
     this.settled = true
     this.status = 'killed'
-    await this.console.finish(killedOutcome(KILLED_EXIT_CODE))
+    await this.console.finish(killedOutcome(KILLED_EXIT_CODE, 9))
     const sandbox = this.parts.verdict(null, '')
     if (sandbox !== undefined) this.sandbox = sandbox
     this.parts.disarm()

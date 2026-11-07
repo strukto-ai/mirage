@@ -18,7 +18,6 @@ import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Channel } from '../shell/console/index.ts'
-import { JobStatus } from '../execution/job/index.ts'
 import { MountMode } from '../types.ts'
 import { applyStateDict, toStateDict } from './snapshot/state.ts'
 import { type ExecuteResult, Workspace } from './workspace/workspace.ts'
@@ -102,7 +101,7 @@ describe('history view + builtin', () => {
     await ws.shell('echo marker')
     await new Promise((resolve) => setTimeout(resolve, 250))
     const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
-    expect(job?.status).toBe(JobStatus.RUNNING)
+    expect(job?.state).toBe('running')
     const shown = new TextDecoder().decode(await job?.console.snapshot(Channel.STDOUT))
     expect(shown).toContain('pwd')
     expect(shown).toContain('echo marker')

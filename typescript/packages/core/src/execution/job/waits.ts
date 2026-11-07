@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { Channel, type JobConsole, JobOutput, type OwnedStream } from '../../shell/console/index.ts'
-import type { Job } from './types.ts'
+import type { JobHandle } from './handle.ts'
 
 /**
  * The background jobs started inside a capture (`$( )`, a pipe stage),
@@ -22,7 +22,7 @@ import type { Job } from './types.ts'
  * of its streams leads into it.
  */
 export class JobWaits {
-  readonly jobs: Job[] = []
+  readonly jobs: JobHandle[] = []
 
   /**
    * @param output where the capture's jobs write, at its edge.
@@ -54,7 +54,7 @@ export class JobWaits {
   }
 
   /** Count a job the capture has to outlast. */
-  add(job: Job): void {
+  add(job: JobHandle): void {
     this.jobs.push(job)
   }
 

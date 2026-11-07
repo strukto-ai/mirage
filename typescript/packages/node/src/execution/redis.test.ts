@@ -16,7 +16,7 @@ import { randomUUID } from 'node:crypto'
 import { createClient } from 'redis'
 import { Channel } from '@struktoai/mirage-core/shell/console/index'
 import { JobTable } from '@struktoai/mirage-core/execution/job/table'
-import { type Job, type JobRunner, JobStatus } from '@struktoai/mirage-core/execution/job/types'
+import type { JobHandle, JobRunner } from '@struktoai/mirage-core/execution/job/handle'
 import { afterEach, describe, expect, it } from 'vitest'
 import { RedisExecutionStore } from './redis.ts'
 
@@ -44,7 +44,7 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
     return store
   }
 
-  async function sleeping(jt: JobTable): Promise<Job> {
+  async function sleeping(jt: JobTable): Promise<JobHandle> {
     const abort = new AbortController()
     return jt.submit({ command: 'sleep 30', run: pending(abort), abort, cwd: '/', sessionId: 's' })
   }
@@ -158,11 +158,11 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
     const b = new JobTable(open())
     const job = await sleeping(a)
     await b.sync('s')
-    expect(b.listJobs('s').map((j) => j.status)).toEqual([JobStatus.RUNNING])
+    expect(b.listJobs('s').map((j) => j.state)).toEqual(['running'])
     expect(await b.kill(1, 's', 15)).toBe(true)
     expect((await b.wait(1, 's')).exitCode).toBe(143)
     await job.process?.join()
-    expect([job.status, job.exitCode]).toEqual([JobStatus.KILLED, 143])
+    expect([job.signal, job.exitCode]).toEqual([15, 143])
     await a.close()
   })
 
