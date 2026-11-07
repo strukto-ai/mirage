@@ -692,8 +692,7 @@ async def _replay(seed: int) -> list[str]:
             assert result.exit_code == 0, line
             seen.append(await result.stdout_str())
         seen.extend(
-            str(event.get("process"))
-            for event in await ws.observer.events()
+            str(event.get("process")) for event in await ws.observer.events()
         )
         copy = await ws.copy()
         try:
@@ -860,7 +859,11 @@ async def test_a_workspace_reaps_the_programs_its_runtimes_reach():
             "machine_pid": {"pid": 41, "started": 1.0, "exited": None},
         }
         assert not await ws._reap_process(host, 15)
-        assert box.reaped == [(f"{wid}:2", 15), (f"{wid}:3", 15), (f"{wid}:6", 15)]
+        assert box.reaped == [
+            (f"{wid}:2", 15),
+            (f"{wid}:3", 15),
+            (f"{wid}:6", 15),
+        ]
     finally:
         await ws.close()
 
