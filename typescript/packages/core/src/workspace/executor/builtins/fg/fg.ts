@@ -16,7 +16,7 @@ import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
-import type { JobConsole } from '../../../../shell/console/index.ts';
+import type { JobConsole } from '../../../../shell/console/index.ts'
 import { Channel } from '../../../../shell/console/index.ts'
 import type { JobHandle, JobTable } from '../../../../execution/job/index.ts'
 import { abortable } from '../../../../utils/abort.ts'

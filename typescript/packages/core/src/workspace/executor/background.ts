@@ -52,7 +52,7 @@ import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { PathSpec, type Refusal } from '../../types.ts'
 import { abortable, atDeadline, runWithDeadline } from '../../utils/abort.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
-import type { EvaluationContext } from '../evaluation.ts';
+import type { EvaluationContext } from '../evaluation.ts'
 import { childContext } from '../evaluation.ts'
 import type { ExecutionFrame } from '../frame.ts'
 import { LineHandle } from '../../execution/line/handle.ts'
