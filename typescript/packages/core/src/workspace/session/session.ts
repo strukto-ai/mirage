@@ -878,6 +878,11 @@ export class SessionState {
       shellOptions: {},
       lastExitCode: 0,
     })
+    // A new shell takes an inherited RANDOM as its seed already drawn, so it
+    // draws a sequence of its own, as Python's `.subshell()` does.
+    const started = child.vars
+    child.vars = started.subshell()
+    started.shell.close()
     child.functionSites = new Map(
       [...this.functionSites].filter(([name]) => name in child.functions),
     )
