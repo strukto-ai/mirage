@@ -67,7 +67,7 @@
       "expect": {
         "exit": 0,
         "stdout": "3 2 5 -1 6 0 4 7766279631452241919 3 zx=6\nzn=8 zw=4\ndeep=7 -7\nchain=2 9\nrc=1\nrc=1\n",
-        "stderr": "bash: '1' + 1 : syntax error: operand expected (error token is \"'1' + 1 \")\nbash: 1?2:3+: syntax error: operand expected (error token is \"+\")\n"
+        "stderr": "bash: line 1: '1' + 1 : syntax error: operand expected (error token is \"'1' + 1 \")\nbash: line 1: 1?2:3+: syntax error: operand expected (error token is \"+\")\n"
       }
     }
   ]

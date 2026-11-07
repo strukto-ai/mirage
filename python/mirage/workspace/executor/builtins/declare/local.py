@@ -276,7 +276,7 @@ async def _declare_operand(
         shaping, marks = _unshaped(shaping), _unshaped(marks)
     if val is None:
         if scoped:
-            shadow_local(session, key)
+            shadow_local(session, key, inherit)
         if fresh:
             line = await _fresh_local(session, view, cmd, key, inherit)
             if line is not None:
@@ -311,7 +311,7 @@ async def _declare_operand(
     if (creates or not nameref) and view.is_readonly(key, not nameref):
         return readonly_line(cmd, key)
     if scoped:
-        shadow_local(session, key)
+        shadow_local(session, key, inherit)
     if creates:
         start_local(session, key, inherit)
     # A reference is checked on the local, which exists from here on even

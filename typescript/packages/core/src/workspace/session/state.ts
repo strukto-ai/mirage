@@ -23,6 +23,7 @@ import { arrayGet, ShellArray } from '../../shell/array.ts'
 import { joinBytes } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { ShellValue, VarAttr } from '../../shell/variable.ts'
+import { shellVoice } from '../../shell/voice.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import type { SessionView } from '../../view/types.ts'
 import { argsBytes, checkEnv, entryBytes, envLimit, framesBytes, outsideBytes } from './budget.ts'
@@ -32,8 +33,9 @@ import { drive, faultError, listens, SessionGate } from './task.ts'
 /**
  * Hand the session's shell the state around it that a task reads: the
  * positional parameters in scope, the special parameters, the options,
- * `max_env` and the bytes the session holds beside its variables, and the
- * bytes left under `max_memory`. Mirrors Python's frame.
+ * `max_env` and the bytes the session holds beside its variables, the bytes
+ * left under `max_memory`, the running command's line and process, and the
+ * voice the shell's diagnostics lead with. Mirrors Python's frame.
  */
 export function frame(session: SessionState, callStack: CallStack | null = null): void {
   const calls = callStack !== null && callStack.depth > 1 ? [callStack.getAllPositional()] : []
@@ -54,6 +56,9 @@ export function frame(session: SessionState, callStack: CallStack | null = null)
     functionNames: session.functionNames,
     paren: callStack?.paren ?? false,
     memoryRoom: memoryRoom(),
+    line: session.lineNumber,
+    bashPid: session.bashPid,
+    voice: shellVoice(),
   })
 }
 
@@ -505,11 +510,13 @@ export function setPositionalParams(
 
 /**
  * Record the caller's record before a `local` shadows it, once per function;
- * a local `RANDOM` is an ordinary variable for the function's extent.
- * Mirrors Python's shadow_local.
+ * a local `RANDOM` is an ordinary variable for the function's extent, and so
+ * is a local `LINENO` or `BASHPID`, its `unset` the function's own; with `-I`
+ * (`inherit`) it keeps the meaning the caller's has. Mirrors Python's
+ * shadow_local.
  */
-export function shadowLocal(session: SessionState, name: string): void {
-  session.vars.shell.shadow(name)
+export function shadowLocal(session: SessionState, name: string, inherit = false): void {
+  session.vars.shell.shadow(name, inherit)
 }
 
 /**

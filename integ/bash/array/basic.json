@@ -102,7 +102,7 @@
       "expect": {
         "exit": 0,
         "stdout": "three\n[declare][-a][ar3=([0]=\"one\" [1]=\"two\" [2]=\"three\")][pzx='s'][declare -a ar3=([0]=\"one\" [1]=\"two\" [2]=\"three\")]\n[] [d]\n",
-        "stderr": "bash: ar3: bad array subscript\nbash: ar3: bad array subscript\n"
+        "stderr": "bash: line 1: ar3: bad array subscript\nbash: line 1: ar3: bad array subscript\n"
       }
     },
     {

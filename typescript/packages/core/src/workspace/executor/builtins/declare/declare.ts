@@ -363,7 +363,7 @@ export async function storeStagedArrays(
       continue
     }
     const fresh = scoped && !shell.isLocal(name)
-    if (scoped) shadowLocal(session, name)
+    if (scoped) shadowLocal(session, name, inherit)
     if (fresh && !inCallEnv(session, name)) startLocal(session, name, inherit)
     const held = fresh && !inherit ? null : heldValue(session, name)
     const conflict = kindConflict(held, kind)

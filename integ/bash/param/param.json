@@ -942,7 +942,7 @@
       "expect": {
         "exit": 0,
         "stdout": "ef\nrc=1\n",
-        "stderr": "bash: -3: substring expression < 0\n"
+        "stderr": "bash: line 1: -3: substring expression < 0\n"
       }
     },
     {
@@ -1327,7 +1327,7 @@
       "expect": {
         "exit": 0,
         "stdout": "[]\npzqa pzqb pzqa pzqb\nrc=1\nrc=1\nrc=1\ny x y d y f\n",
-        "stderr": "bash: pzun1: invalid indirect expansion\nbash: !pzr2: unbound variable\nbash: 1a: invalid variable name\n"
+        "stderr": "bash: line 1: pzun1: invalid indirect expansion\nbash: line 1: !pzr2: unbound variable\nbash: line 1: 1a: invalid variable name\n"
       }
     },
     {
@@ -2657,7 +2657,7 @@
       "expect": {
         "exit": 0,
         "stdout": "a0|a23\nhuBc\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
-        "stderr": "bash: pzqz: unbound variable\nbash: HOME: unbound variable\nbash: pzv: unbound variable\nbash: pzw: unbound variable\nbash: $3: unbound variable\nbash: 3: unbound variable\n"
+        "stderr": "bash: line 1: pzqz: unbound variable\nbash: line 1: HOME: unbound variable\nbash: line 1: pzv: unbound variable\nbash: line 1: pzw: unbound variable\nbash: line 1: $3: unbound variable\nbash: line 1: 3: unbound variable\n"
       }
     },
     {

@@ -41,7 +41,9 @@ impl<H: Host> Expander<'_, H> {
         let nounset = self.shell.option("nounset");
         let outcome = self.shell.vars.arith(&mut draws, text, None, nounset);
         let value = match outcome.value {
-            Err(arith::Error::Unbound(name)) => return Err(Signal::unbound(&name).into()),
+            Err(arith::Error::Unbound(name)) => {
+                return Err(Signal::unbound(self.shell.vars.voice(), &name).into());
+            }
             other => other,
         };
         for write in outcome.writes {
@@ -53,9 +55,9 @@ impl<H: Host> Expander<'_, H> {
         match value {
             Ok(value) => Ok(value),
             Err(arith::Error::Readonly { name, subscript }) => {
-                Err(Signal::readonly(&name, subscript).into())
+                Err(Signal::readonly(self.shell.vars.voice(), &name, subscript).into())
             }
-            Err(error) => Err(Signal::arith(&error, lead, false).into()),
+            Err(error) => Err(Signal::arith(self.shell.vars.voice(), &error, lead, false).into()),
         }
     }
 
@@ -174,7 +176,9 @@ impl<H: Host> Expander<'_, H> {
         let nounset = self.shell.option("nounset");
         let outcome = self.shell.vars.arith(&mut draws, &text, None, nounset);
         let value = match outcome.value {
-            Err(arith::Error::Unbound(name)) => return Err(Signal::unbound(&name).into()),
+            Err(arith::Error::Unbound(name)) => {
+                return Err(Signal::unbound(self.shell.vars.voice(), &name).into());
+            }
             other => other,
         };
         for write in outcome.writes {
@@ -187,9 +191,9 @@ impl<H: Host> Expander<'_, H> {
         match value {
             Ok(value) => Ok(value.to_string().into_bytes()),
             Err(arith::Error::Readonly { name, subscript }) => {
-                Err(Signal::readonly(&name, subscript).into())
+                Err(Signal::readonly(self.shell.vars.voice(), &name, subscript).into())
             }
-            Err(error) => Err(Signal::arith(&error, "", false).into()),
+            Err(error) => Err(Signal::arith(self.shell.vars.voice(), &error, "", false).into()),
         }
     }
 }

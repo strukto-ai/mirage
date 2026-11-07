@@ -29,6 +29,7 @@ from mirage.shell.array import ShellArray, array_get
 from mirage.shell.bytes import join_bytes
 from mirage.shell.call_stack import CallStack
 from mirage.shell.variable import ShellValue, VarAttr
+from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.session.budget import (
     args_bytes,
@@ -53,7 +54,8 @@ def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
     """Hand the session's shell the state around it that a task reads:
     the positional parameters in scope, the special parameters, the
     options, ``max_env`` and the bytes the session holds beside its
-    variables, and the bytes left under ``max_memory``.
+    variables, the bytes left under ``max_memory``, the running command's
+    line and process, and the voice the shell's diagnostics lead with.
 
     Args:
         session (SessionState): the session.
@@ -82,6 +84,9 @@ def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
         function_names=None if names is None else list(names),
         paren=call_stack is not None and call_stack.paren,
         memory_room=memory_room(),
+        line=session.line_number,
+        bash_pid=session.bash_pid,
+        voice=shell_voice(),
     )
 
 
@@ -725,16 +730,21 @@ def set_positional_params(
         session.positional_args = values
 
 
-def shadow_local(session: SessionState, name: str) -> None:
+def shadow_local(
+    session: SessionState, name: str, inherit: bool = False
+) -> None:
     """Record the caller's record before a ``local`` shadows it, once per
     function; a local ``RANDOM`` is an ordinary variable for the
-    function's extent.
+    function's extent, and so is a local ``LINENO`` or ``BASHPID``, its
+    ``unset`` the function's own; with ``-I`` it keeps the meaning the
+    caller's has.
 
     Args:
         session (SessionState): the session the function runs in.
         name (str): the variable being declared local.
+        inherit (bool): the declaration carried ``-I``.
     """
-    session.vars.shell.shadow(name)
+    session.vars.shell.shadow(name, inherit)
 
 
 def seed_var(session: SessionState, name: str, value: ShellValue) -> None:

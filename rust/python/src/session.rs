@@ -472,9 +472,10 @@ impl Shell {
         Ok(self.store()?.is_local(name))
     }
 
-    /// Set the caller's record aside before a `local` shadows it.
-    fn shadow(&mut self, name: &str) -> PyResult<()> {
-        self.store_mut()?.shadow(name);
+    /// Set the caller's record aside before a `local` shadows it; with
+    /// `inherit` (`local -I`) a `LINENO` or `BASHPID` stays special.
+    fn shadow(&mut self, name: &str, inherit: bool) -> PyResult<()> {
+        self.store_mut()?.shadow(name, inherit);
         Ok(())
     }
 
@@ -542,9 +543,10 @@ impl Shell {
     /// `set -o` and `shopt` options set, `max_env` and the bytes the
     /// session holds outside its variables, `${PIPESTATUS[@]}`,
     /// `${FUNCNAME[@]}` (None once unset made it an ordinary name) and
-    /// whether the shell is a `( )` subshell or a forked stage, and the
-    /// bytes left under `max_memory` (None for no cap).
-    #[pyo3(signature = (*, positional, calls, status, pid, last_job, argv0, options, shopts, env_limit, outside, pipe_status, function_names, paren, memory_room))]
+    /// whether the shell is a `( )` subshell or a forked stage, the bytes
+    /// left under `max_memory` (None for no cap), `$LINENO`, `$BASHPID`,
+    /// and the voice the shell's own diagnostics lead with.
+    #[pyo3(signature = (*, positional, calls, status, pid, last_job, argv0, options, shopts, env_limit, outside, pipe_status, function_names, paren, memory_room, line, bash_pid, voice))]
     #[allow(clippy::too_many_arguments)]
     fn frame(
         &mut self,
@@ -562,6 +564,9 @@ impl Shell {
         function_names: Option<Vec<Bound<'_, PyAny>>>,
         paren: bool,
         memory_room: Option<usize>,
+        line: usize,
+        bash_pid: u32,
+        voice: Bound<'_, PyAny>,
     ) -> PyResult<()> {
         let texts =
             |list: &[Bound<'_, PyAny>]| list.iter().map(bytes_of).collect::<PyResult<Vec<_>>>();
@@ -572,6 +577,7 @@ impl Shell {
             .collect::<PyResult<Vec<_>>>()?;
         let function_names = function_names.as_deref().map(texts).transpose()?;
         let argv0 = bytes_of(&argv0)?;
+        let voice = bytes_of(&voice)?;
         let shell = self.shell_mut()?;
         shell.positional = positional;
         shell.calls = calls;
@@ -583,7 +589,9 @@ impl Shell {
         shell.shopts = shopts;
         shell.env_limit = env_limit;
         shell.outside = outside;
-        shell.vars.set_specials(pipe_status, function_names);
+        shell
+            .vars
+            .set_specials(pipe_status, function_names, line, bash_pid, voice);
         shell.paren = paren;
         shell.memory_room = memory_room;
         Ok(())

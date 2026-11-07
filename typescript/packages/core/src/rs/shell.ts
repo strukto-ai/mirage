@@ -605,6 +605,9 @@ export interface ShellFrame {
   readonly functionNames: readonly string[] | null
   readonly paren: boolean
   readonly memoryRoom: number | null
+  readonly line: number
+  readonly bashPid: number
+  readonly voice: string
 }
 
 /** The options of a gated write: whether a session policy listens. */
@@ -797,9 +800,12 @@ export class Shell {
     return this.call('is_local', name) as boolean
   }
 
-  /** Set the caller's record aside before a `local` shadows it. */
-  shadow(name: string): void {
-    this.call('shadow', name)
+  /**
+   * Set the caller's record aside before a `local` shadows it; with `inherit`
+   * (`local -I`) a `LINENO` or `BASHPID` stays special.
+   */
+  shadow(name: string, inherit: boolean): void {
+    this.call('shadow', name, inherit)
   }
 
   /** Open a prefix assignment's scope around a function call. */
@@ -865,6 +871,9 @@ export class Shell {
       frame.functionNames,
       frame.paren,
       frame.memoryRoom,
+      frame.line,
+      frame.bashPid,
+      frame.voice,
     ]
   }
 

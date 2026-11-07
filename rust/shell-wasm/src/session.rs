@@ -636,7 +636,8 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
         "in_function" => Item::Bool(shell.store()?.in_function()),
         "is_local" => Item::Bool(shell.store()?.is_local(&args.string()?)),
         "shadow" => {
-            shell.store_mut()?.shadow(&args.string()?);
+            let name = args.string()?;
+            shell.store_mut()?.shadow(&name, args.flag()?);
             Item::Nil
         }
         "open_temp" => Item::int(shell.store_mut()?.open_temp()),
@@ -707,6 +708,9 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .transpose()?;
             let paren = args.flag()?;
             let memory_room = optional_size(args.maybe()?)?;
+            let line = size(args.int()?)?;
+            let bash_pid = u32::try_from(args.int()?).unwrap_or(0);
+            let voice = args.bytes()?;
             let inner = shell.shell_mut()?;
             inner.positional = positional;
             inner.calls = calls;
@@ -718,7 +722,9 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             inner.shopts = shopts;
             inner.env_limit = env_limit;
             inner.outside = outside;
-            inner.vars.set_specials(pipe_status, function_names);
+            inner
+                .vars
+                .set_specials(pipe_status, function_names, line, bash_pid, voice);
             inner.paren = paren;
             inner.memory_room = memory_room;
             Item::Nil

@@ -41,11 +41,11 @@ pub enum Signal {
 }
 
 impl Signal {
-    /// `set -u` reading a name no variable holds.
-    pub fn unbound(name: &str) -> Self {
+    /// `set -u` reading a name no variable holds, in the shell's `voice`.
+    pub fn unbound(voice: &[u8], name: &str) -> Self {
         Signal::Exit {
             status: 127,
-            stderr: format!("bash: {name}: unbound variable\n").into_bytes(),
+            stderr: voiced(voice, &format!("{name}: unbound variable\n")),
             contained: 1,
         }
     }
@@ -53,8 +53,8 @@ impl Signal {
     /// A readonly name written where no status answers it: one in a
     /// subscript or an `-i` value (`fatal`) ends the shell with 1, any
     /// other discards the line, as `$((R=3))` does.
-    pub fn readonly(name: &str, fatal: bool) -> Self {
-        let stderr = format!("bash: {name}: readonly variable\n").into_bytes();
+    pub fn readonly(voice: &[u8], name: &str, fatal: bool) -> Self {
+        let stderr = voiced(voice, &format!("{name}: readonly variable\n"));
         if fatal {
             Signal::Exit {
                 status: 1,
@@ -72,7 +72,7 @@ impl Signal {
     /// An arithmetic error where no status answers it, `lead` naming the
     /// command it belongs to unless it was in a subscript, which bash
     /// names by the subscript alone.
-    pub fn arith(error: &arith::Error, lead: &str, fatal: bool) -> Self {
+    pub fn arith(voice: &[u8], error: &arith::Error, lead: &str, fatal: bool) -> Self {
         let subscript = matches!(
             error,
             arith::Error::Arith {
@@ -85,7 +85,7 @@ impl Signal {
         } else {
             format!("{lead}: ")
         };
-        let mut stderr = format!("bash: {lead}").into_bytes();
+        let mut stderr = voiced(voice, &lead);
         stderr.extend_from_slice(&arith_line(error));
         stderr.push(b'\n');
         if fatal || subscript {
@@ -101,6 +101,11 @@ impl Signal {
             }
         }
     }
+}
+
+/// A diagnostic of the shell's own, led by its `voice` (`bash: line 3: `).
+pub fn voiced(voice: &[u8], message: &str) -> Vec<u8> {
+    [voice, message.as_bytes()].concat()
 }
 
 /// An arithmetic error as bash words it: the expression, what went wrong,

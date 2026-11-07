@@ -48,6 +48,10 @@ const LETTERS: [(u8, char); 7] = [
 ];
 
 pub const RANDOM: &str = "RANDOM";
+/// The running command's line and the process running it, which the
+/// shell computes at each read until `unset` makes them ordinary names.
+pub const LINENO: &str = "LINENO";
+pub const BASHPID: &str = "BASHPID";
 /// bash 5.2's generator: Park-Miller's minimal standard stepped through
 /// Schrage's method, so `RANDOM=42` is the same sequence everywhere.
 const RANDOM_A: i64 = 16807;
@@ -417,6 +421,17 @@ pub struct Store {
     /// `${FUNCNAME[@]}`: the running functions, innermost first; None
     /// once `unset FUNCNAME` made it an ordinary name.
     function_names: Option<Vec<Vec<u8>>>,
+    /// `$LINENO`, the running command's line, and `$BASHPID`, the process
+    /// running it.
+    line: usize,
+    bash_pid: u32,
+    /// `LINENO` and `BASHPID` once unset: ordinary names from then on.
+    plain: Vec<String>,
+    /// Whether `LINENO` or `BASHPID` was plain where a frame made it
+    /// local, one entry per local, innermost last.
+    local_plain: Vec<(String, bool)>,
+    /// How the shell leads a diagnostic of its own (`bash: line 3: `).
+    voice: Vec<u8>,
 }
 
 impl std::fmt::Debug for Store {
@@ -455,14 +470,61 @@ impl Store {
             held: 0,
             pipe_status: Vec::new(),
             function_names: Some(Vec::new()),
+            line: 0,
+            bash_pid: 0,
+            plain: Vec::new(),
+            local_plain: Vec::new(),
+            voice: b"bash: ".to_vec(),
         }
     }
 
-    /// Set the arrays the shell keeps of its own: each stage's status in
-    /// the last pipeline, and the running functions, innermost first.
-    pub fn set_specials(&mut self, pipe_status: Vec<i32>, function_names: Option<Vec<Vec<u8>>>) {
+    /// Set what the shell keeps of its own: each stage's status in the
+    /// last pipeline, the running functions, innermost first, the running
+    /// command's line, the process running it, and the voice its
+    /// diagnostics lead with.
+    pub fn set_specials(
+        &mut self,
+        pipe_status: Vec<i32>,
+        function_names: Option<Vec<Vec<u8>>>,
+        line: usize,
+        bash_pid: u32,
+        voice: Vec<u8>,
+    ) {
         self.pipe_status = pipe_status;
         self.function_names = function_names;
+        self.line = line;
+        self.bash_pid = bash_pid;
+        self.voice = voice;
+    }
+
+    /// How the shell leads a diagnostic of its own: the name of what it is
+    /// reading and the running command's line (`bash: line 3: `).
+    pub fn voice(&self) -> &[u8] {
+        &self.voice
+    }
+
+    /// What a read of `$LINENO` or `$BASHPID` computes, through a
+    /// reference: the running command's line, the process running it;
+    /// None for any other name, a hidden one, or one unset or made local
+    /// since, which reads as it was assigned.
+    pub fn dynamic(&self, name: &str) -> Option<Vec<u8>> {
+        let name = self.target(name);
+        if self.hidden(&name) || self.plain.contains(&name) {
+            return None;
+        }
+        match name.as_str() {
+            LINENO => Some(self.line.to_string().into_bytes()),
+            BASHPID => Some(self.bash_pid.to_string().into_bytes()),
+            _ => None,
+        }
+    }
+
+    /// End `LINENO`'s or `BASHPID`'s special meaning; no other name has one
+    /// to end.
+    fn make_plain(&mut self, name: &str) {
+        if (name == LINENO || name == BASHPID) && !self.plain.iter().any(|plain| plain == name) {
+            self.plain.push(name.to_owned());
+        }
     }
 
     /// `PIPESTATUS`, and `FUNCNAME` until `unset FUNCNAME`, from the shell's
@@ -812,12 +874,25 @@ impl Store {
         if name == RANDOM {
             self.random_seed = Seed::Off;
         }
+        self.make_plain(name);
         (old, frame)
+    }
+
+    /// What makes `RANDOM`, `LINENO` and `BASHPID` special as it stands,
+    /// for an undo.
+    pub fn marks(&self) -> (Seed, Vec<String>) {
+        (self.random_seed.clone(), self.plain.clone())
     }
 
     /// Put back what `drop_var` dropped, after a refusal: the value the
     /// unset revealed goes back to its scope before the name's own record.
-    pub fn undrop(&mut self, name: &str, old: Option<Arc<Var>>, frame: Option<usize>, seed: Seed) {
+    pub fn undrop(
+        &mut self,
+        name: &str,
+        old: Option<Arc<Var>>,
+        frame: Option<usize>,
+        marks: (Seed, Vec<String>),
+    ) {
         let unsaved = frame.filter(|&index| {
             index < self.frames.len() && !self.frames[index].saved.contains_key(name)
         });
@@ -826,7 +901,7 @@ impl Store {
             self.frames[index].saved.insert(name.to_owned(), revealed);
         }
         self.place(name, old);
-        self.random_seed = seed;
+        (self.random_seed, self.plain) = marks;
     }
 
     /// Open a function's scope; returns the caller's, for `leave`.
@@ -838,17 +913,31 @@ impl Store {
     }
 
     /// Close the running function's scope: its shadowed records come back,
-    /// and a local `RANDOM` hands the caller's generator back. Deliberate
+    /// a local `RANDOM` hands the caller's generator back, and a local
+    /// `LINENO` or `BASHPID` the meaning the caller's had. Deliberate
     /// divergence: bash reseeds the generator there; mirage resumes the
     /// caller's sequence where it left off.
     pub fn leave(&mut self, outer: Option<usize>) {
         if let Some(frame) = self.frames.pop() {
             let random = frame.saved.contains_key(RANDOM);
+            let specials = [LINENO, BASHPID]
+                .iter()
+                .filter(|name| frame.saved.contains_key(**name))
+                .count();
             for (name, old) in frame.saved {
                 self.place(&name, old);
             }
             if random {
                 self.random_seed = self.local_random.pop().unwrap_or(Seed::Fresh);
+            }
+            for (name, plain) in self
+                .local_plain
+                .split_off(self.local_plain.len() - specials)
+            {
+                self.plain.retain(|held| *held != name);
+                if plain {
+                    self.plain.push(name);
+                }
             }
         }
         self.local = outer;
@@ -867,8 +956,10 @@ impl Store {
 
     /// Record the caller's record before a `local` shadows it, once per
     /// scope. A local `RANDOM` is an ordinary variable for the function's
-    /// extent (`local RANDOM=5; echo $RANDOM` prints 5).
-    pub fn shadow(&mut self, name: &str) {
+    /// extent (`local RANDOM=5; echo $RANDOM` prints 5), and so is a local
+    /// `LINENO` or `BASHPID`, its `unset` the function's own, unless `-I`
+    /// (`inherit`) keeps the meaning the caller's has.
+    pub fn shadow(&mut self, name: &str, inherit: bool) {
         let Some(index) = self.local else {
             return;
         };
@@ -880,6 +971,12 @@ impl Store {
         if name == RANDOM {
             let seed = std::mem::replace(&mut self.random_seed, Seed::Off);
             self.local_random.push(seed);
+        } else if name == LINENO || name == BASHPID {
+            let plain = self.plain.iter().any(|held| held == name);
+            self.local_plain.push((name.to_owned(), plain));
+            if !inherit {
+                self.make_plain(name);
+            }
         }
     }
 
@@ -996,7 +1093,8 @@ impl Store {
     }
 
     /// A copy for a fork of the session: the same records, a generator that
-    /// starts afresh unless `unset RANDOM` ended it.
+    /// starts afresh unless `unset RANDOM` ended it, and `LINENO` and
+    /// `BASHPID` as special as they were.
     pub fn fork(&self) -> Self {
         let mut forked = Self::new(self.ids.clone());
         forked.vars = self.vars.clone();
@@ -1004,6 +1102,10 @@ impl Store {
         forked.hidden = self.hidden.clone();
         forked.pipe_status = self.pipe_status.clone();
         forked.function_names = self.function_names.clone();
+        forked.line = self.line;
+        forked.bash_pid = self.bash_pid;
+        forked.plain = self.plain.clone();
+        forked.voice = self.voice.clone();
         if self.random_seed == Seed::Off {
             forked.random_seed = Seed::Off;
         }
@@ -1122,11 +1224,12 @@ impl Store {
             draws: Some(draws),
             kept: None,
         };
-        let dynamic: Vec<String> = if reading.store.random_special(RANDOM) {
-            vec![RANDOM.to_owned()]
-        } else {
-            Vec::new()
-        };
+        let store = &reading.store;
+        let dynamic: Vec<String> = [RANDOM, LINENO, BASHPID]
+            .into_iter()
+            .filter(|&name| store.random_special(name) || store.dynamic(name).is_some())
+            .map(str::to_owned)
+            .collect();
         reading.evaluate(text, added, nounset, &dynamic)
     }
 
@@ -1357,6 +1460,9 @@ impl<'s> Reading<'s> {
 
 impl Vars for Reading<'_> {
     fn draw(&mut self, name: &str) -> Result<Option<Vec<u8>>, Halt> {
+        if let Some(value) = self.store.dynamic(name) {
+            return Ok(Some(value));
+        }
         if !self.store.random_special(name) {
             return Ok(None);
         }
@@ -1747,7 +1853,7 @@ mod tests {
         let mut store = store();
         store.seed("v", Value::Scalar(b"global".to_vec()));
         let outer = store.enter();
-        store.shadow("v");
+        store.shadow("v", false);
         store.seed("v", Value::Scalar(b"local".to_vec()));
         store.drop_var("v");
         assert_eq!(scalar(&store, "v"), None);
@@ -1759,7 +1865,7 @@ mod tests {
     fn declare_g_reaches_past_the_local() {
         let mut store = store();
         let outer = store.enter();
-        store.shadow("G");
+        store.shadow("G", false);
         store.seed("G", Value::Scalar(b"5".to_vec()));
         store.reach_global(&["G".to_owned()]);
         assert_eq!(scalar(&store, "G"), None);
@@ -1814,7 +1920,13 @@ mod tests {
     #[test]
     fn arithmetic_reads_the_shell_s_own_arrays() {
         let mut store = store();
-        store.set_specials(vec![1, 0], Some(vec![b"f".to_vec(), b"main".to_vec()]));
+        store.set_specials(
+            vec![1, 0],
+            Some(vec![b"f".to_vec(), b"main".to_vec()]),
+            0,
+            0,
+            Vec::new(),
+        );
         let mut draws = Draws::default();
         let outcome = store.arith(
             &mut draws,
@@ -1823,11 +1935,51 @@ mod tests {
             false,
         );
         assert_eq!(outcome.value.unwrap(), 12);
-        store.set_specials(vec![3], None);
+        store.set_specials(vec![3], None, 0, 0, Vec::new());
         let outcome = store.arith(&mut draws, b"PIPESTATUS[0] + FUNCNAME[0]", None, false);
         assert_eq!(outcome.value.unwrap(), 3);
         store.hide_vars(&["PIPESTATUS".to_owned()], &[]);
         assert_eq!(store.special("PIPESTATUS"), None);
+    }
+
+    #[test]
+    fn lineno_and_bashpid_compute_until_unset_or_made_local() {
+        let mut store = store();
+        store.set_specials(Vec::new(), None, 7, 42, b"bash: line 7: ".to_vec());
+        store.seed("r", Value::Scalar(b"LINENO".to_vec()));
+        store.set_attr("r", Some(NAMEREF), true);
+        assert_eq!(store.dynamic(LINENO), Some(b"7".to_vec()));
+        assert_eq!(store.dynamic("r"), Some(b"7".to_vec()));
+        assert_eq!(store.dynamic(BASHPID), Some(b"42".to_vec()));
+        let mut draws = Draws::default();
+        let outcome = store.arith(&mut draws, b"LINENO * 100 + BASHPID", None, false);
+        assert_eq!(outcome.value.unwrap(), 742);
+
+        let outer = store.enter();
+        store.shadow(LINENO, false);
+        store.shadow(BASHPID, true);
+        assert_eq!(store.dynamic(LINENO), None);
+        assert_eq!(store.dynamic(BASHPID), Some(b"42".to_vec()));
+        store.drop_var(BASHPID);
+        assert_eq!(store.dynamic(BASHPID), None);
+        store.leave(outer);
+        assert_eq!(store.dynamic(LINENO), Some(b"7".to_vec()));
+        assert_eq!(store.dynamic(BASHPID), Some(b"42".to_vec()));
+
+        let marks = store.marks();
+        let (old, frame) = store.drop_var(LINENO);
+        assert_eq!(store.fork().dynamic(LINENO), None);
+        store.undrop(LINENO, old, frame, marks);
+        assert_eq!(store.dynamic(LINENO), Some(b"7".to_vec()));
+
+        store.drop_var(LINENO);
+        let outer = store.enter();
+        store.shadow(LINENO, true);
+        assert_eq!(store.dynamic(LINENO), None);
+        store.leave(outer);
+        assert_eq!(store.subshell().dynamic(LINENO), None);
+        store.hide_vars(&[BASHPID.to_owned()], &[]);
+        assert_eq!(store.dynamic(BASHPID), None);
     }
 
     #[test]

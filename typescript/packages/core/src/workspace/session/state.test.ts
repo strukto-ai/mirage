@@ -543,7 +543,7 @@ describe('scopes on the call path', () => {
     const shell = session.vars.shell
     seedVar(session, 'A', '1')
     const outer = shell.enter()
-    shell.shadow('A')
+    shell.shadow('A', false)
     seedVar(session, 'A', 'local')
     await view.unset('A')
     expect('A' in session.env).toBe(false)

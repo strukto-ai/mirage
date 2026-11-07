@@ -120,11 +120,12 @@ impl From<Signal> for Fault {
 }
 
 /// A coercion's or a subscript's error, a readonly name in it ending the
-/// shell (`declare -i n; ( n='R=3'; echo no )` ends the subshell).
-fn fatal(error: arith::Error) -> Fault {
+/// shell (`declare -i n; ( n='R=3'; echo no )` ends the subshell), in the
+/// shell's `voice`.
+fn fatal(voice: &[u8], error: arith::Error) -> Fault {
     match error {
-        arith::Error::Readonly { name, .. } => Signal::readonly(&name, true).into(),
-        arith::Error::Unbound(name) => Signal::unbound(&name).into(),
+        arith::Error::Readonly { name, .. } => Signal::readonly(voice, &name, true).into(),
+        arith::Error::Unbound(name) => Signal::unbound(voice, &name).into(),
         error => Fault::Arith(error),
     }
 }
@@ -214,7 +215,7 @@ impl<G: Gate> Writer<'_, G> {
                 Ok(shaped) => value = shaped,
                 Err(error) => {
                     self.land_coercion(&mut coercion).await?;
-                    return Err(fatal(error));
+                    return Err(fatal(self.store.voice(), error));
                 }
             }
         }
@@ -251,12 +252,12 @@ impl<G: Gate> Writer<'_, G> {
                     );
                     return match (error, self.diagnostics.as_deref_mut()) {
                         (arith::Error::Readonly { name, .. }, None) => {
-                            Err(Signal::readonly(&name, subscript).into())
+                            Err(Signal::readonly(self.store.voice(), &name, subscript).into())
                         }
                         (arith::Error::Readonly { name, .. }, Some(_)) if subscript => {
-                            Err(Signal::readonly(&name, true).into())
+                            Err(Signal::readonly(self.store.voice(), &name, true).into())
                         }
-                        (error, None) => Err(fatal(error)),
+                        (error, None) => Err(fatal(self.store.voice(), error)),
                         (error, Some(diagnostics)) => {
                             diagnostics.push(Diagnostic::Text(super::arith_line(&error)));
                             Ok(())
@@ -270,9 +271,10 @@ impl<G: Gate> Writer<'_, G> {
         let unaimed = existing.as_ref().is_some_and(|var| var.has(NAMEREF));
         if unaimed && value.is_array() {
             if let Some(diagnostics) = self.diagnostics.as_deref_mut() {
-                diagnostics.push(Diagnostic::Bytes(
-                    format!("bash: warning: {name}: removing nameref attribute\n").into_bytes(),
-                ));
+                diagnostics.push(Diagnostic::Bytes(super::voiced(
+                    self.store.voice(),
+                    &format!("warning: {name}: removing nameref attribute\n"),
+                )));
             }
         }
         let before = existing
@@ -329,7 +331,7 @@ impl<G: Gate> Writer<'_, G> {
                 .await
                 .map_err(Fault::Denied)?;
         }
-        let seed = self.store.random_seed().clone();
+        let marks = self.store.marks();
         let (old, frame) = self.store.drop_var(&name);
         if self.gate.listens() {
             let old_rendering = old
@@ -347,7 +349,7 @@ impl<G: Gate> Writer<'_, G> {
                 )
                 .await
             {
-                self.store.undrop(&name, old, frame, seed);
+                self.store.undrop(&name, old, frame, marks);
                 return Err(Fault::Denied(denied));
             }
         }
@@ -415,7 +417,7 @@ impl<G: Gate> Writer<'_, G> {
                 .await
             {
                 Err(Fault::Readonly { name, .. }) => {
-                    return Err(Signal::readonly(&name, true).into());
+                    return Err(Signal::readonly(self.store.voice(), &name, true).into());
                 }
                 landed => landed?,
             }
@@ -448,7 +450,11 @@ impl<G: Gate> Writer<'_, G> {
                 .unwrap_or(0);
             let mut array = match self.store.indexed(&name) {
                 Some(array) => array.clone(),
-                None => Indexed::dense(self.store.conversion_scalar(&name).map_err(fatal)?),
+                None => Indexed::dense(
+                    self.store
+                        .conversion_scalar(&name)
+                        .map_err(|error| fatal(self.store.voice(), error))?,
+                ),
             };
             array.set(index, text);
             (
@@ -468,7 +474,9 @@ impl<G: Gate> Writer<'_, G> {
         let landed = self.land_writes(std::mem::take(&mut coercion.writes)).await;
         self.store.step_forward(globals);
         landed?;
-        self.store.settle(&mut coercion.draws).map_err(fatal)
+        self.store
+            .settle(&mut coercion.draws)
+            .map_err(|error| fatal(self.store.voice(), error))
     }
 
     /// An indexed subscript resolved outside arithmetic (`${a[i]}`,
@@ -483,14 +491,18 @@ impl<G: Gate> Writer<'_, G> {
         let outcome = self.store.arith(&mut draws, subscript, None, self.nounset);
         let (index, error) = match outcome.value {
             Ok(index) => (index, None),
-            Err(arith::Error::Unbound(name)) => return Err(Signal::unbound(&name).into()),
+            Err(arith::Error::Unbound(name)) => {
+                return Err(Signal::unbound(self.store.voice(), &name).into());
+            }
             Err(error) => (0, Some(error)),
         };
         self.land_writes(outcome.writes).await?;
-        self.store.settle(&mut draws).map_err(fatal)?;
+        self.store
+            .settle(&mut draws)
+            .map_err(|error| fatal(self.store.voice(), error))?;
         match error {
             None => Ok(index),
-            Some(error) => Err(fatal(error)),
+            Some(error) => Err(fatal(self.store.voice(), error)),
         }
     }
 
@@ -628,7 +640,9 @@ impl<G: Gate> Writer<'_, G> {
         let mut draws = Draws::default();
         let outcome = self.store.arith(&mut draws, text, None, self.nounset);
         let value = match outcome.value {
-            Err(arith::Error::Unbound(name)) => return Err(Signal::unbound(&name).into()),
+            Err(arith::Error::Unbound(name)) => {
+                return Err(Signal::unbound(self.store.voice(), &name).into());
+            }
             other => other,
         };
         let mut landed = Ok(());
@@ -648,7 +662,9 @@ impl<G: Gate> Writer<'_, G> {
                 }
             }
         }
-        self.store.settle(&mut draws).map_err(fatal)?;
+        self.store
+            .settle(&mut draws)
+            .map_err(|error| fatal(self.store.voice(), error))?;
         landed?;
         value.map_err(|error| match error {
             arith::Error::Readonly { name, subscript } => Fault::Readonly { name, subscript },
@@ -666,7 +682,7 @@ impl<G: Gate> Writer<'_, G> {
         let mut coercion = Coercion::default();
         let value = self.store.evaluate_integer(&mut coercion, text, added);
         self.land_coercion(&mut coercion).await?;
-        value.map_err(fatal)
+        value.map_err(|error| fatal(self.store.voice(), error))
     }
 }
 

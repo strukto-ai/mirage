@@ -105,7 +105,10 @@ impl<H: Host> Expander<'_, H> {
                         if values.is_empty() {
                             return Ok(Vec::new());
                         }
-                        return Err(bad_transformation(trim_start(self.text(p.node))));
+                        return Err(bad_transformation(
+                            self.shell.vars.voice(),
+                            trim_start(self.text(p.node)),
+                        ));
                     };
                     let var =
                         String::from_utf8_lossy(p.name.as_deref().unwrap_or_default()).into_owned();
@@ -173,13 +176,14 @@ impl<H: Host> Expander<'_, H> {
                         return Err(self.unset_error(p).await?);
                     }
                     if triggered && p.subscript.is_some() {
-                        return Err(bad_subscript(p));
+                        return Err(bad_subscript(self.shell.vars.voice(), p));
                     }
                     if triggered {
                         let name = String::from_utf8_lossy(p.name.as_deref().unwrap_or_default());
-                        return Err(discard(format!(
-                            "bash: ${name}: cannot assign in this way\n"
-                        )));
+                        return Err(discard(
+                            self.shell.vars.voice(),
+                            &format!("${name}: cannot assign in this way\n"),
+                        ));
                     }
                 }
             }
@@ -275,7 +279,7 @@ impl<H: Host> Expander<'_, H> {
         self.writer()
             .subscript_index(subscript)
             .await
-            .map_err(write_refusal)
+            .map_err(|fault| write_refusal(self.shell.vars.voice(), fault))
     }
 }
 

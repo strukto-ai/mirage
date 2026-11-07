@@ -606,7 +606,7 @@ async def test_unset_of_a_local_leaves_it_unset():
     shell = session.vars.shell
     seed_var(session, "A", "1")
     outer = shell.enter()
-    shell.shadow("A")
+    shell.shadow("A", False)
     seed_var(session, "A", "local")
     await view.unset("A")
     assert "A" not in session.env

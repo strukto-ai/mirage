@@ -4,7 +4,7 @@
 
 use super::{
     Braces, Chunk, Expander, Host, Operands, PATTERN_OPS, Part, bad_subscript, discard, ifs_joiner,
-    join, reference, splat, trim_start, within,
+    join, reference, splat, trim_start, voiced, within,
 };
 
 use crate::interp::escapes::decode_ansi_c;
@@ -418,9 +418,10 @@ impl<H: Host> Expander<'_, H> {
                     index += array.extent();
                     let assigns = matches!(p.op, Some("=" | ":="));
                     if index < 0 && !assigns {
-                        self.diagnostics.push(Diagnostic::Bytes(
-                            format!("bash: {var}: bad array subscript\n").into_bytes(),
-                        ));
+                        self.diagnostics.push(Diagnostic::Bytes(voiced(
+                            self.shell.vars.voice(),
+                            &format!("{var}: bad array subscript\n"),
+                        )));
                     }
                 }
                 if let Some(found) = array.get(index) {
@@ -450,7 +451,7 @@ impl<H: Host> Expander<'_, H> {
             && !p.indirect
             && !p.op.is_some_and(|op| UNSET_GUARD_OPS.contains(&op))
         {
-            return Err(Signal::unbound(&reference(&p)).into());
+            return Err(Signal::unbound(self.shell.vars.voice(), &reference(&p)).into());
         }
         if p.indirect {
             let target = match self.shell.vars.nameref_target(&var) {
@@ -479,13 +480,14 @@ impl<H: Host> Expander<'_, H> {
                 }
                 let default = join(&self.operator_word(&p, quoted).await?);
                 if !starts_name(&name) {
-                    return Err(discard(format!(
-                        "bash: ${var}: cannot assign in this way\n"
-                    )));
+                    return Err(discard(
+                        self.shell.vars.voice(),
+                        &format!("${var}: cannot assign in this way\n"),
+                    ));
                 }
                 let written = if p.subscript.is_some() {
                     let Some(key) = write_key else {
-                        return Err(bad_subscript(&p));
+                        return Err(bad_subscript(self.shell.vars.voice(), &p));
                     };
                     self.expansion_write(&var, Some(key), default.clone()).await
                 } else if !name.is_empty() {
@@ -525,7 +527,7 @@ impl<H: Host> Expander<'_, H> {
             "@" => {
                 let Some(letter) = operands.letter else {
                     if set {
-                        return Err(bad_transformation(&text));
+                        return Err(bad_transformation(self.shell.vars.voice(), &text));
                     }
                     return Ok(Vec::new());
                 };
@@ -562,6 +564,9 @@ impl<H: Host> Expander<'_, H> {
                 return Ok(Some(drawn.to_string().into_bytes()));
             }
         }
+        if let Some(value) = self.shell.vars.dynamic(&var) {
+            return Ok(Some(value));
+        }
         Ok(self.shell.vars.scalar(&var).map(<[u8]>::to_vec))
     }
 
@@ -575,9 +580,10 @@ impl<H: Host> Expander<'_, H> {
         let name = p.name.clone().unwrap_or_default();
         let shown = String::from_utf8_lossy(&name).into_owned();
         let Some(reference) = self.held(&name)? else {
-            return Err(discard(format!(
-                "bash: {shown}: invalid indirect expansion\n"
-            )));
+            return Err(discard(
+                self.shell.vars.voice(),
+                &format!("{shown}: invalid indirect expansion\n"),
+            ));
         };
         let special = reference.len() == 1 && b"@*#?-$!".contains(&reference[0]);
         let digits = !reference.is_empty() && reference.iter().all(u8::is_ascii_digit);
@@ -589,10 +595,13 @@ impl<H: Host> Expander<'_, H> {
                     (target.as_bytes().to_vec(), subscript.map(<[u8]>::to_vec))
                 }
                 None => {
-                    return Err(discard(format!(
-                        "bash: {}: invalid variable name\n",
-                        String::from_utf8_lossy(&reference)
-                    )));
+                    return Err(discard(
+                        self.shell.vars.voice(),
+                        &format!(
+                            "{}: invalid variable name\n",
+                            String::from_utf8_lossy(&reference)
+                        ),
+                    ));
                 }
             }
         };
@@ -603,7 +612,7 @@ impl<H: Host> Expander<'_, H> {
             && self.shell.option("nounset")
             && !self.holds(&String::from_utf8_lossy(&target))
         {
-            return Err(Signal::unbound(&format!("!{shown}")).into());
+            return Err(Signal::unbound(self.shell.vars.voice(), &format!("!{shown}")).into());
         }
         p.name = Some(target);
         p.subscript = subscript;
@@ -614,7 +623,7 @@ impl<H: Host> Expander<'_, H> {
 
     /// Whether a name holds a value, read without drawing `$RANDOM`.
     fn holds(&self, var: &str) -> bool {
-        if var == RANDOM {
+        if var == RANDOM || self.shell.vars.dynamic(var).is_some() {
             return true;
         }
         if let Some(array) = self.shell.indexed(var) {
@@ -654,14 +663,18 @@ impl<H: Host> Expander<'_, H> {
         value: Vec<u8>,
     ) -> Result<(), Fault> {
         if self.shell.vars.hidden(name) {
-            return Err(discard(format!("bash: {name}: permission denied\n")));
+            return Err(discard(
+                self.shell.vars.voice(),
+                &format!("{name}: permission denied\n"),
+            ));
         }
         let landed = self.writer().land_element(name, key, value).await;
         match landed {
-            Err(Fault::Readonly { name, .. }) => {
-                Err(discard(format!("bash: {name}: readonly variable\n")))
-            }
-            other => other.map_err(write_refusal),
+            Err(Fault::Readonly { name, .. }) => Err(discard(
+                self.shell.vars.voice(),
+                &format!("{name}: readonly variable\n"),
+            )),
+            other => other.map_err(|fault| write_refusal(self.shell.vars.voice(), fault)),
         }
     }
 
@@ -843,7 +856,7 @@ impl<H: Host> Expander<'_, H> {
                 b"parameter null or not set".to_vec()
             };
         }
-        let mut stderr = format!("bash: {}: ", reference(p)).into_bytes();
+        let mut stderr = voiced(self.shell.vars.voice(), &format!("{}: ", reference(p)));
         stderr.extend(message);
         stderr.push(b'\n');
         Ok(Signal::Exit {
@@ -875,13 +888,13 @@ fn unescape_all(text: &[u8]) -> Vec<u8> {
 
 /// A refused expansion-time write discards the line: a hidden name or the
 /// gate's refusal in their words, and an `-i` value that does not evaluate
-/// as `n=1+` does.
-pub(super) fn write_refusal(fault: Fault) -> Fault {
+/// as `n=1+` does, in the shell's `voice`.
+pub(super) fn write_refusal(voice: &[u8], fault: Fault) -> Fault {
     match fault {
         Fault::Hidden(name) | Fault::Denied(Denied { name, .. }) => {
-            discard(format!("bash: {name}: permission denied\n"))
+            discard(voice, &format!("{name}: permission denied\n"))
         }
-        Fault::Arith(error) => Signal::arith(&error, "", true).into(),
+        Fault::Arith(error) => Signal::arith(voice, &error, "", true).into(),
         other => other,
     }
 }
@@ -897,10 +910,10 @@ fn starts_name(name: &[u8]) -> bool {
 /// is known to be set: bash ends the shell with 127 (1 from a subshell),
 /// as it does for an unbound name, where `${}`, refused for its spelling,
 /// only discards the line.
-pub(super) fn bad_transformation(text: &[u8]) -> Fault {
+pub(super) fn bad_transformation(voice: &[u8], text: &[u8]) -> Fault {
     Signal::Exit {
         status: 127,
-        stderr: [b"bash: ", text, b": bad substitution\n"].concat(),
+        stderr: [voice, text, b": bad substitution\n"].concat(),
         contained: 1,
     }
     .into()

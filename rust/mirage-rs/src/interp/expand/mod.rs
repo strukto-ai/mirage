@@ -20,6 +20,7 @@ use super::escapes::{decode_ansi_c, unescape_dquoted, unquoted_runs};
 use super::parameter::scan_parameter;
 use super::pattern::{Pattern, Replacement};
 use super::shell::{IFS_DEFAULT, Shell};
+pub(super) use super::voiced;
 use super::write::{Fault, Gate, Writer};
 use super::{Diagnostic, Signal};
 use crate::shell::Tree;
@@ -946,7 +947,11 @@ impl<H: Host> Expander<'_, H> {
                 return Ok(param.clone());
             }
             if nounset {
-                return Err(Signal::unbound(&String::from_utf8_lossy(name)).into());
+                return Err(Signal::unbound(
+                    self.shell.vars.voice(),
+                    &String::from_utf8_lossy(name),
+                )
+                .into());
             }
             return Ok(Vec::new());
         }
@@ -961,12 +966,14 @@ impl<H: Host> Expander<'_, H> {
             array.get(0).map(<[u8]>::to_vec)
         } else if let Some(map) = vars.assoc(&name) {
             map.get(b"0").map(<[u8]>::to_vec)
+        } else if let Some(value) = vars.dynamic(&name) {
+            Some(value)
         } else {
             vars.scalar(&name).map(<[u8]>::to_vec)
         };
         match found {
             Some(value) => Ok(value),
-            None if nounset => Err(Signal::unbound(&name).into()),
+            None if nounset => Err(Signal::unbound(self.shell.vars.voice(), &name).into()),
             None => Ok(Vec::new()),
         }
     }
@@ -979,7 +986,7 @@ impl<H: Host> Expander<'_, H> {
             let positional = name.iter().all(u8::is_ascii_digit) && name != b"0";
             if positional && self.shell.option("nounset") && !self.positional_set(name) {
                 let spelled = format!("${}", String::from_utf8_lossy(name));
-                return Err(Signal::unbound(&spelled).into());
+                return Err(Signal::unbound(self.shell.vars.voice(), &spelled).into());
             }
             return Ok(vec![Chunk::value(self.lookup(name, true)?, quoted)]);
         }
@@ -1044,16 +1051,17 @@ fn reference(p: &Braces) -> String {
     }
 }
 
-fn discard(stderr: String) -> Fault {
+/// A line discarded on a diagnostic of the shell's own, led by its `voice`.
+fn discard(voice: &[u8], message: &str) -> Fault {
     Signal::Discard {
-        stderr: stderr.into_bytes(),
+        stderr: voiced(voice, message),
         contained: 1,
     }
     .into()
 }
 
-fn bad_subscript(p: &Braces) -> Fault {
-    discard(format!("bash: {}: bad array subscript\n", reference(p)))
+fn bad_subscript(voice: &[u8], p: &Braces) -> Fault {
+    discard(voice, &format!("{}: bad array subscript\n", reference(p)))
 }
 
 /// A piece as typed: unquoted, and no expansion's value.

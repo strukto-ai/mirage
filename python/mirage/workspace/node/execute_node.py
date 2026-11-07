@@ -45,8 +45,8 @@ from mirage.io.async_line_iterator import share
 from mirage.io.errors import PipeClosed
 from mirage.io.types import ByteSource
 from mirage.policy import HandOff, PolicyDenied
-from mirage.process.handle import ProcessHandle
 from mirage.policy.policies import Policies
+from mirage.process.handle import ProcessHandle
 from mirage.process.table import ProcessTable
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
