@@ -170,11 +170,21 @@ def main() -> None:
     assert {"started_at", "exit_code"} <= terms
     http = (ROOT / "docs/home/access/http.mdx").read_text()
     anchors = {slug(title) for title in re.findall(r"^#+ (.+)$", http, re.M)}
+    targets = {
+        f"/api{'/server' if key == 'server' else ''}/operations/"
+        f"{slug(op['tags'][0])}/{slug(op['summary'])}"
+        for key, view in views.items()
+        for _, _, op in operations(view)
+    }
     for page in (ROOT / "docs").rglob("*.mdx"):
         for anchor in re.findall(
             r"/home/access/http#([a-z0-9-]+)", page.read_text()
         ):
             assert anchor in anchors, f"{page}: broken HTTP anchor {anchor}"
+        for target in re.findall(
+            r"(/api/(?:server/)?operations/[a-z0-9_/-]+)", page.read_text()
+        ):
+            assert target in targets, f"{page}: broken endpoint link {target}"
     # JSON null is data in examples, including when it replaces an existing value.
     assert apply_overrides(
         {"example": {"a": 1}},

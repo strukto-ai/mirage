@@ -864,11 +864,11 @@
       ]
     },
     "POST /v1/workspaces/{workspace_id}/stop": {
-      "note": "Cloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example.",
+      "note": "Cloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example. On OSS Server, RAM files do not survive stopping and starting. Save them to persistent storage before stopping.",
       "update": []
     },
     "POST /v1/workspaces/{workspace_id}/start": {
-      "note": "Cloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example.",
+      "note": "Cloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example. On OSS Server, RAM files do not survive stopping and starting. Save them to persistent storage before stopping.",
       "update": []
     },
     "GET /v1/templates": {
@@ -1022,7 +1022,7 @@
       ]
     },
     "POST /v1/workspaces/{workspace_id}/shell": {
-      "note": "The default JSON request and response are shared. Cloud rejects `explain=true` and multipart stdin. Runtime selection is supported in both, but Cloud accepts only its built-in runtimes.",
+      "note": "The JSON request is shared. OSS Server includes `line_id` in the result; Cloud returns output and exit status without it. Cloud rejects `explain=true` and multipart stdin. Runtime selection is supported in both, but Cloud accepts only its built-in runtimes.",
       "update": [
         {
           "op": "replace",

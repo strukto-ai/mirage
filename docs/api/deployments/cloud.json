@@ -869,7 +869,7 @@
             }
           }
         },
-        "description": "<Note>\nCloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example.\n</Note>\n\nStop the workspace and keep its state and config for start. A stopped workspace answers as it is, so a stop can be repeated.",
+        "description": "<Note>\nCloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example. On OSS Server, RAM files do not survive stopping and starting. Save them to persistent storage before stopping.\n</Note>\n\nStop the workspace and keep its state and config for start. A stopped workspace answers as it is, so a stop can be repeated.",
         "tags": [
           "Workspaces"
         ]
@@ -1045,7 +1045,7 @@
             }
           }
         },
-        "description": "<Note>\nCloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example.\n</Note>\n\nStart a stopped workspace from the config it was created with, over the state it kept; a running one answers as it is.\n\nThe server's policies judge the config again, and the secrets and saved entries it names are read again, so a rotated secret is picked up.",
+        "description": "<Note>\nCloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example. On OSS Server, RAM files do not survive stopping and starting. Save them to persistent storage before stopping.\n</Note>\n\nStart a stopped workspace from the config it was created with, over the state it kept; a running one answers as it is.\n\nThe server's policies judge the config again, and the secrets and saved entries it names are read again, so a rotated secret is picked up.",
         "tags": [
           "Workspaces"
         ]
@@ -1728,7 +1728,7 @@
             }
           }
         },
-        "description": "<Note>\nThe default JSON request and response are shared. Cloud rejects `explain=true` and multipart stdin. Runtime selection is supported in both, but Cloud accepts only its built-in runtimes.\n</Note>\n\nRun a shell line in a workspace. HTTP 200 means the request completed. Check exit_code to determine whether the command succeeded. Set stream=true for NDJSON output records. See [Streaming and stdin](/api/streaming#stream-command-output) for the record format."
+        "description": "<Note>\nThe JSON request is shared. OSS Server includes `line_id` in the result; Cloud returns output and exit status without it. Cloud rejects `explain=true` and multipart stdin. Runtime selection is supported in both, but Cloud accepts only its built-in runtimes.\n</Note>\n\nRun a shell line in a workspace. HTTP 200 means the request completed. Check exit_code to determine whether the command succeeded. Set stream=true for NDJSON output records. See [Streaming and stdin](/api/streaming#stream-command-output) for the record format."
       }
     },
     "/v1/workspaces/{workspace_id}/vfs/read": {

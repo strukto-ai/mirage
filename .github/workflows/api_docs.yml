@@ -8,12 +8,11 @@ permissions:
     branches: [main]
     paths:
       - 'docs/api/**'
+      - 'docs/**/*.mdx'
       - 'docs/openapi.yaml'
       - 'docs/docs.json'
       - 'docs/snippets/api/**'
       - 'docs/snippets/api-explorer.jsx'
-      - 'docs/home/access/http.mdx'
-      - 'docs/home/access/rpc.mdx'
       - 'scripts/api_deployments.py'
       - 'scripts/gen_api_reference.py'
       - 'scripts/check_api_docs.py'
@@ -22,12 +21,11 @@ permissions:
     branches: [main]
     paths:
       - 'docs/api/**'
+      - 'docs/**/*.mdx'
       - 'docs/openapi.yaml'
       - 'docs/docs.json'
       - 'docs/snippets/api/**'
       - 'docs/snippets/api-explorer.jsx'
-      - 'docs/home/access/http.mdx'
-      - 'docs/home/access/rpc.mdx'
       - 'scripts/api_deployments.py'
       - 'scripts/gen_api_reference.py'
       - 'scripts/check_api_docs.py'
