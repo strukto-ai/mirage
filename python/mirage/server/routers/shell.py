@@ -23,18 +23,19 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from mirage.concurrency.limiter import run_blocking
-from mirage.execution.types import ExecutionRecord, ExecutionStatus
+from mirage.execution.errors import WorkspaceHeldError
+from mirage.execution.line.handle import LineHandle
+from mirage.execution.types import LineId
 from mirage.io.types import ByteSource
 from mirage.server.io_serde import explanation_to_dict, io_result_to_dict
-from mirage.server.jobs import ExecutionTable
 from mirage.server.metrics import refused
 from mirage.server.multipart import MAX_REQUEST_PART, PartEvent, part_events
 from mirage.server.registry import WorkspaceEntry
+from mirage.server.requests import LineRequest, RequestTable
 from mirage.server.routers.vfs import require_entry, session_of
 from mirage.server.stdin import LoopStdin, UploadStdin
 from mirage.server.stream import ShellResponse
 from mirage.types import JsonValue
-from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.shell_execution import ShellExecution
 from mirage.workspace.workspace import Workspace
 
@@ -71,15 +72,13 @@ def _build_shell_kwargs(
 async def _invoke_shell(
     ws: Workspace,
     kwargs: dict[str, Any],
-    scope: ExecutionScope,
+    scope: LineHandle,
     opened: Callable[[ShellExecution | None], None] | None = None,
 ) -> JsonValue:
     if opened is None:
-        result = await ws.shell(**kwargs, execution_scope=scope)
+        result = await ws.shell(**kwargs, line_handle=scope)
     else:
-        execution = await ws.shell(
-            **kwargs, execution_scope=scope, stream=True
-        )
+        execution = await ws.shell(**kwargs, line_handle=scope, stream=True)
         # The response reads the events and closes the execution; the job
         # waits for its status, and a cancelled job stops it.
         opened(execution)
@@ -145,7 +144,7 @@ async def shell(
 
         loop.call_soon_threadsafe(give)
 
-    async def run(scope: ExecutionScope) -> JsonValue:
+    async def run(scope: LineHandle) -> JsonValue:
         try:
             return await entry.runner.call(
                 _invoke_shell(
@@ -165,6 +164,17 @@ async def shell(
                 status_code=503, detail="server is shutting down"
             )
         raise HTTPException(status_code=404, detail="workspace not found")
+    table = entry.runner.ws.job_table
+    if not table.claimed:
+        # Once held, the lease is this daemon's until the workspace
+        # closes, so only a line on a workspace it does not hold yet waits
+        # for the store here.
+        try:
+            await entry.runner.call(table.claim())
+        except WorkspaceHeldError as exc:
+            if upload is not None:
+                await _finish_upload(upload, part)
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
     job = jobs.submit(
         workspace_id=workspace_id,
         command=req_obj.command,
@@ -178,12 +188,10 @@ async def shell(
     job = await wait_attended(jobs, job.id, request, upload)
     if upload is not None:
         await _finish_upload(upload, part)
-    if job.status == ExecutionStatus.CANCELED:
+    if job.line.record.signal is not None:
         raise HTTPException(status_code=499, detail="job canceled")
-    if job.status == ExecutionStatus.FAILED:
-        raise HTTPException(
-            status_code=500, detail=job.error or "shell failed"
-        )
+    if job.error is not None:
+        raise HTTPException(status_code=500, detail=job.error)
     # A large result is encoded off the server's loop.
     return Response(
         content=await run_blocking(json.dumps, job.result),
@@ -224,11 +232,11 @@ async def _explained(
 
 
 async def wait_attended(
-    jobs: ExecutionTable,
-    job_id: str,
+    jobs: RequestTable,
+    job_id: LineId,
     request: Request,
     upload: asyncio.Task[None] | None = None,
-) -> ExecutionRecord:
+) -> LineRequest:
     """Wait for a foreground job while its caller stays connected.
 
     A caller that drops the request is gone for good, so its job is
@@ -238,14 +246,14 @@ async def wait_attended(
     the body bad, cancels the job the same way.
 
     Args:
-        jobs (ExecutionTable): the daemon's execution table.
-        job_id (str): the job the request submitted.
+        jobs (RequestTable): the daemon's requests.
+        job_id (LineId): the line the request submitted.
         request (Request): the request waiting on it.
         upload (asyncio.Task[None] | None): the task still reading the
             request body, if any.
 
     Returns:
-        ExecutionRecord: the settled job.
+        LineRequest: the settled request.
     """
 
     async def caller_gone() -> None:

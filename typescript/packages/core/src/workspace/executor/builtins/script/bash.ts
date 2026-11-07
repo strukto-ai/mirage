@@ -29,7 +29,7 @@ import { CallStack } from '../../../../shell/call_stack.ts'
 import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
 import { SET_OPTION_NAMES } from '../../../../shell/constants.ts'
 import { ExitSignal } from '../../../../shell/errors.ts'
-import type { JobTable } from '../../../../shell/job_table/index.ts'
+import type { JobTable } from '../../../../execution/job/index.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
 import { EvaluationContext } from '../../../evaluation.ts'
 import { setPositionalParams } from '../../../session/state.ts'
@@ -266,7 +266,7 @@ export async function handleBash(
     // the shell's `$$`, whose own subshells and programs it forks.
     const runner = currentCaller().process
     if (runner !== null) {
-      session.shellPid = runner.info.pid
+      session.shellPid = runner.record.id.pid
       if (jobTable !== undefined) context.frame.shell = runner
     }
     io = await run()
@@ -310,7 +310,7 @@ async function inProcess(
       abort.abort()
     },
     (forked) => {
-      session.processId = session.shellPid = forked.info.pid
+      session.processId = session.shellPid = forked.record.id.pid
       context.frame.shell = forked
     },
   )

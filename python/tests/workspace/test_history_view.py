@@ -19,9 +19,9 @@ import pytest
 from mirage.accessor.base import Accessor, NOOPAccessor
 from mirage.commands.config import command
 from mirage.commands.spec import SPECS
+from mirage.execution.job import JobState
 from mirage.io.types import ByteSource, IOResult
 from mirage.shell.console import Channel
-from mirage.shell.job_table import JobStatus
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.snapshot import apply_state_dict, read_tar
@@ -122,7 +122,7 @@ async def test_a_followed_history_streams_each_new_command():
         await asyncio.sleep(0.25)
         job = ws.job_table.get(1, ws.default_session_id)
         assert job is not None
-        assert job.status is JobStatus.RUNNING
+        assert job.state is JobState.RUNNING
         shown = await job.console.snapshot(Channel.STDOUT)
         assert b"pwd" in shown
         assert b"echo marker" in shown

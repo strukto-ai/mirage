@@ -31,8 +31,8 @@ import { runAsProgram } from '../../../../context/session_context.ts'
 import { ensureStream, OutputStream, yieldBytes } from '../../../../io/stream.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult, materialize, OutputState } from '../../../../io/types.ts'
-import type { ProcessHandle } from '../../../../process/handle.ts'
-import { ProcessTable, deliver } from '../../../../process/table.ts'
+import type { ProcessHandle } from '../../../../execution/process/handle.ts'
+import { ProcessTable, deliver } from '../../../../execution/process/table.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import { Channel, type JobConsole } from '../../../../shell/console/index.ts'
 import { PipeConsole } from '../../../../shell/console/pipe.ts'
@@ -49,7 +49,7 @@ import {
   STOP_SIGNALS,
   TIMEOUT_STATUS,
 } from '../../../../shell/constants.ts'
-import { STOP_WAIT_SECONDS } from '../../../../shell/job_table/constants.ts'
+import { STOP_WAIT_SECONDS } from '../../../../execution/job/constants.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import { abortable, atDeadline, runCancellable, SignalStop } from '../../../../utils/abort.ts'
 import { PathSpec } from '../../../../types.ts'
@@ -355,13 +355,13 @@ export async function handleTimeout(
       sessionId: session.sessionId,
       command: inner,
       cwd: PathSpec.fromStrPath(session.cwd),
-      parentPid: session.processId,
+      parent: session.processId,
       cancel: () => {
         abort.abort(new SignalStop(process.signal ?? SIGKILL))
       },
       limit: session.processes.max,
       started: (forked) => {
-        child.session.processId = forked.info.pid
+        child.session.processId = forked.record.id.pid
         child.frame.shell = forked
       },
       ignores: SHELL_IGNORED_SIGNALS,
@@ -397,7 +397,7 @@ export async function handleTimeout(
   // command already knows the signal.
   const send = (number: number): void => {
     if (foreground) deliver(process, number)
-    else processes.signalGroup(process.info.groupId, number)
+    else processes.signalGroup(process.record.group, number)
   }
   const watch = supervise(run, abort.signal, send, sink, held, seconds, lineSignal, {
     signal,

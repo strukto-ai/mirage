@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from mirage.context import get_current_session
+from mirage.execution.types import MachineId
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.apple_container.config import AppleContainerConfig
 from mirage.runtime.sandbox.apple_container.constants import (
@@ -106,10 +107,12 @@ class AppleContainerRuntime(RemoteSandbox, PipeTransportMixin):
         probes each container on its first line instead.
         """
 
-    def _sandbox_key(self) -> str:
-        """The container this line's session runs in, which keeps its own
-        libfaketime answer."""
-        return self._container_name()
+    @property
+    def machine(self) -> MachineId:
+        """The container this line's session runs in,
+        ``apple_container:<container>``, which keeps its own libfaketime
+        answer."""
+        return MachineId(self.name, self._container_name())
 
     def _container_name(self) -> str:
         """The container this line's session runs in (config

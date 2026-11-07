@@ -15,13 +15,13 @@
 import type { ShellVars } from '../../rs/session.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { SessionState } from '../session/session.ts'
-import type { ExecutionScope } from '../execution.ts'
+import type { LineHandle } from '../../execution/line/handle.ts'
 import type { ByteSource, IOResult } from '../../io/types.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { JobConsole } from '../../shell/console/index.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
-import type { JobTable } from '../../shell/job_table/index.ts'
+import type { JobTable } from '../../execution/job/index.ts'
 /**
  * The executor's entry point for a nested line. `node` is the node whose text
  * the line is: the command running it (bound by the dispatcher for
@@ -38,7 +38,7 @@ export type ExecuteFn = (
   command: string,
   opts: {
     sessionId: string
-    executionScope?: ExecutionScope
+    lineHandle?: LineHandle
     context?: EvaluationContext
     session?: SessionState
     stdin?: ByteSource | null

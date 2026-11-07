@@ -32,6 +32,21 @@ from mirage.context import (
     session_voice,
 )
 from mirage.errors.types import CommandTimeoutError
+from mirage.execution.context import new_line_id
+from mirage.execution.job import JobHandle, JobState, JobTable
+from mirage.execution.job.constants import (
+    ENDING_SIGNALS,
+    STOP_WAIT_SECONDS,
+)
+from mirage.execution.line.handle import LineHandle
+from mirage.execution.process.handle import ProcessHandle
+from mirage.execution.process.table import ProcessTable
+from mirage.execution.process.types import (
+    Process,
+    ProcessRunner,
+    ProcessState,
+)
+from mirage.execution.process.view import ProcessView
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import SharedInput, hold_inputs
 from mirage.io.errors import PipeClosed
@@ -40,10 +55,6 @@ from mirage.io.types import ByteSource
 from mirage.policy.builtin.output_cap import LINE_NAME
 from mirage.policy.decisions import Decisions, is_pending
 from mirage.policy.types import HandOff
-from mirage.process.handle import ProcessHandle
-from mirage.process.table import ProcessTable
-from mirage.process.types import ProcessInfo, ProcessRunner, ProcessState
-from mirage.process.view import ProcessView
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import (
@@ -69,11 +80,6 @@ from mirage.shell.constants import (
 )
 from mirage.shell.errors import ExitSignal, ReturnSignal
 from mirage.shell.helpers import get_redirects, get_text, is_backgrounded
-from mirage.shell.job_table import Job, JobStatus, JobTable
-from mirage.shell.job_table.constants import (
-    ENDING_SIGNALS,
-    STOP_WAIT_SECONDS,
-)
 from mirage.shell.node_kind import NodeKind, node_kind, simple_command
 from mirage.shell.parse.names import command_invocations
 from mirage.shell.parse.program import retain_programs
@@ -87,12 +93,11 @@ from mirage.shell.signals import (
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.shell.voice import shell_voice
-from mirage.types import JsonValue, PathSpec, Refusal
+from mirage.types import PathSpec, Refusal
 from mirage.utils.clock import system_now
 from mirage.utils.timezone import zone_from_env
 from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext, child_context
-from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.getopt import scan_options
 from mirage.workspace.executor.builtins.shared import builtin_usage
 from mirage.workspace.executor.statement import (
@@ -108,7 +113,6 @@ from mirage.workspace.executor.traps import inherit_traps
 from mirage.workspace.frame import ExecutionFrame
 from mirage.workspace.lookup.constants import CAPTURABLE_BUILTINS, SHELL_NAMES
 from mirage.workspace.node.occurrence import occurrence_of
-from mirage.workspace.record.types import RecordFields
 from mirage.workspace.session import (
     SessionState,
 )
@@ -239,7 +243,7 @@ def _job_streams(
     return {stream for stream in fds.values() if stream is not None}
 
 
-def _one_program(left: TSNodeLike, session: SessionState) -> bool:
+def one_program(left: TSNodeLike, session: SessionState) -> bool:
     """Whether a job is one program, as bash runs ``cmd &`` as the program
     itself: a simple command whose word names neither a function nor a
     shell builtin a runtime cannot take (``eval``, ``source``), either of
@@ -348,16 +352,12 @@ def report_jobs(
         process = job.process
         if (
             job.reported
-            or job.status == JobStatus.RUNNING
+            or job.state == JobState.RUNNING
             or process is None
-            or process.info.parent_pid != session.process_id
+            or process.record.parent != session.process_id
         ):
             continue
-        ended = (
-            job.exit_code - 128
-            if job.status == JobStatus.KILLED
-            else process.ended_by
-        )
+        ended = job.signal if job.signal is not None else process.ended_by
         if ended is None or ended < 1 or job.exit_code != 128 + ended:
             continue
         report = signal_report(
@@ -389,7 +389,7 @@ def report_reaped(
     listed = signal_reported(reaped[-1][0].ended_by)
     processes = [
         (
-            process.info.pid,
+            process.record.pid,
             code,
             process.ended_by,
             reported_command(node) if listed else "",
@@ -408,6 +408,7 @@ def start_shell(
     run: ProcessRunner,
     parent_pid: int | None,
     started: Callable[[ProcessHandle], None] | None = None,
+    one_command: bool = False,
 ) -> ProcessHandle:
     """Start a shell the running one forks (a subshell, a pipeline stage,
     a command substitution, a nested shell): a process in its session's
@@ -422,6 +423,8 @@ def start_shell(
         parent_pid (int | None): the process that forks it.
         started (Callable[[ProcessHandle], None] | None): called with the
             process before it runs.
+        one_command (bool): the shell runs one program, which runs as it
+            (``one_program``).
     """
     try:
         return processes.start(
@@ -429,10 +432,11 @@ def start_shell(
             command=command,
             cwd=PathSpec.from_str_path(session.cwd),
             run=run,
-            parent_pid=parent_pid,
+            parent=parent_pid,
             limit=session.processes.max,
             started=started,
             ignores=SHELL_IGNORED_SIGNALS,
+            one_command=one_command,
         )
     except BlockingIOError as exc:
         raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
@@ -583,7 +587,7 @@ async def handle_background(
         command is not None and command.type == NT.SUBSHELL
     )
 
-    async def _run_bg(job: Job) -> tuple[IOResult, ExecutionNode]:
+    async def _run_bg(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         child_evaluation.frame.shell = None if in_place else job.process
         # Background jobs don't receive stdin, matching real shell
         # behavior where bg processes get /dev/null. This prevents
@@ -647,8 +651,8 @@ async def handle_background(
                     sink=console,
                     handed=job_handed,
                     cancel=None,
-                    execution_scope=ExecutionScope(
-                        execution_id=job.execution_id
+                    line_handle=LineHandle(
+                        new_line_id(), bg_session.session_id, cmd_str_inner
                     ),
                     ends_shell=True,
                     jobs=job_table.child(),
@@ -756,9 +760,9 @@ async def handle_background(
             run=_run_bg,
             cwd=bg_session.cwd,
             session_id=session.session_id,
-            parent_pid=session.process_id,
+            parent=session.process_id,
             limit=session.processes.max,
-            simple=_one_program(left, session),
+            simple=one_program(left, session),
         )
     except BaseException as exc:
         release_job()
@@ -778,7 +782,7 @@ async def handle_background(
     if job.process is not None:
         job.process.task.add_done_callback(release_job)
         job.process.task.add_done_callback(drop_unrun_holds)
-        bg_session.process_id = job.process.info.pid
+        bg_session.process_id = job.process.record.pid
     session.last_bg_job_id = job.pid
     waits = session.job_waits
     if waits is not None and waits.reaches(
@@ -911,18 +915,18 @@ def _process_view(
     )
 
 
-def _job_numbered(jobs: list[Job], job_id: int) -> Job | None:
+def _job_numbered(jobs: list[JobHandle], job_id: int) -> JobHandle | None:
     """The job whose number is `job_id`, the one `%N` names: none once
     its report was printed, as bash then drops it from its list.
 
     Args:
-        jobs (list[Job]): the jobs the builtin can see.
+        jobs (list[JobHandle]): the jobs the builtin can see.
         job_id (int): the job number.
     """
     return next((j for j in jobs if j.id == job_id and not j.reported), None)
 
 
-def _job_with_pid(jobs: list[Job], pid: int) -> Job | None:
+def _job_with_pid(jobs: list[JobHandle], pid: int) -> JobHandle | None:
     """The job a bare PID names.
 
     A job whose runner is here answers by its runner's PID. One with no
@@ -932,7 +936,7 @@ def _job_with_pid(jobs: list[Job], pid: int) -> Job | None:
     ``%2`` can share a number with a PID handed out here.
 
     Args:
-        jobs (list[Job]): the jobs the builtin can see.
+        jobs (list[JobHandle]): the jobs the builtin can see.
         pid (int): the PID as typed.
     """
     ran = next(
@@ -943,7 +947,9 @@ def _job_with_pid(jobs: list[Job], pid: int) -> Job | None:
     return next((j for j in jobs if j.process is None and j.pid == pid), None)
 
 
-def _resolve_spec(jobs: list[Job], spec: str) -> tuple[Job | None, str]:
+def _resolve_spec(
+    jobs: list[JobHandle], spec: str
+) -> tuple[JobHandle | None, str]:
     """The job a `wait`/`disown` operand names, or bash's refusal.
 
     A `%N` spec that names no job is `no such job`; a bare number is a
@@ -952,7 +958,7 @@ def _resolve_spec(jobs: list[Job], spec: str) -> tuple[Job | None, str]:
     is `not a pid or valid job spec`.
 
     Args:
-        jobs (list[Job]): the jobs the builtin can see.
+        jobs (list[JobHandle]): the jobs the builtin can see.
         spec (str): the operand as typed.
     """
     if spec.startswith("%"):
@@ -967,15 +973,15 @@ def _resolve_spec(jobs: list[Job], spec: str) -> tuple[Job | None, str]:
     return None, f"`{spec}': not a pid or valid job spec"
 
 
-async def _wait_first(job_table: JobTable, jobs: list[Job]) -> Job:
+async def _wait_first(job_table: JobTable, jobs: list[JobHandle]) -> JobHandle:
     """Block until the first of several jobs ends, and return it.
 
     Args:
         job_table (JobTable): the session's jobs.
-        jobs (list[Job]): the candidates, all present in the table.
+        jobs (list[JobHandle]): the candidates, all present in the table.
     """
     for job in jobs:
-        if job.status != JobStatus.RUNNING:
+        if job.state != JobState.RUNNING:
             return await job_table.wait(job.id, job.session_id)
     tasks = {
         asyncio.ensure_future(job_table.wait(job.id, job.session_id)): job
@@ -991,7 +997,7 @@ async def _wait_first(job_table: JobTable, jobs: list[Job]) -> Job:
 
 
 async def _reaped(
-    job_table: JobTable, job: Job, cmd_str: str
+    job_table: JobTable, job: JobHandle, cmd_str: str
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Report one finished job's status, and reap it.
 
@@ -999,7 +1005,7 @@ async def _reaped(
 
     Args:
         job_table (JobTable): the session's jobs.
-        job (Job): the job, already finished.
+        job (JobHandle): the job, already finished.
         cmd_str (str): the command line, for the node.
     """
     # Reaped like GNU bash reaps a job waited on by id, so a later bare
@@ -1101,7 +1107,7 @@ async def handle_wait(
         if view is not None:
             await view.unset(var)
     errors: list[str] = []
-    picked: list[Job] = []
+    picked: list[JobHandle] = []
     await job_table.sync(sid)
     visible = job_table.list_jobs(sid)
     for spec in specs:
@@ -1153,7 +1159,7 @@ async def handle_wait(
     finished = [await job_table.wait(job.id, sid) for job in picked]
     told = _wait_reports(session, job_table)
     last_code = 0
-    last_job: Job | None = None
+    last_job: JobHandle | None = None
     for job in finished:
         _, io, _ = await _reaped(job_table, job, cmd_str)
         last_code = io.exit_code
@@ -1223,7 +1229,7 @@ async def handle_disown(
     running_only = "r" in scan.letters
     keep = "h" in scan.letters
     specs = scan.operands
-    targets: list[Job] = []
+    targets: list[JobHandle] = []
     errors: list[str] = []
     await job_table.sync(sid)
     jobs = job_table.list_jobs(sid)
@@ -1236,7 +1242,7 @@ async def handle_disown(
             targets.append(job)
     elif all_jobs or running_only:
         targets = (
-            [j for j in jobs if j.status == JobStatus.RUNNING]
+            [j for j in jobs if j.state == JobState.RUNNING]
             if running_only
             else jobs
         )
@@ -1296,7 +1302,7 @@ async def handle_fg(
                 IOResult(exit_code=1, stderr=err),
                 ExecutionNode(command=cmd_str, exit_code=1, stderr=err),
             )
-        running = [j for j in jobs if j.status == JobStatus.RUNNING]
+        running = [j for j in jobs if j.state == JobState.RUNNING]
         target = (running or jobs)[-1]
     else:
         raw = parts[1].lstrip("%")
@@ -1374,11 +1380,11 @@ def _kill_list(
     )
 
 
-def _kill_pid(jobs: list[Job], operand: str) -> tuple[int | None, str]:
+def _kill_pid(jobs: list[JobHandle], operand: str) -> tuple[int | None, str]:
     """The managed PID one kill operand names, or bash's refusal.
 
     Args:
-        jobs (list[Job]): the jobs the builtin can see.
+        jobs (list[JobHandle]): the jobs the builtin can see.
         operand (str): the operand as typed.
     """
     if operand == "":
@@ -1399,17 +1405,17 @@ def _kill_pid(jobs: list[Job], operand: str) -> tuple[int | None, str]:
     return int(operand), ""
 
 
-def _runnerless(jobs: list[Job], operand: str) -> Job | None:
+def _runnerless(jobs: list[JobHandle], operand: str) -> JobHandle | None:
     """The job a ``%N`` operand names when it has no runner here.
 
-    Another workspace runs it, or it was restored from a snapshot. It is
-    killed through the job table, which ends another workspace's job by
-    ending its console for its owner to see, and never through this
+    Another daemon runs it, or it was restored from a snapshot. It is
+    killed through the job table, which ends another daemon's job by
+    ending its console for that daemon to see, and never through this
     workspace's process table, where its stand-in PID may name a runner
     of this workspace's own.
 
     Args:
-        jobs (list[Job]): the jobs the builtin can see.
+        jobs (list[JobHandle]): the jobs the builtin can see.
         operand (str): the operand as typed.
     """
     raw = operand[1:] if operand.startswith("%") else ""
@@ -1430,11 +1436,9 @@ async def handle_kill(
     operand is tried and each failure is named in bash's words; the
     status is 0 when any operand was signalled, as bash's is. A job
     spec is ``%N``; a negative number is a process group, the session's
-    ``-$$`` among them, whose every runner gets the signal (killpg).
-    ``owner:pid`` names another workspace's runner, as ``ps`` lists it:
-    its owner stops it once it takes the stop. A signal that stops the
-    shell running ``kill`` lands before the next statement, as bash's
-    signal to itself does.
+    ``-$$`` among them, whose every runner gets the signal (killpg). A
+    signal that stops the shell running ``kill`` lands before the next
+    statement, as bash's signal to itself does.
 
     Args:
         job_table (JobTable): the session's jobs.
@@ -1492,33 +1496,6 @@ async def handle_kill(
     signalled = False
     await job_table.sync(sid)
     for operand in words:
-        owner, colon, local = operand.partition(":")
-        if colon and not operand.startswith("%"):
-            if not owner or not local.isascii() or not local.isdigit():
-                errors.append(
-                    f"{voice}kill: {operand}: arguments must be process "
-                    "or job IDs"
-                )
-                continue
-            # A signal that leaves a process running only probes it.
-            try:
-                found = await job_table.signal_remote(
-                    owner,
-                    int(local),
-                    0 if signal in _KEPT_SIGNALS else signal,
-                    sid,
-                    processes.permissions,
-                )
-            except PermissionError:
-                errors.append(
-                    f"{voice}kill: ({operand}) - Operation not permitted"
-                )
-                continue
-            if not found:
-                errors.append(f"{voice}kill: ({operand}) - No such process")
-                continue
-            signalled = True
-            continue
         jobs = job_table.list_jobs(sid)
         pid, refusal = _kill_pid(jobs, operand)
         if pid is None:
@@ -1542,7 +1519,7 @@ async def handle_kill(
         runnerless = _runnerless(jobs, operand)
         if runnerless is not None:
             if signal in _KEPT_SIGNALS:
-                found = runnerless.status == JobStatus.RUNNING
+                found = runnerless.state == JobState.RUNNING
             else:
                 found = await job_table.kill(runnerless.id, sid, signal)
             if not found:
@@ -1573,7 +1550,7 @@ async def handle_kill(
             continue
         signalled = True
     runner = current_caller().process
-    if runner is not None and runner.info.cancellation_requested:
+    if runner is not None and runner.record.state == ProcessState.STOPPING:
         # The shell running kill stopped itself (`kill $$`): the signal
         # lands here, before its next statement.
         raise asyncio.CancelledError
@@ -1586,7 +1563,7 @@ async def handle_kill(
 async def _kill_group(
     job_table: JobTable,
     processes: ProcessView,
-    jobs: list[Job],
+    jobs: list[JobHandle],
     group: int,
     signal: int,
     session_id: str,
@@ -1597,7 +1574,7 @@ async def _kill_group(
     Args:
         job_table (JobTable): the session's jobs.
         processes (ProcessView): the session's view of the runners.
-        jobs (list[Job]): the jobs the builtin can see.
+        jobs (list[JobHandle]): the jobs the builtin can see.
         group (int): the group.
         signal (int): the signal; a kept one probes.
         session_id (str): the calling session.
@@ -1612,7 +1589,7 @@ async def _kill_group(
     for job in jobs:
         if (
             job.process is not None
-            and job.process.info.group_id == group
+            and job.process.record.group == group
             and signal not in job.process.ignores
         ):
             await job_table.kill(job.id, session_id, signal)
@@ -1622,16 +1599,23 @@ async def _kill_group(
 _JOBS_FLAGS = frozenset("lnprs")
 
 
-def _job_row(job: Job, long: bool) -> str:
+def _job_row(job: JobHandle, long: bool) -> str:
     """One `jobs` line in mirage's own row shape.
 
     Args:
-        job (Job): the job.
+        job (JobHandle): the job.
         long (bool): `-l`, which includes the managed process id.
     """
+    status = (
+        "running"
+        if job.state == JobState.RUNNING
+        else "killed"
+        if job.signal is not None
+        else "completed"
+    )
     if long:
-        return f"[{job.id}] {job.pid} {job.status.value} {job.command}"
-    return f"[{job.id}] {job.status.value} {job.command}"
+        return f"[{job.id}] {job.pid} {status} {job.command}"
+    return f"[{job.id}] {status} {job.command}"
 
 
 async def handle_jobs(
@@ -1682,7 +1666,7 @@ async def handle_jobs(
         table = table.parent
     jobs = [j for j in job_table.listing(sid) if not j.reported]
     if specs:
-        picked: list[Job] = []
+        picked: list[JobHandle] = []
         for spec in specs:
             raw = spec.lstrip("%")
             job = _job_numbered(jobs, int(raw)) if raw.isdigit() else None
@@ -1698,11 +1682,11 @@ async def handle_jobs(
             picked.append(job)
         jobs = picked
     if "r" in flags:
-        jobs = [j for j in jobs if j.status == JobStatus.RUNNING]
+        jobs = [j for j in jobs if j.state == JobState.RUNNING]
     if "s" in flags:
         jobs = []
     if "n" in flags:
-        jobs = [j for j in jobs if j.status != JobStatus.RUNNING]
+        jobs = [j for j in jobs if j.state != JobState.RUNNING]
     if "p" in flags:
         lines = [str(j.pid) for j in jobs]
     else:
@@ -1849,21 +1833,17 @@ class _PsOptions:
 
     Args:
         pids (frozenset[int]): ``-p`` selection, empty for none.
-        remote (frozenset[tuple[str, int]]): ``-p`` selection of other
-            workspaces' processes, ``owner:pid``, by owner prefix.
         all (bool): a letter that selects every process was given.
         columns (tuple[tuple[str, str], ...]): ``-o`` keys and headers.
     """
 
     pids: frozenset[int]
-    remote: frozenset[tuple[str, int]]
     all: bool
     columns: tuple[tuple[str, str], ...]
 
 
-def _ps_pids(value: str, option: str) -> tuple[set[int], set[tuple[str, int]]]:
-    """One ``-p`` list, refused in procps's words: this workspace's
-    PIDs, and other workspaces' as ``owner:pid``.
+def _ps_pids(value: str, option: str) -> set[int]:
+    """One ``-p`` list, refused in procps's words.
 
     Args:
         value (str): the list, comma or blank separated.
@@ -1873,14 +1853,7 @@ def _ps_pids(value: str, option: str) -> tuple[set[int], set[tuple[str, int]]]:
     if not tokens:
         raise ValueError(f"list of process IDs must follow {option}")
     pids: set[int] = set()
-    remote: set[tuple[str, int]] = set()
     for token in tokens:
-        owner, colon, local = token.partition(":")
-        if colon:
-            if not owner or not local.isascii() or not local.isdigit():
-                raise ValueError("process ID list syntax error")
-            remote.add((owner, int(local)))
-            continue
         body = token[1:] if token[:1] in "+-" else token
         if not body.isascii() or not body.isdigit():
             raise ValueError("process ID list syntax error")
@@ -1888,7 +1861,7 @@ def _ps_pids(value: str, option: str) -> tuple[set[int], set[tuple[str, int]]]:
         if number <= 0 or number > _MAX_PID_OPERAND:
             raise ValueError("process ID out of range")
         pids.add(number)
-    return pids, remote
+    return pids
 
 
 def _ps_columns(value: str, option: str) -> list[tuple[str, str]]:
@@ -1926,7 +1899,6 @@ def _parse_ps(words: list[str]) -> _PsOptions:
         words (list[str]): arguments after ps.
     """
     pids: set[int] = set()
-    remote: set[tuple[str, int]] = set()
     columns: list[tuple[str, str]] = []
     select_all = False
     at = 0
@@ -1941,9 +1913,7 @@ def _parse_ps(words: list[str]) -> _PsOptions:
                 attached = words[at] if at < len(words) else ""
                 at += 1
             if option == "--pid":
-                local, others = _ps_pids(attached, option)
-                pids |= local
-                remote |= others
+                pids |= _ps_pids(attached, option)
             else:
                 columns += _ps_columns(attached, option)
             continue
@@ -1967,14 +1937,10 @@ def _parse_ps(words: list[str]) -> _PsOptions:
                 value = words[at] if at < len(words) else ""
                 at += 1
             if flag == "p":
-                local, others = _ps_pids(value, "-p")
-                pids |= local
-                remote |= others
+                pids |= _ps_pids(value, "-p")
             else:
                 columns += _ps_columns(value, "-o")
-    return _PsOptions(
-        frozenset(pids), frozenset(remote), select_all, tuple(columns)
-    )
+    return _PsOptions(frozenset(pids), select_all, tuple(columns))
 
 
 def _ps_row(keys: list[str], cells: list[str]) -> str:
@@ -2032,14 +1998,14 @@ def _elapsed(seconds: int) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 
-def _started(fact: str, info: ProcessInfo, ctx: _PsContext) -> str:
+def _started(fact: str, info: Process, ctx: _PsContext) -> str:
     """One start-time column, lstart, start, stime or bsdstart, in the
     layouts measured from procps-ng 4.0.4's ``ps -o`` output: a day-old
     start prints its date, a recent one its clock.
 
     Args:
         fact (str): lstart, start, stime or bsdstart.
-        info (ProcessInfo): the runner.
+        info (Process): the runner.
         ctx (_PsContext): the line's shared facts.
     """
     start = datetime.fromtimestamp(info.started_at, ctx.zone)
@@ -2058,9 +2024,7 @@ def _started(fact: str, info: ProcessInfo, ctx: _PsContext) -> str:
     return gnu_strftime(start, "%H:%M")
 
 
-def _ps_cell(
-    key: str, info: ProcessInfo, ctx: _PsContext, owner: str = ""
-) -> str:
+def _ps_cell(key: str, info: Process, ctx: _PsContext) -> str:
     """One -o cell for a managed runner.
 
     The owner columns print the workspace user and the session's
@@ -2068,35 +2032,27 @@ def _ps_cell(
     where nobody claimed one or the runner is another session's, whose
     profile this one cannot name. A runner of the calling session belongs
     to the session ``$$`` leads; another session's to its own group.
-    Another workspace's runner prints its ids as ``owner:id``, and leads
-    or joins a group of that workspace.
-
     Args:
         key (str): the column key.
-        info (ProcessInfo): the runner.
+        info (Process): the runner.
         ctx (_PsContext): the line's shared facts.
-        owner (str): the owner prefix of another workspace's runner;
-            empty for this workspace's.
     """
     fact = _PS_COLUMNS[key][3]
     if fact in _PS_FIXED:
         return _PS_FIXED[fact]
-    tag = f"{owner}:" if owner else ""
     session = (
         ctx.shell_pid
-        if not owner
-        and info.session_id == ctx.session_id
-        and ctx.shell_pid is not None
-        else info.group_id or info.pid
+        if info.session_id == ctx.session_id and ctx.shell_pid is not None
+        else info.group or info.pid
     )
     if fact == "pid":
-        return f"{tag}{info.pid}"
+        return str(info.pid)
     if fact == "ppid":
-        return f"{tag}{info.parent_pid}" if info.parent_pid else "0"
+        return str(info.parent) if info.parent else "0"
     if fact == "pgid":
-        return f"{tag}{info.group_id or info.pid}"
+        return str(info.group or info.pid)
     if fact == "sid":
-        return f"{tag}{session}"
+        return str(session)
     if fact in ("stat", "state"):
         state = _PS_STATES[info.state]
         return state + ("s" if fact == "stat" and info.pid == session else "")
@@ -2116,54 +2072,16 @@ def _ps_cell(
     return info.command
 
 
-def _remote_info(record: RecordFields) -> ProcessInfo:
-    """Another workspace's runner as its process record keeps it.
+def _run_where(info: Process) -> str:
+    """Where a process's program runs, as ``ps`` names it: ``host PID``
+    for a host program, its machine (``docker:tools``) for another's.
 
     Args:
-        record (RecordFields): the record.
+        info (Process): the process, which a runtime runs.
     """
-    return ProcessInfo(
-        pid=record["pid"],
-        session_id=record["session"],
-        command=record["command"],
-        cwd=PathSpec.from_str_path(record["cwd"]),
-        started_at=record["started_at"],
-        execution_id=record["execution"],
-        state=ProcessState(record["state"]),
-        parent_pid=record["parent"],
-        group_id=record["group"],
-    )
-
-
-def _owner_tags(owners: list[str]) -> dict[str, str]:
-    """The shortest start of each owner's id, six characters at least,
-    that no other owner's begins with, as ``ps`` names their processes.
-
-    Args:
-        owners (list[str]): the owners' ids.
-    """
-    tags: dict[str, str] = {}
-    for owner in owners:
-        size = 6
-        while size < len(owner) and any(
-            other != owner and other.startswith(owner[:size])
-            for other in owners
-        ):
-            size += 1
-        tags[owner] = owner[:size]
-    return tags
-
-
-def _run_where(run: dict[str, JsonValue]) -> str:
-    """Where a native run goes on, as ``ps`` names it: ``host PID`` for a
-    host program, the runtime and the start of its tag for a sandbox's.
-
-    Args:
-        run (dict[str, JsonValue]): the run, as its process record keeps it.
-    """
-    if "host" in run:
-        return f"host {run['pid']}"
-    return f"{run['runtime']} {str(run['tag'])[:12]}"
+    if info.machine_pid is not None:
+        return f"host {info.machine_pid.pid}"
+    return str(info.machine)
 
 
 async def handle_ps(
@@ -2182,12 +2100,11 @@ async def handle_ps(
     exits 1, as procps does, and an option error is procps's message and
     usage.
 
-    The runners other workspaces on a shared store run follow this
-    workspace's, as ``owner:pid`` with the owner's id shortened as far as
-    it stays unique, within the same view. In the compact rows each
-    runner is followed by the native runs it has going, a host program
-    by its host PID and a sandbox's by its runtime and tag, each as
-    ``-<TAB>└ where: command``.
+    The daemon running the line holds the workspace's lease, so its
+    runners are every one the workspace has. In the compact rows a
+    runner that is a program a runtime runs is followed by where it
+    runs, a host program by its host PID and another by its machine, as
+    ``-<TAB>└ where``.
 
     Args:
         job_table (JobTable): the workspace's job table.
@@ -2202,32 +2119,10 @@ async def handle_ps(
         return _job_result(cmd_str, f"error: {exc}\n{_PS_USAGE}", 1)
     sid = _session_of(session)
     processes = _process_view(job_table, session)
-    every = options.all or not (options.pids or options.remote)
-    runs = {
-        handle.info.pid: list(handle.runs.values())
-        for handle in job_table.processes.live()
-    }
-    rows: list[tuple[str, ProcessInfo, list[dict[str, JsonValue]]]] = [
-        ("", info, runs.get(info.pid, []))
-        for info in processes.list()
-        if every or info.pid in options.pids
+    every = options.all or not options.pids
+    rows = [
+        info for info in processes.list() if every or info.pid in options.pids
     ]
-    remote = await job_table.remote_processes()
-    granted = processes.permissions()
-    tags = _owner_tags(list(remote))
-    for owner, records in remote.items():
-        for record in records.values():
-            if granted is None or (
-                granted.list == "session" and record["session"] != sid
-            ):
-                continue
-            if every or any(
-                owner.startswith(prefix) and record["pid"] == pid
-                for prefix, pid in options.remote
-            ):
-                rows.append(
-                    (tags[owner], _remote_info(record), record["runs"])
-                )
     if options.columns:
         keys = [key for key, _ in options.columns]
         ctx = _PsContext(
@@ -2238,20 +2133,17 @@ async def handle_ps(
             shell_pid=session.shell_pid if session is not None else None,
         )
         lines = [
-            _ps_row(keys, [_ps_cell(key, info, ctx, owner) for key in keys])
-            for owner, info, _ in rows
+            _ps_row(keys, [_ps_cell(key, info, ctx) for key in keys])
+            for info in rows
         ]
         if any(header for _, header in options.columns):
             lines.insert(0, _ps_row(keys, [h for _, h in options.columns]))
     else:
         lines = []
-        for owner, info, native in rows:
-            lines.append(
-                f"{owner + ':' if owner else ''}{info.pid}\t{info.command}"
-            )
-            lines += [
-                f"-\t└ {_run_where(run)}: {run['command']}" for run in native
-            ]
+        for info in rows:
+            lines.append(f"{info.pid}\t{info.command}")
+            if info.runtime is not None:
+                lines.append(f"-\t└ {_run_where(info)}")
     code = 0 if rows else 1
     out = encode_text("\n".join(lines) + "\n") if lines else b""
     return (

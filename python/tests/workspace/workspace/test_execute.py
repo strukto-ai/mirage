@@ -23,13 +23,14 @@ from mirage import MountMode, Workspace
 from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import command
 from mirage.commands.spec import CommandSpec
-from mirage.context.session_context import current_execution_id
+from mirage.context.session_context import current_process_id
+from mirage.execution.line.handle import LineHandle
+from mirage.execution.types import LineId
 from mirage.io.types import IOResult
 from mirage.observe.store import RAMObserverStore
 from mirage.policy import Action, CommandContext, Deny, Policy
 from mirage.utils.abort import ABORT_JOIN_SECONDS, MirageAbortError
 from mirage.vfs.ram import RAMVFS
-from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 from mirage.workspace.record.types import RecordFields
 from tests.fixtures.apply_marks import caching_ram_workspace, capture_marks
@@ -68,7 +69,7 @@ async def test_execution_identity_links_pipeline_threaded_cli_and_observation():
     seen = []
 
     def probe(config, paths, texts, ctx):
-        seen.append(current_execution_id())
+        seen.append(current_process_id())
         return b"tracked\n", IOResult()
 
     ws.register_cli(
@@ -80,17 +81,17 @@ async def test_execution_identity_links_pipeline_threaded_cli_and_observation():
     try:
         result = await ws.shell(
             "probe | cat > /ram/tracked; cat /ram/tracked",
-            execution_scope=ExecutionScope(execution_id="exec-request"),
+            line_handle=LineHandle(LineId("line-request"), "default", "probe"),
         )
         assert await result.stdout_str() == "tracked\n"
-        assert seen[0] is not None and seen[0] != "exec-request"
+        assert seen[0] is not None and seen[0] != "line-request"
         events = await ws.observer.events()
         assert (events[0]["type"], events[0]["id"]) == (
             "command",
-            "exec-request",
+            "line-request",
         )
         assert [event["type"] for event in events[1:]].count("vfs") > 0
-        assert all(event["parent"] == "exec-request" for event in events[1:])
+        assert all(event["parent"] == "line-request" for event in events[1:])
     finally:
         await ws.close()
 

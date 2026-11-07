@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { NetworkSetting } from '../../io/network.ts'
-import type { ProcessPermissions } from '../../process/config.ts'
+import type { ProcessPermissions } from '../../execution/process/config.ts'
 import type { JsonObject, JsonValue, MountMode } from '../../types.ts'
 import type { RAMVFSState } from '../../vfs/ram/ram.ts'
 import type { VFSStateBase } from '../../vfs/types.ts'
@@ -64,15 +64,16 @@ export interface SessionSnapshot {
 }
 
 export interface JobSnapshot {
-  execution_id?: string | null
+  process?: string | null
   id: number
   command: string
   cwd: string
-  status: string
+  signal: number | null
   stdout: Uint8Array
   stderr: Uint8Array
   exit_code: number
   created_at: number
+  ended_at: number | null
   session_id: string
 }
 

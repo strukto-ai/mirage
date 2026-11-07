@@ -16,7 +16,7 @@ import base64
 import re
 from collections.abc import Mapping, Sequence
 
-from mirage.process.handle import ProcessHandle
+from mirage.execution.process.handle import ProcessHandle
 from mirage.runtime.types import MountType
 from mirage.utils.clock import bound_system_clock, system_now
 from mirage.utils.quote import single_quote
@@ -156,12 +156,13 @@ def mount_field(text: str, source: bool = False) -> str:
 
 
 # Every process a run starts in a sandbox carries this variable, set to
-# the run's own id, so a run cancelled midway can be stopped in the box:
+# the id of the Mirage process the run is (``w1:9``), so a run cancelled
+# midway, or one a lapsed workspace left, can be stopped in the box:
 # stopping the client that started it does not reach the box everywhere
 # (`docker exec` has no kill, and the daemon keeps draining the
 # program's output, so a `yes` cut short by `head` would spin on). The id
 # rides the environment because every process of a pipeline inherits it.
-EXEC_ID = "MIRAGE_EXEC_ID"
+PROCESS = "MIRAGE_PROCESS"
 
 # How long stopping a cancelled run may hold the cancel: the stop line's
 # own second of grace, plus the exec's round trips. A box that stopped
@@ -180,8 +181,8 @@ HOST_START_SLACK_SECONDS = 2.0
 # How often a stop in its grace checks whether the signalled group ended.
 STOP_POLL_SECONDS = 0.02
 
-# Where the stop line finds grep and sleep: the config's PATH is for the
-# programs it runs and may name none of the system's directories.
+# Where the stop line finds tr, grep and sleep: the config's PATH is for
+# the programs it runs and may name none of the system's directories.
 REAP_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Output as base64 lines per read, status on fd 3, for an exec that returns text.
@@ -278,27 +279,33 @@ def wrap_line(argv: Sequence[str], env: Mapping[str, str], cwd: str) -> str:
 REAP_ABSENT = 3
 
 
-def reap_line(exec_id: str, signum: int = 15) -> str:
-    """The shell line that stops every process of the run ``exec_id``.
+def reap_line(process: str, signum: int = 15) -> str:
+    """The shell line that stops every process of the run ``process``
+    tags.
 
-    Each process whose environment holds the run's id, found through
+    Each process whose environment holds the tag, found through
     ``/proc``, gets ``signum``, and what still runs a second later gets
-    KILL, so a program that ignores it stops too. The line exits 0 once
-    it stopped them and ``REAP_ABSENT`` when there were none. It looks
-    grep up on its own PATH (``REAP_PATH``) and exits 127 without it, so
-    it needs only a POSIX shell, grep and ``/proc``.
+    KILL, so a program that ignores it stops too. The tag is matched as
+    a whole entry, so ``w1:9`` never stops the run of ``w1:90``. The line
+    exits 0 once it stopped them and ``REAP_ABSENT`` when there were
+    none. It looks tr and grep up on its own PATH (``REAP_PATH``) and
+    exits 127 without them, so it needs only a POSIX shell, tr, grep and
+    ``/proc``.
 
     Args:
-        exec_id (str): the run's id, as ``EXEC_ID`` carries it.
+        process (str): the id of the Mirage process the run is, as
+            ``PROCESS`` carries it.
         signum (int): the first signal, TERM (15) unless a ``kill``
             named another.
     """
-    mark = single_quote(f"{EXEC_ID}={exec_id}")
+    mark = single_quote(f"{PROCESS}={process}")
     return (
-        f"PATH={REAP_PATH}; command -v grep >/dev/null || exit 127; "
+        f"PATH={REAP_PATH}; command -v tr >/dev/null || exit 127; "
+        "command -v grep >/dev/null || exit 127; "
         f"m={mark}; "
         "left() { l=; for p in /proc/[0-9]*; do "
-        'grep -qs "$m" "$p/environ" && l="$l ${p#/proc/}"; done; '
+        "tr '\\000' '\\n' < \"$p/environ\" 2>/dev/null | grep -qxF \"$m\" "
+        '&& l="$l ${p#/proc/}"; done; '
         '[ -n "$l" ]; }; '
         f"left || exit {REAP_ABSENT}; kill -{signum} $l 2>/dev/null; "
         "for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.1; left || exit 0; done; "

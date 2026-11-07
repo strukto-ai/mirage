@@ -20,12 +20,12 @@ from collections.abc import Callable, Iterable
 from opentelemetry import metrics
 from opentelemetry.metrics import CallbackOptions, Counter, Meter, Observation
 
-from mirage.execution.types import ExecutionStatus
+from mirage.execution.line.types import LineState
 from mirage.server.registry import WorkspaceRegistry
 
 METER_NAME = "mirage.server"
 
-_RUNNING = frozenset({ExecutionStatus.RUNNING, ExecutionStatus.STOPPING})
+_RUNNING = frozenset({LineState.RUNNING, LineState.STOPPING})
 _registries: "weakref.WeakSet[WorkspaceRegistry]" = weakref.WeakSet()
 # The OpenTelemetry reader collects on a thread of its own, so the set is
 # read and changed under this lock.
@@ -172,8 +172,8 @@ def _running(options: CallbackOptions) -> Iterable[Observation]:
         sum(
             1
             for registry in _served()
-            for job in registry.jobs.list(prune=False)
-            if job.status in _RUNNING
+            for request in registry.jobs.requests()
+            if request.line.record.state in _RUNNING
         )
     )
 

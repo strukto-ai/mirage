@@ -24,7 +24,7 @@ from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.apple_container import AppleContainerRuntime
-from mirage.runtime.sandbox.constants import EXEC_ID, EXEC_PRELUDE
+from mirage.runtime.sandbox.constants import EXEC_PRELUDE, PROCESS
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
@@ -250,7 +250,7 @@ async def test_process_preserves_argv_and_probes_the_container_once(
             "-e",
             "E=request",
             "-e",
-            f"{EXEC_ID}=run",
+            f"{PROCESS}=run",
             "box",
             "/bin/sh",
             "-c",

@@ -14,9 +14,9 @@
 
 import pytest
 
+from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.types import materialize
-from mirage.shell.job_table import JobTable
 from mirage.shell.parse import parse
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS

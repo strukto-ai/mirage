@@ -38,6 +38,7 @@ from mirage.context import (
 )
 from mirage.errors.fs import no_mount
 from mirage.errors.types import NoMountError
+from mirage.execution.process.view import ProcessView
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_BODY_BYTES, MemoryBudget
 from mirage.io.network import (
@@ -50,7 +51,6 @@ from mirage.io.network import (
 from mirage.observe.observer import Observer
 from mirage.policy import Decisions, MountRootPolicy, Policies
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
-from mirage.process.view import ProcessView
 from mirage.rs.diff_types import DiffComputer
 from mirage.runtime.base import Runtime
 from mirage.runtime.types import DispatchFn

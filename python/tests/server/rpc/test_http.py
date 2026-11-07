@@ -92,8 +92,8 @@ async def test_shell_is_a_daemon_job_in_the_named_session(tmp_path):
             url, params=params, json=request(2, "shell", {"command": "pwd"})
         )
         assert pwd.json()["result"]["stdout"] == "/d\n"
-        jobs = app.state.jobs.list(wid)
-        assert {job.session_id for job in jobs} == {"agent"}
+        lines = app.state.registry.get(wid).runner.ws.line_table.lines()
+        assert {line.session_id for line in lines} == {"agent"}
 
 
 @pytest.mark.asyncio
@@ -116,13 +116,14 @@ async def test_cancel_request_reaches_a_running_shell(tmp_path):
         assert cancelled.status_code == 204
         answer = await asyncio.wait_for(running, 5)
         assert answer.json()["error"]["code"] == -32800
-        status = ""
+        table = app.state.registry.get(wid).runner.ws.line_table
+        signal = None
         for _ in range(100):
-            status = app.state.jobs.list(wid)[0].status
-            if status == "canceled":
+            signal = table.lines()[0].signal
+            if signal is not None:
                 break
             await asyncio.sleep(0.05)
-        assert status == "canceled"
+        assert signal == 2
 
 
 @pytest.mark.asyncio

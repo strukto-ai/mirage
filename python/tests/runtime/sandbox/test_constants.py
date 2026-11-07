@@ -20,8 +20,8 @@ import pytest
 
 from mirage.runtime.sandbox.constants import (
     ENCODE_OUTPUT,
-    EXEC_ID,
     MOUNT_GUARD,
+    PROCESS,
     REAP_ABSENT,
     REAP_PATH,
     decode_output,
@@ -94,21 +94,21 @@ def test_the_stop_line_answers_a_run_it_does_not_hold():
 @pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="needs /proc")
 @pytest.mark.parametrize("path", [None, "/nowhere"], ids=["path", "no-grep"])
 def test_the_stop_line_ends_a_run_that_ignores_term(path):
-    exec_id = uuid.uuid4().hex
+    tag = f"{uuid.uuid4().hex}:9"
     program = subprocess.Popen(
         [
             "/bin/sh",
             "-c",
             'trap "" TERM; echo ready; while :; do sleep 1; done',
         ],
-        env={**os.environ, EXEC_ID: exec_id},
+        env={**os.environ, PROCESS: tag},
         stdout=subprocess.PIPE,
     )
     assert program.stdout is not None
     try:
         assert program.stdout.readline() == b"ready\n"
         done = subprocess.run(
-            ["/bin/sh", "-c", reap_line(exec_id)],
+            ["/bin/sh", "-c", reap_line(tag)],
             env=dict(os.environ) if path is None else {"PATH": path},
             check=False,
             timeout=10,
@@ -118,6 +118,32 @@ def test_the_stop_line_ends_a_run_that_ignores_term(path):
     finally:
         if program.poll() is None:
             program.kill()
+        program.stdout.close()
+
+
+# A tag names one process: the stop line for w:9 leaves the run of w:90
+# running.
+@pytest.mark.skipif(not os.path.isdir("/proc/self"), reason="needs /proc")
+def test_the_stop_line_matches_its_process_tag_whole():
+    workspace = uuid.uuid4().hex
+    program = subprocess.Popen(
+        ["/bin/sh", "-c", "echo ready; while :; do sleep 1; done"],
+        env={**os.environ, PROCESS: f"{workspace}:90"},
+        stdout=subprocess.PIPE,
+    )
+    assert program.stdout is not None
+    try:
+        assert program.stdout.readline() == b"ready\n"
+        done = subprocess.run(
+            ["/bin/sh", "-c", reap_line(f"{workspace}:9")],
+            check=False,
+            timeout=10,
+        )
+        assert done.returncode == REAP_ABSENT
+        assert program.poll() is None
+    finally:
+        program.kill()
+        program.wait(timeout=5)
         program.stdout.close()
 
 

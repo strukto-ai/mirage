@@ -4,7 +4,8 @@ import type { Policy } from '../policy/base.ts'
 import type { Action, ExecuteResultContext } from '../policy/types.ts'
 import { JobConsole } from '../shell/console/job_console.ts'
 import { Channel } from '../shell/console/types.ts'
-import { ExecutionScope } from './execution.ts'
+import { LineHandle } from '../execution/line/handle.ts'
+import { LineId } from '../execution/types.ts'
 import { ShellExecution } from './shell_execution.ts'
 import { ExecuteResult } from './workspace/types.ts'
 import { Workspace } from './workspace/workspace.ts'
@@ -44,12 +45,15 @@ describe('ShellExecution', () => {
       release = gate()
     let finished = false
     const seen: string[] = []
-    const execution = new ShellExecution(async (output) => {
-      await output.emit(Channel.STDOUT, new Uint8Array(CHUNK_SIZE * 8).fill(97))
-      await output.emit(Channel.STDERR, enc.encode('warning'))
-      finished = true
-      return new ExecuteResult(new Uint8Array(), new Uint8Array(), 7)
-    }, new ExecutionScope())
+    const execution = new ShellExecution(
+      async (output) => {
+        await output.emit(Channel.STDOUT, new Uint8Array(CHUNK_SIZE * 8).fill(97))
+        await output.emit(Channel.STDERR, enc.encode('warning'))
+        finished = true
+        return new ExecuteResult(new Uint8Array(), new Uint8Array(), 7)
+      },
+      new LineHandle(new LineId('line'), 's', 'c'),
+    )
     const collecting = execution.collect(async (event) => {
       seen.push(event.stream)
       if (seen.length === 1) {
@@ -78,23 +82,26 @@ describe('ShellExecution', () => {
   it('joins producer cleanup after the event observer fails', async () => {
     let closed = false
     const observed: Uint8Array[] = []
-    const execution = new ShellExecution(async (output, signal) => {
-      try {
-        await output.emit(Channel.STDOUT, enc.encode('prefix'))
-        await new Promise<void>((_, reject) => {
-          signal.addEventListener(
-            'abort',
-            () => {
-              reject(new DOMException('aborted', 'AbortError'))
-            },
-            { once: true },
-          )
-        })
-        return empty()
-      } finally {
-        closed = true
-      }
-    }, new ExecutionScope())
+    const execution = new ShellExecution(
+      async (output, signal) => {
+        try {
+          await output.emit(Channel.STDOUT, enc.encode('prefix'))
+          await new Promise<void>((_, reject) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                reject(new DOMException('aborted', 'AbortError'))
+              },
+              { once: true },
+            )
+          })
+          return empty()
+        } finally {
+          closed = true
+        }
+      },
+      new LineHandle(new LineId('line'), 's', 'c'),
+    )
     await expect(
       execution.collect((event) => {
         observed.push(event.data)
@@ -109,14 +116,17 @@ describe('ShellExecution', () => {
   it('bounds output and keeps final status separate from collection', async () => {
     const started = gate()
     let finished = false
-    const execution = new ShellExecution(async (output) => {
-      started.release()
-      await output.emit(Channel.STDOUT, new Uint8Array(CHUNK_SIZE * 8).fill(97))
-      await output.emit(Channel.STDERR, enc.encode('warning'))
-      await output.emit(Channel.STDOUT, enc.encode('tail'))
-      finished = true
-      return new ExecuteResult(new Uint8Array(), new Uint8Array(), 7)
-    }, new ExecutionScope())
+    const execution = new ShellExecution(
+      async (output) => {
+        started.release()
+        await output.emit(Channel.STDOUT, new Uint8Array(CHUNK_SIZE * 8).fill(97))
+        await output.emit(Channel.STDERR, enc.encode('warning'))
+        await output.emit(Channel.STDOUT, enc.encode('tail'))
+        finished = true
+        return new ExecuteResult(new Uint8Array(), new Uint8Array(), 7)
+      },
+      new LineHandle(new LineId('line'), 's', 'c'),
+    )
     await started.promise
     expect(finished).toBe(false)
     const result = await execution.collect()
@@ -127,11 +137,14 @@ describe('ShellExecution', () => {
   })
 
   it('delivers accepted bytes before a late failure', async () => {
-    const execution = new ShellExecution(async (output) => {
-      await output.emit(Channel.STDOUT, enc.encode('prefix'))
-      await output.emit(Channel.STDERR, enc.encode('warning'))
-      throw new Error('late failure')
-    }, new ExecutionScope())
+    const execution = new ShellExecution(
+      async (output) => {
+        await output.emit(Channel.STDOUT, enc.encode('prefix'))
+        await output.emit(Channel.STDERR, enc.encode('warning'))
+        throw new Error('late failure')
+      },
+      new LineHandle(new LineId('line'), 's', 'c'),
+    )
     try {
       const first = await execution.events.next()
       const second = await execution.events.next()
@@ -148,15 +161,18 @@ describe('ShellExecution', () => {
   it('closes before first pull and unblocks a saturated writer exactly once', async () => {
     const started = gate()
     let closed = false
-    const execution = new ShellExecution(async (output) => {
-      try {
-        started.release()
-        await output.emit(Channel.STDOUT, new Uint8Array(CHUNK_SIZE * 8))
-        return empty()
-      } finally {
-        closed = true
-      }
-    }, new ExecutionScope())
+    const execution = new ShellExecution(
+      async (output) => {
+        try {
+          started.release()
+          await output.emit(Channel.STDOUT, new Uint8Array(CHUNK_SIZE * 8))
+          return empty()
+        } finally {
+          closed = true
+        }
+      },
+      new LineHandle(new LineId('line'), 's', 'c'),
+    )
     await started.promise
     await Promise.all([execution.close(), execution.close()])
     expect(closed).toBe(true)
@@ -166,24 +182,27 @@ describe('ShellExecution', () => {
   it('closes a pending output pull before joining the iterator', async () => {
     const ready = gate()
     let closed = false
-    const execution = new ShellExecution(async (_output, signal) => {
-      try {
-        ready.release()
-        await new Promise<void>((resolve) => {
-          signal.addEventListener(
-            'abort',
-            () => {
-              resolve()
-            },
-            { once: true },
-          )
-        })
-        signal.throwIfAborted()
-        return empty()
-      } finally {
-        closed = true
-      }
-    }, new ExecutionScope())
+    const execution = new ShellExecution(
+      async (_output, signal) => {
+        try {
+          ready.release()
+          await new Promise<void>((resolve) => {
+            signal.addEventListener(
+              'abort',
+              () => {
+                resolve()
+              },
+              { once: true },
+            )
+          })
+          signal.throwIfAborted()
+          return empty()
+        } finally {
+          closed = true
+        }
+      },
+      new LineHandle(new LineId('line'), 's', 'c'),
+    )
     const pending = execution.events.next()
     await ready.promise
     await execution.close()

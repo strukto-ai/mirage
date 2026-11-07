@@ -467,11 +467,11 @@ fn store(raw: &Doc) -> Result<(), String> {
             "namespace",
             "observer",
             "workspace",
-            "jobs",
+            "execution",
         ],
         "store",
     )?;
-    for group in ["namespace", "observer", "workspace", "jobs"] {
+    for group in ["namespace", "observer", "workspace", "execution"] {
         let block = raw.get(group);
         if matches!(block, Doc::Null) {
             continue;
@@ -486,8 +486,8 @@ fn store(raw: &Doc) -> Result<(), String> {
         if group == "observer" && block.get("type").named("redis") {
             return Err("config `store.observer` cannot be redis: history only grows; keep it on ram or disk".into());
         }
-        if group == "jobs" && block.get("type").named("disk") {
-            return Err("config `store.jobs` cannot be disk: a job's console is a stream other processes follow; keep the jobs plane on ram or redis".into());
+        if group == "execution" && block.get("type").named("disk") {
+            return Err("config `store.execution` cannot be disk: a job's console is a stream other processes follow; keep the execution plane on ram or redis".into());
         }
         typed_fields(block, "store_group", &at)?;
     }
@@ -783,7 +783,7 @@ mod tests {
         );
         assert!(
             store(&object(vec![(
-                "jobs",
+                "execution",
                 object(vec![("type", Doc::text("disk"))])
             )]))
             .unwrap_err()
@@ -799,7 +799,7 @@ mod tests {
         );
         assert!(
             store(&object(vec![(
-                "jobs",
+                "execution",
                 object(vec![("type", Doc::text("other"))])
             )]))
             .unwrap_err()

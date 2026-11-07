@@ -18,6 +18,9 @@ from functools import partial
 from typing import Any
 
 from mirage.context import reset_current_session, set_current_evaluation
+from mirage.execution.job import JobTable, JobWaits
+from mirage.execution.process.handle import ProcessHandle
+from mirage.execution.process.table import ProcessTable
 from mirage.io import IOResult
 from mirage.io.pipe import CAPACITY
 from mirage.io.stream import (
@@ -29,8 +32,6 @@ from mirage.io.stream import (
 from mirage.io.types import ByteSource, materialize
 from mirage.policy.decisions import Decisions
 from mirage.policy.types import HandOff
-from mirage.process.handle import ProcessHandle
-from mirage.process.table import ProcessTable
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
@@ -42,7 +43,6 @@ from mirage.shell.constants import (
 )
 from mirage.shell.descriptors import Recorder
 from mirage.shell.errors import ExitSignal, PipeClosed, ReturnSignal
-from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.node_kind import simple_command
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
@@ -54,6 +54,7 @@ from mirage.workspace.executor.builtins.exec import (
 from mirage.workspace.executor.control import UNWINDING, carried, ended
 from mirage.workspace.executor.jobs import (
     handle_background,
+    one_program,
     pump,
     report_reaped,
     run_program,
@@ -247,8 +248,9 @@ async def handle_pipe(
                 decode_text(cmd.text or b""),
                 partial(run_segment, i, cmd),
                 session.process_id,
+                one_command=one_program(cmd, session),
             )
-            children[i].session.process_id = process.info.pid
+            children[i].session.process_id = process.record.pid
             stages[i] = process
             children[i].frame.shell = (
                 None if _shell_stage(cmd, session) else process

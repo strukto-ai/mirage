@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { MachineId } from '@struktoai/mirage-core/execution/types'
 import { abortable } from '@struktoai/mirage-core/utils/abort'
 import { getCurrentSession } from '@struktoai/mirage-core/context/session_context'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
@@ -86,9 +87,12 @@ export class AppleContainerRuntime
     return Promise.resolve()
   }
 
-  /** The container this line's session runs in, which keeps its own libfaketime answer. */
-  protected override sandboxKey(): string {
-    return this.containerName()
+  /**
+   * The container this line's session runs in, `apple_container:<container>`,
+   * which keeps its own libfaketime answer.
+   */
+  override get machine(): MachineId {
+    return new MachineId(this.name, this.containerName())
   }
 
   /** The container this line's session runs in (config `containers`, else `container`). */

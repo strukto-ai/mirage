@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, Protocol
 from mirage.shell.types import TSNodeLike
 
 if TYPE_CHECKING:
+    from mirage.execution.process.handle import ProcessHandle
     from mirage.io.types import ByteSource, IOResult
-    from mirage.process.handle import ProcessHandle
     from mirage.runtime.types import RouteDecision, RuntimeIdentity
     from mirage.shell.console import JobConsole
 

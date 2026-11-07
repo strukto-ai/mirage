@@ -17,20 +17,21 @@ import errno
 import json
 import logging
 import os
-import socket
 import stat
 import sys
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from contextvars import Context
+from dataclasses import replace
 
 import aiofiles.os
 
 from mirage.context.session_context import current_caller
+from mirage.execution.process.handle import ProcessHandle
+from mirage.execution.types import MachinePid
 from mirage.io.stream import close_quietly, feed
 from mirage.io.types import ByteSource
-from mirage.process.handle import ProcessHandle
 from mirage.runtime.sandbox.constants import (
     EXEC_PRELUDE,
     FAKETIME_LIBRARIES,
@@ -44,8 +45,6 @@ from mirage.runtime.sandbox.constants import (
 )
 from mirage.runtime.types import OutputFn, RunResult, SandboxPipe
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
-from mirage.shell.join import shell_join
-from mirage.types import JsonValue
 from mirage.utils.clock import bound_system_clock
 
 logger = logging.getLogger(__name__)
@@ -152,11 +151,11 @@ async def run_program(
     """
     loop = asyncio.get_running_loop()
     runner = current_caller().process
-    run: dict[str, JsonValue] | None = None
+    machine_pid: MachinePid | None = None
 
     def exited() -> None:
-        if run is not None and runner is not None and run_key in runner.runs:
-            runner.add_run(run_key, {**run, "exited_at": time.time()})
+        if machine_pid is not None and runner is not None:
+            runner.set_machine_pid(replace(machine_pid, exited=time.time()))
 
     try:
         process, transport = await _spawn(
@@ -176,12 +175,14 @@ async def run_program(
         if hint is None:
             raise
         raise RuntimeError(hint) from None
-    run_key = f"host:{process.pid}"
     if children is not None:
         children[process] = (transport, loop)
-        if runner is not None:
-            run = host_run(process.pid, [executable, *args])
-            runner.add_run(run_key, run)
+        # A program run directly is its runner's process on this host,
+        # which leads its own group, and when it started, so a pid the
+        # host reused is never taken for it.
+        if runner is not None and direct:
+            machine_pid = MachinePid(process.pid, time.time())
+            runner.set_machine_pid(machine_pid)
             if process.returncode is not None:
                 exited()
     assert process.stdout is not None and process.stderr is not None
@@ -249,8 +250,6 @@ async def run_program(
         await close_quietly(stdin)
         if children is not None:
             children.pop(process, None)
-            if runner is not None:
-                runner.drop_run(run_key)
     code = process.returncode if process.returncode is not None else 1
     if direct and runner is not None and code < 0:
         runner.program_signaled(-code)
@@ -259,25 +258,6 @@ async def run_program(
         stderr=stderr or None,
         exit_code=128 - code if code < 0 else code,
     )
-
-
-def host_run(pid: int, argv: Sequence[str]) -> dict[str, JsonValue]:
-    """How another workspace on this host reaches a child ``run_program``
-    started, which leads its own process group: the host, the PID, and
-    when it started, so a PID the host reused is never taken for it.
-    ``run_program`` adds ``exited_at`` once the child exits while what
-    it started may run on. Mirrors TypeScript's ``hostRun``.
-
-    Args:
-        pid (int): the child's PID.
-        argv (Sequence[str]): what it runs.
-    """
-    return {
-        "host": socket.gethostname(),
-        "pid": pid,
-        "started_at": time.time(),
-        "command": shell_join(argv),
-    }
 
 
 async def _ps(*args: str) -> str:
@@ -346,19 +326,22 @@ async def _group_started(group: int) -> list[float]:
     return starts
 
 
-async def reap_host_run(run: Mapping[str, JsonValue], signum: int) -> bool:
-    """Stop a host run a lapsed workspace left: its process group gets
-    ``signum``, then KILL after ``STOP_GRACE_SECONDS``. Mirrors
-    TypeScript's ``reapHostRun``.
+async def reap_host_run(
+    machine_pid: MachinePid, seen_at: float | None, signum: int
+) -> bool:
+    """Stop a host program a lapsed workspace left, the one its process
+    record names on this host: its process group gets ``signum``, then
+    KILL after ``STOP_GRACE_SECONDS``. Mirrors TypeScript's
+    ``reapHostRun``.
 
-    Only a run of this host is reached, and only while its PID still
-    names a process started when the run did, to the second ``ps``
-    shows, so a PID the host reused is left alone. A PID that names no
-    process may still name the run's group, whose leader exited before
-    the programs it started. That group is the run's while one of its
-    members started by the last time the group was known to be: when
-    the leader exited (``exited_at``), else when its workspace last
-    vouched for the run (``seen_at``), with the leader still unreaped.
+    It is reached only while its PID still names a process started when
+    the program did, to the second ``ps`` shows, so a PID the host
+    reused is left alone. A PID that names no process may still name the
+    program's group, whose leader exited before the programs it started.
+    That group is the program's while one of its members started by the
+    last time the group was known to be: when the leader exited
+    (``exited``), else when its workspace last vouched for the process
+    (``seen_at``), with the leader still unreaped.
     The host gives no new process the id of a group that has members,
     and hands a number out again only after a full round of the others,
     so a group that took the id later has only members started since.
@@ -369,20 +352,17 @@ async def reap_host_run(run: Mapping[str, JsonValue], signum: int) -> bool:
     unreaped).
 
     Args:
-        run (Mapping[str, JsonValue]): the run as ``host_run`` keeps it.
+        machine_pid (MachinePid): the program's pid and start, and when
+            it exited, if it did.
+        seen_at (float | None): when its workspace last vouched for it.
         signum (int): the first signal.
 
     Returns:
-        bool: True once the run is stopped or gone; False when this
+        bool: True once the program is stopped or gone; False when this
         workspace cannot reach it.
     """
-    pid, recorded = run.get("pid"), run.get("started_at")
-    if (
-        sys.platform == "win32"
-        or run.get("host") != socket.gethostname()
-        or not isinstance(pid, int)
-        or not isinstance(recorded, (int, float))
-    ):
+    pid, recorded = machine_pid.pid, machine_pid.started
+    if sys.platform == "win32":
         return False
     try:
         started = await _started_at(pid)
@@ -396,8 +376,10 @@ async def reap_host_run(run: Mapping[str, JsonValue], signum: int) -> bool:
     else:
         if not members:
             return True
-        known = run.get("exited_at", run.get("seen_at"))
-        if not isinstance(known, (int, float)) or not any(
+        known = (
+            machine_pid.exited if machine_pid.exited is not None else seen_at
+        )
+        if known is None or not any(
             start <= known + HOST_START_SLACK_SECONDS for start in members
         ):
             return False

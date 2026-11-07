@@ -12,10 +12,11 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { homedir } from 'node:os'
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { mirageHome, pidFilePath, stateRootPath } from './paths.ts'
+import { loadDaemonId, mirageHome, pidFilePath, stateRootPath } from './paths.ts'
 
 describe('mirageHome', () => {
   it('defaults to ~/.mirage', () => {
@@ -58,5 +59,23 @@ describe('relative overrides are absolutized', () => {
 
   it('relative explicit pid path resolves against cwd', () => {
     expect(pidFilePath('x.pid', {})).toBe(resolve('x.pid'))
+  })
+})
+
+// A daemon keeps its id under the state root, so a restart on the same root
+// names the same daemon; a fresh root makes a new one.
+describe('loadDaemonId', () => {
+  it('makes the id once per state root', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mirage-daemon-'))
+    try {
+      const first = await loadDaemonId(join(dir, 'state'))
+      expect(first).toHaveLength(32)
+      expect(await loadDaemonId(join(dir, 'state'))).toBe(first)
+      expect(await readFile(join(dir, 'state', 'daemon-id'), 'utf8')).toBe(first)
+      expect(await readdir(join(dir, 'state'))).toEqual(['daemon-id'])
+      expect(await loadDaemonId(join(dir, 'other'))).not.toBe(first)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
+from mirage.execution.process.config import ProcessPermissions
 from mirage.io.network import (
     NetworkRule,
     NetworkSetting,
@@ -43,7 +44,6 @@ from mirage.policy.types import (
     ProfileScripts,
     ScriptMethod,
 )
-from mirage.process.config import ProcessPermissions
 from mirage.rs.document import validate_document
 from mirage.runtime.types import ScriptSource
 from mirage.secrets.config import EnvVar, SecretRef

@@ -32,6 +32,8 @@ from mirage.commands.cli.types import CLI, CLIHandler
 from mirage.commands.config import Command
 from mirage.commands.spec import Argument, CommandSpec
 from mirage.core.api.client import SessionPool
+from mirage.execution.job import JobState
+from mirage.execution.ram import RAMExecutionStore
 from mirage.io import IOResult
 from mirage.runtime.base import Runtime
 from mirage.runtime.python.host.fs import HostFs
@@ -42,7 +44,6 @@ from mirage.shell.console import (
     ConsoleStore,
     RAMConsoleStore,
 )
-from mirage.shell.job_table import JobStatus, RAMJobStore
 from mirage.types import (
     CapacityResult,
     CapacityState,
@@ -522,7 +523,7 @@ async def test_close_settles_a_job_that_ignores_the_cancel():
             release.set()
         await asyncio.wait_for(closing, timeout=5)
 
-        assert job.status == JobStatus.KILLED
+        assert job.signal is not None
         assert job.exit_code == 137
         await asyncio.wait_for(job.console.wait_finished(), timeout=2)
     finally:
@@ -534,7 +535,7 @@ async def test_close_settles_a_job_that_ignores_the_cancel():
         await asyncio.sleep(0)
 
     # The runner unwinding afterwards must not reopen or relabel it.
-    assert job.status == JobStatus.KILLED
+    assert job.signal is not None
 
 
 class _LateWriteStore(RAMConsoleStore):
@@ -556,7 +557,7 @@ class _LateWriteStore(RAMConsoleStore):
         return await super().append(channel, data)
 
 
-class _OneConsole(RAMJobStore):
+class _OneConsole(RAMExecutionStore):
     """A job store whose every job writes one given console.
 
     Args:
@@ -597,7 +598,7 @@ async def test_close_keeps_a_console_open_until_its_runner_settles():
     assert job.process is not None and job.process.terminate()
 
     async def killed():
-        while job.status == JobStatus.RUNNING:
+        while job.state == JobState.RUNNING:
             await asyncio.sleep(0)
 
     await asyncio.wait_for(killed(), timeout=2)
@@ -623,31 +624,31 @@ async def test_close_is_idempotent_with_a_job_running():
         await asyncio.wait_for(closing, timeout=5)
         await asyncio.wait_for(ws.close(), timeout=5)
 
-        assert job.status == JobStatus.KILLED
+        assert job.signal is not None
     finally:
         for release in _RELEASE:
             release.set()
         await asyncio.sleep(0)
 
 
-async def _leave_a_job_running() -> JobStatus:
+async def _leave_a_job_running() -> int | None:
     with Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE) as ws:
         await ws.shell("sleep 30 &")
         job = ws.job_table.all_running_jobs()[0]
-    return job.status
+    return job.signal
 
 
 def test_a_with_block_exits_inside_a_loop_with_a_job_running():
     # The job runs on the loop the block exits inside, which runs nothing
     # until the exit returns, so the close cannot wait for it.
-    statuses: list[JobStatus] = []
+    statuses: list[int | None] = []
     worker = threading.Thread(
         target=lambda: statuses.append(asyncio.run(_leave_a_job_running())),
         daemon=True,
     )
     worker.start()
     worker.join(timeout=10)
-    assert statuses == [JobStatus.KILLED]
+    assert statuses == [9]
 
 
 @pytest.mark.asyncio

@@ -43,7 +43,7 @@ async function rows(line: string, exitCode = 0): Promise<[string, string, number
     const io = await ws.shell(line)
     expect(io.exitCode, new TextDecoder().decode(io.stderr)).toBe(exitCode)
     const recs = ws.records.slice(start)
-    expect(recs.every((r) => r.executionId !== null)).toBe(true)
+    expect(recs.every((r) => r.process !== null)).toBe(true)
     return recs
       .filter((r) => MUTATIONS.has(r.op) && r.source === 'disk')
       .map((r) => [r.op, r.path, r.bytes])

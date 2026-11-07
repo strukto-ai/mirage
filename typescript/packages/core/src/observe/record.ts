@@ -139,7 +139,7 @@ export class RecordIndex {
 export class OpRecord {
   /** In-process transfer lifecycle; excluded from serialized observations. */
   complete = true
-  readonly executionId: string | null
+  readonly process: string | null
   readonly op: string
   readonly path: string
   readonly source: string
@@ -152,9 +152,9 @@ export class OpRecord {
 
   constructor(
     init: Pick<OpRecord, 'op' | 'path' | 'source' | 'bytes' | 'timestamp' | 'durationMs'> &
-      Partial<Pick<OpRecord, 'executionId' | 'fingerprint' | 'revision' | 'mountId'>>,
+      Partial<Pick<OpRecord, 'process' | 'fingerprint' | 'revision' | 'mountId'>>,
   ) {
-    this.executionId = init.executionId ?? null
+    this.process = init.process ?? null
     this.op = init.op
     this.path = init.path
     this.source = init.source
@@ -184,7 +184,7 @@ export class OpRecord {
       durationMs: this.durationMs,
       fingerprint: this.fingerprint,
       revision: this.revision,
-      ...(this.executionId === null ? {} : { execution_id: this.executionId }),
+      ...(this.process === null ? {} : { process: this.process }),
     }
   }
 }

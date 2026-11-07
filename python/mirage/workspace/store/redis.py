@@ -19,9 +19,9 @@ from typing import Any, Awaitable, cast
 
 import redis.asyncio as aioredis
 
+from mirage.execution.base import ExecutionStore
+from mirage.execution.redis import RedisExecutionStore
 from mirage.observe.store import ObserverStore
-from mirage.shell.job_table.redis import RedisJobStore
-from mirage.shell.job_table.store import JobStore
 from mirage.workspace.mount.namespace.redis import (
     CAS_SCRIPT,
     RedisNamespaceStore,
@@ -56,7 +56,8 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
     - ``{prefix}workspaces`` — hash, workspace id -> metadata JSON
     - ``{prefix}{ws}:namespace:nodes`` — node table
     - ``{prefix}{ws}:sessions`` — session table
-    - ``{prefix}{ws}:jobs:*``: job lists, consoles and owner leases
+    - ``{prefix}{ws}:execution:*``: job lists, consoles, the
+      workspace's lease and process records
 
     All plane state survives restarts and is visible to every process
     pointed at the same url and prefix, so a workspace rebuilt from its
@@ -75,7 +76,7 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         namespace: WorkspaceStateStore | None = None,
         observer: WorkspaceStateStore | None = None,
         workspace: WorkspaceStateStore | None = None,
-        jobs: WorkspaceStateStore | None = None,
+        execution: WorkspaceStateStore | None = None,
     ) -> None:
         super().__init__(
             namespace=namespace,
@@ -85,7 +86,7 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
                 root=_history_root(root, url, key_prefix)
             ),
             workspace=workspace,
-            jobs=jobs,
+            execution=execution,
         )
         self._url = url
         self._prefix = key_prefix
@@ -96,7 +97,7 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         self._meta_cas = self._meta_client.register_script(CAS_SCRIPT)
         self._namespaces: dict[str, RedisNamespaceStore] = {}
         self._sessions: dict[str, RedisNamespaceStore] = {}
-        self._jobs: dict[str, RedisJobStore] = {}
+        self._execution: dict[str, RedisExecutionStore] = {}
 
     def _make_namespace(self, workspace_id: str) -> NamespaceStore:
         if workspace_id not in self._namespaces:
@@ -121,13 +122,13 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
             )
         return self._sessions[workspace_id]
 
-    def _make_jobs(self, workspace_id: str) -> JobStore:
-        if workspace_id not in self._jobs:
-            self._jobs[workspace_id] = RedisJobStore(
+    def _make_execution(self, workspace_id: str) -> ExecutionStore:
+        if workspace_id not in self._execution:
+            self._execution[workspace_id] = RedisExecutionStore(
                 url=self._url,
-                key_prefix=f"{self._prefix}{workspace_id}:jobs:",
+                key_prefix=f"{self._prefix}{workspace_id}:execution:",
             )
-        return self._jobs[workspace_id]
+        return self._execution[workspace_id]
 
     async def _load_meta(self, workspace_id: str) -> WorkspaceFields | None:
         raw = await cast(
@@ -156,7 +157,7 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
         for handles in (
             self._namespaces,
             self._sessions,
-            self._jobs,
+            self._execution,
         ):
             handle = handles.pop(workspace_id, None)
             if handle is not None:
@@ -171,6 +172,6 @@ class RedisWorkspaceStateStore(WorkspaceStateStore):
             await ns.close()
         for sess in self._sessions.values():
             await sess.close()
-        for jobs in self._jobs.values():
-            await jobs.close()
+        for execution in self._execution.values():
+            await execution.close()
         await self._meta_client.aclose()

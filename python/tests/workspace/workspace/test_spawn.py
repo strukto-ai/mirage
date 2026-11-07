@@ -3,7 +3,7 @@ import asyncio
 import pytest
 
 from mirage import Workspace
-from mirage.process.types import SpawnRequest
+from mirage.execution.process.types import SpawnRequest
 from mirage.runtime.python.monty.runtime import MontyRuntime
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS
@@ -76,7 +76,7 @@ async def test_terminate_stops_a_child_with_the_signal_it_names():
         child = ws.spawn(SpawnRequest(("sleep", "30")))
         child.terminate(15)
         info = await asyncio.wait_for(child.wait(), 5)
-        assert info.exit_code == 143
+        assert info.exit == 143
         assert child.poll() == 143
     finally:
         await ws.close()
@@ -184,8 +184,8 @@ async def test_top_level_line_cannot_bypass_spawn_process_cap():
 
 
 @pytest.mark.asyncio
-async def test_a_spawned_command_records_under_its_own_execution():
-    # The child's file calls carry the execution id its handle bound, not
+async def test_a_spawned_command_records_under_its_own_process():
+    # The child's file calls carry the process id its handle bound, not
     # the spawning caller's.
     ws = Workspace({"/data/": RAMVFS()}, mode=MountMode.WRITE, runtimes=[])
     try:
@@ -196,7 +196,7 @@ async def test_a_spawned_command_records_under_its_own_execution():
         info = await child.wait()
         reads = [r for r in ws.vfs.records if r.path == "/data/f"]
         assert reads
-        assert {r.execution_id for r in reads} == {info.execution_id}
+        assert {r.process for r in reads} == {str(info.id)}
     finally:
         await ws.close()
 

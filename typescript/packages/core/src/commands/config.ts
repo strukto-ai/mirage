@@ -15,7 +15,7 @@
 import type { Accessor } from '../accessor/base.ts'
 import { IOResult, type ByteSource, type CommandOutput } from '../io/types.ts'
 import type { EntryGate } from '../policy/types.ts'
-import type { ProcessView } from '../process/view.ts'
+import type { ProcessView } from '../execution/process/view.ts'
 import type { DiffComputer } from '../rs/diff_types.ts'
 import type { FindExpr } from '../rs/find.ts'
 import type { CommandRuntime, ShellFn } from '../runtime/types.ts'

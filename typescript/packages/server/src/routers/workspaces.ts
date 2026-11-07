@@ -472,6 +472,9 @@ function openWorkspace(
         ws = new deps.host.Workspace(vfsMap, {
           ...args.options,
           workspaceId: wid,
+          // The workspace's lease names this daemon while it runs its
+          // lines, by the id it keeps across restarts.
+          daemonId: await deps.host.daemonId(),
           // Daemon default is disk (a created workspace survives restart
           // with zero infrastructure, like git init); the library default
           // stays ram. An explicit store always wins.

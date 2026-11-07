@@ -22,7 +22,7 @@ import type { ExecAction, FindAction } from '../../commands/builtin/types.ts'
 import { formatFindLs } from '../../commands/builtin/utils/formatting.ts'
 import type { Identity } from '../../commands/builtin/utils/identity.ts'
 import { linkView } from '../../commands/builtin/utils/links.ts'
-import { getCurrentSession, runAsProgram } from '../../context/session_context.ts'
+import { currentCaller, getCurrentSession, runAsProgram } from '../../context/session_context.ts'
 import { modifiedTs } from '../../core/generic/find.ts'
 import { printfKind, treeHasTime } from '../../core/generic/find_eval.ts'
 import { enoent, strerrorOf } from '../../errors/fs.ts'
@@ -143,6 +143,9 @@ async function runExec(
   // program run for the session, so a builtin that doubles as a program
   // answers as the program (`printf -v` is a format).
   const line = (shadowed ? 'command ' : '') + shellJoin(words)
+  // find stays its process and forks each program as a child of it.
+  const process = currentCaller().process
+  if (process != null) process.oneCommand = false
   const run = () => executeFn(`( ${line} )`, { sessionId: session?.sessionId ?? '', stdin })
   const io = session === null ? await run() : await runAsProgram(session, run)
   if (io.stdout !== null) {

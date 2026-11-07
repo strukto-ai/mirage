@@ -3,6 +3,8 @@ import asyncio
 import pytest
 
 from mirage import ShellExecution, Workspace
+from mirage.execution.line.handle import LineHandle
+from mirage.execution.types import LineId
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult, PathRecord
 from mirage.policy import Action, ExecuteResultContext, Policy
@@ -10,7 +12,6 @@ from mirage.shell.console import JobConsole
 from mirage.shell.console.types import Channel
 from mirage.types import PathSpec
 from mirage.utils.abort import MirageAbortError
-from mirage.workspace.execution import ExecutionScope
 
 COUNTED = PathRecord(PathSpec.from_str_path("/a"), values=(1,))
 
@@ -28,7 +29,7 @@ async def test_events_bound_output_and_keep_final_status_separate():
         finished.set()
         return IOResult(exit_code=7, records=[COUNTED])
 
-    execution = ShellExecution(run, ExecutionScope())
+    execution = ShellExecution(run, LineHandle(LineId("line"), "s", "c"))
     await started.wait()
     assert not finished.is_set()
     result = await execution.collect()
@@ -58,7 +59,7 @@ async def test_collect_awaits_event_observer_and_preserves_output():
             entered.set()
             await release.wait()
 
-    execution = ShellExecution(run, ExecutionScope())
+    execution = ShellExecution(run, LineHandle(LineId("line"), "s", "c"))
     collecting = asyncio.create_task(execution.collect(on_event=observe))
     try:
         await asyncio.wait_for(entered.wait(), 1)
@@ -96,7 +97,7 @@ async def test_collect_observer_failure_joins_producer_cleanup():
         observed.append(event.data)
         raise ValueError("preview failed")
 
-    execution = ShellExecution(run, ExecutionScope())
+    execution = ShellExecution(run, LineHandle(LineId("line"), "s", "c"))
     with pytest.raises(ValueError, match="preview failed"):
         await asyncio.wait_for(execution.collect(on_event=observe), 1)
     assert observed == [b"prefix"]
@@ -112,7 +113,7 @@ async def test_late_failure_follows_accepted_prefix():
         await output.emit(Channel.STDERR, b"warning")
         raise ValueError("late failure")
 
-    execution = ShellExecution(run, ExecutionScope())
+    execution = ShellExecution(run, LineHandle(LineId("line"), "s", "c"))
     async with execution:
         assert (await anext(execution.events)).data == b"prefix"
         assert (await anext(execution.events)).stream == Channel.STDERR
@@ -135,7 +136,7 @@ async def test_close_before_first_pull_unblocks_saturated_writer():
         finally:
             closed.set()
 
-    execution = ShellExecution(run, ExecutionScope())
+    execution = ShellExecution(run, LineHandle(LineId("line"), "s", "c"))
     await started.wait()
     await asyncio.wait_for(
         asyncio.gather(execution.aclose(), execution.aclose()), 1
@@ -158,7 +159,7 @@ async def test_close_during_pending_pull_joins_producer():
         finally:
             closed.set()
 
-    execution = ShellExecution(run, ExecutionScope())
+    execution = ShellExecution(run, LineHandle(LineId("line"), "s", "c"))
     pending = asyncio.create_task(anext(execution.events))
     await ready.wait()
     await asyncio.wait_for(execution.aclose(), 1)

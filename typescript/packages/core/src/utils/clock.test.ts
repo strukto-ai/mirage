@@ -36,7 +36,9 @@ const SEAMED = [
   'core/box/client.ts',
   'core/dropbox/client.ts',
   'core/google/client.ts',
-  'shell/job_table',
+  'execution/base.ts',
+  'execution/job',
+  'execution/ram.ts',
   'workspace/files.ts',
   'workspace/mount/mount.ts',
   'workspace/mount/registry.ts',
@@ -62,22 +64,22 @@ const KEPT_ON_SYSTEM_CLOCK: Record<string, string> = {
     'the trust window and row-write times are counted per key prefix across every ' +
     'store sharing it, and those stores may hold different clocks, so they stay on ' +
     'the process monotonic clock; listing expiry already reads the store clock',
-  'shell/job_table/table.ts setTimeout':
+  'execution/job/table.ts setTimeout':
     "bounds a killed job's stop with a loop timer, which fake timers already " +
     'replace; on a manual clock a clock sleep would end the bound before the job ' +
     "stops. It also paces the owner's lease, renewing it and checking another " +
     "owner's, which expires on real time in the store",
-  'shell/job_table/table.ts sleep':
+  'execution/job/handle.ts sleep':
     'paces the retry of a failed watch, which reads the store on real time; a ' +
     "manual clock's sleep returns at once and would spin the retry",
-  'shell/job_table/table.ts Date.now':
+  'execution/job/table.ts Date.now':
     'stamps seen_at on the process records, which a host reap compares with the start ' +
     "times ps prints, on the host's wall clock; a manual clock's time would prove " +
     "nothing about the host's processes",
-  'shell/job_table/table.ts performance.now':
+  'execution/job/table.ts performance.now':
     "waits out another owner's lease on the same process clock the shared store " +
     "uses; a table's injected clock may differ from other tables sharing the store",
-  'shell/job_table/ram.ts performance.now':
+  'execution/ram.ts performance.now':
     "an owner's lease is compared by every table sharing the store, and those " +
     'tables may hold different clocks, so it stays on the process monotonic ' +
     "clock, as a Redis lease expires on the server's",

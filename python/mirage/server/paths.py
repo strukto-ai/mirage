@@ -12,10 +12,14 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import logging
 import os
+import uuid
 from pathlib import Path
 
 from mirage.server.env import ENV_HOME
+
+logger = logging.getLogger(__name__)
 
 
 def _absolute(value: str | Path) -> Path:
@@ -88,3 +92,32 @@ def resources_root_path(explicit: str | Path | None = None) -> Path:
     if explicit is not None:
         return _absolute(explicit)
     return mirage_home() / "resources"
+
+
+def load_daemon_id(state_root: Path) -> str:
+    """This daemon's id, kept in ``daemon-id`` under the state root and
+    made the first time.
+
+    A workspace's lease names the daemon that runs it, so a daemon
+    restarted on the same state root holds its workspaces again at once.
+    Daemons that start together on one root agree on one id: the first
+    to link its file in place wins, and the others read it.
+
+    Args:
+        state_root (Path): the live-state root.
+
+    Returns:
+        str: the daemon's id.
+    """
+    path = state_root / "daemon-id"
+    if not path.exists():
+        state_root.mkdir(parents=True, exist_ok=True)
+        draft = state_root / f"daemon-id.{uuid.uuid4().hex}"
+        draft.write_text(uuid.uuid4().hex, encoding="utf-8")
+        try:
+            os.link(draft, path)
+        except FileExistsError:
+            logger.debug("daemon id already written at %s", path)
+        finally:
+            draft.unlink()
+    return path.read_text(encoding="utf-8").strip()

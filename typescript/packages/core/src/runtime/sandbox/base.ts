@@ -16,7 +16,6 @@ import type { Context } from '../../commands/config.ts'
 import { currentCaller } from '../../context/session_context.ts'
 import type { ByteSource } from '../../io/types.ts'
 import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
-import { shellJoin } from '../../shell/join.ts'
 import type { PathSpec } from '../../types.ts'
 import { abortable } from '../../utils/abort.ts'
 import { concat } from '../../utils/bytes.ts'
@@ -38,7 +37,7 @@ import {
   type SandboxConfig,
 } from './config.ts'
 import {
-  EXEC_ID,
+  PROCESS,
   FAKETIME_PROBE_SECONDS,
   faketimeEnv,
   faketimeProbe,
@@ -91,7 +90,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   // retries.
   private connecting: Promise<void> | null = null
   private mounts: SandboxMounts | null = null
-  // The libfaketime each sandbox holds (`sandboxKey`), asked once the first
+  // The libfaketime each sandbox holds (`machine`), asked once the first
   // program runs there under a system_time: null for none. Concurrent first
   // runs share the probe; a failed probe clears its slot so a later run asks
   // again.
@@ -202,15 +201,16 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     const clock = await this.systemTimeEnv(given, ctx.signal)
     // A deadline that passed during the probe starts nothing.
     ctx.signal?.throwIfAborted()
-    const execId = crypto.randomUUID().replaceAll('-', '')
+    // The run is the process it runs as, which its tag names; one run
+    // outside a process gets a tag of its own.
     const runner = currentCaller().process
-    runner?.addRun(`box:${execId}`, { runtime: this.name, tag: execId, command: shellJoin(argv) })
+    const tag = runner?.record.id.toString() ?? crypto.randomUUID().replaceAll('-', '')
     let done: RunResult
     try {
       done = await this.execArgv(
         run,
         ctx.stdin,
-        { ...given, ...clock, [EXEC_ID]: execId },
+        { ...given, ...clock, [PROCESS]: tag },
         ctx.cwd.virtual,
         output,
         errors,
@@ -218,10 +218,8 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
       )
     } catch (error) {
       if (ctx.signal?.aborted === true)
-        await this.reapRun(execId, runner?.signal ?? runner?.interrupted ?? 15)
+        await this.reapRun(tag, runner?.signal ?? runner?.interrupted ?? 15)
       throw error
-    } finally {
-      runner?.dropRun(`box:${execId}`)
     }
     if (done.exitCode === CANNOT_EXECUTE_STATUS) this.mounts?.forget()
     // sshfs acknowledged the writes before they landed.
@@ -238,13 +236,13 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
 
   /**
    * Stop a run a lapsed workspace left in the box: every process its
-   * `EXEC_ID` tag marks gets `signum`, then KILL a second later. Connecting
+   * `PROCESS` tag marks gets `signum`, then KILL a second later. Connecting
    * is bounded as the stop is (`REAP_WAIT_SECONDS`). Answers true once the
    * box held the run's processes and they were stopped, false when it holds
    * none of them, as a box other than the run's does; throws when the box
    * could not be reached or the stop failed.
    *
-   * @param tag the run's `EXEC_ID`, as its process record has it.
+   * @param tag the id of the process the run is, as `PROCESS` carries it.
    * @param signum the first signal.
    */
   async reap(tag: string, signum: number): Promise<boolean> {
@@ -255,21 +253,21 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   }
 
   /**
-   * Stop what a cancelled or failed run left in the box (`EXEC_ID`), for at
+   * Stop what a cancelled or failed run left in the box (`PROCESS`), for at
    * most `REAP_WAIT_SECONDS`: a box that stopped answering would otherwise hold
    * the cancel or the error.
    *
-   * @param execId the run's id.
+   * @param tag the run's tag.
    * @param signum the signal the run is stopped with first.
    * @returns the stop line's status (`reapLine`); null when the box did not
    *   answer.
    */
-  protected async reapRun(execId: string, signum: number): Promise<number | null> {
+  protected async reapRun(tag: string, signum: number): Promise<number | null> {
     const signal = AbortSignal.timeout(REAP_WAIT_SECONDS * 1000)
     try {
       const done = await abortable(
         this.execArgv(
-          ['/bin/sh', '-c', reapLine(execId, signum)],
+          ['/bin/sh', '-c', reapLine(tag, signum)],
           null,
           { ...this.config.env },
           '/',
@@ -280,11 +278,11 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
         signal,
       )
       if (done.exitCode !== 0 && done.exitCode !== REAP_ABSENT) {
-        console.debug(`${this.name}: run ${execId} not stopped: exit ${String(done.exitCode)}`)
+        console.debug(`${this.name}: run ${tag} not stopped: exit ${String(done.exitCode)}`)
       }
       return done.exitCode
     } catch (error) {
-      console.debug(`${this.name}: run ${execId} not stopped: ${String(error)}`)
+      console.debug(`${this.name}: run ${tag} not stopped: ${String(error)}`)
       return null
     }
   }
@@ -317,7 +315,7 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
     signal?: AbortSignal,
   ): Promise<Record<string, string>> {
     if (boundSystemClock() === null) return {}
-    const key = this.sandboxKey()
+    const key = String(this.machine)
     let probe = this.faketime.get(key)
     if (probe === undefined) {
       // Its own deadline, not the first caller's: every waiting run shares it.
@@ -344,15 +342,6 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
       return {}
     }
     return library === null ? {} : faketimeEnv(library, env)
-  }
-
-  /**
-   * Which sandbox a run of the current session goes to, which the libfaketime
-   * probe is kept for: one per runtime unless a provider picks its sandbox
-   * per session. Mirrors Python's `SandboxRuntime._sandbox_key`.
-   */
-  protected sandboxKey(): string {
-    return ''
   }
 
   protected async ensureConnected(signal?: AbortSignal): Promise<void> {

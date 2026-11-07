@@ -15,7 +15,7 @@
 import type { ObserverStore } from '../../observe/store.ts'
 import { normalizeKeyPrefix, type S3Config } from '../../vfs/s3/config.ts'
 import { RecordNamespaceStore, type NamespaceStore } from '../mount/namespace/store.ts'
-import type { JobStore } from '../../shell/job_table/store.ts'
+import type { ExecutionStore } from '../../execution/base.ts'
 import { S3RecordClient } from '../record/s3.ts'
 import {
   WorkspaceStateStore,
@@ -67,9 +67,9 @@ export class S3WorkspaceStateStore extends WorkspaceStateStore {
     )
   }
 
-  protected makeJobs(_workspaceId: string): JobStore {
+  protected makeExecution(_workspaceId: string): ExecutionStore {
     throw new Error(
-      'The s3 store hosts only the sessions+meta group; keep the jobs ' +
+      'The s3 store hosts only the sessions+meta group; keep the execution ' +
         "plane on RAM or Redis and pass the s3 store as the 'workspace' group override.",
     )
   }

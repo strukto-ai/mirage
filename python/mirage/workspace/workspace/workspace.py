@@ -17,6 +17,7 @@ import dataclasses
 import errno
 import logging
 import shutil
+import socket
 import tempfile
 from collections import deque
 from collections.abc import (
@@ -61,11 +62,21 @@ from mirage.context import (
     set_program_invocation,
     set_refusal_sink,
 )
-from mirage.context.session_context import run_with_execution
+from mirage.context.session_context import run_as_process
 from mirage.core.history.constants import HISTFILESIZE
 from mirage.errors.fs import enoent
 from mirage.events.base import EventRuntime
-from mirage.execution.context import new_execution_id
+from mirage.execution.context import new_line_id
+from mirage.execution.job import JobTable
+from mirage.execution.line.handle import LineHandle
+from mirage.execution.line.table import LineTable
+from mirage.execution.process.child import ChildProcess
+from mirage.execution.process.config import ProcessPermissions
+from mirage.execution.process.stdio import ProcessInput, ProcessOutput
+from mirage.execution.process.table import ProcessTable
+from mirage.execution.process.types import SpawnRequest
+from mirage.execution.process.view import ProcessView
+from mirage.execution.types import MachineId, MachinePid, ProcessId
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget
@@ -94,12 +105,6 @@ from mirage.policy import (
 from mirage.policy.builtin import RoutePolicy
 from mirage.policy.builtin.output_cap import check_command_limits
 from mirage.policy.types import DryRun, PolicyCaller, policy_caller
-from mirage.process.child import ChildProcess
-from mirage.process.config import ProcessPermissions
-from mirage.process.stdio import ProcessInput, ProcessOutput
-from mirage.process.table import ProcessTable
-from mirage.process.types import SpawnRequest
-from mirage.process.view import ProcessView
 from mirage.rs.diff_pool import DiffPool
 from mirage.runtime.base import Runtime
 from mirage.runtime.binding import (
@@ -123,7 +128,6 @@ from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import BIN_PREFIX
-from mirage.shell.job_table import JobTable
 from mirage.shell.literal import literal_tree
 from mirage.shell.parse import parse
 from mirage.shell.variable import VarAttr
@@ -162,7 +166,6 @@ from mirage.view.types import SessionView
 from mirage.workspace.cli import CLIInstall
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.documentation.documents import Documents
-from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.statement import (
     record_status,
@@ -188,6 +191,7 @@ from mirage.workspace.node.explain import (
     holds,
     line_judgments,
 )
+from mirage.workspace.record.types import RecordFields
 from mirage.workspace.session import SessionManager, SessionState
 from mirage.workspace.session.budget import check_env_fits
 from mirage.workspace.session.constants import DEFAULT_PROFILE, MAX_ENV
@@ -283,6 +287,7 @@ class Workspace:
         command_limits: Mapping[str, Limit] | None = None,
         session_id: str | None = None,
         workspace_id: str | None = None,
+        daemon_id: str | None = None,
         store: WorkspaceStateStore | None = None,
         owns_store: bool = False,
         observe: ObserverStore | None = None,
@@ -408,8 +413,9 @@ class Workspace:
         self._drift = DriftQueue()
         # A line binds the system clock only once its process has started.
         self.processes = ProcessTable(
-            self._ids,
-            bind=run_with_execution,
+            self._workspace_id,
+            MachineId("host", socket.gethostname()),
+            bind=run_as_process,
             changed=lambda: self.job_table.processes_changed(),
             now=lambda: (
                 system_now()
@@ -418,10 +424,17 @@ class Workspace:
             ),
         )
         self.processes.ceiling = self._registry.ceilings.max_processes
+        # One daemon runs a workspace's lines at a time, the one holding
+        # its lease in the store; a server passes the id it keeps on disk,
+        # so a restarted one holds its workspaces again.
         self.job_table = JobTable(
-            stores.jobs, self.processes, clock=self._clock
+            stores.execution,
+            self.processes,
+            clock=self._clock,
+            daemon=daemon_id,
         )
-        self.job_table.reaper = self._reap_runs
+        self.job_table.reaper = self._reap_process
+        self.line_table = LineTable(self._clock)
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
         self._shell_executions: dict[ShellExecution, None] = {}
         self._admitting = asyncio.Event()
@@ -714,6 +727,7 @@ class Workspace:
             self._files,
             self.get_session,
             self._sandbox_mounts,
+            self.processes,
         )
         self._runtimes = Runtimes(self._registry, self._runtime_binding)
         self._runtimes.resolve(runtimes)
@@ -1437,6 +1451,7 @@ class Workspace:
         )
 
         async def run() -> int:
+            await self.job_table.claim()
             await self.ensure_sessions_loaded()
             if self._session_mgr.get(session.session_id) is not owner:
                 raise RuntimeError(
@@ -1483,11 +1498,11 @@ class Workspace:
             command=shell_join(argv),
             cwd=cwd,
             run=run,
-            parent_pid=session.process_id,
+            parent=session.process_id,
             limit=session.processes.max,
         )
-        child.process_id = process.info.pid
-        child.shell_pid = process.info.pid
+        child.process_id = process.record.pid
+        child.shell_pid = process.record.pid
 
         def cancel(signal: int) -> None:
             process.terminate(signal)
@@ -1500,44 +1515,43 @@ class Workspace:
         """The ordered runtime world, first capturer first."""
         return list(self._runtimes.entries)
 
-    async def _reap_runs(
-        self, runs: list[dict[str, JsonValue]], signum: int
-    ) -> list[dict[str, JsonValue]]:
-        """Stop native runs a lapsed workspace left, answering the ones
-        this workspace cannot reach: a host run directly when it runs on
-        this host, a sandbox run through every runtime of its name here,
-        each of which stops what its tag marks in the box it reaches. A
-        run counts as reached only once a box held it and it was stopped:
-        a box of the same name that holds none of it, or one that could
-        not be reached, leaves it to a workspace that reaches its own.
+    async def _reap_process(self, record: RecordFields, signum: int) -> bool:
+        """Stop the program a lapsed workspace's process ran past the
+        workspace, answering whether this workspace reached it: a host
+        program by its pid when it ran on this host, a sandbox's run
+        through each runtime here on the machine it ran on, which stops
+        what the process's tag marks there. It counts as reached only
+        once a box held it and it was stopped: a box that holds none of
+        it, or one that could not be reached, leaves it to a workspace
+        that reaches its own.
 
         Args:
-            runs (list[dict[str, JsonValue]]): the runs, as their process
-                records keep them.
+            record (RecordFields): the process, as its workspace published
+                it.
             signum (int): the first signal.
         """
-        left: list[dict[str, JsonValue]] = []
-        for run in runs:
-            if "host" in run:
-                if not await reap_host_run(run, signum):
-                    left.append(run)
+        machine, pid = record.get("machine"), record.get("pid")
+        found, seen = record.get("machine_pid"), record.get("seen_at")
+        if not isinstance(pid, int):
+            return False
+        if machine == str(self.processes.machine) and isinstance(found, dict):
+            return await reap_host_run(
+                MachinePid(found["pid"], found["started"], found["exited"]),
+                seen,
+                signum,
+            )
+        tag = str(ProcessId(self._workspace_id, pid))
+        reached = False
+        for runtime in self.runtimes():
+            if not isinstance(runtime, RemoteSandbox):
                 continue
-            reached = False
-            for runtime in self.runtimes():
-                if not isinstance(
-                    runtime, RemoteSandbox
-                ) or runtime.name != run.get("runtime"):
+            try:
+                if str(runtime.machine or self.processes.machine) != machine:
                     continue
-                try:
-                    reached = (
-                        await runtime.reap(str(run.get("tag")), signum)
-                        or reached
-                    )
-                except Exception as exc:
-                    logger.debug("%s: run not reaped: %s", runtime.name, exc)
-            if not reached:
-                left.append(run)
-        return left
+                reached = await runtime.reap(tag, signum) or reached
+            except Exception as exc:
+                logger.debug("%s: run not reaped: %s", runtime.name, exc)
+        return reached
 
     def add_runtime(self, runtime: Runtime[Any] | str) -> Runtime[Any]:
         """Add a runtime entry to the workspace's ordered set;
@@ -2751,7 +2765,7 @@ class Workspace:
             if await self.job_table.kill(job.id, job.session_id):
                 killed += 1
         for process in self.processes.live():
-            if session_id in (None, process.info.session_id):
+            if session_id in (None, process.record.session_id):
                 if process.terminate():
                     killed += 1
         return killed
@@ -2944,6 +2958,7 @@ class Workspace:
             observer=self.observer,
             records=self._files.records,
             job_table=self.job_table,
+            line_table=self.line_table,
             runtimes=self._runtimes,
             router=self._router,
             processes=self.processes,
@@ -3079,7 +3094,7 @@ class Workspace:
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
-        execution_scope: ExecutionScope | None = None,
+        line_handle: LineHandle | None = None,
         job_table: JobTable | None = None,
         *,
         stream: Literal[True],
@@ -3101,7 +3116,7 @@ class Workspace:
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
-        execution_scope: ExecutionScope | None = None,
+        line_handle: LineHandle | None = None,
         job_table: JobTable | None = None,
         *,
         stream: Literal[False] = False,
@@ -3123,7 +3138,7 @@ class Workspace:
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
-        execution_scope: ExecutionScope | None = None,
+        line_handle: LineHandle | None = None,
         job_table: JobTable | None = None,
         *,
         stream: bool,
@@ -3144,7 +3159,7 @@ class Workspace:
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
-        execution_scope: ExecutionScope | None = None,
+        line_handle: LineHandle | None = None,
         job_table: JobTable | None = None,
         *,
         stream: bool = False,
@@ -3206,7 +3221,7 @@ class Workspace:
                 caller's positional parameters and locals, and an
                 ``exit``, ``return``, ``break`` or ``continue`` in it
                 unwinds into the caller instead of ending the line.
-            execution_scope: Internal. Scheduling and admission shared by
+            line_handle: Internal. Scheduling and admission shared by
                 nested foreground evaluations. Background jobs start a
                 separate scope.
             job_table: Internal. The jobs of a child shell (``$( )``,
@@ -3225,7 +3240,7 @@ class Workspace:
         if not stream and (
             sink is not None
             or handed is not None
-            or execution_scope is not None
+            or line_handle is not None
             or call_stack is not None
             or job_table is not None
             or get_current_session_for(self._session_mgr) is not None
@@ -3243,7 +3258,7 @@ class Workspace:
                 handed,
                 sink,
                 call_stack,
-                execution_scope,
+                line_handle,
                 job_table,
                 session=session,
             )
@@ -3251,7 +3266,7 @@ class Workspace:
             raise RuntimeError("Workspace is closed")
 
         async def run(
-            output: JobConsole, stop: asyncio.Event, scope: ExecutionScope
+            output: JobConsole, stop: asyncio.Event, scope: LineHandle
         ) -> IOResult:
             return await self._shell(
                 command,
@@ -3273,8 +3288,15 @@ class Workspace:
 
         execution = ShellExecution(
             run,
-            execution_scope
-            or ExecutionScope(execution_id=new_execution_id(self._ids)),
+            line_handle
+            or LineHandle(
+                new_line_id(self._ids),
+                session.session_id
+                if session is not None
+                else session_id or self.default_session_id,
+                command,
+                now=self._clock.now,
+            ),
             cancel,
             buffer_bytes=self.io.buffer_bytes,
         )
@@ -3305,7 +3327,7 @@ class Workspace:
         handed: HandOff | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
-        execution_scope: ExecutionScope | None = None,
+        line_handle: LineHandle | None = None,
         job_table: JobTable | None = None,
         *,
         session: SessionState | None = None,
@@ -3353,7 +3375,7 @@ class Workspace:
                     frame,
                     sink=sink,
                     call_stack=call_stack,
-                    execution_scope=execution_scope,
+                    line_handle=line_handle,
                     job_table=job_table,
                 )
                 source = None

@@ -11,7 +11,7 @@ import {
 import { PassThrough } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 import { PathSpec } from '@struktoai/mirage-core/types'
-import type { ChildProcess } from '@struktoai/mirage-core/process/child'
+import type { ChildProcess } from '@struktoai/mirage-core/execution/process/child'
 import type { Workspace } from '@struktoai/mirage-node'
 import './service.ts'
 import { StreamTail } from './text.ts'
@@ -188,8 +188,8 @@ export class MirageSubprocess extends SubprocessRuntime {
           drain(launched.stdout, stdout, outTail, process.stdout),
           drain(launched.stderr, stderr, errTail, process.stderr),
         ])
-        if (info.failure !== null) throw new Error(info.failure)
-        return { exitCode: info.exitCode, signal: null }
+        if (info.error !== null) throw new Error(info.error)
+        return { exitCode: info.exit, signal: null }
       })
       .catch((error: unknown) => {
         terminate()
@@ -207,7 +207,7 @@ export class MirageSubprocess extends SubprocessRuntime {
         for (;;) {
           const active = workspace.processes
             .live()
-            .filter((process) => process.info.groupId === pid)
+            .filter((process) => process.record.group === pid)
           if (active.length === 0) break
           await Promise.all(active.map((process) => process.join()))
         }

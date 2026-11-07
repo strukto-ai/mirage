@@ -330,7 +330,7 @@ describe('background job kill', () => {
       const subshell = () =>
         ws.jobTable.processes
           .live()
-          .find((p) => p.info.command.startsWith('(trap') && p.info.parentPid !== null)
+          .find((p) => p.record.command.startsWith('(trap') && p.record.parent !== null)
       const deadline = Date.now() + 3000
       while (subshell() === undefined) {
         if (Date.now() > deadline) throw new Error('the subshell never started')

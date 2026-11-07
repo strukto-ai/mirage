@@ -20,13 +20,13 @@ import uuid
 
 import pytest
 
+from mirage.execution.job import JobHandle, JobState
 from mirage.shell.console import (
     Channel,
     ConsoleChunk,
     JobConsole,
     RAMConsoleStore,
 )
-from mirage.shell.job_table import Job, JobStatus
 from mirage.types import MountMode
 from mirage.vfs.disk import DiskVFS
 from mirage.vfs.ram import RAMVFS
@@ -164,11 +164,11 @@ def _finished_console(stdout: bytes) -> JobConsole:
 
 def test_finished_jobs_survive(tmp_path):
     src = Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
-    finished = Job(
+    finished = JobHandle(
         id=1,
         command="echo done",
         cwd="/",
-        status=JobStatus.COMPLETED,
+        state=JobState.EXITED,
         exit_code=0,
         console=_finished_console(b"done\n"),
         created_at=time.time(),

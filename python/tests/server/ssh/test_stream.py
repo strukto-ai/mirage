@@ -20,6 +20,8 @@ from typing import Any
 import asyncssh
 import pytest
 
+from mirage.execution.line.handle import LineHandle
+from mirage.execution.types import LineId
 from mirage.io.types import IOResult
 from mirage.server.ssh import stream
 from mirage.server.ssh.stream import (
@@ -36,7 +38,6 @@ from mirage.server.stdin import LoopStdin
 from mirage.shell.console import JobConsole
 from mirage.shell.console.types import Channel
 from mirage.types import Refusal
-from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.shell_execution import ShellExecution
 
 Step = str | BaseException
@@ -282,13 +283,13 @@ async def test_output_folds_stderr_into_stdout_on_a_terminal():
 
 def _execution(io: IOResult, *events: tuple[Channel, bytes]) -> ShellExecution:
     async def run(
-        output: JobConsole, cancel: asyncio.Event, scope: ExecutionScope
+        output: JobConsole, cancel: asyncio.Event, scope: LineHandle
     ) -> IOResult:
         for channel, data in events:
             await output.emit(channel, data)
         return io
 
-    return ShellExecution(run, ExecutionScope())
+    return ShellExecution(run, LineHandle(LineId("line"), "s", "c"))
 
 
 @pytest.mark.asyncio
@@ -317,7 +318,7 @@ async def test_deliver_sends_output_before_the_line_ends():
     first = asyncio.Event()
 
     async def run(
-        output: JobConsole, cancel: asyncio.Event, scope: ExecutionScope
+        output: JobConsole, cancel: asyncio.Event, scope: LineHandle
     ) -> IOResult:
         await output.emit(Channel.STDOUT, b"ready")
         await release.wait()
@@ -326,7 +327,9 @@ async def test_deliver_sends_output_before_the_line_ends():
     async def send(data: bytes, is_stderr: bool) -> None:
         first.set()
 
-    async with ShellExecution(run, ExecutionScope()) as execution:
+    async with ShellExecution(
+        run, LineHandle(LineId("line"), "s", "c")
+    ) as execution:
         delivering = asyncio.create_task(deliver(execution, send))
         await asyncio.wait_for(first.wait(), 5)
         assert not delivering.done()

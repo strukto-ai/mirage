@@ -14,7 +14,8 @@
 
 import { PassThrough } from 'node:stream'
 import { Channel } from '@struktoai/mirage-core/shell/console/types'
-import { ExecutionScope } from '@struktoai/mirage-core/workspace/execution'
+import { LineHandle } from '@struktoai/mirage-core/execution/line/handle'
+import { LineId } from '@struktoai/mirage-core/execution/types'
 import { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import type { ServerChannel } from 'ssh2'
@@ -189,10 +190,13 @@ function produced(
   result: ExecuteResult,
   ...events: [(typeof Channel)['STDOUT' | 'STDERR'], string][]
 ): ShellExecution {
-  return new ShellExecution(async (output) => {
-    for (const [channel, data] of events) await output.emit(channel, enc.encode(data))
-    return result
-  }, new ExecutionScope())
+  return new ShellExecution(
+    async (output) => {
+      for (const [channel, data] of events) await output.emit(channel, enc.encode(data))
+      return result
+    },
+    new LineHandle(new LineId('line'), 's', 'c'),
+  )
 }
 
 describe('ChannelOutput', () => {
@@ -232,11 +236,14 @@ describe('ChannelOutput', () => {
     const released = new Promise<void>((resolve) => (release = resolve))
     let first!: () => void
     const reached = new Promise<void>((resolve) => (first = resolve))
-    const execution = new ShellExecution(async (output) => {
-      await output.emit(Channel.STDOUT, enc.encode('ready'))
-      await released
-      return new ExecuteResult(new Uint8Array(0), new Uint8Array(0), 0)
-    }, new ExecutionScope())
+    const execution = new ShellExecution(
+      async (output) => {
+        await output.emit(Channel.STDOUT, enc.encode('ready'))
+        await released
+        return new ExecuteResult(new Uint8Array(0), new Uint8Array(0), 0)
+      },
+      new LineHandle(new LineId('line'), 's', 'c'),
+    )
     let done = false
     const delivering = deliver(execution, () => {
       first()

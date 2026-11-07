@@ -127,14 +127,14 @@ describe('the tool routes', () => {
       signal: stop.signal,
     })
     const job = await vi.waitFor(() => {
-      const [entry] = app.jobs.list(id)
-      if (entry?.status !== 'running') throw new Error('the shell never started')
+      const entry = app.jobs.requests().find((request) => request.workspaceId === id)
+      if (entry?.line.record.state !== 'running') throw new Error('the shell never started')
       return entry
     })
     stop.abort()
     await expect(calling).rejects.toThrow()
     await vi.waitFor(() => {
-      expect(app.jobs.get(job.id)?.status).toBe('canceled')
+      expect(job.line.record.signal).toBe(2)
     })
   })
 })

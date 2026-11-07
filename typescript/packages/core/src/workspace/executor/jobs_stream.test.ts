@@ -15,7 +15,6 @@
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
-import { JobStatus } from '../../shell/job_table/index.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { eacces } from '../../errors/fs.ts'
 import { Workspace } from '../workspace/workspace.ts'
@@ -331,7 +330,7 @@ describe('kill reaches a real running command', () => {
     await ws.shell('kill %1')
     const elapsed = Date.now() - started
 
-    expect(job.status).toBe(JobStatus.KILLED)
+    expect(job.signal).not.toBeNull()
     expect(DEC.decode(await job.console.snapshot(Channel.STDOUT))).not.toContain('never')
     // Without a signal reaching the executor this waits the full 10s
     // for `sleep` to finish on its own.
@@ -352,7 +351,7 @@ it('a followed tail streams to its job console until killed', async () => {
   await ws.shell("printf 'l2\\n' >> /m/log", { sessionId: 'writer' })
   await new Promise((resolve) => setTimeout(resolve, 250))
   const job = ws.jobTable.get(1, ws.sessionManager.defaultId)
-  expect(job?.status).toBe(JobStatus.RUNNING)
+  expect(job?.state).toBe('running')
   expect(new TextDecoder().decode(await job?.console.snapshot(Channel.STDOUT))).toBe('l1\nl2\n')
   expect((await ws.shell('kill %1')).exitCode).toBe(0)
   await ws.close()

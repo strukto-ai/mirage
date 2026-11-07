@@ -14,9 +14,9 @@
 
 import asyncio
 
+from mirage.execution.job import JobState, JobTable
 from mirage.io.types import IOResult
 from mirage.shell.console import Channel
-from mirage.shell.job_table import JobStatus, JobTable
 from mirage.types import MountMode
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
@@ -73,7 +73,7 @@ def test_kill_settles_a_runner_that_ignores_the_cancel():
         # Joining here would hang on exactly the job being stopped.
         assert await asyncio.wait_for(table.kill(1), timeout=5)
 
-        assert job.status == JobStatus.KILLED
+        assert job.signal is not None
         assert job.exit_code == 137
         assert not job.console.finished
 
@@ -84,7 +84,7 @@ def test_kill_settles_a_runner_that_ignores_the_cancel():
         _DEAF_RELEASE[0].set()
         assert job.process is not None
         await job.process.join()
-        assert job.status == JobStatus.KILLED
+        assert job.signal is not None
         assert job.exit_code == 137
         assert job.console.finished
 
@@ -96,7 +96,7 @@ def test_wait_handles_task_exception():
         table = JobTable()
         await table.submit(command="bad_cmd", run=_failing_run, cwd="/")
         job = await table.wait(1)
-        assert job.status == JobStatus.COMPLETED
+        assert (job.state, job.signal) == (JobState.EXITED, None)
         assert job.exit_code == 1
         stderr = await job.console.snapshot(Channel.STDERR)
         assert b"VFS API error" in stderr
@@ -125,7 +125,7 @@ def test_wait_successful_task():
         table = JobTable()
         await table.submit(command="echo hello", run=_successful_run, cwd="/")
         job = await table.wait(1)
-        assert job.status == JobStatus.COMPLETED
+        assert (job.state, job.signal) == (JobState.EXITED, None)
         assert job.exit_code == 0
         assert await job.console.snapshot(Channel.STDOUT) == b"hello"
 
@@ -144,7 +144,7 @@ def test_kill_keeps_output_produced_before_the_kill():
         assert await table.kill(1)
         await table.wait(1)
 
-        assert job.status == JobStatus.KILLED
+        assert job.signal is not None
         assert job.exit_code == 137
         assert await job.console.snapshot(Channel.STDOUT) == b"partial"
         assert await job.console.snapshot(Channel.STDERR) == b"Killed"
@@ -163,7 +163,7 @@ def test_kill_answers_killed_at_once_and_ends_the_console_once_stopped():
 
         assert await table.kill(1)
 
-        assert job.status == JobStatus.KILLED
+        assert job.signal is not None
         assert job.process is not None
         await job.process.join()
         assert job.console.finished

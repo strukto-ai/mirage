@@ -21,14 +21,14 @@ import {
   DEFAULT_PROCESS_PERMISSIONS,
   parseProcessPermissions,
   type ProcessPermissions,
-} from '../../process/config.ts'
+} from '../../execution/process/config.ts'
 import { ShellVars } from '../../rs/session.ts'
 import { EnvVar, type EnvEntries } from '../../secrets/config.ts'
 import { ShellArray } from '../../shell/array.ts'
 import { Terminal, type JobOutput } from '../../shell/console/index.ts'
 import { BIN_PREFIX, IFS_DEFAULT, SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
-import type { JobTable, JobWaits } from '../../shell/job_table/index.ts'
+import type { JobTable, JobWaits } from '../../execution/job/index.ts'
 import { sourceRow } from '../../shell/helpers.ts'
 import type { AliasExpansion, TSNodeLike } from '../../shell/types.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'

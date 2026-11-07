@@ -30,7 +30,7 @@ import {
 } from './io/network.ts'
 import { parseCommandLimits } from './policy/builtin/output_cap.ts'
 import { parseProgram, SessionProfile, type ProfilePolicySpec } from './policy/profile.ts'
-import { statedProcesses } from './process/config.ts'
+import { statedProcesses } from './execution/process/config.ts'
 import { validateDocument } from './rs/document.ts'
 import { Runtime, type RuntimeEntry } from './runtime/base.ts'
 import type { RuntimeOptions } from './runtime/config.ts'
@@ -184,7 +184,7 @@ function camelizeKeys(obj: Record<string, unknown>): Record<string, unknown> {
   return out
 }
 
-const STORE_GROUPS = ['namespace', 'observer', 'workspace', 'jobs'] as const
+const STORE_GROUPS = ['namespace', 'observer', 'workspace', 'execution'] as const
 
 const CLI_KEYS: readonly string[] = ['cli', 'script', 'runtime', 'config']
 
@@ -596,11 +596,13 @@ export type StoreGroupBlock = RamStoreBlock | DiskStoreBlock | RedisStoreBlock |
  * The workspace state store: one block, five planes. The top-level
  * type/url/keyPrefix pick the default backend for every control-plane
  * group (namespace nodes, observer events, sessions + workspace
- * metadata, jobs); the optional per-group overrides redirect one group
- * to a different backend. Sessions and workspace metadata move together
- * by design, so there is one `workspace` override, not two. A disk store
- * keeps jobs in memory, since a job's console is a stream other processes
- * follow, so the `jobs` group is ram or redis.
+ * metadata, execution); the optional per-group overrides redirect one
+ * group to a different backend. Sessions and workspace metadata move
+ * together by design, so there is one `workspace` override, not two. A
+ * disk store keeps the execution plane in memory, since a job's console
+ * is a stream other processes follow, so the `execution` group (job
+ * lists, consoles, the workspace's lease, process records) is ram or
+ * redis.
  */
 export interface StoreBlock {
   type?: 'ram' | 'disk' | 'redis'
@@ -610,7 +612,7 @@ export interface StoreBlock {
   namespace?: StoreGroupBlock | null
   observer?: StoreGroupBlock | null
   workspace?: StoreGroupBlock | null
-  jobs?: StoreGroupBlock | null
+  execution?: StoreGroupBlock | null
 }
 
 /**

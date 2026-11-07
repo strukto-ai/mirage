@@ -42,6 +42,7 @@ from mirage.commands.spec.flag_view import spread_operands
 from mirage.commands.spec.standard import standard_request
 from mirage.context import current_caller
 from mirage.context.session_context import session_access
+from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
@@ -52,7 +53,6 @@ from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import NOT_FOUND_STATUS
-from mirage.shell.job_table import JobTable
 from mirage.shell.voice import shell_voice
 from mirage.types import Follow, PathSpec, Producer
 from mirage.view.types import StatPath

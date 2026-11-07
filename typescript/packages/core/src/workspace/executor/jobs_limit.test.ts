@@ -14,12 +14,12 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
-import type * as Constants from '../../shell/job_table/constants.ts'
+import type * as Constants from '../../execution/job/constants.ts'
 import { Limit, MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace.ts'
 
-vi.mock('../../shell/job_table/constants.ts', async (importOriginal) => ({
+vi.mock('../../execution/job/constants.ts', async (importOriginal) => ({
   ...(await importOriginal<typeof Constants>()),
   STOP_WAIT_SECONDS: 0.2,
 }))

@@ -309,10 +309,10 @@
             "key_prefix": "mirage/",
             "default_content_type": "application/octet-stream"
           },
-          "jobs": {
+          "execution": {
             "type": "redis",
             "url": "redis://localhost:6379/1",
-            "key_prefix": "jobs:"
+            "key_prefix": "execution:"
           }
         }
       }

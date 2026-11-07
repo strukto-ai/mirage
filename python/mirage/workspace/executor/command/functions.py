@@ -21,6 +21,7 @@ from mirage.context import (
     reset_program_invocation,
     session_voice,
 )
+from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import share
 from mirage.io.types import ByteSource
@@ -32,7 +33,6 @@ from mirage.shell.console import JobConsole
 from mirage.shell.constants import NESTING_MAX
 from mirage.shell.errors import DiscardSignal, ExitSignal, ReturnSignal
 from mirage.shell.helpers import parse_function
-from mirage.shell.job_table import JobTable
 from mirage.shell.parse.scope import ParseScope
 from mirage.types import PathSpec, word_text
 from mirage.workspace.evaluation import EvaluationContext

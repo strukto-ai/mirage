@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { MachineId } from '@struktoai/mirage-core/execution/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/runtime/sandbox/mixin'
@@ -42,6 +43,11 @@ export class DockerRuntime extends RemoteSandbox<DockerConfig> implements PipeTr
   constructor(options: RuntimeOptions<DockerConfig> = {}) {
     super(options, DockerRuntime.configFields)
     requireId('docker', 'container', this.config.container)
+  }
+
+  /** The container it runs programs in, `docker:<container>`. */
+  override get machine(): MachineId {
+    return new MachineId(this.name, this.config.container)
   }
 
   // Run `docker` once; the seam tests override.

@@ -14,9 +14,9 @@
 
 import { describe, expect, it } from 'vitest'
 import type { Context } from '../../../../commands/config.ts'
-import { ChildProcess } from '../../../../process/child.ts'
-import { ProcessInput, ProcessOutput } from '../../../../process/stdio.ts'
-import { ProcessTable } from '../../../../process/table.ts'
+import { ChildProcess } from '../../../../execution/process/child.ts'
+import { ProcessInput, ProcessOutput } from '../../../../execution/process/stdio.ts'
+import { ProcessTable } from '../../../../execution/process/table.ts'
 import { PathSpec } from '../../../../types.ts'
 import type { RuntimeFiles } from '../../../files.ts'
 import { GuestProcessTable } from './process.ts'
@@ -90,7 +90,7 @@ describe('GuestProcessTable', () => {
     const table = guestTable(child)
     const pid = await spawn(table)
     expect(await call(table, { op: 'kill', pid, signal })).toMatchObject({ returncode: null })
-    expect((await child.wait()).exitCode).toBe(code)
+    expect((await child.wait()).exit).toBe(code)
   })
 
   // A `kill()` after `terminate()` stops what ignores TERM at once.
@@ -100,6 +100,6 @@ describe('GuestProcessTable', () => {
     const pid = await spawn(table)
     await call(table, { op: 'kill', pid, signal: 15 })
     await call(table, { op: 'kill', pid, signal: 9 })
-    expect((await child.wait()).exitCode).toBe(137)
+    expect((await child.wait()).exit).toBe(137)
   })
 })

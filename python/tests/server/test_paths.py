@@ -16,6 +16,7 @@ from pathlib import Path
 
 from mirage.server.env import ENV_HOME
 from mirage.server.paths import (
+    load_daemon_id,
     mirage_home,
     pid_file_path,
     state_root_path,
@@ -61,3 +62,16 @@ def test_pid_file_explicit_relative_is_absolutized(monkeypatch, tmp_path):
 def test_state_root_explicit_beats_home(monkeypatch, tmp_path):
     monkeypatch.setenv(ENV_HOME, str(tmp_path))
     assert state_root_path("/explicit/state") == Path("/explicit/state")
+
+
+# A daemon keeps its id under the state root, so a restart on the same root
+# names the same daemon; a fresh root makes a new one.
+def test_the_daemon_id_is_made_once_per_state_root(tmp_path):
+    first = load_daemon_id(tmp_path / "state")
+    assert len(first) == 32
+    assert load_daemon_id(tmp_path / "state") == first
+    assert (tmp_path / "state" / "daemon-id").read_text() == first
+    assert sorted(p.name for p in (tmp_path / "state").iterdir()) == [
+        "daemon-id"
+    ]
+    assert load_daemon_id(tmp_path / "other") != first

@@ -24,10 +24,12 @@ def exit_outcome(exit_code: int) -> str:
     return f"{EXIT_OUTCOME}:{exit_code}"
 
 
-def killed_outcome(exit_code: int) -> str:
+def killed_outcome(exit_code: int, signal: int) -> str:
     """Outcome text for a job stopped by a signal.
 
     Args:
-        exit_code (int): the status it answers, 128 plus the signal.
+        exit_code (int): the status it answers: 128 plus the signal, or
+            the one its program exited with after handling it.
+        signal (int): the signal it was stopped with.
     """
-    return f"{KILLED_OUTCOME}:{exit_code}"
+    return f"{KILLED_OUTCOME}:{exit_code}:{signal}"

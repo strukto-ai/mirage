@@ -25,12 +25,12 @@ from typing import Any, cast
 from mirage.bridge.sync import handed
 from mirage.cache.file.mixin import FileCacheMixin
 from mirage.concurrency.limiter import run_blocking
+from mirage.execution.job import JobTable
+from mirage.execution.process.table import ProcessTable
 from mirage.io.async_line_iterator import release_inputs
 from mirage.observe.store import ObserverStore
-from mirage.process.table import ProcessTable
 from mirage.runtime.python.host.fs import HostFs, make_rmtree, os_routing
 from mirage.runtime.python.host.open import make_open
-from mirage.shell.job_table import JobTable, cancel_job
 from mirage.workspace.files import WorkspaceFiles
 from mirage.workspace.mount.namespace.store import NamespaceStore
 from mirage.workspace.mount.registry import MountRegistry
@@ -160,7 +160,7 @@ async def close_local_parts(deps: CloseDeps) -> None:
         await run_blocking(deps.kernel_mounts.close)
     finally:
         for job in deps.job_table.all_running_jobs():
-            cancel_job(job)
+            job.cancel()
 
 
 async def _drop_state(deps: CloseDeps) -> None:

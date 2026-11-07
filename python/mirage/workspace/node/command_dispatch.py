@@ -48,6 +48,7 @@ from mirage.context.session_context import (
     redirect_syntax_for,
     syntax_head,
 )
+from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, OutputState, materialize
@@ -82,7 +83,6 @@ from mirage.shell.helpers import (
     read_row,
     split_env_prefix,
 )
-from mirage.shell.job_table import JobTable
 from mirage.shell.join import shell_join
 from mirage.shell.parse.constants import WORD_BREAKS
 from mirage.shell.parse.parse import syntax_refusal

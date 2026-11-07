@@ -49,6 +49,8 @@ from mirage.view.types import SessionAccess
 
 if TYPE_CHECKING:
     from mirage.cache.types import CacheInvalidator, WriteContext
+    from mirage.execution.process.handle import ProcessHandle
+    from mirage.execution.types import ProcessId
     from mirage.io.types import ByteSource, IOResult
     from mirage.observe.record import OpRecord, Recorder
     from mirage.policy.types import (
@@ -59,7 +61,6 @@ if TYPE_CHECKING:
         HandOff,
         VfsExplanation,
     )
-    from mirage.process.handle import ProcessHandle
     from mirage.shell.console import JobConsole
     from mirage.shell.descriptors import FileDescription
     from mirage.shell.types import Redirect
@@ -168,10 +169,9 @@ class Caller:
             level running a command, for a level whose output is a value
             (a substitution's) to send another level's stream bytes
             toward it.
-        execution (str | None): the execution (a line, a job, a spawned
-            process) the call runs in, which its records name.
         process (ProcessHandle | None): the managed runner the call runs
-            in, whose kill signal a native program it started receives.
+            in, which its records name and whose kill signal a native
+            program it started receives.
         invocation (CommandContext | None): what ``pre_command`` judged
             the running command on, which a connection it opens reports.
         vfs_mount (str | None): the prefix of the mount whose VFS serves
@@ -222,7 +222,6 @@ class Caller:
     command: str | None = None
     declared: Limit | None = None
     enclosing: JobConsole | None = None
-    execution: str | None = None
     process: ProcessHandle | None = None
     invocation: CommandContext | None = None
     vfs_mount: str | None = None
@@ -328,26 +327,23 @@ def reset_caller(token: CallerToken) -> None:
     _caller.set(current.changed(restored))
 
 
-def current_execution_id() -> str | None:
-    """The execution the current call runs in, which its records name."""
-    return _caller.get().execution
+def current_process_id() -> ProcessId | None:
+    """The process the current call runs in, which its records name."""
+    process = _caller.get().process
+    return process.record.id if process is not None else None
 
 
-async def run_with_execution(
-    execution_id: str,
+async def run_as_process(
     run: Callable[[], Awaitable[T]],
-    process: ProcessHandle | None = None,
+    process: ProcessHandle,
 ) -> T:
-    """Run ``run`` as part of the execution ``execution_id``.
+    """Run ``run`` as the managed runner ``process``.
 
     Args:
-        execution_id (str): the execution (a line, a job, a spawned
-            process).
         run (Callable[[], Awaitable[T]]): what runs in it.
-        process (ProcessHandle | None): the managed runner it is, when it
-            is one.
+        process (ProcessHandle): the managed runner it is.
     """
-    token = _bind(execution=execution_id, process=process)
+    token = _bind(process=process)
     try:
         return await run()
     finally:

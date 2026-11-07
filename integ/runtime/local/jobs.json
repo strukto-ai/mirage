@@ -44,7 +44,7 @@
           "expect": {
             "exit": 0,
             "stdout": "137\n",
-            "stderr": "bash: line 1:     5 Killed                  python3 -c 'import signal, sys, time; signal.signal(signal.SIGTERM, lambda *_: sys.exit(3)); open(sys.argv[1], \"w\").close(); time.sleep(60)' \"$F\"\n"
+            "stderr_contains": "Killed                  python3 -c 'import signal, sys, time; signal.signal(signal.SIGTERM, lambda *_: sys.exit(3)); open(sys.argv[1], \"w\").close(); time.sleep(60)' \"$F\"\n"
           }
         },
         {
@@ -92,7 +92,7 @@
           "expect": {
             "exit": 0,
             "stdout": "137\n",
-            "stderr": "bash: line 1:    11 Killed                  python3 -c 'import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); open(sys.argv[1], \"w\").close(); time.sleep(60)' \"$F\"\n"
+            "stderr_contains": "Killed                  python3 -c 'import signal, sys, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); open(sys.argv[1], \"w\").close(); time.sleep(60)' \"$F\"\n"
           }
         },
         {
@@ -100,7 +100,48 @@
           "expect": {
             "exit": 0,
             "stdout": "137\n",
-            "stderr": "bash: line 1:    12 Killed                  python3 -c 'import os; os.kill(os.getpid(), 9)'\n"
+            "stderr_contains": "Killed                  python3 -c 'import os; os.kill(os.getpid(), 9)'\n"
+          }
+        }
+      ]
+    },
+    {
+      "id": "local_programs_a_job_forks_are_its_children",
+      "world": {
+        "runtimes": [
+          {
+            "name": "local",
+            "captures": [
+              "python3",
+              "@external"
+            ]
+          },
+          "workspace"
+        ]
+      },
+      "steps": [
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; python3 -c 'import os, sys, time; open(sys.argv[1], \"w\").close(); any(os.path.exists(sys.argv[1] + \".go\") or time.sleep(0.05) for _ in range(600))' \"$F\" & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; echo \"[$(ps -o ppid=,comm= | awk -v j=$! '$1 == j { print $2 }')]\"; perl -e 'open my $f, \">\", $ARGV[0]' \"$F.go\"; wait; perl -e 'unlink @ARGV' \"$F\" \"$F.go\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; find / -maxdepth 0 -exec python3 -c 'import os, sys, time; open(sys.argv[1], \"w\").close(); any(os.path.exists(sys.argv[1] + \".go\") or time.sleep(0.05) for _ in range(600))' \"$F\" \\; & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; echo \"[$(ps -o ppid=,comm= | awk -v j=$! '$1 == j { print $2 }')]\"; perl -e 'open my $f, \">\", $ARGV[0]' \"$F.go\"; wait; perl -e 'unlink @ARGV' \"$F\" \"$F.go\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[python3]\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "F=/tmp/mirage-job-$RANDOM$RANDOM; xargs python3 -c 'import os, sys, time; open(sys.argv[1], \"w\").close(); any(os.path.exists(sys.argv[1] + \".go\") or time.sleep(0.05) for _ in range(600))' \"$F\" </dev/null & i=0; until perl -e 'exit !-e $ARGV[0]' \"$F\" || [ $i -ge 200 ]; do i=$((i+1)); sleep 0.05; done; echo \"[$(ps -o ppid=,comm= | awk -v j=$! '$1 == j { print $2 }')]\"; perl -e 'open my $f, \">\", $ARGV[0]' \"$F.go\"; wait; perl -e 'unlink @ARGV' \"$F\" \"$F.go\"",
+          "expect": {
+            "exit": 0,
+            "stdout": "[python3]\n",
+            "stderr": ""
           }
         }
       ]

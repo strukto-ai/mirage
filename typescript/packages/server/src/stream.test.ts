@@ -1,12 +1,10 @@
 import { expect, it, vi } from 'vitest'
-import { ExecutionTable } from './jobs.ts'
-import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
+import { RequestTable } from './requests.ts'
 import type { JsonValue } from '@struktoai/mirage-core/types'
-import type { ExecutionScope } from '@struktoai/mirage-core/workspace/execution'
+import type { LineHandle } from '@struktoai/mirage-core/execution/line/handle'
 import { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import { ExecuteResult } from '@struktoai/mirage-core/workspace/workspace/types'
 import type { JobConsole } from '@struktoai/mirage-core/shell/console/job_console'
-import { MAX_FINISHED_JOBS } from './constants.ts'
 import type { RouteReply } from './routes.ts'
 import { UploadStdin } from './stdin.ts'
 import { PAYLOAD_SIZE, record, shellResponse } from './stream.ts'
@@ -88,7 +86,7 @@ it('a record holds at most a payload of its event', () => {
 // The line's events go out as its records, as they come, then the final
 // record with its status.
 it('sends each event then the final record', async () => {
-  const table = new ExecutionTable()
+  const table = new RequestTable()
   let opened!: (shell: ShellExecution) => void
   const execution = new Promise<ShellExecution | null>((resolve) => {
     opened = resolve
@@ -121,7 +119,7 @@ it('sends each event then the final record', async () => {
 // A line that fails while it streams keeps what it sent, and its final
 // record says how it ended.
 it('a line that fails while streaming still sends the final record', async () => {
-  const table = new ExecutionTable()
+  const table = new RequestTable()
   let opened!: (shell: ShellExecution) => void
   const execution = new Promise<ShellExecution | null>((resolve) => {
     opened = resolve
@@ -150,7 +148,7 @@ it('disconnect cancels the job and joins its cleanup before closing the transpor
   const entered = gate(),
     cleanup = gate(),
     release = gate()
-  const table = new ExecutionTable()
+  const table = new RequestTable()
   let opened!: (shell: ShellExecution) => void
   const execution = new Promise<ShellExecution | null>((resolve) => {
     opened = resolve
@@ -215,13 +213,13 @@ it('disconnect cancels the job and joins its cleanup before closing the transpor
   expect(ended).toBe(false)
   release.release()
   await reading
-  expect(table.get(job.id)?.status).toBe(ExecutionStatus.CANCELED)
+  expect(job.line.record.signal).toBe(2)
   await table.close()
 })
 
 it('a cancelled body stops a line that has printed nothing yet', async () => {
   const started = gate()
-  const table = new ExecutionTable()
+  const table = new RequestTable()
   let opened!: (shell: ShellExecution) => void
   const execution = new Promise<ShellExecution | null>((resolve) => {
     opened = resolve
@@ -262,13 +260,13 @@ it('a cancelled body stops a line that has printed nothing yet', async () => {
   await reader.cancel()
   await read
   expect(closed.signal.aborted).toBe(false)
-  expect(table.get(job.id)?.status).toBe(ExecutionStatus.CANCELED)
+  expect(job.line.record.signal).toBe(2)
   await table.close()
 })
 
 it('the final record does not wait for stdin to end', async () => {
   const uploaded = gate()
-  const table = new ExecutionTable()
+  const table = new RequestTable()
   const job = table.submit(
     'workspace',
     'true',
@@ -278,7 +276,7 @@ it('the final record does not wait for stdin to end', async () => {
     },
     'session',
   )
-  await table.wait(job.id)
+  await table.drain(job.id)
   let source: ReadableStream<Uint8Array> | undefined
   const closed = new AbortController()
   const reply = {
@@ -312,7 +310,7 @@ it('the final record does not wait for stdin to end', async () => {
 
 it('a hang-up after the final record ends the body', async () => {
   const hangUp = gate()
-  const table = new ExecutionTable()
+  const table = new RequestTable()
   const job = table.submit(
     'workspace',
     'true',
@@ -322,7 +320,7 @@ it('a hang-up after the final record ends the body', async () => {
     },
     'session',
   )
-  await table.wait(job.id)
+  await table.drain(job.id)
   const closed = new AbortController()
   const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
   let source: ReadableStream<Uint8Array> | undefined
@@ -359,12 +357,12 @@ it('a hang-up after the final record ends the body', async () => {
   ).toEqual(['done'])
   expect(error).not.toHaveBeenCalled()
   error.mockRestore()
-  expect(table.get(job.id)?.status).toBe(ExecutionStatus.DONE)
+  expect([job.line.record.signal, job.error]).toEqual([null, null])
   await table.close()
 })
 
 it('an upload that failed first fails the final record', async () => {
-  const table = new ExecutionTable()
+  const table = new RequestTable()
   const job = table.submit(
     'workspace',
     'true',
@@ -374,7 +372,7 @@ it('an upload that failed first fails the final record', async () => {
     },
     'session',
   )
-  await table.wait(job.id)
+  await table.drain(job.id)
   let source: ReadableStream<Uint8Array> | undefined
   const closed = new AbortController()
   const reply = {
@@ -401,7 +399,7 @@ it('an upload that failed first fails the final record', async () => {
 
 it('an upload failing while its cleanup runs fails the record', async () => {
   const held = gate()
-  const table = new ExecutionTable()
+  const table = new RequestTable()
   const job = table.submit(
     'workspace',
     'true',
@@ -411,7 +409,7 @@ it('an upload failing while its cleanup runs fails the record', async () => {
     },
     'session',
   )
-  await table.wait(job.id)
+  await table.drain(job.id)
   let source: ReadableStream<Uint8Array> | undefined
   const closed = new AbortController()
   const reply = {
@@ -444,15 +442,16 @@ it('an upload failing while its cleanup runs fails the record', async () => {
   await table.close()
 })
 
-it('the final record survives its eviction', async () => {
+it('the final record outlives its request in the table', async () => {
   const finish = gate()
-  const table = new ExecutionTable()
-  const work = async (_signal: AbortSignal, scope: ExecutionScope): Promise<JsonValue> => {
+  const table = new RequestTable()
+  const work = async (_signal: AbortSignal, scope: LineHandle): Promise<JsonValue> => {
     await scope.start()
     await finish.wait
     return { exit_code: 0 }
   }
   const job = table.submit('workspace', 'held', work, 'session')
+  table.submit('workspace', 'other', work, 'session')
   let source: ReadableStream<Uint8Array> | undefined
   const closed = new AbortController()
   const reply = {
@@ -472,7 +471,6 @@ it('the final record survives its eviction', async () => {
     Promise.resolve(undefined),
     undefined,
   )
-  for (let i = 0; i < MAX_FINISHED_JOBS; i++) table.submit('workspace', 'other', work, 'session')
   if (source === undefined) throw new Error('response did not send a stream')
   const body = source
   const records: string[] = []
@@ -481,7 +479,7 @@ it('the final record survives its eviction', async () => {
   })()
   finish.release()
   await reading
-  expect(table.get(job.id)).toBeNull()
+  expect(table.requests()).not.toContain(job)
   expect(JSON.parse(records.join('').trim().split('\n').at(-1) ?? '')).toMatchObject({
     status: 'done',
   })

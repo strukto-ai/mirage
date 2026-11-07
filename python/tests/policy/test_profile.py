@@ -23,6 +23,7 @@ from mirage.commands.cli.specs import cli_spec_for
 from mirage.commands.config import Context, command
 from mirage.commands.spec.types import Argument, CommandSpec
 from mirage.context import reset_current_session, set_current_session
+from mirage.execution.process.config import ProcessPermissions
 from mirage.io.types import IOResult
 from mirage.policy import (
     Action,
@@ -48,7 +49,6 @@ from mirage.policy.profile import (
     profile_to_dict,
 )
 from mirage.policy.types import CommandRule, HideReason
-from mirage.process.config import ProcessPermissions
 from mirage.runtime.base import Runtime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import RunResult, ScriptSource

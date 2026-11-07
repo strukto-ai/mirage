@@ -114,12 +114,19 @@ describe('session cancel and kill', () => {
     sessionId: string,
     status: string,
   ): Promise<void> {
+    const table = app.registry.get('cw').runner.ws.lineTable
     for (let i = 0; i < 500; i += 1) {
-      const job = app.jobs.list('cw').find((record) => record.sessionId === sessionId)
-      if (job?.status === status) return
+      const reached = table
+        .lines()
+        .some(
+          (line) =>
+            line.sessionId === sessionId &&
+            (status === 'canceled' ? line.signal !== null : line.state === 'running'),
+        )
+      if (reached) return
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
-    throw new Error(`session ${sessionId}'s job never reached ${status}`)
+    throw new Error(`session ${sessionId}'s line never reached ${status}`)
   }
 
   it('cancel stops the jobs of the session and spares the others', async () => {

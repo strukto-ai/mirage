@@ -14,6 +14,7 @@
 
 from typing import Any
 
+from mirage.execution.types import MachineId
 from mirage.io.types import ByteSource, materialize
 from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.sandbox.base import RemoteSandbox
@@ -49,6 +50,12 @@ class DaytonaRuntime(RemoteSandbox):
     name = "daytona"
     config_cls = DaytonaConfig
     config: DaytonaConfig
+
+    @property
+    def machine(self) -> MachineId:
+        """The sandbox it runs programs in, ``daytona:<sandbox_id>``."""
+        return MachineId(self.name, self.config.sandbox_id)
+
     _client: Any = None
     _sandbox: Any = None
 

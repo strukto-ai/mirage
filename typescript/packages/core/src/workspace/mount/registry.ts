@@ -41,7 +41,7 @@ import {
 import type { Observer } from '../../observe/observer.ts'
 import { ALL_COMMANDS } from '../../policy/builtin/output_cap.ts'
 import { type Decisions, MountRootPolicy, Policies } from '../../policy/index.ts'
-import type { ProcessView } from '../../process/view.ts'
+import type { ProcessView } from '../../execution/process/view.ts'
 import type { DiffComputer } from '../../rs/diff_types.ts'
 import type { Runtime } from '../../runtime/base.ts'
 import type { DispatchFn } from '../../runtime/types.ts'

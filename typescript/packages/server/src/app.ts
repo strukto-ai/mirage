@@ -57,7 +57,7 @@ import {
 import { registerApi } from './api.ts'
 import { registerSshRoutes } from './routers/ssh.ts'
 import { readDaemonTable, validateDaemonTable } from './daemon_config.ts'
-import { mirageHome, pidFilePath, stateRootPath } from './paths.ts'
+import { loadDaemonId, mirageHome, pidFilePath, stateRootPath } from './paths.ts'
 import type { S3Config } from '@struktoai/mirage-core/vfs/s3/config'
 import { resolveSSHConfig, type SSHConfig } from './ssh/config.ts'
 import type { SSHEndpoint } from './ssh/types.ts'
@@ -196,6 +196,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     // Daemon default is disk (a created workspace survives restart with
     // zero infrastructure, like git init); the library default stays ram.
     stateStore: () => new DiskWorkspaceStateStore({ root: stateRoot }),
+    daemonId: () => loadDaemonId(stateRoot),
     quoteName,
     reservedIds: DOT_IDS,
     watchNetwork,

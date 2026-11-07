@@ -34,10 +34,9 @@ from starlette.routing import Route
 from starlette.types import Message, Receive, Scope, Send
 
 from mirage import __version__
-from mirage.execution.types import ExecutionStatus
+from mirage.execution.line.handle import LineHandle
 from mirage.server.inflight import InFlight, rpc_messages
 from mirage.server.io_serde import io_result_to_dict
-from mirage.server.jobs import ExecutionTable
 from mirage.server.mcp.progress import (
     McpToolOperations,
     OutputProgress,
@@ -46,8 +45,8 @@ from mirage.server.mcp.progress import (
 from mirage.server.mcp.server import MirageMcpServer
 from mirage.server.metrics import refused
 from mirage.server.registry import WorkspaceEntry, WorkspaceRegistry
+from mirage.server.requests import RequestTable
 from mirage.types import JsonValue
-from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.tools.io_text import io_to_str
 from mirage.workspace.tools.tool_operations import ToolResult
@@ -62,7 +61,7 @@ T = TypeVar("T")
 class DaemonToolOperations(McpToolOperations):
     """The tool table as the daemon serves it: through its own API.
 
-    ``shell`` is a job, submitted to the daemon's execution table the way
+    ``shell`` is a job, submitted to the daemon's request table the way
     ``POST /shell`` submits one, so an MCP command drains at shutdown and
     is recorded like any other.
     A caller cancelled while it waits (an MCP client's cancel) cancels
@@ -73,12 +72,12 @@ class DaemonToolOperations(McpToolOperations):
 
     Args:
         entry (WorkspaceEntry): the workspace the tools act on.
-        jobs (ExecutionTable): the daemon's execution table.
+        jobs (RequestTable): the daemon's requests.
         session_id (str): the session the tools act as.
     """
 
     def __init__(
-        self, entry: WorkspaceEntry, jobs: ExecutionTable, session_id: str
+        self, entry: WorkspaceEntry, jobs: RequestTable, session_id: str
     ) -> None:
         super().__init__(entry.runner.ws, session_id)
         self._entry = entry
@@ -100,11 +99,11 @@ class DaemonToolOperations(McpToolOperations):
         runner = self._entry.runner
         answers: list[ToolResult] = []
 
-        async def run_line(scope: ExecutionScope) -> JsonValue:
+        async def run_line(scope: LineHandle) -> JsonValue:
             execution = await runner.ws.shell(
                 command,
                 session_id=self._session_id,
-                execution_scope=scope,
+                line_handle=scope,
                 stream=True,
             )
             io = await collect_execution(execution, progress)
@@ -112,7 +111,7 @@ class DaemonToolOperations(McpToolOperations):
             answers.append(ToolResult(io_to_str(io), io.exit_code != 0))
             return payload
 
-        async def run(scope: ExecutionScope) -> JsonValue:
+        async def run(scope: LineHandle) -> JsonValue:
             return await runner.call(run_line(scope))
 
         if self._jobs.draining:
@@ -127,9 +126,9 @@ class DaemonToolOperations(McpToolOperations):
             session_id=self._session_id,
         )
         job = await self._jobs.join(job.id)
-        if job.status == ExecutionStatus.CANCELED:
+        if job.line.record.signal is not None:
             return ToolResult("job canceled", True)
-        if job.status == ExecutionStatus.FAILED or not answers:
+        if job.error is not None or not answers:
             return ToolResult(job.error or "shell failed", True)
         return answers[0]
 
@@ -223,11 +222,11 @@ class McpEndpoint:
 
     Args:
         registry (WorkspaceRegistry): the daemon's workspaces.
-        jobs (ExecutionTable): the daemon's execution table, which runs ``shell``.
+        jobs (RequestTable): the daemon's requests, which run ``shell``.
     """
 
     def __init__(
-        self, registry: WorkspaceRegistry, jobs: ExecutionTable
+        self, registry: WorkspaceRegistry, jobs: RequestTable
     ) -> None:
         self._registry = registry
         self._jobs = jobs
@@ -581,7 +580,7 @@ class McpEndpoint:
 
 
 def register_mcp_routes(
-    app: FastAPI, registry: WorkspaceRegistry, jobs: ExecutionTable
+    app: FastAPI, registry: WorkspaceRegistry, jobs: RequestTable
 ) -> McpEndpoint:
     """Serve MCP at ``/v1/workspaces/{workspace_id}/mcp``.
 
@@ -591,7 +590,7 @@ def register_mcp_routes(
     Args:
         app (FastAPI): the daemon app.
         registry (WorkspaceRegistry): the daemon's workspaces.
-        jobs (ExecutionTable): the daemon's execution table.
+        jobs (RequestTable): the daemon's requests.
 
     Returns:
         McpEndpoint: the endpoint, whose ``close`` the app's lifespan

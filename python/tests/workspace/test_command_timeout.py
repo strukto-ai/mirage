@@ -329,8 +329,8 @@ async def test_a_killed_subshell_stops_its_exit_action():
             (
                 p
                 for p in ws.job_table.processes.live()
-                if p.info.command.startswith("(trap")
-                and p.info.parent_pid is not None
+                if p.record.command.startswith("(trap")
+                and p.record.parent is not None
             ),
             None,
         )

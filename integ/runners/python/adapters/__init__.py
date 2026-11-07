@@ -3511,7 +3511,7 @@ async def teardown_target(
 
 
 def job_store(target: dict, run_id: str) -> WorkspaceStateStore | None:
-    """Build the target's state store with its jobs plane on Redis, or
+    """Build the target's state store with its execution plane on Redis, or
     None for the in-memory default.
 
     A target opts in with ``"jobs": {"type": "redis"}``; job lists and
@@ -3525,7 +3525,7 @@ def job_store(target: dict, run_id: str) -> WorkspaceStateStore | None:
     if (target.get("jobs") or {}).get("type") != "redis":
         return None
     return RAMWorkspaceStateStore(
-        jobs=RedisWorkspaceStateStore(
+        execution=RedisWorkspaceStateStore(
             url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
             key_prefix=f"mirage-integ-jobs-{run_id}:",
         )
@@ -3545,7 +3545,7 @@ def _drop_jobs(
     """
 
     async def drop() -> None:
-        await store.jobs(ws.workspace_id).clear()
+        await store.execution(ws.workspace_id).clear()
         await store.close()
 
     return drop

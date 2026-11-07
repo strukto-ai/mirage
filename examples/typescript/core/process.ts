@@ -70,7 +70,7 @@ async function driveFromHost(ws: Workspace): Promise<void> {
   }
   await feed
   const info = await child.wait()
-  console.log(`  grep pid=${String(child.pid)} exit=${String(info.exitCode)}`)
+  console.log(`  grep pid=${String(child.pid)} exit=${String(info.exit)}`)
 
   const tally = ws.spawn({ argv: ['sh', '-c', "cut -d' ' -f2 | sort | uniq -c"] })
   const counted = await tally.communicate(ENC.encode(LOG))
@@ -86,7 +86,7 @@ async function driveFromHost(ws: Workspace): Promise<void> {
   stuck.terminate()
   const stopped = await stuck.wait()
   console.log(
-    `  terminate sleep 30 -> exit=${String(stopped.exitCode)} after ${String(Date.now() - t0)}ms`,
+    `  terminate sleep 30 -> exit=${String(stopped.exit)} after ${String(Date.now() - t0)}ms`,
   )
 }
 
@@ -119,10 +119,10 @@ async function nothingOutlivesClose(ws: Workspace): Promise<void> {
   await sh(ws, 'sleep 60 &', 'agent-a')
   await sh(ws, 'sleep 60 | sleep 60 &', 'agent-b')
   ws.spawn({ argv: ['sleep', '60'] })
-  const live = ws.processes.live().map((p) => p.info)
+  const live = ws.processes.live().map((p) => p.record)
   console.log(
     `  live before close: ${String(live.length)} -> ` +
-      live.map((i) => `${String(i.pid)}:${i.command ?? ''}`).join(', '),
+      live.map((i) => `${String(i.id.pid)}:${i.command}`).join(', '),
   )
   const t0 = Date.now()
   await ws.close()

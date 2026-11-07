@@ -47,20 +47,22 @@ class JobConsole:
     ) -> None:
         self._store = store if store is not None else RAMConsoleStore()
         self._finished = finished
-        self._execution_id: str | None = None
+        self._process: str | None = None
 
     @property
-    def execution_id(self) -> str | None:
-        return self._execution_id
+    def process(self) -> str | None:
+        """The id of the process whose output this is, as text."""
+        return self._process
 
-    def bind_execution(self, execution_id: str) -> None:
-        """Associate this job's output with its one managed execution."""
-        if (
-            self._execution_id is not None
-            and self._execution_id != execution_id
-        ):
-            raise ValueError("console already belongs to another execution")
-        self._execution_id = execution_id
+    def bind_process(self, process: str) -> None:
+        """Associate this job's output with its one managed process.
+
+        Args:
+            process (str): the process's id, as text.
+        """
+        if self._process is not None and self._process != process:
+            raise ValueError("console already belongs to another process")
+        self._process = process
 
     @property
     def store(self) -> ConsoleStore:

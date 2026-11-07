@@ -32,7 +32,7 @@ import { LINE_EXECUTOR, type LineExecutorMixin } from '../../runtime/mixin.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { registerSecrets } from '../../secrets/registry.ts'
 import type { ConsoleStore } from '../../shell/console/index.ts'
-import { RAMJobStore } from '../../shell/job_table/index.ts'
+import { RAMExecutionStore } from '../../execution/ram.ts'
 import { parse } from '../../shell/parse/parse.ts'
 import { MountMode, type PathSpec } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -201,7 +201,7 @@ function answering(asked: string[], outcome: Outcome, scope = Scope.ONCE): AskHa
 }
 
 /** A job store that cannot open a console, counting the tries. */
-class NoConsoles extends RAMJobStore {
+class NoConsoles extends RAMExecutionStore {
   asked = 0
 
   override console(): ConsoleStore {

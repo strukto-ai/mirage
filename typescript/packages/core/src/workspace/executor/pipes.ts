@@ -20,8 +20,8 @@ import type { ByteSource } from '../../io/types.ts'
 import { IOResult, materialize } from '../../io/types.ts'
 import type { Decisions } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
-import type { ProcessHandle } from '../../process/handle.ts'
-import type { ProcessTable } from '../../process/table.ts'
+import type { ProcessHandle } from '../../execution/process/handle.ts'
+import type { ProcessTable } from '../../execution/process/table.ts'
 import type { DispatchFn } from '../../runtime/types.ts'
 import { isAborting } from '../../errors/fs.ts'
 import { CallStack } from '../../shell/call_stack.ts'
@@ -31,7 +31,7 @@ import { Channel } from '../../shell/console/types.ts'
 import { SIGPIPE_STATUS } from '../../shell/constants.ts'
 import { Recorder } from '../../shell/descriptors.ts'
 import { ExitSignal, PipeClosed, ReturnSignal } from '../../shell/errors.ts'
-import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
+import { type JobTable, JobWaits } from '../../execution/job/index.ts'
 import { simpleCommand } from '../../shell/node_kind.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { NodeType as NT } from '../../shell/types.ts'
@@ -46,7 +46,7 @@ import { divertStatement, divertedFile } from './builtins/exec/index.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, ended, isUnwinding } from './control.ts'
-import { handleBackground, pump, reportReaped, runProgram, startShell } from './jobs.ts'
+import { handleBackground, oneProgram, pump, reportReaped, runProgram, startShell } from './jobs.ts'
 import {
   answerClosed,
   asWritten,
@@ -216,8 +216,10 @@ export async function handlePipe(
       () => {
         stopped.abort()
       },
+      undefined,
+      oneProgram(cmd, session),
     )
-    child.processId = process.info.pid
+    child.processId = process.record.id.pid
     stages[i] = process
     childEvaluation.frame.shell = shellStage(cmd, session) ? null : process
     return process.reap(parentSignal ?? null).then((code) => {

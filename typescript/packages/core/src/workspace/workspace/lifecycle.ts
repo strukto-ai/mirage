@@ -14,7 +14,7 @@
 
 import type { FileCacheMixin } from '../../cache/file/mixin.ts'
 import { releaseInputs } from '../../io/async_line_iterator.ts'
-import type { JobTable } from '../../shell/job_table/index.ts'
+import type { JobTable } from '../../execution/job/index.ts'
 import { ABORT_JOIN_MS } from '../../utils/abort.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { MountRegistry } from '../mount/registry.ts'

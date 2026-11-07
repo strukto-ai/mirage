@@ -35,6 +35,7 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.config import load_config
 from mirage.context import reset_current_session, set_current_session
 from mirage.errors import classify
+from mirage.execution.process.types import SpawnRequest
 from mirage.io.cooperative import chunks
 from mirage.io.types import ByteSource, IOResult
 from mirage.policy import Policy, PolicyDenied
@@ -58,7 +59,6 @@ from mirage.policy.types import (
     VfsExplanation,
     VfsResultContext,
 )
-from mirage.process.types import SpawnRequest
 from mirage.runtime.types import ScriptSource
 from mirage.server import io_serde
 from mirage.server.vfs_calls import VFS_CALL_BY_NAME

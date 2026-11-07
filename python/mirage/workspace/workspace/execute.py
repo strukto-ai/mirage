@@ -30,7 +30,13 @@ from mirage.context import (
     voice_name,
 )
 from mirage.errors.types import CommandTimeoutError
-from mirage.execution.context import new_execution_id
+from mirage.execution.constants import LINE_STOP_SIGNAL
+from mirage.execution.context import new_line_id
+from mirage.execution.job import JobTable, JobWaits
+from mirage.execution.line.handle import LineHandle
+from mirage.execution.line.table import LineTable
+from mirage.execution.process.handle import ProcessHandle
+from mirage.execution.process.table import ProcessTable
 from mirage.io import IOResult
 from mirage.io.errors import MemoryExhausted
 from mirage.io.gateway import run_with_egress
@@ -43,8 +49,6 @@ from mirage.observe.record import OpRecord
 from mirage.policy import Deny, HandOff, Pending
 from mirage.policy.builtin.output_cap import LINE_NAME, line_timeout
 from mirage.policy.decisions import is_pending
-from mirage.process.handle import ProcessHandle
-from mirage.process.table import ProcessTable
 from mirage.runtime.routing import RouteError
 from mirage.runtime.table import whole_line_runtime
 from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
@@ -60,7 +64,6 @@ from mirage.shell.constants import (
 )
 from mirage.shell.errors import DiscardSignal, ExitSignal
 from mirage.shell.helpers import input_substitution_redirect
-from mirage.shell.job_table import JobTable, JobWaits
 from mirage.shell.literal import literal_tree
 from mirage.shell.parse.parse import syntax_refusal
 from mirage.shell.parse.scope import ParseScope
@@ -72,7 +75,6 @@ from mirage.utils.clock import run_with_system_clock
 from mirage.workspace.abort import line_status_writer, set_line_writer
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import EvaluationContext, child_context
-from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.alias import expanding_aliases
 from mirage.workspace.executor.control import UNWINDING, ended
 from mirage.workspace.executor.jobs import start_shell
@@ -148,6 +150,7 @@ class ExecuteEnv:
         observer (Observer): records each typed line.
         records (list[OpRecord]): the workspace's op log.
         job_table (JobTable): the workspace's jobs.
+        line_table (LineTable): the lines its sessions read.
         runtimes (Runtimes): the runtimes a whole line may run in.
         router (Router): places a line.
         processes (ProcessTable): starts a session's process.
@@ -169,6 +172,7 @@ class ExecuteEnv:
     observer: Observer
     records: list[OpRecord]
     job_table: JobTable
+    line_table: LineTable
     runtimes: Runtimes
     router: Router
     processes: ProcessTable
@@ -206,7 +210,7 @@ async def recurse(
     cancel: asyncio.Event | None,
     routing_decision: RouteDecision[RuntimeIdentity] | None,
     nested: NestedRefusal,
-    execution_scope: ExecutionScope,
+    line_handle: LineHandle,
     substitution: bool = False,
     **opts: Any,
 ) -> Any:
@@ -300,7 +304,7 @@ async def recurse(
                     cancel=cancel,
                     routing_decision=routing_decision,
                     nested=nested,
-                    execution_scope=execution_scope,
+                    line_handle=line_handle,
                     handed=inner,
                 )
                 io, _ = await run_command_tree(
@@ -316,7 +320,7 @@ async def recurse(
                     handed=inner,
                     command_substitution=True,
                     read=read,
-                    execution_scope=execution_scope,
+                    line_handle=line_handle,
                     route=ws.router.context(
                         cmd,
                         session,
@@ -378,7 +382,7 @@ async def recurse(
                 cmd,
                 cancel=cancel,
                 record=False,
-                execution_scope=execution_scope,
+                line_handle=line_handle,
                 routing_decision=routing_decision,
                 handed=inner,
                 **opts,
@@ -400,7 +404,7 @@ async def recurse(
                     cancel=cancel,
                     routing_decision=routing_decision,
                     nested=nested,
-                    execution_scope=execution_scope,
+                    line_handle=line_handle,
                     job_table=opts["job_table"],
                 ),
                 session,
@@ -428,7 +432,7 @@ async def recurse(
                 return done[0].exit_code
 
             def started(process: ProcessHandle) -> None:
-                session.process_id = process.info.pid
+                session.process_id = process.record.pid
                 context.frame.shell = process
 
             process = start_shell(
@@ -521,7 +525,7 @@ async def execute_line(
     argv: tuple[str, ...] | None = None,
     sink: JobConsole | None = None,
     call_stack: CallStack | None = None,
-    execution_scope: ExecutionScope | None = None,
+    line_handle: LineHandle | None = None,
     job_table: JobTable | None = None,
     tty: Terminal | None = None,
 ) -> IOResult:
@@ -574,10 +578,13 @@ async def execute_line(
         # reached the terminal while it ran, a job's output from before
         # it first.
         tty = session.tty
-    execution_scope = execution_scope or ExecutionScope(
-        execution_id=new_execution_id(ws.registry.ids)
+    line_handle = line_handle or LineHandle(
+        new_line_id(ws.registry.ids),
+        session_id,
+        command,
+        now=ws.line_table.clock.now,
     )
-    await execution_scope.start()
+    await line_handle.start()
     # Whole-invocation policies must approve the result before bytes escape.
     if await ws.registry.policies.wants_for("post_execute", session_id):
         sink = None
@@ -598,18 +605,16 @@ async def execute_line(
         argv=argv,
         sink=tty if tty is not None else sink,
         call_stack=call_stack,
-        execution_scope=execution_scope,
+        line_handle=line_handle,
         job_table=job_table,
     )
     if tty is None:
         return await _run_line(
-            ws, command, session, cwd, run_line, execution_scope
+            ws, command, session, cwd, run_line, line_handle
         )
     try:
         await tty.attach(sink)
-        io = await _run_line(
-            ws, command, session, cwd, run_line, execution_scope
-        )
+        io = await _run_line(ws, command, session, cwd, run_line, line_handle)
         for channel, data in (
             (Channel.STDOUT, await io.materialize_stdout()),
             (Channel.STDERR, await io.materialize_stderr()),
@@ -630,14 +635,21 @@ async def _run_line(
     session: SessionState,
     cwd: str | None,
     run_line: Callable[[], Awaitable[IOResult]],
-    execution_scope: ExecutionScope,
+    line_handle: LineHandle,
 ) -> IOResult:
     """Run a line as the session's process, starting one if it has none.
 
     Every line of a session runs under one pid, its ``$$``, as one shell
     runs them all; the session runs one line at a time. A signal that
     stops the shell (``kill $$``) ends the line with 128 plus it, its jobs
-    left running.
+    left running. The workspace's lease is taken first, so the pid comes
+    after every one the workspace gave out (``JobTable.claim``).
+
+    A line that starts the session's process is one of the workspace's
+    lines (``line_table``), recorded until it ends: with its status, as
+    stopped once a cancel or an abort ended it, or with the error that
+    kept Mirage from running it. One the session runs inside another is
+    part of that one.
 
     Args:
         ws (ExecuteEnv): the workspace.
@@ -645,47 +657,85 @@ async def _run_line(
         session (SessionState): the session it runs on.
         cwd (str | None): the per-call directory, if any.
         run_line (Callable): the line.
-        execution_scope (ExecutionScope): the admitted line's identity.
+        line_handle (LineHandle): the admitted line's identity.
+
+    Raises:
+        WorkspaceHeldError: another daemon holds the workspace's lease.
     """
-    if session.process_id is None:
-        results: list[IOResult] = []
+    await ws.job_table.claim()
+    if session.process_id is not None:
+        return await run_line()
+    ws.line_table.start(line_handle)
+    try:
+        io = await _run_as_shell(
+            ws, command, session, cwd, run_line, line_handle
+        )
+    except (asyncio.CancelledError, MirageAbortError):
+        line_handle.stop(LINE_STOP_SIGNAL)
+        line_handle.end(128 + LINE_STOP_SIGNAL)
+        raise
+    except Exception as exc:
+        line_handle.end(None, f"{type(exc).__name__}: {exc}")
+        raise
+    line_handle.end(io.exit_code)
+    return io
 
-        async def run() -> int:
-            token = set_current_session(session, owner=ws.sessions)
-            try:
-                result = await run_line()
-                results.append(result)
-                return result.exit_code
-            finally:
-                reset_current_session(token)
 
-        def started(process: ProcessHandle) -> None:
-            session.process_id = session.shell_pid = process.info.pid
+async def _run_as_shell(
+    ws: ExecuteEnv,
+    command: str,
+    session: SessionState,
+    cwd: str | None,
+    run_line: Callable[[], Awaitable[IOResult]],
+    line_handle: LineHandle,
+) -> IOResult:
+    """Run a line as a process the session starts for it, its ``$$``.
 
+    Args:
+        ws (ExecuteEnv): the workspace.
+        command (str): the line's text.
+        session (SessionState): the session it runs on.
+        cwd (str | None): the per-call directory, if any.
+        run_line (Callable): the line.
+        line_handle (LineHandle): the line.
+    """
+    results: list[IOResult] = []
+
+    async def run() -> int:
+        token = set_current_session(session, owner=ws.sessions)
         try:
-            process = ws.processes.start(
-                session_id=session.session_id,
-                command=command,
-                cwd=PathSpec.from_str_path(cwd or session.cwd),
-                run=run,
-                limit=session.processes.max,
-                execution_id=execution_scope.id,
-                started=started,
-                ignores=SHELL_IGNORED_SIGNALS,
-                pid=session.shell_pid,
-            )
-        except BlockingIOError:
-            record_status(session, FORK_FAILED_STATUS)
-            return IOResult(exit_code=FORK_FAILED_STATUS, stderr=FORK_FAILED)
-        try:
-            code = await process.reap()
-            if results:
-                return results[0]
-            record_status(session, code)
-            return IOResult(exit_code=code)
+            result = await run_line()
+            results.append(result)
+            return result.exit_code
         finally:
-            session.process_id = None
-    return await run_line()
+            reset_current_session(token)
+
+    def started(process: ProcessHandle) -> None:
+        session.process_id = session.shell_pid = process.record.pid
+
+    try:
+        process = ws.processes.start(
+            session_id=session.session_id,
+            command=command,
+            cwd=PathSpec.from_str_path(cwd or session.cwd),
+            run=run,
+            limit=session.processes.max,
+            line=line_handle.id,
+            started=started,
+            ignores=SHELL_IGNORED_SIGNALS,
+            pid=session.shell_pid,
+        )
+    except BlockingIOError:
+        record_status(session, FORK_FAILED_STATUS)
+        return IOResult(exit_code=FORK_FAILED_STATUS, stderr=FORK_FAILED)
+    try:
+        code = await process.reap()
+        if results:
+            return results[0]
+        record_status(session, code)
+        return IOResult(exit_code=code)
+    finally:
+        session.process_id = None
 
 
 async def _shown(io: IOResult, sink: JobConsole | None) -> IOResult:
@@ -727,7 +777,7 @@ async def run_prepared_line(
     argv: tuple[str, ...] | None,
     sink: JobConsole | None,
     call_stack: CallStack | None,
-    execution_scope: ExecutionScope,
+    line_handle: LineHandle,
     job_table: JobTable | None = None,
 ) -> IOResult:
     """Run a line on the session it acquired, after admission is published.
@@ -840,7 +890,7 @@ async def run_prepared_line(
                 ast,
                 session_id,
                 effective_session,
-                execution_scope.id,
+                str(line_handle.id),
                 sink,
             )
         if recorded and history is None:
@@ -848,7 +898,7 @@ async def run_prepared_line(
                 command,
                 session_id,
                 effective_session.cwd,
-                execution_scope.id,
+                str(line_handle.id),
             )
         # Syntax gates before policy, mirroring the TS order and
         # bash: an unparsable line exits 2 and the policy is never
@@ -981,7 +1031,7 @@ async def run_prepared_line(
                 cancel=cancel,
                 routing_decision=decision,
                 nested=nested,
-                execution_scope=execution_scope,
+                line_handle=line_handle,
                 job_table=job_table,
             )
             line_runtime = whole_line_runtime(decision.bindings)
@@ -1213,7 +1263,7 @@ async def run_prepared_line(
                                     handed=handed,
                                     sink=sink,
                                     call_stack=call_stack,
-                                    execution_scope=execution_scope,
+                                    line_handle=line_handle,
                                     route=ws.router.context(
                                         command,
                                         effective_session,
@@ -1347,5 +1397,5 @@ async def run_prepared_line(
                 scope.records,
                 session_id,
                 effective_session.cwd,
-                execution_scope.id,
+                str(line_handle.id),
             )

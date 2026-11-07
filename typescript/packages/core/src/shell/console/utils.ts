@@ -19,7 +19,10 @@ export function exitOutcome(exitCode: number): string {
   return `${EXIT_OUTCOME}:${exitCode.toString()}`
 }
 
-/** Outcome text for a job stopped by a signal, answering 128 plus it. */
-export function killedOutcome(exitCode: number): string {
-  return `${KILLED_OUTCOME}:${exitCode.toString()}`
+/**
+ * Outcome text for a job stopped by `signal`, answering 128 plus it, or the
+ * status its program exited with after handling it.
+ */
+export function killedOutcome(exitCode: number, signal: number): string {
+  return `${KILLED_OUTCOME}:${exitCode.toString()}:${signal.toString()}`
 }

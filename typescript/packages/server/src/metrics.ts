@@ -13,15 +13,12 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type Counter, type Meter, metrics, type ObservableResult } from '@opentelemetry/api'
-import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
+import type { LineState } from '@struktoai/mirage-core/execution/line/types'
 import type { WorkspaceRegistry } from './registry.ts'
 
 const METER_NAME = 'mirage.server'
 
-const RUNNING: ReadonlySet<ExecutionStatus> = new Set([
-  ExecutionStatus.RUNNING,
-  ExecutionStatus.STOPPING,
-])
+const RUNNING: ReadonlySet<LineState> = new Set<LineState>(['running', 'stopping'])
 const registries = new Set<WorkspaceRegistry>()
 let held: Counter | null = null
 
@@ -117,7 +114,9 @@ function sessions(result: ObservableResult): void {
 function running(result: ObservableResult): void {
   let count = 0
   for (const registry of registries) {
-    count += registry.jobs.list(undefined, false).filter((job) => RUNNING.has(job.status)).length
+    count += registry.jobs
+      .requests()
+      .filter((request) => RUNNING.has(request.line.record.state)).length
   }
   result.observe(count)
 }

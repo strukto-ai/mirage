@@ -21,7 +21,7 @@ import type { ByteSource } from '../../io/types.ts'
 import type { ObserverStore } from '../../observe/store.ts'
 import type { AskHandler, Policy } from '../../policy/index.ts'
 import type { SessionProfile } from '../../policy/profile.ts'
-import type { ProcessesBlock } from '../../process/config.ts'
+import type { ProcessesBlock } from '../../execution/process/config.ts'
 import type { HandOff } from '../../policy/types.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
 import type { RouteRule } from '../../runtime/routing/index.ts'
@@ -29,7 +29,7 @@ import type { RouteDecision } from '../../runtime/types.ts'
 import type { EnvEntries, SecretEntries } from '../../secrets/config.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { JobConsole, Terminal } from '../../shell/console/index.ts'
-import type { JobTable } from '../../shell/job_table/index.ts'
+import type { JobTable } from '../../execution/job/index.ts'
 import type {
   Ceilings,
   DriftPolicy,
@@ -43,7 +43,7 @@ import type { Clock } from '../../utils/clock.ts'
 import type { IdSource } from '../../utils/ids.ts'
 import type { BaseVFS } from '../../vfs/base.ts'
 import type { EvaluationContext } from '../evaluation.ts'
-import type { ExecutionScope } from '../execution.ts'
+import type { LineHandle } from '../../execution/line/handle.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
 import type { Mount } from '../mount/spec.ts'
 import type { SessionState } from '../session/session.ts'
@@ -141,6 +141,14 @@ export interface WorkspaceOptions {
   namespaceStore?: NamespaceStore
   sessionStore?: NamespaceStore
   workspaceId?: string
+  /**
+   * The id of the daemon this workspace runs on, which the workspace's
+   * lease in its store names. One daemon runs a workspace's lines at a
+   * time; a server passes the id it keeps on disk, so a restarted one
+   * holds its workspaces again. Omitted is a fresh one. Mirrors Python's
+   * `daemon_id`.
+   */
+  daemonId?: string
   store?: WorkspaceStateStore
   /**
    * Whether a passed `store` is this workspace's to close. A provider
@@ -273,7 +281,7 @@ export interface ExecuteOptions {
   /** Return a running execution with bounded output events. */
   stream?: boolean
   /** @internal Scheduling scope; background jobs create their own. */
-  executionScope?: ExecutionScope
+  lineHandle?: LineHandle
   stdin?: ByteSource | null
   sessionId?: string
   /** @internal The calling evaluator for a nested line. */

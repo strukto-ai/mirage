@@ -117,7 +117,7 @@ class OpRecord:
     fingerprint: str | None = field(default=None)
     revision: str | None = field(default=None)
     mount_id: str | None = field(default=None, repr=False, compare=False)
-    execution_id: str | None = None
+    process: str | None = None
     complete: bool = field(default=True, init=False, repr=False, compare=False)
 
     @property
@@ -136,11 +136,7 @@ class OpRecord:
             "duration_ms": self.duration_ms,
             "fingerprint": self.fingerprint,
             "revision": self.revision,
-            **(
-                {"execution_id": self.execution_id}
-                if self.execution_id is not None
-                else {}
-            ),
+            **({"process": self.process} if self.process is not None else {}),
         }
 
 

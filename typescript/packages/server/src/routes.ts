@@ -145,6 +145,11 @@ export interface ServerHost {
   loadProfile(profile: SessionProfile): SessionProfile
   /** A fresh handle on the store workspaces keep their state in; the caller closes it. */
   stateStore(): WorkspaceStateStore
+  /**
+   * This daemon's id, which the lease of each workspace it runs names; a host
+   * that keeps it on disk holds its workspaces again after a restart.
+   */
+  daemonId(): Promise<string>
   /** An account's name as one path segment of a snapshot key. */
   quoteName(name: string): string
   /** The ids no workspace may take. */

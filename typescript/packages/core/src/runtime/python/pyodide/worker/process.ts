@@ -1,4 +1,4 @@
-import type { ChildProcess } from '../../../../process/child.ts'
+import type { ChildProcess } from '../../../../execution/process/child.ts'
 import type { RuntimeFiles } from '../../../files.ts'
 import { resolvePath } from '../../../../utils/path.ts'
 import { classify } from '../../../../errors/index.ts'

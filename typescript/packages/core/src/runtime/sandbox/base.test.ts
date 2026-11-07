@@ -21,7 +21,7 @@ import { materialize, type ByteSource } from '../../io/types.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { RemoteSandbox } from './base.ts'
 import {
-  EXEC_ID,
+  PROCESS,
   FAKETIME_PROBE_SECONDS,
   faketimeProbe,
   REAP_ABSENT,
@@ -32,9 +32,9 @@ import { LanguageRuntime } from '../language.ts'
 import { isLineExecutor } from '../mixin.ts'
 import type { RunResult } from '../types.ts'
 import type { RuntimeOptions } from '../config.ts'
-import { ProcessTable } from '../../process/table.ts'
-import type { ProcessHandle } from '../../process/handle.ts'
-import { runWithExecution } from '../../context/session_context.ts'
+import { ProcessTable } from '../../execution/process/table.ts'
+import { MachineId } from '../../execution/types.ts'
+import { runAsProcess } from '../../context/session_context.ts'
 
 const ENC = new TextEncoder()
 const DEC = new TextDecoder()
@@ -167,8 +167,8 @@ describe('RemoteSandbox', () => {
         super({ captures: ['python3'] })
       }
 
-      protected override sandboxKey(): string {
-        return this.key
+      override get machine(): MachineId {
+        return new MachineId(this.name, this.key)
       }
 
       override async execLine(
@@ -405,10 +405,10 @@ describe('RemoteSandbox', () => {
     })
     abort.abort()
     await rejected
-    const execId = box.execs[0]?.[2][EXEC_ID] ?? ''
-    expect(execId).not.toBe('')
-    expect(box.execs.map(([line]) => line)).toEqual(['yes', reapLine(execId)])
-    expect(box.execs[1]?.[2]).not.toHaveProperty(EXEC_ID)
+    const tag = box.execs[0]?.[2][PROCESS] ?? ''
+    expect(tag).not.toBe('')
+    expect(box.execs.map(([line]) => line)).toEqual(['yes', reapLine(tag)])
+    expect(box.execs[1]?.[2]).not.toHaveProperty(PROCESS)
   })
 
   // A run a `kill` stopped is stopped in the box with the signal it named.
@@ -445,7 +445,7 @@ describe('RemoteSandbox', () => {
       cwd: PathSpec.fromStrPath('/'),
       signal: abort.signal,
     }
-    const runner = new ProcessTable(runWithExecution).start({
+    const runner = new ProcessTable(undefined, undefined, runAsProcess).start({
       sessionId: 's',
       command: 'yes',
       cwd: ctx.cwd,
@@ -458,43 +458,28 @@ describe('RemoteSandbox', () => {
       expect(box.execs).toHaveLength(1)
     })
     expect(runner.terminate(2)).toBe(true)
-    expect((await runner.join()).exitCode).toBe(130)
-    const execId = box.execs[0]?.[2][EXEC_ID] ?? ''
-    expect(box.execs.map(([line]) => line)).toEqual(['yes', reapLine(execId, 2)])
+    expect((await runner.join()).exit).toBe(130)
+    expect(box.execs[0]?.[2][PROCESS]).toBe(runner.record.id.toString())
+    expect(box.execs.map(([line]) => line)).toEqual([
+      'yes',
+      reapLine(runner.record.id.toString(), 2),
+    ])
   })
 
-  // A run in the box is one its runner has going, by its runtime and tag,
-  // so the process plane lists it and a workspace that outlives this one
-  // stops it; it goes once the run ends.
-  it('keeps a run in the box on its runner while it runs', async () => {
-    const seen: Record<string, unknown>[] = []
-    let runner: ProcessHandle | null = null
-    class WatchedBox extends RecordingSandbox {
-      override execLine(
-        line: string,
-        stdin: Uint8Array | null,
-        env: Record<string, string>,
-        cwd: string,
-      ): Promise<RunResult> {
-        seen.push({ ...runner?.runs })
-        return super.execLine(line, stdin, env, cwd)
-      }
-    }
-    const box = new WatchedBox({ captures: ['yes'] })
+  // A run in the box carries the id of the process it runs as, which a
+  // workspace that outlives this one stops it by.
+  it('tags a run in the box with its process', async () => {
+    const box = new RecordingSandbox({ captures: ['yes'] })
     const ctx = { stdin: null, flags: { c: 'yes' }, env: {}, cwd: PathSpec.fromStrPath('/') }
-    runner = new ProcessTable(runWithExecution).start({
+    const runner = new ProcessTable('w1', undefined, runAsProcess).start({
       sessionId: 's',
       command: 'yes',
       cwd: ctx.cwd,
       cancel: () => undefined,
       run: async () => (await box.runLine(undefined, [], [], ctx)).exitCode,
     })
-    expect((await runner.join()).exitCode).toBe(0)
-    const tag = box.execs[0]?.[2][EXEC_ID] ?? ''
-    expect(seen).toEqual([
-      { [`box:${tag}`]: { runtime: 'recbox', tag, command: '/bin/sh -c yes' } },
-    ])
-    expect(runner.runs).toEqual({})
+    expect((await runner.join()).exit).toBe(0)
+    expect(box.execs[0]?.[2][PROCESS]).toBe('w1:1')
   })
 
   // A run another workspace left is stopped by its tag, the box reached

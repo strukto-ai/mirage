@@ -4,6 +4,7 @@ import json
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from mirage.execution.line.types import LineState
 from mirage.server import build_app
 
 
@@ -148,10 +149,12 @@ async def _start_shell(app, wid: str):
     calling = asyncio.create_task(app(scope, incoming.get, _ignore_sent))
     for _ in range(500):
         running = [
-            j for j in app.state.jobs.list(wid) if j.status == "running"
+            request
+            for request in app.state.jobs.requests()
+            if request.line.record.state == LineState.RUNNING
         ]
         if running:
-            return calling, incoming, running[0].id
+            return calling, incoming, running[0]
         await asyncio.sleep(0.01)
     raise AssertionError("the shell never started")
 
@@ -168,17 +171,17 @@ async def _shell_app():
 @pytest.mark.asyncio
 async def test_a_caller_that_disconnects_cancels_the_shell():
     app, wid = await _shell_app()
-    calling, incoming, job_id = await _start_shell(app, wid)
+    calling, incoming, job = await _start_shell(app, wid)
     await incoming.put({"type": "http.disconnect"})
     await asyncio.wait_for(calling, 5)
-    assert app.state.jobs.get(job_id).status == "canceled"
+    assert job.line.record.signal == 2
 
 
 @pytest.mark.asyncio
 async def test_a_canceled_request_cancels_the_shell():
     app, wid = await _shell_app()
-    calling, _, job_id = await _start_shell(app, wid)
+    calling, _, job = await _start_shell(app, wid)
     calling.cancel()
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(calling, 5)
-    assert app.state.jobs.get(job_id).status == "canceled"
+    assert job.line.record.signal == 2

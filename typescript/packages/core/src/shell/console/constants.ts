@@ -12,10 +12,10 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-// The two forms of the CONTROL payload, "<form>:<code>": a job that ran
-// to completion ends "exit:<code>" and one stopped by a signal
-// "killed:<code>", the code being the status `wait` answers for it
-// (utils.exitOutcome, utils.killedOutcome).
+// The two forms of the CONTROL payload: a job that ran to completion ends
+// "exit:<code>" and one stopped by a signal "killed:<code>:<signal>", the
+// code being the status `wait` answers for it (utils.exitOutcome,
+// utils.killedOutcome).
 export const EXIT_OUTCOME = 'exit'
 export const KILLED_OUTCOME = 'killed'
 

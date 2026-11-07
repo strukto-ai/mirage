@@ -18,8 +18,7 @@ import type { MirageToolOperations } from '@struktoai/mirage-core/workspace/tool
 import type { JsonValue } from '@struktoai/mirage-core/types'
 import { InFlight } from '../inflight.ts'
 import { ioResultToDict } from '../io_serde.ts'
-import type { ExecutionTable } from '../jobs.ts'
-import { ExecutionStatus } from '@struktoai/mirage-core/execution/types'
+import type { RequestTable } from '../requests.ts'
 import type { McpEndpoint } from '../mcp/http.ts'
 import type { WorkspaceEntry, WorkspaceRegistry } from '../registry.ts'
 import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
@@ -42,7 +41,7 @@ const RPC_PATH = '/v1/workspaces/:workspaceId/rpc'
 class DaemonRpcServer extends MirageRpcServer {
   constructor(
     private readonly entry: WorkspaceEntry,
-    private readonly jobs: ExecutionTable,
+    private readonly jobs: RequestTable,
     sessionId: string,
     operations: MirageToolOperations,
   ) {
@@ -64,18 +63,15 @@ class DaemonRpcServer extends MirageRpcServer {
     const submitted = this.jobs.submit(
       this.entry.id,
       command,
-      async (jobSignal, executionScope) =>
+      async (jobSignal, lineHandle) =>
         ioResultToDict(
-          await ws.shell(command, { ...options, sessionId, executionScope, signal: jobSignal }),
+          await ws.shell(command, { ...options, sessionId, lineHandle, signal: jobSignal }),
         ),
       sessionId,
     )
     const job = await this.jobs.join(submitted.id, signal)
-    if (job.status === ExecutionStatus.CANCELED)
-      throw new RpcError(RPC_REQUEST_CANCELLED, 'job canceled')
-    if (job.status === ExecutionStatus.FAILED) {
-      throw new RpcError(RPC_INTERNAL_ERROR, job.error ?? 'shell failed')
-    }
+    if (job.line.record.signal !== null) throw new RpcError(RPC_REQUEST_CANCELLED, 'job canceled')
+    if (job.error !== null) throw new RpcError(RPC_INTERNAL_ERROR, job.error)
     return job.result
   }
 }
@@ -94,7 +90,7 @@ class RpcEndpoint {
 
   constructor(
     private readonly registry: WorkspaceRegistry,
-    private readonly jobs: ExecutionTable,
+    private readonly jobs: RequestTable,
     private readonly mcp: McpEndpoint,
   ) {}
 
@@ -174,7 +170,7 @@ class RpcEndpoint {
 export function registerRpcRoutes(
   app: RouteApp,
   registry: WorkspaceRegistry,
-  jobs: ExecutionTable,
+  jobs: RequestTable,
   mcp: McpEndpoint,
 ): void {
   const endpoint = new RpcEndpoint(registry, jobs, mcp)

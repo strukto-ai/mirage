@@ -14,6 +14,7 @@
 
 import asyncio
 
+from mirage.execution.types import MachineId
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import not_running_hint
@@ -48,6 +49,11 @@ class MicrosandboxRuntime(RemoteSandbox, PipeTransportMixin):
     name = "microsandbox"
     config_cls = MicrosandboxConfig
     config: MicrosandboxConfig
+
+    @property
+    def machine(self) -> MachineId:
+        """The sandbox it runs programs in, ``microsandbox:<sandbox>``."""
+        return MachineId(self.name, self.config.sandbox)
 
     async def _ensure_connected(self) -> None:
         """Skip the connect-once latch: every exec probes the guest."""

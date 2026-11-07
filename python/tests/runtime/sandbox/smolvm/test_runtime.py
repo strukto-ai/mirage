@@ -21,7 +21,7 @@ from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
 from mirage.io.types import materialize
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
-from mirage.runtime.sandbox.constants import EXEC_ID, EXEC_PRELUDE
+from mirage.runtime.sandbox.constants import EXEC_PRELUDE, PROCESS
 from mirage.runtime.sandbox.smolvm import SmolvmRuntime
 from mirage.runtime.types import RunResult
 from mirage.types import PathSpec
@@ -174,7 +174,7 @@ async def test_process_preserves_argv_and_shares_the_shell_connection(
             "-e",
             "E=request",
             "-e",
-            f"{EXEC_ID}=run",
+            f"{PROCESS}=run",
             "--",
             "/bin/sh",
             "-c",

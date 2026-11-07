@@ -26,17 +26,17 @@ from mirage.context import (
     reset_program_invocation,
     set_current_evaluation,
 )
+from mirage.execution.job import JobTable
+from mirage.execution.process.handle import ProcessHandle
 from mirage.io import IOResult
 from mirage.io.stream import materialize, yield_bytes
 from mirage.io.types import ByteSource
-from mirage.process.handle import ProcessHandle
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole, JobOutput
 from mirage.shell.constants import SET_OPTION_NAMES
 from mirage.shell.errors import ExitSignal
-from mirage.shell.job_table import JobTable
 from mirage.shell.options import parse_option_word
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.script.constants import (
@@ -284,7 +284,7 @@ async def handle_bash(
         # pid the shell's `$$`, whose own subshells and programs it forks.
         runner = current_caller().process
         if runner is not None:
-            session.shell_pid = runner.info.pid
+            session.shell_pid = runner.record.pid
             if job_table is not None:
                 context.frame.shell = runner
         io = await run()
@@ -325,7 +325,7 @@ async def _in_process(
     session = context.session
 
     def started(process: ProcessHandle) -> None:
-        session.process_id = session.shell_pid = process.info.pid
+        session.process_id = session.shell_pid = process.record.pid
         context.frame.shell = process
 
     process = start_shell(

@@ -326,7 +326,7 @@ async function installMcpClis(ws: Workspace, target: Target): Promise<void> {
 function jobStoreFor(target: Target): RAMWorkspaceStateStore | undefined {
   if (target.jobs?.type !== 'redis') return undefined
   return new RAMWorkspaceStateStore({
-    jobs: new RedisWorkspaceStateStore({
+    execution: new RedisWorkspaceStateStore({
       url: process.env.REDIS_URL ?? 'redis://localhost:6379/0',
       keyPrefix: `mirage-integ-jobs-${randomBytes(4).toString('hex')}:`,
     }),
@@ -426,7 +426,7 @@ async function openRam(target: Target, options?: OpenOptions): Promise<Open> {
   const cleanup = async (): Promise<void> => {
     await ws.close()
     // Battery keys must not accumulate in the shared redis db.
-    await store?.jobs(ws.workspaceId).clear()
+    await store?.execution(ws.workspaceId).clear()
     await store?.close()
     await secretsEnv?.cleanup()
   }

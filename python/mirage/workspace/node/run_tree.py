@@ -19,7 +19,9 @@ from typing import Any, Callable
 
 from mirage.commands.builtin.utils.limit import guard_output
 from mirage.context import reset_admission, set_admission
-from mirage.execution.context import new_execution_id
+from mirage.execution.context import new_line_id
+from mirage.execution.job import JobTable
+from mirage.execution.line.handle import LineHandle
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.policy import (
@@ -34,11 +36,9 @@ from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole, Terminal
-from mirage.shell.helpers import input_substitution_redirect
-from mirage.shell.job_table import JobTable
+from mirage.shell.helpers import get_text, input_substitution_redirect
 from mirage.types import PathSpec, Producer
 from mirage.workspace.evaluation import EvaluationContext
-from mirage.workspace.execution import ExecutionScope
 from mirage.workspace.executor.builtins.scope import _to_scope
 from mirage.workspace.executor.redirect import handle_redirect
 from mirage.workspace.expand.redirects import expand_redirect
@@ -65,7 +65,7 @@ async def run_command_tree(
     command_substitution: bool = False,
     read: list[str] | None = None,
     call_stack: CallStack | None = None,
-    execution_scope: ExecutionScope | None = None,
+    line_handle: LineHandle | None = None,
     route: RouteContext | None = None,
 ) -> tuple[IOResult, ExecutionNode]:
     """Run a parsed command tree and finalize its output stream.
@@ -118,8 +118,10 @@ async def run_command_tree(
         cancel=cancel,
         handed=handed,
         sink=sink,
-        execution_scope=execution_scope
-        or ExecutionScope(execution_id=new_execution_id(registry.ids)),
+        line_handle=line_handle
+        or LineHandle(
+            new_line_id(registry.ids), session.session_id, get_text(ast)
+        ),
     )
     redirect = (
         input_substitution_redirect(ast) if command_substitution else None

@@ -32,10 +32,10 @@ import { IOResult } from '../../io/types.ts'
 import { LINE_NAME } from '../../policy/builtin/output_cap.ts'
 import { type Decisions, isPending } from '../../policy/decisions.ts'
 import type { HandOff } from '../../policy/types.ts'
-import type { ProcessHandle } from '../../process/handle.ts'
-import type { ProcessTable } from '../../process/table.ts'
-import type { ProcessInfo, ProcessRunner, ProcessState } from '../../process/types.ts'
-import type { ProcessView } from '../../process/view.ts'
+import type { ProcessHandle } from '../../execution/process/handle.ts'
+import type { ProcessTable } from '../../execution/process/table.ts'
+import type { Process, ProcessRunner, ProcessState } from '../../execution/process/types.ts'
+import type { ProcessView } from '../../execution/process/view.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import { concat } from '../../utils/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
@@ -63,13 +63,13 @@ import {
 } from '../../shell/signals.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { getRedirects, isBackgrounded } from '../../shell/helpers.ts'
-import { ENDING_SIGNALS, STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
-import { type Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
+import { ENDING_SIGNALS, STOP_WAIT_SECONDS } from '../../execution/job/constants.ts'
+import type { JobHandle, JobTable } from '../../execution/job/index.ts'
 import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
 import { commandInvocations } from '../../shell/parse/names.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { type JsonValue, PathSpec, type Refusal } from '../../types.ts'
+import { PathSpec, type Refusal } from '../../types.ts'
 import { abortable, atDeadline, runWithDeadline } from '../../utils/abort.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { systemNow } from '../../utils/clock.ts'
@@ -77,10 +77,10 @@ import { LOCAL_ZONE, type Zone, zoneFromEnv } from '../../utils/timezone.ts'
 import type { SessionView } from '../../view/types.ts'
 import { childContext, EvaluationContext } from '../evaluation.ts'
 import type { ExecutionFrame } from '../frame.ts'
-import { ExecutionScope } from '../execution.ts'
+import { LineHandle } from '../../execution/line/handle.ts'
+import { newLineId } from '../../execution/context.ts'
 import { CAPTURABLE_BUILTINS, SHELL_NAMES } from '../lookup/constants.ts'
 import { occurrenceOf } from '../node/occurrence.ts'
-import type { RecordFields } from '../record/types.ts'
 import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { scanOptions } from './builtins/getopt.ts'
@@ -230,7 +230,7 @@ function jobStreams(node: TSNodeLike, session: SessionState): Set<Channel | Owne
  * it runs, and words that run commands of their own (`$( )`) run them as
  * the job, so neither is one. Mirrors Python's `_one_program`.
  */
-function oneProgram(left: TSNodeLike, session: SessionState): boolean {
+export function oneProgram(left: TSNodeLike, session: SessionState): boolean {
   if (!simpleCommand(left)) return false
   const invocations = commandInvocations(left)
   const first = invocations[0]
@@ -355,14 +355,10 @@ export function reportJobs(context: EvaluationContext, jobTable: JobTable | null
   const told: string[] = []
   for (const job of jobTable.listJobs(sessionOf(session))) {
     const process = job.process ?? null
-    if (
-      job.reported ||
-      job.status === JobStatus.RUNNING ||
-      process?.info.parentPid !== session.processId
-    ) {
+    if (job.reported || job.state === 'running' || process?.record.parent !== session.processId) {
       continue
     }
-    const ended = job.status === JobStatus.KILLED ? job.exitCode - 128 : process.endedBy
+    const ended = job.signal ?? process.endedBy
     if (ended === null || ended < 1 || job.exitCode !== 128 + ended) continue
     const report = signalReport(shellVoice(), [[job.pid, job.exitCode, ended, job.command]], false)
     if (report !== '') {
@@ -388,7 +384,7 @@ export function reportReaped(
   const listed = signalReported(reaped[reaped.length - 1]?.[0].endedBy ?? null)
   const processes = reaped.map(
     ([process, code, node]) =>
-      [process.info.pid, code, process.endedBy, listed ? reportedCommand(node) : ''] as const,
+      [process.record.id.pid, code, process.endedBy, listed ? reportedCommand(node) : ''] as const,
   )
   frame.reports.push(encodeText(signalReport(shellVoice(), processes, true)))
 }
@@ -397,7 +393,8 @@ export function reportReaped(
  * Start a shell the running one forks (a subshell, a pipeline stage, a
  * command substitution, a nested shell): a process in its session's
  * directory that ignores the signals every shell does. A fork past the
- * session's process limit fails as bash's does. Mirrors Python's
+ * session's process limit fails as bash's does. `oneCommand` marks a shell
+ * that runs one program, which runs as it (`oneProgram`). Mirrors Python's
  * start_shell.
  */
 export function startShell(
@@ -405,9 +402,10 @@ export function startShell(
   session: SessionState,
   command: string,
   run: ProcessRunner,
-  parentPid: number | null,
+  parent: number | null,
   cancel: () => void,
   started?: (process: ProcessHandle) => void,
+  oneCommand = false,
 ): ProcessHandle {
   try {
     return processes.start({
@@ -416,10 +414,11 @@ export function startShell(
       cwd: PathSpec.fromStrPath(session.cwd),
       run,
       cancel,
-      parentPid,
+      parent,
       limit: session.processes.max,
       ...(started === undefined ? {} : { started }),
       ignores: SHELL_IGNORED_SIGNALS,
+      oneCommand,
     })
   } catch (error) {
     if ((error as { code?: unknown }).code === 'EAGAIN')
@@ -515,7 +514,7 @@ export async function handleBackground(
   const stopped = AbortSignal.any([killed, expiry.signal])
   childEvaluation.frame.abortSignal = stopped
   const cmdStrInner = left.text
-  const runBg = async (job: Job): Promise<[IOResult, ExecutionNode]> => {
+  const runBg = async (job: JobHandle): Promise<[IOResult, ExecutionNode]> => {
     childEvaluation.frame.shell = inPlace ? null : job.process
     // What the job writes stays in its console and goes where its shell
     // writes as it is written: the terminal, or the substitution or pipe
@@ -541,7 +540,7 @@ export async function handleBackground(
         const opts: ExecuteNodeOpts = {
           sink: console_,
           signal: AbortSignal.any([abort.signal, expiry.signal, ...(stop === null ? [] : [stop])]),
-          executionScope: new ExecutionScope(undefined, job.executionId ?? undefined),
+          lineHandle: new LineHandle(newLineId(), bgSession.sessionId, cmdStrInner),
           endsShell: true,
           jobTable: jobTable.child(),
         }
@@ -681,7 +680,7 @@ export async function handleBackground(
   const cmdStr = left.text
   // Non-interactive bash announces nothing on launch ("[1] <pid>" is
   // interactive-only); the job stays discoverable via $! and `jobs`.
-  let job: Job
+  let job: JobHandle
   try {
     job = await jobTable.submit({
       command: cmdStr,
@@ -689,7 +688,7 @@ export async function handleBackground(
       abort,
       cwd: bgSession.cwd,
       sessionId: session.sessionId,
-      parentPid: session.processId,
+      parent: session.processId,
       limit: session.processes.max,
       simple: oneProgram(left, session),
       // A job whose runner never begins skips runBg's finally, so its
@@ -715,7 +714,7 @@ export async function handleBackground(
       throw new ExitSignal(FORK_FAILED_STATUS, encodeText(FORK_FAILED))
     throw err
   }
-  bgSession.processId = job.process?.info.pid ?? null
+  bgSession.processId = job.process?.record.id.pid ?? null
   session.lastBgJobId = job.pid
   if (session.jobWaits?.reaches(output, jobStreams(left, session)) === true)
     session.jobWaits.add(job)
@@ -814,7 +813,7 @@ function processView(jobTable: JobTable, session: SessionState | null): ProcessV
  * The job whose number is `jobId`, the one `%N` names: none once its report
  * was printed, as bash then drops it from its list.
  */
-function jobNumbered(jobs: readonly Job[], jobId: number): Job | null {
+function jobNumbered(jobs: readonly JobHandle[], jobId: number): JobHandle | null {
   return jobs.find((j) => j.id === jobId && !j.reported) ?? null
 }
 
@@ -825,7 +824,7 @@ function jobNumbered(jobs: readonly Job[], jobId: number): Job | null {
  * here holds that PID: another workspace numbers its jobs on the shared
  * list, so its `%2` can share a number with a PID handed out here.
  */
-function jobWithPid(jobs: readonly Job[], pid: number): Job | null {
+function jobWithPid(jobs: readonly JobHandle[], pid: number): JobHandle | null {
   return (
     jobs.find((j) => j.process !== null && j.pid === pid) ??
     jobs.find((j) => j.process === null && j.pid === pid) ??
@@ -839,7 +838,7 @@ function jobWithPid(jobs: readonly Job[], pid: number): Job | null {
  * also returned by `$!`, so an unknown one is `pid N is not a child of
  * this shell`. Anything else is `not a pid or valid job spec`.
  */
-function resolveSpec(jobs: readonly Job[], spec: string): [Job | null, string] {
+function resolveSpec(jobs: readonly JobHandle[], spec: string): [JobHandle | null, string] {
   if (spec.startsWith('%')) {
     const raw = spec.slice(1)
     const job = /^[0-9]+$/.test(raw) ? jobNumbered(jobs, Number(raw)) : null
@@ -856,9 +855,13 @@ function resolveSpec(jobs: readonly Job[], spec: string): [Job | null, string] {
  * Block until the first of several jobs ends, and return it. Once one has,
  * the other waits are abandoned, as `signal` abandons them all.
  */
-async function waitFirst(jobTable: JobTable, jobs: Job[], signal?: AbortSignal): Promise<Job> {
+async function waitFirst(
+  jobTable: JobTable,
+  jobs: JobHandle[],
+  signal?: AbortSignal,
+): Promise<JobHandle> {
   for (const job of jobs) {
-    if (job.status !== JobStatus.RUNNING) return await jobTable.wait(job.id, job.sessionId, signal)
+    if (job.state !== 'running') return await jobTable.wait(job.id, job.sessionId, signal)
   }
   const losers = new AbortController()
   const done = signal === undefined ? losers.signal : AbortSignal.any([signal, losers.signal])
@@ -873,7 +876,7 @@ async function waitFirst(jobTable: JobTable, jobs: Job[], signal?: AbortSignal):
  * Report one finished job's status, and reap it. Its output already went
  * where its shell writes as it was written.
  */
-async function reaped(jobTable: JobTable, job: Job, cmdStr: string): Promise<RedirectResult> {
+async function reaped(jobTable: JobTable, job: JobHandle, cmdStr: string): Promise<RedirectResult> {
   // Reaped like GNU bash reaps a job waited on by id, so a later bare
   // `wait` does not answer for it again.
   await jobTable.reap(job.id, job.sessionId)
@@ -970,7 +973,7 @@ export async function handleWait(
     if (view !== null) await view.unset(varName)
   }
   const errors: string[] = []
-  const picked: Job[] = []
+  const picked: JobHandle[] = []
   await jobTable.sync(sid)
   const visible = jobTable.listJobs(sid)
   for (const spec of specs) {
@@ -1018,12 +1021,12 @@ export async function handleWait(
     const code = last.endsWith('not a pid or valid job spec') ? 1 : NOT_FOUND_STATUS
     return jobResult(cmdStr, errText, code)
   }
-  const finished: Job[] = []
+  const finished: JobHandle[] = []
   for (const job of picked)
     finished.push(await abortable(jobTable.wait(job.id, sid, signal), signal))
   const told = waitReports(session, jobTable)
   let lastCode = 0
-  let lastJob: Job | null = null
+  let lastJob: JobHandle | null = null
   for (const job of finished) {
     const [, io] = await reaped(jobTable, job, cmdStr)
     lastCode = io.exitCode
@@ -1082,7 +1085,7 @@ export async function handleDisown(
   const runningOnly = scan.letters.includes('r')
   const keep = scan.letters.includes('h')
   const specs = scan.operands
-  let targets: Job[] = []
+  let targets: JobHandle[] = []
   const errors: string[] = []
   await jobTable.sync(sid)
   const jobs = jobTable.listJobs(sid)
@@ -1096,7 +1099,7 @@ export async function handleDisown(
       targets.push(job)
     }
   } else if (allJobs || runningOnly) {
-    targets = runningOnly ? jobs.filter((j) => j.status === JobStatus.RUNNING) : jobs
+    targets = runningOnly ? jobs.filter((j) => j.state === 'running') : jobs
   } else {
     const current = jobs[jobs.length - 1]
     if (current === undefined) {
@@ -1140,9 +1143,9 @@ export async function handleFg(
   const sid = sessionOf(session)
   await jobTable.sync(sid)
   const jobs = jobTable.listJobs(sid)
-  let target: Job
+  let target: JobHandle
   if (parts.length <= 1) {
-    const current = jobs.filter((j) => j.status === JobStatus.RUNNING).at(-1) ?? jobs.at(-1)
+    const current = jobs.filter((j) => j.state === 'running').at(-1) ?? jobs.at(-1)
     if (current === undefined) {
       const err = encodeText(`${shellVoice()}fg: current: no such job\n`)
       return [
@@ -1219,7 +1222,7 @@ function killList(cmdStr: string, operands: string[], voice: string): RedirectRe
 }
 
 /** The managed PID one kill operand names, or bash's refusal. */
-function killPid(jobs: readonly Job[], operand: string): [number | null, string] {
+function killPid(jobs: readonly JobHandle[], operand: string): [number | null, string] {
   if (operand === '') return [null, "`': not a pid or valid job spec"]
   if (operand.startsWith('%')) {
     const raw = operand.slice(1)
@@ -1234,13 +1237,13 @@ function killPid(jobs: readonly Job[], operand: string): [number | null, string]
 
 /**
  * The job a `%N` operand names when it has no runner here: another
- * workspace runs it, or it was restored from a snapshot. It is killed
- * through the job table, which ends another workspace's job by ending its
- * console for its owner to see, and never through this workspace's process
+ * daemon runs it, or it was restored from a snapshot. It is killed through
+ * the job table, which ends another daemon's job by ending its console for
+ * that daemon to see, and never through this workspace's process
  * table, where its stand-in PID may name a runner of this workspace's own.
  * Mirrors Python's `_runnerless`.
  */
-function runnerless(jobs: Job[], operand: string): Job | null {
+function runnerless(jobs: JobHandle[], operand: string): JobHandle | null {
   const raw = operand.startsWith('%') ? operand.slice(1) : ''
   const job = /^\d+$/.test(raw) ? jobNumbered(jobs, Number(raw)) : null
   return job !== null && job.process === null ? job : null
@@ -1253,10 +1256,9 @@ function runnerless(jobs: Job[], operand: string): Job | null {
  * named in bash's words; the status is 0 when any operand was signalled,
  * as bash's is. A job spec is `%N`; a negative number is a process group,
  * the session's `-$$` among them, whose every runner gets the signal
- * (killpg). `owner:pid` names another workspace's runner, as `ps` lists it:
- * its owner stops it once it takes the stop. A signal that stops the shell
- * running `kill` lands before the next statement, as bash's signal to itself
- * does: its abort fails that statement's checkpoint.
+ * (killpg). A signal that stops the shell running `kill` lands before the
+ * next statement, as bash's signal to itself does: its abort fails that
+ * statement's checkpoint.
  */
 export async function handleKill(
   jobTable: JobTable,
@@ -1308,36 +1310,6 @@ export async function handleKill(
   let signalled = false
   await jobTable.sync(sid)
   for (const operand of words) {
-    const colon = operand.indexOf(':')
-    if (colon >= 0 && !operand.startsWith('%')) {
-      const owner = operand.slice(0, colon)
-      const owned = operand.slice(colon + 1)
-      if (owner === '' || !/^[0-9]+$/.test(owned)) {
-        errors.push(`${voice}kill: ${operand}: arguments must be process or job IDs`)
-        continue
-      }
-      let found: boolean
-      try {
-        // A signal that leaves a process running only probes it.
-        found = await jobTable.signalRemote(
-          owner,
-          Number(owned),
-          KEPT_SIGNALS.has(signal) ? 0 : signal,
-          sid,
-          processes.permissions,
-        )
-      } catch (err) {
-        if ((err as { code?: unknown }).code !== 'EPERM') throw err
-        errors.push(`${voice}kill: (${operand}) - Operation not permitted`)
-        continue
-      }
-      if (!found) {
-        errors.push(`${voice}kill: (${operand}) - No such process`)
-        continue
-      }
-      signalled = true
-      continue
-    }
     const jobs = jobTable.listJobs(sid)
     const [pid, refusal] = killPid(jobs, operand)
     if (pid === null) {
@@ -1363,7 +1335,7 @@ export async function handleKill(
     const unrun = runnerless(jobs, operand)
     if (unrun !== null) {
       const found = KEPT_SIGNALS.has(signal)
-        ? unrun.status === JobStatus.RUNNING
+        ? unrun.state === 'running'
         : await jobTable.kill(unrun.id, sid, signal)
       if (!found) {
         errors.push(`${voice}kill: (${String(pid)}) - No such process`)
@@ -1408,7 +1380,7 @@ export async function handleKill(
 async function killGroup(
   jobTable: JobTable,
   processes: ProcessView,
-  jobs: Job[],
+  jobs: JobHandle[],
   group: number,
   signal: number,
   sessionId: string,
@@ -1418,7 +1390,7 @@ async function killGroup(
   for (const job of jobs) {
     if (
       job.process !== null &&
-      job.process.info.groupId === group &&
+      job.process.record.group === group &&
       !job.process.ignores.has(signal)
     )
       await jobTable.kill(job.id, sessionId, signal)
@@ -1429,11 +1401,12 @@ async function killGroup(
 const JOBS_FLAGS: ReadonlySet<string> = new Set('lnprs')
 
 /** One `jobs` line; `-l` includes the managed PID. */
-function jobRow(job: Job, long: boolean): string {
+function jobRow(job: JobHandle, long: boolean): string {
   const id = job.id.toString()
+  const status = job.state === 'running' ? 'running' : job.signal !== null ? 'killed' : 'completed'
   return long
-    ? `[${id}] ${String(job.pid)} ${job.status} ${job.command}`
-    : `[${id}] ${job.status} ${job.command}`
+    ? `[${id}] ${String(job.pid)} ${status} ${job.command}`
+    : `[${id}] ${status} ${job.command}`
 }
 
 /**
@@ -1480,7 +1453,7 @@ export async function handleJobs(
     await table.sync(sid)
   let jobs = jobTable.listing(sid).filter((j) => !j.reported)
   if (specs.length > 0) {
-    const picked: Job[] = []
+    const picked: JobHandle[] = []
     for (const spec of specs) {
       const raw = spec.replace(/^%+/, '')
       const job = /^\d+$/.test(raw) ? jobNumbered(jobs, Number(raw)) : null
@@ -1496,9 +1469,9 @@ export async function handleJobs(
     }
     jobs = picked
   }
-  if (flags.has('r')) jobs = jobs.filter((j) => j.status === JobStatus.RUNNING)
+  if (flags.has('r')) jobs = jobs.filter((j) => j.state === 'running')
   if (flags.has('s')) jobs = []
-  if (flags.has('n')) jobs = jobs.filter((j) => j.status !== JobStatus.RUNNING)
+  if (flags.has('n')) jobs = jobs.filter((j) => j.state !== 'running')
   const lines = flags.has('p')
     ? jobs.map((j) => String(j.pid))
     : jobs.map((j) => jobRow(j, flags.has('l')))
@@ -1638,32 +1611,18 @@ const PS_STATES: Readonly<Record<ProcessState, string>> = {
 // Letters that select every process: SysV -e/-A/-a/-x, BSD a/x.
 const PS_ALL = new Set(['e', 'A', 'a', 'x'])
 
-/**
- * What a ps line selects and prints. `remote` selects other workspaces'
- * processes, `owner:pid`, by owner prefix.
- */
+/** What a ps line selects and prints. */
 interface PsOptions {
   readonly pids: ReadonlySet<number>
-  readonly remote: readonly (readonly [string, number])[]
   readonly all: boolean
   readonly columns: readonly (readonly [string, string])[]
 }
 
-/**
- * One `-p` list, refused in procps's words: this workspace's PIDs, and
- * other workspaces' as `owner:pid`.
- */
-function psPids(value: string, option: string): (number | [string, number])[] {
+/** One `-p` list, refused in procps's words. */
+function psPids(value: string, option: string): number[] {
   const tokens = value.split(/[\s,]+/).filter((t) => t !== '')
   if (tokens.length === 0) throw new Error(`list of process IDs must follow ${option}`)
   return tokens.map((token) => {
-    const colon = token.indexOf(':')
-    if (colon >= 0) {
-      const owner = token.slice(0, colon)
-      const pid = token.slice(colon + 1)
-      if (owner === '' || !/^[0-9]+$/.test(pid)) throw new Error('process ID list syntax error')
-      return [owner, Number(pid)]
-    }
     if (!/^[+-]?[0-9]+$/.test(token)) throw new Error('process ID list syntax error')
     const number = Number(token)
     if (number <= 0 || number > MAX_PID_OPERAND) throw new Error('process ID out of range')
@@ -1696,12 +1655,8 @@ function psColumns(value: string, option: string): [string, string][] {
  */
 function parsePs(words: string[]): PsOptions {
   const pids = new Set<number>()
-  const remote: [string, number][] = []
-  const select = (picked: (number | [string, number])[]) => {
-    for (const pid of picked) {
-      if (typeof pid === 'number') pids.add(pid)
-      else remote.push(pid)
-    }
+  const select = (picked: number[]) => {
+    for (const pid of picked) pids.add(pid)
   }
   const columns: [string, string][] = []
   let all = false
@@ -1738,7 +1693,7 @@ function parsePs(words: string[]): PsOptions {
       else for (const item of psColumns(value, '-o')) columns.push(item)
     }
   }
-  return { pids, remote, all, columns }
+  return { pids, all, columns }
 }
 
 /** One row in procps's layout: each column padded but the last. */
@@ -1784,7 +1739,7 @@ function elapsed(seconds: number): string {
  * measured from procps-ng 4.0.4's `ps -o` output: a day-old start prints its
  * date, a recent one its clock.
  */
-function started(fact: string, info: ProcessInfo, ctx: PsContext): string {
+function started(fact: string, info: Process, ctx: PsContext): string {
   const start = new Date(info.startedAt * 1000)
   if (fact === 'lstart') return gnuStrftime(start, '%a %b %e %H:%M:%S %Y', ctx.zone)
   const old = ctx.now - info.startedAt > 86400
@@ -1806,21 +1761,20 @@ function started(fact: string, info: ProcessInfo, ctx: PsContext): string {
  * profile this one cannot name. A runner of the calling session belongs to the
  * session `$$` leads; another session's to its own group.
  */
-function psCell(key: string, info: ProcessInfo, ctx: PsContext, owner = ''): string {
+function psCell(key: string, info: Process, ctx: PsContext): string {
   const fact = PS_COLUMNS[key]?.[3] ?? ''
   const fixed = PS_FIXED[fact]
   if (fixed !== undefined) return fixed
-  const tag = owner !== '' ? `${owner}:` : ''
   const session =
-    owner === '' && info.sessionId === ctx.sessionId && ctx.shellPid !== null
+    info.sessionId === ctx.sessionId && ctx.shellPid !== null
       ? ctx.shellPid
-      : info.groupId || info.pid
-  if (fact === 'pid') return `${tag}${String(info.pid)}`
-  if (fact === 'ppid') return info.parentPid ? `${tag}${String(info.parentPid)}` : '0'
-  if (fact === 'pgid') return `${tag}${String(info.groupId || info.pid)}`
-  if (fact === 'sid') return `${tag}${String(session)}`
+      : info.group || info.id.pid
+  if (fact === 'pid') return String(info.id.pid)
+  if (fact === 'ppid') return info.parent ? String(info.parent) : '0'
+  if (fact === 'pgid') return String(info.group || info.id.pid)
+  if (fact === 'sid') return String(session)
   if (fact === 'stat' || fact === 'state') {
-    return PS_STATES[info.state] + (fact === 'stat' && info.pid === session ? 's' : '')
+    return PS_STATES[info.state] + (fact === 'stat' && info.id.pid === session ? 's' : '')
   }
   if (fact === 'comm') {
     const head = info.command.split(/\s+/).find((w) => w !== '') ?? ''
@@ -1836,49 +1790,13 @@ function psCell(key: string, info: ProcessInfo, ctx: PsContext, owner = ''): str
   return info.command
 }
 
-/** Another workspace's runner as its process record keeps it. */
-function remoteInfo(record: RecordFields): ProcessInfo {
-  return {
-    pid: record.pid as number,
-    sessionId: record.session as string,
-    command: record.command as string,
-    cwd: PathSpec.fromStrPath(record.cwd as string),
-    startedAt: record.started_at as number,
-    executionId: record.execution as string,
-    state: record.state as ProcessState,
-    cancellationRequested: false,
-    exitCode: null,
-    failure: null,
-    parentPid: record.parent as number | null,
-    groupId: record.group as number,
-  }
-}
-
 /**
- * The shortest start of each owner's id, six characters at least, that no
- * other owner's begins with, as `ps` names their processes.
+ * Where a process's program runs, as `ps` names it: `host PID` for a host
+ * program, its machine (`docker:tools`) for another's.
  */
-export function ownerTags(owners: readonly string[]): Map<string, string> {
-  const tags = new Map<string, string>()
-  for (const owner of owners) {
-    let size = 6
-    while (
-      size < owner.length &&
-      owners.some((other) => other !== owner && other.startsWith(owner.slice(0, size)))
-    )
-      size += 1
-    tags.set(owner, owner.slice(0, size))
-  }
-  return tags
-}
-
-/**
- * Where a native run goes on, as `ps` names it: `host PID` for a host
- * program, the runtime and the start of its tag for a sandbox's.
- */
-function runWhere(run: Record<string, JsonValue>): string {
-  if ('host' in run) return `host ${String(run.pid as number)}`
-  return `${run.runtime as string} ${(run.tag as string).slice(0, 12)}`
+function runWhere(info: Process): string {
+  if (info.machinePid !== null) return `host ${String(info.machinePid.pid)}`
+  return info.machine.toString()
 }
 
 /**
@@ -1890,13 +1808,12 @@ function runWhere(run: Record<string, JsonValue>): string {
  * of an absent PID) exits 1, as procps does, and an option error is
  * procps's message and usage.
  *
- * The runners other workspaces on a shared store run follow this
- * workspace's, as `owner:pid` with the owner's id shortened as far as it
- * stays unique, within the same view. In the compact rows each runner is followed by the native runs
- * it has going, a host program by its host PID and a sandbox's by its
- * runtime and tag, each as `-<TAB>└ where: command`.
+ * The daemon running the line holds the workspace's lease, so its runners
+ * are every one the workspace has. In the compact rows a runner that is a
+ * program a runtime runs is followed by where it runs, a host program by its
+ * host PID and another by its machine, as `-<TAB>└ where`.
  */
-export async function handlePs(
+export function handlePs(
   jobTable: JobTable,
   parts: string[],
   session: SessionState | null = null,
@@ -1907,35 +1824,12 @@ export async function handlePs(
   try {
     options = parsePs(parts.slice(1))
   } catch (err) {
-    return jobResult(cmdStr, `error: ${(err as Error).message}\n${PS_USAGE}`, 1)
+    return Promise.resolve(jobResult(cmdStr, `error: ${(err as Error).message}\n${PS_USAGE}`, 1))
   }
   const sid = sessionOf(session)
   const processes = processView(jobTable, session)
-  const every = options.all || (options.pids.size === 0 && options.remote.length === 0)
-  const runs = new Map(
-    jobTable.processes.live().map((handle) => [handle.info.pid, Object.values(handle.runs)]),
-  )
-  const rows: [string, ProcessInfo, Record<string, JsonValue>[]][] = processes
-    .list()
-    .filter((info) => every || options.pids.has(info.pid))
-    .map((info) => ['', info, runs.get(info.pid) ?? []])
-  const remote = await jobTable.remoteProcesses()
-  const granted = processes.permissions()
-  const tags = ownerTags(Object.keys(remote))
-  for (const [owner, records] of Object.entries(remote)) {
-    for (const record of Object.values(records)) {
-      if (granted === null || (granted.list === 'session' && record.session !== sid)) continue
-      if (
-        every ||
-        options.remote.some(([prefix, pid]) => owner.startsWith(prefix) && record.pid === pid)
-      )
-        rows.push([
-          tags.get(owner) ?? owner,
-          remoteInfo(record),
-          record.runs as Record<string, JsonValue>[],
-        ])
-    }
-  }
+  const every = options.all || options.pids.size === 0
+  const rows = processes.list().filter((info) => every || options.pids.has(info.id.pid))
   let lines: string[]
   if (options.columns.length > 0) {
     const keys = options.columns.map(([key]) => key)
@@ -1946,10 +1840,10 @@ export async function handlePs(
       sessionId: sid,
       shellPid: session?.shellPid ?? null,
     }
-    lines = rows.map(([owner, info]) =>
+    lines = rows.map((info) =>
       psRow(
         keys,
-        keys.map((key) => psCell(key, info, ctx, owner)),
+        keys.map((key) => psCell(key, info, ctx)),
       ),
     )
     if (options.columns.some(([, header]) => header !== ''))
@@ -1960,16 +1854,16 @@ export async function handlePs(
         ),
       )
   } else {
-    lines = rows.flatMap(([owner, info, native]) => [
-      `${owner !== '' ? `${owner}:` : ''}${String(info.pid)}\t${info.command}`,
-      ...native.map((run) => `-\t└ ${runWhere(run)}: ${run.command as string}`),
+    lines = rows.flatMap((info) => [
+      `${String(info.id.pid)}\t${info.command}`,
+      ...(info.runtime !== null ? [`-\t└ ${runWhere(info)}`] : []),
     ])
   }
   const code = rows.length > 0 ? 0 : 1
   const out = encodeText(lines.length > 0 ? lines.join('\n') + '\n' : '')
-  return [
+  return Promise.resolve([
     out,
     new IOResult({ exitCode: code }),
     new ExecutionNode({ command: cmdStr, exitCode: code }),
-  ]
+  ])
 }

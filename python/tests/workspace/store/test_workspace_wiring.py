@@ -335,12 +335,18 @@ async def test_same_workspace_id_shares_sessions():
     await ws_b.close()
 
 
+# A daemon restarted on the same store, under the id it keeps, finds the
+# shell as it left it.
 @pytest.mark.asyncio
 async def test_a_workspace_on_the_same_store_finds_the_shell_as_left():
     store = RAMWorkspaceStateStore()
     ram = RAMVFS()
     ws_a = Workspace(
-        {"/data": ram}, mode=MountMode.EXEC, workspace_id="kept", store=store
+        {"/data": ram},
+        mode=MountMode.EXEC,
+        workspace_id="kept",
+        daemon_id="d",
+        store=store,
     )
     set_ = await ws_a.shell(
         "mkdir -p /data/real && ln -s /data/real /data/link && cd /data/link"
@@ -351,7 +357,11 @@ async def test_a_workspace_on_the_same_store_finds_the_shell_as_left():
     await ws_a.flush_sessions()
 
     ws_b = Workspace(
-        {"/data": ram}, mode=MountMode.EXEC, workspace_id="kept", store=store
+        {"/data": ram},
+        mode=MountMode.EXEC,
+        workspace_id="kept",
+        daemon_id="d",
+        store=store,
     )
     result = await ws_b.shell(
         "alias ll; set -o | grep pipefail; shopt nullglob; umask; pwd; trap -p EXIT"
@@ -369,7 +379,11 @@ async def test_a_reloaded_function_runs_the_aliases_its_definition_saw():
     store = RAMWorkspaceStateStore()
     ram = RAMVFS()
     ws_a = Workspace(
-        {"/data": ram}, mode=MountMode.EXEC, workspace_id="fn", store=store
+        {"/data": ram},
+        mode=MountMode.EXEC,
+        workspace_id="fn",
+        daemon_id="d",
+        store=store,
     )
     await ws_a.shell("shopt -s expand_aliases")
     await ws_a.shell("f() { echo old; }")
@@ -378,7 +392,11 @@ async def test_a_reloaded_function_runs_the_aliases_its_definition_saw():
     await ws_a.flush_sessions()
 
     ws_b = Workspace(
-        {"/data": ram}, mode=MountMode.EXEC, workspace_id="fn", store=store
+        {"/data": ram},
+        mode=MountMode.EXEC,
+        workspace_id="fn",
+        daemon_id="d",
+        store=store,
     )
     assert (await ws_b.shell("f; echo now")).stdout == b"old\nchanged"
     await ws_a.close()
@@ -405,20 +423,27 @@ async def test_different_workspace_ids_are_isolated():
 
 @pytest.mark.asyncio
 async def test_shared_history_through_provider():
-    """Two workspaces on one provider + workspace id see one history."""
+    """Two workspaces on one provider + workspace id see one history: the
+    second runs its lines once the first closed, as one daemon runs a
+    workspace's lines at a time."""
     store = RAMWorkspaceStateStore()
-    ram = RAMVFS()
     ws_a = Workspace(
-        {"/data": ram}, mode=MountMode.EXEC, workspace_id="shared", store=store
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        workspace_id="shared",
+        store=store,
     )
     await ws_a.shell("echo one")
+    await ws_a.close()
 
     ws_b = Workspace(
-        {"/data": ram}, mode=MountMode.EXEC, workspace_id="shared", store=store
+        {"/data": RAMVFS()},
+        mode=MountMode.EXEC,
+        workspace_id="shared",
+        store=store,
     )
     result = await ws_b.shell("history")
     assert b"echo one" in result.stdout
-    await ws_a.close()
     await ws_b.close()
 
 
@@ -436,6 +461,7 @@ async def test_plane_override_param_beats_provider():
         observe=direct,
     )
     await ws.shell("echo hi")
+    await ws.close()
 
     sibling = Workspace(
         {"/data": RAMVFS()},
@@ -445,5 +471,4 @@ async def test_plane_override_param_beats_provider():
     )
     result = await sibling.shell("history")
     assert b"echo hi" not in result.stdout
-    await ws.close()
     await sibling.close()

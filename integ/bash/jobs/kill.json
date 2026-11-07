@@ -600,7 +600,7 @@
       }
     },
     {
-      "id": "job_kill_owner_pid_nobody_runs",
+      "id": "job_kill_and_ps_refuse_a_non_numeric_pid",
       "seq": 502427,
       "targets": [
         "ram",
@@ -631,9 +631,8 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=1\n",
-        "stderr": "bash: line 1: kill: (ab12:3) - No such process\nbash: line 1: kill: ab12:x: arguments must be process or job IDs\n"
-      },
-      "note": "mirage's own operand: owner:pid names a process another workspace on a shared store runs, as ps lists it, where bash refuses any non-numeric operand as not a process or job ID. One no live workspace runs is no such process, and ps -p of it selects nothing."
+        "stderr": "bash: line 1: kill: ab12:3: arguments must be process or job IDs\nbash: line 1: kill: ab12:x: arguments must be process or job IDs\nerror: process ID list syntax error\n\nUsage:\n ps [options]\n\n Try 'ps --help <simple|list|output|threads|misc|all>'\n  or 'ps --help <s|l|o|t|m|a>'\n for additional help text.\n\nFor more details see ps(1).\n"
+      }
     },
     {
       "id": "job_kill_stops_the_jobs_a_job_started",

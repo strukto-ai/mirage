@@ -591,7 +591,7 @@ const CHECKS: [string, Check][] = [
       const waiting = ws.shell('wait', { signal: abort.signal })
       abort.abort()
       equal(await aborted(waiting), 'AbortError')
-      equal(ws.jobTable.get(1, ws.defaultSessionId)?.status, 'running')
+      equal(ws.jobTable.get(1, ws.defaultSessionId)?.state, 'running')
     },
   ],
   [
@@ -603,7 +603,7 @@ const CHECKS: [string, Check][] = [
       const finished = job.console.waitFinished()
       await ws.close()
       await finished
-      equal(job.status, 'killed')
+      equal([job.state, job.signal], ['exited', 9])
     },
   ],
   [

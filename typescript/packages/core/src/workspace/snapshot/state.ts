@@ -30,7 +30,7 @@ import type { Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { commandLimitsToJSON, parseCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { profileFromDict, profileToDict, type SessionProfile } from '../../policy/profile.ts'
-import { statedProcesses, type ProcessPermissions } from '../../process/config.ts'
+import { statedProcesses, type ProcessPermissions } from '../../execution/process/config.ts'
 import { ScriptSource } from '../../runtime/types.ts'
 import {
   Channel,
@@ -41,7 +41,7 @@ import {
   RAMConsoleStore,
 } from '../../shell/console/index.ts'
 import { BIN_PREFIX } from '../../shell/constants.ts'
-import { Job, JobStatus, type JobTable } from '../../shell/job_table/index.ts'
+import { JobHandle, type JobTable } from '../../execution/job/index.ts'
 import type { ShellVar } from '../../shell/variable.ts'
 import type { JsonObject } from '../../types.ts'
 import {
@@ -196,7 +196,7 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
   const jobs: JobSnapshot[] = await Promise.all(
     ws.jobTable
       .allJobs()
-      .filter((j) => j.status !== JobStatus.RUNNING && (j.process === null || j.console.finished))
+      .filter((j) => j.state !== 'running' && (j.process === null || j.console.finished))
       .map((j) => jobToDict(j)),
   )
   const clisState: CLISnapshot[] = [...ws.registry.clis.items()].map(([name, install]) =>
@@ -889,18 +889,19 @@ async function restoreHistory(ws: WorkspaceLike, state: WorkspaceStateDict): Pro
  * job's stdout and stderr no longer interleave, which only affects jobs
  * that have already ended.
  */
-async function jobToDict(j: Job): Promise<JobSnapshot> {
+async function jobToDict(j: JobHandle): Promise<JobSnapshot> {
   return {
     id: j.id,
     command: j.command,
     cwd: j.cwd,
-    status: j.status,
+    signal: j.signal,
     stdout: await j.console.snapshot(Channel.STDOUT),
     stderr: await j.console.snapshot(Channel.STDERR),
     exit_code: j.exitCode,
     created_at: j.createdAt,
+    ended_at: j.endedAt,
     session_id: j.sessionId,
-    execution_id: j.executionId,
+    process: j.processId,
   }
 }
 
@@ -916,9 +917,7 @@ function restoredConsole(j: JobSnapshot): JobConsole {
     }
   }
   const outcome =
-    (j.status as JobStatus) === JobStatus.KILLED
-      ? killedOutcome(j.exit_code)
-      : exitOutcome(j.exit_code)
+    j.signal !== null ? killedOutcome(j.exit_code, j.signal) : exitOutcome(j.exit_code)
   chunks.push({
     seq: chunks.length,
     ts: j.created_at,
@@ -926,19 +925,21 @@ function restoredConsole(j: JobSnapshot): JobConsole {
     data: new TextEncoder().encode(outcome),
   })
   const console = new JobConsole(new RAMConsoleStore(null, chunks), true)
-  if (j.execution_id !== null && j.execution_id !== undefined) console.bindExecution(j.execution_id)
+  if (j.process !== null && j.process !== undefined) console.bindProcess(j.process)
   return console
 }
 
-function jobFromDict(j: JobSnapshot): Job {
-  return new Job({
+function jobFromDict(j: JobSnapshot): JobHandle {
+  return new JobHandle({
     id: j.id,
     command: j.command,
     cwd: j.cwd,
     sessionId: j.session_id,
     createdAt: j.created_at,
-    status: j.status as JobStatus,
+    state: 'exited',
     exitCode: j.exit_code,
+    signal: j.signal,
+    endedAt: j.ended_at,
     console: restoredConsole(j),
   })
 }

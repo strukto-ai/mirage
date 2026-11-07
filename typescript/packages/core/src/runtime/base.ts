@@ -13,8 +13,13 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../commands/config.ts'
-import { runWithCaller } from '../context/session_context.ts'
+import { currentCaller, runWithCaller } from '../context/session_context.ts'
+import { isAborting } from '../errors/fs.ts'
+import type { ProcessHandle } from '../execution/process/handle.ts'
+import type { MachineId } from '../execution/types.ts'
 import { liveEgress } from '../io/gateway.ts'
+import { FORK_FAILED, FORK_FAILED_STATUS } from '../shell/constants.ts'
+import { shellJoin } from '../shell/join.ts'
 import type { PathSpec } from '../types.ts'
 import { Activity } from '../utils/activity.ts'
 import { refusedRun, type WorkspaceBinding } from './binding.ts'
@@ -99,6 +104,15 @@ export abstract class Runtime<E = unknown> {
     this.config = coerceRuntimeConfig(options.config, Object.keys(configFields))
   }
 
+  /**
+   * The machine this runtime runs its programs on, which their process
+   * records name; null for the workspace's own.
+   */
+  // eslint-disable-next-line @typescript-eslint/class-literal-property-style
+  get machine(): MachineId | null {
+    return null
+  }
+
   /** Whether workspace file mutations already invalidate through dispatch. */
   get fileEffectsDispatched(): boolean {
     return this.reach === 'workspace'
@@ -171,10 +185,92 @@ export abstract class Runtime<E = unknown> {
       if (vfs === undefined) delete runCtx.vfs
       else runCtx.vfs = vfs
       return await runWithCaller(capture.caller, () =>
-        this.runAs(kind, engine, [...paths], [...texts], runCtx, opts.output, opts.errors),
+        this.asProgram(kind, [...texts], runCtx, (programCtx) =>
+          this.runAs(kind, engine, [...paths], [...texts], programCtx, opts.output, opts.errors),
+        ),
       )
     } finally {
       release()
+    }
+  }
+
+  /**
+   * Run a program past the workspace's reach as a process of its own, as
+   * bash forks one: the process started for it when it is that process's
+   * one command (`ProcessHandle.take`), else a child of the running one, in
+   * its group, on this runtime's machine. A run the workspace reaches stays
+   * in its shell's process, as does one outside a process. A child stopped
+   * with its shell gets the signal the shell was stopped with, or the
+   * interrupt it took; one stopped alone answers 128 plus its signal, and
+   * its shell goes on. Mirrors Python's `Runtime._as_program`.
+   *
+   * @param kind what is asked, which names the program.
+   * @param texts the text operands.
+   * @param ctx the run's context.
+   * @param run the program, to its end, under the context it is given.
+   */
+  private async asProgram(
+    kind: ExecutionKind,
+    texts: string[],
+    ctx: Context,
+    run: (ctx: Context) => Promise<RunResult>,
+  ): Promise<RunResult> {
+    const processes = this.binding?.processes ?? null
+    const { process: shell, session } = currentCaller()
+    if (this.reach === 'workspace' || processes === null || shell == null || session == null)
+      return run(ctx)
+    if (shell.take(this.machine, this.name)) return run(ctx)
+    const line = ctx.flags.c
+    const command =
+      kind === 'line' && typeof line === 'string'
+        ? line
+        : kind === 'process'
+          ? shellJoin(texts)
+          : shellJoin([ctx.spec?.name ?? this.name, ...(ctx.argv ?? [])])
+    const stop = new AbortController()
+    const signal =
+      ctx.signal === undefined ? stop.signal : AbortSignal.any([ctx.signal, stop.signal])
+    let done: RunResult | undefined
+    let child: ProcessHandle
+    try {
+      child = processes.start({
+        sessionId: session.sessionId,
+        command,
+        cwd: ctx.cwd,
+        run: async () => {
+          done = await run({ ...ctx, signal })
+          return done.exitCode
+        },
+        cancel: () => {
+          stop.abort()
+        },
+        parent: shell.record.id.pid,
+        limit: session.processes.max,
+        machine: this.machine,
+        runtime: this.name,
+      })
+    } catch (error) {
+      if ((error as { code?: unknown }).code !== 'EAGAIN') throw error
+      return {
+        stdout: new Uint8Array(),
+        stderr: new TextEncoder().encode(FORK_FAILED),
+        exitCode: FORK_FAILED_STATUS,
+      }
+    }
+    const stopped = (): void => {
+      child.terminate(shell.signal ?? shell.interrupted ?? 9)
+    }
+    ctx.signal?.addEventListener('abort', stopped, { once: true })
+    try {
+      const code = await child.task
+      return done ?? { stdout: new Uint8Array(), stderr: null, exitCode: code }
+    } catch (error) {
+      if (ctx.signal?.aborted === true || !isAborting(error)) throw error
+      // The child alone was stopped (`kill` of its pid); its shell goes on
+      // with its status.
+      return { stdout: new Uint8Array(), stderr: null, exitCode: 128 + (child.signal ?? 9) }
+    } finally {
+      ctx.signal?.removeEventListener('abort', stopped)
     }
   }
 

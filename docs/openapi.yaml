@@ -1687,6 +1687,13 @@ paths:
           $ref: '#/components/responses/403'
         '404':
           $ref: '#/components/responses/404'
+        '409':
+          description: Another daemon holds the workspace's lease and runs its lines; the
+            detail names it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: Validation Error
           content:
@@ -6181,7 +6188,7 @@ components:
                   s3: '#/components/schemas/S3StoreBlock'
             - type: 'null'
           title: Workspace
-        jobs:
+        execution:
           anyOf:
             - oneOf:
                 - $ref: '#/components/schemas/RamStoreBlock'
@@ -6196,7 +6203,7 @@ components:
                   redis: '#/components/schemas/RedisStoreBlock'
                   s3: '#/components/schemas/S3StoreBlock'
             - type: 'null'
-          title: Jobs
+          title: Execution
       additionalProperties: false
       type: object
       title: StoreBlock
@@ -6207,7 +6214,7 @@ components:
 
         every control-plane group (namespace nodes, observer events,
 
-        sessions + workspace metadata, jobs). The optional per-group
+        sessions + workspace metadata, execution). The optional per-group
 
         overrides redirect one group to a different backend, e.g. large
 
@@ -6229,9 +6236,9 @@ components:
 
         stream other processes follow; ``root`` is only read when a disk
 
-        store is selected. The ``jobs`` group (job lists, consoles, owner
+        store is selected. The ``execution`` group (job lists, consoles, the
 
-        leases) is therefore ram or redis.'
+        workspace''s lease, process records) is therefore ram or redis.'
     TemplateResponse:
       properties:
         name:

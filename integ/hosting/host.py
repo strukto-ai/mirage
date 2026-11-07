@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi.responses import PlainTextResponse
 
+from mirage.execution.line.types import LineState
 from mirage.server.app import build_app
 from mirage.server.auth.config import AuthConfig, AuthMode
 
@@ -37,8 +38,14 @@ async def main() -> None:
     # The lines a workspace's sessions have queued, which have not started.
     @app.get("/__integ/pending/{wid}")
     async def pending(wid: str) -> dict[str, list[str]]:
-        jobs = app.state.jobs.list(wid)
-        return {"pending": [j.command for j in jobs if j.status == "pending"]}
+        return {
+            "pending": [
+                held.line.record.command
+                for held in app.state.jobs.requests()
+                if held.workspace_id == wid
+                and held.line.record.state == LineState.WAITING
+            ]
+        }
 
     @app.post("/__integ/release/{key}")
     async def release(key: str) -> dict[str, bool]:

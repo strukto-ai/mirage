@@ -422,7 +422,7 @@ describe('AuthMiddleware integration', () => {
           const tools = new DaemonToolOperations(entry, app.jobs, entry.runner.ws.defaultSessionId)
           const answer = await tools.shell('echo MCP-SECRET')
           expect(answer.content).toEqual([{ type: 'text', text: 'MCP-SECRET\n' }])
-          expect(app.jobs.list('w')).toHaveLength(2)
+          expect(entry.runner.ws.lineTable.lines()).toHaveLength(2)
           r = await app.inject({ method: 'DELETE', url: '/v1/workspaces/w', headers: alice })
           expect(r.statusCode, r.body).toBe(200)
           r = await app.inject({
@@ -439,7 +439,8 @@ describe('AuthMiddleware integration', () => {
             payload: { command: 'echo fresh' },
           })
           expect(r.statusCode, r.body).toBe(200)
-          expect(app.jobs.list('w').map((job) => job.command)).toEqual(['echo fresh'])
+          const successorLines = app.registry.get('w').runner.ws.lineTable
+          expect(successorLines.lines().map((line) => line.command)).toEqual(['echo fresh'])
         } finally {
           await app.close()
         }
@@ -508,7 +509,7 @@ describe('AuthMiddleware integration', () => {
         const response = await pending
         expect(response.statusCode, response.body).toBe(404)
         expect(discard).toHaveBeenCalled()
-        expect(app.jobs.list('w')).toEqual([])
+        expect(app.jobs.requests().filter((held) => held.workspaceId === 'w')).toEqual([])
       } finally {
         release.release()
         input.end('\r\n--boundary--\r\n')
@@ -613,7 +614,7 @@ describe('AuthMiddleware integration', () => {
               expect(response?.json()).toHaveProperty('error')
             }
           }
-          expect(app.jobs.list('w')).toEqual([])
+          expect(app.jobs.requests().filter((held) => held.workspaceId === 'w')).toEqual([])
         } finally {
           release.release()
           await pending

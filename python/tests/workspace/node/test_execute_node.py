@@ -17,13 +17,13 @@ from functools import partial
 from unittest.mock import AsyncMock, MagicMock
 
 from mirage.commands.config import Context
+from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.stream import materialize
 from mirage.runtime.types import RouteDecision
 from mirage.runtime.workspace import WorkspaceRuntime
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
 from mirage.shell.errors import ReturnSignal
-from mirage.shell.job_table import JobTable
 from mirage.shell.parse import parse
 from mirage.types import MountMode, PathSpec
 from mirage.vfs.ram import RAMVFS

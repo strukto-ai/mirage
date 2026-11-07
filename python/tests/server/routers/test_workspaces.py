@@ -35,6 +35,7 @@ from moto.server import ThreadedMotoServer
 from pydantic import BaseModel
 
 from mirage import MountMode, Workspace
+from mirage.execution.line.types import LineState
 from mirage.policy.base import Policy
 from mirage.policy.types import (
     CommandContext,
@@ -1647,9 +1648,10 @@ async def test_workspace_cancel_and_kill_reach_every_session(tmp_path):
             )
         )
         for _ in range(500):
-            jobs = app.state.jobs.list(wid)
             if any(
-                j.command == "sleep 30" and j.status == "running" for j in jobs
+                request.line.record.command == "sleep 30"
+                and request.line.record.state == LineState.RUNNING
+                for request in app.state.jobs.requests()
             ):
                 break
             await asyncio.sleep(0.01)

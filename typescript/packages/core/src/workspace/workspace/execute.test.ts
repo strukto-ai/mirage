@@ -18,8 +18,9 @@ import { CLI } from '../../commands/cli/types.ts'
 import { Command } from '../../commands/config.ts'
 import { CommandSpec } from '../../commands/spec/types.ts'
 import { IOResult } from '../../io/types.ts'
-import { currentExecutionId } from '../../context/session_context.ts'
-import { ExecutionScope } from '../execution.ts'
+import { currentProcessId } from '../../context/session_context.ts'
+import { LineHandle } from '../../execution/line/handle.ts'
+import { LineId } from '../../execution/types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { MountMode, VFSName } from '../../types.ts'
 import type { Action, CommandContext, Policy } from '../../policy/index.ts'
@@ -68,7 +69,7 @@ it('links a pipeline CLI and operation history to the admitted execution', async
       handlers: {
         '': new CLIHandler({
           fn: () => {
-            seen.push(currentExecutionId())
+            seen.push(currentProcessId()?.toString() ?? null)
             return [ENC.encode('tracked\n'), new IOResult()]
           },
         }),
@@ -76,15 +77,15 @@ it('links a pipeline CLI and operation history to the admitted execution', async
     }),
   )
   const result = await ws.shell('probe | cat > /ram/tracked; cat /ram/tracked', {
-    executionScope: new ExecutionScope(undefined, 'exec-request'),
+    lineHandle: new LineHandle(new LineId('line-request'), 'default', 'probe'),
   })
   expect(result.stdoutText).toBe('tracked\n')
   expect(seen[0]).not.toBeNull()
-  expect(seen[0]).not.toBe('exec-request')
+  expect(seen[0]).not.toBe('line-request')
   const events = await ws.observer.events()
-  expect([events[0]?.type, events[0]?.id]).toEqual(['command', 'exec-request'])
+  expect([events[0]?.type, events[0]?.id]).toEqual(['command', 'line-request'])
   expect(events.slice(1).some((event) => event.type === 'vfs')).toBe(true)
-  expect(events.slice(1).every((event) => event.parent === 'exec-request')).toBe(true)
+  expect(events.slice(1).every((event) => event.parent === 'line-request')).toBe(true)
 })
 
 function makeWs(): Workspace {

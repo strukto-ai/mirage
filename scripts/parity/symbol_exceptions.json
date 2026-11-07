@@ -1299,7 +1299,7 @@
     "PUBLISH_BYTES": "A Python RAM file is immutable bytes, so each landing of a streamed write copies the whole file, and past this size the wait grows with it; TypeScript grows one buffer and lands only the new bytes, so its wait stays STREAM_PUBLISH_SECONDS."
    }
   },
-  "process/config": {
+  "execution/process/config": {
    "typescript_only": {
     "ProcessesBlock": "A block as written, a bare scope or the fields it states; Python's ProcessPermissions keeps both shapes in one pydantic model, its model_fields_set recording what was stated.",
     "layerProcesses": "Python's ProcessPermissions.layered, a classmethod on the model; TypeScript's ProcessPermissions is a plain interface with no methods.",
@@ -1498,6 +1498,11 @@
    },
    "typescript_only": {
     "outputOf": "Commander hands an option's raw string to a parser, so TypeScript refuses anything but yaml in outputOf; Typer checks the value against the Output enum itself."
+   }
+  },
+  "workspace/workspace/execute": {
+   "python_only": {
+    "_run_as_shell": "Python runs the line as its session's process in a module function given what it needs; TypeScript's runAsShell is a closure inside runLine over the line's options, frame and argv."
    }
   }
  }

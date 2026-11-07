@@ -23,6 +23,7 @@ from mirage.context import (
 )
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.fs import fs_strerror
+from mirage.execution.job import JobTable
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.runtime.types import DispatchFn
@@ -30,7 +31,6 @@ from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS, NOT_FOUND_STATUS
-from mirage.shell.job_table import JobTable
 from mirage.shell.join import shell_join
 from mirage.shell.voice import shell_voice
 from mirage.utils.path import resolve_path

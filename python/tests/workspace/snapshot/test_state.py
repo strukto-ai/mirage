@@ -38,6 +38,7 @@ from mirage import (
 from mirage.cache.file.config import RedisCacheConfig
 from mirage.cache.index import IndexConfig, RedisIndexConfig
 from mirage.errors.types import QuotaExceededError
+from mirage.execution.job.handle import JobHandle
 from mirage.io import IOResult
 from mirage.policy import Action, Deny, Policy, PolicyDenied
 from mirage.policy.builtin.output_cap import ALL_COMMANDS
@@ -45,7 +46,6 @@ from mirage.policy.types import SessionContext
 from mirage.secrets import registry
 from mirage.secrets.registry import register_secrets
 from mirage.secrets.types import ResolvedSecret
-from mirage.shell.job_table.types import Job
 from mirage.types import (
     ContentType,
     FileType,
@@ -1693,7 +1693,7 @@ async def test_a_snapshot_leaves_out_a_killed_job_still_stopping():
     ws = Workspace({"/m": RAMVFS()})
     release = asyncio.Event()
 
-    async def run(job: Job) -> tuple[IOResult, ExecutionNode]:
+    async def run(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
         try:
             await asyncio.Event().wait()
         finally:

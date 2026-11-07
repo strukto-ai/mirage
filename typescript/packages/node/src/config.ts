@@ -283,7 +283,7 @@ function buildStateStore(block: StoreBlock | null | undefined): WorkspaceStateSt
     ...(block.namespace != null ? { namespace: buildStoreGroup(block.namespace) } : {}),
     ...(block.observer != null ? { observer: buildStoreGroup(block.observer) } : {}),
     ...(block.workspace != null ? { workspace: buildStoreGroup(block.workspace) } : {}),
-    ...(block.jobs != null ? { jobs: buildStoreGroup(block.jobs) } : {}),
+    ...(block.execution != null ? { execution: buildStoreGroup(block.execution) } : {}),
   }
   if (block.type === 'redis') {
     return new RedisWorkspaceStateStore({

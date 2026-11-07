@@ -36,7 +36,7 @@ import { PolicyDenied } from '../policy/errors.ts'
 import type { Policy } from '../policy/index.ts'
 import type { Action, SessionContext } from '../policy/types.ts'
 import { ScriptSource } from '../runtime/types.ts'
-import { type JobResult } from '../shell/job_table/index.ts'
+import { type JobResult } from '../execution/job/index.ts'
 import { DEFAULT_READ_TTL, Limit, MountMode, ReadPolicy } from '../types.ts'
 import { ManualClock } from '../utils/clock.ts'
 import { VERSION } from '../version.ts'
@@ -547,7 +547,7 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     })
     expect(state.jobs.length).toBe(1)
     expect(state.jobs[0]?.command).toBe('sleep 0')
-    expect(state.jobs[0]?.status).toBe('completed')
+    expect(state.jobs[0]?.signal).toBeNull()
 
     const ws2 = await Workspace.fromState(state, {
       mode: MountMode.WRITE,
@@ -568,7 +568,7 @@ describe('Workspace.fromState — sessions and finished jobs', () => {
     const jobs2 = ws2.jobTable.listJobs('worker')
     expect(jobs2.length).toBe(1)
     expect(jobs2[0]?.command).toBe('sleep 0')
-    expect(jobs2[0]?.status).toBe('completed')
+    expect([jobs2[0]?.state, jobs2[0]?.signal]).toEqual(['exited', null])
     expect(jobs2[0]?.cwd).toBe('/data')
     expect(jobs2[0]?.sessionId).toBe('worker')
 

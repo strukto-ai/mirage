@@ -12,14 +12,15 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { ExecutionStatus, type ExecutionRecord } from '@struktoai/mirage-core/execution/types'
+import { WorkspaceHeldError } from '@struktoai/mirage-core/execution/errors'
+import type { LineId } from '@struktoai/mirage-core/execution/types'
 import type { ShellExplanation } from '@struktoai/mirage-core/policy/types'
 import { z } from '@struktoai/mirage-core/vfs/secrets'
 import type { ShellExecution } from '@struktoai/mirage-core/workspace/shell_execution'
 import type { RouteApp, RouteReply, RouteRequest } from '../routes.ts'
 import { Buffer } from 'node:buffer'
 import { explanationToDict, ioResultToDict } from '../io_serde.ts'
-import type { ExecutionTable } from '../jobs.ts'
+import type { LineRequest, RequestTable } from '../requests.ts'
 import { refused } from '../metrics.ts'
 import { MAX_REQUEST_PART, MultipartError, partEvents, type PartEvent } from '../multipart.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
@@ -29,7 +30,7 @@ import { failure, HttpError, queryFlag, requireEntry, sessionOf } from './vfs.ts
 
 export interface ShellRoutesDeps {
   registry: WorkspaceRegistry
-  jobs: ExecutionTable
+  jobs: RequestTable
 }
 
 interface ShellParams {
@@ -160,11 +161,11 @@ async function readShellBody(req: RouteRequest, capacity: number): Promise<Shell
  * fails, the caller gone or the body bad, cancels the job the same way.
  */
 async function waitAttended(
-  jobs: ExecutionTable,
-  jobId: string,
+  jobs: RequestTable,
+  jobId: LineId,
   closed: AbortSignal,
   upload: Promise<unknown>,
-): Promise<ExecutionRecord> {
+): Promise<LineRequest> {
   const gone = (): void => {
     jobs.cancel(jobId)
   }
@@ -281,6 +282,23 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
         }
         return reply.status(404).send({ detail: 'workspace not found' })
       }
+      const table = entry.runner.ws.jobTable
+      if (!table.claimed) {
+        // Once held, the lease is this daemon's until the workspace closes,
+        // so only a line on a workspace it does not hold yet waits for the
+        // store here.
+        try {
+          await table.claim()
+        } catch (err) {
+          if (!(err instanceof WorkspaceHeldError)) throw err
+          try {
+            await upload.finish()
+          } catch (error) {
+            return refuse(req, reply, error)
+          }
+          return reply.status(409).send({ detail: err.message })
+        }
+      }
       let opened!: (execution: ShellExecution | null) => void
       const execution = new Promise<ShellExecution | null>((resolve) => {
         opened = resolve
@@ -288,10 +306,10 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
       let job = deps.jobs.submit(
         wsId,
         body.command,
-        async (signal, executionScope) => {
+        async (signal, lineHandle) => {
           const options = {
             sessionId,
-            executionScope,
+            lineHandle,
             ...(body.cwd !== undefined ? { cwd: body.cwd } : {}),
             ...(body.runtime !== undefined ? { runtime: body.runtime } : {}),
             ...(body.record !== undefined ? { record: body.record } : {}),
@@ -320,11 +338,11 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
       } catch (error) {
         return refuse(req, reply, error)
       }
-      if (job.status === ExecutionStatus.CANCELED) {
+      if (job.line.record.signal !== null) {
         return reply.status(499).send({ detail: 'job canceled' })
       }
-      if (job.status === ExecutionStatus.FAILED) {
-        return reply.status(500).send({ detail: job.error ?? 'shell failed' })
+      if (job.error !== null) {
+        return reply.status(500).send({ detail: job.error })
       }
       return job.result
     },
