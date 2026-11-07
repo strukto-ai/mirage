@@ -15,6 +15,7 @@
 import argparse
 import re
 import sys
+from html import unescape
 from pathlib import Path
 from typing import Any
 
@@ -166,7 +167,9 @@ def render(doc: dict[str, Any]) -> str:
         (path, method, op)
         for path, methods in doc["paths"].items()
         for method, op in methods.items()
-        if method in METHOD_ORDER and not op.get("x-excluded")
+        if method in METHOD_ORDER
+        and not op.get("x-excluded")
+        and not op.get("x-hidden")
     ]
     lines = [HEADER, "<ApiExplorer>", ""]
     for path, method, op in sorted(ops, key=order):
@@ -175,14 +178,90 @@ def render(doc: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def selftest() -> None:
+    """Check search coverage and valid attribute text on a recursive schema."""
+    shared = {"$ref": "#/components/schemas/Shared"}
+    node = {"$ref": "#/components/schemas/Node"}
+    doc = {
+        "components": {
+            "schemas": {
+                "Shared": {"properties": {"filename": {"type": "string"}}},
+                "Node": {
+                    "allOf": [
+                        shared,
+                        {"properties": {"child": node}},
+                    ]
+                },
+            }
+        }
+    }
+    op = {
+        "summary": "Read files",
+        "description": 'Read a "file" at {path} & return <bytes>.',
+        "tags": ["VFS"],
+        "parameters": [
+            {"name": "stream", "description": "Stream the response."}
+        ],
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "schema": {"allOf": [node, shared]},
+                    "example": {"not_searchable": "unused"},
+                }
+            }
+        },
+        "responses": {
+            "200": {
+                "content": {
+                    "application/json": {
+                        "schema": {"properties": {"data": shared}}
+                    }
+                }
+            }
+        },
+    }
+    terms = search_terms(doc, op, set())
+    assert {"filename", "child", "stream", "data", "response."} <= terms
+    assert "not_searchable" not in terms
+
+    text = '"{path}" & <bytes> \\ &quot;'
+    escaped = attr(text)
+    assert unescape(escaped) == text
+    assert not any(char in escaped for char in ('"', "{", "}", "<"))
+
+    output = "\n".join(operation(doc, "/v1/files/{path}", "post", op))
+    assert 'href="/api/operations/vfs/read-files"' in output
+    assert 'anchor="post-v1-files-path"' in output
+    assert "filename" in output and "stream" in output
+    assert "&quot;file&quot;" in output and "&#123;path&#125;" in output
+
+    doc["paths"] = {
+        "/visible": {"get": op},
+        "/hidden": {"post": {**op, "x-hidden": True}},
+    }
+    page = render(doc)
+    assert 'path="/visible"' in page
+    assert 'path="/hidden"' not in page
+    print("API reference self-test passed")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--selftest",
+        action="store_true",
+        help="check recursive search and attribute escaping",
+    )
     parser.add_argument(
         "--check",
         action="store_true",
         help="fail when the committed page differs from the generated one",
     )
     args = parser.parse_args()
+    if args.selftest:
+        selftest()
+        if not args.check:
+            return 0
     page = render(yaml.safe_load(SPEC.read_text()))
     if args.check:
         if not PAGE.exists() or PAGE.read_text() != page:

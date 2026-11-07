@@ -4,17 +4,14 @@ description: Create a workspace and run your first shell command over HTTP.
 icon: bolt
 ---
 
-Set these variables before starting a [local server](/home/access/http#launch-a-server).
-Use the same token and base URL in the terminal that sends requests:
+Set the hosted API URL and your access token in the terminal that sends requests:
 
 ```bash
-export MIRAGE_AUTH_MODE=token
+export MIRAGE_BASE_URL='https://api.strukto.ai'
 export MIRAGE_AUTH_TOKEN='replace-with-your-token'
-export MIRAGE_BASE_URL='http://127.0.0.1:8765'
 ```
 
-For a hosted workspace, set `MIRAGE_BASE_URL` to the API URL from your deployment
-and use its token. The request paths and JSON bodies are the same.
+For another deployment, set `MIRAGE_BASE_URL` to its API URL and use its token.
 
 Create a workspace with an in-memory filesystem:
 
@@ -49,3 +46,5 @@ Use [Create a workspace](/api/operations/workspaces/create-a-workspace) and
 request fields and responses. Browse the resource groups on the left, or use
 the [endpoint search](/api/reference) to find an operation by path, parameter
 or response field.
+
+For local daemon setup, see the [HTTP server guide](/home/access/http).

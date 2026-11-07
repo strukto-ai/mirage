@@ -19,8 +19,8 @@ tags:
   - name: Server
   - name: Auth
 servers:
-  - url: http://127.0.0.1:8765
-    description: A local daemon on its default port
+  - url: https://api.strukto.ai
+    description: The hosted API
 security:
   - bearerAuth: []
 paths:
@@ -284,6 +284,9 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/stop:
     post:
       summary: Stop a workspace
@@ -359,6 +362,9 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/cancel:
     post:
       summary: Cancel a workspace's lines
@@ -420,6 +426,9 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/profiles/{name}:
     put:
       summary: Set a profile
@@ -471,6 +480,9 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/clis/{name}:
     put:
       summary: Install an MCP CLI
@@ -526,6 +538,9 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
     delete:
       summary: Remove an MCP CLI
       operationId: delete_cli_v1_workspaces__workspace_id__clis__name__delete
@@ -563,6 +578,9 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/clone:
     post:
       summary: Clone a workspace
@@ -598,8 +616,12 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Snapshots
+      x-hidden: true
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/snapshot:
     get:
       summary: Download a snapshot
@@ -630,8 +652,12 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Snapshots
+      x-hidden: true
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
     post:
       summary: Snapshot a workspace
       operationId: snapshot_workspace_v1_workspaces__workspace_id__snapshot_post
@@ -666,8 +692,12 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Snapshots
+      x-hidden: true
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/load:
     post:
       summary: Load a snapshot
@@ -687,6 +717,7 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Snapshots
+      x-hidden: true
       x-hosts:
         - daemon
       requestBody:
@@ -710,6 +741,9 @@ paths:
                   description: The tar archive, up to 1 GiB.
               required:
                 - snapshot
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/templates:
     get:
       summary: List templates
@@ -917,6 +951,9 @@ paths:
         - Documents
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
     put:
       summary: Write the workspace's VFS.md
       operationId: put_v1_workspaces__workspace_id__vfs_md_put
@@ -960,6 +997,9 @@ paths:
         - Documents
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/sessions/{session_id}/vfs-md:
     get:
       summary: Read a session's VFS.md
@@ -1003,6 +1043,9 @@ paths:
         - Documents
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
     put:
       summary: Write a session's VFS.md
       operationId: put_v1_workspaces__workspace_id__sessions__session_id__vfs_md_put
@@ -1052,6 +1095,9 @@ paths:
         - Documents
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/skill-md:
     get:
       summary: Read the workspace's SKILL.md
@@ -1089,6 +1135,9 @@ paths:
         - Documents
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
     put:
       summary: Write the workspace's SKILL.md
       operationId: put_v1_workspaces__workspace_id__skill_md_put
@@ -1132,6 +1181,9 @@ paths:
         - Documents
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/sessions/{session_id}/skill-md:
     get:
       summary: Read a session's SKILL.md
@@ -1175,6 +1227,9 @@ paths:
         - Documents
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
     put:
       summary: Write a session's SKILL.md
       operationId: put_v1_workspaces__workspace_id__sessions__session_id__skill_md_put
@@ -1224,6 +1279,9 @@ paths:
         - Documents
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/sessions:
     post:
       summary: Create a session
@@ -1259,6 +1317,7 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Sessions
+      x-hidden: true
       x-hosts:
         - daemon
         - hosted
@@ -1291,6 +1350,7 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Sessions
+      x-hidden: true
       x-hosts:
         - daemon
         - hosted
@@ -1326,8 +1386,12 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Sessions
+      x-hidden: true
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
     patch:
       summary: Change a session's profile
       operationId: update_session_v1_workspaces__workspace_id__sessions__session_id__patch
@@ -1369,8 +1433,12 @@ paths:
       description: Replace the session's profile; its cwd, env and history stay.
       tags:
         - Sessions
+      x-hidden: true
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/sessions/{session_id}/cancel:
     post:
       summary: Cancel a session's lines
@@ -1407,8 +1475,12 @@ paths:
         The session stays open; returns once those lines have ended.'
       tags:
         - Sessions
+      x-hidden: true
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/sessions/{session_id}/kill:
     post:
       summary: Kill a session's jobs
@@ -1442,8 +1514,12 @@ paths:
       description: Kill the session's background jobs and runners; it stays open.
       tags:
         - Sessions
+      x-hidden: true
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/asks:
     get:
       summary: List asks
@@ -1493,6 +1569,9 @@ paths:
         - Asks
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/asks/{ask_id}:
     post:
       summary: Answer an ask
@@ -1543,6 +1622,9 @@ paths:
         - Asks
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/shell:
     post:
       summary: Run a shell line
@@ -1656,6 +1738,7 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Tools
+      x-hidden: true
       x-hosts:
         - daemon
       requestBody:
@@ -1672,6 +1755,9 @@ paths:
                 - command
             example:
               command: echo hello
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/tools/read:
     post:
       summary: Read tool
@@ -1702,6 +1788,7 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Tools
+      x-hidden: true
       x-hosts:
         - daemon
       requestBody:
@@ -1726,6 +1813,9 @@ paths:
                 - path
             example:
               path: /hello.txt
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/tools/write:
     post:
       summary: Write tool
@@ -1756,6 +1846,7 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Tools
+      x-hidden: true
       x-hosts:
         - daemon
       requestBody:
@@ -1777,6 +1868,9 @@ paths:
             example:
               path: /hello.txt
               content: "hello\n"
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/tools/edit:
     post:
       summary: Edit tool
@@ -1807,6 +1901,7 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Tools
+      x-hidden: true
       x-hosts:
         - daemon
       requestBody:
@@ -1836,6 +1931,9 @@ paths:
               path: /hello.txt
               old_string: hello
               new_string: goodbye
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/tools/ls:
     post:
       summary: Ls tool
@@ -1866,6 +1964,7 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Tools
+      x-hidden: true
       x-hosts:
         - daemon
       requestBody:
@@ -1882,6 +1981,9 @@ paths:
                 - path
             example:
               path: /
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/tools/grep:
     post:
       summary: Grep tool
@@ -1912,6 +2014,7 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Tools
+      x-hidden: true
       x-hosts:
         - daemon
       requestBody:
@@ -1957,6 +2060,9 @@ paths:
             example:
               pattern: hello
               path: /
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/tools/glob:
     post:
       summary: Glob tool
@@ -1987,6 +2093,7 @@ paths:
           $ref: '#/components/responses/429'
       tags:
         - Tools
+      x-hidden: true
       x-hosts:
         - daemon
       requestBody:
@@ -2009,6 +2116,9 @@ paths:
             example:
               pattern: '**/*.txt'
               path: /
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/read:
     post:
       summary: VFS read
@@ -2081,6 +2191,9 @@ paths:
             example:
               path: /hello.txt
       description: Read a file's bytes, from an offset.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/write:
     post:
       summary: VFS write
@@ -2142,6 +2255,9 @@ paths:
               path: /hello.txt
               data: aGVsbG8K
       description: Write a file's bytes, replacing what it held.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/append:
     post:
       summary: VFS append
@@ -2203,6 +2319,9 @@ paths:
               path: /hello.txt
               data: aGVsbG8K
       description: Append bytes to a file.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/pwrite:
     post:
       summary: VFS pwrite
@@ -2268,6 +2387,9 @@ paths:
               data: aGVsbG8K
               offset: 0
       description: Write bytes into a file at an offset.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/stat:
     post:
       summary: VFS stat
@@ -2326,6 +2448,9 @@ paths:
             example:
               path: /hello.txt
       description: A path's metadata.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/readdir:
     post:
       summary: VFS readdir
@@ -2384,6 +2509,9 @@ paths:
             example:
               path: /
       description: A directory's entries.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/exists:
     post:
       summary: VFS exists
@@ -2439,6 +2567,9 @@ paths:
             example:
               path: /hello.txt
       description: Whether a path exists.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/is_dir:
     post:
       summary: VFS is_dir
@@ -2494,6 +2625,9 @@ paths:
             example:
               path: /
       description: Whether a path is a directory.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/is_file:
     post:
       summary: VFS is_file
@@ -2549,6 +2683,9 @@ paths:
             example:
               path: /hello.txt
       description: Whether a path is a file.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/list_files:
     post:
       summary: VFS list_files
@@ -2607,6 +2744,9 @@ paths:
             example:
               path: /
       description: The names of a directory's files.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/mkdir:
     post:
       summary: VFS mkdir
@@ -2662,6 +2802,9 @@ paths:
             example:
               path: /notes
       description: Make a directory.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/rmdir:
     post:
       summary: VFS rmdir
@@ -2717,6 +2860,9 @@ paths:
             example:
               path: /notes
       description: Remove an empty directory.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/unlink:
     post:
       summary: VFS unlink
@@ -2772,6 +2918,9 @@ paths:
             example:
               path: /hello.txt
       description: Remove a file.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/create:
     post:
       summary: VFS create
@@ -2827,6 +2976,9 @@ paths:
             example:
               path: /hello.txt
       description: Create an empty file.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/rename:
     post:
       summary: VFS rename
@@ -2886,6 +3038,9 @@ paths:
               src: /hello.txt
               dst: /goodbye.txt
       description: Rename a path within its mount.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/symlink:
     post:
       summary: VFS symlink
@@ -2945,6 +3100,9 @@ paths:
               path: /hello-link.txt
               target: /hello.txt
       description: Make a symbolic link at a path.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/readlink:
     post:
       summary: VFS readlink
@@ -3001,6 +3159,9 @@ paths:
             example:
               path: /hello-link.txt
       description: Where a symbolic link points.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/setattr:
     post:
       summary: VFS setattr
@@ -3073,6 +3234,9 @@ paths:
               path: /hello.txt
               mode: 420
       description: Change a path's mode, owner or times.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/getxattr:
     post:
       summary: VFS getxattr
@@ -3135,6 +3299,9 @@ paths:
               path: /hello.txt
               name: user.note
       description: One extended attribute's value.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/listxattr:
     post:
       summary: VFS listxattr
@@ -3194,6 +3361,9 @@ paths:
             example:
               path: /hello.txt
       description: A path's extended attribute names.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/setxattr:
     post:
       summary: VFS setxattr
@@ -3265,6 +3435,9 @@ paths:
               name: user.note
               value: aGVsbG8K
       description: Set an extended attribute.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/removexattr:
     post:
       summary: VFS removexattr
@@ -3326,6 +3499,9 @@ paths:
               path: /hello.txt
               name: user.note
       description: Remove an extended attribute.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/vfs/truncate:
     post:
       summary: VFS truncate
@@ -3385,6 +3561,9 @@ paths:
               path: /hello.txt
               length: 0
       description: Cut or extend a file to a length.
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/glob:
     post:
       summary: Match paths
@@ -3492,6 +3671,9 @@ paths:
             example:
               path: /hello.txt
               kwargs: {}
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/health:
     get:
       summary: Check health
@@ -3508,6 +3690,9 @@ paths:
       x-hosts:
         - daemon
       security: []
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/daemon/ready:
     get:
       summary: Check readiness
@@ -3529,6 +3714,9 @@ paths:
       x-hosts:
         - daemon
       security: []
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/daemon/shutdown:
     post:
       summary: Shut down the server
@@ -3559,6 +3747,9 @@ paths:
       x-excluded: true
       x-hosts:
         - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /.well-known/oauth-protected-resource:
     get:
       summary: Read OAuth protected-resource metadata
@@ -3580,9 +3771,13 @@ paths:
         publishes no login answers 404, so the CLI knows it needs none.'
       tags:
         - Auth
+      x-hidden: true
       x-hosts:
         - daemon
       security: []
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/vfs:
     get:
       operationId: list_entries_v1_vfs_get

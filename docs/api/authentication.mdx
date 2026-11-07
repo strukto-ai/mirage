@@ -1,32 +1,34 @@
 ---
 title: Authentication
-description: Authenticate requests to a local daemon or hosted deployment.
+description: Authenticate requests to the hosted API with a bearer token.
 icon: key
 ---
 
-Send the server's token on every request:
+The hosted API is at `https://api.strukto.ai`. Set `MIRAGE_AUTH_TOKEN` to your
+access token and send it on every request:
 
 ```bash
-curl http://127.0.0.1:8765/v1/workspaces \
+curl https://api.strukto.ai/v1/workspaces \
   -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
 ```
 
-`GET /v1/health` needs no token. A daemon with no token set accepts every
-request, so set one before anyone else can reach it. Tokens, JWTs and
-per-account workspaces are covered in [Auth](/home/access/http#auth) and
-[Configure authentication](/home/access/http#configure-authentication).
+The API returns `401` when the token is missing, incorrect or expired. The
+account associated with the token determines which workspaces are visible.
 
-## Local token mode
+## Sign in with the CLI
 
-Set `MIRAGE_AUTH_MODE=token` and `MIRAGE_AUTH_TOKEN` in the server's environment
-before starting it. Clients send the token in the `Authorization` header.
-A missing or incorrect token returns `401`.
+[`mirage login`](/home/access/cli#log-in) signs in to the hosted API and stores
+the credentials in a CLI context. [`mirage api`](/home/access/cli#call-any-route)
+uses that context to authenticate requests.
 
-## Hosted deployments
+### OAuth discovery
 
-Use the API URL and token from your deployment. A hosted deployment can require
-a JWT rather than the local daemon's token. The same bearer header carries either.
-The account associated with the token determines which workspaces are visible.
+The CLI reads `/.well-known/oauth-protected-resource` to discover a deployment's
+OAuth issuer and client ID before opening browser sign-in. This endpoint does not
+issue tokens. Normal API requests only need the bearer token shown above.
 
-See [Configure authentication](/home/access/http#configure-authentication)
-for JWT issuers, audiences and account isolation.
+## Other deployments
+
+For another deployment, use its API URL and bearer token. See
+[Server authentication](/home/access/http#configure-authentication) for local
+daemon setup, JWT issuers, audiences and account isolation.
