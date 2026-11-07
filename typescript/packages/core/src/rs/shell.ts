@@ -831,6 +831,14 @@ export class Shell {
     this.call('unassigned', name)
   }
 
+  /**
+   * Whether `name`'s record is one declared and never assigned, which a host
+   * putting the record back marks again (`unassigned`).
+   */
+  isUnassigned(name: string): boolean {
+    return this.call('is_unassigned', name) as boolean
+  }
+
   /** The line `declare -p` prints for a name; null for one unset or hidden. */
   declaration(name: string): string | null {
     return this.call('declaration', name) as string | null

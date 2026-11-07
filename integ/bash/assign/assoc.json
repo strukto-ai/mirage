@@ -1148,11 +1148,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( X=(1 2); declare X=9; declare -a S=1; declare -A M=1; Y=(1 2); declare -A Y=9; echo \"rc=$?\"; readonly R=1; declare R=2; echo \"rc=$?\"; declare -p X S M Y ); ( i=2; declare 'E[$i]=w' 'E[1]=$i' E[1+2]=z; declare -i 'N[1]=1+2'; s=x; declare s[1]=y; declare U[1]+=a; declare U[1]+=b; declare -A K; k=q; declare \"K[$k]=v\"; declare 'B[x=5]=1'; declare 'Q[]=1' 'Q[@]=1'; echo \"rc=$? x=$x\"; export X2[$i]=1; f(){ local G[1]=1; declare -g H[0]=h; declare -p G; }; f; declare -p G 2>&1; declare -p E N s U K B H )",
+      "command": "( X=(1 2); declare X=9; declare -a S=1; declare -A M=1; Y=(1 2); declare -A Y=9; echo \"rc=$?\"; readonly R=1; declare R=2; echo \"rc=$?\"; declare -p X S M Y ); ( i=2; declare 'E[$i]=w' 'E[1]=$i' E[1+2]=z; declare -i 'N[1]=1+2'; s=x; declare s[1]=y; declare U[1]+=a; declare U[1]+=b; declare -A K; k=q; declare \"K[$k]=v\"; declare 'B[x=5]=1'; declare 'Q[]=1' 'Q[@]=1'; echo \"rc=$? x=$x\"; export X2[$i]=1; f(){ local G[1]=1; declare -g H[0]=h; declare -p G; }; f; declare -p G 2>&1; declare -p E N s U K B H ); ( declare 'zgn_a[zgn_b[0]=1]=v' 'zgn_c[zgn_x=2]'; declare -p zgn_a zgn_b zgn_c zgn_x; f() { local 'zgn_d[zgn_e[1]=2]=w'; declare -p zgn_d zgn_e; }; f )",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\nrc=1\ndeclare -a X=([0]=\"9\" [1]=\"2\")\ndeclare -a S=([0]=\"1\")\ndeclare -A M=([0]=\"1\" )\ndeclare -a Y=([0]=\"1\" [1]=\"2\")\nrc=1 x=5\ndeclare -a G=([1]=\"1\")\nbash: line 1: declare: G: not found\ndeclare -a E=([1]=\"\\$i\" [2]=\"w\" [3]=\"z\")\ndeclare -ai N=([1]=\"3\")\ndeclare -a s=([0]=\"x\" [1]=\"y\")\ndeclare -a U=([1]=\"ab\")\ndeclare -A K=([q]=\"v\" )\ndeclare -a B=([5]=\"1\")\ndeclare -a H=([0]=\"h\")\n",
-        "stderr": "bash: line 1: declare: Y: cannot convert indexed to associative array\nbash: line 1: declare: R: readonly variable\nbash: line 1: Q[]: bad array subscript\nbash: line 1: Q[@]: bad array subscript\nbash: line 1: export: `X2[2]': not a valid identifier\n"
+        "stdout": "rc=1\nrc=1\ndeclare -a X=([0]=\"9\" [1]=\"2\")\ndeclare -a S=([0]=\"1\")\ndeclare -A M=([0]=\"1\" )\ndeclare -a Y=([0]=\"1\" [1]=\"2\")\nrc=1 x=5\ndeclare -a G=([1]=\"1\")\nbash: line 1: declare: G: not found\ndeclare -a E=([1]=\"\\$i\" [2]=\"w\" [3]=\"z\")\ndeclare -ai N=([1]=\"3\")\ndeclare -a s=([0]=\"x\" [1]=\"y\")\ndeclare -a U=([1]=\"ab\")\ndeclare -A K=([q]=\"v\" )\ndeclare -a B=([5]=\"1\")\ndeclare -a H=([0]=\"h\")\ndeclare -a zgn_a=([1]=\"v\")\ndeclare -a zgn_b=([0]=\"1\")\ndeclare -a zgn_c\ndeclare -a zgn_d=([2]=\"w\")\ndeclare -a zgn_e=([1]=\"2\")\n",
+        "stderr": "bash: line 1: declare: Y: cannot convert indexed to associative array\nbash: line 1: declare: R: readonly variable\nbash: line 1: Q[]: bad array subscript\nbash: line 1: Q[@]: bad array subscript\nbash: line 1: export: `X2[2]': not a valid identifier\nbash: line 1: declare: zgn_x: not found\n"
       }
     },
     {

@@ -40,9 +40,9 @@ from mirage.utils.hidden import var_hidden
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.alias.alias import body_alias_values
 from mirage.workspace.executor.builtins.declare.constants import (
-    ELEMENT_OPERAND_RE,
     EXPORT_FLAGS,
     LISTED_ATTRIBUTES,
+    NAME_BRACKET_RE,
     READONLY_FLAGS,
     SUBSCRIPT_RE,
     VISIBLE_SCOPE_BUILTINS,
@@ -565,18 +565,58 @@ def split_decl_flags(
 def operand_parts(word: str) -> tuple[str, bool, str | None]:
     """A declaration operand as its name, whether it appends, and its
     value, None for a bare name: ``X+=y`` appends ``y`` to ``X``. An
-    element's ``=`` is the first after its subscript (``a[x=5]=1``).
+    element's subscript runs to its matching ``]``, so an ``=`` inside it
+    is the subscript's (``a[x=5]=1``, ``a[b[0]=1]=v``).
 
     Args:
         word (str): the operand as typed.
     """
-    element = ELEMENT_OPERAND_RE.match(word)
-    if element is not None:
-        return element.group(1), bool(element.group(2)), element.group(3)
+    end = _subscript_end(word)
+    if end is not None:
+        rest = word[end:]
+        if not rest:
+            return word, False, None
+        if rest.startswith("+="):
+            return word[:end], True, rest[2:]
+        if rest.startswith("="):
+            return word[:end], False, rest[1:]
     name, eq, value = word.partition("=")
     if not eq:
         return word, False, None
     return name.removesuffix("+"), name.endswith("+"), value
+
+
+def element_name(word: str) -> str | None:
+    """The name a bare element operand declares (``a[1]``, ``a[x=2]``),
+    None for any other word.
+
+    Args:
+        word (str): the operand as typed.
+    """
+    if _subscript_end(word) != len(word):
+        return None
+    return word.partition("[")[0]
+
+
+def _subscript_end(word: str) -> int | None:
+    """The index just past the ``]`` closing the subscript ``word`` opens
+    with, as ``NAME[``; None when it opens with none or never closes it.
+
+    Args:
+        word (str): the operand as typed.
+    """
+    head = NAME_BRACKET_RE.match(word)
+    if head is None:
+        return None
+    depth = 0
+    for i in range(head.end() - 1, len(word)):
+        if word[i] == "[":
+            depth += 1
+        elif word[i] == "]":
+            depth -= 1
+            if depth == 0:
+                return i + 1
+    return None
 
 
 def identifier_refusal(cmd: str, word: str) -> str | None:

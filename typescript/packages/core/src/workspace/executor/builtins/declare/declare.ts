@@ -65,9 +65,9 @@ import {
   result,
 } from '../shared.ts'
 import {
-  ELEMENT_OPERAND_RE,
   EXPORT_FLAGS,
   LISTED_ATTRIBUTES,
+  NAME_BRACKET_RE,
   READONLY_FLAGS,
   SUBSCRIPT_RE,
   VISIBLE_SCOPE_BUILTINS,
@@ -447,17 +447,51 @@ export function splitDeclFlags(
 
 /**
  * A declaration operand as its name, whether it appends, and its value, null
- * for a bare name: `X+=y` appends `y` to `X`. An element's `=` is the first
- * after its subscript (`a[x=5]=1`).
+ * for a bare name: `X+=y` appends `y` to `X`. An element's subscript runs to
+ * its matching `]`, so an `=` inside it is the subscript's (`a[x=5]=1`,
+ * `a[b[0]=1]=v`). Mirrors Python's operand_parts.
  */
 export function operandParts(word: string): [string, boolean, string | null] {
-  const element = ELEMENT_OPERAND_RE.exec(word)
-  if (element !== null) return [element[1] ?? '', element[2] !== undefined, element[3] ?? '']
+  const end = subscriptEnd(word)
+  if (end !== null) {
+    const rest = word.slice(end)
+    if (rest === '') return [word, false, null]
+    if (rest.startsWith('+=')) return [word.slice(0, end), true, rest.slice(2)]
+    if (rest.startsWith('=')) return [word.slice(0, end), false, rest.slice(1)]
+  }
   const eq = word.indexOf('=')
   if (eq < 0) return [word, false, null]
   const name = word.slice(0, eq)
   const append = name.endsWith('+')
   return [append ? name.slice(0, -1) : name, append, word.slice(eq + 1)]
+}
+
+/**
+ * The name a bare element operand declares (`a[1]`, `a[x=2]`), null for any
+ * other word. Mirrors Python's element_name.
+ */
+export function elementName(word: string): string | null {
+  if (subscriptEnd(word) !== word.length) return null
+  return word.slice(0, word.indexOf('['))
+}
+
+/**
+ * The index just past the `]` closing the subscript `word` opens with, as
+ * `NAME[`; null when it opens with none or never closes it. Mirrors
+ * Python's _subscript_end.
+ */
+function subscriptEnd(word: string): number | null {
+  const head = NAME_BRACKET_RE.exec(word)
+  if (head === null) return null
+  let depth = 0
+  for (let i = head[0].length - 1; i < word.length; i++) {
+    if (word[i] === '[') depth++
+    else if (word[i] === ']') {
+      depth--
+      if (depth === 0) return i + 1
+    }
+  }
+  return null
 }
 
 /**

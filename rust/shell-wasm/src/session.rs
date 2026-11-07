@@ -629,6 +629,12 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 .set_attr(&name, Some(vars::UNASSIGNED), true);
             Item::Nil
         }
+        "is_unassigned" => Item::Bool(
+            shell
+                .store()?
+                .record(&args.string()?)
+                .is_some_and(|var| var.has(vars::UNASSIGNED)),
+        ),
         "declaration" => Item::opt(
             listing::declaration(shell.store()?, &args.string()?),
             Item::text,

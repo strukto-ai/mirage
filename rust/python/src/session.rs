@@ -460,6 +460,15 @@ impl Shell {
         Ok(())
     }
 
+    /// Whether `name`'s record is one declared and never assigned, which
+    /// a host putting the record back marks again (`unassigned`).
+    fn is_unassigned(&self, name: &str) -> PyResult<bool> {
+        Ok(self
+            .store()?
+            .record(name)
+            .is_some_and(|var| var.has(vars::UNASSIGNED)))
+    }
+
     /// The line `declare -p` prints for a name; None for one unset or
     /// hidden.
     fn declaration<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py, PyAny>>> {

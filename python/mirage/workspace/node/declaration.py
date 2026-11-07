@@ -38,11 +38,11 @@ from mirage.workspace.executor.builtins import (
 )
 from mirage.workspace.executor.builtins.declare.constants import (
     LISTED_ATTRIBUTES,
-    SUBSCRIPT_RE,
     VISIBLE_SCOPE_BUILTINS,
 )
 from mirage.workspace.executor.builtins.declare.declare import (
     declared_kind,
+    element_name,
     held_value,
     kind_conflict,
     mark_names,
@@ -485,10 +485,8 @@ def _element_base(operand: _Operand) -> _Operand:
     Args:
         operand (_Operand): one operand, a word or a staged array.
     """
-    if (
-        isinstance(operand, str)
-        and "=" not in operand
-        and SUBSCRIPT_RE.fullmatch(operand)
-    ):
-        return operand.partition("[")[0]
+    if isinstance(operand, str):
+        name = element_name(operand)
+        if name is not None:
+            return name
     return operand

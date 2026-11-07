@@ -32,8 +32,6 @@ VISIBLE_SCOPE_BUILTINS = frozenset({"export", "readonly"})
 # not a plain name, which the declaration builtins quote on its own.
 SUBSCRIPT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\[.*\]")
 
-# An element operand, `NAME[SUB]=value` or `NAME[SUB]+=value`: the target
-# runs to the first `]` an `=` follows, so `a[x=5]=1` assigns `x=5`.
-ELEMENT_OPERAND_RE = re.compile(
-    r"([A-Za-z_][A-Za-z0-9_]*\[.*?\])(\+)?=(.*)\Z", re.DOTALL
-)
+# The head of an element operand, `NAME[`, whose subscript runs to the
+# matching `]` (`operand_parts`).
+NAME_BRACKET_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\[")

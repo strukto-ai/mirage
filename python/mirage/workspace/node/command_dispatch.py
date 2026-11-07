@@ -373,7 +373,7 @@ async def execute_command(
         if "=" not in atext:
             continue
         key, _, raw_val = atext.partition("=")
-        if name and env_is_readonly(session, key, False):
+        if name and env_is_readonly(session, key, True):
             refused += encode_text(
                 f"{shell_voice()}{key}: readonly variable\n"
             )
@@ -394,7 +394,10 @@ async def execute_command(
             v = raw_val
         prefix_assignments.append((key, v))
 
-    for k, v in prefix_assignments:
+    for given, v in prefix_assignments:
+        # Each check is of the name the write lands on, a reference's
+        # target (`r=new cmd` over `declare -n r=T` writes T).
+        k = deref(session, given)
         # The hidden gate runs first, as in set_var: calling a hidden
         # name "readonly" would leak that it exists. Both branches
         # below write session.env raw (an `export` inside a function
@@ -423,12 +426,13 @@ async def execute_command(
             return _write_refused(exc, name or k)
         if k in session.readonly_vars:
             raise DiscardSignal(
-                encode_text(f"{shell_voice()}{k}: readonly variable\n")
+                encode_text(f"{shell_voice()}{given}: readonly variable\n")
             )
 
     async def judge_landed(renderings: Mapping[str, str | None]) -> None:
         # `post_session` asks about each prefix write once it landed.
-        for k, v in prefix_assignments:
+        for given, v in prefix_assignments:
+            k = deref(session, given)
             await post_session_gate(
                 registry.policies,
                 SessionContext(
@@ -437,8 +441,12 @@ async def execute_command(
                     value=v,
                     session_id=session.session_id,
                 ),
-                renderings.get(k),
+                renderings.get(k, renderings.get(given)),
             )
+
+    # The saved records of arrays declared and never assigned, which a
+    # record put back as a table entry no longer says.
+    unassigned: dict[str, ShellVar] = {}
 
     def restore(saved: Mapping[str, Any]) -> None:
         for k, prev in saved.items():
@@ -446,6 +454,8 @@ async def execute_command(
                 session.vars.pop(k, None)
             else:
                 session.vars[k] = prev
+                if unassigned.get(k) is prev:
+                    session.vars.shell.unassigned(k)
         saves = session._prefix_saves
         saves[:] = [s for s in saves if s is not saved]
 
@@ -517,8 +527,10 @@ async def execute_command(
                 entry_bytes(k, v),
             )
             if k not in saved_env_overrides:
-                saved_env_overrides[k] = session.vars.get(k)
+                held = saved_env_overrides[k] = session.vars.get(k)
                 saved_renderings[k] = shell.rendered(k)
+                if held is not None and shell.is_unassigned(k):
+                    unassigned[k] = held
             if temp is not None:
                 shell.save_temp(temp, k)
             # Exported for the duration, which is the whole point of the

@@ -60,6 +60,18 @@ import type { SessionState } from '../session/session.ts'
 import { ExecutionNode } from '../types.ts'
 import { isControlFlowError } from '../workspace/failure.ts'
 
+// The compound commands, whose rows a `$( )` body read again keeps apart.
+const COMPOUND_TYPES: ReadonlySet<string> = new Set([
+  NT.IF_STATEMENT,
+  NT.FOR_STATEMENT,
+  NT.C_STYLE_FOR_STATEMENT,
+  NT.WHILE_STATEMENT,
+  NT.CASE_STATEMENT,
+  NT.COMPOUND_STATEMENT,
+  NT.SUBSHELL,
+  NT.FUNCTION_DEFINITION,
+])
+
 /** Forward ordinary output while retaining chunks needing descriptor routing. */
 class StatementRecorder extends Recorder {
   constructor(
@@ -570,7 +582,8 @@ export function parseRows(session: SessionState, inline: boolean): [number, numb
  * The line a `$( )` or `<( )` body numbers each of its rows by, on from the
  * command running it. bash reads the body again as it prints it, a statement
  * to a line only where a newline ended the one before, so a blank line, a
- * newline after `;` and the rows a statement spans add none. Mirrors
+ * newline after `;` and the rows a simple statement or pipeline spans add
+ * none; a compound command keeps its rows apart, one line each. Mirrors
  * Python's reread_rows.
  */
 export function rereadRows(node: TSNodeLike): number[] {
@@ -584,11 +597,21 @@ export function rereadRows(node: TSNodeLike): number[] {
     }
     if (child.type === NT.COMMENT) continue
     if (rows.length > 0 && newline) line++
+    const first = sourceRow(child)
     const last = sourceRow(child, true)
-    while (rows.length <= last) rows.push(line)
+    while (rows.length <= first) rows.push(line)
+    const nested = compound(child)
+    for (let row = rows.length; row <= last; row++) rows.push(line + (nested ? row - first : 0))
+    if (nested) line += last - first
     newline = true
   }
   return rows
+}
+
+/** Whether a statement is a compound command, under its redirects. Mirrors Python's _compound. */
+function compound(node: TSNodeLike): boolean {
+  const inner = node.type === NT.REDIRECTED_STATEMENT ? (node.namedChildren[0] ?? node) : node
+  return COMPOUND_TYPES.has(inner.type)
 }
 
 /**

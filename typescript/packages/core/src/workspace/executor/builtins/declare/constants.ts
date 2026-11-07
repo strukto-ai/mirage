@@ -34,6 +34,6 @@ export const VISIBLE_SCOPE_BUILTINS: ReadonlySet<string> = new Set(['export', 'r
 // not a plain name, which the declaration builtins quote on its own.
 export const SUBSCRIPT_RE = /^[A-Za-z_][A-Za-z0-9_]*\[.*\]$/
 
-// An element operand, `NAME[SUB]=value` or `NAME[SUB]+=value`: the target
-// runs to the first `]` an `=` follows, so `a[x=5]=1` assigns `x=5`.
-export const ELEMENT_OPERAND_RE = /^([A-Za-z_][A-Za-z0-9_]*\[[\s\S]*?\])(\+)?=([\s\S]*)$/
+// The head of an element operand, `NAME[`, whose subscript runs to the
+// matching `]` (`operandParts`).
+export const NAME_BRACKET_RE = /^[A-Za-z_][A-Za-z0-9_]*\[/

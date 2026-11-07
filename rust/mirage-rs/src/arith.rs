@@ -495,6 +495,14 @@ impl Record<'_, '_> {
     /// itself, and a double quote is removed. A command substitution and
     /// every other parameter stay as typed, for the evaluator to refuse.
     fn expand(&mut self, text: &[u8], depth: usize) -> Step<Vec<u8>> {
+        if depth >= MAX_DEPTH {
+            return Err(Box::new(Error::Arith {
+                reason: "expression recursion level exceeded".to_owned(),
+                expression: text.to_vec(),
+                token: Some(text.to_vec()),
+                subscript: false,
+            }));
+        }
         let mut out = Vec::with_capacity(text.len());
         let mut i = 0;
         while i < text.len() {
@@ -515,7 +523,7 @@ impl Record<'_, '_> {
             }
             if text[i..].starts_with(b"$((") {
                 if let Some(close) = arith_close(text, i + 3) {
-                    let inner = self.expand(&text[i + 3..close], depth)?;
+                    let inner = self.expand(&text[i + 3..close], depth + 1)?;
                     let value = self.evaluate(&inner, depth + 1, true, false)?;
                     out.extend_from_slice(value.to_string().as_bytes());
                     i = close + 2;
@@ -1204,6 +1212,11 @@ mod tests {
             line(b"e[$i]", &mut session),
             b"$i: syntax error: operand expected (error token is \"$i\")"
         );
+        let deep = format!("e[{}1{}]", "$((".repeat(100_000), "))".repeat(100_000));
+        session.scalars.insert("d".to_owned(), deep);
+        let error = line(b"d", &mut session);
+        let reason = b": expression recursion level exceeded (error token is";
+        assert!(error.windows(reason.len()).any(|w| w == reason));
     }
 
     #[test]

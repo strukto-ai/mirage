@@ -301,7 +301,7 @@ export async function executeCommand(
     const eq = atext.indexOf('=')
     if (eq < 0) continue
     const key = atext.slice(0, eq)
-    if (name !== '' && envIsReadonly(session, key, false)) {
+    if (name !== '' && envIsReadonly(session, key, true)) {
       refused += `${shellVoice()}${key}: readonly variable\n`
       continue
     }
@@ -318,7 +318,10 @@ export async function executeCommand(
     prefixAssignments.push([key, v])
   }
 
-  for (const [k, v] of prefixAssignments) {
+  for (const [given, v] of prefixAssignments) {
+    // Each check is of the name the write lands on, a reference's target
+    // (`r=new cmd` over `declare -n r=T` writes T).
+    const k = deref(session, given)
     // The hidden gate runs first, as in setVar: calling a hidden name
     // "readonly" would leak that it exists. Both branches below write
     // session.env raw (an `export` inside a function keeps its prefix
@@ -344,25 +347,32 @@ export async function executeCommand(
       return writeRefused(err, name !== '' ? name : k)
     }
     if (session.readonlyVars.has(k)) {
-      throw new DiscardSignal(encodeText(`${shellVoice()}${k}: readonly variable\n`))
+      throw new DiscardSignal(encodeText(`${shellVoice()}${given}: readonly variable\n`))
     }
   }
 
   // `postSession` asks about each prefix write once it landed.
   const judgeLanded = async (renderings: ReadonlyMap<string, string | null>): Promise<void> => {
-    for (const [k, v] of prefixAssignments) {
+    for (const [given, v] of prefixAssignments) {
+      const k = deref(session, given)
       await postSessionGate(
         registry.policies,
         { verb: 'set', key: k, value: v, sessionId: session.sessionId },
-        renderings.get(k) ?? null,
+        renderings.get(k) ?? renderings.get(given) ?? null,
       )
     }
   }
 
+  // The saved records of arrays declared and never assigned, which a record
+  // put back as a table entry no longer says.
+  const unassigned = new Map<string, ShellVar>()
   const restore = (saved: ReadonlyMap<string, ShellVar | null>): void => {
     for (const [k, prev] of saved) {
       if (prev === null) session.vars.delete(k)
-      else session.vars.set(k, prev)
+      else {
+        session.vars.set(k, prev)
+        if (unassigned.get(k) === prev) session.vars.shell.unassigned(k)
+      }
     }
     session.prefixSaves = session.prefixSaves.filter((s) => s !== saved)
   }
@@ -415,8 +425,10 @@ export async function executeCommand(
       const old = savedEnvOverrides.has(k) ? session.vars.get(k) : undefined
       checkEnv(session, old === undefined ? 0 : entryBytes(k, old.value), entryBytes(k, v))
       if (!savedEnvOverrides.has(k)) {
-        savedEnvOverrides.set(k, session.vars.get(k) ?? null)
+        const held = session.vars.get(k) ?? null
+        savedEnvOverrides.set(k, held)
         savedRenderings.set(k, shell.rendered(k))
+        if (held !== null && shell.isUnassigned(k)) unassigned.set(k, held)
       }
       if (temp !== null) shell.saveTemp(temp, k)
       // Exported for the duration, which is the whole point of the form:

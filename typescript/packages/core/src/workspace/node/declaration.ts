@@ -31,11 +31,11 @@ import { compareCodePoints } from '../../utils/sort.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import {
   LISTED_ATTRIBUTES,
-  SUBSCRIPT_RE,
   VISIBLE_SCOPE_BUILTINS,
 } from '../executor/builtins/declare/constants.ts'
 import {
   declaredKind,
+  elementName,
   heldValue,
   kindConflict,
   markNames,
@@ -431,8 +431,6 @@ export async function executeDeclaration(
 
 /** A bare element operand as the name it declares, any other as is. */
 function elementBase<T extends DeclarationOperand>(operand: T): T | string {
-  if (typeof operand === 'string' && !operand.includes('=') && SUBSCRIPT_RE.test(operand)) {
-    return operand.slice(0, operand.indexOf('['))
-  }
+  if (typeof operand === 'string') return elementName(operand) ?? operand
   return operand
 }

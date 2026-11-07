@@ -73,6 +73,20 @@ from mirage.workspace.history.line import LineHistory
 from mirage.workspace.session.session import SessionState
 from mirage.workspace.types import ExecutionNode
 
+# The compound commands, whose rows a `$( )` body read again keeps apart.
+_COMPOUND_TYPES = frozenset(
+    {
+        NT.IF_STATEMENT,
+        NT.FOR_STATEMENT,
+        NT.C_STYLE_FOR_STATEMENT,
+        NT.WHILE_STATEMENT,
+        NT.CASE_STATEMENT,
+        NT.COMPOUND_STATEMENT,
+        NT.SUBSHELL,
+        NT.FUNCTION_DEFINITION,
+    }
+)
+
 
 class StatementRecorder(Recorder):
     """Forward ordinary output while retaining chunks needing descriptor routing."""
@@ -678,8 +692,9 @@ def reread_rows(node: TSNodeLike) -> tuple[int, ...]:
     """The line a ``$( )`` or ``<( )`` body numbers each of its rows by,
     on from the command running it. bash reads the body again as it
     prints it, a statement to a line only where a newline ended the one
-    before, so a blank line, a newline after ``;`` and the rows a
-    statement spans add none.
+    before, so a blank line, a newline after ``;`` and the rows a simple
+    statement or pipeline spans add none; a compound command keeps its
+    rows apart, one line each.
 
     Args:
         node (TSNodeLike): the body's program.
@@ -695,10 +710,26 @@ def reread_rows(node: TSNodeLike) -> tuple[int, ...]:
             continue
         if rows and newline:
             line += 1
-        last = source_row(child, end=True)
-        rows.extend([line] * (last + 1 - len(rows)))
+        first, last = source_row(child), source_row(child, end=True)
+        rows.extend([line] * (first + 1 - len(rows)))
+        compound = _compound(child)
+        for row in range(len(rows), last + 1):
+            rows.append(line + (row - first if compound else 0))
+        if compound:
+            line += last - first
         newline = True
     return tuple(rows)
+
+
+def _compound(node: TSNodeLike) -> bool:
+    """Whether a statement is a compound command, under its redirects.
+
+    Args:
+        node (TSNodeLike): a statement.
+    """
+    if node.type == NT.REDIRECTED_STATEMENT and node.named_children:
+        node = node.named_children[0]
+    return node.type in _COMPOUND_TYPES
 
 
 def refused_row(node: TSNodeLike) -> int | None:
