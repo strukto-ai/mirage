@@ -251,6 +251,9 @@ describe('decodeOutput', () => {
       255,
     ])
   })
+  it('keeps a plain line longer in bytes than in characters', () => {
+    expect(new TextDecoder().decode(decodeOutput('mirage: é€'))).toBe('mirage: é€\n')
+  })
 })
 
 // A sandbox without dd or base64 runs nothing: the script says so in plain

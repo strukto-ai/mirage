@@ -14,7 +14,6 @@
 
 import { singleQuote } from '../../utils/quote.ts'
 import { decodeBase64 } from '../../utils/base64.ts'
-import { concat } from '../../utils/bytes.ts'
 import { boundSystemClock, systemNow } from '../../utils/clock.ts'
 import type { ProcessHandle } from '../../process/handle.ts'
 import type { MountType } from '../types.ts'
@@ -212,12 +211,20 @@ export function encodeOutput(line: string, combined = false): string {
  * @param text whole lines of the command's output.
  */
 export function decodeOutput(text: string): Uint8Array {
-  const parts: Uint8Array[] = []
+  let out = new Uint8Array(text.length)
+  let at = 0
   for (const line of text.split('\n')) {
     const word = line.trim()
-    parts.push(BASE64_LINE.test(word) ? decodeBase64(word) : ENC.encode(`${line}\n`))
+    const bytes = BASE64_LINE.test(word) ? decodeBase64(word) : ENC.encode(`${line}\n`)
+    if (at + bytes.byteLength > out.byteLength) {
+      const grown = new Uint8Array(2 * (at + bytes.byteLength))
+      grown.set(out.subarray(0, at))
+      out = grown
+    }
+    out.set(bytes, at)
+    at += bytes.byteLength
   }
-  return concat(parts)
+  return out.slice(0, at)
 }
 
 /**
