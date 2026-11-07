@@ -96,7 +96,7 @@ from mirage.io.network import NetworkSetting, network_rule, run_with_network
 from mirage.io.stream import materialize
 from mirage.io.types import ByteSource
 from mirage.observe.log_entry import EVENT_COMMAND, EVENT_RESULT, EVENT_VFS
-from mirage.observe.observer import Observer, trace_job, trace_process
+from mirage.observe.observer import Observer
 from mirage.observe.store import ObserverStore
 from mirage.policy import (
     AskHandler,
@@ -434,7 +434,7 @@ class Workspace:
                 if self._registry.system_clock is None
                 else self._registry.system_clock.now()
             ),
-            ended=trace_process,
+            ended=lambda record: self.observer.trace_process(record),
             note=stores.execution.note,
         )
         self.process_table.ceiling = self._registry.ceilings.max_processes
@@ -448,6 +448,18 @@ class Workspace:
             daemon=daemon_id,
         )
         self.job_table.reaper = self._reap_process
+
+        def trace_job(record: Job) -> None:
+            machine = next(
+                (
+                    process.machine
+                    for process in self.process_table.records()
+                    if process.pid == record.pid
+                ),
+                self.process_table.machine,
+            )
+            self.observer.trace_job(record, machine)
+
         self.job_table.ended = trace_job
         self.line_table = LineTable(self._clock, note=stores.execution.note)
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
@@ -669,6 +681,7 @@ class Workspace:
             store=stores.observe,
             clock=self._clock,
             workspace_id=self._workspace_id,
+            machine=str(self.process_table.machine),
         )
         self._registry.observer = self.observer
         # The stores this workspace's state lives in, whether the state

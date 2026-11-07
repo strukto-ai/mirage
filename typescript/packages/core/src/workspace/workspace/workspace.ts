@@ -48,7 +48,7 @@ import { MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
 import { networkRule, type NetworkSetting, runWithNetwork, sameNetwork } from '../../io/network.ts'
 import { HISTFILESIZE } from '../../core/history/constants.ts'
 import { EVENT_COMMAND, EVENT_RESULT, EVENT_VFS } from '../../observe/log_entry.ts'
-import { Observer, traceJob, traceProcess } from '../../observe/observer.ts'
+import { Observer } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
@@ -331,7 +331,9 @@ export class Workspace {
         this.jobTable.processesChanged()
       },
       () => this.registry.systemClock?.now() ?? systemNow(),
-      traceProcess,
+      (record) => {
+        this.observer.traceProcess(record)
+      },
       (record) => {
         this.jobTable.store.note(record)
       },
@@ -373,7 +375,12 @@ export class Workspace {
       options.daemonId ?? null,
     )
     this.jobTable.reaper = (record, signum) => this.reapProcess(record, signum)
-    this.jobTable.ended = traceJob
+    this.jobTable.ended = (record) => {
+      const machine =
+        this.processTable.records().find((process) => process.id.pid === record.pid)?.machine ??
+        this.processTable.machine
+      this.observer.traceJob(record, machine)
+    }
     this.lineTable = new LineTable(this.clock, (record) => {
       this.jobTable.store.note(record)
     })
@@ -538,7 +545,12 @@ export class Workspace {
       const cliSpec = typeof specOrKey === 'string' ? cliSpecFor(specOrKey) : specOrKey
       this.registry.clis.install(cliName, cliSpec, cliConfig)
     }
-    this.observer = new Observer(stores.observe, this.clock, this.wsId)
+    this.observer = new Observer(
+      stores.observe,
+      this.clock,
+      this.wsId,
+      this.processTable.machine.toString(),
+    )
     this.registry.observer = this.observer
     this.planes = [stores.namespace, stores.observe, stores.sessions]
     // Explicit at the construction site: the history view does not cache
