@@ -521,6 +521,7 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
       targetNode,
       kind: RedirectKind.HEREDOC,
       expandVars: !child.heredoc.quoted,
+      deferred: child.heredoc.deferred,
     })
   }
   // `>&word` with a word rather than a number is bash's other spelling

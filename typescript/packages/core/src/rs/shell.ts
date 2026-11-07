@@ -48,6 +48,8 @@ interface Exports {
 
 /** The `u32`s one node takes in a parse's table: kind | field << 16 | flags << 24, then spans and links. */
 const WORDS = 10
+/** `u32::MAX`: the extras' word for no value. */
+const NONE = 0xffffffff
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -391,21 +393,32 @@ export function readExtras(wasm: Exports) {
   let word = 3
   const offsets = words.subarray(word, (word += source.length + 1))
   const heredocs: Heredoc[] = []
-  for (let index = 0; index < heredocCount; index += 1, word += 9) {
+  for (let index = 0; index < heredocCount; index += 1, word += 11) {
     const [atSource = 0, operatorStart = 0, wordEnd = 0, bodyStart = 0, end = 0, flags = 0] =
       words.subarray(word, word + 6)
+    const heredocWord = next(words[word + 6] ?? 0)
+    const delimiter = next(words[word + 7] ?? 0)
+    const bodyBytes = text.subarray(at, (at += words[word + 8] ?? 0))
+    const failsAt = words[word + 9] ?? NONE
     heredocs.push({
       at: atSource,
       operatorStart,
       wordEnd,
       bodyStart,
       end,
-      word: next(words[word + 6] ?? 0),
-      delimiter: next(words[word + 7] ?? 0),
-      body: next(words[word + 8] ?? 0),
+      word: heredocWord,
+      delimiter,
+      body: decodeText(bodyBytes),
       quoted: (flags & 1) !== 0,
       terminated: (flags & 2) !== 0,
       dash: (flags & 4) !== 0,
+      deferred:
+        failsAt === NONE
+          ? null
+          : {
+              at: decodeText(bodyBytes.subarray(0, failsAt)).length,
+              row: words[word + 10] ?? 0,
+            },
     })
   }
   const inlined = new Map<number, string>()

@@ -16,7 +16,6 @@ import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
 import { decodeText, encodeText } from '../bytes.ts'
-import { endsEscaped } from '../escapes.ts'
 import { getParts, getRedirects, getText } from '../helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../types.ts'
 import { parse, syntaxRefusal } from './parse.ts'
@@ -40,15 +39,7 @@ const HEAD = 'bash: -c: '
 
 // Rows of the bash_syntax fixtures, pinned with `bash -c`, that mirage reads
 // otherwise. Mirrors Python's DIVERGES.
-const DIVERGES = new Set([
-  'cat <<EOF\n$(\nEOF',
-  'cat <<EOF\n$(fi)\nEOF',
-  'cat <<EOF\n${a\nEOF',
-  'cat <<EOF\n`\nEOF',
-  'declare a[x y]=(1)',
-  'f() x=({\necho\n}',
-  '{fd}>f x=(a[)',
-])
+const DIVERGES = new Set(['declare a[x y]=(1)', 'f() x=({\necho\n}', '{fd}>f x=(a[)'])
 
 const refusal = (line: string, aliases: ReadonlySet<string> = new Set()): [number, string] => {
   const io = syntaxRefusal(parse(line, aliases, false), HEAD, 1, false)
@@ -483,7 +474,6 @@ describe('syntax refusals', () => {
     const differ = (CORPUS[kind] ?? []).filter(
       (row) =>
         !DIVERGES.has(row.line) &&
-        !endsEscaped(row.line) &&
         refusal(row.line).join('\0') !== [row.status, row.stderr].join('\0'),
     )
     expect(differ.map((row) => row.line)).toEqual([])

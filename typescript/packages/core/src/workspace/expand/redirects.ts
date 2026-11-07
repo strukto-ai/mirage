@@ -12,13 +12,18 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { sessionAccess } from '../../context/session_context.ts'
+import { sessionAccess, voiceName } from '../../context/session_context.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import type { Policies } from '../../policy/index.ts'
 import type { NamespaceLinks } from '../../view/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
+import { encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { ExitSignal } from '../../shell/errors.ts'
+import { parse, syntaxRefusal } from '../../shell/parse/index.ts'
 import { Redirect, RedirectKind } from '../../shell/types.ts'
+import { shellVoice } from '../../shell/voice.ts'
+import type { SessionState } from '../session/session.ts'
+import { visibleEnv } from '../session/state.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
 import { classifyBarePath } from './classify/index.ts'
@@ -71,6 +76,14 @@ async function expandTarget(
   expanded: readonly string[] | null,
 ): Promise<Redirect> {
   const session = context.session
+  if (r.kind === RedirectKind.HEREDOC && r.expandVars && r.deferred !== null) {
+    const stderr = await failedBody(String(r.target), r.deferred.at, r.deferred.row, session)
+    return new Redirect({
+      fd: r.fd,
+      target: new ExitSignal(1, stderr),
+      kind: RedirectKind.UNEXPANDED,
+    })
+  }
   if (r.kind === RedirectKind.HEREDOC || r.kind === RedirectKind.HERESTRING) {
     let body: unknown = r.target
     const heredocNode = r.targetNode as TSNodeLike | null
@@ -119,4 +132,32 @@ async function expandTarget(
     clobber: r.clobber,
     expandVars: r.expandVars,
   })
+}
+
+/**
+ * What bash reports as expanding a heredoc's body fails where what it reads
+ * only then opens: a `$( )` whose commands do not parse or that is left open,
+ * its lines counted from the body's (`row` the row the body starts on), or a
+ * `${` (named by the whole body) or backtick left open. Mirrors Python's
+ * _failed_body.
+ */
+async function failedBody(
+  body: string,
+  at: number,
+  row: number,
+  session: SessionState,
+): Promise<Uint8Array> {
+  const rest = body.slice(at)
+  if (rest.startsWith('$(')) {
+    const text = rest.slice(2)
+    const head = `${voiceName(session)}: command substitution: `
+    const refused = syntaxRefusal(parse(text), head, row + 1, utf8Locale(visibleEnv(session)))
+    if (refused !== null) return await refused.materializeStderr()
+    const line = row + 1 + text.split('\n').length - 1 + (text.endsWith('\n') ? 0 : 1)
+    return encodeText(
+      `${head}line ${String(line)}: unexpected EOF while looking for matching \`)'\n`,
+    )
+  }
+  if (rest.startsWith('${')) return encodeText(`${shellVoice()}${body}: bad substitution\n`)
+  return encodeText(`${shellVoice()}bad substitution: no closing "\`" in ${rest}\n`)
 }

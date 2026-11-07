@@ -166,10 +166,18 @@ export class Redirect {
   readonly append: boolean
   readonly clobber: boolean
   readonly expandVars: boolean
+  /**
+   * For a heredoc, where expanding its body fails (an index into the body and
+   * the row the body starts on), bash reading what opens there only as it
+   * expands it. Mirrors Python's `deferred`.
+   */
+  readonly deferred: Heredoc['deferred']
 
   constructor(
     init: Pick<Redirect, 'fd' | 'target'> &
-      Partial<Pick<Redirect, 'targetNode' | 'kind' | 'append' | 'clobber' | 'expandVars'>>,
+      Partial<
+        Pick<Redirect, 'targetNode' | 'kind' | 'append' | 'clobber' | 'expandVars' | 'deferred'>
+      >,
   ) {
     this.fd = init.fd
     this.target = init.target
@@ -178,6 +186,7 @@ export class Redirect {
     this.append = init.append ?? false
     this.clobber = init.clobber ?? false
     this.expandVars = init.expandVars ?? true
+    this.deferred = init.deferred ?? null
   }
 }
 
@@ -365,6 +374,12 @@ export interface Heredoc {
   readonly dash: boolean
   /** Whether the delimiter line ended it, not the end of the input. */
   readonly terminated: boolean
+  /**
+   * Where expanding the body fails, bash reading what opens there only as it
+   * expands the body: the index in `body` and the row the body starts on in
+   * the line as typed; null when it does not.
+   */
+  readonly deferred: { readonly at: number; readonly row: number } | null
 }
 
 /**

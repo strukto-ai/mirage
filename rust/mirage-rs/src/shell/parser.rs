@@ -325,6 +325,10 @@ fn joined(
                 heredoc.word_end = end(heredoc.word_end);
                 heredoc.body_start = start(heredoc.body_start);
                 heredoc.end = end(heredoc.end);
+                if let Some(deferred) = &mut heredoc.deferred {
+                    deferred.row =
+                        super::lower::newlines(&source[..heredoc.body_start.min(source.len())]);
+                }
                 heredoc.line =
                     super::lower::newlines(&source[..heredoc.body_start.saturating_sub(1)]) + 1;
                 heredoc.eof_line = lines.max(heredoc.line);
@@ -516,13 +520,42 @@ fn said(source: &[u8], newlines: &[usize], fail: &Fail) -> Vec<Said> {
     if ahead > end || end > at && source[..end].ends_with(b"\\\n") {
         last = ahead;
     }
-    let past = newlines.len() + usize::from(source.last().is_some_and(|&b| b != b'\n'));
+    // bash -c reads a line after a backslash ending the input, and after a
+    // line continuation ending a word there.
+    let kept = super::heredoc::ends_escaped(source);
+    let continued = source.strip_suffix(b"\n").is_some_and(|text| {
+        super::heredoc::ends_escaped(text)
+            && text
+                .iter()
+                .rev()
+                .find(|&&b| b != b'\\')
+                .is_some_and(|&b| !is_blank(b))
+    });
+    let past = newlines.len()
+        + usize::from(source.last().is_some_and(|&b| b != b'\n'))
+        + usize::from(kept || continued);
+    // A refusal of the word the kept backslash ends stands on the line past
+    // it, where bash -c has nothing to quote back, and a conditional names
+    // no token there.
+    let ending = kept
+        && end == source.len()
+        && fail
+            .lines
+            .iter()
+            .any(|text| text.starts_with(b"syntax error near"));
     let mut out = Vec::new();
     for (index, text) in fail.lines.iter().enumerate() {
         let near = text.starts_with(b"syntax error near");
+        let text = if ending && near && !text.starts_with(b"syntax error near unexpected") {
+            &b"syntax error".to_vec()
+        } else {
+            text
+        };
+        let near = near && text.starts_with(b"syntax error near");
         let opened = index == 0 && fail.matching;
         let row = match fail.anchored(index) {
             Some(from) => rows(from.min(source.len())),
+            None if ending => newlines.len() + 1,
             None if near => rows(last),
             None if fail.eof && !opened => past,
             None => rows(at),
@@ -541,9 +574,18 @@ fn said(source: &[u8], newlines: &[usize], fail: &Fail) -> Vec<Said> {
                 .filter(|&from| (start..=at).contains(&from))
                 .unwrap_or(start);
             let end = memchr::memchr(b'\n', &source[last..]).map_or(source.len(), |i| last + i);
+            // bash -c doubles the backslash it keeps in its own copy.
+            let mut text = if ending {
+                Vec::new()
+            } else {
+                source[start..end].to_vec()
+            };
+            if kept && !ending && end == source.len() {
+                text.push(b'\\');
+            }
             out.push(Said {
                 row,
-                text: source[start..end].to_vec(),
+                text,
                 quoted: true,
             });
         }
@@ -557,10 +599,11 @@ pub(super) fn line(pieces: &[&[u8]]) -> Vec<u8> {
 }
 
 /// The bytes bash's reader deletes as line continuations: a backslash
-/// that an odd run ends, before a newline or the end of the input, and
-/// that newline. Single-quoted and ANSI-C text and a comment keep theirs.
+/// that an odd run ends before a newline, and that newline; bash -c keeps
+/// one that ends the input. Single-quoted and ANSI-C text and a comment
+/// keep theirs.
 fn continuations(source: &[u8], pass: &Pass) -> Vec<usize> {
-    if memchr::memmem::find(source, b"\\\n").is_none() && !source.ends_with(b"\\") {
+    if memchr::memmem::find(source, b"\\\n").is_none() {
         return Vec::new();
     }
     let mut verbatim = pass.comments.clone();
@@ -589,14 +632,9 @@ fn continuations(source: &[u8], pass: &Pass) -> Vec<usize> {
         while let Some(&(_, to)) = spans.next_if(|span| span.0 <= last) {
             covered = covered.max(to);
         }
-        let live = (end - start) % 2 == 1
-            && matches!(source.get(end), None | Some(b'\n'))
-            && covered <= last;
+        let live = (end - start) % 2 == 1 && source.get(end) == Some(&b'\n') && covered <= last;
         if live {
-            dropped.push(last);
-            if end < source.len() {
-                dropped.push(end);
-            }
+            dropped.extend([last, end]);
         }
         at = end;
     }
@@ -827,10 +865,14 @@ impl Parser<'_> {
             }
             return self.refusal(at, at, vec![self.eof_line().into()], true);
         }
-        let (token, end) = match self.token_text(at) {
+        let (mut token, end) = match self.token_text(at) {
             Ok(token) => token,
             Err(fail) => return fail,
         };
+        // bash -c names the backslash it keeps at the end doubled.
+        if end == self.s.len() && super::heredoc::ends_escaped(self.s) {
+            token.push(b'\\');
+        }
         let newline = token == b"\n";
         let token = if newline { b"newline".to_vec() } else { token };
         let fail = self.refusal(

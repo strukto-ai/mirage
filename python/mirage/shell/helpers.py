@@ -613,12 +613,16 @@ def _parse_file_redirect(child: TSNodeLike) -> Redirect:
 
     document = getattr(child, "heredoc", None)
     if document is not None:
+        fails = document.deferred
         return Redirect(
             fd=0 if fd is None else fd,
             target=decode_text(document.body),
             target_node=target_node,
             kind=RedirectKind.HEREDOC,
             expand_vars=not document.quoted,
+            deferred=None
+            if fails is None
+            else (len(decode_text(document.body[: fails[0]])), fails[1]),
         )
 
     # `>&word` with a word rather than a number is bash's other spelling

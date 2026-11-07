@@ -25,6 +25,7 @@ import type { ByteSource } from '../../../../io/types.ts'
 import { IOResult, materialize } from '../../../../io/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
+import { endsEscaped } from '../../../../shell/escapes.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
 import { type JobConsole, JobOutput } from '../../../../shell/console/index.ts'
 import { SET_OPTION_NAMES } from '../../../../shell/constants.ts'
@@ -200,6 +201,9 @@ export async function handleBash(
   if (script === null) {
     return [null, new IOResult(), new ExecutionNode({ command: name, exitCode: 0 })]
   }
+  // bash reads a file's or stdin's final backslash as a line continuation
+  // onto nothing, where -c keeps it.
+  if (name === 'bash' && parsed.script === null && endsEscaped(script)) script = script.slice(0, -1)
   const cs = callStack ?? new CallStack(session.shellNesting)
   cs.admit(name)
   const parentPid = session.processId
