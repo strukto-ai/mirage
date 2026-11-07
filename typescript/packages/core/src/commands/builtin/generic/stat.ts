@@ -51,7 +51,7 @@ import { fullIsoTime, lsModeString } from '../utils/formatting.ts'
 import { groupName, identityOf, ownerName, type Identity } from '../utils/identity.ts'
 import { formatRecords } from '../utils/output.ts'
 import { missingOperandError } from '../../spec/usage.ts'
-import { encodeText } from '../../../shell/bytes.ts'
+import { byteChar, encodeText } from '../../../shell/bytes.ts'
 import { linksOf, mountsOf, dispatchOf } from '../utils/links.ts'
 import { vfsStatPath } from '../utils/paths.ts'
 
@@ -95,6 +95,27 @@ const PLACEHOLDERS = new Set(['-', '?'])
 const DEVICE_HALVES = 'dr'
 
 // GNU's file-system report (coreutils 9.7 stat -f), in its directives.
+// What -t prints, as stat's own --help states it: one line of the fields a
+// script splits on blanks.
+const TERSE = '%n %s %b %f %u %g %D %i %h %t %T %X %Y %Z %W %o'
+const TERSE_FS = '%n %i %l %t %s %S %b %f %a %c %d'
+
+// The escapes --printf reads, each the byte it stands for.
+const ESCAPES: Readonly<Record<string, number>> = {
+  a: 7,
+  b: 8,
+  e: 27,
+  f: 12,
+  n: 10,
+  r: 13,
+  t: 9,
+  v: 11,
+  '"': 34,
+  '\\': 92,
+}
+const OCTAL = /^[0-7]$/
+const HEX = /^[0-9a-fA-F]$/
+
 const FS_LAYOUT = [
   '  File: "%n"',
   '    ID: %-8i Namelen: %-7l Type: %T',
@@ -383,12 +404,58 @@ function parseFormatDirective(fmt: string, start: number, halves: string): Forma
   return { end: cursor, flags, width, precision, spec }
 }
 
-// Expand a format string, each directive through `render`.
-function format(fmt: string, halves: string, render: (d: FormatDirective) => string): string {
+/**
+ * The text one `--printf` backslash escape stands for, and the index after
+ * it. Up to three octal digits or two hex digits after `x` give a byte; the
+ * named escapes give theirs; any other character is printed as it is, with a
+ * warning, as is a backslash that ends the format. Mirrors Python's _escape.
+ */
+function escape(fmt: string, start: number, warnings: string[]): [string, number] {
+  const cursor = start + 1
+  if (cursor === fmt.length) {
+    warnings.push('stat: warning: backslash at end of format\n')
+    return ['\\', cursor]
+  }
+  const char = fmt.charAt(cursor)
+  if (OCTAL.test(char)) {
+    let end = cursor
+    while (end < fmt.length && end - cursor < 3 && OCTAL.test(fmt.charAt(end))) end += 1
+    return [byteChar(parseInt(fmt.slice(cursor, end), 8)), end]
+  }
+  if (char === 'x' && HEX.test(fmt.charAt(cursor + 1))) {
+    let end = cursor + 1
+    while (end < fmt.length && end - cursor < 3 && HEX.test(fmt.charAt(end))) end += 1
+    return [byteChar(parseInt(fmt.slice(cursor + 1, end), 16)), end]
+  }
+  const named = ESCAPES[char]
+  if (named !== undefined) return [String.fromCharCode(named), cursor + 1]
+  warnings.push(`stat: warning: unrecognized escape '\\${char}'\n`)
+  return [char, cursor + 1]
+}
+
+// Expand a format string, each directive through `render`. `warnings` is
+// --printf's, which reads the backslash escapes and adds its warnings there;
+// null reads a backslash as itself.
+function format(
+  fmt: string,
+  halves: string,
+  render: (d: FormatDirective) => string,
+  warnings: string[] | null = null,
+): string {
   const parts: string[] = []
   let cursor = 0
   while (cursor < fmt.length) {
     const start = fmt.indexOf('%', cursor)
+    if (warnings !== null) {
+      const slash = fmt.indexOf('\\', cursor)
+      if (slash !== -1 && (start === -1 || slash < start)) {
+        parts.push(fmt.slice(cursor, slash))
+        const [text, next] = escape(fmt, slash, warnings)
+        parts.push(text)
+        cursor = next
+        continue
+      }
+    }
     if (start === -1) {
       parts.push(fmt.slice(cursor))
       break
@@ -406,8 +473,14 @@ function format(fmt: string, halves: string, render: (d: FormatDirective) => str
   return parts.join('')
 }
 
-function formatStat(fmt: string, s: FileStat, name: string, identity: Identity | null): string {
-  return format(fmt, DEVICE_HALVES, (d) => renderDirective(d, s, name, identity))
+function formatStat(
+  fmt: string,
+  s: FileStat,
+  name: string,
+  identity: Identity | null,
+  warnings: string[] | null = null,
+): string {
+  return format(fmt, DEVICE_HALVES, (d) => renderDirective(d, s, name, identity), warnings)
 }
 
 // The fraction of a second as the backend spelled it, so both hosts print
@@ -454,9 +527,24 @@ function renderOne(
   name: string,
   fmt: string | null,
   identity: Identity | null,
+  warnings: string[] | null = null,
 ): string {
-  if (fmt !== null) return formatStat(fmt, s, name, identity)
+  if (fmt !== null) return formatStat(fmt, s, name, identity, warnings)
   return renderStat(s, name, identity)
+}
+
+// The reports as output: one per line, or as --printf wrote them, with no
+// newline of its own.
+function records(lines: readonly string[], printf: boolean): Uint8Array {
+  return printf ? encodeText(lines.join('')) : formatRecords(lines)
+}
+
+// The warnings one report raised, leaving the list empty.
+function drained(warnings: string[] | null): string {
+  if (warnings === null || warnings.length === 0) return ''
+  const text = warnings.join('')
+  warnings.length = 0
+  return text
 }
 
 // Report the file system each operand is on, GNU `stat -f`. The operand stat
@@ -467,12 +555,15 @@ async function fileSystems(
   fmt: string,
   probe: (p: PathSpec) => Promise<FileStat>,
   statfs: StatfsFn | null,
+  warnings: string[] | null = null,
 ): Promise<CommandFnResult> {
   const lines: string[] = []
   let err = ''
+  let failed = false
   for (const p of paths) {
     if (p.rawPath === '-') {
       err += `stat: ${FS_STDIN}\n`
+      failed = true
       continue
     }
     let found: [string, CapacityResult]
@@ -485,17 +576,19 @@ async function fileSystems(
       err +=
         `stat: cannot read file system information for ${shellQuoteAlways(p.rawPath)}` +
         `${strerror !== null ? `: ${strerror}` : ''}\n`
+      failed = true
       continue
     }
     const [kind, cap] = found
-    lines.push(format(fmt, '', (d) => renderFsDirective(d, kind, cap, p.rawPath)))
+    lines.push(format(fmt, '', (d) => renderFsDirective(d, kind, cap, p.rawPath), warnings))
+    err += drained(warnings)
   }
   const io = new IOResult({
-    exitCode: err === '' ? 0 : 1,
+    exitCode: failed ? 1 : 0,
     stderr: err === '' ? null : encodeText(err),
   })
   if (lines.length === 0) return [null, io]
-  return [formatRecords(lines), io]
+  return [records(lines, warnings !== null), io]
 }
 
 // statfs through the dispatcher.
@@ -511,14 +604,20 @@ interface StatFlags {
   readonly format: string | null
   readonly fileSystem: boolean
   readonly deref: boolean
+  readonly printf: boolean
+  readonly terse: boolean
 }
 
 function parseFlags(bag: Record<string, FlagValue>): StatFlags {
   const fl = new FlagView(bag, specOf('stat'))
+  // The later of -c and --printf sets the format, and either one overrides -t.
+  const last = fl.typedOrder('format', 'printf').at(-1)
   return {
-    format: fl.asStr('format') ?? null,
+    format: last === undefined ? null : (fl.asStr(last) ?? null),
     fileSystem: fl.asBool('file_system'),
     deref: fl.asBool('dereference'),
+    printf: last === 'printf',
+    terse: fl.asBool('terse'),
   }
 }
 
@@ -529,7 +628,8 @@ export async function statGeneric(
 ): Promise<CommandFnResult> {
   const parsed = parseFlags(ctx.flags)
   if (paths.length === 0) throw missingOperandError('stat', null)
-  const fmt = parsed.format
+  const fmt = parsed.format ?? (parsed.terse ? (parsed.fileSystem ? TERSE_FS : TERSE) : null)
+  const warnings: string[] | null = parsed.printf ? [] : null
   const statPath = vfsStatPath(ctx.vfs)
   if (parsed.fileSystem) {
     const dispatch = dispatchOf(ctx)
@@ -537,10 +637,11 @@ export async function statGeneric(
       operandStat(p, stat, statPath, mountsOf(ctx), linksOf(ctx))
     const statfs: StatfsFn | null =
       dispatch !== undefined ? (p) => dispatchedStatfs(dispatch, p) : null
-    return fileSystems(paths, fmt ?? FS_LAYOUT, probe, statfs)
+    return fileSystems(paths, fmt ?? FS_LAYOUT, probe, statfs, warnings)
   }
   const lines: string[] = []
   let err = ''
+  let failed = false
   const links = parsed.deref ? null : (linksOf(ctx) ?? null)
   const identity = identityOf(ctx)
   for (const p of paths) {
@@ -549,7 +650,8 @@ export async function statGeneric(
     // inode, so the namespace is the only authority for it.
     const linked = links?.statAt(p.virtual) ?? null
     if (linked !== null) {
-      lines.push(renderOne(linked, p.rawPath, fmt, identity))
+      lines.push(renderOne(linked, p.rawPath, fmt, identity, warnings))
+      err += drained(warnings)
       continue
     }
     let s: FileStat
@@ -559,16 +661,18 @@ export async function statGeneric(
       // GNU stat keeps reporting the remaining operands, exit 1.
       if (!isFsError(e)) throw e
       err += fsErrorLine('stat', p, e)
+      failed = true
       continue
     }
-    lines.push(renderOne(s, p.rawPath, fmt, identity))
+    lines.push(renderOne(s, p.rawPath, fmt, identity, warnings))
+    err += drained(warnings)
   }
   const io = new IOResult({
-    exitCode: err === '' ? 0 : 1,
+    exitCode: failed ? 1 : 0,
     stderr: err === '' ? null : encodeText(err),
   })
   if (lines.length === 0) return [null, io]
-  const out: ByteSource = formatRecords(lines)
+  const out: ByteSource = records(lines, parsed.printf)
   return [out, io]
 }
 

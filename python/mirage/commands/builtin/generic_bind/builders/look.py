@@ -56,10 +56,14 @@ async def look(
     files = command_files(ctx, paths)
     resolved = await resolve_or_empty(files, paths)
     words = [*texts, *(path.raw_path for path in resolved)] if texts else []
+    fl = FlagView(ctx.flags, spec=SPECS["look"])
     config: dict[str, JsonValue] = {
         "operands": [byte_view(word) for word in words],
-        "fold": FlagView(ctx.flags, spec=SPECS["look"]).as_bool("f"),
+        "fold": fl.as_bool("ignore_case"),
+        "alphanum": fl.as_bool("alphanum"),
     }
+    if (stop := fl.as_str("terminate")) is not None:
+        config["terminate"] = byte_view(stop)
     try:
         open_stream("look", config)
     except StreamRefusal as refusal:

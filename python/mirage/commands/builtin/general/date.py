@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from datetime import timezone
+from collections.abc import AsyncIterator
+from datetime import datetime, timezone, tzinfo
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.commands.config import Context, command
 from mirage.commands.errors import UsageError
@@ -27,11 +29,18 @@ from mirage.commands.spec.usage import (
     usage_exit_code,
     usage_hint,
 )
+from mirage.errors.constants import FS_ERRORS
+from mirage.errors.render import fs_error_line
+from mirage.io.stream import OutputStream, close_quietly
 from mirage.io.types import ByteSource, IOResult
-from mirage.shell.bytes import encode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import PathSpec
 from mirage.utils.clock import system_date
-from mirage.utils.dates import parse_date_expr_async, parse_posix_time_async
+from mirage.utils.dates import (
+    iso_timestamp,
+    parse_date_expr_async,
+    parse_posix_time_async,
+)
 from mirage.utils.timezone import zone_from_env
 
 # GNU date's output formats, each chosen by one option: -I takes one
@@ -102,6 +111,131 @@ def invalid_date(text: str) -> tuple[ByteSource | None, IOResult]:
     )
 
 
+def exclusive_error() -> UsageError:
+    """GNU's refusal of two of -d, -f, -r and --resolution, a usage error."""
+    return UsageError(
+        "date: the options to specify dates for printing are mutually "
+        f"exclusive\n{usage_hint(CommandName.DATE)}",
+        usage_exit_code(CommandName.DATE),
+    )
+
+
+async def _named(expression: str, zone: tzinfo | None) -> datetime | None:
+    """The moment one ``-d`` or ``-f`` expression names, or None.
+
+    A blank expression names today at midnight, as GNU reads it.
+
+    Args:
+        expression (str): the expression as typed.
+        zone (tzinfo | None): the command's zone; None is the host's.
+    """
+    if not expression.strip():
+        now = system_date(zone)
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    return await parse_date_expr_async(expression, tz=zone)
+
+
+async def _dated(
+    first: bytes,
+    rest: AsyncIterator[bytes],
+    zone: tzinfo | None,
+    fmt: str,
+    io: IOResult,
+) -> AsyncIterator[bytes]:
+    """``-f``'s output, a line at a time as the expressions arrive; what
+    names no date goes to ``io``'s stderr, exit 1, once the input ends.
+
+    Args:
+        first (bytes): the input's first chunk, already read.
+        rest (AsyncIterator[bytes]): the rest of it.
+        zone (tzinfo | None): the command's zone; None is the host's.
+        fmt (str): the output format.
+        io (IOResult): the result the refusals settle into.
+    """
+    errors: list[str] = []
+
+    async def one(raw: bytes) -> bytes:
+        text = decode_text(raw)
+        dt = await _named(text, zone)
+        if dt is None:
+            errors.append(f"date: invalid date '{quote_text(text)}'\n")
+            return b""
+        return encode_text(
+            gnu_strftime(dt if zone else dt.astimezone(), fmt) + "\n"
+        )
+
+    held = bytearray()
+    chunk = first
+    while True:
+        start = 0
+        while (at := chunk.find(b"\n", start)) != -1:
+            held += chunk[start:at]
+            if out := await one(bytes(held)):
+                yield out
+            held.clear()
+            start = at + 1
+        held += chunk[start:]
+        try:
+            chunk = await anext(rest)
+        except StopAsyncIteration:
+            break
+    if held and (out := await one(bytes(held))):
+        yield out
+    if errors:
+        io.exit_code = 1
+        io.stderr = encode_text("".join(errors))
+
+
+async def _each_line(
+    ctx: Context, datefile: PathSpec, zone: tzinfo | None, fmt: str
+) -> tuple[ByteSource | None, IOResult]:
+    """``-f``: each line of the file a ``-d`` expression, printed in turn
+    as it is read.
+
+    A line that names no date is reported and the next one still
+    prints, exit 1; ``-`` reads standard input. A file that cannot be
+    opened is reported before anything prints.
+
+    Args:
+        ctx (Context): the command's context.
+        datefile (PathSpec): the file of expressions.
+        zone (tzinfo | None): the command's zone; None is the host's.
+        fmt (str): the output format.
+    """
+    try:
+        if datefile.raw_path == "-":
+            source = resolve_source(ctx.stdin)
+        elif ctx.vfs is not None:
+            source = await ctx.vfs.read(datefile, stream=True)
+        else:
+            raise FileNotFoundError(datefile.raw_path)
+        first = await anext(source, b"")
+    except FS_ERRORS as exc:
+        line = fs_error_line(CommandName.DATE, datefile, exc)
+        return None, IOResult(exit_code=1, stderr=encode_text(line))
+    io = IOResult()
+    # The output owns the input: closed early, or before its first pull,
+    # it closes the reader too.
+    return OutputStream(
+        _dated(first, source, zone, fmt, io), lambda: close_quietly(source)
+    ), io
+
+
+async def _modified(ctx: Context, reference: PathSpec) -> datetime:
+    """``-r``: the moment a file was last modified.
+
+    A backend that reports no time for it answers the epoch.
+
+    Args:
+        ctx (Context): the command's context.
+        reference (PathSpec): the file.
+    """
+    if ctx.vfs is None:
+        raise FileNotFoundError(reference.raw_path)
+    stamp = iso_timestamp((await ctx.vfs.stat(reference)).modified)
+    return datetime.fromtimestamp(stamp or 0, timezone.utc)
+
+
 def lacks_plus_error(operand: str) -> UsageError:
     """GNU's refusal of a non-``+`` operand beside ``-d``, a usage error.
 
@@ -144,9 +278,15 @@ async def date(
     fl = FlagView(ctx.flags, spec=SPECS["date"])
     u = fl.as_bool("utc") or fl.as_bool("universal")
     d = fl.as_str("date")
+    reference = fl.as_path("reference")
+    datefile = fl.as_path("file")
+    resolution = fl.as_bool("resolution")
     formats = option_formats(fl)
     if len(formats) > 1:
         return _multiple_formats()
+    named = [d is not None, reference is not None, datefile is not None]
+    if sum(named) + resolution > 1:
+        raise exclusive_error()
     if len(texts) > 1:
         raise extra_operand_error(CommandName.DATE, texts[1])
     setting = texts[0] if texts else None
@@ -155,34 +295,50 @@ async def date(
             return _multiple_formats()
         formats.append(setting[1:])
         setting = None
-    elif setting is not None and d is not None:
+    elif setting is not None and (any(named) or resolution):
         raise lacks_plus_error(setting)
     zone = timezone.utc if u else zone_from_env(ctx.env)
+    if datefile is not None:
+        fmt = formats[0] if formats else DEFAULT_FORMAT
+        return await _each_line(ctx, datefile, zone, fmt)
+    if resolution and not formats:
+        # Times here are kept to the nanosecond, the resolution GNU
+        # reports for a filesystem that keeps them so.
+        return b"0.000000001\n", IOResult()
     if setting is not None:
         placed = await parse_posix_time_async(setting, tz=zone)
         if placed is None:
             return invalid_date(setting)
         dt = placed
-    elif d is not None and not d.strip():
+    elif d is not None:
         # GNU ACCEPTS an empty (or blank) expression, exit 0: with no
         # item at all it names today at midnight. Measured on coreutils
         # 9.4: `date -d ''` and `date -d '   '` both print today 00:00:00
         # in the command's zone.
-        now = system_date(zone)
-        dt = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    elif d is not None:
-        parsed_d = await parse_date_expr_async(d, tz=zone)
+        parsed_d = await _named(d, zone)
         if parsed_d is None:
             # GNU's refusal, exit 1: a wrong answer with exit 0 poisons
             # whatever consumed it (the NaN-timestamp corpus failure).
             return invalid_date(d)
         dt = parsed_d
+    elif reference is not None:
+        try:
+            dt = await _modified(ctx, reference)
+        except FS_ERRORS as exc:
+            line = fs_error_line(CommandName.DATE, reference, exc)
+            return None, IOResult(exit_code=1, stderr=encode_text(line))
+        if zone is not None:
+            dt = dt.astimezone(zone)
+    elif resolution:
+        dt = datetime.fromtimestamp(0, zone or timezone.utc)
     else:
         dt = system_date(zone)
     if zone is None:
         dt = dt.astimezone()
     fmt = formats[0] if formats else DEFAULT_FORMAT
-    out = encode_text(gnu_strftime(dt, fmt) + "\n")
+    # --resolution names one nanosecond past the epoch.
+    tick = 1 if resolution else None
+    out = encode_text(gnu_strftime(dt, fmt, nanosecond=tick) + "\n")
     if setting is not None:
         return out, IOResult(exit_code=1, stderr=CANNOT_SET)
     return out, IOResult()

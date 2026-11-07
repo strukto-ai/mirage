@@ -73,6 +73,13 @@ pub(super) struct Piece {
     held: Vec<u8>,
     /// What it holds before it sends it.
     pub(super) limit: usize,
+    /// Under -e: the file is made only once a byte is put, so a piece
+    /// that gets none leaves no file.
+    pub(super) elide: bool,
+    /// Whether a byte has been put.
+    pub(super) touched: bool,
+    /// -u: what a put holds is sent before it returns.
+    pub(super) unbuffered: bool,
 }
 
 impl Piece {
@@ -82,12 +89,16 @@ impl Piece {
             created: false,
             held: Vec::new(),
             limit: LIMIT,
+            elide: false,
+            touched: false,
+            unbuffered: false,
         }
     }
 
     /// Hold `data`, a write going each time `limit` bytes are held; the
     /// buffer is taken once at that size and never grows past it.
     pub(super) fn put(&mut self, mut data: &[u8], io: &mut Io) {
+        self.touched |= !data.is_empty();
         while !data.is_empty() {
             if self.held.capacity() == 0 {
                 self.held.reserve_exact(self.limit);
@@ -98,6 +109,9 @@ impl Piece {
             if self.held.len() >= self.limit {
                 self.send(io);
             }
+        }
+        if self.unbuffered && !self.held.is_empty() {
+            self.send(io);
         }
     }
 
@@ -121,6 +135,9 @@ impl Piece {
 
     /// Write what is held, the file itself when nothing was, and commit it.
     pub(super) fn close(mut self, io: &mut Io) {
+        if self.elide && !self.touched {
+            return;
+        }
         if !self.created || !self.held.is_empty() {
             self.send(io);
         }

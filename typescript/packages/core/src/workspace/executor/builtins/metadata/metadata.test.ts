@@ -665,6 +665,25 @@ describe("a rule's refusal is one file's error", () => {
       await ws.close()
     },
   )
+
+  // -h changes the link itself, and the directory it leads to is still
+  // walked under -L, so a listing refused there is reported. Mirrors
+  // test_h_reports_a_denied_listing_behind_a_link.
+  it.each([
+    ['chown', 'ln -s t/sealed sl', 'sl', 'sl'],
+    ['chown', 'mkdir -p w && printf x > w/f && ln -s ../t/sealed w/l', 'w', 'w/l'],
+    ['chgrp', 'ln -s t/sealed sl', 'sl', 'sl'],
+    ['chgrp', 'mkdir -p w && printf x > w/f && ln -s ../t/sealed w/l', 'w', 'w/l'],
+  ])('%s -R -L -h reports a denied listing behind %s', async (name, setup, operand, shown) => {
+    const ws = await sealedWs()
+    const line = `cd /data && ${setup} && ${name} -R -L -h 7 ${operand}; echo rc=$?`
+    expect(await guarded(ws, line)).toEqual([
+      0,
+      'rc=1\n',
+      `${name}: cannot read directory '${shown}': Permission denied\n`,
+    ])
+    await ws.close()
+  })
 })
 
 /** A dispatch whose mount refuses every listing. */

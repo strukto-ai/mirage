@@ -153,9 +153,9 @@ def _view(name: str, *words: str) -> FlagView:
 
 
 def test_texts_read_a_numeric_shorthand_where_it_was_typed():
-    assert _view("tail", "-n", "x", "-4").texts("n") == [
-        ("n", "x"),
-        ("n", "4"),
+    assert _view("tail", "-n", "x", "-4").texts("lines") == [
+        ("lines", "x"),
+        ("lines", "4"),
     ]
     assert _view("head", "-4", "-n", "x").texts("lines") == [
         ("lines", "4"),

@@ -19,6 +19,7 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
     let mut count: Option<u64> = None;
     let mut range: Option<(u64, u64)> = None;
     let mut output: Option<&[u8]> = None;
+    let mut source: Option<&[u8]> = None;
     let mut echo = false;
     for (name, raw) in options {
         match name.as_str() {
@@ -40,6 +41,12 @@ pub(crate) fn scan(options: &[Typed]) -> Result<Values, StreamError> {
                     return Err(refused("shuf: multiple output files specified"));
                 }
                 _ => output = Some(raw),
+            },
+            "random_source" => match source {
+                Some(first) if first != raw.as_slice() => {
+                    return Err(refused("shuf: multiple random sources specified"));
+                }
+                _ => source = Some(raw),
             },
             "echo" => echo = true,
             _ => return Err(unknown("shuf", name)),
@@ -239,6 +246,10 @@ mod tests {
             (
                 &[("head_count", b"x"), ("output", b"a"), ("output", b"b")],
                 "shuf: invalid line count: 'x'",
+            ),
+            (
+                &[("random_source", b"a"), ("random_source", b"b")],
+                "shuf: multiple random sources specified",
             ),
             (
                 &[("input_range", b"1-3"), ("echo", b""), ("head_count", b"x")],

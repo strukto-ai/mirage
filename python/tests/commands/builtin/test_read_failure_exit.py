@@ -82,7 +82,8 @@ GNU_READ_EXIT = {
 # Is a directory`, `sort: read failed: dir: Is a directory`, `rev:
 # fgetwc() failed: Is a directory`, `fmt: read error` with no errno at
 # all, `strings: Warning: 'dir' is a directory`, and `gzip: dir is a
-# directory -- ignored`, which the gzip family prints as GNU does. mirage
+# directory -- ignored`, which strings and the gzip family print as their
+# references do. mirage
 # says the step in GNU's words only where that still names the operand
 # (``FAILURE_WORDING``: head, tail and uniq
 # say `error reading 'dir'`, tac and tsort `dir: read error`, sed `read
@@ -168,6 +169,7 @@ async def test_directory_read_says_is_a_directory(template):
         or "error reading '/ram/dir': Is a directory" in stderr
         or 'cannot open "/ram/dir" (Is a directory)' in stderr
         or "gzip: /ram/dir is a directory -- ignored" in stderr
+        or "strings: Warning: '/ram/dir' is a directory" in stderr
     )
     assert "No such file" not in stderr
 

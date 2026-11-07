@@ -48,10 +48,12 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "tail": CommandSpec(
         arguments=(
-            Argument("-n", numeric_shorthand=True),
-            Argument("-c"),
-            Argument("-q", action="store_true"),
-            Argument("-v", action="store_true"),
+            Argument("-n", "--lines", numeric_shorthand=True),
+            Argument("-c", "--bytes"),
+            Argument("-q", "--quiet", action="store_true"),
+            Argument("--silent", action="store_true"),
+            Argument("-v", "--verbose", action="store_true"),
+            Argument("-z", "--zero-terminated", action="store_true"),
             # GNU: -f never takes an argument; only --follow= carries the
             # descriptor/name choice, so the short stays clusterable.
             Argument(
@@ -120,7 +122,12 @@ SPECS: dict[str, CommandSpec] = {
             PATHS_OPERAND,
         )
     ),
-    "rev": CommandSpec(arguments=(PATHS_OPERAND,)),
+    "rev": CommandSpec(
+        arguments=(
+            Argument("-0", "--zero", action="store_true"),
+            PATHS_OPERAND,
+        )
+    ),
     "expand": CommandSpec(
         arguments=(
             Argument("-t", "--tabs", action="append"),
@@ -138,7 +145,9 @@ SPECS: dict[str, CommandSpec] = {
     ),
     "look": CommandSpec(
         arguments=(
-            Argument("-f", action="store_true"),
+            Argument("-f", "--ignore-case", action="store_true"),
+            Argument("-d", "--alphanum", action="store_true"),
+            Argument("-t", "--terminate"),
             TEXT_OPERAND,
             PATH2_OPERAND,
         )

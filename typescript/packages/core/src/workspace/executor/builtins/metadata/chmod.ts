@@ -19,8 +19,7 @@ import type { RedirectResult } from '../../../../context/session_context.ts'
 import { isRefusal } from '../../../../errors/fs.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
-import type { FileStat, PathSpec } from '../../../../types.ts'
-import { FileType } from '../../../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseChmod } from '../../../../utils/mode.ts'
 import { shellQuoteAlways } from '../../../../utils/quote.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
@@ -30,8 +29,14 @@ import {
   type WalkEntry,
   beforeRecursiveChange,
   permissionError,
+  preservesRoot,
+  referenceOperands,
+  referenceStat,
   resolveOperand,
+  rootRefusal,
   setattrVia,
+  traversal,
+  unfollowedError,
   unreadError,
   verbosity,
   walkedName,
@@ -52,13 +57,21 @@ export function modeLine(name: string, stat: FileStat, mode: number, failed: boo
   return `${lead} ${oldOctal} (${was}) to ${newOctal} (${perms})\n`
 }
 
+// chmod -v's report for a link it neither changes nor follows. Mirrors
+// Python's link_line.
+export function linkLine(name: string): string {
+  return `neither symbolic link ${shellQuoteAlways(name)} nor referent has been changed\n`
+}
+
 // chmod MODE FILE...: set permission bits via setattr. Follows symlinks
 // (GNU chmod always dereferences). Stored, not enforced: mount mode does
 // real access control. -R walks the operand's subtree and applies the mode
 // to every entry, skipping symlinks the way GNU does (a traversed link
 // changes neither itself nor its referent); a command-line link to a
-// directory is still followed and its target walked. -v reports every
-// file, -c the changed ones, and -f drops the per-file errors.
+// directory is still followed and its target walked, unless -P leaves it,
+// and -L follows every link. -v reports every file, -c the changed ones,
+// and -f drops the per-file errors. --reference takes the mode of a file in
+// place of MODE.
 export async function handleChmod(
   namespace: Namespace,
   dispatch: DispatchFn,
@@ -67,20 +80,43 @@ export async function handleChmod(
 ): Promise<RedirectResult> {
   const [parsed, fl, refused] = parseLine('chmod', args, session.cwd)
   if (refused !== null) return refused
-  const modeText = parsed.texts[0]
-  if (modeText === undefined || parsed.paths.length === 0) {
-    const error = missingOperandError('chmod', modeText ?? null)
-    return fail('chmod', `${error.message}\n`, error.exitCode)
+  const links = namespace.sessionLinks(session)
+  const reference = fl.asPath('reference')
+  let operands = parsed.paths
+  let modeText: string
+  if (reference !== undefined) {
+    operands = referenceOperands(parsed.texts, parsed.paths, session.cwd)
+    if (operands.length === 0) {
+      const error = missingOperandError('chmod', null)
+      return fail('chmod', `${error.message}\n`, error.exitCode)
+    }
+    const source = await referenceStat(links, dispatch, 'chmod', reference)
+    if (!(source instanceof FileStat)) return source
+    const copied =
+      source.mode ?? (source.type === FileType.DIRECTORY ? DEFAULT_DIR_MODE : DEFAULT_FILE_MODE)
+    modeText = copied.toString(8)
+  } else {
+    const typed = parsed.texts[0]
+    if (typed === undefined || parsed.paths.length === 0) {
+      const error = missingOperandError('chmod', typed ?? null)
+      return fail('chmod', `${error.message}\n`, error.exitCode)
+    }
+    modeText = typed
   }
   if (parseChmod(modeText, 0) === null) {
     return fail('chmod', `chmod: invalid mode: '${modeText}'\n`, 1)
   }
 
   const report = verbosity(fl)
+  const walk = traversal(fl, 'H')
+  const recursive = fl.asBool('recursive')
   const errors: string[] = []
   const out: string[] = []
-  const links = namespace.sessionLinks(session)
-  for (const target of await expandOperands(namespace, dispatch, parsed.paths)) {
+  for (const target of await expandOperands(namespace, dispatch, operands)) {
+    if (recursive && walk === 'P' && links.isLink(target.virtual)) {
+      if (report === 'verbose') out.push(linkLine(target.rawPath))
+      continue
+    }
     const found = await resolveOperand(links, dispatch, 'chmod', target, errors)
     if (found === null) {
       if (report === 'verbose')
@@ -88,7 +124,12 @@ export async function handleChmod(
       continue
     }
     const [resolved, stat] = found
-    if (fl.asBool('recursive')) {
+    if (recursive) {
+      const refusal = rootRefusal('chmod', fl, target.rawPath, resolved)
+      if (refusal !== null) {
+        errors.push(refusal)
+        continue
+      }
       try {
         await beforeRecursiveChange(links.mounts(false), dispatch, resolved, 'chmod')
       } catch (err) {
@@ -97,10 +138,18 @@ export async function handleChmod(
         continue
       }
     }
-    const entries: WalkEntry[] = fl.asBool('recursive')
-      ? await walkStats(links, dispatch, resolved, stat)
+    const entries: WalkEntry[] = recursive
+      ? await walkStats(links, dispatch, resolved, stat, walk === 'L', preservesRoot(fl))
       : [[resolved, stat, null]]
     for (const [path, entryStat, unread] of entries) {
+      if (entryStat.type === FileType.SYMLINK) {
+        const name = walkedName(target.rawPath, resolved, path)
+        if (walk !== 'L') {
+          if (report === 'verbose') out.push(linkLine(name))
+        } else if (unread !== null) errors.push(unfollowedError('chmod', name, unread))
+        else errors.push(rootRefusal('chmod', fl, name, PathSpec.fromStrPath('/')) ?? '')
+        continue
+      }
       // Backends without a mode default to what ls renders: 755 for
       // directories, 644 for files (symbolic clauses build on this).
       const pathStat =

@@ -1,6 +1,6 @@
 import { IOResult, type ByteSource } from '../../../io/types.ts'
 import type { FileStat, PathSpec } from '../../../types.ts'
-import { eisdir, enoent, enotdir, isEnotdir, isFsError } from '../../../errors/fs.ts'
+import { eisdir, enoent, enotdir, fsStrerror, isEnotdir, isFsError } from '../../../errors/fs.ts'
 import { classify } from '../../../errors/classify.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { posixPhrase } from '../../../errors/posix.ts'
@@ -67,6 +67,9 @@ export function resolveSize(size: Size, current: bigint): bigint {
 export interface TruncateFlags {
   readonly size: Size
   readonly noCreate: boolean
+  /** `-r`: the file whose size a relative `-s` counts from, in place of each
+   * operand's own. */
+  readonly reference?: PathSpec | null
 }
 
 /**
@@ -75,9 +78,12 @@ export interface TruncateFlags {
  */
 export function parseFlags(bag: Record<string, FlagValue>): TruncateFlags | IOResult {
   const fl = new FlagView(bag, specOf('truncate'))
+  const reference = fl.asPath('reference') ?? null
+  const typed = fl.texts('size')
+  if (reference !== null) typed.push(['reference', ''])
   let values
   try {
-    values = scan('truncate', fl.texts('size'))
+    values = scan('truncate', typed)
   } catch (err) {
     if (!(err instanceof StreamRefusal)) throw err
     return refused(err)
@@ -96,6 +102,7 @@ export function parseFlags(bag: Record<string, FlagValue>): TruncateFlags | IORe
   return {
     size: { mode: size.mode as SizeMode, number: BigInt(size.size) },
     noCreate: fl.asBool('no_create'),
+    reference,
   }
 }
 
@@ -108,13 +115,25 @@ export async function truncateGeneric(
   flags: TruncateFlags,
   stat: (path: PathSpec) => Promise<FileStat>,
   truncate: (path: PathSpec, length: number, noCreate: boolean) => Promise<void>,
+  referenceStat: (path: PathSpec) => Promise<FileStat> = stat,
 ): Promise<[ByteSource | null, IOResult]> {
   if (paths.length === 0)
     throw new UsageError(`truncate: missing file operand\n${usageHint('truncate')}`, 1)
+  let base: bigint | null = null
+  const reference = flags.reference ?? null
+  if (reference !== null) {
+    try {
+      base = BigInt((await referenceStat(reference)).size ?? 0)
+    } catch (e) {
+      if (!isFsError(e)) throw e
+      const line = `truncate: cannot stat ${shellQuoteAlways(reference.rawPath)}: ${fsStrerror(e) ?? ''}\n`
+      return [null, new IOResult({ exitCode: 1, stderr: encodeText(line) })]
+    }
+  }
   const errors: string[] = []
   for (const path of paths) {
     try {
-      const line = await truncateOne(path, flags, stat, truncate)
+      const line = await truncateOne(path, flags, stat, truncate, base)
       if (line !== null) errors.push(line)
     } catch (e) {
       if (!isFsError(e)) throw e
@@ -147,6 +166,7 @@ async function truncateOne(
   flags: TruncateFlags,
   stat: (path: PathSpec) => Promise<FileStat>,
   truncate: (path: PathSpec, length: number, noCreate: boolean) => Promise<void>,
+  base: bigint | null = null,
 ): Promise<string | null> {
   let current = 0n
   let directory = false
@@ -166,7 +186,7 @@ async function truncateOne(
   }
   const slashed = path.rawPath.endsWith('/') && !endsAtDot(path.rawPath)
   if (directory || (slashed && !flags.noCreate)) throw eisdir(path)
-  const size = resolveSize(flags.size, current)
+  const size = resolveSize(flags.size, base ?? current)
   try {
     await truncate(path, Number(size), flags.noCreate)
   } catch (err) {

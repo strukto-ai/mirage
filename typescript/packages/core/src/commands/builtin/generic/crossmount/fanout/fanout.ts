@@ -54,20 +54,18 @@ export async function runFanout(
 ): Promise<CrossResult> {
   const flags = { ...flagKwargs }
   flagOccurrences(flags).push(...flagOccurrences(flagKwargs))
-  // head pairs -q/--quiet and -v/--verbose (canonical dests), tail declares
-  // them short-only.
-  const quietKey = cmdName === Cmd.HEAD ? 'quiet' : 'q'
-  const verboseKey = cmdName === Cmd.HEAD ? 'verbose' : 'v'
-  if (
-    (cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) &&
-    !new FlagView(flags, specOf(cmdName)).asBool(quietKey)
-  ) {
-    flags[verboseKey] = true
+  // head and tail name every operand unless -q (or tail's --silent) says
+  // otherwise.
+  if (cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) {
+    const view = new FlagView(flags, specOf(cmdName))
+    if (!(view.asBool('quiet') || (cmdName === Cmd.TAIL && view.asBool('silent')))) {
+      flags.verbose = true
+    }
   }
   if (![Cmd.FIND, Cmd.RM, Cmd.RMDIR, Cmd.UNLINK, Cmd.TOUCH, Cmd.MKDIR].includes(cmdName)) {
     const separator =
       (cmdName === Cmd.HEAD || cmdName === Cmd.TAIL) &&
-      new FlagView(flags, specOf(cmdName)).asBool(verboseKey)
+      new FlagView(flags, specOf(cmdName)).asBool('verbose')
         ? '\n'
         : ''
     return streamOperands(runSingle, cmdName, scopes, textArgs, flags, separator)

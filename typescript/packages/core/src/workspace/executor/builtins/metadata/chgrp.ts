@@ -15,16 +15,17 @@
 import { missingOperandError } from '../../../../commands/spec/usage.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
-import type { PathSpec } from '../../../../types.ts'
+import { FileStat, type PathSpec } from '../../../../types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { fail, parseLine } from '../shared.ts'
-import { changeOwner, parseGroup } from './metadata.ts'
+import { changeOwner, parseGroup, referenceOperands, referenceStat } from './metadata.ts'
 
 // chgrp GROUP FILE...: set group ownership via setattr. The group half of
 // chown: writes gid and leaves uid untouched. Group is stored, not enforced
 // (mirage has no group model); a name is kept verbatim, a numeric id becomes
-// a number. `-h` writes the link node's own group.
+// a number. `-h` writes the link node's own group, and --reference copies a
+// file's group.
 export async function handleChgrp(
   namespace: Namespace,
   dispatch: DispatchFn,
@@ -33,6 +34,17 @@ export async function handleChgrp(
 ): Promise<RedirectResult> {
   const [parsed, fl, refused] = parseLine('chgrp', args, session.cwd)
   if (refused !== null) return refused
+  const reference = fl.asPath('reference')
+  if (reference !== undefined) {
+    const operands = referenceOperands(parsed.texts, parsed.paths, session.cwd)
+    if (operands.length === 0) {
+      const error = missingOperandError('chgrp', null)
+      return fail('chgrp', `${error.message}\n`, error.exitCode)
+    }
+    const found = await referenceStat(namespace.sessionLinks(session), dispatch, 'chgrp', reference)
+    if (!(found instanceof FileStat)) return found
+    return changeOwner(namespace, dispatch, session, 'chgrp', fl, operands, null, found.gid)
+  }
   const groupText = parsed.texts[0]
   if (groupText === undefined || parsed.paths.length === 0) {
     const error = missingOperandError('chgrp', groupText ?? null)

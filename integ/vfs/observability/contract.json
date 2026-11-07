@@ -343,7 +343,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "strings: {mount}/__nf_missing__: No such file or directory\n"
+        "stderr": "strings: '{mount}/__nf_missing__': No such file\n"
       }
     },
     {

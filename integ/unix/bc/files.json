@@ -448,10 +448,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mkdir -p /data/bcnl && printf 7 > /data/bcnl/a.bc && cd /data/bcnl && printf 7 | bc; printf '1\\n2\\n3+' | bc; printf '7\\n/* c */' | bc; bc a.bc </dev/null; printf '\\n' | bc a.bc; echo rc=$?",
+      "command": "mkdir -p /data/bcnl && printf 7 > /data/bcnl/a.bc && cd /data/bcnl && printf 7 | bc; printf '1\\n2\\n3+' | bc; printf '7\\n/* c */' | bc; bc a.bc </dev/null; printf '\\n' | bc a.bc; echo rc=$?; echo 'scale' | bc --mathlib; echo '1+1' | bc --quiet; echo 's(0)' | bc -l",
       "expect": {
         "exit": 0,
-        "stdout": "1\n2\n7\n7\nrc=0\n",
+        "stdout": "1\n2\n7\n7\nrc=0\n20\n2\n0\n",
         "stderr": "(standard_in) 1: syntax error\n(standard_in) 1: syntax error\n(standard_in) 1: syntax error\n"
       }
     },

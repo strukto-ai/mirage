@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "tail /data/a.txt",
+      "command": "tail /data/a.txt; tail --lines=2 /data/a.txt; tail --bytes=4 /data/a.txt; tail --quiet -n1 /data/a.txt /data/b.txt; tail --silent -n1 /data/b.txt /data/a.txt; tail --verbose -n1 /data/b.txt; printf 'a\\0b\\0c\\0' | tail -z -n2 | od -c",
       "expect": {
         "exit": 0,
-        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\nbar\nbaz\nbaz\nbaz\n3\n3\nbaz\n==> /data/b.txt <==\n3\n0000000   b  \\0   c  \\0\n0000004\n",
         "stderr": ""
       }
     },

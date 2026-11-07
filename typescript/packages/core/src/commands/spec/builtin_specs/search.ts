@@ -448,7 +448,37 @@ export const SPECS: Record<string, CommandSpec> = {
     ],
   }),
   strings: new CommandSpec({
-    arguments: [new Argument('-n'), PATHS_OPERAND],
+    arguments: [
+      new Argument(['-a', '--all'], {
+        action: 'store_true',
+        help: 'read the whole file (always so)',
+      }),
+      new Argument(['-d', '--data'], {
+        action: 'store_true',
+        help: 'read the data sections (the whole file here)',
+      }),
+      new Argument(['-f', '--print-file-name'], {
+        action: 'store_true',
+        help: 'name the file before each string',
+      }),
+      new Argument(['-n', '--bytes'], { help: 'the fewest characters a string has (4)' }),
+      new Argument(['-t', '--radix'], { help: 'print each offset in base o, d or x' }),
+      new Argument('-o', { action: 'store_true', help: 'the same as -t o' }),
+      new Argument(['-w', '--include-all-whitespace'], {
+        action: 'store_true',
+        help: 'let any whitespace belong to a string',
+      }),
+      new Argument(['-T', '--target'], {
+        help: 'the object format (ignored: every file is bytes)',
+      }),
+      new Argument(['-e', '--encoding'], {
+        help: 'character width and order: s, S, b, l, B or L',
+      }),
+      new Argument(['-s', '--output-separator'], {
+        help: 'what follows each string instead of a newline',
+      }),
+      PATHS_OPERAND,
+    ],
   }),
   zgrep: new CommandSpec({
     arguments: [

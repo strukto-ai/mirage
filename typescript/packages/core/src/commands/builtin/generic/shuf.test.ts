@@ -281,6 +281,7 @@ describe('shuf parseFlags is the one flag read', () => {
       withReplacement: true,
       inputRange: [1n, 3n],
       output: PathSpec.fromStrPath('/data/out.txt'),
+      randomSource: null,
     })
   })
 
@@ -296,6 +297,7 @@ describe('shuf parseFlags is the one flag read', () => {
       withReplacement: false,
       inputRange: null,
       output: null,
+      randomSource: null,
     })
   })
 })

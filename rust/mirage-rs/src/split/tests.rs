@@ -176,3 +176,124 @@ fn csplit_goes_on_with_a_long_back_referenced_search_across_drains() {
     assert_eq!((host.out.as_slice(), status), (b"28\n31\n".as_slice(), 0));
     assert!(host.drains > 2, "{}", host.drains);
 }
+
+/// Every piece the run made, in name order.
+fn pieces(host: &Host) -> Vec<(String, String)> {
+    let mut names: Vec<_> = host
+        .files
+        .keys()
+        .filter(|name| name.starts_with('x'))
+        .cloned()
+        .collect();
+    names.sort();
+    names
+        .into_iter()
+        .map(|name| (file(host, &name).to_owned(), name))
+        .map(|(body, name)| (name, body))
+        .collect()
+}
+
+#[test]
+fn line_bytes_pack_whole_records_and_cut_a_long_one() {
+    for (input, limit, want) in [
+        (
+            "aaaa\nbb\ncccccccc\nd\n",
+            "5",
+            vec!["aaaa\n", "bb\n", "ccccc", "ccc\n", "d\n"],
+        ),
+        ("ab\ncccccccc\n", "5", vec!["ab\n", "ccccc", "ccc\n"]),
+        ("abcdefgh\nij\n", "5", vec!["abcde", "fgh\n", "ij\n"]),
+        ("abcde\nfghij\n", "5", vec!["abcde", "\n", "fghij", "\n"]),
+        (
+            "ab\ncdefghijklmnop",
+            "5",
+            vec!["ab\n", "cdefg", "hijkl", "mnop"],
+        ),
+        (
+            "abcdefghijk\nl\n",
+            "3",
+            vec!["abc", "def", "ghi", "jk\n", "l\n"],
+        ),
+        ("a\nb\nc\nd\n", "4", vec!["a\nb\n", "c\nd\n"]),
+        ("abcdefg", "1", vec!["a", "b", "c", "d", "e", "f", "g"]),
+        (
+            "abcdefgh\nij",
+            "2",
+            vec!["ab", "cd", "ef", "gh", "\n", "ij"],
+        ),
+        ("", "5", vec![]),
+    ] {
+        let host = split(json!({"line_bytes": limit}), input);
+        let got: Vec<String> = pieces(&host).into_iter().map(|(_, body)| body).collect();
+        assert_eq!(got, want, "{input:?} -C {limit}");
+    }
+}
+
+#[test]
+fn one_way_of_splitting_and_a_line_bytes_count_worded_as_lines() {
+    for config in [
+        json!({"lines": "1", "bytes": "1"}),
+        json!({"line_bytes": "2", "number": "2"}),
+    ] {
+        let (host, status) = run("split", config, &["in"], "a\n");
+        assert_eq!(
+            (host.err.as_slice(), status),
+            (b"split: cannot split in more than one way\nTry 'split --help' for more information.\n".as_slice(), 1)
+        );
+    }
+    let (host, status) = run("split", json!({"line_bytes": "0"}), &["in"], "a\n");
+    assert_eq!(
+        (host.err.as_slice(), status),
+        (b"split: invalid number of lines: '0'\n".as_slice(), 1)
+    );
+}
+
+#[test]
+fn elided_pieces_make_no_file_and_verbose_names_the_ones_made() {
+    let host = split(
+        json!({"number": "4", "elide_empty_files": true, "verbose": true}),
+        "ab",
+    );
+    assert_eq!(
+        pieces(&host),
+        [
+            ("xaa".to_owned(), "a".to_owned()),
+            ("xab".to_owned(), "b".to_owned())
+        ]
+    );
+    assert_eq!(host.out, b"creating file 'xaa'\ncreating file 'xab'\n");
+    let host = split(
+        json!({"number": "r/3", "elide_empty_files": true, "verbose": true}),
+        "a\nb\n",
+    );
+    assert_eq!(pieces(&host).len(), 2);
+    assert_eq!(host.out, b"creating file 'xaa'\ncreating file 'xab'\n");
+    let host = split(json!({"number": "r/3", "verbose": true}), "a\nb\n");
+    assert_eq!(pieces(&host).len(), 3);
+    assert_eq!(
+        host.out,
+        b"creating file 'xaa'\ncreating file 'xab'\ncreating file 'xac'\n"
+    );
+    let host = split(json!({"line_bytes": "3", "verbose": true}), "ab\ncd\n");
+    assert_eq!(host.out, b"creating file 'xaa'\ncreating file 'xab'\n");
+}
+
+#[test]
+fn unbuffered_pieces_send_each_put() {
+    use super::pieces::Piece;
+    use crate::request::{Io, Request};
+    let writes = |unbuffered: bool| {
+        let mut io = Io::default();
+        let mut piece = Piece::new(b"xaa".to_vec());
+        piece.unbuffered = unbuffered;
+        piece.put(b"a\n", &mut io);
+        piece.put(b"b\n", &mut io);
+        io.requests
+            .iter()
+            .filter(|request| matches!(request, Request::Write { .. }))
+            .count()
+    };
+    assert_eq!((writes(false), writes(true)), (0, 2));
+    let host = split(json!({"number": "r/2", "unbuffered": true}), "a\nb\nc\n");
+    assert_eq!((file(&host, "xaa"), file(&host, "xab")), ("a\nc\n", "b\n"));
+}

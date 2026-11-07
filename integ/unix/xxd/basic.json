@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "head -c 8 /data/a.txt | xxd",
+      "command": "head -c 8 /data/a.txt | xxd; printf abcdefghij | xxd -e -g 4; printf abc | xxd -i; xxd -i -C -n blob /data/b.txt; xxd -include /data/b.txt; printf abcdefghij | xxd -b -c 4 -o 16 -d; head -c 48 /dev/zero | xxd -a; printf ab | xxd -E -u; printf abcdef | xxd -cols 4 -groupsize 1 -len 5 -seek 1 -uppercase -offset 0x10",
       "expect": {
         "exit": 0,
-        "stdout": "00000000: 6865 6c6c 6f0a 776f                      hello.wo\n",
+        "stdout": "00000000: 6865 6c6c 6f0a 776f                      hello.wo\n00000000: 64636261 68676665     6a69           abcdefghij\n  0x61, 0x62, 0x63\nunsigned char BLOB[] = {\n  0x31, 0x0a, 0x32, 0x0a, 0x33, 0x0a\n};\nunsigned int BLOB_LEN = 6;\nunsigned char _data_b_txt[] = {\n  0x31, 0x0a, 0x32, 0x0a, 0x33, 0x0a\n};\nunsigned int _data_b_txt_len = 6;\n00000016: 01100001 01100010 01100011 01100100  abcd\n00000020: 01100101 01100110 01100111 01101000  efgh\n00000024: 01101001 01101010                    ij\n00000000: 0000 0000 0000 0000 0000 0000 0000 0000  ................\n00000010: 0000 0000 0000 0000 0000 0000 0000 0000  ................\n00000020: 0000 0000 0000 0000 0000 0000 0000 0000  ................\n00000000: 6162                                     /.\n00000011: 62 63 64 65  bcde\n00000015: 66           f\n",
         "stderr": ""
       }
     },

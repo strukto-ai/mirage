@@ -184,7 +184,19 @@ describe('df', () => {
   it('invalid option', async () => {
     const ws = makeWs()
     const [code] = await run(ws, 'df -z /mem')
-    expect(code).toBe(2)
+    expect(code).toBe(1)
+    await ws.close()
+  })
+
+  it('reads long options and names a refused block size as typed', async () => {
+    const ws = makeWs()
+    const [code, out] = await run(ws, 'df --print-type --human-readable /mem')
+    expect(code).toBe(0)
+    expect(out.split('\n')[0]?.split(/\s+/).slice(0, 3)).toEqual(['Filesystem', 'Type', 'Size'])
+    const [bogus] = await run(ws, 'df --bogus /mem')
+    expect(bogus).toBe(1)
+    const io = await ws.shell('df --block-size=x /mem')
+    expect(io.stderrText).toBe("df: invalid --block-size argument 'x'\n")
     await ws.close()
   })
 

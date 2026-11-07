@@ -41,10 +41,10 @@ import { beforeFullWalk } from '../../utils/tree.ts'
 const rm: CommandFn = async (_accessor, paths, _texts, ctx) => {
   const files = commandFiles(ctx, paths)
   const fl = new FlagView(ctx.flags, specOf('rm'))
-  const recursive = fl.asBool('r') || fl.asBool('R')
-  const dirFlag = fl.asBool('d')
-  const force = fl.asBool('f')
-  const verbose = fl.asBool('v')
+  const recursive = fl.asBool('recursive')
+  const dirFlag = fl.asBool('dir')
+  const force = fl.asBool('force')
+  const verbose = fl.asBool('verbose')
   if (paths.length === 0) return rmWithoutOperands(force)
   const resolved = await files.resolveGlob(paths)
   const lines: string[] = []

@@ -98,6 +98,21 @@ describe('wc asks the mount for a line count', () => {
     await run({ lines: true, words: true })
     expect(reads).toEqual(['/bb', '/a', '/bb'])
   })
+
+  // Mirrors test_a_listed_file_is_read_whatever_the_mount_counts.
+  it('reads a listed file whatever the mount counts', async () => {
+    const files: Record<string, string> = { '/l': '/a\0', '/a': 'x\ny\n' }
+    const stream = async function* (p: PathSpec): AsyncIterable<Uint8Array> {
+      await Promise.resolve()
+      yield new TextEncoder().encode(files[p.virtual] ?? '')
+    }
+    const lineCount = (p: PathSpec): Promise<number | null> =>
+      Promise.reject(new Error(`lineCount asked for ${p.virtual}`))
+    const flags = { lines: true, files0_from: PathSpec.fromStrPath('/l') }
+    const ctx = { stdin: null, flags, cwd: PathSpec.fromStrPath('/') } as unknown as Context
+    const result = await wcGeneric([], [], ctx, stream, lineCount)
+    expect(new TextDecoder().decode(await materialize(result?.[0] ?? null))).toBe('2 /a\n')
+  })
 })
 
 describe('wc takes bytes alone from the size', () => {

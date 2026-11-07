@@ -37,7 +37,6 @@ from mirage.workspace.executor.builtins.shared import (
     record_delimiter,
     refusal,
     require_view,
-    split_value_flags,
     status_of,
 )
 from mirage.workspace.session import SessionState
@@ -84,30 +83,6 @@ def test_abs_path():
     spec = PathSpec.from_str_path("/data/f.txt")
     assert abs_path(spec, "/tmp") == "/data/f.txt"
     assert abs_path("f.txt", "/data") == "/data/f.txt"
-
-
-def test_split_value_flags_detached_value():
-    flags, values, operands, bad = split_value_flags(
-        ["-c", "-t", "202601021530", "f.txt"], "acmh", "tdr"
-    )
-    assert bad is None
-    assert flags == {"c"}
-    assert values == {"t": "202601021530"}
-    assert operands == ["f.txt"]
-
-
-def test_split_value_flags_attached_value():
-    _flags, values, operands, bad = split_value_flags(
-        ["-t202601021530", "f"], "acmh", "tdr"
-    )
-    assert bad is None
-    assert values == {"t": "202601021530"}
-    assert operands == ["f"]
-
-
-def test_split_value_flags_reports_unknown():
-    _flags, _values, _operands, bad = split_value_flags(["-q", "f"], "Rvf", "")
-    assert bad == "q"
 
 
 @pytest.mark.asyncio

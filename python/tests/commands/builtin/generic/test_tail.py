@@ -496,7 +496,7 @@ async def test_follow_names_a_raw_byte_file_in_its_first_header():
     stream, _ = await _tail_generic(
         _paths(name),
         [],
-        _follow_opts(v=True),
+        _follow_opts(verbose=True),
         fs.stat,
         fs.read,
         fs.read_range,
@@ -622,7 +622,7 @@ async def test_retry_without_follow_warns_and_tails_anyway():
     stream, io = await _tail_generic(
         _paths("/d/f"),
         [],
-        Context(flags={"retry": True, "n": "1"}),
+        Context(flags={"retry": True, "lines": "1"}),
         fs.stat,
         fs.read,
         fs.read_range,
@@ -1000,10 +1000,10 @@ async def test_follow_infinite_interval_never_polls():
     "flags, asked",
     [
         ({}, 10),
-        ({"n": "2"}, 2),
-        ({"n": "-2"}, 2),
-        ({"n": "+2"}, None),
-        ({"c": "2"}, None),
+        ({"lines": "2"}, 2),
+        ({"lines": "-2"}, 2),
+        ({"lines": "+2"}, None),
+        ({"bytes": "2"}, None),
     ],
 )
 async def test_tail_asks_last_lines_for_a_count_from_the_end(flags, asked):
@@ -1050,7 +1050,7 @@ async def test_follow_streams_what_the_mount_hands_over_first_print_included():
     stream, _ = await _tail_generic(
         _paths("/d/log"),
         [],
-        _follow_opts(n="1"),
+        _follow_opts(lines="1"),
         fs.stat,
         fs.read,
         fs.read_range,
@@ -1093,7 +1093,7 @@ async def test_a_reader_that_stops_at_the_header_closes_the_follow():
     stream, _ = await _tail_generic(
         _paths("/d/log"),
         [],
-        _follow_opts(n="1", v=True),
+        _follow_opts(lines="1", verbose=True),
         fs.stat,
         fs.read,
         fs.read_range,
@@ -1120,7 +1120,7 @@ async def test_a_polled_follow_reads_its_first_print_whole():
     stream, _ = await _tail_generic(
         _paths("/d/log"),
         [],
-        _follow_opts(n="1"),
+        _follow_opts(lines="1"),
         fs.stat,
         fs.read,
         fs.read_range,
@@ -1142,9 +1142,9 @@ async def test_a_polled_follow_reads_its_first_print_whole():
 @pytest.mark.parametrize(
     "flags,expected,maximum",
     [
-        ({"n": "2"}, 16, 16384),
-        ({"c": "1000"}, 1000, 1000),
-        ({"n": str(2 << 20)}, 16 << 20, 17 << 20),
+        ({"lines": "2"}, 16, 16384),
+        ({"bytes": "1000"}, 1000, 1000),
+        ({"lines": str(2 << 20)}, 16 << 20, 17 << 20),
     ],
 )
 async def test_seekable_tail_keeps_only_a_range_window(
@@ -1186,7 +1186,7 @@ async def test_seekable_tail_keeps_only_a_range_window(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("flags", [{"n": "1"}, {"c": "4"}])
+@pytest.mark.parametrize("flags", [{"lines": "1"}, {"bytes": "4"}])
 async def test_a_zero_stat_size_does_not_hide_streamed_bytes(flags):
     data = b"first\nlast"
 

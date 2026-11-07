@@ -145,7 +145,7 @@ function followOpts(abort: AbortController, extra: Record<string, string | boole
 }
 
 describe('tail -n', () => {
-  async function lastLines(parts: string[], n: string): Promise<string[]> {
+  async function lastLines(parts: string[], lines: string): Promise<string[]> {
     const encoder = new TextEncoder()
     async function* source(): AsyncIterable<Uint8Array> {
       for (const part of parts) {
@@ -153,7 +153,7 @@ describe('tail -n', () => {
         yield encoder.encode(part)
       }
     }
-    const ctx = { stdin: source(), flags: { n }, cwd: PathSpec.fromStrPath('/') }
+    const ctx = { stdin: source(), flags: { lines }, cwd: PathSpec.fromStrPath('/') }
     const result = await tailGeneric(
       [],
       [],
@@ -303,7 +303,7 @@ describe('tail -f', () => {
     const [stream] = (await tailGeneric(
       [spec(name)],
       [],
-      followOpts(abort, { v: true }),
+      followOpts(abort, { verbose: true }),
       fs.stream,
       fs.stat,
       fs.readRange,
@@ -766,15 +766,21 @@ describe('tail -s reads exactly what strtod reads', () => {
 // test_tail.py.
 describe('tail parseFlags', () => {
   it.each([
-    [{ n: '+3' }, { lines: null, fromLine: 3, byteCount: null, fromByte: null }],
-    [{ n: '-3' }, { lines: 3, fromLine: null, byteCount: null, fromByte: null }],
     [
-      { n: '2', c: '1k' },
-      { lines: null, fromLine: null, byteCount: 1024, fromByte: null },
+      { lines: '+3' },
+      { lines: null, fromLine: 3, byteCount: null, fromByte: null, terminator: 10 },
     ],
     [
-      { c: '+2', n: '4' },
-      { lines: 4, fromLine: null, byteCount: null, fromByte: null },
+      { lines: '-3' },
+      { lines: 3, fromLine: null, byteCount: null, fromByte: null, terminator: 10 },
+    ],
+    [
+      { lines: '2', bytes: '1k' },
+      { lines: null, fromLine: null, byteCount: 1024, fromByte: null, terminator: 10 },
+    ],
+    [
+      { bytes: '+2', lines: '4' },
+      { lines: 4, fromLine: null, byteCount: null, fromByte: null, terminator: 10 },
     ],
   ])('counts %j', (flags, counts) => {
     const parsed = parseFlags(flags)
@@ -793,8 +799,8 @@ describe('tail parseFlags', () => {
   })
 
   it('refuses a count in its own words', () => {
-    expect(said({ n: '2K' })).toBe("tail: invalid number of lines: '2K'\n")
-    expect(said({ c: 'x' })).toBe("tail: invalid number of bytes: 'x'\n")
+    expect(said({ lines: '2K' })).toBe("tail: invalid number of lines: '2K'\n")
+    expect(said({ bytes: 'x' })).toBe("tail: invalid number of bytes: 'x'\n")
   })
 })
 
@@ -879,10 +885,10 @@ describe('a follow prints each append past the file cache', () => {
 describe('tail asks the mount for the last lines', () => {
   it.each([
     [{}, 10],
-    [{ n: '2' }, 2],
-    [{ n: '-2' }, 2],
-    [{ n: '+2' }, null],
-    [{ c: '2' }, null],
+    [{ lines: '2' }, 2],
+    [{ lines: '-2' }, 2],
+    [{ lines: '+2' }, null],
+    [{ bytes: '2' }, null],
   ] as const)('with %j asks for %s', async (flags, asked) => {
     const fs = new Growing(new Map())
     fs.set('/d/log', 'a\nb\nc\n')
@@ -914,7 +920,7 @@ describe('tail asks the mount for the last lines', () => {
       const result = await tailGeneric(
         [spec('/big'), spec('/gone'), spec('/small')],
         [],
-        ctx({ n: '1' }),
+        ctx({ lines: '1' }),
         fs.stream,
         fs.stat,
         null,
@@ -959,7 +965,7 @@ describe('tail asks the mount for the last lines', () => {
     const result = await tailGeneric(
       [spec('/d/log')],
       [],
-      followOpts(abort, { n: '1' }),
+      followOpts(abort, { lines: '1' }),
       fs.stream,
       fs.stat,
       fs.readRange,
@@ -992,7 +998,7 @@ describe('tail asks the mount for the last lines', () => {
     const result = await tailGeneric(
       [spec('/d/log')],
       [],
-      followOpts(abort, { n: '1', v: true }),
+      followOpts(abort, { lines: '1', verbose: true }),
       fs.stream,
       fs.stat,
       fs.readRange,
@@ -1013,7 +1019,7 @@ describe('tail asks the mount for the last lines', () => {
     const result = await tailGeneric(
       [spec('/d/log')],
       [],
-      followOpts(abort, { n: '1' }),
+      followOpts(abort, { lines: '1' }),
       fs.stream,
       fs.stat,
       fs.readRange,
@@ -1032,9 +1038,9 @@ describe('tail asks the mount for the last lines', () => {
 })
 
 it.each([
-  [{ n: '2' }, 16, 16384],
-  [{ c: '1000' }, 1000, 1000],
-  [{ n: String(2 << 20) }, 16 << 20, 17 << 20],
+  [{ lines: '2' }, 16, 16384],
+  [{ bytes: '1000' }, 1000, 1000],
+  [{ lines: String(2 << 20) }, 16 << 20, 17 << 20],
 ] as const)('reads seekable tails through bounded ranges: %j', async (flags, expected, maximum) => {
   const size = 40 << 20
   let requested = 0
@@ -1071,7 +1077,7 @@ it.each([
   expect(requested).toBeLessThanOrEqual(maximum + expected)
 })
 
-it.each([{ n: '1' }, { c: '4' }])(
+it.each([{ lines: '1' }, { bytes: '4' }])(
   'reads streamed bytes when stat reports zero: %j',
   async (flags) => {
     const read = async function* (): AsyncGenerator<Uint8Array> {
