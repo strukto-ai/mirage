@@ -15,6 +15,8 @@ Routes are under `/v1` and take and return JSON. Send
 is the contract both servers are checked against.
 
 Rows marked **daemon and hosted** are also served by the hosted API.
+Readiness and shutdown control a server you run yourself, so they are
+documented with [launching a server](/home/access/http#server), not here.
 An error answers `{detail, errno?, refusal?}`; `429` adds `Retry-After`.
 
 <ApiExplorer>
@@ -5135,50 +5137,6 @@ The workspace's id.
 </ResponseField>
 <ResponseField name="uptime_s" type="number" required>
 </ResponseField>
-
-</Operation>
-
-<Operation resource="Server" method="GET" path="/v1/ready" summary="Check readiness" hosts="daemon">
-
-[Open page](/api/operations/server/check-readiness)
-
-Whether the server takes new workspaces: 503 while it drains for
-shutdown or holds `max_workspaces`, so a load balancer sends new
-work elsewhere. `/v1/health` only says the process is up.
-
-**Responses**
-
-`200` OK
-
-`application/json` `any`
-
-</Operation>
-
-<Operation resource="Server" method="POST" path="/v1/shutdown" summary="Shut down the server" hosts="daemon">
-
-[Open page](/api/operations/server/shut-down-the-server)
-
-Trip the exit event, which the app's `on_idle_exit` acts on.
-
-The daemon's hook sends SIGTERM to its own process, so uvicorn runs
-its graceful shutdown (close connections, run the lifespan's finally
-block). An app run without a hook keeps serving. The server serves
-every account, so an account may not stop it.
-
-**Responses**
-
-`200` OK
-
-`application/json` `ShutdownResponse`
-
-<ResponseField name="status" type="string" required>
-</ResponseField>
-<ResponseField name="pid" type="integer" required>
-</ResponseField>
-
-`401` The token is missing or wrong
-
-`429` Past a rate limit, or a new session past max_sessions
 
 </Operation>
 
