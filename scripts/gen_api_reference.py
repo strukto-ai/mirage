@@ -223,14 +223,21 @@ def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
     created = (
         responses.get("201", {}).get("content", {}).get("application/json", {})
     )
+    example = []
     if "200" in responses and "example" in created:
+        example = [
+            "```json 201 Created",
+            json.dumps(created["example"], indent=2),
+            "```",
+        ]
+    elif {code for code in responses if code.startswith("2")} == {"204"}:
+        example = ["```http 204 No Content", "HTTP/1.1 204 No Content", "```"]
+    if example:
         lines += [
             '<div className="hidden">',
             "<ResponseExample>",
             "",
-            "```json 201 Created",
-            json.dumps(created["example"], indent=2),
-            "```",
+            *example,
             "",
             "</ResponseExample>",
             "</div>",
@@ -405,6 +412,11 @@ def selftest() -> None:
         "target": '$.paths.*.*.responses["409"]',
         "remove": True,
     }
+    empty_response = response_content(
+        doc, {"responses": {"204": {"description": "No content"}}}
+    )
+    assert "204 No Content" in empty_response
+    assert "```http" in empty_response and "```json" not in empty_response
     print("API reference self-test passed")
 
 

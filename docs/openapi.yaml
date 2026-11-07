@@ -78,7 +78,7 @@ paths:
               example:
                 id: demo
                 mode: write
-                created_at: 1794023746.7
+                created_at: 1794009600
                 fuse_mountpoints: {}
                 system_time: null
                 sessions:
@@ -99,7 +99,7 @@ paths:
               example:
                 id: demo
                 mode: write
-                created_at: 1794023746.7
+                created_at: 1794009600
                 fuse_mountpoints: {}
                 system_time: null
                 sessions:
@@ -157,7 +157,7 @@ paths:
                   mode: write
                   mount_count: 1
                   session_count: 1
-                  created_at: 1794023746.7
+                  created_at: 1794009600
         '401':
           $ref: '#/components/responses/401'
         '429':
@@ -247,6 +247,7 @@ paths:
         - name: since
           in: query
           required: false
+          description: Include records at or after this Unix timestamp, in milliseconds.
           schema:
             anyOf:
               - type: integer
@@ -255,6 +256,7 @@ paths:
         - name: last
           in: query
           required: false
+          description: Return only the newest this many records, ordered oldest first.
           schema:
             anyOf:
               - type: integer
@@ -263,6 +265,7 @@ paths:
         - name: vfs
           in: query
           required: false
+          description: Include filesystem operation records alongside commands and results.
           schema:
             type: boolean
             default: false
@@ -277,6 +280,22 @@ paths:
                   type: object
                   additionalProperties: true
                 title: Response Workspace History V1 Workspaces  Workspace Id  History Get
+              example:
+                - type: command
+                  session: 01a1b425-ec80-7038-86e0-75b597344043
+                  timestamp: 1794009600000
+                  cwd: /
+                  id: exec_01a1b470-6a0a-705a-bb61-aab01f2bde66
+                  command: echo hello
+                - type: result
+                  session: 01a1b425-ec80-7038-86e0-75b597344043
+                  timestamp: 1794009600008
+                  cwd: /
+                  parent: exec_01a1b470-6a0a-705a-bb61-aab01f2bde66
+                  duration_ms: 8
+                  exit_code: 0
+                  stdout: "hello\n"
+                  stderr: ''
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -289,13 +308,12 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'The workspace''s recorded history, oldest first: a `command`
-
-        entry for every line its sessions ran, and with `vfs` a `vfs`
-
-        entry for every call a line made to a mount. Read on the workspace''s
-
-        own loop.'
+      description: >-
+        Return recorded commands and results, oldest first. A command record names
+        the shell line; its result links back through parent and includes stdout,
+        stderr, exit_code and duration_ms. The timestamp field and the since filter
+        use Unix milliseconds. Set vfs=true to include filesystem operation records.
+        An empty history returns [].
       tags:
         - Workspaces
       x-hosts:
@@ -4619,7 +4637,7 @@ paths:
         '501':
           $ref: '#/components/responses/501'
       summary: Delete a policy
-      description: Delete a saved policy.
+      description: Delete a saved policy. Success returns HTTP 204 No Content with no response body.
       tags:
         - Policies
       x-hosts: *id002
@@ -6237,6 +6255,10 @@ components:
         created_at:
           type: number
           title: Created At
+          description: >-
+            Creation time as Unix seconds. For example, 1794009600 is
+            2026-11-07T00:00:00Z. Fractional values include sub-second precision.
+          example: 1794009600
       type: object
       required:
         - id
@@ -6416,6 +6438,10 @@ components:
         created_at:
           type: number
           title: Created At
+          description: >-
+            Creation time as Unix seconds. For example, 1794009600 is
+            2026-11-07T00:00:00Z. Fractional values include sub-second precision.
+          example: 1794009600
         fuse_mountpoints:
           additionalProperties:
             type: string
