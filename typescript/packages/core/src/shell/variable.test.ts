@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   attrLetters,
-  detach,
   makeVar,
   VarAttr,
   varKind,
   VarKind,
-  withAttr,
   withValue,
   type ManagedRef,
 } from './variable.ts'
@@ -46,18 +44,5 @@ describe('managed variables', () => {
     // or a second fill pass could not tell a filled var from a plain one.
     const v = { value: null, attrs: new Set([VarAttr.Export]), managed: ref }
     expect(withValue(v, 'tok').managed).toBe(ref)
-  })
-
-  it('withAttr keeps the pointer', () => {
-    const v = { value: null, attrs: new Set([VarAttr.Export]), managed: ref }
-    expect(withAttr(v, VarAttr.Readonly).managed).toBe(ref)
-  })
-
-  it('detach drops the pointer and keeps value and attrs', () => {
-    const v = { value: 'tok', attrs: new Set([VarAttr.Export]), managed: ref }
-    const detached = detach(v)
-    expect(detached.managed).toBeUndefined()
-    expect(detached.value).toBe('tok')
-    expect(detached.attrs).toBe(v.attrs)
   })
 })

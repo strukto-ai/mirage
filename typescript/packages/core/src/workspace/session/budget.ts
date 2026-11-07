@@ -16,17 +16,14 @@ import { ShellArray } from '../../shell/array.ts'
 import { encodeText } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
-import type { ShellValue, ShellVar } from '../../shell/variable.ts'
+import type { ShellValue } from '../../shell/variable.ts'
 import { createAsyncContext } from '../../utils/async_context.ts'
 import { byteLength } from '../../utils/sanitize.ts'
 import { ENV_EXHAUSTED_STATUS } from './constants.ts'
-import { type SessionState, sessionEntry } from './session.ts'
+import type { SessionState } from './session.ts'
 
 // The running workspace's max_env, null for no cap.
 const limits = createAsyncContext<number | null>()
-
-// Each variable record's bytes, counted once: a record never changes.
-const varBytes = new WeakMap<ShellVar, number>()
 
 /**
  * `fn` run under a workspace's max_env, which every write to a session's
@@ -40,7 +37,7 @@ export function runWithEnvLimit<T>(limit: number | null, fn: () => Promise<T>): 
  * The running workspace's max_env, null for no cap. A browser cannot tell one
  * task's binding from another's, so there it is the least any live line has.
  */
-function envLimit(): number | null {
+export function envLimit(): number | null {
   let limit: number | null = null
   for (const live of limits.liveStores()) {
     if (live !== null) limit = Math.min(limit ?? Infinity, live)
@@ -86,46 +83,32 @@ export function framesBytes(callStack: CallStack): number {
   return held
 }
 
-function recordBytes(name: string, record: ShellVar): number {
-  let held = varBytes.get(record)
-  if (held === undefined) {
-    held = entryBytes(name, record.value) - byteLength(name)
-    varBytes.set(record, held)
-  }
-  return byteLength(name) + held
-}
-
 /**
- * The bytes a session's shell state holds: its variables, functions,
- * aliases and positional parameters, names and values, and the records a
- * running prefix assignment set aside.
+ * The bytes a session's shell state holds beside its variables: its
+ * functions, aliases and positional parameters, names and values, and the
+ * records a running prefix assignment set aside. Mirrors Python's
+ * `outside_bytes`.
  */
-export function envBytes(session: SessionState): number {
-  let held = argsBytes(session.positionalArgs)
-  for (const [name, record] of Object.entries(session.vars)) held += recordBytes(name, record)
+export function outsideBytes(session: SessionState): number {
+  let held = argsBytes(session.positionalArgs) + savesBytes(session)
   for (const [name, body] of Object.entries(session.functions)) held += entryBytes(name, body)
   for (const [name, text] of Object.entries(session.aliases)) held += entryBytes(name, text)
-  return held + savesBytes(session)
+  return held
+}
+
+/** The bytes a session's shell state holds: its variables and `outsideBytes`. */
+export function envBytes(session: SessionState): number {
+  return session.vars.shell.held() + outsideBytes(session)
 }
 
 /**
- * The bytes the records running prefix assignments set aside hold, each
- * record once. A `declare -g` that reaches past one, and the arithmetic it
- * runs, swap records between the variables, the save and `reached`; a record
- * the variables hold is counted there. Mirrors Python's `saves_bytes`.
+ * The bytes the records running prefix assignments set aside hold. Mirrors
+ * Python's `saves_bytes`.
  */
 export function savesBytes(session: SessionState): number {
-  const saves = new Set<ReadonlyMap<string, ShellVar | null>>(session.prefixSaves)
-  const heldAside: [string, ShellVar | null][] = []
-  for (const saved of saves) for (const entry of saved) heldAside.push(entry)
-  for (const [name, frame, running] of session.reached) {
-    if (saves.has(frame)) heldAside.push([name, running])
-  }
   let held = 0
-  for (const [name, record] of heldAside) {
-    if (record !== null && record !== sessionEntry(session.vars, name)) {
-      held += recordBytes(name, record)
-    }
+  for (const saved of session.prefixSaves) {
+    for (const [name, record] of saved) if (record !== null) held += entryBytes(name, record.value)
   }
   return held
 }

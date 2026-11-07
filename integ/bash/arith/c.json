@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "x=1; for (( i=${x}0; i<11; i++ )); do echo $i; done; echo $(( ${x}0 + 1 )) $(( $(echo 4)0 )) $[ ${x}2 ]; (( ${x}0 == 10 )) && echo ten",
+      "command": "x=1; for (( i=${x}0; i<11; i++ )); do echo $i; done; echo $(( ${x}0 + 1 )) $(( $(echo 4)0 )) $[ ${x}2 ]; (( ${x}0 == 10 )) && echo ten; false | true; echo $((PIPESTATUS[0] * 10 + PIPESTATUS[1])) $((${#PIPESTATUS[@]}))",
       "expect": {
         "exit": 0,
-        "stdout": "10\n11 40 12\nten\n",
+        "stdout": "10\n11 40 12\nten\n10 2\n",
         "stderr": ""
       }
     },

@@ -21,11 +21,12 @@ import { ScriptSource } from '../../runtime/types.ts'
 import { MountMode, type Visibility } from '../../types.ts'
 import { SessionManager } from './manager.ts'
 import { ManualClock } from '../../utils/clock.ts'
+import { SeededIdSource } from '../../utils/ids.ts'
 import { compileProfile } from './resolve.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { SessionState, varsFromEntries } from './session.ts'
 import type { RecordFields } from '../record/types.ts'
-import { VarAttr, type ShellVar } from '../../shell/variable.ts'
+import { VarAttr, withValue, type ShellVar } from '../../shell/variable.ts'
 
 /** An empty compiled profile with the given parts filled in. */
 function compiled(
@@ -391,6 +392,29 @@ describe('SessionManager dirty flush + CAS', () => {
     seedVar(m.get('default'), 'K', 'v')
     await m.flush()
     expect(store.casCalls).toBe(2)
+    // A change that came back where it was (`TMP=x true`) writes nothing,
+    // so it cannot carry stale records over another writer's newer ones.
+    seedVar(m.get('default'), 'K', 'w')
+    seedVar(m.get('default'), 'K', 'v')
+    await m.flush()
+    expect(store.casCalls).toBe(2)
+    seedVar(m.get('default'), 'K', 'w')
+    await m.flush()
+    expect(store.casCalls).toBe(3)
+    // Fetching a secret fills a value the record never saves, its pointer
+    // standing in for it, so the fetch writes nothing either.
+    const session = m.get('default')
+    const pointer: ShellVar = {
+      value: null,
+      attrs: new Set([VarAttr.Export]),
+      managed: { source: 'aws-sm', ref: 'prod', key: '', eager: false },
+    }
+    session.vars.set('TOKEN', pointer)
+    await m.flush()
+    expect(store.casCalls).toBe(4)
+    session.vars.set('TOKEN', withValue(pointer, 's3cret'))
+    await m.flush()
+    expect(store.casCalls).toBe(4)
   })
 
   it('flush bumps the generation', async () => {
@@ -600,12 +624,12 @@ describe('hasManagedEnv', () => {
   it('create seeds the workspace template and session entries win', () => {
     const mgr = new SessionManager('s', undefined, { TOKEN: managed })
     const session = mgr.create('s2', { env: { TOKEN: 'literal', OWN: { from: 'env' } } })
-    expect(session.vars.TOKEN?.managed).toBeUndefined()
-    expect(session.vars.TOKEN?.value).toBe('literal')
-    expect(session.vars.OWN?.managed?.source).toBe('env')
+    expect(session.vars.get('TOKEN')?.managed).toBeUndefined()
+    expect(session.vars.get('TOKEN')?.value).toBe('literal')
+    expect(session.vars.get('OWN')?.managed?.source).toBe('env')
     // The template itself is untouched: a third session still gets the
     // managed TOKEN.
-    expect(mgr.create('s3', {}).vars.TOKEN?.managed).not.toBeUndefined()
+    expect(mgr.create('s3', {}).vars.get('TOKEN')?.managed).not.toBeUndefined()
   })
 
   it('a snapshot carrying a pointer flips it', async () => {
@@ -632,7 +656,7 @@ describe('hasManagedEnv', () => {
     const mgr = new SessionManager('s', store)
     await mgr.ensureLoaded()
     expect(mgr.hasManagedEnv).toBe(true)
-    expect(mgr.get('other').vars.TOKEN?.managed?.source).toBe('env')
+    expect(mgr.get('other').vars.get('TOKEN')?.managed?.source).toBe('env')
   })
 })
 
@@ -647,8 +671,8 @@ describe('restoreSeed', () => {
     mgr.restoreSeed(seed)
     expect(mgr.hasManagedEnv).toBe(true)
     const created = mgr.create('later')
-    expect(created.vars.MODE?.value).toBe('x')
-    expect(created.vars.TOKEN?.managed).not.toBeUndefined()
+    expect(created.vars.get('MODE')?.value).toBe('x')
+    expect(created.vars.get('TOKEN')?.managed).not.toBeUndefined()
     expect(mgr.seedVars).toEqual(seed)
   })
 })
@@ -657,9 +681,9 @@ describe('seed merge on hydration', () => {
   it('merges env entries the record predates, record entries winning', async () => {
     const store = new RAMNamespaceStore()
     const old = new SessionManager('default', store)
-    old.get('default').vars.KEPT = { value: 'stored', attrs: new Set() }
+    old.get('default').vars.set('KEPT', { value: 'stored', attrs: new Set() })
     old.create('agent')
-    old.get('agent').vars.KEPT = { value: 'agent', attrs: new Set() }
+    old.get('agent').vars.set('KEPT', { value: 'agent', attrs: new Set() })
     await old.ensureLoaded()
     await old.flush()
     const seeds = varsFromEntries({
@@ -668,10 +692,10 @@ describe('seed merge on hydration', () => {
     })
     const fresh = new SessionManager('default', store, seeds)
     await fresh.ensureLoaded()
-    expect(fresh.get('default').vars.TOKEN?.managed).not.toBeUndefined()
-    expect(fresh.get('default').vars.KEPT?.value).toBe('stored')
-    expect(fresh.get('agent').vars.TOKEN?.managed).not.toBeUndefined()
-    expect(fresh.get('agent').vars.KEPT?.value).toBe('agent')
+    expect(fresh.get('default').vars.get('TOKEN')?.managed).not.toBeUndefined()
+    expect(fresh.get('default').vars.get('KEPT')?.value).toBe('stored')
+    expect(fresh.get('agent').vars.get('TOKEN')?.managed).not.toBeUndefined()
+    expect(fresh.get('agent').vars.get('KEPT')?.value).toBe('agent')
     expect(fresh.hasManagedEnv).toBe(true)
   })
 
@@ -717,6 +741,7 @@ it.each([false, true])(
       },
     )
     manager.defaultProfile = original
+    seedVar(manager.get('default'), 'TOKEN', 't')
     await manager.flush()
     const session = manager.get('default')
     const before = session.toDict()
@@ -744,6 +769,7 @@ it.each([false, true])(
     try {
       await entered
       expect(session.toDict()).toEqual(before)
+      expect(session.vars.shell.hidden('TOKEN')).toBe(true)
       expect(manager.commandsOf('')).toEqual(original.policies.commands)
       expect(manager.scriptsOf('')).toEqual(original.policies.scripts)
       session.cwd = '/changed-during-write'
@@ -752,12 +778,14 @@ it.each([false, true])(
         expect(await updating).toEqual(new Error('store unavailable'))
         expect(session.toDict()).toEqual({ ...before, cwd: session.cwd })
         expect(await store.load()).toEqual(persisted)
+        expect(session.vars.shell.hidden('TOKEN')).toBe(true)
         expect(manager.commandsOf('')).toEqual(original.policies.commands)
         expect(manager.scriptsOf('')).toEqual(original.policies.scripts)
       } else {
         expect(await updating).toBe(session)
         expect(session.mountModes).toBeNull()
         expect(session.visibility.paths).toBeNull()
+        expect(session.vars.shell.hidden('TOKEN')).toBe(false)
         expect(manager.commandsOf('')).toBeNull()
         expect(manager.scriptsOf('')).toEqual({})
       }
@@ -828,4 +856,32 @@ it('a final flush after session deletion does not recreate it', async () => {
   await manager.close('gone')
   await manager.flush('gone')
   expect((await store.load()).has('gone')).toBe(false)
+})
+
+async function loadedDraws(store: RAMNamespaceStore, seed: number): Promise<number[]> {
+  const manager = new SessionManager(
+    'default',
+    store,
+    undefined,
+    undefined,
+    new SeededIdSource(seed),
+  )
+  await manager.ensureLoaded()
+  return ['default', 'agent'].map((sid) => {
+    const draw = manager.get(sid).vars.shell.nextRandom()
+    if (typeof draw !== 'number') throw new Error('no draw')
+    return draw
+  })
+}
+
+it("draws a loaded session's $RANDOM from the manager's ids", async () => {
+  const store = new RAMNamespaceStore()
+  const first = new SessionManager('default', store, undefined, undefined, new SeededIdSource(5))
+  first.create('agent')
+  seedVar(first.get('default'), 'K', 'v')
+  seedVar(first.get('agent'), 'K', 'v')
+  await first.flush()
+  const draws = await loadedDraws(store, 5)
+  expect(await loadedDraws(store, 5)).toEqual(draws)
+  expect(await loadedDraws(store, 6)).not.toEqual(draws)
 })

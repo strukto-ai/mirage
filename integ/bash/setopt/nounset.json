@@ -378,11 +378,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(set -u; zun7[znv7]=1; echo unreached); echo rc=$?",
+      "command": "(set -u; zun7[znv7]=1; echo unreached); echo rc=$?; (set -u; trap 'echo \"zi7=$zi7\"' EXIT; zun7[zi7=3, znv7]=1); (set -u; trap 'echo \"zx7=$zx7\"' EXIT; : \"$((zx7=5, znv7))\"); (set -u; trap 'echo \"zy7=$zy7\"' EXIT; (( zy7=7, znv7 ))); (set -u; zs7=hello; trap 'echo \"zo7=$zo7\"' EXIT; echo \"${zs7:(zo7=2, znv7)}\"); echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\n",
-        "stderr": "bash: line 1: znv7: unbound variable\n"
+        "stdout": "rc=1\nzi7=3\nzx7=5\nzy7=7\nzo7=2\nrc=1\n",
+        "stderr": "bash: line 1: znv7: unbound variable\nbash: line 1: znv7: unbound variable\nbash: line 1: znv7: unbound variable\nbash: line 1: znv7: unbound variable\nbash: line 1: znv7: unbound variable\n"
       }
     },
     {

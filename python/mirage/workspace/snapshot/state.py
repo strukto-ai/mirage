@@ -48,6 +48,7 @@ from mirage.policy.profile import (
     profile_to_dict,
 )
 from mirage.process.config import ProcessPermissions
+from mirage.rs.session import ShellVars
 from mirage.runtime.types import Language, ScriptSource
 from mirage.shell.console import (
     Channel,
@@ -905,7 +906,7 @@ async def _gate_restored_state(
     await gate_restored_vars(
         ws.policies,
         ws._session_mgr.default_id if default_sid is None else default_sid,
-        seed_vars,
+        ShellVars.of(seed_vars),
     )
     return sessions, seed_vars
 

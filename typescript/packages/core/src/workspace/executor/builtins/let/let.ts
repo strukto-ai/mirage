@@ -15,12 +15,11 @@
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
+import type { Policies } from '../../../../policy/index.ts'
 import { ArithError, ReadonlyVariableError } from '../../../../shell/errors.ts'
-import type { SessionView } from '../../../../view/types.ts'
-import { landedArith } from '../../../session/elements.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { sessionView } from '../../../session/state.ts'
-import { fail, readonlyRefusal, refusal, requireView, result } from '../shared.ts'
+import { sessionArith } from '../../../session/state.ts'
+import { fail, readonlyRefusal, refusal, result } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 
 /**
@@ -34,14 +33,13 @@ import type { BuiltinCall } from '../types.ts'
 export async function handleLet(
   args: string[],
   session: SessionState,
-  state: SessionView | null = null,
+  policies: Policies | null = null,
 ): Promise<RedirectResult> {
   if (args.length === 0) return fail('let', `${shellVoice()}let: expression expected\n`)
-  const view = requireView(state)
   let value = 0n
   for (const expr of args) {
     try {
-      value = await landedArith(session, view, expr)
+      value = await sessionArith(session, expr, policies)
     } catch (err) {
       if (err instanceof PolicyDenied) return refusal('let', err)
       if (!(err instanceof ArithError || err instanceof ReadonlyVariableError)) throw err
@@ -55,9 +53,5 @@ export async function handleLet(
 
 /** The `let` arm. */
 export async function letBuiltin(call: BuiltinCall): Promise<RedirectResult> {
-  return handleLet(
-    [...call.argv.args],
-    call.context.session,
-    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
-  )
+  return handleLet([...call.argv.args], call.context.session, call.registry.policies)
 }

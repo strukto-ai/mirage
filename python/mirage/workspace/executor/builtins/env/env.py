@@ -17,6 +17,7 @@ from typing import Any
 
 from mirage.context import reset_program_invocation, set_program_invocation
 from mirage.io.types import ByteSource
+from mirage.rs.session import ShellVars
 from mirage.shell.bytes import encode_text
 from mirage.shell.join import shell_join
 from mirage.shell.variable import ShellVar
@@ -37,8 +38,9 @@ def env_child(
     args: list[str], session: SessionState
 ) -> tuple[list[str], dict[str, str], bool, bool] | str:
     """What ``env`` runs and the environment it runs it in, read off its
-    words: the command's words, the environment in ``environ`` order,
-    whether ``-i`` cleared it and whether ``-0`` was given; or the
+    words: the command's words, the environment (the session's sorted by
+    name, each ``NAME=VALUE`` replacing its name in place or adding it
+    last), whether ``-i`` cleared it and whether ``-0`` was given; or the
     message for words env refuses.
 
     Args:
@@ -147,8 +149,9 @@ async def handle_env(
     """Run the ``env`` builtin (print environment or run a command).
 
     Usage: ``env [-i] [-u NAME]... [NAME=VALUE]... [command [arg]...]``.
-    With no command it prints the (optionally modified) environment in
-    ``environ`` order, unsorted, terminated per entry by newline or NUL
+    With no command it prints the (optionally modified) environment,
+    the session's sorted by name (mirage's pinned order where bash's
+    follows its hash table), terminated per entry by newline or NUL
     (``-0``). With a command it runs it under the modified environment,
     forwarding stdin, then restores the session environment. Missing
     commands fail like GNU with the shell's own exit 127.
@@ -171,7 +174,9 @@ async def handle_env(
         return ok("env", out)
 
     saved = session.vars
-    session.vars = env_vars(session, base)
+    session.vars = ShellVars.of(
+        env_vars(session, base), session.ids.random_u32
+    )
     # The command gets its own copy of the functions `export -f` marked,
     # empty under `-i`: they are part of bash's environment, as its
     # `BASH_FUNC_NAME%%` entries.

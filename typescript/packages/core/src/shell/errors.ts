@@ -15,7 +15,6 @@ export { PipeClosed } from '../io/errors.ts'
 
 import { shellVoice } from './voice.ts'
 import type { ByteSource } from '../io/types.ts'
-import type { ArithWrite } from './types.ts'
 import { encodeText } from './bytes.ts'
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
@@ -23,11 +22,8 @@ import { encodeText } from './bytes.ts'
  * A bash arithmetic syntax or evaluation error, worded as bash's line: the
  * expression, what went wrong, and the text from the token the reader
  * stood on to the end (`1+: syntax error: operand expected (error token is
- * "+")`). `writes` carries the assignments the expression made before it
- * failed: bash binds each at once, so `x=5, 1/0` leaves `x` at 5 and
- * `RANDOM=42, RANDOM + 1/0` leaves the generator seeded and drawn from.
- * The evaluator fills it as it throws; a caller lands them the way it
- * lands a successful result's, then reports the error. `inSubscript`
+ * "+")`). The assignments the expression made before it failed stay made,
+ * as bash binds each at once: `x=5, 1/0` leaves `x` at 5. `inSubscript`
  * marks one made while an array subscript evaluated, which ends the shell
  * wherever the subscript is (`let 'a[1+]'`), where `let` would otherwise
  * fail with 1. Mirrors Python's mirage.shell.errors.ArithError.
@@ -36,7 +32,6 @@ export class ArithError extends Error {
   readonly reason: string
   readonly expression: string
   readonly token: string | null
-  writes: ArithWrite[] = []
   inSubscript = false
 
   constructor(reason: string, expression = '', token: string | null = null) {
@@ -69,9 +64,9 @@ export class ArithError extends Error {
  * An assignment to a readonly shell variable: a session write to a name
  * `readonly` marked, or one an arithmetic expression made. Its message is
  * bash's `<name>: readonly variable`, which each caller renders in its own
- * voice. An arithmetic evaluation stops at it, as bash's does: `writes`
- * carries the assignments made before it, which bind (`(( X=5, R=3 ))`
- * leaves X at 5), and nothing after it runs. `inSubscript` marks one made
+ * voice. An arithmetic evaluation stops at it, as bash's does: the
+ * assignments made before it stay made (`(( X=5, R=3 ))` leaves X at 5),
+ * and nothing after it runs. `inSubscript` marks one made
  * while an array subscript evaluated (`${a[R=3]}`, `(( a[R=3] ))`), which
  * ends the shell wherever the subscript is. Mirrors Python's
  * mirage.shell.errors.ReadonlyVariableError.
@@ -79,7 +74,6 @@ export class ArithError extends Error {
 export class ReadonlyVariableError extends Error {
   readonly varName: string
   readonly inSubscript: boolean
-  writes: ArithWrite[] = []
 
   constructor(name: string, inSubscript = false) {
     super(`${name}: readonly variable`)

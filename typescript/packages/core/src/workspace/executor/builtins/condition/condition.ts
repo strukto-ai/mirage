@@ -27,11 +27,9 @@ import { ExitSignal } from '../../../../shell/errors.ts'
 import { ShellBuiltin as SB } from '../../../../shell/types.ts'
 import type { PathSpec } from '../../../../types.ts'
 import { wordText } from '../../../../types.ts'
-import type { SessionView } from '../../../../view/types.ts'
 import { Files } from '../../../files.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { sessionView } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import type { BuiltinCall } from '../types.ts'
 import { CondError, CondRefused } from './errors.ts'
@@ -56,7 +54,6 @@ export async function handleTest(
   args: (string | PathSpec)[] | CondNode,
   session: SessionState,
   name = 'test',
-  view?: SessionView,
   admit?: AdmitTest,
   signal?: AbortSignal,
 ): Promise<RedirectResult> {
@@ -75,7 +72,6 @@ export async function handleTest(
     namespace,
     session,
     name,
-    ...(view !== undefined ? { view } : {}),
     ...(links !== undefined ? { links } : {}),
     ...(admit !== undefined ? { admit } : {}),
     ...(signal !== undefined ? { signal } : {}),
@@ -161,12 +157,5 @@ export async function testBuiltin(call: BuiltinCall): Promise<RedirectResult> {
       ]
     }
   }
-  return handleTest(
-    call.dispatch,
-    call.namespace,
-    testArgs,
-    call.context.session,
-    testName,
-    sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
-  )
+  return handleTest(call.dispatch, call.namespace, testArgs, call.context.session, testName)
 }

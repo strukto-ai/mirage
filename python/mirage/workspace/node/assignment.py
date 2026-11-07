@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from mirage.cache.index.scope import command_scope
 from mirage.policy import PolicyDenied
+from mirage.policy.policies import Policies
 from mirage.shell.array import (
     ShellArray,
     array_extent,
@@ -46,7 +47,11 @@ from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.shared import ok, result
 from mirage.workspace.executor.builtins.types import Result
 from mirage.workspace.executor.statement import assignment_status
-from mirage.workspace.expand import expand_and_classify, expand_node
+from mirage.workspace.expand import (
+    expand_and_classify,
+    expand_assignment,
+    expand_node,
+)
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
@@ -60,18 +65,18 @@ from mirage.workspace.session.state import (
 
 
 async def _fatal_index(
-    context: EvaluationContext, subscript: str, view: SessionView | None
+    context: EvaluationContext, subscript: str, policies: Policies | None
 ) -> int:
     """``subscript_index`` whose failure ends the line, in bash's words.
 
     Args:
         context (EvaluationContext): the session the subscript reads.
         subscript (str): the raw subscript text.
-        view (SessionView | None): the gated session view.
+        policies (Policies | None): the policies its writes clear.
     """
     session = context.session
     try:
-        return await subscript_index(session, subscript, view)
+        return await subscript_index(session, subscript, policies)
     except ArithError as exc:
         raise exc.signal(fatal=True) from exc
 
@@ -89,7 +94,7 @@ async def _fatal_index_literal(
         items (list[str]): the expanded element words.
         append (bool): extend rather than replace.
         index_of (Callable[[str], Awaitable[int]]): the subscript
-            resolver, bound to the session and its view.
+            resolver, bound to the session and its policies.
     """
     try:
         return await build_indexed_literal(held, items, append, index_of)
@@ -171,18 +176,18 @@ async def expand_array_items(
         cs (CallStack | None): function-call scope, if any.
     """
     session = context.session
-    # The session view, bound once for the line: every
-    # expansion-time write (`${X:=d}`, `$((X=5))`) lands through it,
-    # so a pre_session rule governs those exactly as it governs `X=d`.
-    view = session_view(
-        session, registry.policies, diagnostics=context.frame.diagnostics
-    )
     values = list(array_node.named_children)
     # A bare assignment is no command, but its glob reads listings all the
     # same, so it gets a scope of its own.
     async with command_scope():
         classified = await expand_and_classify(
-            values, context, execute_fn, registry, session.cwd, cs, view=view
+            values,
+            context,
+            execute_fn,
+            registry,
+            session.cwd,
+            cs,
+            registry.policies,
         )
         resolved = await resolve_globs(
             classified,
@@ -203,7 +208,7 @@ async def _subscript_key_text(
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
     cs: CallStack | None,
-    view: SessionView | None,
+    policies: Policies | None,
 ) -> str:
     """The expanded subscript text of one ``name[...]=`` assignment.
 
@@ -220,7 +225,7 @@ async def _subscript_key_text(
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         cs (CallStack | None): shell call stack.
-        view (SessionView | None): the gated session view.
+        policies (Policies | None): the policies its writes clear.
     """
     inner = [
         sc
@@ -232,7 +237,7 @@ async def _subscript_key_text(
         return raw
     parts = []
     for sc in inner:
-        parts.append(await expand_node(sc, context, execute_fn, cs, view=view))
+        parts.append(await expand_node(sc, context, execute_fn, cs, policies))
     return "".join(parts)
 
 
@@ -294,10 +299,9 @@ async def execute_assignment(
     # Every branch below computes its resulting value with bash's
     # own mechanics on a copy, then stores through the one session
     # view, which owns the gate and the scalar/array invariant.
+    policies = namespace.registry.policies
     view = session_view(
-        session,
-        namespace.registry.policies,
-        diagnostics=context.frame.diagnostics,
+        session, policies, diagnostics=context.frame.diagnostics
     )
     # `set -x` traces the name as typed, before the store refuses it.
     xtrace = session.shell_options.get("xtrace")
@@ -345,15 +349,15 @@ async def execute_assignment(
             held,
             items,
             append,
-            functools.partial(subscript_index, session, view=view),
+            functools.partial(subscript_index, session, policies=policies),
         )
         await _assign_var(view, key, base)
         return result(
             text, exit_code=assignment_status(context.frame, sub_seq)
         )
     if val_nodes:
-        val = await expand_node(
-            val_nodes[0], context, execute_fn, cs, view=view
+        val = await expand_assignment(
+            val_nodes[0], context, execute_fn, cs, policies
         )
     else:
         val = text.partition("=")[2]
@@ -366,7 +370,7 @@ async def execute_assignment(
         )
     if subscript_node is not None:
         sub_text = await _subscript_key_text(
-            subscript_node, spelled, context, execute_fn, cs, view
+            subscript_node, spelled, context, execute_fn, cs, policies
         )
         amap = session.assocs.get(key)
         raw_sub = get_text(subscript_node)[len(spelled) + 1 : -1]
@@ -400,7 +404,7 @@ async def execute_assignment(
         if arr is None:
             scalar = conversion_scalar(session, key)
             arr = make_array([] if scalar is None else [scalar])
-        idx = await _fatal_index(context, sub_text, view)
+        idx = await _fatal_index(context, sub_text, policies)
         if idx < 0:
             idx += array_extent(arr)
         if idx < 0:

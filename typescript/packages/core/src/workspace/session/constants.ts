@@ -38,3 +38,15 @@ export const MAX_ENV = 1 << 21
 
 /** Bash's own exit when it cannot allocate, a fatal error. */
 export const ENV_EXHAUSTED_STATUS = 2
+
+/**
+ * The record's keys a session's variables fill, which a flush compares by
+ * their store's version instead of reading them out again.
+ */
+export const VAR_KEYS: ReadonlySet<string> = new Set([
+  'env',
+  'arrays',
+  'assocs',
+  'var_attrs',
+  'managed',
+])

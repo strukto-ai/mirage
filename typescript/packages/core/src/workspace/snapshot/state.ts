@@ -81,6 +81,7 @@ import { narrow, narrowingOf, stricterModes } from '../session/resolve.ts'
 import { SessionState, varsFromFields, varsToFields } from '../session/session.ts'
 import { setCwd } from '../session/shell_dirs.ts'
 import { gateRestoredVars } from '../session/state.ts'
+import { ShellVars } from '../../rs/session.ts'
 import type { MountArgs } from './config.ts'
 import { indexConfigDump, restoreIndexConfig } from './config.ts'
 import { MCPKey } from './keys.ts'
@@ -784,11 +785,16 @@ async function gateRestoredState(
   }
   if (state.env === undefined || Object.keys(state.env).length === 0) return [sessions, null]
   const seed = varsFromFields(state.env)
-  await gateRestoredVars(
-    ws.registry.policies,
-    state.default_session_id ?? ws.defaultSessionId,
-    seed,
-  )
+  const seeded = ShellVars.of(seed)
+  try {
+    await gateRestoredVars(
+      ws.registry.policies,
+      state.default_session_id ?? ws.defaultSessionId,
+      seeded,
+    )
+  } finally {
+    seeded.shell.close()
+  }
   return [sessions, seed]
 }
 

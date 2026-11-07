@@ -17,7 +17,6 @@ from typing import TypeVar
 from mirage.io.errors import PipeClosed  # noqa: F401
 from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
-from mirage.shell.types import ArithWrite
 from mirage.shell.voice import shell_voice
 
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
@@ -29,12 +28,9 @@ class ArithError(ValueError):
     reader stood on to the end (``1+: syntax error: operand expected
     (error token is "+")``).
 
-    ``writes`` carries the assignments the expression made before it
-    failed: bash binds each at once, so ``x=5, 1/0`` leaves ``x`` at 5
-    and ``RANDOM=42, RANDOM + 1/0`` leaves the generator seeded and
-    drawn from. The evaluator fills it as it raises; a caller lands
-    them the way it lands a successful result's, then reports the
-    error. ``in_subscript`` marks one made while an array subscript
+    The assignments the expression made before it failed stay made, as
+    bash binds each at once: ``x=5, 1/0`` leaves ``x`` at 5.
+    ``in_subscript`` marks one made while an array subscript
     evaluated, which ends the shell wherever the subscript is
     (``let 'a[1+]'``), where ``let`` would otherwise fail with 1.
 
@@ -45,7 +41,6 @@ class ArithError(ValueError):
         token (str | None): the error token, None when bash names none.
     """
 
-    writes: tuple[ArithWrite, ...] = ()
     in_subscript = False
 
     def __init__(
@@ -86,9 +81,8 @@ class ReadonlyVariableError(Exception):
 
     Its message is bash's ``<name>: readonly variable``, which each
     caller renders in its own voice. An arithmetic evaluation stops at
-    it, as bash's does: ``writes`` carries the assignments made before
-    it, which bind (``(( X=5, R=3 ))`` leaves X at 5), and nothing after
-    it runs.
+    it, as bash's does: the assignments made before it stay made
+    (``(( X=5, R=3 ))`` leaves X at 5), and nothing after it runs.
 
     Args:
         name (str): variable that was assigned to.
@@ -96,8 +90,6 @@ class ReadonlyVariableError(Exception):
             (``${a[R=3]}``, ``(( a[R=3] ))``), which ends the shell
             wherever the subscript is.
     """
-
-    writes: tuple[ArithWrite, ...] = ()
 
     def __init__(self, name: str, in_subscript: bool = False) -> None:
         self.name = name

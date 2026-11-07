@@ -411,6 +411,12 @@ impl Parser<'_> {
             };
             match self.literal_opt(ctx)? {
                 Some(piece) => pieces.push(piece),
+                // An operator byte is literal inside the braces:
+                // `${x/b/[&]}` is `a[b]c`, `${x/b/<&>}` `a<b>c`.
+                None if matches!(self.peek(), b'&' | b'<' | b'>' | b'|' | b';' | b'(' | b')') => {
+                    pieces.push(Syn::leaf("word", self.i, self.i + 1));
+                    self.i += 1;
+                }
                 None => return self.fail(self.i),
             }
         }

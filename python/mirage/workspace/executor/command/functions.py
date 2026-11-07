@@ -34,7 +34,6 @@ from mirage.shell.errors import DiscardSignal, ExitSignal, ReturnSignal
 from mirage.shell.helpers import parse_function
 from mirage.shell.job_table import JobTable
 from mirage.shell.parse.scope import ParseScope
-from mirage.shell.variable import ShellVar
 from mirage.types import PathSpec, word_text
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.executor.builtins.alias.alias import body_aliases
@@ -47,7 +46,6 @@ from mirage.workspace.executor.traps import (
 )
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.budget import args_bytes, check_env, frames_bytes
-from mirage.workspace.session.state import restore_locals
 from mirage.workspace.types import ExecutionNode
 
 
@@ -148,15 +146,10 @@ async def run_shell_function(
     outer_names = session.function_names
     if outer_names is not None:
         session.function_names = cs.function_names()
-    # One stack: a local shadows the whole record, so the caller's
-    # value and attributes are saved and put back together.
-    saved_locals: dict[str, ShellVar | None] = {}
-    # The caller's frame is kept and put back: a function that calls
-    # another and then declares a `local` is still inside a function,
-    # and its own shadows must keep being recorded on its own frame.
-    outer_locals = session._local_vars
-    session._local_vars = saved_locals
-    session._local_frames.append(saved_locals)
+    # The function's scope: a local shadows the whole record, so the
+    # caller's value and attributes come back together when it returns.
+    shell = session.vars.shell
+    outer_scope = shell.enter()
     # The body is shell code: the builtins it runs are the shell's,
     # whatever `xargs` or `env` marked the line that called it.
     marked = clear_program_invocation()
@@ -254,6 +247,4 @@ async def run_shell_function(
         if session.function_names is not None:
             session.function_names = outer_names
         restore_function_traps(session, lifted)
-        restore_locals(session, saved_locals)
-        session._local_frames.pop()
-        session._local_vars = outer_locals
+        shell.leave(outer_scope)

@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(export HOME=/data && cat ~/a.txt)",
+      "command": "(export HOME=/data && cat ~/a.txt); (export HOME=/data && cd /data/sub && cd /data && echo ~+ ~- && x=/a:~/b && x+=:~ && echo $x \\~ ~\"/x\" ~'/x' && P=/a:~/b printenv P && a=(a:~/y) && echo \"${a[@]}\"); (HOME=/; echo ~/x); (HOME=/data; pzk=k; echo a=~ b+=~/x c[1]=x:~ c[$pzk]=~ c[a=b]=~ d=a:~ --e=~ 1f=~)",
       "expect": {
         "exit": 0,
-        "stdout": "hello\nworld\nfoo\nbar\nbaz\n",
+        "stdout": "hello\nworld\nfoo\nbar\nbaz\n/data /data/sub\n/a:/data/b:/data ~ ~/x ~/x\n/a:/data/b\na:~/y\n//x\na=/data b+=/data/x c[1]=x:/data c[k]=/data c[a=b]=~ d=a:/data --e=~ 1f=~\n",
         "stderr": ""
       }
     },

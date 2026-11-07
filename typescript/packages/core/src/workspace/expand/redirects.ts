@@ -14,13 +14,13 @@
 
 import { sessionAccess } from '../../context/session_context.ts'
 import type { EvaluationContext } from '../evaluation.ts'
-import type { NamespaceLinks, SessionView } from '../../view/types.ts'
+import type { Policies } from '../../policy/index.ts'
+import type { NamespaceLinks } from '../../view/types.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal } from '../../shell/errors.ts'
 import { Redirect, RedirectKind } from '../../shell/types.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 
-import { visibleEnv } from '../session/state.ts'
 import { classifyBarePath } from './classify/index.ts'
 import { globOptions, resolveGlobs } from './globs.ts'
 import { expandWords } from './parts.ts'
@@ -35,12 +35,24 @@ export async function expandRedirect(
   executeFn: ExecuteFn,
   registry: MountRegistry,
   callStack: CallStack | null = null,
-  view?: SessionView,
+  policies: Policies | null = null,
   forked = false,
   links: NamespaceLinks | null = null,
+  // The target's words when another shell expanded them already (`$(< file)`),
+  // glob marks kept; null expands the target here.
+  words: readonly string[] | null = null,
 ): Promise<Redirect> {
   try {
-    return await expandTarget(redirect, context, executeFn, registry, callStack, view, links)
+    return await expandTarget(
+      redirect,
+      context,
+      executeFn,
+      registry,
+      callStack,
+      policies,
+      links,
+      words,
+    )
   } catch (error) {
     if (!(error instanceof ExitSignal) || !forked) throw error
     return new Redirect({ fd: redirect.fd, target: error, kind: RedirectKind.UNEXPANDED })
@@ -54,21 +66,16 @@ async function expandTarget(
   executeFn: ExecuteFn,
   registry: MountRegistry,
   callStack: CallStack | null,
-  view: SessionView | undefined,
+  policies: Policies | null,
   links: NamespaceLinks | null,
+  expanded: readonly string[] | null,
 ): Promise<Redirect> {
   const session = context.session
   if (r.kind === RedirectKind.HEREDOC || r.kind === RedirectKind.HERESTRING) {
     let body: unknown = r.target
     const heredocNode = r.targetNode as TSNodeLike | null
     if (r.expandVars && heredocNode !== null) {
-      body = await expandNode(heredocNode, context, executeFn, callStack, view)
-    } else if (typeof body === 'string' && r.expandVars) {
-      let s: string = body
-      for (const [k, v] of Object.entries(visibleEnv(session))) {
-        s = s.replaceAll('$' + k, v)
-      }
-      body = s
+      body = await expandNode(heredocNode, context, executeFn, callStack, policies)
     }
     return new Redirect({
       fd: r.fd,
@@ -84,7 +91,8 @@ async function expandTarget(
   const targetNode = r.targetNode as TSNodeLike | null
   let targetScope: unknown = r.target
   if (targetNode !== null) {
-    const words = await expandWords([targetNode], context, executeFn, callStack, view)
+    const words =
+      expanded ?? (await expandWords([targetNode], context, executeFn, callStack, policies))
     const targets = await resolveGlobs(
       words.map((word) => classifyBarePath(word, registry, session.cwd, sessionAccess(session))),
       registry,

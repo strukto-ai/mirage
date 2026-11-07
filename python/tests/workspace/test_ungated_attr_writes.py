@@ -60,11 +60,6 @@ ALLOWED = {
     "OLDPWD as part of a cd the router already authorized, not a "
     "name the agent chose; an agent-typed `PWD=x` is an ordinary "
     "assignment and goes through the session view",
-    (
-        "mirage/workspace/session/state.py",
-        "mark_var",
-    ): "this is the gated session view itself: the write lands after "
-    "`ensure_var_visible` and `pre_session_gate`",
 }
 
 

@@ -1,4 +1,6 @@
+mod session;
 mod shell;
+mod text;
 
 use pyo3::create_exception;
 use pyo3::exceptions::PyException;
@@ -227,6 +229,8 @@ impl NFSServer {
 #[pyo3(name = "_rs")]
 fn mirage_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Stream>()?;
+    m.add_class::<session::Shell>()?;
+    m.add_class::<session::ShellTask>()?;
     m.add_class::<NFSServer>()?;
     m.add_class::<shell::ShellTree>()?;
     m.add_class::<shell::ShellNode>()?;

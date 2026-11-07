@@ -16,10 +16,12 @@ import copy
 from collections.abc import Mapping
 from typing import Any
 
+from mirage._rs import Shell
 from mirage.context.session_context import SessionOwner
 from mirage.io.async_line_iterator import release_inputs
 from mirage.policy.profile import CompiledProfile
 from mirage.policy.types import AdmissionRules, Decision, ProfileScripts
+from mirage.rs.session import ShellVars
 from mirage.secrets.config import EnvVar
 from mirage.shell.variable import ShellVar
 from mirage.types import MountMode
@@ -33,6 +35,7 @@ from mirage.workspace.record.types import (
     generation_of,
 )
 from mirage.workspace.session.budget import check_env_fits, entry_bytes
+from mirage.workspace.session.constants import VAR_KEYS
 from mirage.workspace.session.resolve import apply_profile, narrow
 from mirage.workspace.session.session import (
     SessionState,
@@ -40,6 +43,34 @@ from mirage.workspace.session.session import (
     vars_from_env,
 )
 from mirage.workspace.session.shell_dirs import set_cwd
+
+# What a flush compares a session against: a fork of its shell as its
+# variables were saved, which shares their records rather than copying
+# them, and the rest of its record. A clean session, or one whose change
+# came back where it was (`TMP=x true`), is told apart without reading
+# the variables out of the store.
+Baseline = tuple[Shell, RecordFields]
+
+
+def _baseline(session: SessionState) -> Baseline:
+    """What the session would write now, as a flush compares it.
+
+    Args:
+        session (SessionState): the session to read.
+    """
+    return session.vars.shell.fork(), session.to_dict(variables=False)
+
+
+def _written(saved: Shell, fields: RecordFields) -> Baseline:
+    """The baseline of a record written whole, beside a fork of the shell
+    its variables were read from.
+
+    Args:
+        saved (Shell): a fork of the shell as ``fields`` was made.
+        fields (RecordFields): the record written.
+    """
+    rest = {key: value for key, value in fields.items() if key not in VAR_KEYS}
+    return saved, copy.deepcopy(rest)
 
 
 def _holds_managed(session: SessionState) -> bool:
@@ -131,7 +162,7 @@ class SessionManager(SessionOwner):
         # What the store last saw from us, per session id. Flush
         # compares against this to skip clean sessions without a
         # network read, and to avoid clobbering other writers.
-        self._persisted: dict[str, RecordFields] = {}
+        self._persisted: dict[str, Baseline] = {}
         # The workspace's env block, translated: seeded onto the
         # default session now and copied into every created session as
         # its template. The records are frozen, so sharing them across
@@ -142,7 +173,7 @@ class SessionManager(SessionOwner):
         )
         self._sessions[default_session_id] = SessionState(
             session_id=default_session_id,
-            vars=dict(self._seed_vars),
+            vars=ShellVars.of(self._seed_vars),
             created_at=self._clock.now(),
             ids=self._ids,
         )
@@ -314,7 +345,9 @@ class SessionManager(SessionOwner):
     @env.setter
     def env(self, value: dict[str, str]) -> None:
         session = self._sessions[self._default_id]
-        session.vars = vars_from_env(value)
+        session.vars = ShellVars.of(
+            vars_from_env(value), session.ids.random_u32
+        )
 
     def adopt_default(self, session_id: str) -> None:
         """Re-key the default session to an externally decided id.
@@ -413,7 +446,7 @@ class SessionManager(SessionOwner):
                     default.generation = stored.generation
                     # Hydrated sessions start clean: baseline what the
                     # store holds so the next flush skips them.
-                    self._persisted[sid] = copy.deepcopy(default.to_dict())
+                    self._persisted[sid] = _baseline(default)
                     # The document outranks the record for the fields
                     # no line can edit; stamped after the baseline so a
                     # stale record is rewritten on the next flush.
@@ -429,7 +462,7 @@ class SessionManager(SessionOwner):
                 stored.ids = self._ids
                 self._sessions[sid] = stored
                 self._locks[sid] = asyncio.Lock()
-                self._persisted[sid] = copy.deepcopy(stored.to_dict())
+                self._persisted[sid] = _baseline(stored)
                 _merge_seed_vars(stored, self._seed_vars)
                 self._has_managed = self._has_managed or _holds_managed(stored)
             self._loaded = True
@@ -462,11 +495,17 @@ class SessionManager(SessionOwner):
     async def _flush_one(self, session: SessionState) -> None:
         """Persist one session, retrying when another writer races us."""
         sid = session.session_id
-        if session.to_dict() == self._persisted.get(sid):
+        kept = self._persisted.get(sid)
+        if (
+            kept is not None
+            and session.vars.shell.same_vars(kept[0])
+            and kept[1] == session.to_dict(variables=False)
+        ):
             return  # clean: the store already has exactly this state
         for _ in range(CAS_MAX_RETRIES):
             expected = session.generation
             session.generation = expected + 1
+            saved = session.vars.shell.fork()
             fields = session.to_dict()
             try:
                 placed = await self._store.cas_set(sid, fields, expected)
@@ -492,7 +531,7 @@ class SessionManager(SessionOwner):
                 # Deep copy: to_dict() returns nested dicts the caller
                 # may go on to mutate, and the baseline this is compared
                 # against must stay frozen at what was written.
-                self._persisted[sid] = copy.deepcopy(fields)
+                self._persisted[sid] = _written(saved, fields)
                 return
             # Lost the race: adopt the winner's generation and retry
             # our content on top (last-writer-wins until a merge
@@ -514,12 +553,19 @@ class SessionManager(SessionOwner):
         ``Namespace.replace_nodes``.
         """
         self._loaded = True
-        entries = {s.session_id: s.to_dict() for s in self._sessions.values()}
+        written = {
+            s.session_id: (s.vars.shell.fork(), s.to_dict())
+            for s in (*self._sessions.values(), *sessions)
+        }
         for session in sessions:
-            entries[session.session_id] = session.to_dict()
             self._has_managed = self._has_managed or _holds_managed(session)
-        await self._store.replace_all(entries)
-        self._persisted = copy.deepcopy(entries)
+        await self._store.replace_all(
+            {sid: fields for sid, (_, fields) in written.items()}
+        )
+        self._persisted = {
+            sid: _written(saved, fields)
+            for sid, (saved, fields) in written.items()
+        }
 
     def create(
         self,
@@ -549,7 +595,7 @@ class SessionManager(SessionOwner):
         session = SessionState(
             session_id=session_id,
             mount_modes=mount_modes,
-            vars=seeded,
+            vars=ShellVars.of(seeded),
             created_at=self._clock.now(),
             ids=self._ids,
         )
@@ -579,6 +625,10 @@ class SessionManager(SessionOwner):
         async with self._locks[session_id]:
             session = self.get(session_id)
             candidate = copy.copy(session)
+            # The copy hides names on a shell of its own: narrowing the
+            # live one before the write lands would show what the old
+            # profile hid, and keep showing it if the write failed.
+            candidate.vars = session.vars.fork()
             narrow(candidate, compiled)
             await self._flush_one(candidate)
             narrow(session, compiled)

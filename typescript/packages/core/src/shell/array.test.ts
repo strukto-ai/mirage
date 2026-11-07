@@ -15,15 +15,10 @@
 import { describe, expect, it } from 'vitest'
 import {
   ShellArray,
-  arrayCount,
   arrayExtent,
   arrayGet,
-  arrayHas,
-  arrayIndices,
   arraySet,
-  arraySlice,
   arrayUnset,
-  arrayValues,
   buildAssocLiteral,
   buildIndexedLiteral,
   keyedWord,
@@ -37,7 +32,7 @@ describe('shell array', () => {
       [0n, 'a'],
       [1n, 'b'],
     ])
-    expect(arrayIndices(arr)).toEqual([0n, 1n])
+    expect([...arr.elements.keys()]).toEqual([0n, 1n])
   })
 
   it('arraySet holds only the element it assigns', () => {
@@ -45,13 +40,13 @@ describe('shell array', () => {
     arraySet(arr, 3, 'v')
     expect([...arr.elements]).toEqual([[3n, 'v']])
     // An index no write reached is no element.
-    expect(arrayCount(arr)).toBe(1)
-    expect(arrayValues(arr)).toEqual(['v'])
-    expect(arrayIndices(arr)).toEqual([3n])
+    expect(arr.elements.size).toBe(1)
+    expect([...arr.elements.values()]).toEqual(['v'])
+    expect([...arr.elements.keys()]).toEqual([3n])
     expect(arrayExtent(arr)).toBe(4n)
     expect(arrayGet(arr, 0)).toBe('')
-    expect(arrayHas(arr, 0)).toBe(false)
-    expect(arrayHas(arr, 3)).toBe(true)
+    expect(arr.elements.has(0n)).toBe(false)
+    expect(arr.elements.has(3n)).toBe(true)
   })
 
   it('unsetting an interior element keeps the later indices', () => {
@@ -62,14 +57,14 @@ describe('shell array', () => {
       [2n, 'two'],
     ])
     expect(arrayGet(arr, 2)).toBe('two')
-    expect(arrayCount(arr)).toBe(2)
-    expect(arrayIndices(arr)).toEqual([0n, 2n])
+    expect(arr.elements.size).toBe(2)
+    expect([...arr.elements.keys()]).toEqual([0n, 2n])
   })
 
   it('unsetting a trailing element shrinks the extent', () => {
     const arr = makeArray(['x', 'y', 'z'])
     arrayUnset(arr, 2)
-    expect(arrayValues(arr)).toEqual(['x', 'y'])
+    expect([...arr.elements.values()]).toEqual(['x', 'y'])
     expect(arrayExtent(arr)).toBe(2n)
   })
 
@@ -92,58 +87,24 @@ describe('shell array', () => {
     const arr = makeArray(['x', 'y', 'z'])
     arrayUnset(arr, 1)
     arraySet(arr, 1, 'new')
-    expect(arrayValues(arr)).toEqual(['x', 'new', 'z'])
-    expect(arrayIndices(arr)).toEqual([0n, 1n, 2n])
-    expect(arrayCount(arr)).toBe(3)
-  })
-
-  it('slicing keeps subscripts, not ordinals', () => {
-    const arr = new ShellArray()
-    arraySet(arr, 1, 'b')
-    arraySet(arr, 3, 'd')
-    arraySet(arr, 9, 'j')
-    // Offset 2 means "index >= 2", not "skip the first two values".
-    expect(arraySlice(arr, 2, null)).toEqual(['d', 'j'])
-    expect(arraySlice(arr, 0, null)).toEqual(['b', 'd', 'j'])
-    expect(arraySlice(arr, 4, null)).toEqual(['j'])
-    expect(arraySlice(arr, 20, null)).toEqual([])
-  })
-
-  it('slice length counts elements taken', () => {
-    const arr = new ShellArray()
-    arraySet(arr, 1, 'b')
-    arraySet(arr, 3, 'd')
-    arraySet(arr, 9, 'j')
-    expect(arraySlice(arr, 2, 1)).toEqual(['d'])
-    expect(arraySlice(arr, 0, 2)).toEqual(['b', 'd'])
-    expect(arraySlice(arr, 0, -1)).toEqual(['b', 'd'])
-  })
-
-  it('a negative slice offset counts from the extent', () => {
-    const arr = new ShellArray()
-    arraySet(arr, 1, 'b')
-    arraySet(arr, 9, 'j')
-    expect(arraySlice(arr, -1, null)).toEqual(['j'])
-    // Still negative after the extent is added: nothing, not everything.
-    expect(arraySlice(arr, -20, null)).toEqual([])
-    expect(arraySlice(makeArray(['x', 'y', 'z']), -5, null)).toEqual([])
-    expect(arraySlice(makeArray(['x', 'y', 'z']), -2, null)).toEqual(['y', 'z'])
+    expect([...arr.elements.values()]).toEqual(['x', 'new', 'z'])
+    expect([...arr.elements.keys()]).toEqual([0n, 1n, 2n])
+    expect(arr.elements.size).toBe(3)
   })
 
   it('an empty string is an element, not a hole', () => {
     const arr = makeArray(['', 'y'])
-    expect(arrayCount(arr)).toBe(2)
-    expect(arrayIndices(arr)).toEqual([0n, 1n])
-    expect(arrayValues(arr)).toEqual(['', 'y'])
+    expect(arr.elements.size).toBe(2)
+    expect([...arr.elements.keys()]).toEqual([0n, 1n])
+    expect([...arr.elements.values()]).toEqual(['', 'y'])
   })
 
   it('a far index holds one element', () => {
     const arr = makeArray(['a'])
     arraySet(arr, 1_000_000_000, 'far')
-    expect(arrayCount(arr)).toBe(2)
+    expect(arr.elements.size).toBe(2)
     expect(arrayExtent(arr)).toBe(1_000_000_001n)
-    expect(arrayIndices(arr)).toEqual([0n, 1_000_000_000n])
-    expect(arraySlice(arr, 1, null)).toEqual(['far'])
+    expect([...arr.elements.keys()]).toEqual([0n, 1_000_000_000n])
     arrayUnset(arr, 1_000_000_000)
     expect(arrayExtent(arr)).toBe(1n)
   })
@@ -172,7 +133,7 @@ describe('buildIndexedLiteral', () => {
     ])
     // `+=` starts the cursor at the extent; last index wins.
     const appended = await buildIndexedLiteral(makeArray(['a']), ['b', '[0]=A'], true, intOf)
-    expect(arrayValues(appended)).toEqual(['A', 'b'])
+    expect([...appended.elements.values()]).toEqual(['A', 'b'])
   })
 })
 

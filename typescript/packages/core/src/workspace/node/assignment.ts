@@ -34,28 +34,28 @@ import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { type ShellValue, VarAttr } from '../../shell/variable.ts'
 import { traceAssignment } from '../../shell/xtrace.ts'
 import { wordText } from '../../types.ts'
+import type { Policies } from '../../policy/index.ts'
 import type { SessionView } from '../../view/types.ts'
 import type { EvaluationContext } from '../evaluation.ts'
 import { ok, result } from '../executor/builtins/shared.ts'
 import { assignmentStatus } from '../executor/statement.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
-import { expandNode } from '../expand/node.ts'
+import { expandAssignment, expandNode } from '../expand/node.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
-import { sessionEntry } from '../session/session.ts'
 import { appended, conversionScalar, deref, sessionView, subscriptIndex } from '../session/state.ts'
 
 /** `subscriptIndex` whose failure ends the line, in bash's words. */
 async function fatalIndex(
   context: EvaluationContext,
   subscript: string,
-  view: SessionView,
+  policies: Policies | null,
 ): Promise<bigint> {
   const session = context.session
   try {
-    return await subscriptIndex(session, subscript, view)
+    return await subscriptIndex(session, subscript, policies)
   } catch (err) {
     if (err instanceof ArithError) throw err.signal('', true)
     throw err
@@ -141,7 +141,7 @@ export async function expandArrayItems(
       registry,
       session.cwd,
       callStack,
-      sessionView(session, registry.policies, context.frame.diagnostics),
+      registry.policies,
     )
     return resolveGlobs(
       classified,
@@ -171,7 +171,7 @@ async function subscriptKeyText(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   callStack: CallStack | null,
-  view?: SessionView,
+  policies: Policies | null = null,
 ): Promise<string> {
   const inner = subscriptNode.namedChildren.filter((sc) => sc.type !== NT.VARIABLE_NAME)
   const raw = subscriptNode.text.slice(name.length + 1, -1)
@@ -180,7 +180,7 @@ async function subscriptKeyText(
   }
   const parts: string[] = []
   for (const sc of inner) {
-    parts.push(await expandNode(sc, context, executeFn, callStack, view))
+    parts.push(await expandNode(sc, context, executeFn, callStack, policies))
   }
   return parts.join('')
 }
@@ -217,14 +217,15 @@ export async function executeAssignment(
   const key = deref(session, spelled) || spelled
   const append = node.children.some((c) => c.type === '+=')
   // `+=` on an integer adds, element by element too (`appended`).
-  const integer = sessionEntry(session.vars, key)?.attrs.has(VarAttr.Integer) === true
+  const integer = session.vars.get(key)?.attrs.has(VarAttr.Integer) === true
   const valNodes = node.namedChildren.filter(
     (c) => c.type !== NT.VARIABLE_NAME && c.type !== 'subscript',
   )
   // Every branch below computes its resulting value with bash's own
   // mechanics on a copy, then stores through the one session view,
   // which owns the gate and the scalar/array invariant.
-  const view = sessionView(session, registry.policies, context.frame.diagnostics)
+  const policies = registry.policies
+  const view = sessionView(session, policies, context.frame.diagnostics)
   const firstVal = valNodes[0]
   // `set -x` traces the name as typed, before the store refuses it.
   const xtrace = session.shellOptions.xtrace === true
@@ -266,21 +267,21 @@ export async function executeAssignment(
     let held: ShellArray | null = session.arrays[key] ?? null
     if (append && held === null) {
       const scalar = conversionScalar(session, key)
-      held = scalar === undefined ? null : makeArray([scalar])
+      held = scalar === null ? null : makeArray([scalar])
     }
     // `arr+=(...)` starts at the extent, so it fills the hole a
     // trailing `unset arr[last]` left but skips interior ones; a
     // `[i]=v` element places at i and the next plain word continues
     // from there.
     const base = await fatalIndexLiteral(held, items, append, (sub) =>
-      subscriptIndex(session, sub, view),
+      subscriptIndex(session, sub, policies),
     )
     await assignVar(view, key, base)
     return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
   }
   let val = text.slice(eq + 1)
   if (firstVal !== undefined) {
-    val = await expandNode(firstVal, context, executeFn, callStack, view)
+    val = await expandAssignment(firstVal, context, executeFn, callStack, policies)
   }
   if (xtrace) {
     const target = subscriptNode === null ? spelled : getText(subscriptNode)
@@ -293,7 +294,7 @@ export async function executeAssignment(
       context,
       executeFn,
       callStack,
-      view,
+      policies,
     )
     const heldMap = session.assocs[key]
     const rawSub = subscriptNode.text.slice(spelled.length + 1, -1)
@@ -309,8 +310,9 @@ export async function executeAssignment(
     if (heldMap !== undefined) {
       // The subscript is the key: no arithmetic, `m[1+1]` writes the
       // key "1+1".
-      const newMap = { ...heldMap }
-      const [slot, added] = append ? appended(heldMap[subText] ?? '', val, integer) : [val, null]
+      const newMap = Object.assign(Object.create(null) as Record<string, string>, heldMap)
+      const held = Object.hasOwn(heldMap, subText) ? heldMap[subText] : ''
+      const [slot, added] = append ? appended(held ?? '', val, integer) : [val, null]
       newMap[subText] = slot
       await assignVar(view, key, newMap, new Set([subText]), added)
       return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })
@@ -318,9 +320,9 @@ export async function executeAssignment(
     let arr: ShellArray | undefined = session.arrays[key]
     if (arr === undefined) {
       const scalar = conversionScalar(session, key)
-      arr = makeArray(scalar === undefined ? [] : [scalar])
+      arr = makeArray(scalar === null ? [] : [scalar])
     }
-    let idx = await fatalIndex(context, subText, view)
+    let idx = await fatalIndex(context, subText, policies)
     if (idx < 0n) idx += arrayExtent(arr)
     if (idx < 0n) {
       // Same fatal shape as the empty subscript above.

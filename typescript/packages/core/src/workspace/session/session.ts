@@ -22,24 +22,17 @@ import {
   parseProcessPermissions,
   type ProcessPermissions,
 } from '../../process/config.ts'
+import { ShellVars } from '../../rs/session.ts'
 import { EnvVar, type EnvEntries } from '../../secrets/config.ts'
 import { ShellArray } from '../../shell/array.ts'
 import { Terminal, type JobOutput } from '../../shell/console/index.ts'
-import {
-  BASHPID,
-  BIN_PREFIX,
-  IFS_DEFAULT,
-  LINENO,
-  RANDOM,
-  RANDOM_UNSET,
-  SHELL_ARGV0,
-} from '../../shell/constants.ts'
+import { BIN_PREFIX, IFS_DEFAULT, SHELL_ARGV0 } from '../../shell/constants.ts'
 import type { Descriptor, StreamOwner } from '../../shell/descriptors.ts'
 import type { JobTable, JobWaits } from '../../shell/job_table/index.ts'
 import { sourceRow } from '../../shell/helpers.ts'
 import type { AliasExpansion, TSNodeLike } from '../../shell/types.ts'
 import type { ManagedRef, ShellVar } from '../../shell/variable.ts'
-import { attrsFromLetters, copyVar, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
+import { attrsFromLetters, makeVar, storedAttrs, VarAttr } from '../../shell/variable.ts'
 import type { Limit, MountMode } from '../../types.ts'
 import { DEFAULT_VISIBILITY, type ShowEntry, type Visibility } from '../../types.ts'
 import { SystemIdSource, type IdSource } from '../../utils/ids.ts'
@@ -100,11 +93,46 @@ export function ownRecord<T>(record?: Record<string, T>): Record<string, T> {
   return Object.assign(Object.create(null) as Record<string, T>, record)
 }
 
+/**
+ * A live, read-only view of the records holding one kind of value, as
+ * stored: hidden names and references are not resolved, and a lookup reads
+ * the one record it names, so `session.arrays[key]` costs one record however
+ * many the session holds. Mirrors Python's `_Records`.
+ */
+function records<T>(
+  vars: ShellVars,
+  pick: (value: ShellVar['value']) => T | undefined,
+): Readonly<Record<string, T>> {
+  const lookup = (name: string | symbol): T | undefined => {
+    if (typeof name !== 'string') return undefined
+    const v = vars.get(name)
+    return v === undefined ? undefined : pick(v.value)
+  }
+  return new Proxy(ownRecord<T>(), {
+    get: (_, name) => lookup(name),
+    has: (_, name) => lookup(name) !== undefined,
+    ownKeys: () =>
+      vars
+        .records()
+        .filter(([, v]) => pick(v.value) !== undefined)
+        .map(([name]) => name),
+    getOwnPropertyDescriptor: (_, name) => {
+      const value = lookup(name)
+      return value === undefined
+        ? undefined
+        : { value, enumerable: true, configurable: true, writable: false }
+    },
+    set: () => false,
+    defineProperty: () => false,
+    deleteProperty: () => false,
+  })
+}
+
 export interface SessionInit {
   sessionId: string
   cwd?: string
   logicalCwd?: string | undefined
-  vars?: Record<string, ShellVar>
+  vars?: ShellVars | Readonly<Record<string, ShellVar>>
   createdAt?: number
   functions?: Record<string, string>
   readonlyFunctions?: Set<string>
@@ -324,8 +352,23 @@ function restoredVars(
     | Record<string, { from: string; ref: string; key: string; fetch?: string }>
     | null
     | undefined,
+  arrays: Record<string, Record<string, string>> = {},
+  assocs: Record<string, Record<string, string>> = {},
 ): Record<string, ShellVar> {
   const out = attrs === undefined ? varsFromEnv(env) : varsFromDict(env, attrs)
+  for (const [name, elements] of Object.entries(arrays)) {
+    const indexed = Object.entries(elements).map(
+      ([index, value]) => [BigInt(index), value] as const,
+    )
+    setSessionEntry(
+      out,
+      name,
+      makeVar(new ShellArray(indexed), attrsFromLetters(attrs?.[name] ?? '')),
+    )
+  }
+  for (const [name, entries] of Object.entries(assocs)) {
+    setSessionEntry(out, name, makeVar(ownRecord(entries), attrsFromLetters(attrs?.[name] ?? '')))
+  }
   for (const [name, m] of Object.entries(managed ?? {})) {
     const base = sessionEntry(out, name) ?? makeVar(null, new Set([VarAttr.Export]))
     setSessionEntry(out, name, {
@@ -337,23 +380,9 @@ function restoredVars(
   return out
 }
 
-/** Copy a variable store deeply enough that a child cannot write back. */
-/** Copy locals; temporary call environments become ordinary saved scopes in the child. */
-function copyLocals(frame: Map<string, ShellVar | null>): Map<string, ShellVar | null> {
-  const copied = new Map<string, ShellVar | null>()
-  for (const [name, variable] of frame)
-    copied.set(name, variable === null ? null : copyVar(variable))
-  return copied
-}
-
-function copyVars(vars: Record<string, ShellVar>): Record<string, ShellVar> {
-  const out = ownRecord<ShellVar>()
-  for (const [name, v] of Object.entries(vars)) {
-    // The record is frozen, but an indexed or associative value is a
-    // live container, so the copy has to reach inside it.
-    out[name] = copyVar(v)
-  }
-  return out
+/** A shell's draw from an id source, which holds no session. */
+function drawFrom(ids: IdSource): () => number {
+  return () => ids.randomU32()
 }
 
 export class SessionState {
@@ -366,12 +395,12 @@ export class SessionState {
   // which is every session that has not walked through a symlink. `cwd`
   // stays physical because it is what every operand resolves against.
   logicalCwd: string | undefined
-  // One record per variable: value plus attributes. This is the whole
-  // variable store -- `env`, `arrays` and `readonlyVars` are read-only
-  // projections of it, so a name cannot be a scalar in one container and
-  // an array in another, and an attribute cannot drift from the value it
-  // describes.
-  vars: Record<string, ShellVar>
+  // One record per variable: value plus attributes, held by the session's
+  // mirage-rs shell. This is the whole variable store -- `env`, `arrays`
+  // and `readonlyVars` are read-only projections of it, so a name cannot be
+  // a scalar in one container and an array in another, and an attribute
+  // cannot drift from the value it describes.
+  private records!: ShellVars
   createdAt: number
   functions: Record<string, string>
   // The functions `readonly -f` has frozen. A set beside `functions`
@@ -409,16 +438,7 @@ export class SessionState {
   statusWriter: StatusWriter | null = null
   // Where `$RANDOM` draws its first seed: the workspace's id source, shared
   // by every fork and never serialized.
-  ids: IdSource = new SystemIdSource()
-  // `$RANDOM`'s generator state and the seed word it last consumed
-  // (`session/rng.ts`). A child shell reseeds, as bash's does, and the
-  // parent retains its own state while the child runs.
-  randomState: number | null = null
-  randomSeed: string | null = null
-  randomLast = 0
-  // `$LINENO` and `$BASHPID` once the shell unset them: ordinary variables
-  // from then on, as bash's are. A fork keeps them so.
-  plainSpecials: ReadonlySet<string> = new Set()
+  private idSource: IdSource = new SystemIdSource()
   positionalArgs: string[]
   // What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
   // sets it to the script file it is running, or to the name given after
@@ -458,11 +478,6 @@ export class SessionState {
   // Whether `set -e` is ending the shell: its statements unwind without
   // running ERR or RETURN again, as bash's exit leaves at once.
   errexitExiting = false
-  // Variables shadowed by `local` / `declare` in the running function; a
-  // null value means the caller had no variable of that name. One stack,
-  // not one per container: a local shadows the whole record, so its
-  // value and its attributes are saved and restored together.
-  localVars: Map<string, ShellVar | null> | null = null
   // Hidden `getopts` state: the char offset within the word being
   // scanned (0 = positioned at the word's leading dash), plus the OPTIND
   // that offset belongs to. A caller resetting OPTIND makes the seen
@@ -545,22 +560,10 @@ export class SessionState {
   // The readers a fork inherited: its parent still holds them, so the fork
   // closing one never closes the parent's. Mirrors Python's _borrowed.
   borrowed: SharedInput[] = []
-  localFrames: Map<string, ShellVar | null>[] = []
   // The records running prefix assignments set aside, held until put back.
   prefixSaves: ReadonlyMap<string, ShellVar | null>[] = []
-  // The names a running `declare -g` has put at global scope
-  // (`reachGlobal`), each with its frame and the function's local it set
-  // aside: arithmetic in the declaration still reads that local.
-  reached: [string, Map<string, ShellVar | null>, ShellVar | null][] = []
-  // The caller's `RANDOM` marker for every frame that shadows the name,
-  // innermost last: a local `RANDOM` is an ordinary variable for the
-  // function's extent, and the generator resumes when it returns.
-  localRandom: (string | null)[] = []
-  // Whether `LINENO` or `BASHPID` was plain where a frame made it local,
-  // one entry per local, innermost last.
-  localPlain: [string, boolean][] = []
   mountModes: ReadonlyMap<string, MountMode> | null
-  visibility: Visibility
+  private vis: Visibility | undefined
   hideReasons: readonly HideReason[]
   commands: AdmissionRules | null
   scripts: ProfileScripts
@@ -585,7 +588,7 @@ export class SessionState {
     this.errexitImmune = false
     this.cwd = init.cwd ?? '/'
     this.logicalCwd = init.logicalCwd
-    this.vars = ownRecord(init.vars)
+    this.vars = init.vars ?? {}
     this.createdAt = init.createdAt ?? Date.now() / 1000
     this.functions = functionSources(init.functions)
     this.readonlyFunctions = new Set(init.readonlyFunctions ?? [])
@@ -616,22 +619,67 @@ export class SessionState {
     // by `env`. "Exports" is literal -- it carries the attribute, which is
     // what keeps it in `env` now that the process view is the exported set
     // rather than every string.
-    if (!Object.hasOwn(this.vars, 'PWD'))
-      this.vars.PWD = makeVar(this.cwd, new Set([VarAttr.Export]))
+    if (!this.vars.has('PWD')) this.vars.set('PWD', makeVar(this.cwd, new Set([VarAttr.Export])))
     // bash starts with a PATH when the environment gives it none, and does
     // not export it: `env` does not list it and a child process, such as a
     // host interpreter, keeps its own. The one directory here is where
     // every program's file is.
-    if (!Object.hasOwn(this.vars, 'PATH')) this.vars.PATH = makeVar(BIN_PREFIX, new Set())
+    if (!this.vars.has('PATH')) this.vars.set('PATH', makeVar(BIN_PREFIX, new Set()))
     // bash sets IFS at startup and never exports it, so a fresh shell reads
     // `${#IFS}` as 3 and `OLDIFS=$IFS ... IFS=$OLDIFS` puts the default
     // back rather than an empty IFS that splits nothing.
-    if (!Object.hasOwn(this.vars, 'IFS')) this.vars.IFS = makeVar(IFS_DEFAULT, new Set())
+    if (!this.vars.has('IFS')) this.vars.set('IFS', makeVar(IFS_DEFAULT, new Set()))
     // bash starts OPTIND (an integer) and OPTERR at 1 and never exports them,
     // so `shift $((OPTIND-1))` works before any `getopts`.
     for (const [name, start] of Object.entries(STARTUP_VALUES)) {
-      if (!Object.hasOwn(this.vars, name)) this.vars[name] = copyVar(start)
+      if (!this.vars.has(name)) this.vars.set(name, start)
     }
+  }
+
+  /** The session's variables; a table assigned here starts a shell holding it. */
+  get vars(): ShellVars {
+    return this.records
+  }
+
+  set vars(value: ShellVars | Readonly<Record<string, ShellVar>>) {
+    this.records = value instanceof ShellVars ? value : ShellVars.of(value)
+    // The shell draws a first `$RANDOM` seed from the session's ids, so a new
+    // shell binds as it lands, as a new source does.
+    this.records.shell.useIds(drawFrom(this.idSource))
+    this.hideVars()
+  }
+
+  get ids(): IdSource {
+    return this.idSource
+  }
+
+  set ids(ids: IdSource) {
+    this.idSource = ids
+    this.records.shell.useIds(drawFrom(ids))
+  }
+
+  /** What exists for this session; the shell takes its hidden names as it lands. */
+  get visibility(): Visibility {
+    return this.vis ?? DEFAULT_VISIBILITY
+  }
+
+  set visibility(visibility: Visibility) {
+    this.vis = visibility
+    this.hideVars()
+  }
+
+  /**
+   * Hand the shell the names the session's visibility hides. The shell holds
+   * them itself, so a new visibility, or a new shell, takes them as it lands,
+   * wherever it is set. Mirrors Python's hide_vars.
+   */
+  hideVars(): void {
+    if (this.vis === undefined) return
+    const hidden = this.vis.vars
+    this.records.shell.hide(
+      hidden === null ? [] : [...(hidden.names ?? [])],
+      hidden === null ? [] : [...(hidden.patterns ?? [])],
+    )
   }
 
   /**
@@ -649,18 +697,31 @@ export class SessionState {
    * each call site is what keeps `execute({cwd})` from reporting the
    * persistent session's old directory from `pwd`. `??` cannot express
    * this, since the value being chosen is `undefined`.
+   *
+   * A fork is the same shell going on, so a startup variable the source
+   * unset stays unset (`unset IFS; ( ... )`) and the shell's records carry
+   * over whole; a fork given new variables starts them.
    */
   fork(overrides: Partial<SessionInit> = {}): SessionState {
+    return this.forkWith(overrides, null)
+  }
+
+  private forkWith(overrides: Partial<SessionInit>, given: ShellVars | null): SessionState {
     const movedTo = 'logicalCwd' in overrides ? undefined : overrides.cwd
-    const vars = overrides.vars ?? copyVars(this.vars)
+    const records = given ?? (overrides.vars === undefined ? this.vars.fork() : null)
     // $PWD names where the session is, so it follows the move even when
     // the caller also supplied variables to layer on.
-    if (movedTo !== undefined) vars.PWD = makeVar(movedTo, new Set([VarAttr.Export]))
+    if (movedTo !== undefined) {
+      const pwd = makeVar(movedTo, new Set([VarAttr.Export]))
+      const moved = records ?? overrides.vars
+      if (moved instanceof ShellVars) moved.set('PWD', pwd)
+      else if (moved !== undefined) setSessionEntry(moved as Record<string, ShellVar>, 'PWD', pwd)
+    }
     const forked = new SessionState({
       sessionId: overrides.sessionId ?? this.sessionId,
       cwd: overrides.cwd ?? this.cwd,
       logicalCwd: movedTo !== undefined ? undefined : (overrides.logicalCwd ?? this.logicalCwd),
-      vars,
+      vars: records === null ? (overrides.vars ?? {}) : {},
       createdAt: overrides.createdAt ?? this.createdAt,
       functions: overrides.functions ?? { ...this.functions },
       readonlyFunctions: overrides.readonlyFunctions ?? new Set(this.readonlyFunctions),
@@ -686,12 +747,11 @@ export class SessionState {
       generation: overrides.generation ?? this.generation,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
-    // A fork is the same shell going on, so a startup variable the source
-    // unset stays unset (`unset IFS; ( ... )`) rather than being seeded
-    // again; a fork given new variables starts them.
-    if (overrides.vars === undefined) forked.vars = vars
-    if (this.randomSeed === RANDOM_UNSET) forked.randomSeed = RANDOM_UNSET
-    forked.plainSpecials = this.plainSpecials
+    if (records !== null) {
+      const seeded = forked.vars
+      forked.vars = records
+      seeded.shell.close()
+    }
     forked.versions = this.versions
     forked.ids = this.ids
     forked.terminalOutput = this.terminalOutput
@@ -736,34 +796,20 @@ export class SessionState {
    * A child shell of this session: a fork that reads on from here. `fork`
    * copies what a session keeps; a child shell (a command substitution, a
    * subshell) also inherits the reader's position, the aliases being
-   * expanded and the local frames, and reseeds `$RANDOM` on its first draw
-   * instead of replaying this session's seed. Mirrors Python.
+   * expanded and the local scopes, and reseeds `$RANDOM` on its first draw
+   * instead of replaying this session's seed. `records` are the child's
+   * variables when a running expansion made them (a substitution's child
+   * shell); null copies this session's. Mirrors Python.
    */
-  subshell(): SessionState {
-    const child = this.fork()
+  subshell(records: ShellVars | null = null): SessionState {
+    const child = this.forkWith({}, records ?? this.vars.subshell())
     child.parseCurrent = this.parseCurrent
     child.parseRow = this.parseRow
     child.lineRow = this.lineRow
     child.parseName = this.parseName
     child.lineNode = this.lineNode
     child.aliasExpansion = this.aliasExpansion
-    child.localVars = this.localVars === null ? null : copyLocals(this.localVars)
-    child.localFrames = this.localFrames.map((frame) =>
-      frame === this.localVars && child.localVars !== null ? child.localVars : copyLocals(frame),
-    )
-    child.localRandom = [...this.localRandom]
-    child.localPlain = [...this.localPlain]
-    if (child.randomSeed !== RANDOM_UNSET) child.drawAfresh()
     return child
-  }
-
-  /**
-   * Start `$RANDOM` on a new sequence at its next draw, rather than seed it
-   * from the value the variable holds now.
-   */
-  private drawAfresh(): void {
-    const word = this.vars[RANDOM]?.value
-    this.randomSeed = typeof word === 'string' ? word : null
   }
 
   /**
@@ -782,7 +828,7 @@ export class SessionState {
    */
   newShell(): SessionState {
     const vars = ownRecord<ShellVar>()
-    for (const [name, v] of Object.entries(this.vars)) {
+    for (const [name, v] of this.vars.records()) {
       if (!v.attrs.has(VarAttr.Export) || name === 'IFS') continue
       if (typeof v.value !== 'string' && v.managed === undefined) continue
       const start = sessionEntry(STARTUP_VALUES, name)
@@ -798,8 +844,9 @@ export class SessionState {
     const functions = Object.fromEntries(
       Object.entries(this.functions).filter(([name]) => this.exportedFunctions.has(name)),
     )
+    const started = ShellVars.of(vars)
     const child = this.fork({
-      vars,
+      vars: started.subshell(),
       functions,
       exportedFunctions: new Set(Object.keys(functions)),
       readonlyFunctions: new Set(),
@@ -819,8 +866,7 @@ export class SessionState {
     child.getoptsPos = 0
     child.getoptsOptind = null
     child.errexitIgnored = false
-    child.plainSpecials = new Set()
-    child.drawAfresh()
+    started.shell.close()
     return child
   }
 
@@ -849,18 +895,6 @@ export class SessionState {
   }
 
   /**
-   * What the shell computes a read of `$LINENO` or `$BASHPID` to
-   * (`lineNumber`, `bashPid`); null for any other name and for one the shell
-   * unset, which reads as it was assigned. Mirrors Python's dynamic_value.
-   */
-  dynamicValue(name: string): string | null {
-    if (this.plainSpecials.has(name)) return null
-    if (name === LINENO) return String(this.lineNumber)
-    if (name === BASHPID) return String(this.bashPid)
-    return null
-  }
-
-  /**
    * What `$0` expands to. Null is the shell itself; a nested `bash`/`sh`
    * sets it to the script it is running, or to the name given after
    * `-c`. An empty name is a name, so it is not folded into the default:
@@ -873,46 +907,37 @@ export class SessionState {
   /**
    * The scalar variables, by name.
    *
-   * A frozen read-only projection of `vars`, not a container: a writer
+   * A live read-only projection of `vars`, not a container: a writer
    * goes through `SessionView.set` (or `seedVar` when seeding a session
    * before it is narrowed), so a `pre_session` policy sees every write.
-   * `state.ts` has always documented that rule; freezing the projection
-   * is what stops it being walked around by assigning into storage, and
-   * an assignment into a plain object would land in a throwaway and
-   * vanish -- silent loss is the exact failure this store removes.
+   * `state.ts` has always documented that rule; refusing writes to the
+   * projection is what stops it being walked around by assigning into
+   * storage, and an assignment into a plain object would land in a
+   * throwaway and vanish -- silent loss is the exact failure this store
+   * removes.
    */
   get env(): Readonly<Record<string, string>> {
-    const out = ownRecord<string>()
-    for (const [name, v] of Object.entries(this.vars)) {
-      if (typeof v.value === 'string') out[name] = v.value
-    }
-    return Object.freeze(out)
+    return records(this.vars, (value) => (typeof value === 'string' ? value : undefined))
   }
 
   /** The indexed arrays, by name. Read-only, like `env`. */
   get arrays(): Readonly<Record<string, ShellArray>> {
-    const out = ownRecord<ShellArray>()
-    for (const [name, v] of Object.entries(this.vars)) {
-      if (v.value instanceof ShellArray) out[name] = v.value
-    }
-    return Object.freeze(out)
+    return records(this.vars, (value) => (value instanceof ShellArray ? value : undefined))
   }
 
   /** The associative arrays, by name. Read-only, like `env`. */
   get assocs(): Readonly<Record<string, Record<string, string>>> {
-    const out = ownRecord<Record<string, string>>()
-    for (const [name, v] of Object.entries(this.vars)) {
-      if (v.value !== null && typeof v.value === 'object' && !(v.value instanceof ShellArray)) {
-        out[name] = v.value
-      }
-    }
-    return Object.freeze(out)
+    return records(this.vars, (value) =>
+      value !== null && typeof value === 'object' && !(value instanceof ShellArray)
+        ? value
+        : undefined,
+    )
   }
 
   /** The names `readonly` has marked. Read-only, like `env`. */
   get readonlyVars(): ReadonlySet<string> {
     const out = new Set<string>()
-    for (const [name, v] of Object.entries(this.vars)) {
+    for (const [name, v] of this.vars.records()) {
       if (v.attrs.has(VarAttr.Readonly)) out.add(name)
     }
     return out
@@ -951,15 +976,17 @@ export class SessionState {
     return this.toDict()
   }
 
-  toDict(): Record<string, unknown> {
+  /** The record's keys the variables fill: `env`, `arrays`, `assocs`, `var_attrs` and `managed`. */
+  variablesToDict(): Record<string, unknown> {
     // A managed name serializes as its pointer, never its value: a
     // stored session may leak only where a secret lives. `env` skips
     // the name (the fetched plaintext must not land in the record)
     // while `var_attrs` keeps its letters, so a payload with the
     // `managed` key stripped still restores the name as
     // attributed-unset rather than dropping it.
+    const records = this.vars.records()
     const managed = ownRecord<ManagedRef>()
-    for (const [name, v] of Object.entries(this.vars)) {
+    for (const [name, v] of records) {
       if (v.managed !== undefined) managed[name] = v.managed
     }
     // `env` is every scalar and `var_attrs` the letters set on the names
@@ -970,18 +997,26 @@ export class SessionState {
     // turned every plain `X=hello` into an exported one on the first
     // round trip.
     const scalars = ownRecord<string>()
-    for (const [name, value] of Object.entries(this.env)) {
-      if (!Object.hasOwn(managed, name)) scalars[name] = value
+    for (const [name, v] of records) {
+      if (typeof v.value === 'string' && !Object.hasOwn(managed, name)) scalars[name] = v.value
     }
-    const data: Record<string, unknown> = {
-      session_id: this.sessionId,
-      cwd: this.cwd,
-      env: scalars,
-      created_at: this.createdAt,
-      generation: this.generation,
+    const data: Record<string, unknown> = { env: scalars }
+    // Arrays ride beside `env`, which stays the plain name/value map an
+    // embedder reads: an indexed array by index, an associative one in the
+    // order its keys were first assigned.
+    const arrays = ownRecord<Record<string, string>>()
+    const assocs = ownRecord<Record<string, string>>()
+    for (const [name, v] of records) {
+      if (v.value instanceof ShellArray) {
+        arrays[name] = Object.fromEntries(
+          [...v.value.elements].map(([index, value]) => [String(index), value]),
+        )
+      } else if (v.value !== null && typeof v.value === 'object') assocs[name] = { ...v.value }
     }
+    if (Object.keys(arrays).length > 0) data.arrays = arrays
+    if (Object.keys(assocs).length > 0) data.assocs = assocs
     const letters = ownRecord<string>()
-    for (const [name, v] of Object.entries(this.vars)) {
+    for (const [name, v] of records) {
       if (v.attrs.size > 0) letters[name] = storedAttrs(v)
     }
     // Always written, even empty, because its *presence* is the
@@ -1000,6 +1035,22 @@ export class SessionState {
       }
       data.managed = refs
     }
+    return data
+  }
+
+  /**
+   * The session's record; `variables` false leaves out the keys the variables
+   * fill, for a flush that compares their store's version instead of reading
+   * them.
+   */
+  toDict(variables = true): Record<string, unknown> {
+    const data: Record<string, unknown> = {
+      session_id: this.sessionId,
+      cwd: this.cwd,
+      created_at: this.createdAt,
+      generation: this.generation,
+    }
+    if (variables) Object.assign(data, this.variablesToDict())
     if (Object.keys(this.functions).length > 0) data.functions = { ...this.functions }
     if (this.readonlyFunctions.size > 0)
       data.readonly_functions = [...this.readonlyFunctions].sort(compareCodePoints)
@@ -1071,6 +1122,8 @@ export class SessionState {
     env?: Record<string, string>
     var_attrs?: Record<string, string>
     managed?: Record<string, { from: string; ref: string; key: string; fetch?: string }> | null
+    arrays?: Record<string, Record<string, string>>
+    assocs?: Record<string, Record<string, string>>
     created_at?: number
     mount_modes?: Record<string, MountMode> | null
     hidden_paths?: { paths?: string[]; patterns?: string[] } | null
@@ -1102,7 +1155,7 @@ export class SessionState {
     const processes = parseProcessPermissions(data.processes ?? DEFAULT_PROCESS_PERMISSIONS)
     const vars =
       data.env !== undefined || data.var_attrs !== undefined || data.managed != null
-        ? restoredVars(data.env ?? {}, data.var_attrs, data.managed)
+        ? restoredVars(data.env ?? {}, data.var_attrs, data.managed, data.arrays, data.assocs)
         : undefined
     const session = new SessionState({
       sessionId: data.session_id,
@@ -1155,7 +1208,11 @@ export class SessionState {
     // A recorded session comes back as it was written, so a startup
     // variable it had unset stays unset rather than being seeded again; a
     // bare environment starts a new shell. The constructor seeded a copy.
-    if (data.var_attrs !== undefined && vars !== undefined) session.vars = vars
+    if (data.var_attrs !== undefined && vars !== undefined) {
+      const seeded = session.vars
+      session.vars = vars
+      seeded.shell.close()
+    }
     if (data.aliases != null) session.aliases = { ...data.aliases }
     // A function's alias view comes back as its site; where on its line the
     // definition stood went with the line.

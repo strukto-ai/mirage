@@ -721,6 +721,11 @@ async function runPreparedLine(
               try {
                 const substitutionTree = substitutionParser.parse(cmd)
                 if (inputSubstitutionRedirect(substitutionTree) !== null) {
+                  // The file was named in the shell expanding the substitution;
+                  // the read runs on its child's copy.
+                  if (opts.records !== undefined) {
+                    innerContext = childContext(innerContext, opts.records)
+                  }
                   // The file is the substitution's value, never what the line
                   // shows: the read runs with no sink, the line's terminal least
                   // of all.
@@ -755,6 +760,7 @@ async function runPreparedLine(
                           ),
                         )
                       : null,
+                    opts.read ?? null,
                   )
                   io.stdout = stdout
                   recordStatus(session, io.exitCode, true)
@@ -767,7 +773,7 @@ async function runPreparedLine(
             }
             const substitution = opts.substitution === true
             if (substitution) {
-              innerContext = childContext(innerContext)
+              innerContext = childContext(innerContext, opts.records ?? null)
               innerContext.frame.substitution = true
               session = innerContext.session
               innerOpts.session = session

@@ -144,7 +144,7 @@ describe('the process view is not the shell view', () => {
     // and the forked session's env would lose PWD entirely.
     const session = new SessionState({ sessionId: 's1', cwd: '/' })
     const forked = session.fork({ cwd: '/data' })
-    expect(forked.vars.PWD?.attrs.has(VarAttr.Export)).toBe(true)
+    expect(forked.vars.get('PWD')?.attrs.has(VarAttr.Export)).toBe(true)
     expect(envSnapshot(forked).PWD).toBe('/data')
   })
 })

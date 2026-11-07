@@ -319,8 +319,8 @@ describe('session-state writes go through the view', () => {
     const io = await ws.shell('declare -x SECRET_TOKEN')
     expect(io.exitCode).not.toBe(0)
     expect(voicedStderr(io)).toContain('refused by policy')
-    expect(sess.vars.SECRET_TOKEN?.attrs.has(VarAttr.Export)).toBe(false)
-    expect(sess.vars.SECRET_TOKEN?.value).toBe('hunter2')
+    expect(sess.vars.get('SECRET_TOKEN')?.attrs.has(VarAttr.Export)).toBe(false)
+    expect(sess.vars.get('SECRET_TOKEN')?.value).toBe('hunter2')
   })
 
   it('stamps what stored despite a bad sibling', async () => {
@@ -422,7 +422,7 @@ describe('the remaining session writers clear the same gate', () => {
       expect(voicedStderr(io), line).toContain('refused by policy')
     }
     for (const name of ['SECRET_A', 'SECRET_B', 'SECRET_C', 'SECRET_D', 'SECRET_E']) {
-      expect(name in session.vars, name).toBe(false)
+      expect(session.vars.has(name), name).toBe(false)
     }
   })
 
@@ -843,7 +843,7 @@ describe('hidden vars across the shell tier', () => {
       expect(io.exitCode).not.toBe(0)
       expect(stderrStr(io)).not.toContain('xoxb-real')
       expect(stderrStr(io)).toContain('permission denied')
-      const record = ws.getSession('agent').vars.SLACK_TOKEN
+      const record = ws.getSession('agent').vars.get('SLACK_TOKEN')
       expect(record?.value).toBe('xoxb-real')
       expect(record?.attrs.size).toBe(0)
     })
@@ -868,8 +868,8 @@ describe('hidden vars across the shell tier', () => {
       expect(stderrStr(io)).toContain('permission denied')
       expect(stderrStr(io)).not.toContain('xoxb-real')
     }
-    expect(session.vars.SLACK_TOKEN?.value).toBe('1xoxb-real')
-    expect(session.vars.X?.value).toBe('0')
+    expect(session.vars.get('SLACK_TOKEN')?.value).toBe('1xoxb-real')
+    expect(session.vars.get('X')?.value).toBe('0')
   })
 
   it('printf -v of a hidden var is refused', async () => {

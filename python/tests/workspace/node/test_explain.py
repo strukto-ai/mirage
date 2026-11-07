@@ -1586,6 +1586,24 @@ async def test_a_pair_after_a_multibyte_character_runs_on_its_own_nod():
 
 
 @pytest.mark.asyncio
+async def test_a_held_pair_holding_a_multibyte_character_runs_on_its_grant(
+    ws,
+):
+    # The engine places a pair in bytes of its region, as the pass does;
+    # counted apart, the grant is hidden from the gate and the line asks
+    # again.
+    await ws.vfs.write("/data/secrét", b"s\n")
+    line = "echo x && echo `cat /data/secrét`"
+    first = await ws.shell(line, session_id="s")
+    assert first.refusal is not None and first.refusal.kind == "pending"
+    await ws.decisions.answer(first.refusal.ask_id, Outcome.ALLOW)
+    ran = await ws.shell(line, session_id="s")
+    assert ran.exit_code == 0
+    assert ran.stdout == b"x\ns\n"
+    assert ws.decisions.list("s") == ()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "line",
     [

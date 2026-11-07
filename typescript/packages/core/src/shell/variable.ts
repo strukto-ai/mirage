@@ -17,11 +17,6 @@ import { ShellArray } from './array.ts'
 /** What a shell variable can hold. */
 export type ShellValue = string | ShellArray | Record<string, string>
 
-// What one attributed write does to a scalar before it is stored. `-i`
-// needs the arithmetic evaluator, which lives above this module, so the
-// caller injects it rather than this leaf importing upward.
-export type Coercer = (text: string) => string
-
 /**
  * One bash variable attribute, spelled as its `declare` letter.
  *
@@ -116,18 +111,6 @@ export interface ShellVar {
   readonly managed?: ManagedRef
 }
 
-/**
- * The records a prefix assignment shadowed for one function call.
- *
- * bash runs `x=1 f` with `x` in a scope of its own around the function,
- * its temporary environment: the caller's value comes back when the call
- * returns, `unset x` inside reveals it, and an `export` or `readonly` of
- * the name lets the value outlive the call. A frame of this type on the
- * call path is that scope; a plain frame holds a function's `local`
- * shadows.
- */
-export class TempEnv extends Map<string, ShellVar | null> {}
-
 const NO_ATTRS: ReadonlySet<VarAttr> = new Set()
 
 /** Build a variable record. */
@@ -150,13 +133,6 @@ export function varKind(v: ShellVar): VarKind {
   return VarKind.Scalar
 }
 
-/** Copy a variable and its mutable array value for a child shell. */
-export function copyVar(v: ShellVar): ShellVar {
-  if (v.value instanceof ShellArray) return withValue(v, v.value.copy())
-  if (v.value !== null && typeof v.value === 'object') return withValue(v, { ...v.value })
-  return v
-}
-
 /**
  * The variable with a new value and the same attributes, but a reference's
  * under an array: bash's reference cannot hold one, so `declare -n r;
@@ -170,30 +146,6 @@ export function withValue(v: ShellVar, value: ShellValue | null): ShellVar {
 }
 
 /**
- * The variable with its managed pointer dropped, value kept.
- *
- * An agent write to a managed name shadows session-locally: the record
- * becomes a plain variable for this session only, so the fill step
- * never clobbers it and the declaration (new sessions fetch fresh) and
- * the remote store are untouched by construction.
- */
-export function detach(v: ShellVar): ShellVar {
-  return { value: v.value, attrs: v.attrs }
-}
-
-/**
- * The variable with one attribute turned on or off. `+attr` is the off
- * direction, which is why this takes a flag rather than being two
- * functions.
- */
-export function withAttr(v: ShellVar, attr: VarAttr, on = true): ShellVar {
-  const attrs = new Set(v.attrs)
-  if (on) attrs.add(attr)
-  else attrs.delete(attr)
-  return { ...v, attrs }
-}
-
-/**
  * The stored attribute letters, in `declare -p` print order.
  *
  * The tail of `attrLetters` without the `a`/`A` kind lead, which is
@@ -202,61 +154,6 @@ export function withAttr(v: ShellVar, attr: VarAttr, on = true): ShellVar {
  * would then read back as an attribute the value already implies, and
  * `attrLetters` itself.
  */
-/**
- * Apply the value-shaping attributes to one scalar being stored.
- *
- * bash applies these at assignment, not at read: `declare -l s; s=ABC`
- * stores `abc`, and `declare -i n; n=2+2` stores `4`, so `declare -p`
- * and `$s` agree with no per-read work. Order is integer first, then
- * case, which only matters for hex digits and is what GNU does
- * (`declare -il n=0xA` stores `10`). `-l` and `-u` cannot both hold; a
- * declaration that sets one clears the other, so at most one applies.
- */
-export function coerceScalar(
-  text: string,
-  attrs: ReadonlySet<VarAttr>,
-  integer: Coercer | null,
-): string {
-  let out = text
-  if (attrs.has(VarAttr.Integer) && integer !== null) out = integer(out)
-  if (attrs.has(VarAttr.Lower)) return out.toLowerCase()
-  if (attrs.has(VarAttr.Upper)) return out.toUpperCase()
-  return out
-}
-
-/**
- * `coerceScalar` lifted over every value shape. An array applies the
- * attribute per element, which is GNU's `declare -ai a=(1+1 2*3)` giving
- * `([0]="2" [1]="6")`. A write that assigns some elements only (`a[1]=x`,
- * `a=x`) names them in `assigned`, and the others are carried over as
- * stored: bash shapes a value when it is assigned, so `declare -i a;
- * a[0]=9` never re-evaluates a stored `a[1]`.
- */
-export function coerceValue(
-  value: ShellValue,
-  attrs: ReadonlySet<VarAttr>,
-  integer: Coercer | null,
-  assigned: ReadonlySet<bigint | string> | null = null,
-): ShellValue {
-  if (!attrs.has(VarAttr.Integer) && !attrs.has(VarAttr.Lower) && !attrs.has(VarAttr.Upper)) {
-    return value
-  }
-  if (typeof value === 'string') return coerceScalar(value, attrs, integer)
-  if (value instanceof ShellArray) {
-    return new ShellArray(
-      [...value.elements].map(([i, v]) => [
-        i,
-        assigned !== null && !assigned.has(i) ? v : coerceScalar(v, attrs, integer),
-      ]),
-    )
-  }
-  const out: Record<string, string> = {}
-  for (const [k, v] of Object.entries(value)) {
-    out[k] = assigned !== null && !assigned.has(k) ? v : coerceScalar(v, attrs, integer)
-  }
-  return out
-}
-
 export function storedAttrs(v: ShellVar): string {
   return ATTR_ORDER.filter((a) => v.attrs.has(a)).join('')
 }

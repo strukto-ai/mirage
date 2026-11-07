@@ -82,26 +82,6 @@ export function arrayExtent(arr: ShellArray): bigint {
   return arr.extent
 }
 
-/** The assigned values in index order. */
-export function arrayValues(arr: ShellArray): string[] {
-  return [...arr.elements.values()]
-}
-
-/** The assigned indices in order. */
-export function arrayIndices(arr: ShellArray): bigint[] {
-  return [...arr.elements.keys()]
-}
-
-/** The number of assigned elements, which is `${#arr[@]}`. */
-export function arrayCount(arr: ShellArray): number {
-  return arr.elements.size
-}
-
-/** Whether `idx` holds an assigned element. */
-export function arrayHas(arr: ShellArray, idx: number | bigint): boolean {
-  return arr.elements.has(BigInt(idx))
-}
-
 /** The element at `idx`, or the empty string for an index that holds none. */
 export function arrayGet(arr: ShellArray, idx: number | bigint): string {
   return arr.elements.get(BigInt(idx)) ?? ''
@@ -124,32 +104,6 @@ export function arrayWith(arr: ShellArray, idx: number | bigint, value: string):
   const updated = arr.copy()
   updated.set(idx, value)
   return updated
-}
-
-/**
- * Take the assigned elements from index `offset` on, in index order.
- *
- * bash slices an indexed array by *subscript*, not by position among the
- * assigned values: for `a=([1]=b [3]=d [9]=j)`, `${a[@]:2}` is `d j`
- * because it keeps every index >= 2. `length` then caps how many of those
- * are taken. A negative offset counts back from the extent and yields
- * nothing if it is still negative.
- */
-export function arraySlice(
-  arr: ShellArray,
-  offset: number | bigint,
-  length: number | null,
-): string[] {
-  let start = BigInt(offset)
-  if (start < 0n) {
-    start += arrayExtent(arr)
-    if (start < 0n) return []
-  }
-  const picked: string[] = []
-  for (const [i, v] of arr.elements) if (i >= start) picked.push(v)
-  if (length === null) return picked
-  if (length < 0) return picked.slice(0, Math.max(0, picked.length + length))
-  return picked.slice(0, length)
 }
 
 /**
@@ -225,7 +179,10 @@ export function buildAssocLiteral(
   words: readonly string[],
   append: boolean,
 ): { map: Record<string, string>; badWords: string[] } {
-  const map: Record<string, string> = append && base !== null ? { ...base } : {}
+  const map = Object.assign(
+    Object.create(null) as Record<string, string>,
+    append && base !== null ? base : {},
+  )
   const first = words[0]
   if (first === undefined) return { map, badWords: [] }
   if (keyedWord(first) === null) {

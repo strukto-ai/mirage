@@ -14,7 +14,6 @@
 
 import pytest
 
-from mirage.rs.glob import Glob
 from mirage.utils.fnmatch import fnmatch, fnmatchcase
 
 
@@ -249,89 +248,11 @@ def test_long_subjects_match_in_linear_time(pattern, tail, expected):
     assert fnmatch("a" * 16000 + tail, pattern, extglob=True) is expected
 
 
-def test_matcher_end_reads_every_offset_in_linear_time():
-    match = Glob("*b")
-    assert (match.end("abcab", 0), match.end("abcab", 0, longest=False)) == (
-        5,
-        2,
-    )
-    assert (match.end("abcab", 2), match.end("abcab", 5)) == (5, None)
-    blank = Glob("*b")
-    subject = " " * 16000
-    assert all(blank.end(subject, i) is None for i in range(16001))
-
-
-@pytest.mark.parametrize(
-    "name,pattern,expected",
-    [
-        ("ab" * 16000, "*a", (None, None)),
-        ("ab" * 16000, "a*", (31998, 0)),
-        ("xab", "@(b|ab)", (2, 1)),
-        ("ba", "+(@(a|b))", (1, 0)),
-        ("xa)", "!(a)", (3, 0)),
-        ("xa(b)|c", "(b)|c", (2, 2)),
-        ("xa(b)", "@(a(b)|z)", (1, 1)),
-        ("x[a", "[a", (1, 1)),
-        ("x|)", "[)|]", (2, 2)),
-        ("\udcff\ud83d", "*", (2, 0)),
-        ("\udcff\ud83d", "\ud83d", (1, 1)),
-        ("x\udcff\ud83d", "\udcff\ud83d", (1, 1)),
-    ],
-)
-def test_suffix_start_runs_the_reversed_pattern_once(name, pattern, expected):
-    glob = Glob(pattern, True)
-    shortest = glob.suffix(name, longest=False)
-    assert (shortest, glob.suffix(name)) == expected
-
-
 @pytest.mark.parametrize("operator", ["@", "?", "+", "*"])
 def test_deep_extended_groups_use_an_explicit_stack(operator):
     pattern = (operator + "(") * 1200 + "a" + ")" * 1200
     assert fnmatch("a", pattern, extglob=True)
     assert not fnmatch("b", pattern, extglob=True)
-
-
-@pytest.mark.parametrize(
-    "name,pattern,ends,suffix",
-    [
-        (
-            "a😀\udcffb",
-            "?",
-            [(1, 1), (2, 2), (3, 3), (4, 4), (None, None)],
-            (3, 3),
-        ),
-        (
-            "a😀\udcffb",
-            "+(?)",
-            [(1, 4), (2, 4), (3, 4), (4, 4), (None, None)],
-            (3, 0),
-        ),
-        (
-            "a😀\udcffb",
-            "?b",
-            [(None, None), (None, None), (4, 4), (None, None), (None, None)],
-            (2, 2),
-        ),
-        (
-            "x\udcff😀",
-            "@(😀|\udcff😀)",
-            [(None, None), (3, 3), (3, 3), (None, None)],
-            (2, 1),
-        ),
-    ],
-)
-def test_match_extents_count_characters_and_preserve_raw_bytes(
-    name, pattern, ends, suffix
-):
-    match = Glob(pattern, True)
-    assert [
-        (match.end(name, i, longest=False), match.end(name, i))
-        for i in range(len(name) + 1)
-    ] == ends
-    assert (
-        match.suffix(name, longest=False),
-        match.suffix(name),
-    ) == suffix
 
 
 @pytest.mark.parametrize("index,literal", enumerate("*?[@+!()|"))

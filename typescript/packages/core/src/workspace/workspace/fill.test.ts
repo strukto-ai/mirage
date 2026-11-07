@@ -258,8 +258,8 @@ describe('fillEnv through execute', () => {
       expect((await ws.shell('echo hi')).exitCode).toBe(0)
       expect(calls).toEqual(['re'])
       const session = ws.getSession(ws.defaultSessionId)
-      expect(session.vars.E?.value).toBe('ev')
-      expect(session.vars.L?.value).toBeNull()
+      expect(session.vars.get('E')?.value).toBe('ev')
+      expect(session.vars.get('L')?.value).toBeNull()
     } finally {
       await ws.close()
     }
@@ -316,7 +316,7 @@ describe('fillEnv through execute', () => {
       const io = await ws.shell('echo $S', { sessionId: 's2' })
       expect(stdoutStr(io)).toBe('sv\n')
       expect(calls).toEqual(['r'])
-      expect('S' in ws.getSession(ws.defaultSessionId).vars).toBe(false)
+      expect(ws.getSession(ws.defaultSessionId).vars.has('S')).toBe(false)
     } finally {
       await ws.close()
     }
@@ -343,11 +343,11 @@ describe('fillEnv through execute', () => {
     const ws = makeWs(undefined)
     try {
       const session = ws.getSession(ws.defaultSessionId)
-      session.vars.T = {
+      session.vars.set('T', {
         value: null,
         attrs: new Set([VarAttr.Export]),
         managed: { source: 'fake', ref: 'r', key: 'T', eager: false },
-      }
+      })
       expect(stdoutStr(await ws.shell('export -p'))).toContain('declare -x T\n')
     } finally {
       await ws.close()
@@ -372,7 +372,7 @@ describe('fillEnv through execute', () => {
     const ws = makeWs({ TOKEN: { from: 'fake-fork', ref: 'r' } })
     try {
       expect(stdoutStr(await ws.shell('(export TOKEN=y; echo $TOKEN)'))).toBe('y\n')
-      expect(ws.getSession(ws.defaultSessionId).vars.TOKEN?.managed).not.toBeUndefined()
+      expect(ws.getSession(ws.defaultSessionId).vars.get('TOKEN')?.managed).not.toBeUndefined()
       expect(stdoutStr(await ws.shell('echo $TOKEN'))).toBe('t0\n')
     } finally {
       await ws.close()
@@ -558,7 +558,7 @@ describe('fillEnv through execute', () => {
       const session = ws.getSession(ws.defaultSessionId)
       // Written straight into the session so the declaring line's own
       // opaque-read fetch cannot mask the deref path.
-      session.vars.r2 = { value: 'TOKEN', attrs: new Set([VarAttr.Nameref]) }
+      session.vars.set('r2', { value: 'TOKEN', attrs: new Set([VarAttr.Nameref]) })
       expect(stdoutStr(await ws.shell('echo $r2'))).toBe('t0\n')
       expect(calls).toEqual(['r'])
     } finally {
@@ -2292,7 +2292,7 @@ describe('a managed fetch under the invocation signal', () => {
       ).rejects.toMatchObject({ name: 'AbortError' })
       late.release()
       await new Promise((resolve) => setTimeout(resolve, 20))
-      expect(ws.getSession(ws.defaultSessionId).vars.TOKEN?.value).toBeNull()
+      expect(ws.getSession(ws.defaultSessionId).vars.get('TOKEN')?.value).toBeNull()
     } finally {
       await ws.close()
     }

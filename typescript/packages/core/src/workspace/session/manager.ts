@@ -17,10 +17,12 @@ import { SessionOwner } from '../../context/session_context.ts'
 import { ownRecord, SessionState, varsFromEntries, varsFromEnv } from './session.ts'
 import { setCwd } from './shell_dirs.ts'
 import type { CompiledProfile } from '../../policy/profile.ts'
+import type { Shell } from '../../rs/shell.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import type { NamespaceStore } from '../mount/namespace/store.ts'
 import { applyProfile, narrow } from './resolve.ts'
 import { checkEnvFits, entryBytes } from './budget.ts'
+import { VAR_KEYS } from './constants.ts'
 import { CAS_MAX_RETRIES, generationOf, type RecordFields } from '../record/types.ts'
 import type { AdmissionRules, Decision, ProfileScripts } from '../../policy/types.ts'
 import type { EnvEntries } from '../../secrets/config.ts'
@@ -32,9 +34,29 @@ import { checkName, SystemIdSource, type IdSource } from '../../utils/ids.ts'
 
 type StoredSession = Parameters<typeof SessionState.fromDict>[0]
 
+/**
+ * What a flush compares a session against: a fork of its shell as its
+ * variables were saved, which shares their records rather than copying them,
+ * and the rest of its record as JSON. A clean session, or one whose change came
+ * back where it was (`TMP=x true`), is told apart without reading the
+ * variables out of the store.
+ */
+type Baseline = readonly [Shell, string]
+
+/** What the session would write now, as a flush compares it. */
+function baseline(session: SessionState): Baseline {
+  return [session.vars.shell.fork(), JSON.stringify(session.toDict(false))]
+}
+
+/** The baseline of a record written whole, beside a fork of the shell its variables were read from. */
+function written(saved: Shell, fields: RecordFields): Baseline {
+  const rest = Object.fromEntries(Object.entries(fields).filter(([key]) => !VAR_KEYS.has(key)))
+  return [saved, JSON.stringify(rest)]
+}
+
 /** Whether any of the session's variables carries a pointer. */
 function holdsManaged(session: SessionState): boolean {
-  return Object.values(session.vars).some((v) => v.managed !== undefined)
+  return session.vars.records().some(([, v]) => v.managed !== undefined)
 }
 
 /**
@@ -50,7 +72,7 @@ function holdsManaged(session: SessionState): boolean {
  */
 function mergeSeedVars(session: SessionState, seedVars: Record<string, ShellVar>): void {
   for (const [name, seeded] of Object.entries(seedVars)) {
-    if (!(name in session.vars)) session.vars[name] = seeded
+    if (!session.vars.has(name)) session.vars.set(name, seeded)
   }
 }
 
@@ -58,7 +80,7 @@ function mergeSeedVars(session: SessionState, seedVars: Record<string, ShellVar>
 function seedBytes(session: SessionState, seedVars: Record<string, ShellVar>): number {
   let held = 0
   for (const [name, seeded] of Object.entries(seedVars)) {
-    if (!(name in session.vars)) held += entryBytes(name, seeded.value)
+    if (!session.vars.has(name)) held += entryBytes(name, seeded.value)
   }
   return held
 }
@@ -83,9 +105,8 @@ export class SessionManager extends SessionOwner {
   private loadPromise: Promise<void> | null = null
   // What the store last saw from us, per session id. Flush compares
   // against this to skip clean sessions without a network read, and to
-  // avoid clobbering other writers. Kept as JSON strings: a string
-  // cannot alias the live session (Python needs a deep copy instead).
-  private readonly persisted = new Map<string, string>()
+  // avoid clobbering other writers.
+  private readonly persisted = new Map<string, Baseline>()
 
   private defaultProfileInternal: CompiledProfile | null = null
 
@@ -270,7 +291,7 @@ export class SessionManager extends SessionOwner {
    */
   adoptDefault(sessionId: string): void {
     if (sessionId === this.defaultIdInternal) return
-    this.persisted.delete(this.defaultIdInternal)
+    this.rebase(this.defaultIdInternal, undefined)
     const existing = this.sessions.get(sessionId)
     if (existing !== undefined) {
       this.sessions.delete(this.defaultIdInternal)
@@ -361,7 +382,7 @@ export class SessionManager extends SessionOwner {
         dflt.generation = stored.generation
         // Hydrated sessions start clean: baseline what the store
         // holds so the next flush skips them.
-        this.persisted.set(sid, JSON.stringify(dflt.toDict()))
+        this.rebase(sid, baseline(dflt))
         // The document outranks the record for the fields no line can
         // edit; stamped after the baseline so a stale record is
         // rewritten on the next flush.
@@ -374,7 +395,7 @@ export class SessionManager extends SessionOwner {
       }
       stored.ids = this.ids
       this.sessions.set(sid, stored)
-      this.persisted.set(sid, JSON.stringify(stored.toDict()))
+      this.rebase(sid, baseline(stored))
       mergeSeedVars(stored, this.seedVarsInternal)
       this.hasManaged = this.hasManaged || holdsManaged(stored)
     }
@@ -400,19 +421,37 @@ export class SessionManager extends SessionOwner {
     }
   }
 
+  /**
+   * Keep `next` as what the store last saw of `sid`, or forget it with
+   * undefined, freeing the fork the one it replaces held.
+   */
+  private rebase(sid: string, next: Baseline | undefined): void {
+    this.persisted.get(sid)?.[0].close()
+    if (next === undefined) this.persisted.delete(sid)
+    else this.persisted.set(sid, next)
+  }
+
   /** Persist one session, retrying when another writer races us. */
   private async flushOne(session: SessionState): Promise<void> {
     const sid = session.sessionId
+    const kept = this.persisted.get(sid)
     // Clean: the store already has exactly this state.
-    if (JSON.stringify(session.toDict()) === this.persisted.get(sid)) return
+    if (
+      kept !== undefined &&
+      session.vars.shell.sameVars(kept[0]) &&
+      kept[1] === JSON.stringify(session.toDict(false))
+    )
+      return
     for (let attempt = 0; attempt < CAS_MAX_RETRIES; attempt++) {
       const expected = session.generation
       session.generation = expected + 1
+      const saved = session.vars.shell.fork()
       const fields = session.toDict() as RecordFields
       if (await this.sessionStore.casSet(sid, fields, expected)) {
-        this.persisted.set(sid, JSON.stringify(fields))
+        this.rebase(sid, written(saved, fields))
         return
       }
+      saved.close()
       // Lost the race: adopt the winner's generation and retry our
       // content on top (last-writer-wins until a merge policy exists).
       session.generation = expected
@@ -432,15 +471,15 @@ export class SessionManager extends SessionOwner {
   async replaceFromSnapshot(sessions: readonly SessionState[]): Promise<void> {
     this.loaded = true
     this.loadPromise = Promise.resolve()
-    const entries = new Map<string, RecordFields>()
-    for (const s of this.sessions.values()) entries.set(s.sessionId, s.toDict() as RecordFields)
-    for (const s of sessions) {
-      entries.set(s.sessionId, s.toDict() as RecordFields)
-      this.hasManaged = this.hasManaged || holdsManaged(s)
+    const made = new Map<string, readonly [Shell, RecordFields]>()
+    for (const s of [...this.sessions.values(), ...sessions]) {
+      made.get(s.sessionId)?.[0].close()
+      made.set(s.sessionId, [s.vars.shell.fork(), s.toDict() as RecordFields])
     }
-    await this.sessionStore.replaceAll(entries)
-    this.persisted.clear()
-    for (const [sid, fields] of entries) this.persisted.set(sid, JSON.stringify(fields))
+    for (const s of sessions) this.hasManaged = this.hasManaged || holdsManaged(s)
+    await this.sessionStore.replaceAll(new Map([...made].map(([sid, [, fields]]) => [sid, fields])))
+    for (const sid of [...this.persisted.keys()]) this.rebase(sid, undefined)
+    for (const [sid, [saved, fields]] of made) this.persisted.set(sid, written(saved, fields))
   }
 
   /**
@@ -507,7 +546,7 @@ export class SessionManager extends SessionOwner {
         .flatMap(([, other]) => other.openInputs())
       await releaseInputs(session.openInputs(), keep)
       this.sessions.delete(sessionId)
-      this.persisted.delete(sessionId)
+      this.rebase(sessionId, undefined)
       await this.sessionStore.delete([sessionId])
     })
   }

@@ -28,20 +28,6 @@ import { IOResult } from '../io/types.ts'
 import { CHUNK_SIZE } from '../io/cooperative.ts'
 import { PipeRecorder } from './executor/redirect.ts'
 import { Channel } from '../shell/console/index.ts'
-import type * as Brace from './expand/brace.ts'
-
-const made = vi.hoisted(() => ({ words: 0 }))
-
-vi.mock('./expand/brace.ts', async (importOriginal) => {
-  const brace = await importOriginal<typeof Brace>()
-  return {
-    ...brace,
-    substitute: (...args: Parameters<typeof brace.substitute>) => {
-      made.words += 1
-      return brace.substitute(...args)
-    },
-  }
-})
 
 class SignalProbeRuntime extends LanguageRuntime {
   readonly language = 'python'
@@ -184,19 +170,18 @@ describe('the line deadline inside a long expansion', () => {
     }
   })
 
-  // A brace range is counted in words rather than time, which a loaded
-  // runner stretches: the deadline stops it partway through.
-  it('stops a brace range partway through its words', async () => {
+  // The expansion yields as it makes words, so the deadline lands inside a
+  // long brace range.
+  it('lands the line deadline in a long brace range', async () => {
     const ws = new Workspace(
       { '/data': new RAMVFS() },
       { mode: MountMode.WRITE, commandLimits: { '@line': new Limit({ timeoutSeconds: 0.3 }) } },
     )
     try {
-      made.words = 0
-      const r = await ws.shell('echo {1..3000000} > /dev/null')
+      const started = performance.now()
+      const r = await ws.shell('echo {1..1000000} > /dev/null')
       expect(r.exitCode).toBe(124)
-      expect(made.words).toBeGreaterThan(0)
-      expect(made.words).toBeLessThan(3_000_000)
+      expect(performance.now() - started).toBeLessThan(3000)
     } finally {
       await ws.close()
     }

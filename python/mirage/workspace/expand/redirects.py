@@ -14,17 +14,17 @@
 
 from typing import Any, Callable
 
+from mirage.policy.policies import Policies
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
 from mirage.shell.types import Redirect, RedirectKind
-from mirage.view.types import NamespaceLinks, SessionView
+from mirage.view.types import NamespaceLinks
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.classify import classify_bare_path
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.expand.node import expand_node
 from mirage.workspace.expand.parts import expand_words
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session import visible_env
 
 
 async def expand_redirect(
@@ -33,9 +33,10 @@ async def expand_redirect(
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     call_stack: CallStack | None = None,
-    view: SessionView | None = None,
+    policies: Policies | None = None,
     forked: bool = False,
     links: NamespaceLinks | None = None,
+    words: list[str] | None = None,
 ) -> Redirect:
     """Expand one redirect immediately before the executor applies it.
 
@@ -45,13 +46,23 @@ async def expand_redirect(
         execute_fn (Callable): recursive execute for substitutions.
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.
-        view (SessionView | None): gated session writes.
+        policies (Policies | None): the policies its writes clear.
         forked (bool): retain an expansion error for the child command.
         links (NamespaceLinks | None): namespace links for pathname expansion.
+        words (list[str] | None): the target's words when another shell
+            expanded them already (``$(< file)``), glob marks kept; None
+            expands the target here.
     """
     try:
         return await _expand_target(
-            redirect, context, execute_fn, registry, call_stack, view, links
+            redirect,
+            context,
+            execute_fn,
+            registry,
+            call_stack,
+            policies,
+            links,
+            words,
         )
     except ExitSignal as exc:
         if not forked:
@@ -67,8 +78,9 @@ async def _expand_target(
     execute_fn: Callable[..., Any],
     registry: MountRegistry,
     call_stack: CallStack | None,
-    view: SessionView | None,
+    policies: Policies | None,
     links: NamespaceLinks | None,
+    words: list[str] | None = None,
 ) -> Redirect:
     """Expand one redirect's body or target.
 
@@ -78,19 +90,18 @@ async def _expand_target(
         execute_fn (Callable): recursive execute (for expansions).
         registry (MountRegistry): mount registry for classification.
         call_stack (CallStack | None): shell call stack for expansion.
-        view (SessionView | None): the gated session view.
+        policies (Policies | None): the policies its writes clear.
         links (NamespaceLinks | None): namespace links for pathname expansion.
+        words (list[str] | None): the target's words, expanded already;
+            None expands them here.
     """
     session = context.session
     if r.kind in (RedirectKind.HEREDOC, RedirectKind.HERESTRING):
         body = r.target
         if r.target_node is not None and r.expand_vars:
             body = await expand_node(
-                r.target_node, context, execute_fn, call_stack, view=view
+                r.target_node, context, execute_fn, call_stack, policies
             )
-        elif isinstance(body, str) and r.expand_vars:
-            for var, val in visible_env(session).items():
-                body = body.replace("$" + var, val)
         return Redirect(
             fd=r.fd,
             target=body,
@@ -104,9 +115,10 @@ async def _expand_target(
         return r
     target_scope = r.target
     if r.target_node is not None:
-        words = await expand_words(
-            [r.target_node], context, execute_fn, call_stack, view=view
-        )
+        if words is None:
+            words = await expand_words(
+                [r.target_node], context, execute_fn, call_stack, policies
+            )
         targets = await resolve_globs(
             [
                 classify_bare_path(word, registry, session.cwd)

@@ -18,9 +18,7 @@ import { YieldBudget } from '../io/yield_budget.ts'
 import type { OpenStream } from './stream.ts'
 import { MovableStream, openStreamSync } from './stream.ts'
 
-const position = z.number().int().nonnegative().nullable()
 const units = z.array(z.number().int().min(0).max(0x10ffff))
-const spans = z.array(z.tuple([z.number().int().nonnegative(), z.number().int().nonnegative()]))
 const finalizer = new FinalizationRegistry<OpenStream>((stream) => {
   stream.close()
 })
@@ -29,25 +27,10 @@ const CHUNK = 4096
 const CACHE_SIZE = 256
 const scratch = new Uint8Array(4 * CHUNK)
 
-interface Plain {
+interface Operation {
   kind: 'matches' | 'shape' | 'parts'
 }
-interface End {
-  kind: 'end'
-  start: number
-  longest: boolean
-}
-interface Suffix {
-  kind: 'suffix'
-  longest: boolean
-}
-interface Replace {
-  kind: 'replace'
-  all: boolean
-  anchor: string | null
-}
-type Operation = Plain | End | Suffix | Replace
-type Reply = boolean | number | null | number[] | number[][]
+type Reply = boolean | number[] | number[][]
 type Dialect = 'shell' | 'python'
 
 // The code points as little-endian u32 units. A `transient` result may be the
@@ -101,7 +84,7 @@ function text(result: readonly number[]): string {
   return result.map((unit) => String.fromCodePoint(unit)).join('')
 }
 
-/** One compiled pattern. Offsets count supplied characters, including lone surrogates. */
+/** One compiled pattern over character values, including lone surrogates. */
 export class Glob {
   private readonly stream: OpenStream
   private subject: string | undefined
@@ -157,27 +140,6 @@ export class Glob {
 
   async matchesAsync(name: string): Promise<boolean> {
     return z.boolean().parse(await this.runAsync(name, { kind: 'matches' }))
-  }
-
-  end(name: string, start: number, longest = true): number | null {
-    return position.parse(this.run(name, { kind: 'end', start, longest }))
-  }
-
-  suffix(name: string, longest = true): number | null {
-    return position.parse(this.run(name, { kind: 'suffix', longest }))
-  }
-
-  async extent(name: string, prefix: boolean, longest: boolean): Promise<number | null> {
-    return position.parse(
-      await this.runAsync(
-        name,
-        prefix ? { kind: 'end', start: 0, longest } : { kind: 'suffix', longest },
-      ),
-    )
-  }
-
-  async spans(name: string, all: boolean, anchor: string | null): Promise<[number, number][]> {
-    return spans.parse(await this.runAsync(name, { kind: 'replace', all, anchor }))
   }
 
   shape(): string {

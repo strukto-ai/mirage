@@ -28,13 +28,11 @@ import { parseFunction } from '../../../shell/helpers.ts'
 import type { JobTable } from '../../../shell/job_table/index.ts'
 import type { ParseScope } from '../../../shell/parse/scope.ts'
 import type { TSNodeLike } from '../../../shell/types.ts'
-import type { ShellVar } from '../../../shell/variable.ts'
 import type { PathSpec } from '../../../types.ts'
 import { wordText } from '../../../types.ts'
 import type { EvaluationContext } from '../../evaluation.ts'
 import { argsBytes, checkEnv, framesBytes } from '../../session/budget.ts'
 import type { SessionState } from '../../session/session.ts'
-import { restoreLocals } from '../../session/state.ts'
 import { ExecutionNode } from '../../types.ts'
 import { bodyAliases } from '../builtins/alias/alias.ts'
 import { isCountWord } from '../builtins/shared.ts'
@@ -105,15 +103,10 @@ export async function runShellFunction(
   let lifted = liftFunctionTraps(session)
   const outerNames = session.functionNames
   if (outerNames !== null) session.functionNames = cs.functionNames()
-  // One stack: a local shadows the whole record, so the caller's value
-  // and attributes are saved and put back together.
-  const savedLocals = new Map<string, ShellVar | null>()
-  // The caller's frame is kept and put back: a function that calls
-  // another and then declares a `local` is still inside a function, and
-  // its own shadows must keep being recorded on its own frame.
-  const outerLocals = session.localVars
-  session.localVars = savedLocals
-  session.localFrames.push(savedLocals)
+  // The function's scope: a local shadows the whole record, so the
+  // caller's value and attributes come back together when it returns.
+  const shell = session.vars.shell
+  const outerScope = shell.enter()
   // The body is parsed again from its source, so its rows restart at 0;
   // its diagnostics number them from the definition's row, under the name
   // of where it was defined, and it expands the aliases its definition saw,
@@ -212,8 +205,6 @@ export async function runShellFunction(
     cs.pop()
     if (session.functionNames !== null) session.functionNames = outerNames
     restoreFunctionTraps(session, lifted)
-    restoreLocals(session, savedLocals)
-    session.localFrames.pop()
-    session.localVars = outerLocals
+    shell.leave(outerScope)
   }
 }

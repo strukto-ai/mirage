@@ -31,7 +31,7 @@ from mirage.policy.types import (
     Scope,
 )
 from mirage.runtime.types import ScriptSource
-from mirage.shell.variable import ShellVar
+from mirage.shell.variable import ShellVar, with_value
 from mirage.types import (
     HiddenPaths,
     HiddenVars,
@@ -41,6 +41,7 @@ from mirage.types import (
     Visibility,
 )
 from mirage.utils.clock import ManualClock
+from mirage.utils.ids import SeededIdSource
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
@@ -512,6 +513,26 @@ def test_flush_skips_clean_sessions():
     seed_var(mgr.get("default"), "K", "v")
     _run(mgr.flush())
     assert store.cas_calls == 2
+    # A change that came back where it was (`TMP=x true`) writes nothing,
+    # so it cannot carry stale records over another writer's newer ones.
+    seed_var(mgr.get("default"), "K", "w")
+    seed_var(mgr.get("default"), "K", "v")
+    _run(mgr.flush())
+    assert store.cas_calls == 2
+    seed_var(mgr.get("default"), "K", "w")
+    _run(mgr.flush())
+    assert store.cas_calls == 3
+    # Fetching a secret fills a value the record never saves, its pointer
+    # standing in for it, so the fetch writes nothing either.
+    session = mgr.get("default")
+    session.vars["TOKEN"] = vars_from_entries(
+        {"TOKEN": {"from": "aws-sm", "ref": "prod"}}
+    )["TOKEN"]
+    _run(mgr.flush())
+    assert store.cas_calls == 4
+    session.vars["TOKEN"] = with_value(session.vars["TOKEN"], "s3cret")
+    _run(mgr.flush())
+    assert store.cas_calls == 4
 
 
 def test_flush_bumps_generation():
@@ -815,6 +836,7 @@ async def test_profile_changes_publish_only_after_persistence(
         ),
     )
     mgr.default_profile = original
+    seed_var(mgr.get("default"), "TOKEN", "t")
     await mgr.flush()
     session = mgr.get("default")
     before = session.to_dict()
@@ -835,6 +857,7 @@ async def test_profile_changes_publish_only_after_persistence(
     try:
         await asyncio.wait_for(entered.wait(), 5)
         assert session.to_dict() == before
+        assert session.vars.shell.hidden("TOKEN")
         assert mgr.commands_of("") == original.policies.commands
         assert mgr.scripts_of("") == original.policies.scripts
         session.cwd = "/changed-during-write"
@@ -845,12 +868,14 @@ async def test_profile_changes_publish_only_after_persistence(
             before["cwd"] = session.cwd
             assert session.to_dict() == before
             assert await store.load() == persisted
+            assert session.vars.shell.hidden("TOKEN")
             assert mgr.commands_of("") == original.policies.commands
             assert mgr.scripts_of("") == original.policies.scripts
         else:
             assert await updating is session
             assert session.mount_modes is None
             assert session.visibility.paths is None
+            assert not session.vars.shell.hidden("TOKEN")
             assert mgr.commands_of("") is None
             assert mgr.scripts_of("") == {}
         assert session.cwd == "/changed-during-write"
@@ -991,3 +1016,27 @@ async def test_flush_of_closed_session_does_not_recreate_it():
     await manager.close("gone")
     await manager.flush("gone")
     assert "gone" not in await manager.store.load()
+
+
+async def _loaded_draws(store: RAMNamespaceStore, seed: int) -> list[int]:
+    manager = SessionManager("default", store=store, ids=SeededIdSource(seed))
+    await manager.ensure_loaded()
+    draws: list[int] = []
+    for sid in ("default", "agent"):
+        draw = manager.get(sid).vars.shell.next_random()
+        assert isinstance(draw, int)
+        draws.append(draw)
+    return draws
+
+
+@pytest.mark.asyncio
+async def test_loaded_sessions_draw_random_from_the_manager_ids():
+    store = RAMNamespaceStore()
+    first = SessionManager("default", store=store, ids=SeededIdSource(5))
+    first.create("agent")
+    seed_var(first.get("default"), "K", "v")
+    seed_var(first.get("agent"), "K", "v")
+    await first.flush()
+    draws = await _loaded_draws(store, 5)
+    assert draws == await _loaded_draws(store, 5)
+    assert draws != await _loaded_draws(store, 6)

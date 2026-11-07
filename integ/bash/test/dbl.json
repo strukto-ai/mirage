@@ -693,10 +693,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "e=$(printf '\\303\\251'); LC_ALL=C; [[ $e =~ ^..$ ]]; echo $?; [[ $e =~ [[:alpha:]] ]]; echo $?; LC_ALL=C.UTF-8; [[ $e =~ ^.$ ]] && echo \"${BASH_REMATCH[0]}\"; [[ $e =~ [[:alpha:]] ]]; echo $?",
+      "command": "e=$(printf '\\303\\251'); LC_ALL=C; [[ $e =~ ^..$ ]]; echo $?; [[ $e =~ [[:alpha:]] ]]; echo $?; LC_ALL=C.UTF-8; [[ $e =~ ^.$ ]] && echo \"${BASH_REMATCH[0]}\"; [[ $e =~ [[:alpha:]] ]]; echo $?; [[ $e == \\é ]] && echo esc; case $e in \\é) echo case;; esac",
       "expect": {
         "exit": 0,
-        "stdout": "0\n1\né\n0\n",
+        "stdout": "0\n1\né\n0\nesc\ncase\n",
         "stderr": ""
       }
     },

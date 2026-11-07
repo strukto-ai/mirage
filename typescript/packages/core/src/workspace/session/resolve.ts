@@ -406,6 +406,10 @@ export function stricterModes(
  */
 export function applyProfile(session: SessionState, compiled: CompiledProfile): void {
   narrow(session, compiled)
-  if (compiled.setup.env != null) Object.assign(session.vars, varsFromEntries(compiled.setup.env))
+  if (compiled.setup.env != null) {
+    for (const [name, v] of Object.entries(varsFromEntries(compiled.setup.env))) {
+      session.vars.set(name, v)
+    }
+  }
   if (compiled.setup.cwd !== null) setCwd(session, compiled.setup.cwd)
 }

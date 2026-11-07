@@ -16,32 +16,38 @@ import asyncio
 
 import pytest
 
+from mirage.context.session_context import (
+    reset_current_session,
+    set_current_session,
+)
 from mirage.policy import Action, Deny, Policies, Policy, PolicyDenied
 from mirage.policy.types import SessionContext
+from mirage.rs.session import ShellVars
 from mirage.shell.array import ShellArray, make_array
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ReadonlyVariableError
-from mirage.shell.variable import ManagedRef, ShellVar, TempEnv, VarAttr
+from mirage.shell.parse.parse import parse_program
+from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import HiddenVars, Visibility
 from mirage.view.types import SessionView
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.session import vars_from_env
 from mirage.workspace.session.state import (
+    assign_element,
+    element_is_set,
     env_snapshot,
-    gate_rendering,
     gate_restored_vars,
     in_call_env,
-    next_random,
     outlive_call,
     positional_params,
     seed_var,
-    session_elements,
     session_view,
     set_attr,
     set_positional_params,
     set_var,
-    strip_key_quotes,
     subscript_index,
+    visible_arrays,
+    visible_assocs,
     visible_env,
 )
 
@@ -326,12 +332,93 @@ def _element_session() -> SessionState:
     return session
 
 
-def test_strip_key_quotes():
-    assert strip_key_quotes('"x"') == "x"
-    assert strip_key_quotes("'x'") == "x"
-    assert strip_key_quotes("x") == "x"
-    assert strip_key_quotes('"x') == '"x'
-    assert strip_key_quotes('""') == ""
+def test_element_is_set():
+    session = _element_session()
+
+    async def run():
+        assert await element_is_set(session, "m[a]")
+        assert await element_is_set(session, 'm["a"]')
+        assert not await element_is_set(session, "m[zz]")
+        # The subscript is the key verbatim, never arithmetic.
+        assert not await element_is_set(session, "m[1+1]")
+        assert await element_is_set(session, "m[@]")
+        assert await element_is_set(session, "arr[2]")
+        assert not await element_is_set(session, "arr[9]")
+        assert await element_is_set(session, "arr[@]")
+        # An indexed subscript is arithmetic, and what it assigns lands.
+        assert await element_is_set(session, "arr[j=2]")
+        assert session.vars["j"].value == "2"
+        # A bare name over an array checks element 0 (the literal key
+        # "0" for an associative one).
+        assert await element_is_set(session, "m")
+        assert await element_is_set(session, "arr")
+        assert await element_is_set(session, "s5")
+        assert not await element_is_set(session, "missing")
+        assert not await element_is_set(session, "not a ref")
+        # PIPESTATUS answers from the shell's own bookkeeping.
+        session.pipe_status = (0, 1)
+        assert await element_is_set(session, "PIPESTATUS[1]")
+        assert not await element_is_set(session, "PIPESTATUS[2]")
+
+    asyncio.run(run())
+
+
+def test_assign_element_assoc_and_append():
+    session = _element_session()
+
+    async def run():
+        assert await assign_element(session, None, "m", "b", "2") == "ok"
+        assert (
+            await assign_element(session, None, "m", "b", "x", append=True)
+            == "ok"
+        )
+        # A bare target over an associative array is the key "0".
+        assert await assign_element(session, None, "m", None, "top") == "ok"
+        assert await assign_element(session, None, "m", "", "v") == "subscript"
+
+    asyncio.run(run())
+    assert session.assocs["m"]["b"] == "2x"
+    assert session.assocs["m"]["0"] == "top"
+
+
+def test_assign_element_indexed_scalar_and_statuses():
+    session = _element_session()
+    held = session.vars.pop("s5")
+    session.vars["ro"] = ShellVar(held.value, held.attrs | {VarAttr.READONLY})
+    session.visibility = Visibility(vars=HiddenVars(names=("h",)))
+
+    async def run():
+        assert await assign_element(session, None, "arr", "1", "X") == "ok"
+        assert await assign_element(session, None, "arr", "-1", "Y") == "ok"
+        assert (
+            await assign_element(session, None, "arr", "-9", "n")
+            == "subscript"
+        )
+        # An existing scalar migrates to element 0 under a subscript.
+        seed_var(session, "sc", "base")
+        assert await assign_element(session, None, "sc", "1", "one") == "ok"
+        assert (
+            await assign_element(session, None, "ro", "0", "x") == "readonly"
+        )
+        assert await assign_element(session, None, "h", "0", "x") == "denied"
+
+    asyncio.run(run())
+    assert session.arrays["arr"] == make_array(["10", "X", "Y"])
+    assert session.arrays["sc"] == make_array(["base", "one"])
+
+
+def test_views_list_only_what_a_lookup_finds():
+    session = _element_session()
+    seed_var(session, "SECRET", "k")
+    session.visibility = Visibility(vars=HiddenVars(names=("SECRET",)))
+    env = visible_env(session)
+    assert "SECRET" not in env and "SECRET" not in list(env)
+    assert set(env) <= set(session.env)
+    assert list(visible_arrays(session)) == ["arr"]
+    assert list(visible_assocs(session)) == ["m"]
+    session.pipe_status = (3,)
+    assert visible_arrays(session)["PIPESTATUS"] == make_array(["3"])
+    assert "PIPESTATUS" not in list(visible_arrays(session))
 
 
 def test_subscript_index_lands_its_assignments_and_seeds_random():
@@ -353,44 +440,15 @@ def test_subscript_index_lands_its_assignments_and_seeds_random():
         # A seed reaches the generator, and the draw after it advances
         # the session past it.
         assert await subscript_index(session, "RANDOM=42, RANDOM") == 17772
-        assert next_random(session, session.vars["RANDOM"].value) == 26794
-        # Through the session view, a refusal is the gate's.
-        view = session_view(session, Policies([DenySecrets()]))
+        assert session.vars.shell.next_random() == 26794
+        # Through the session policies, a refusal is the gate's.
         with pytest.raises(PolicyDenied):
-            await subscript_index(session, "SECRET_N=1", view)
+            await subscript_index(
+                session, "SECRET_N=1", Policies([DenySecrets()])
+            )
         assert "SECRET_N" not in session.env
 
     asyncio.run(run())
-
-
-def test_resolve_assoc_is_literal():
-    session = _element_session()
-    ops = session_elements(session)
-    assert ops.resolve("m", "a", {}) == "a"
-    assert ops.resolve("m", '"a"', {}) == "a"
-    # A key spelled like arithmetic stays a key.
-    assert ops.resolve("m", "1+1", {}) == "1+1"
-
-
-def test_resolve_indexed_wraps_negative():
-    session = _element_session()
-    ops = session_elements(session)
-    assert ops.resolve("arr", "-1", {}) == "2"
-    with pytest.raises(ArithError):
-        ops.resolve("arr", "-9", {})
-
-
-def test_read_by_kind():
-    session = _element_session()
-    ops = session_elements(session)
-    assert ops.read("m", "a") == "1"
-    assert ops.read("m", "zz") is None
-    assert ops.read("arr", "1") == "20"
-    assert ops.read("arr", "9") is None
-    # A scalar answers as element 0 of a one-element array.
-    assert ops.read("s5", "0") == "5"
-    assert ops.read("s5", "1") is None
-    assert ops.read("missing", "0") is None
 
 
 def _managed(value: str | None) -> ShellVar:
@@ -459,7 +517,7 @@ def test_a_failing_coercion_lands_what_it_assigned():
         seed_var(session, "x", "RANDOM=42,1/0")
         with pytest.raises(ArithError):
             await set_var(session, None, "n", "x")
-        assert next_random(session, session.vars["RANDOM"].value) == 17772
+        assert session.vars.shell.next_random() == 17772
 
     asyncio.run(run())
 
@@ -469,11 +527,13 @@ def test_a_failing_coercion_lands_what_it_assigned():
 # refusal aborts the whole restore rather than dropping one variable.
 @pytest.mark.asyncio
 async def test_gate_restored_vars_refuses_a_denied_name():
-    table = vars_from_env({"SECRET_A": "1", "PUBLIC": "2"})
+    table = ShellVars.of(vars_from_env({"SECRET_A": "1", "PUBLIC": "2"}))
     with pytest.raises(PolicyDenied):
         await gate_restored_vars(Policies([DenySecrets()]), "s", table)
     await gate_restored_vars(
-        Policies([DenySecrets()]), "s", vars_from_env({"PUBLIC": "2"})
+        Policies([DenySecrets()]),
+        "s",
+        ShellVars.of(vars_from_env({"PUBLIC": "2"})),
     )
     await gate_restored_vars(None, "s", table)
 
@@ -487,19 +547,32 @@ async def test_gate_restored_vars_leaves_the_shell_bookkeeping_alone():
             return Deny("nothing may be set\n")
 
     await gate_restored_vars(
-        Policies([DenyAll()]), "s", vars_from_env({"PWD": "/", "OLDPWD": "/"})
+        Policies([DenyAll()]),
+        "s",
+        ShellVars.of(vars_from_env({"PWD": "/", "OLDPWD": "/"})),
     )
     with pytest.raises(PolicyDenied):
         await gate_restored_vars(
-            Policies([DenyAll()]), "s", vars_from_env({"X": "1"})
+            Policies([DenyAll()]), "s", ShellVars.of(vars_from_env({"X": "1"}))
         )
 
 
-def test_gate_rendering_is_what_set_var_shows_a_method():
-    assert gate_rendering("x") == "x"
-    assert gate_rendering({"b": "2", "a": "1"}) == "1 2"
-    assert gate_rendering(make_array(["p", "q"])) == "p q"
-    assert gate_rendering(None) is None
+def test_a_policy_is_shown_each_value_rendered():
+    shell = ShellVars.of(
+        {
+            "s": ShellVar("x", frozenset()),
+            "m": ShellVar({"b": "2", "a": "1"}, frozenset()),
+            "a": ShellVar(make_array(["p", "q"]), frozenset()),
+            "d": ShellVar(None, frozenset()),
+        }
+    ).shell
+    assert [shell.rendered(n) for n in ("s", "m", "a", "d", "no")] == [
+        "x",
+        "1 2",
+        "p q",
+        None,
+        None,
+    ]
 
 
 def test_positional_params_are_a_functions_own_even_when_empty():
@@ -516,44 +589,68 @@ def test_positional_params_are_a_functions_own_even_when_empty():
     assert session.positional_args == ["y"]
 
 
-def _in_function(
-    session: SessionState, temp: TempEnv
-) -> dict[str, ShellVar | None]:
-    locals_frame: dict[str, ShellVar | None] = {}
-    session._local_frames.extend([temp, locals_frame])
-    session._local_vars = locals_frame
-    return locals_frame
-
-
 @pytest.mark.asyncio
 async def test_unset_reveals_what_an_enclosing_scope_saved():
     view, session = _view()
-    _in_function(session, TempEnv({"A": ShellVar("old")}))
+    shell = session.vars.shell
+    seed_var(session, "A", "old")
+    temp = shell.open_temp()
+    shell.save_temp(temp, "A")
     seed_var(session, "A", "pre")
+    outer = shell.enter()
     await view.unset("A")
     assert session.env["A"] == "old"
-    assert "A" not in session._local_frames[0]
+    shell.leave(outer)
+    shell.close_temp(temp)
+    assert session.env["A"] == "old"
 
 
 @pytest.mark.asyncio
 async def test_unset_of_a_local_leaves_it_unset():
     view, session = _view()
-    frame = _in_function(session, TempEnv())
-    frame["A"] = ShellVar("1")
+    shell = session.vars.shell
+    seed_var(session, "A", "1")
+    outer = shell.enter()
+    shell.shadow("A", False)
     seed_var(session, "A", "local")
     await view.unset("A")
     assert "A" not in session.env
-    assert frame["A"] == ShellVar("1")
+    shell.leave(outer)
+    assert session.env["A"] == "1"
 
 
 def test_outlive_call_keeps_a_temporary_environment_name():
     session = SessionState(session_id="s")
-    temp = TempEnv({"A": None})
-    frame = _in_function(session, temp)
+    shell = session.vars.shell
+    temp = shell.open_temp()
+    shell.save_temp(temp, "A")
+    seed_var(session, "A", "t")
+    outer = shell.enter()
     assert in_call_env(session, "A")
-    frame["B"] = None
-    outlive_call(session, "B")
-    assert frame == {"B": None}
     outlive_call(session, "A")
-    assert temp == {}
     assert not in_call_env(session, "A")
+    shell.leave(outer)
+    shell.close_temp(temp)
+    assert session.env["A"] == "t"
+
+
+@pytest.mark.asyncio
+async def test_a_frame_voices_its_own_session_while_another_runs():
+    _, session = _view()
+    _, other = _view()
+    held = parse_program("true\necho here")
+    session._line_node = held.root.named_children[1]
+    gone = parse_program("echo there")
+    other._line_node = gone.root.named_children[0]
+    gone.release()
+    set_attr(session, "r", VarAttr.NAMEREF)
+    notes: list[str | bytes] = []
+    token = set_current_session(other)
+    try:
+        await set_var(session, None, "r", make_array(["x"]), diagnostics=notes)
+    finally:
+        reset_current_session(token)
+    held.release()
+    assert [
+        note if isinstance(note, str) else note.decode() for note in notes
+    ] == ["bash: line 2: warning: r: removing nameref attribute\n"]

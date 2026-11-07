@@ -1412,6 +1412,54 @@
           }
         },
         {
+          "command": "echo {1..10} | wc -c",
+          "expect": {
+            "exit": 0,
+            "stdout": "21\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "echo {1..100000}",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "line: memory exhausted\n"
+          }
+        },
+        {
+          "command": "z=$(printf %0100d 0); y=${z//0/0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMN}; echo \"len=${#y}\"",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "line: memory exhausted\n"
+          }
+        },
+        {
+          "command": "z=$(printf %0100d 0); y=${z/*/&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&}; echo \"len=${#y}\"",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "line: memory exhausted\n"
+          }
+        },
+        {
+          "command": "echo xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1}{1..1} | wc -c",
+          "expect": {
+            "exit": 0,
+            "stdout": "321\n",
+            "stderr": ""
+          }
+        },
+        {
+          "command": "echo {a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,} | wc -c",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "line: memory exhausted\n"
+          }
+        },
+        {
           "command": "seq 1 2000 | jq -Rs length; echo \"jq=$?\"",
           "expect": {
             "exit": 0,

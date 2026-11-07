@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "nrb=(1 2); declare -n nrc=nrb; echo ${nrc[1]} ${#nrc[@]}; nrc[2]=3; declare -p nrb",
+      "command": "nrb=(1 2); declare -n nrc=nrb; echo ${nrc[1]} ${#nrc[@]}; nrc[2]=3; declare -p nrb; declare -n nrp=PIPESTATUS; false | true; echo \"${nrp[@]} $nrp $(( nrp ))\"; declare -n nrq=FUNCNAME; nrh() { echo \"${nrq[0]}\"; }; nrh",
       "expect": {
         "exit": 0,
-        "stdout": "2 2\ndeclare -a nrb=([0]=\"1\" [1]=\"2\" [2]=\"3\")\n",
+        "stdout": "2 2\ndeclare -a nrb=([0]=\"1\" [1]=\"2\" [2]=\"3\")\n1 0 1 1\nnrh\n",
         "stderr": ""
       }
     },

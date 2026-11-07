@@ -98,11 +98,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "ar3=(one two three); echo ${ar3[-1]}",
+      "command": "ar3=(one two three); echo ${ar3[-1]}; (pzx=s; printf '[%s]' \"${ar3[@]@A}\" \"${pzx[@]@A}\" \"${ar3[*]@A}\"; echo; echo \"[${ar3[-9]}]\" \"[${ar3[-9]:-d}]\")",
       "expect": {
         "exit": 0,
-        "stdout": "three\n",
-        "stderr": ""
+        "stdout": "three\n[declare][-a][ar3=([0]=\"one\" [1]=\"two\" [2]=\"three\")][pzx='s'][declare -a ar3=([0]=\"one\" [1]=\"two\" [2]=\"three\")]\n[] [d]\n",
+        "stderr": "bash: line 1: ar3: bad array subscript\nbash: line 1: ar3: bad array subscript\n"
       }
     },
     {
@@ -518,10 +518,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "ar15=(1 2 3 4); echo ${ar15[@]:1:2}",
+      "command": "ar15=(1 2 3 4); echo ${ar15[@]:1:2}; ar15[9223372036854775807]=x; echo \"${ar15[@]:3} ${ar15[-1]} ${ar15[@]: -1}\"; unset 'ar15[-1]'; echo \"${!ar15[@]}\"",
       "expect": {
         "exit": 0,
-        "stdout": "2 3\n",
+        "stdout": "2 3\n4 x x x\n0 1 2 3\n",
         "stderr": ""
       }
     },

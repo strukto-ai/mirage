@@ -12,10 +12,10 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field, replace
-from types import MappingProxyType
-from typing import Any
+from typing import Any, TypeVar
 
 from mirage.cache.versions import VersionHistory
 from mirage.io.async_line_iterator import SharedInput, release_inputs
@@ -28,16 +28,13 @@ from mirage.policy.types import (
     ProfileScripts,
 )
 from mirage.process.config import ProcessPermissions
+from mirage.rs.session import ShellVars
 from mirage.secrets.config import EnvVar
 from mirage.shell.array import ShellArray
 from mirage.shell.console import JobOutput, Terminal
 from mirage.shell.constants import (
-    BASHPID,
     BIN_PREFIX,
     IFS_DEFAULT,
-    LINENO,
-    RANDOM,
-    RANDOM_UNSET,
     SHELL_ARGV0,
 )
 from mirage.shell.descriptors import Descriptor, StreamOwner
@@ -50,7 +47,6 @@ from mirage.shell.variable import (
     ShellVar,
     VarAttr,
     attrs_from_letters,
-    copy_var,
     stored_attrs,
 )
 from mirage.types import (
@@ -86,6 +82,8 @@ from mirage.workspace.types import StatusWriter
 # The file-creation mask a fresh shell starts with, as bash's.
 _FRESH_UMASK = 0o022
 
+T = TypeVar("T")
+
 
 def copy_state(value: Any) -> Any:
     """Copy one session field deeply enough that a child cannot write back.
@@ -93,10 +91,8 @@ def copy_state(value: Any) -> Any:
     Args:
         value (Any): the field value.
     """
-    if isinstance(value, ShellVar):
-        # The record is frozen, but an indexed or associative value is
-        # a live container, so the copy has to reach inside it.
-        return copy_var(value)
+    if isinstance(value, ShellVars):
+        return value.fork()
     if isinstance(value, dict):
         return {k: copy_state(v) for k, v in value.items()}
     if isinstance(value, set):
@@ -104,22 +100,6 @@ def copy_state(value: Any) -> Any:
     if isinstance(value, list):
         return list(value)
     return value
-
-
-def copy_locals(
-    frame: dict[str, ShellVar | None],
-) -> dict[str, ShellVar | None]:
-    """Copy saved locals into child-owned frames.
-
-    Temporary call environments become ordinary saved scopes in the child.
-
-    Args:
-        frame (dict[str, ShellVar | None]): the parent's saved variables.
-    """
-    return {
-        name: None if var is None else copy_var(var)
-        for name, var in frame.items()
-    }
 
 
 def vars_from_env(env: Mapping[str, str]) -> dict[str, ShellVar]:
@@ -277,6 +257,64 @@ def vars_from_fields(data: Mapping[str, Any]) -> dict[str, ShellVar]:
     return out
 
 
+class _Records(Mapping[str, T]):
+    """A live, read-only view of the records holding one kind of value,
+    as stored: hidden names and references are not resolved, and a
+    lookup reads the one record it names.
+
+    Args:
+        records (ShellVars): the session's variables.
+        kind (type[T]): the value's type.
+    """
+
+    __slots__ = ("_kind", "_records")
+
+    def __init__(self, records: ShellVars, kind: type[T]) -> None:
+        self._records = records
+        self._kind = kind
+
+    def __getitem__(self, name: str) -> T:
+        var = self._records.get(name)
+        if var is None or not isinstance(var.value, self._kind):
+            raise KeyError(name)
+        return var.value
+
+    def __iter__(self) -> Iterator[str]:
+        for name, var in self._records.records():
+            if isinstance(var.value, self._kind):
+                yield name
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+
+class _Readonly(AbstractSet[str]):
+    """A live view of the names ``readonly`` has marked.
+
+    Args:
+        records (ShellVars): the session's variables.
+    """
+
+    __slots__ = ("_records",)
+
+    def __init__(self, records: ShellVars) -> None:
+        self._records = records
+
+    def __contains__(self, name: object) -> bool:
+        if not isinstance(name, str):
+            return False
+        var = self._records.get(name)
+        return var is not None and VarAttr.READONLY in var.attrs
+
+    def __iter__(self) -> Iterator[str]:
+        for name, var in self._records.records():
+            if VarAttr.READONLY in var.attrs:
+                yield name
+
+    def __len__(self) -> int:
+        return sum(1 for _ in self)
+
+
 @dataclass
 class SessionState:
     session_id: str
@@ -295,7 +333,7 @@ class SessionState:
     # projections of it, so a name cannot be a scalar in one container
     # and an array in another, and an attribute cannot drift from the
     # value it describes.
-    vars: dict[str, ShellVar] = field(default_factory=dict)
+    vars: ShellVars = field(default_factory=lambda: ShellVars.of({}))
     # The manager stamps it on the workspace clock.
     created_at: float = field(default_factory=SystemClock().now)
     functions: dict[str, str] = field(default_factory=dict)
@@ -426,35 +464,6 @@ class SessionState:
     # Whether `set -e` is ending the shell: its statements unwind
     # without running ERR or RETURN again, as bash's exit leaves at once.
     errexit_exiting: bool = field(default=False, repr=False)
-    # Variables shadowed by `local` / `declare` in the running function;
-    # a None value means the caller had no variable of that name. One
-    # stack, not one per container: a local shadows the whole record, so
-    # its value and its attributes are saved and restored together.
-    _local_vars: dict[str, ShellVar | None] | None = field(
-        default=None, repr=False
-    )
-    # Every function frame on the call path, outermost first; the last
-    # is `_local_vars`. `declare -g` inside a nested call needs the
-    # outermost frame that shadows a name, since that frame's saved
-    # record is the global one.
-    _local_frames: list[dict[str, ShellVar | None]] = field(
-        default_factory=list, repr=False
-    )
-    # The caller's `RANDOM` marker for every frame that shadows the
-    # name, innermost last: a local `RANDOM` is an ordinary variable for
-    # the function's extent, and the generator resumes when it returns.
-    _local_random: list[str | None] = field(default_factory=list, repr=False)
-    # Whether `LINENO` or `BASHPID` was plain where a frame made it
-    # local, one entry per local, innermost last.
-    _local_plain: list[tuple[str, bool]] = field(
-        default_factory=list, repr=False
-    )
-    # The names a running `declare -g` has put at global scope
-    # (`reach_global`), each with its frame and the function's local it
-    # set aside: arithmetic in the declaration still reads that local.
-    _reached: list[tuple[str, dict[str, ShellVar | None], ShellVar | None]] = (
-        field(default_factory=list, repr=False)
-    )
     # The records running prefix assignments set aside, held until put back.
     _prefix_saves: list[dict[str, ShellVar | None]] = field(
         default_factory=list, repr=False
@@ -473,15 +482,6 @@ class SessionState:
     _pipe_status_pending: tuple[int, ...] | None = field(
         default=None, repr=False
     )
-    # `$RANDOM`'s generator state and the seed word it last consumed
-    # (`session/rng.py`). A child shell reseeds, as bash's does, and the
-    # parent retains its own state while the child runs.
-    _random_state: int | None = field(default=None, repr=False)
-    _random_seed: str | None = field(default=None, repr=False)
-    _random_last: int = field(default=0, repr=False)
-    # `$LINENO` and `$BASHPID` once the shell unset them: ordinary
-    # variables from then on, as bash's are. A fork keeps them so.
-    _plain_specials: frozenset[str] = field(default=frozenset(), repr=False)
     # Alias bookkeeping. bash expands an alias when it *parses* the line
     # that uses it, so a definition takes effect from the next line read
     # (`alias x=..; x` on one line finds no `x`; the same two statements
@@ -601,16 +601,19 @@ class SessionState:
         ones it inherited stay with the shell that opened them."""
         await release_inputs(self.open_inputs(), self._borrowed)
 
-    def to_dict(self) -> dict[str, Any]:
+    def variables_to_dict(self) -> dict[str, Any]:
+        """The record's keys the variables fill: ``env``, ``arrays``,
+        ``assocs``, ``var_attrs`` and ``managed``."""
         # A managed name serializes as its pointer, never its value: a
         # stored session may leak only where a secret lives. `env` skips
         # the name (the fetched plaintext must not land in the record)
         # while `var_attrs` keeps its letters, so a payload with the
         # `managed` key stripped still restores the name as
         # attributed-unset rather than dropping it.
+        records = self.vars.records()
         managed = {
             name: var.managed
-            for name, var in self.vars.items()
+            for name, var in records
             if var.managed is not None
         }
         # `env` is every scalar and `var_attrs` the letters set on the
@@ -620,13 +623,30 @@ class SessionState:
         # beside it. Without the second key a reload could only guess,
         # and guessing "exported" turned every plain `X=hello` into an
         # exported one on the first round trip.
-        data = {
-            "session_id": self.session_id,
-            "cwd": self.cwd,
-            "env": {n: v for n, v in self.env.items() if n not in managed},
-            "created_at": self.created_at,
-            "generation": self.generation,
+        data: dict[str, Any] = {
+            "env": {
+                name: var.value
+                for name, var in records
+                if isinstance(var.value, str) and name not in managed
+            },
         }
+        # Arrays ride beside `env`, which stays the plain name/value map
+        # an embedder reads: an indexed array by index, an associative
+        # one in the order its keys were first assigned.
+        arrays = {
+            name: {str(i): v for i, v in var.value.elements.items()}
+            for name, var in records
+            if isinstance(var.value, ShellArray)
+        }
+        if arrays:
+            data["arrays"] = arrays
+        assocs = {
+            name: dict(var.value)
+            for name, var in records
+            if isinstance(var.value, dict)
+        }
+        if assocs:
+            data["assocs"] = assocs
         # Always written, even empty, because its *presence* is the
         # discriminator: a payload without it is read as a bare process
         # environment and every name in it comes back exported. Writing
@@ -634,9 +654,7 @@ class SessionState:
         # last attribute was cleared) serialize as a process environment,
         # so the reload re-exported everything it held.
         data["var_attrs"] = {
-            name: stored_attrs(var)
-            for name, var in self.vars.items()
-            if var.attrs
+            name: stored_attrs(var) for name, var in records if var.attrs
         }
         if managed:
             refs: dict[str, dict[str, str]] = {}
@@ -646,6 +664,24 @@ class SessionState:
                     entry["fetch"] = "eager"
                 refs[name] = entry
             data["managed"] = refs
+        return data
+
+    def to_dict(self, variables: bool = True) -> dict[str, Any]:
+        """The session's record.
+
+        Args:
+            variables (bool): include the keys the variables fill; False
+                leaves them out, for a flush that compares their store's
+                version instead of reading them.
+        """
+        data: dict[str, Any] = {
+            "session_id": self.session_id,
+            "cwd": self.cwd,
+            "created_at": self.created_at,
+            "generation": self.generation,
+        }
+        if variables:
+            data.update(self.variables_to_dict())
         if self.functions:
             data["functions"] = dict(self.functions)
         if self.readonly_functions:
@@ -736,6 +772,8 @@ class SessionState:
             env = data.pop("env", {})
             attrs = data.pop("var_attrs", None)
             managed = data.pop("managed", None)
+            arrays = data.pop("arrays", {})
+            assocs = data.pop("assocs", {})
             # No `var_attrs` at all means the payload is a bare process
             # environment -- an embedder's dict, or a record another
             # writer hand-built -- so every name in it is exported,
@@ -747,6 +785,16 @@ class SessionState:
                 if attrs is None
                 else vars_from_dict(env, attrs)
             )
+            for name, elements in arrays.items():
+                out_vars[name] = ShellVar(
+                    ShellArray({int(i): v for i, v in elements.items()}),
+                    attrs_from_letters((attrs or {}).get(name, "")),
+                )
+            for name, entries in assocs.items():
+                out_vars[name] = ShellVar(
+                    dict(entries),
+                    attrs_from_letters((attrs or {}).get(name, "")),
+                )
             # A managed name restores declared-but-unfetched. The value
             # is forced back to None: a stored session must never carry
             # the plaintext, so one a tampered payload smuggles into
@@ -767,7 +815,7 @@ class SessionState:
                 )
             data["vars"] = out_vars
             if attrs is not None:
-                recorded = dict(out_vars)
+                recorded = out_vars
         for marks in ("readonly_functions", "exported_functions"):
             if marks in data:
                 data = {**data, marks: set(data[marks])}
@@ -864,6 +912,8 @@ class SessionState:
                 ),
                 processes=data.get("processes", ProcessPermissions()).list,
             )
+        if "vars" in data:
+            data["vars"] = ShellVars.of(data["vars"])
         session = cls(**data)
         # A function's alias view comes back as its site; where on its line
         # the definition stood went with the line.
@@ -876,7 +926,7 @@ class SessionState:
             # A recorded session comes back as it was written, so a
             # startup variable it had unset stays unset rather than being
             # seeded again; a bare environment starts a new shell.
-            session.vars = recorded
+            session.vars = ShellVars.of(recorded, session.ids.random_u32)
         return session
 
     @property
@@ -904,74 +954,61 @@ class SessionState:
         stage or substitution it runs in, else the shell itself."""
         return self.process_id or self.shell_pid or 0
 
-    def dynamic_value(self, name: str) -> str | None:
-        """What the shell computes a read of ``$LINENO`` or ``$BASHPID``
-        to (``line_number``, ``bash_pid``); None for any other name and
-        for one the shell unset, which reads as it was assigned.
-
-        Args:
-            name (str): the variable read.
-        """
-        if name in self._plain_specials:
-            return None
-        if name == LINENO:
-            return str(self.line_number)
-        if name == BASHPID:
-            return str(self.bash_pid)
-        return None
-
     @property
     def env(self) -> Mapping[str, str]:
         """The scalar variables, by name.
 
-        A mappingproxy, so an assignment into it raises instead of
-        landing in a throwaway dict -- silent loss is the exact failure
-        this store exists to remove.
-
-        A read-only projection of `vars`, not a container: a writer goes
-        through `SessionView.set` (or `seed_var` when seeding a session
-        before it is narrowed), so a `pre_session` policy sees every
-        write. `state.py` has always documented that rule; making the
-        mapping read-only is what stops it being walked around by
-        assigning into storage.
+        Read-only, so an assignment into it raises instead of landing in
+        a throwaway dict. A writer goes through `SessionView.set` (or
+        `seed_var` when seeding a session before it is narrowed), so a
+        `pre_session` policy sees every write.
         """
-        return MappingProxyType(
-            {
-                name: var.value
-                for name, var in self.vars.items()
-                if isinstance(var.value, str)
-            }
-        )
+        return _Records(self.vars, str)
 
     @property
     def arrays(self) -> Mapping[str, ShellArray]:
         """The indexed arrays, by name. Read-only, like `env`."""
-        return MappingProxyType(
-            {
-                name: var.value
-                for name, var in self.vars.items()
-                if isinstance(var.value, ShellArray)
-            }
-        )
+        return _Records(self.vars, ShellArray)
 
     @property
     def assocs(self) -> Mapping[str, dict[str, str]]:
         """The associative arrays, by name. Read-only, like `env`."""
-        return MappingProxyType(
-            {
-                name: var.value
-                for name, var in self.vars.items()
-                if isinstance(var.value, dict)
-            }
-        )
+        return _Records(self.vars, dict)
 
     @property
-    def readonly_vars(self) -> frozenset[str]:
+    def readonly_vars(self) -> AbstractSet[str]:
         """The names `readonly` has marked. Read-only, like `env`."""
-        return frozenset(
-            name
-            for name, var in self.vars.items()
-            if VarAttr.READONLY in var.attrs
+        return _Readonly(self.vars)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == "vars" and not isinstance(value, ShellVars):
+            ids = self.__dict__.get("ids")
+            value = ShellVars.of(
+                value, None if ids is None else ids.random_u32
+            )
+        object.__setattr__(self, name, value)
+        # The shell draws a first `$RANDOM` seed from the session's ids, so
+        # a new source, or a new shell, binds as it lands.
+        if name in ("ids", "vars") and {"ids", "vars"} <= self.__dict__.keys():
+            self.vars.shell.use_ids(self.ids.random_u32)
+        # The shell holds the hidden names itself, so a new visibility,
+        # or a new shell, takes them as it lands, wherever it is set.
+        if (
+            name in ("visibility", "vars")
+            and {
+                "visibility",
+                "vars",
+            }
+            <= self.__dict__.keys()
+        ):
+            self.hide_vars()
+
+    def hide_vars(self) -> None:
+        """Hand the shell the names the session's visibility hides."""
+        hidden = self.visibility.vars
+        self.vars.shell.hide(
+            [] if hidden is None else list(hidden.names),
+            [] if hidden is None else list(hidden.patterns),
         )
 
     def __post_init__(self) -> None:
@@ -1015,81 +1052,67 @@ class SessionState:
         ``execute(cwd=...)`` from reporting the persistent session's old
         directory from ``pwd``.
 
+        A fork is the same shell going on, so a startup variable the
+        source unset stays unset (`unset IFS; ( ... )`) and the shell's
+        records carry over whole; a fork given new variables starts them.
+
         Args:
             **overrides: Field-name kwargs to override on the copy.
         """
+        return self._fork(overrides, None)
+
+    def _fork(
+        self, overrides: dict[str, Any], records: ShellVars | None
+    ) -> "SessionState":
+        given = {*overrides, *(() if records is None else ("vars",))}
         defaults: dict[str, Any] = {
-            name: copy_state(getattr(self, name)) for name in INHERITED_FIELDS
+            name: copy_state(getattr(self, name))
+            for name in INHERITED_FIELDS
+            if name not in given
         }
         defaults.update(overrides)
+        if records is None and "vars" not in overrides:
+            records = defaults["vars"]
+        if records is not None:
+            defaults["vars"] = ShellVars.of({})
         if "cwd" in overrides and "logical_cwd" not in overrides:
             defaults["logical_cwd"] = None
             # `$PWD` names where the session is, so it follows the move
             # even when the caller also supplied an env to layer on.
-            defaults["vars"] = {
-                **defaults["vars"],
-                "PWD": ShellVar(overrides["cwd"], frozenset({VarAttr.EXPORT})),
-            }
-        kept = None if "vars" in overrides else dict(defaults["vars"])
+            moved = defaults["vars"] if records is None else records
+            moved["PWD"] = ShellVar(
+                overrides["cwd"], frozenset({VarAttr.EXPORT})
+            )
         forked = SessionState(**defaults)
-        if kept is not None:
-            # A fork is the same shell going on, so a startup variable the
-            # source unset stays unset (`unset IFS; ( ... )`) rather than
-            # being seeded again; a fork given new variables starts them.
-            forked.vars = kept
-        if self._random_seed == RANDOM_UNSET:
-            forked._random_seed = RANDOM_UNSET
-        forked._plain_specials = self._plain_specials
+        if records is not None:
+            forked.vars = records
         forked._borrowed = [*self._borrowed, *self.open_inputs()]
         return forked
 
-    def subshell(self) -> "SessionState":
+    def subshell(self, records: ShellVars | None = None) -> "SessionState":
         """A child shell of this session: a fork that reads on from here.
 
         ``fork`` copies what a session keeps; a child shell (a command
         substitution, a subshell) also inherits the reader's position, the
-        aliases being expanded and the local frames, and reseeds
+        aliases being expanded and the local scopes, and reseeds
         ``$RANDOM`` on its first draw instead of replaying this session's
         seed.
 
         Args:
-            None
+            records (ShellVars | None): the child's variables when a
+                running expansion made them (a substitution's child
+                shell); None copies this session's.
         """
-        child = self.fork()
+        child = self._fork(
+            {}, self.vars.subshell() if records is None else records
+        )
         child._parse_current = self._parse_current
         child._parse_row = self._parse_row
         child._line_row = self._line_row
         child._parse_name = self._parse_name
         child._line_node = self._line_node
         child._alias_expansion = self._alias_expansion
-        child._local_vars = (
-            None if self._local_vars is None else copy_locals(self._local_vars)
-        )
-        child._local_frames = [
-            child._local_vars
-            if frame is self._local_vars and child._local_vars is not None
-            else copy_locals(frame)
-            for frame in self._local_frames
-        ]
-        child._local_random = list(self._local_random)
-        child._local_plain = list(self._local_plain)
-        if child._random_seed != RANDOM_UNSET:
-            child._draw_afresh()
         return child
-
-    def _draw_afresh(self) -> None:
-        """Start ``$RANDOM`` on a new sequence at its next draw, rather
-        than seed it from the value the variable holds now.
-
-        Args:
-            None
-        """
-        var = self.vars.get(RANDOM)
-        self._random_seed = (
-            var.value
-            if var is not None and isinstance(var.value, str)
-            else None
-        )
 
     def new_shell(self) -> "SessionState":
         """A new shell started from this session, as a nested ``bash`` is.
@@ -1113,7 +1136,7 @@ class SessionState:
         """
         exported = frozenset({VarAttr.EXPORT})
         variables: dict[str, ShellVar] = {}
-        for name, var in self.vars.items():
+        for name, var in self.vars.records():
             if VarAttr.EXPORT not in var.attrs or name == "IFS":
                 continue
             if not isinstance(var.value, str) and var.managed is None:
@@ -1130,7 +1153,7 @@ class SessionState:
             if name in self.exported_functions
         }
         child = self.fork(
-            vars=variables,
+            vars=ShellVars.of(variables).subshell(),
             functions=functions,
             exported_functions=set(functions),
             readonly_functions=set(),
@@ -1152,8 +1175,6 @@ class SessionState:
             _getopts_optind=None,
             errexit_ignored=False,
         )
-        child._plain_specials = frozenset()
-        child._draw_afresh()
         return child
 
     def remove_function(self, name: str) -> None:

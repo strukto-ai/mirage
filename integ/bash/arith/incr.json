@@ -63,11 +63,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "zx=5 zy=1; for e in '1++2' '1--1' '++5' '---1' 'zx+++zy' '0x' '-2**2' '99999999999999999999' '1 ? 2, 3 : 4'; do printf '%s ' \"$((e))\"; done; echo \"zx=$zx\"; zn='zw=4'; declare -i zn; zn+=zw; echo \"zn=$zn zw=$zw\"; unset zx zy e zn zw",
+      "command": "zx=5 zy=1; for e in '1++2' '1--1' '++5' '---1' 'zx+++zy' '0x' '-2**2' '99999999999999999999' '1 ? 2, 3 : 4'; do printf '%s ' \"$((e))\"; done; echo \"zx=$zx\"; zn='zw=4'; declare -i zn; zn+=zw; echo \"zn=$zn zw=$zw\"; zp=$(printf '(%.0s' {1..200}); zq=$(printf ')%.0s' {1..200}); zm=$(printf -- '- %.0s' {1..301}); echo \"deep=$(( ${zp}7${zq} )) $(( ${zm}7 ))\"; zr=2$(printf '**1%.0s' {1..300}); zt=$(printf '0?1:%.0s' {1..300})9; echo \"chain=$((zr)) $((zt))\"; unset zx zy e zn zw zp zq zm zr zt; ( echo $(( '1' + 1 )) ); echo rc=$?; zb='1?2:3+'; ( echo $((zb)) ); echo rc=$?; unset zb",
       "expect": {
         "exit": 0,
-        "stdout": "3 2 5 -1 6 0 4 7766279631452241919 3 zx=6\nzn=8 zw=4\n",
-        "stderr": ""
+        "stdout": "3 2 5 -1 6 0 4 7766279631452241919 3 zx=6\nzn=8 zw=4\ndeep=7 -7\nchain=2 9\nrc=1\nrc=1\n",
+        "stderr": "bash: line 1: '1' + 1 : syntax error: operand expected (error token is \"'1' + 1 \")\nbash: line 1: 1?2:3+: syntax error: operand expected (error token is \"+\")\n"
       }
     }
   ]

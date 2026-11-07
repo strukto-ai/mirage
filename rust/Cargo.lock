@@ -303,6 +303,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mirage-shell-wasm"
+version = "0.0.9-alpha.1"
+dependencies = [
+ "mirage-rs",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"

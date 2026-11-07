@@ -36,8 +36,6 @@ from mirage.types import Limit, OnExceed
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace.executor.redirect import PipeRecorder
-from mirage.workspace.expand import parts as expand_parts
-from mirage.workspace.expand.brace import substitute
 from mirage.workspace.lookup.lookup import programs
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
 
@@ -106,23 +104,14 @@ async def test_the_line_deadline_lands_inside_a_long_expansion(line):
 
 
 @pytest.mark.asyncio
-async def test_the_line_deadline_lands_partway_through_a_brace_range(
-    monkeypatch,
-):
-    made = 0
-
-    def counted(word, values):
-        nonlocal made
-        made += 1
-        return substitute(word, values)
-
-    monkeypatch.setattr(expand_parts, "substitute", counted)
+async def test_the_line_deadline_lands_in_a_long_brace_range():
     ws = Workspace(
         {"/data": RAMVFS()}, mode=MountMode.WRITE, command_limits=_line(0.3)
     )
-    r = await ws.shell("echo {1..3000000} > /dev/null")
+    started = time.monotonic()
+    r = await ws.shell("echo {1..1000000} > /dev/null")
     assert r.exit_code == 124
-    assert 0 < made < 3000000
+    assert time.monotonic() - started < 3
 
 
 @pytest.mark.asyncio

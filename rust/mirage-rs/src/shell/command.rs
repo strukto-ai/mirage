@@ -1,4 +1,6 @@
-use super::lex::{digits_end, is_blank, is_name, is_name_start, is_operator, is_space, name_end};
+use super::lex::{
+    blank_end, digits_end, is_blank, is_name, is_name_start, is_operator, is_space, name_end,
+};
 use super::parser::{Mark, Parser, R};
 use super::tree::Syn;
 
@@ -365,13 +367,51 @@ impl Parser<'_> {
                 at = name_end(self.s, at);
             }
             if self.s.get(at) == Some(&b'[') {
-                self.scan_bracket(at + 1, at)?;
+                let close = self.scan_bracket(at + 1, at)?;
+                let assigns =
+                    self.s[close..].starts_with(b"=") || self.s[close..].starts_with(b"+=");
+                if at == self.i && assigns && self.s[at + 1..close - 1].iter().any(|b| is_blank(*b))
+                {
+                    children.push(self.spaced_element(close)?);
+                    continue;
+                }
             }
             match self.literal_opt(super::word::Ctx::default())? {
                 Some(value) => children.push(value),
                 None => return self.fail(self.i),
             }
         }
+    }
+
+    /// An element whose subscript holds blanks (`[x y]=z`): bash reads a
+    /// subscript to its `]` before a blank can end the word, so the blanks
+    /// are the key's. The subscript's pieces expand as any word's do.
+    fn spaced_element(&mut self, close: usize) -> R<Syn> {
+        let start = self.i;
+        let mut parts = vec![Syn::leaf("word", start, start + 1)];
+        self.i = start + 1;
+        let inside = super::word::Ctx {
+            bracket: true,
+            ..super::word::Ctx::default()
+        };
+        while self.i < close - 1 {
+            let blanks = blank_end(self.s, self.i);
+            if blanks > self.i {
+                parts.push(Syn::leaf("word", self.i, blanks.min(close - 1)));
+                self.i = blanks.min(close - 1);
+                continue;
+            }
+            match self.literal_opt(inside)? {
+                Some(piece) => parts.push(piece),
+                None => return self.fail(self.i),
+            }
+        }
+        match self.literal_opt(super::word::Ctx::default())? {
+            Some(mut value) if value.kind == "concatenation" => parts.append(&mut value.children),
+            Some(value) => parts.push(value),
+            None => return self.fail(self.i),
+        }
+        Ok(Syn::node("concatenation", parts))
     }
 
     pub(super) fn subscript(&mut self, name_at: usize) -> R<Syn> {

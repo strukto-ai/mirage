@@ -61,7 +61,7 @@
       }
     },
     {
-      "id": "brace_cmdsub_runs_once",
+      "id": "brace_cmdsub_runs_per_word",
       "seq": 9901213,
       "targets": [
         "ram",
@@ -71,7 +71,7 @@
       "command": "rm -f /data/sub-count; echo {a,b}$(echo x >> /data/sub-count; printf value); wc -l < /data/sub-count",
       "expect": {
         "exit": 0,
-        "stdout": "avalue bvalue\n1\n",
+        "stdout": "avalue bvalue\n2\n",
         "stderr": ""
       }
     },

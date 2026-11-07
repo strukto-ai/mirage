@@ -203,10 +203,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(printf 'body\\n' > '{mount}/cmdsub file'; p='{mount}/cmdsub file'; printf '[%s]\\n' \"$(< \"$p\")\" \"$(< \"$(printf '%s' \"$p\")\")\"; rm \"$p\")",
+      "command": "(printf 'body\\n' > '{mount}/cmdsub file'; p='{mount}/cmdsub file'; printf '[%s]\\n' \"$(< \"$p\")\" \"$(< \"$(printf '%s' \"$p\")\")\"; : > \"$p.n\"; { y=$(< $(echo hit >> \"$p.n\"; printf 'a b')); echo \"rc=$? [$y]\"; } 2>/dev/null; cat \"$p.n\"; rm \"$p\" \"$p.n\")",
       "expect": {
         "exit": 0,
-        "stdout": "[body]\n[body]\n",
+        "stdout": "[body]\n[body]\nrc=1 []\nhit\n",
         "stderr": ""
       }
     },

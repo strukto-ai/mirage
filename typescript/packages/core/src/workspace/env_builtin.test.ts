@@ -18,13 +18,13 @@ import { makeWorkspace, stdoutStr } from '../../tests/workspace/fixtures/workspa
 const ENC = new TextEncoder()
 
 describe('workspace: env builtin', () => {
-  it('prints the environment unsorted in insertion order', async () => {
+  it('prints the environment sorted by name', async () => {
     const { ws } = makeWorkspace()
     await ws.shell('export ZZZ=1')
     await ws.shell('export AAA=2')
     const io = await ws.shell('env')
     const out = stdoutStr(io)
-    expect(out.indexOf('ZZZ=1')).toBeLessThan(out.indexOf('AAA=2'))
+    expect(out.indexOf('AAA=2')).toBeLessThan(out.indexOf('ZZZ=1'))
     await ws.close()
   })
 

@@ -163,6 +163,17 @@ class ProgramNode:
         return self._wrap(self._node.child_by_field_name(name))
 
 
+def shell_node(node: TSNodeLike) -> ShellNode | None:
+    """The parser's own node a node reads, None for a synthetic one.
+
+    Args:
+        node (TSNodeLike): a program's node, the parser's, or a literal.
+    """
+    if isinstance(node, ProgramNode):
+        return shell_node(node._node)
+    return node if isinstance(node, ShellNode) else None
+
+
 def retain_programs(nodes: Sequence[TSNodeLike]) -> Callable[[], None]:
     """Retain each program the nodes come from, once; return the release.
 

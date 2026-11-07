@@ -54,9 +54,11 @@ it('fits the upload limit', () => {
   expect(total).toBeLessThan(LIMIT)
 })
 
-it('loads the Rust module as a .wasm file, with no base64 copy in the script', () => {
-  expect([...files.keys()].some((name) => name.endsWith('mirage_rs.wasm'))).toBe(true)
-  // A base64 copy of the module would be one run of millions of base64
+it('loads the Rust modules as .wasm files, with no base64 copy in the script', () => {
+  for (const module of ['mirage_rs.wasm', 'mirage_shell.wasm']) {
+    expect([...files.keys()].some((name) => name.endsWith(module))).toBe(true)
+  }
+  // A base64 copy of a module would be one run of millions of base64
   // characters; the script's own longest run is tens of thousands.
   const script = readFileSync(join(outdir, 'worker.js'), 'latin1')
   let longest = 0

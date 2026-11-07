@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "declare -A QAA; QAA[alpha]=1; QAA[beta]=2; echo \"${QAA[alpha]}|${QAA[beta]}|${#QAA[@]}\"",
+      "command": "declare -A QAA; QAA[alpha]=1; QAA[beta]=2; echo \"${QAA[alpha]}|${QAA[beta]}|${#QAA[@]}\"; declare -A QAP=([__proto__]=a [constructor]=b); QAP+=([toString]=c); QAP[constructor]+=x; QAP[valueOf]+=y; QAP[hasOwnProperty]=z; echo \"${QAP[__proto__]} ${QAP[constructor]} ${QAP[toString]} ${QAP[valueOf]} ${QAP[hasOwnProperty]} ${#QAP[@]}\"",
       "expect": {
         "exit": 0,
-        "stdout": "1|2|2\n",
+        "stdout": "1|2|2\na bx c y z 5\n",
         "stderr": ""
       }
     },
@@ -133,10 +133,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "declare -A QAD=([c]=3 [a]=1 [b]=2); echo \"${QAD[@]}\"; echo \"${!QAD[@]}\"",
+      "command": "declare -A QAD=([c]=3 [a]=1 [b]=2); echo \"${QAD[@]}\"; echo \"${!QAD[@]}\"; (declare -A pzk=([x y]=z [a b]=c); echo \"${pzk[x y]}\" \"${pzk[a b]}\" ${#pzk[@]})",
       "expect": {
         "exit": 0,
-        "stdout": "1 2 3\na b c\n",
+        "stdout": "1 2 3\na b c\nz c 2\n",
         "stderr": ""
       }
     },

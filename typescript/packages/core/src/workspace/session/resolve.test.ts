@@ -372,7 +372,7 @@ describe('narrow / applyProfile', () => {
     expect(applied.mountModes).toEqual(new Map([['/a', MountMode.WRITE]]))
     expect(applied.cwd).toBe('/a')
     expect(applied.env.ROLE).toBe('x')
-    expect(applied.vars.ROLE?.attrs.has(VarAttr.Export)).toBe(true)
+    expect(applied.vars.get('ROLE')?.attrs.has(VarAttr.Export)).toBe(true)
   })
 
   it("carries the profile's admission rules onto the session", () => {

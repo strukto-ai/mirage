@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { EvaluationContext } from '../evaluation.ts'
-import type { SessionView } from '../../view/types.ts'
+import type { Policies } from '../../policy/index.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { CondNode } from '../executor/builtins/condition/index.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
@@ -34,9 +34,9 @@ export async function expandDoubleBracket(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   cs: CallStack | null,
-  view?: SessionView,
+  policies: Policies | null = null,
 ): Promise<CondNode> {
-  return condNode(new CondParser(condTokens(node)).parse(), context, executeFn, cs, view)
+  return condNode(new CondParser(condTokens(node)).parse(), context, executeFn, cs, policies)
 }
 
 /** Expand one parsed `[[ ]]` tree into a CondNode. */
@@ -45,7 +45,7 @@ async function condNode(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   cs: CallStack | null,
-  view?: SessionView,
+  policies: Policies | null = null,
 ): Promise<CondNode> {
   switch (tree.kind) {
     case 'and':
@@ -55,30 +55,33 @@ async function condNode(
       const { left, right } = tree
       const first: CondNode = {
         kind: 'lazy',
-        expand: () => condNode(left, context, executeFn, cs, view),
+        expand: () => condNode(left, context, executeFn, cs, policies),
       }
       const second: CondNode = {
         kind: 'lazy',
-        expand: () => condNode(right, context, executeFn, cs, view),
+        expand: () => condNode(right, context, executeFn, cs, policies),
       }
       return { kind: tree.kind, left: first, right: second }
     }
     case 'not':
-      return { kind: 'not', inner: await condNode(tree.inner, context, executeFn, cs, view) }
+      return { kind: 'not', inner: await condNode(tree.inner, context, executeFn, cs, policies) }
     case 'group':
-      return condNode(tree.inner, context, executeFn, cs, view)
+      return condNode(tree.inner, context, executeFn, cs, policies)
     case 'unary':
       return {
         kind: 'unary',
         op: tree.op,
-        operand: await expandNode(tree.operand, context, executeFn, cs, view),
+        operand: await expandNode(tree.operand, context, executeFn, cs, policies),
       }
     case 'binary': {
-      const leftText = await expandNode(tree.left, context, executeFn, cs, view)
-      return comparison(tree.op, leftText, tree.right, context, executeFn, cs, view)
+      const leftText = await expandNode(tree.left, context, executeFn, cs, policies)
+      return comparison(tree.op, leftText, tree.right, context, executeFn, cs, policies)
     }
     case 'word':
-      return { kind: 'word', value: await expandNode(tree.operand, context, executeFn, cs, view) }
+      return {
+        kind: 'word',
+        value: await expandNode(tree.operand, context, executeFn, cs, policies),
+      }
   }
 }
 
@@ -90,7 +93,7 @@ async function comparison(
   context: EvaluationContext,
   executeFn: ExecuteFn,
   cs: CallStack | null,
-  view?: SessionView,
+  policies: Policies | null = null,
 ): Promise<CondNode> {
   if (PATTERN_OPS.has(op)) {
     // The right side of a match is a pattern word; the shared expander
@@ -98,9 +101,9 @@ async function comparison(
     // literal, unquoted live), so the evaluator matches unconditionally. A
     // wholly-literal pattern matches exactly itself.
     const expand = op === '=~' ? expandRegex : expandPattern
-    const pattern = await expand(right, context, executeFn, cs, view)
+    const pattern = await expand(right, context, executeFn, cs, policies)
     return { kind: 'binary', left: leftText, op, right: pattern }
   }
-  const rightText = await expandNode(right, context, executeFn, cs, view)
+  const rightText = await expandNode(right, context, executeFn, cs, policies)
   return { kind: 'binary', left: leftText, op, right: rightText }
 }

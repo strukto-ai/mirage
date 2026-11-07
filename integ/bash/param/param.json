@@ -413,10 +413,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "pr1=hello; echo ${pr1/l/L}",
+      "command": "pr1=hello; echo ${pr1/l/L}; echo ${pr1/l/[&]} ${pr1//[ho]/<&>} ${pr1/l/\\&} \"${pr1/l/\"&\"}\"; echo \"[${pzun/x/y}]\" \"${pr1/#/<}\" \"${pr1/%/>}\" \"[${pzun/#/P}]\" \"[${pzun//}]\"",
       "expect": {
         "exit": 0,
-        "stdout": "heLlo\n",
+        "stdout": "heLlo\nhe[l]lo <h>ell<o> he&lo he&lo\n[] <hello hello> [] []\n",
         "stderr": ""
       }
     },
@@ -938,11 +938,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "ps3=abcdef; echo ${ps3: -2}",
+      "command": "ps3=abcdef; echo ${ps3: -2}; (echo ${ps3:4:-3}); echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "ef\n",
-        "stderr": ""
+        "stdout": "ef\nrc=1\n",
+        "stderr": "bash: line 1: -3: substring expression < 0\n"
       }
     },
     {
@@ -1148,10 +1148,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "pc2='hello world'; echo \"${pc2^^}\"",
+      "command": "pc2='hello world'; echo \"${pc2^^}\"; (echo \"${pc2@U}|${pc2@u}|${pc2@L}\"; pzt='a\\tb'\\''c'; echo \"${pzt@Q}\" \"${pzt@E}\"; declare -A pzm=([k]=v); pza=(a 'b c'); declare -ir pzi=7; echo \"${pzi@a} ${pza@a} ${pzm@a} ${pzi@A}\"; echo \"${pza[@]@Q}|${pzm[@]@K}|${pzm[@]@k}|${pza[@]@A}\"; declare -n pzr=pzi; declare -a pzs=([1]=x); declare -i pzn; echo \"${pzm@A}|${pzm[zz]@A}|${pza[5]@A}|${pzs@A}|${pzn@A}|${pzr@A}|[${pzu@A}]|${pzs-unset}\"); (pzg='aBc dE'; echo \"${pzg~}|${pzg~~}|${pzg~~[a-c]}|${pzg~[a-z]}\"); (pzc=($'\\x01\\'x' $'\\x01\\\\y'); echo \"${pzc[*]@A}\"; eval \"${pzc[*]@A}\"; printf '%q\\n' \"${pzc[@]}\")",
       "expect": {
         "exit": 0,
-        "stdout": "HELLO WORLD\n",
+        "stdout": "HELLO WORLD\nHELLO WORLD|Hello world|hello world\n'a\\tb'\\''c' a\tb'c\nir a A declare -ir pzi='7'\n'a' 'b c'|k \"v\" |k v|declare -a pza=([0]=\"a\" [1]=\"b c\")\ndeclare -A pzm|declare -A pzm|declare -a pza|declare -a pzs|declare -i pzn|declare -ir pzi='7'|[]|unset\nABc dE|AbC De|ABC dE|ABc dE\ndeclare -a pzc=([0]=$'\\001\\'x' [1]=$'\\001\\\\y')\n$'\\001\\'x'\n$'\\001\\\\y'\n",
         "stderr": ""
       }
     },
@@ -1323,11 +1323,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "pref2=zz_missing_pn; echo \"[${!pref2}]\"",
+      "command": "pref2=zz_missing_pn; echo \"[${!pref2}]\"; pzqa=1 pzqb=2; echo ${!pzq@} \"${!pzq*}\"; (: ${!pzun1}); echo rc=$?; (set -u; pzr2=pzun2; : ${!pzr2}); echo rc=$?; (pzib=1a; : ${!pzib}); echo rc=$?; (pzia=(x y); pzi1='pzia[1]' pzi2='pzia[@]' pzid=zz_missing; echo ${!pzi1} ${!pzi2} ${!pzid:-d} ${!pzi1:-e} ${!pzi1:+f})",
       "expect": {
         "exit": 0,
-        "stdout": "[]\n",
-        "stderr": ""
+        "stdout": "[]\npzqa pzqb pzqa pzqb\nrc=1\nrc=1\nrc=1\ny x y d y f\n",
+        "stderr": "bash: line 1: pzun1: invalid indirect expansion\nbash: line 1: !pzr2: unbound variable\nbash: line 1: 1a: invalid variable name\n"
       }
     },
     {
@@ -2653,11 +2653,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "( set -- a; set -u; echo \"$10|$123\" )",
+      "command": "( set -- a; set -u; echo \"$10|$123\" ); ( set -u; echo $-; echo $((pzqz+1)); echo no ); echo rc=$?; ( unset HOME; set -u; echo \"[$HOME]\"; echo no ); echo rc=$?; ( pzv=([1]=x); set -u; echo \"[$pzv]\"; echo no ); echo rc=$?; ( declare -A pzw=([k]=v); set -u; echo \"[${pzw}]\"; echo no ); echo rc=$?; ( set -u; echo \"$3\" ); ( set -u; echo \"${3}\" ); echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "a0|a23\n",
-        "stderr": ""
+        "stdout": "a0|a23\nhuBc\nrc=1\nrc=1\nrc=1\nrc=1\nrc=1\n",
+        "stderr": "bash: line 1: pzqz: unbound variable\nbash: line 1: HOME: unbound variable\nbash: line 1: pzv: unbound variable\nbash: line 1: pzw: unbound variable\nbash: line 1: $3: unbound variable\nbash: line 1: 3: unbound variable\n"
       }
     },
     {
@@ -3143,11 +3143,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "(: ${}); (: ${.}); (: ${pb3.b}); (: ${1a}); (: ${pb3:}); (: ${#pb3 b}); (: ${#pb3-x}); (: ${!pb3 b}); (: ${pb3;b}); (: ${pb3[1]x}); (: ${pb3*}); (: ${ pb3}); (: ${pb3 b}); (: ${pb3 }); (: ${%pb3}); (: ${-pb3}); (: ${$pb3}); (: ${#%}); (: ${#!x}); (: ${!$}); (: ${pb3[]}); (: ${@pb3}); (: ${pb3\\ b}); (: ${pb3\"b\"}); set -- p1 p2; pb3=hello; echo ${#} ${!#} ${@:2} ${pb3-x} ${#pb3} ${pb3:1:2}; (: ${_} ${10} ${00} ${-} ${?} ${##} ${#-} ${#pb3[@]} ${!pb3} ${!pb3*} ${!pb3[@]} ${pb3:-} ${pb3::} ${pb3: } ${pb3@Q} ${@:1} ${pb3-b c}); echo rc=$?",
+      "command": "(: ${}); (: ${.}); (: ${pb3.b}); (: ${1a}); (: ${pb3:}); (: ${#pb3 b}); (: ${#pb3-x}); (: ${!pb3 b}); (: ${pb3;b}); (: ${pb3[1]x}); (: ${pb3*}); (: ${ pb3}); (: ${pb3 b}); (: ${pb3 }); (: ${%pb3}); (: ${-pb3}); (: ${$pb3}); (: ${#%}); (: ${#!x}); (: ${!$}); (: ${pb3[]}); (: ${@pb3}); (: ${pb3\\ b}); (: ${pb3\"b\"}); set -- p1 p2; pb3=hello; echo ${#} ${!#} ${@:2} ${pb3-x} ${#pb3} ${pb3:1:2}; (: ${_} ${10} ${00} ${-} ${?} ${##} ${#-} ${#pb3[@]} ${!pb3} ${!pb3*} ${!pb3[@]} ${pb3:-} ${pb3::} ${pb3: } ${pb3@Q} ${@:1} ${pb3-b c}); echo rc=$?; (pzt=x; : ${pzt@Z}); echo rc=$?; (: ${pzu9@Z}); echo rc=$?; (: ${9:=x}); echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "2 p2 p2 hello 5 el\nrc=0\n",
-        "stderr": "bash: line 1: ${}: bad substitution\nbash: line 1: ${.}: bad substitution\nbash: line 1: ${pb3.b}: bad substitution\nbash: line 1: ${1a}: bad substitution\nbash: line 1: ${pb3:}: bad substitution\nbash: line 1: ${#pb3 b}: bad substitution\nbash: line 1: ${#pb3-x}: bad substitution\nbash: line 1: ${!pb3 b}: bad substitution\nbash: line 1: ${pb3;b}: bad substitution\nbash: line 1: ${pb3[1]x}: bad substitution\nbash: line 1: ${pb3*}: bad substitution\nbash: line 1: ${ pb3}: bad substitution\nbash: line 1: ${pb3 b}: bad substitution\nbash: line 1: ${pb3 }: bad substitution\nbash: line 1: ${%pb3}: bad substitution\nbash: line 1: ${-pb3}: bad substitution\nbash: line 1: ${$pb3}: bad substitution\nbash: line 1: ${#%}: bad substitution\nbash: line 1: ${#!x}: bad substitution\nbash: line 1: ${!$}: bad substitution\nbash: line 1: ${pb3[]}: bad substitution\nbash: line 1: ${@pb3}: bad substitution\nbash: line 1: ${pb3\\ b}: bad substitution\nbash: line 1: ${pb3\"b\"}: bad substitution\n"
+        "stdout": "2 p2 p2 hello 5 el\nrc=0\nrc=1\nrc=0\nrc=1\n",
+        "stderr": "bash: line 1: ${}: bad substitution\nbash: line 1: ${.}: bad substitution\nbash: line 1: ${pb3.b}: bad substitution\nbash: line 1: ${1a}: bad substitution\nbash: line 1: ${pb3:}: bad substitution\nbash: line 1: ${#pb3 b}: bad substitution\nbash: line 1: ${#pb3-x}: bad substitution\nbash: line 1: ${!pb3 b}: bad substitution\nbash: line 1: ${pb3;b}: bad substitution\nbash: line 1: ${pb3[1]x}: bad substitution\nbash: line 1: ${pb3*}: bad substitution\nbash: line 1: ${ pb3}: bad substitution\nbash: line 1: ${pb3 b}: bad substitution\nbash: line 1: ${pb3 }: bad substitution\nbash: line 1: ${%pb3}: bad substitution\nbash: line 1: ${-pb3}: bad substitution\nbash: line 1: ${$pb3}: bad substitution\nbash: line 1: ${#%}: bad substitution\nbash: line 1: ${#!x}: bad substitution\nbash: line 1: ${!$}: bad substitution\nbash: line 1: ${pb3[]}: bad substitution\nbash: line 1: ${@pb3}: bad substitution\nbash: line 1: ${pb3\\ b}: bad substitution\nbash: line 1: ${pb3\"b\"}: bad substitution\nbash: line 1: ${pzt@Z}: bad substitution\nbash: line 1: $9: cannot assign in this way\n"
       }
     },
     {

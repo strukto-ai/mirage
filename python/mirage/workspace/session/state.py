@@ -14,196 +14,179 @@
 
 import errno
 import functools
-from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
-from dataclasses import replace
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from typing import ParamSpec
 
-from mirage.context.session_context import session_access
+from mirage._rs import ShellTask
+from mirage.context.session_context import session_access, session_voice
+from mirage.io.memory import memory_room
 from mirage.policy.errors import PolicyDenied
-from mirage.policy.policies import (
-    Policies,
-    post_session_gate,
-    pre_session_gate,
-)
-from mirage.policy.types import SessionContext
-from mirage.shell.arith import evaluate_arith, plain_decimal
-from mirage.shell.array import (
-    ShellArray,
-    array_extent,
-    array_get,
-    array_has,
-    array_values,
-    array_with,
-    make_array,
-)
-from mirage.shell.bytes import encode_text, join_bytes
+from mirage.policy.policies import Policies, pre_session_gate
+from mirage.policy.types import HandOff, SessionContext
+from mirage.rs.session import ShellVars, raw_value, var_of
+from mirage.shell.arith import plain_decimal
+from mirage.shell.array import ShellArray, array_get
+from mirage.shell.bytes import join_bytes
 from mirage.shell.call_stack import CallStack
-from mirage.shell.constants import (
-    BASHPID,
-    FUNCNAME,
-    LINENO,
-    PIPESTATUS,
-    RANDOM,
-    RANDOM_MODULUS,
-    RANDOM_UNSET,
-)
-from mirage.shell.errors import ArithError, ExitSignal, ReadonlyVariableError
-from mirage.shell.types import ArithResult, ArithWrite, ElementOps
-from mirage.shell.variable import (
-    ShellValue,
-    ShellVar,
-    TempEnv,
-    VarAttr,
-    coerce_value,
-    detach,
-    with_attr,
-    with_value,
-)
-from mirage.shell.voice import shell_voice
-from mirage.utils.hidden import var_hidden
-from mirage.view.types import EnvSet, SessionView
+from mirage.shell.variable import ShellValue, VarAttr
+from mirage.view.types import SessionView
 from mirage.workspace.session.budget import (
     args_bytes,
     check_env,
     entry_bytes,
+    env_limit,
     frames_bytes,
+    outside_bytes,
 )
-from mirage.workspace.session.rng import draw, initial_seed
 from mirage.workspace.session.session import SessionState
+from mirage.workspace.session.task import (
+    SessionGate,
+    drive,
+    fault_error,
+    listens,
+)
 
 P = ParamSpec("P")
+
+
+def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
+    """Hand the session's shell the state around it that a task reads:
+    the positional parameters in scope, the special parameters, the
+    options, ``max_env`` and the bytes the session holds beside its
+    variables, the bytes left under ``max_memory``, the running command's
+    line and process, and the voice the shell's diagnostics lead with.
+
+    Args:
+        session (SessionState): the session.
+        call_stack (CallStack | None): function-call scope, if any.
+    """
+    calls = (
+        [call_stack.get_all_positional()]
+        if call_stack is not None and call_stack.depth > 1
+        else []
+    )
+    limit = env_limit()
+    outside = 0 if limit is None else outside_bytes(session)
+    names = session.function_names
+    session.vars.shell.frame(
+        positional=session.positional_args,
+        calls=calls,
+        status=session.last_exit_code,
+        pid=session.shell_pid or session.process_id or 0,
+        last_job=session.last_bg_job_id,
+        argv0=session.argv0,
+        options=session.shell_options,
+        shopts=session.shopts,
+        env_limit=limit,
+        outside=outside,
+        pipe_status=list(session.pipe_status),
+        function_names=None if names is None else list(names),
+        paren=call_stack is not None and call_stack.paren,
+        memory_room=memory_room(),
+        line=session.line_number,
+        bash_pid=session.bash_pid,
+        voice=session_voice(session),
+    )
+
+
+async def run_write(
+    session: SessionState,
+    policies: Policies | None,
+    start: Callable[[bool], ShellTask],
+    diagnostics: list[str | bytes] | None = None,
+) -> int:
+    """Run one gated write on the session's shell to its end.
+
+    Args:
+        session (SessionState): the session written.
+        policies (Policies | None): the policies its writes clear.
+        start (Callable[[bool], ShellTask]): the task, given whether a
+            policy listens.
+        diagnostics (list[str | bytes] | None): where its warnings go.
+    """
+    frame(session)
+    task = start(listens(policies))
+    sink: list[str | bytes] = [] if diagnostics is None else diagnostics
+    return int(await drive(task, SessionGate(session, policies), sink))
 
 
 def env_snapshot(session: SessionState) -> dict[str, str]:
     """The one copy-out of a session's environment.
 
     Every tier that hands the env onward as a process view (a command's
-    or CLI's ``ctx.env``, a runtime's, the ``env`` builtin)
-    copies through here, so the hidden-vars filter lands on all of
-    them by construction rather than on however many hand-rolled
-    copies someone remembers.
-
-    *Exported* names only, which is what makes this the process view
-    rather than a second spelling of ``visible_env``. bash puts a
-    variable in a child's environment when it carries the export
-    attribute, not when it happens to hold a string: ``X=hello`` is
-    absent from ``env`` and ``export Y=world`` is present. An unset
-    name carrying the attribute (``export Z``) is absent too, which
-    falls out of the value check rather than needing its own arm.
+    or CLI's ``ctx.env``, a runtime's, the ``env`` builtin) copies
+    through here, so the hidden-vars filter lands on all of them. Only
+    exported scalars, as bash's child environment: ``X=hello`` is
+    absent, ``export Y=world`` present, ``export Z`` (unset) absent.
 
     Diverges from bash on one point: bash also carries each function
     ``export -f`` marked, as a ``BASH_FUNC_NAME%%`` entry. mirage hands
-    those to a nested shell directly (``SessionState.new_shell``), so
-    neither ``env`` nor a runtime lists them.
+    those to a nested shell directly (``SessionState.new_shell``).
 
     Args:
         session (SessionState): the session whose env to copy.
     """
-    return {
-        name: var.value
-        for name, var in session.vars.items()
-        if isinstance(var.value, str)
-        and VarAttr.EXPORT in var.attrs
-        and not var_hidden(session.visibility, name)
-    }
+    return dict(session.vars.shell.exported())
 
 
 def nameref_target(session: SessionState, name: str) -> str | None:
-    """The name a ``declare -n`` reference points at, None otherwise.
-
-    None also for a reference declared but not yet aimed (``declare -n
-    r`` before ``r=v``): bash treats the first assignment to such a
-    reference as naming its target, so until then it stands for nothing.
+    """The name a ``declare -n`` reference points at, None otherwise
+    (also for a reference not yet aimed, which stands for nothing).
 
     Args:
         session (SessionState): the session holding the record.
         name (str): variable name.
     """
-    var = session.vars.get(name)
-    if var is None or VarAttr.NAMEREF not in var.attrs:
-        return None
-    return var.value if isinstance(var.value, str) and var.value else None
+    return session.vars.shell.nameref_target(name)
 
 
 def deref(session: SessionState, name: str) -> str:
-    """The variable a name stands for, following ``declare -n`` chains.
-
-    A name that is not a reference is its own answer, so every reader
-    and writer can resolve unconditionally and a session with no
-    namerefs pays one dict lookup. A chain that comes back to itself
-    (``declare -n a=b; declare -n b=a``) is bash's "circular name
-    reference", which it warns about and reads as unset: that resolves
-    to the empty name, which no record ever has, so a reader sees unset
-    and a writer falls back to the reference's own record. The warning
-    line is the one part not reproduced.
+    """The variable a name stands for, following ``declare -n`` chains;
+    the empty name for a chain that comes back to itself, which bash
+    reads as unset.
 
     Args:
         session (SessionState): the session holding the records.
         name (str): the name as spelled.
     """
-    current = name
-    seen: set[str] = set()
-    while True:
-        target = nameref_target(session, current)
-        if target is None:
-            return current
-        if current in seen:
-            return ""
-        seen.add(current)
-        current = target
+    return session.vars.shell.deref(name)
+
+
+def _visible(session: SessionState, name: str) -> ShellValue | None:
+    record = session.vars.shell.visible(name)
+    return None if record is None else var_of(record).value
 
 
 def env_get(session: SessionState, name: str) -> str | None:
-    """The variable's value, None when unset or hidden.
-
-    Sync on purpose: ``$X`` expansion is the hot path, so a read stays
-    a dict lookup plus the hidden check. A name reference reads its
-    target.
+    """The variable's value, None when unset, hidden or an array; a name
+    reference reads its target.
 
     Args:
         session (SessionState): the session holding the environment.
         name (str): variable name.
     """
-    name = deref(session, name)
-    if var_hidden(session.visibility, name):
-        return None
-    var = session.vars.get(name)
-    return (
-        var.value if var is not None and isinstance(var.value, str) else None
-    )
+    value = _visible(session, name)
+    return value if isinstance(value, str) else None
 
 
 def env_is_readonly(
     session: SessionState, name: str, follow_ref: bool = True
 ) -> bool:
-    """Whether ``readonly`` has marked the name.
-
-    A hidden name answers False: is_readonly speaks about the
-    session's visible world, and calling a name that reads as unset
-    "readonly" would leak it.
+    """Whether ``readonly`` has marked the name; a hidden name is not,
+    which would leak it.
 
     Args:
         session (SessionState): the session holding the readonly set.
         name (str): variable name.
         follow_ref (bool): ask about what a ``declare -n`` reference
-            points at; a write to the reference itself (``declare -n
-            r=w``, ``unset -n r``) asks about the reference.
+            points at; a write to the reference itself asks about it.
     """
-    if follow_ref:
-        name = deref(session, name)
-    if var_hidden(session.visibility, name):
-        return False
-    var = session.vars.get(name)
-    return var is not None and VarAttr.READONLY in var.attrs
+    return session.vars.shell.is_readonly(name, follow_ref)
 
 
 class _VisibleEnv(Mapping[str, str]):
-    """A live, read-only view of the session env minus hidden names.
-
-    Handed to expansion instead of a filtered copy so a ``$X`` read
-    stays one dict lookup plus the hidden check, and later writes to
-    the session show through without rebuilding anything.
-    """
+    """A live, read-only view of the session's scalars minus hidden
+    names, a lookup following references."""
 
     __slots__ = ("_session",)
 
@@ -211,33 +194,21 @@ class _VisibleEnv(Mapping[str, str]):
         self._session = session
 
     def __getitem__(self, name: str) -> str:
-        name = deref(self._session, name)
-        if var_hidden(self._session.visibility, name):
+        value = env_get(self._session, name)
+        if value is None:
             raise KeyError(name)
-        var = self._session.vars[name]
-        if not isinstance(var.value, str):
-            raise KeyError(name)
-        return var.value
+        return value
 
     def __iter__(self) -> Iterator[str]:
-        hidden = self._session.visibility
-        for name, var in self._session.vars.items():
-            if isinstance(var.value, str) and not var_hidden(hidden, name):
-                yield name
+        return iter(self._session.vars.shell.visible_names("scalar"))
 
     def __len__(self) -> int:
-        return sum(1 for _ in self)
+        return len(self._session.vars.shell.visible_names("scalar"))
 
 
 def visible_env(session: SessionState) -> Mapping[str, str]:
-    """The env mapping a reader tier should resolve names against.
-
-    Always the live view, never ``session.env``: that property is a
-    projection built fresh on every access, so handing it out would
-    copy the whole store per read *and* freeze the answer at that
-    moment. The view costs one dict lookup plus the hidden check per
-    name and shows later writes through. Read-only by type: writers go
-    through ``set_var``/``unset_var``, never a mapping.
+    """The env mapping a reader tier resolves names against: live,
+    read-only, hidden names left out.
 
     Args:
         session (SessionState): the session holding the environment.
@@ -246,12 +217,10 @@ def visible_env(session: SessionState) -> Mapping[str, str]:
 
 
 class _VisibleArrays(Mapping[str, ShellArray]):
-    """A live, read-only view of the session arrays minus hidden names.
-
-    The arrays twin of ``_VisibleEnv``: the embedder can seed
-    ``session.arrays`` before narrowing, so a hidden name can hold an
-    array and array reads need the same filter env reads get.
-    """
+    """A live, read-only view of the session's indexed arrays minus
+    hidden names. ``PIPESTATUS`` and ``FUNCNAME`` answer a lookup from
+    the shell's own bookkeeping, which the frame hands it, and never
+    list: bash's ``declare -p PIPESTATUS`` is ``not found``."""
 
     __slots__ = ("_session",)
 
@@ -259,39 +228,22 @@ class _VisibleArrays(Mapping[str, ShellArray]):
         self._session = session
 
     def __getitem__(self, name: str) -> ShellArray:
-        name = deref(self._session, name)
-        if var_hidden(self._session.visibility, name):
+        session = self._session
+        frame(session)
+        raw = session.vars.shell.indexed(name)
+        if raw is None:
             raise KeyError(name)
-        if name == PIPESTATUS:
-            return make_array(
-                [str(code) for code in self._session.pipe_status]
-            )
-        if name == FUNCNAME and self._session.function_names is not None:
-            return make_array(list(self._session.function_names))
-        var = self._session.vars[name]
-        if not isinstance(var.value, ShellArray):
-            raise KeyError(name)
-        return var.value
+        return ShellArray(raw)
 
     def __iter__(self) -> Iterator[str]:
-        # PIPESTATUS and FUNCNAME answer a lookup (and so `in`, which
-        # Mapping derives from the lookup) and never list: bash's
-        # `declare -p PIPESTATUS` is `not found`, and an assignment to
-        # either is ignored, which this view honors by answering the
-        # session's record before the store.
-        hidden = self._session.visibility
-        for name, var in self._session.vars.items():
-            if isinstance(var.value, ShellArray) and not var_hidden(
-                hidden, name
-            ):
-                yield name
+        return iter(self._session.vars.shell.visible_names("indexed"))
 
     def __len__(self) -> int:
-        return sum(1 for _ in self)
+        return len(self._session.vars.shell.visible_names("indexed"))
 
 
 def visible_arrays(session: SessionState) -> Mapping[str, ShellArray]:
-    """The arrays mapping a reader tier should resolve names against.
+    """The indexed arrays a reader tier resolves names against.
 
     Args:
         session (SessionState): the session holding the arrays.
@@ -301,12 +253,7 @@ def visible_arrays(session: SessionState) -> Mapping[str, ShellArray]:
 
 class _VisibleAssocs(Mapping[str, dict[str, str]]):
     """A live, read-only view of the associative arrays minus hidden
-    names.
-
-    The third sibling beside ``_VisibleEnv`` and ``_VisibleArrays``,
-    for the same reason both exist: the embedder can seed a hidden name
-    with any value shape, so every reader tier filters the same way.
-    """
+    names."""
 
     __slots__ = ("_session",)
 
@@ -314,27 +261,20 @@ class _VisibleAssocs(Mapping[str, dict[str, str]]):
         self._session = session
 
     def __getitem__(self, name: str) -> dict[str, str]:
-        name = deref(self._session, name)
-        if var_hidden(self._session.visibility, name):
+        value = _visible(self._session, name)
+        if not isinstance(value, dict):
             raise KeyError(name)
-        var = self._session.vars[name]
-        if not isinstance(var.value, dict):
-            raise KeyError(name)
-        return var.value
+        return value
 
     def __iter__(self) -> Iterator[str]:
-        hidden = self._session.visibility
-        for name, var in self._session.vars.items():
-            if isinstance(var.value, dict) and not var_hidden(hidden, name):
-                yield name
+        return iter(self._session.vars.shell.visible_names("assoc"))
 
     def __len__(self) -> int:
-        return sum(1 for _ in self)
+        return len(self._session.vars.shell.visible_names("assoc"))
 
 
 def visible_assocs(session: SessionState) -> Mapping[str, dict[str, str]]:
-    """The associative arrays a reader tier should resolve names
-    against.
+    """The associative arrays a reader tier resolves names against.
 
     Args:
         session (SessionState): the session holding the arrays.
@@ -342,599 +282,105 @@ def visible_assocs(session: SessionState) -> Mapping[str, dict[str, str]]:
     return _VisibleAssocs(session)
 
 
-def strip_key_quotes(text: str) -> str:
-    """Remove one surrounding quote pair from an associative subscript.
-
-    An arithmetic reference carries its subscript verbatim, so
-    ``m["x"]`` arrives with the quotes bash would have removed; one
-    layer comes off and anything else is the key itself.
-
-    Args:
-        text (str): the raw subscript text.
-    """
-    if len(text) >= 2 and text[0] == text[-1] and text[0] in "\"'":
-        return text[1:-1]
-    return text
-
-
-async def _land_writes(
-    session: SessionState, store: EnvSet, writes: Sequence[ArithWrite]
-) -> None:
-    """Land arithmetic assignments in order, each as the whole variable
-    it produces, so a refusal never leaves one half-applied.
-
-    Each lands the way ``assign_element`` lands one: through a
-    reference on its target, a bare name over an array at element 0
-    (``A=(old keep); n='A=9'`` keeps ``keep``), naming the element it
-    assigns so an ``-i`` array never runs its other elements again
-    (``A=(0 'x++'); declare -i A; (( A[0]=9 ))`` leaves ``x++``). Both
-    of its contexts, a subscript and an ``-i`` value, end the shell on
-    a readonly name (``declare -i n; ( n='R=3'; echo no )`` ends only
-    the subshell).
-
-    Args:
-        session (SessionState): the session the writes read.
-        store (EnvSet): the session view each write goes through.
-        writes (Sequence[ArithWrite]): the assignments, in order.
-
-    Raises:
-        ExitSignal: an assignment named a readonly variable.
-        PolicyDenied: the session view refused an assignment.
-    """
-    for write in writes:
-        name = deref(session, write.name) or write.name
-        assoc = visible_assocs(session).get(name)
-        arr = visible_arrays(session).get(name)
-        value: ShellValue = write.value
-        assigned: frozenset[int | str] | None = None
-        if assoc is not None:
-            key = "0" if write.key is None else write.key
-            value = {**assoc, key: write.value}
-            assigned = frozenset({key})
-        elif write.key is not None or arr is not None:
-            index = 0 if write.key is None else int(write.key)
-            if arr is None:
-                # A scalar becomes element 0, as `assign_element` turns
-                # it (`x=7; n='x[1]=5'` keeps the 7).
-                scalar = conversion_scalar(session, name)
-                arr = make_array([] if scalar is None else [scalar])
-            value = array_with(arr, index, write.value)
-            assigned = frozenset({index})
-        try:
-            await store(name, value, assigned=assigned)
-        except ReadonlyVariableError as exc:
-            raise exc.signal(fatal=True) from exc
-
-
 async def subscript_index(
-    session: SessionState, subscript: str, view: SessionView | None = None
+    session: SessionState, subscript: str, policies: Policies | None = None
 ) -> int:
     """An indexed subscript resolved outside an arithmetic expression:
-    ``${a[i]}``, ``a[i]=v``, ``unset 'a[i]'``, ``[[ -v a[i] ]]``.
-
-    The subscript is arithmetic, so it may assign (``a[x=3]``) and seed
-    (``a[RANDOM=42]``), and bash binds those as it evaluates them. Each
-    lands through the session view once the index is known, then the ``RANDOM``
-    reader replays the draws made after the seed. A subscript that
-    fails to evaluate lands what it assigned before failing and then
-    raises, the subscript text leading the message, since bash aborts
-    the line on it (``${a[1/0]}`` is ``1/0: division by 0``) rather
-    than reading element 0.
+    ``a[i]=v``, ``unset 'a[i]'``. It is arithmetic, so it may assign
+    (``a[x=3]``) and seed (``a[RANDOM=42]``); each lands through the gate.
+    One that fails lands what it assigned before failing, then raises.
 
     Args:
         session (SessionState): the session the subscript reads.
         subscript (str): the raw subscript text.
-        view (SessionView | None): the gated session view the assignments land
-            through; None lands them ungated, outside a workspace.
+        policies (Policies | None): the policies its writes clear.
 
     Raises:
-        PolicyDenied: the session view refused an assignment.
+        PolicyDenied: the gate refused an assignment.
         ExitSignal: an assignment named a readonly variable, which ends
-            the shell wherever a subscript is (``${a[R=3]}``).
-        ArithError: the subscript does not evaluate, or an assigned name
-            carries ``-i`` and the value does not evaluate.
+            the shell wherever a subscript is.
+        ArithError: the subscript does not evaluate.
     """
     plain = plain_decimal(subscript)
     if plain is not None:
         return plain
-    reader = random_reader(session)
-    error: ArithError | ReadonlyVariableError | None = None
-    idx = 0
-    try:
-        result = session_arith(
-            session,
-            subscript,
-            reader,
-            nounset=bool(session.shell_options.get("nounset")),
-        )
-        idx, writes = result.value, result.writes
-    except (ArithError, ReadonlyVariableError) as exc:
-        error, writes = exc, exc.writes
-    await _land_writes(
+    shell = session.vars.shell
+    return await run_write(
         session,
-        view.set
-        if view is not None
-        else functools.partial(set_var, session, None),
-        writes,
-    )
-    reader.settle()
-    if isinstance(error, ReadonlyVariableError):
-        raise error.signal(fatal=True) from error
-    if error is not None:
-        raise error
-    return idx
-
-
-class _SessionElements:
-    """The ``ElementOps`` implementation bound to one session.
-
-    It lives beside the other reader projections because the session
-    view needs it too: the ``-i`` coercion evaluates ``n=a[1]+1`` at the
-    write, and a resolver that imported the session view would close a
-    cycle.
-    """
-
-    __slots__ = ("_session",)
-
-    def __init__(self, session: SessionState) -> None:
-        self._session = session
-
-    def resolve(
-        self, name: str, subscript: str, env: Mapping[str, str]
-    ) -> str:
-        """Canonical key for one reference.
-
-        Args:
-            name (str): the array variable's name.
-            subscript (str): an associative array's raw subscript text,
-                or an indexed one's index, which the evaluator has
-                already read as arithmetic.
-            env (Mapping[str, str]): the evaluator's current view,
-                pending assignments included.
-        """
-        if name in visible_assocs(self._session):
-            return strip_key_quotes(subscript)
-        idx = int(subscript)
-        if idx < 0:
-            arr = visible_arrays(self._session).get(name)
-            if arr is not None:
-                idx += array_extent(arr)
-            elif env_get(self._session, name) is not None:
-                idx += 1
-            if idx < 0:
-                raise ArithError("bad array subscript", f"{name}[{subscript}]")
-        return str(idx)
-
-    def is_assoc(self, name: str) -> bool:
-        """Whether the name holds an associative array.
-
-        Args:
-            name (str): the array variable's name.
-        """
-        return name in visible_assocs(self._session)
-
-    def holds_array(self, name: str) -> bool:
-        """Whether the name holds an array, indexed or associative.
-
-        Args:
-            name (str): the variable's name.
-        """
-        return name in visible_assocs(self._session) or name in visible_arrays(
-            self._session
-        )
-
-    def read(self, name: str, key: str) -> str | None:
-        """The element's stored text, None when unset.
-
-        Args:
-            name (str): the array variable's name.
-            key (str): the canonical key ``resolve`` produced.
-        """
-        session = self._session
-        amap = visible_assocs(session).get(name)
-        if amap is not None:
-            return amap.get(key)
-        arr = visible_arrays(session).get(name)
-        idx = int(key)
-        if arr is None:
-            scalar = env_get(session, name)
-            if scalar is None:
-                return None
-            return scalar if idx == 0 else None
-        return array_get(arr, idx) if array_has(arr, idx) else None
-
-
-def session_elements(session: SessionState) -> ElementOps:
-    """Element callbacks bound to one session, for ``evaluate_arith``.
-
-    Args:
-        session (SessionState): the session references resolve against.
-    """
-    bound = _SessionElements(session)
-    return ElementOps(
-        resolve=bound.resolve,
-        read=bound.read,
-        is_assoc=bound.is_assoc,
-        holds_array=bound.holds_array,
+        policies,
+        lambda heard: shell.index(subscript, listens=heard),
     )
 
 
-def seed_from(word: str, session: SessionState) -> int:
-    """Evaluate a host-supplied seed; invalid arithmetic propagates.
-
-    Read without the generator on offer: a host word naming ``RANDOM``
-    would otherwise draw, and the draw reseed, without end.
-
-    Args:
-        word (str): the seed expression.
-        session (SessionState): the session the expression reads.
-    """
-    value = evaluate_arith(
-        word, visible_env(session), elements=session_elements(session)
-    ).value
-    return value % RANDOM_MODULUS
-
-
-def next_random(session: SessionState, stored: str | None) -> int | None:
-    """Draw from the session generator, or None after RANDOM is unset.
-
-    Shell assignments validate and seed at the session view. A host-seeded
-    variable is consumed here on its first read. The last draw is separate
-    from the stored word because a reseed resets repeat suppression to zero.
+async def session_arith(
+    session: SessionState,
+    text: str,
+    policies: Policies | None = None,
+    call_stack: CallStack | None = None,
+) -> int:
+    """Evaluate an arithmetic command, a ``let`` operand or a test's
+    integer operand against the session, its writes landed through the
+    gate in order.
 
     Args:
-        session (SessionState): generator and variable state.
-        stored (str | None): the visible RANDOM value.
+        session (SessionState): the session.
+        text (str): the expression, already expanded.
+        policies (Policies | None): the policies its writes clear.
+        call_stack (CallStack | None): function-call scope, if any.
     """
-    if session._random_seed == RANDOM_UNSET or (
-        stored is None and session._random_seed is not None
-    ):
-        return None
-    seed = (
-        seed_from(stored, session)
-        if stored is not None and stored != session._random_seed
-        else None
-    )
-    if seed is not None:
-        state = seed
-        last = 0
-    elif session._random_state is None:
-        state = initial_seed(session.ids)
-        last = 0
-    else:
-        state = session._random_state
-        last = session._random_last
-    state, value = draw(state, last)
-    session._random_state = state
-    session._random_last = value
-    word = str(value)
-    existing = session.vars.get(RANDOM)
-    session.vars[RANDOM] = (
-        replace(existing, value=word)
-        if existing is not None
-        else ShellVar(word)
-    )
-    session._random_seed = word
-    return value
-
-
-def note_random_kind(
-    session: SessionState, name: str, value: ShellValue
-) -> None:
-    """End ``RANDOM``'s special meaning when a non-string lands on it.
-
-    Once bash turns ``RANDOM`` into an array it neither draws nor seeds,
-    so ``RANDOM=(1 2)``, ``declare -a RANDOM``,
-    ``RANDOM[1]=5`` and ``RANDOM+=(3)`` all leave an ordinary array that
-    ``$RANDOM`` reads element 0 of, for good, as ``unset RANDOM`` does.
-    Every store entry point calls this, gated or not, since a host seeding an
-    array onto the name means the same thing.
-
-    Args:
-        session (SessionState): the session the store landed in.
-        name (str): the variable stored.
-        value (ShellValue): what it now holds.
-    """
-    if name == RANDOM and not isinstance(value, str):
-        session._random_seed = RANDOM_UNSET
+    shell = session.vars.shell
+    frame(session, call_stack)
+    task = shell.arith(text, listens=listens(policies))
+    return int(await drive(task, SessionGate(session, policies), []))
 
 
 def conversion_scalar(session: SessionState, name: str) -> str | None:
-    """The scalar an array conversion keeps as element 0.
-
-    When bash turns a variable into an array, its current value becomes
-    element 0, and for a live ``RANDOM`` looking the name up is
-    what draws: ``RANDOM[1]=5`` leaves ``[0]`` holding one draw and
-    ``declare -a RANDOM`` one alone, after which the array is ordinary.
+    """The scalar an array conversion keeps as element 0; for a live
+    ``RANDOM`` looking the name up draws (``RANDOM[1]=5`` leaves ``[0]``
+    one draw).
 
     Args:
         session (SessionState): the session the conversion happens in.
         name (str): the variable turning into an array.
     """
-    if name == RANDOM:
-        drawn = next_random(session, visible_env(session).get(RANDOM))
-        if drawn is not None:
-            return str(drawn)
-    return session.env.get(name)
-
-
-class RandomReader:
-    """Arithmetic's reads of ``$RANDOM``, bound to one session, of
-    ``$LINENO``, the running command's line, and of ``$BASHPID``, the
-    process running it.
-
-    A read before the expression assigns ``RANDOM`` draws from the
-    session generator. bash seeds at the instant of an assignment and
-    every later read draws from the new seed (``$((RANDOM=42, RANDOM))``
-    is the first draw after seeding with 42). Here the assignment is
-    still pending at the session view, which lands it gated after
-    evaluation, so the evaluator tells the reader of each assignment as
-    it is made (``wrote``), the reader seeds a scratch generator the way
-    the session view will and draws from that, and ``settle`` replays the draws
-    on the session once the session view has seeded it: the session ends where
-    bash's does, seeded and advanced by every read since the last
-    assignment, and the write still reaches the gate as the assignment
-    it is. Each assignment restarts the scratch generator and the count,
-    since the session view lands only the last value written, and the draws are
-    replayed only if the session view did land it: an assignment the caller
-    never applied leaves the session as it was.
-
-    Lives beside the session view rather than with the generator because the
-    session view needs it too: ``RANDOM=RANDOM`` draws once while the seed is
-    evaluated, then seeds with the draw, as bash does: it reads an
-    assigned seed as an arithmetic expression.
-
-    Args:
-        session (SessionState): generator and visibility state.
-    """
-
-    def __init__(self, session: SessionState) -> None:
-        self.session = session
-        self.seeded: str | None = None
-        self.state = 0
-        self.last = 0
-        self.draws = 0
-
-    def _special(self, name: str) -> bool:
-        session = self.session
-        return (
-            name == RANDOM
-            and not var_hidden(session.visibility, name)
-            and session._random_seed != RANDOM_UNSET
-        )
-
-    def read(self, name: str) -> str | None:
-        """The dynamic value of a name, None for a name that has none.
-
-        Args:
-            name (str): the variable the expression reads.
-        """
-        dynamic = self.session.dynamic_value(name)
-        if dynamic is not None:
-            return dynamic
-        if not self._special(name):
-            return None
-        if self.seeded is None:
-            value = next_random(
-                self.session, visible_env(self.session).get(name)
-            )
-            return None if value is None else str(value)
-        self.state, value = draw(self.state, self.last)
-        self.last = value
-        self.draws += 1
-        return str(value)
-
-    def wrote(self, name: str, value: str) -> None:
-        """Note an assignment the expression made.
-
-        Args:
-            name (str): the variable assigned.
-            value (str): the value, an integer's text.
-        """
-        if not self._special(name):
-            return
-        self.seeded = value
-        self.state = int(value) % RANDOM_MODULUS
-        self.last = 0
-        self.draws = 0
-
-    def settle(self) -> None:
-        """Replay the scratch draws on the session generator, once the
-        session view has seeded it with the value the expression assigned."""
-        if self.seeded is None or self.session._random_seed != self.seeded:
-            return
-        for _ in range(self.draws):
-            next_random(self.session, visible_env(self.session).get(RANDOM))
-        self.draws = 0
-
-
-def random_reader(session: SessionState) -> RandomReader:
-    """Bind arithmetic ``$RANDOM`` reads to a session.
-
-    Args:
-        session (SessionState): generator and visibility state.
-    """
-    return RandomReader(session)
-
-
-def session_arith(
-    session: SessionState,
-    text: str,
-    reader: RandomReader,
-    nounset: bool = False,
-    added: str | None = None,
-) -> ArithResult:
-    """Evaluate ``text`` as every arithmetic context of the shell does:
-    against the visible env and the session's elements, drawing through
-    ``reader``, and stopping at a write to a readonly name, as bash's
-    evaluation does (``(( X=5, R=3 ))`` binds X and refuses R).
-
-    Args:
-        session (SessionState): the session the expression reads.
-        text (str): the expression.
-        reader (RandomReader): the expression's ``RANDOM`` reader.
-        nounset (bool): ``set -u`` for the names it reads.
-        added (str | None): an integer ``+=``'s added text, read after
-            ``text`` in the same evaluation and added to it.
-
-    Raises:
-        ArithError: the text does not evaluate.
-        ReadonlyVariableError: an assignment named a readonly variable; its
-            ``writes`` are the ones made before it.
-    """
-    return evaluate_arith(
-        text,
-        visible_env(session),
-        elements=session_elements(session),
-        read_var=reader.read,
-        wrote_var=reader.wrote,
-        nounset=nounset,
-        frozen=functools.partial(_readonly_target, session),
-        added=added,
-    )
-
-
-def _readonly_target(session: SessionState, name: str) -> str | None:
-    """The readonly variable a write to ``name`` reaches, through a
-    ``declare -n`` reference, which the refusal names; None when the
-    write lands.
-
-    Args:
-        session (SessionState): the session holding the readonly marks.
-        name (str): the name the expression writes.
-    """
-    target = deref(session, name)
-    return target if env_is_readonly(session, target, False) else None
-
-
-class _IntegerCoercion:
-    """The `-i` coercion and the ``RANDOM`` seed, as one evaluation.
-
-    The incoming text evaluates as arithmetic against the visible env,
-    element references resolving through the session's resolver, so
-    `n=x+1` sees `x` and `n=a[1]+1` the element; an unresolvable name
-    is 0 (`n=abc` stores `0`), the arithmetic rule, not a refusal.
-    ``RANDOM`` draws, as in every other arithmetic context, so `n=RANDOM`
-    and a `RANDOM=RANDOM` seed both advance the generator. The
-    assignments the expression makes are kept for the session view to land
-    (``_land_coercion``): bash binds `x` in `n='x=5'` and in
-    `RANDOM='x=5'`, before the error too if the expression then fails.
-    A malformed expression raises ArithError with the offending text
-    leading, the way every caller voices it; a write to a readonly name
-    ends the shell (``ExitSignal``), as bash's coercion does, where a
-    seed (``evaluate``) reports it the way it reports a malformed one.
-
-    Args:
-        session (SessionState): the session the expression reads.
-    """
-
-    def __init__(self, session: SessionState) -> None:
-        self.session = session
-        self.reader = random_reader(session)
-        self.writes: list[ArithWrite] = []
-
-    def __call__(self, text: str, added: str | None = None) -> str:
-        try:
-            return self.evaluate(text, added)
-        except ReadonlyVariableError as exc:
-            raise exc.signal(fatal=True) from exc
-
-    def evaluate(self, text: str, added: str | None = None) -> str:
-        """The value ``text`` evaluates to, keeping the writes it made
-        before an ``ArithError`` or a ``ReadonlyVariableError``.
-
-        With ``added``, the two sides of an integer ``+=`` (``appended``)
-        evaluate in turn in one evaluation and add: the second sees what
-        the first assigned, and an error names the side that made it, as
-        bash's does (``N+=1+`` is ``1+: syntax error``).
-
-        Args:
-            text (str): the expression, the held value for a ``+=``.
-            added (str | None): a ``+=``'s added text.
-        """
-        session = self.session
-        # Inside a `declare -g` the expression still reads the
-        # function's scope, as bash's does (`local H=2; declare -gi
-        # G=H` stores 2), while the value lands on the global.
-        reach_again = _step_back(session)
-        try:
-            result = session_arith(session, text, self.reader, added=added)
-        except (ArithError, ReadonlyVariableError) as exc:
-            self.writes.extend(exc.writes)
-            raise
-        finally:
-            reach_again()
-        self.writes.extend(result.writes)
-        return str(result.value)
-
-
-async def _land_coercion(
-    session: SessionState, store: EnvSet, coercion: _IntegerCoercion
-) -> None:
-    """Land the assignments a coercion made, each through the session view, in
-    the scope it read, then settle its ``RANDOM`` draws.
-
-    Inside a ``declare -g`` that is the function's: ``local G=3; declare
-    -gi G='G=G+10'`` leaves the local at 13 and stores 13 globally, as
-    bash's does (``_step_back``).
-
-    Args:
-        session (SessionState): the shell session.
-        store (EnvSet): the session view each write goes through.
-        coercion (_IntegerCoercion): the evaluation that made the writes.
-    """
-    reach_again = _step_back(session)
-    try:
-        await _land_writes(session, store, coercion.writes)
-    finally:
-        reach_again()
-    coercion.reader.settle()
+    answer = session.vars.shell.conversion_scalar(name)
+    if isinstance(answer, tuple):
+        raise fault_error(("arith", answer[1]), {})
+    return answer
 
 
 async def evaluate_integer(
     session: SessionState,
-    view: SessionView,
+    policies: Policies | None,
     text: str,
     added: str | None = None,
 ) -> str:
     """Evaluate ``text`` as an ``-i`` write coerces it, land what it
-    assigns through ``view``, and give back the value: a ``declare -ni
-    r=M`` value, which bash evaluates before refusing the reference
-    (``M='X=5'`` sets X). Inside a ``declare -g`` it reads the
-    function's scope, as the coercion does.
+    assigns, and give back the value: a ``declare -ni r=M`` value, which
+    bash evaluates before refusing the reference (``M='X=5'`` sets X).
 
     Args:
         session (SessionState): shell session state.
-        view (SessionView): the gated session view.
+        policies (Policies | None): the policies its writes clear.
         text (str): the value, the held one for a ``r+=M``.
         added (str | None): a ``r+=M``'s added text, evaluated after
             ``text`` in the same evaluation and added to it.
-
-    Raises:
-        PolicyDenied: an assignment named a hidden variable or the gate
-            refused it; the ones before it have landed.
-        ExitSignal: an assignment named a readonly variable, which
-            ends the shell, as bash's does.
-        ArithError: the text does not evaluate; the assignments made
-            before the error have landed.
     """
-    coercion = _IntegerCoercion(session)
-    try:
-        return coercion(text, added)
-    finally:
-        await _land_coercion(session, view.set, coercion)
+    shell = session.vars.shell
+    value = await run_write(
+        session,
+        policies,
+        lambda heard: shell.integer(text, added, listens=heard),
+    )
+    return str(value)
 
 
 def appended(
     held: ShellValue | None, added: str, integer: bool
 ) -> tuple[str, str | None]:
     """What a ``+=`` hands ``set_var``: the held text then the added one,
-    or on an integer the held text with the added one as ``added``, the
-    two evaluating there in turn and summing behind the store's
-    refusals. The held value evaluates too, so ``n='x=5'; declare -i n;
-    n+=x`` stores 10, and an empty side counts as 0. An array extends
-    element 0 and a map key ``"0"`` (``S=x; declare -a S+=y`` gives
-    ``([0]="xy")``).
+    or on an integer the held text with the added one as ``added``. An
+    array extends element 0 and a map key ``"0"``.
 
     Args:
         held (ShellValue | None): what the slot holds, None when unset.
@@ -950,14 +396,8 @@ def appended(
 
 
 def ensure_var_visible(session: SessionState, name: str) -> None:
-    """Refuse a write that names a hidden variable.
-
-    The sync half of ``set_var``'s hidden gate, shared with the
-    expansion-time writers that land on the raw env (``${X:=d}``,
-    ``$((X=5))``, ``printf -v``): a landed write would clobber the real
-    value the host's wiring still reads, and a swallowed one would
-    gaslight the writer; refuse loudly instead, the vars twin of EACCES
-    on a create into hidden path space.
+    """Refuse a write that names a hidden variable, the vars twin of
+    EACCES on a create into hidden path space.
 
     Args:
         session (SessionState): the session being written.
@@ -966,7 +406,7 @@ def ensure_var_visible(session: SessionState, name: str) -> None:
     Raises:
         PolicyDenied: the name is hidden for this session.
     """
-    if var_hidden(session.visibility, name):
+    if session.vars.shell.hidden(name):
         raise PolicyDenied(errno.EACCES, f"{name}: permission denied", name)
 
 
@@ -976,47 +416,21 @@ def ensure_var_visible(session: SessionState, name: str) -> None:
 SHELL_BOOKKEEPING = frozenset({"PWD", "OLDPWD", "BASH_REMATCH"})
 
 
-def gate_rendering(value: ShellValue | None) -> str | None:
-    """The value a ``pre_session`` method is shown for one variable.
-
-    A scalar as itself, an indexed array as its present elements joined
-    by spaces, an associative one in sorted-key order, and None for a
-    variable that is declared but unset. One rendering, so a rule reads
-    the same text whether the write came from a typed line or a restore.
-
-    Args:
-        value (ShellValue | None): the variable's value.
-    """
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    if isinstance(value, dict):
-        return " ".join(value[k] for k in sorted(value))
-    return " ".join(array_values(value))
-
-
 async def gate_restored_vars(
-    policies: Policies | None, session_id: str, table: Mapping[str, ShellVar]
+    policies: Policies | None, session_id: str, table: ShellVars
 ) -> None:
-    """Vet a variable table a snapshot restores through the session gate.
-
-    A snapshot is the one env input the deployment did not author, so
-    the ``pre_session`` rule that refuses a name on a typed line has to
-    see the restore too. Every restored variable fires the gate as a
-    ``set`` of its rendered value before any of them lands, and a
-    refusal aborts the load with the ``PolicyDenied`` a live ``export``
-    of that name reports, rather than dropping the one variable: a
-    partial restore is a workspace whose state matches no snapshot. The
-    shell's own bookkeeping (``SHELL_BOOKKEEPING``) is exempt here as it
-    is live. None policies gate nothing.
+    """Vet a variable table a snapshot restores through the session gate:
+    every variable fires ``pre_session`` as a ``set`` of its rendered
+    value before any of them lands, and a refusal aborts the load. The
+    shell's own bookkeeping is exempt here as it is live.
 
     Args:
         policies (Policies | None): the target workspace's policies.
         session_id (str): the session the table is restored into.
-        table (Mapping[str, ShellVar]): the restored variables.
+        table (ShellVars): the restored variables.
     """
-    for name, var in table.items():
+    shell = table.shell
+    for name in shell.names():
         if name in SHELL_BOOKKEEPING:
             continue
         await pre_session_gate(
@@ -1024,10 +438,92 @@ async def gate_restored_vars(
             SessionContext(
                 verb="set",
                 key=name,
-                value=gate_rendering(var.value),
+                value=shell.rendered(name),
                 session_id=session_id,
             ),
         )
+
+
+_ELEMENT_STATUS = ("ok", "denied", "readonly", "subscript")
+
+
+async def element_is_set(
+    session: SessionState, ref: str, policies: Policies | None = None
+) -> bool:
+    """Whether a ``name`` / ``name[sub]`` reference names a set value,
+    what ``test -v`` asks: a bare name over an array checks element 0,
+    ``name[@]`` any element, an indexed subscript evaluates and what it
+    assigns lands (``[[ -v a[x=2] ]]`` leaves x at 2).
+
+    Args:
+        session (SessionState): shell session state.
+        ref (str): the reference as the operand spelled it.
+        policies (Policies | None): the policies the subscript's
+            assignments clear; None outside a workspace.
+
+    Raises:
+        ArithError: the subscript does not evaluate.
+    """
+    shell = session.vars.shell
+    return bool(
+        await run_write(
+            session, policies, lambda heard: shell.is_set(ref, listens=heard)
+        )
+    )
+
+
+async def assign_element(
+    session: SessionState,
+    policies: Policies | None,
+    name: str,
+    subscript: str | None,
+    value: str,
+    append: bool = False,
+) -> str:
+    """Assign one element (or a bare name resolved as element 0) a
+    builtin names, as one gated write of the whole value it makes, so a
+    ``pre_session`` rule sees ``m[k]=v`` as a write to ``m``. The
+    subscript arrives already expanded: an associative name takes it as
+    the key verbatim, an indexed one evaluates it as arithmetic.
+
+    Args:
+        session (SessionState): shell session state.
+        policies (Policies | None): the policies the write and the
+            subscript's assignments clear.
+        name (str): the target's base variable name.
+        subscript (str | None): the ``[...]`` text, None for a bare
+            target.
+        value (str): the text to store.
+        append (bool): concatenate onto the existing element.
+
+    Returns:
+        str: ``"ok"``, ``"denied"``, ``"readonly"``, or ``"subscript"``.
+
+    Raises:
+        PolicyDenied: a pre_session rule refused the write.
+        ArithError: the name carries ``-i`` and the text does not
+            evaluate.
+    """
+    shell = session.vars.shell
+
+    async def write(_: HandOff | None = None) -> int:
+        return await run_write(
+            session,
+            policies,
+            lambda heard: shell.element(
+                name,
+                subscript,
+                value,
+                append=append,
+                listens=heard,
+                warns=False,
+            ),
+        )
+
+    if policies is None:
+        return _ELEMENT_STATUS[await write()]
+    code = await policies.decisions.within_call(session.session_id, write)
+    return _ELEMENT_STATUS[code]
 
 
 async def set_var(
@@ -1043,178 +539,49 @@ async def set_var(
 ) -> None:
     """Write one variable through the session plane's gate.
 
-    General over variable shapes: a string stores a scalar, a
-    ShellArray stores an indexed array, a dict stores an associative
-    one, and the storages stay exclusive. Semantics live here once —
-    readonly refusal, the ``pre_session`` policy gate (whose context
-    value renders an array as its present elements joined by spaces,
-    an associative one in sorted-key order), then the store — so
-    every writer states them the same way whichever tier or spelling
-    asked. Writers with richer mechanics (subscripts, appends, holes)
-    compute the resulting value on a copy and hand it here, so a
-    denial never leaves a half-applied write; an integer ``+=`` hands
-    its held text and the added one (``appended``), which evaluate here
-    behind the same refusals. None policies gate nothing (a writer
-    outside a workspace).
+    A string stores a scalar, a ShellArray an indexed array, a dict an
+    associative one. Readonly and hidden names refuse; the value is
+    shaped by the name's attributes (``-i -l -u``) before the
+    ``pre_session`` policy judges it, lands, and is put back when
+    ``post_session`` refuses. Writers with richer mechanics compute the
+    resulting value on a copy and hand it here.
 
     Args:
         session (SessionState): the session being written.
         policies (Policies | None): admission policies the write clears.
         name (str): variable name.
         value (ShellValue): the value to store.
-        diagnostics (list[str | bytes] | None): evaluation-owned warnings;
-            without a sink, arithmetic errors propagate to the caller.
         follow_ref (bool): resolve a ``declare -n`` reference to its
-            target first, which is what every ordinary assignment does.
-            ``declare -n r=w`` on an existing reference is the one
-            writer that re-aims the reference instead, and passes False.
+            target first; ``declare -n r=w`` re-aims and passes False.
         assigned (frozenset[int | str] | None): the elements an array
-            write assigns (``coerce_value``), None for the whole value.
-        added (str | None): an integer ``+=``'s text, which the assigned
-            value evaluates after its held one in one evaluation.
+            write assigns, None for the whole value.
+        added (str | None): an integer ``+=``'s text, evaluated after the
+            held one.
+        diagnostics (list[str | bytes] | None): evaluation-owned warnings;
+            without a sink, a seed's arithmetic error propagates.
 
     Raises:
         ReadonlyVariableError: the name is readonly.
-        PolicyDenied: the name is hidden for this session, or a
-            pre_session policy refused the write.
+        PolicyDenied: the name is hidden, or a policy refused the write.
     """
-    if follow_ref:
-        name = deref(session, name) or name
-    ensure_var_visible(session, name)
-    # The record, not the `readonly_vars` projection: that property
-    # rebuilds a frozenset over every variable in the session, and this
-    # is the hot path every assignment takes. TypeScript's `setVar` has
-    # always read the record directly. `ensure_var_visible` has already
-    # refused a hidden name, so the two answer identically here. The name
-    # is resolved already: `declare -n r=w` on a frozen `r` refuses.
-    if env_is_readonly(session, name, follow_ref=False):
-        raise ReadonlyVariableError(name)
-    existing = session.vars.get(name)
-    # Attributes belong to the name, not to the value, so a plain
-    # assignment keeps them: `declare -i n; n=3` stays an integer. The
-    # old two-container store had to remember to evict the name from
-    # whichever container it was not landing in; one record cannot
-    # disagree with itself that way. The value-shaping attributes
-    # (`-i -l -u`) apply here, at the write, which is where bash applies
-    # them: `declare -l s; s=ABC` stores `abc`, so every reader agrees
-    # without per-read work. `-i` evaluates against the visible env,
-    # and a bad expression raises the arithmetic error as bash does.
-    # Coercion runs before the gate so a rule judges the value that
-    # will land: `declare -l profile; profile=ADMIN` stores `admin`, and a
-    # rule refusing `admin` must see that, not the raw text.
-    coercion = _IntegerCoercion(session)
-    store = functools.partial(
-        set_var, session, policies, diagnostics=diagnostics
-    )
-    if existing is not None and existing.attrs:
-        try:
-            value = coerce_value(
-                value,
-                existing.attrs,
-                functools.partial(coercion, added=added),
-                assigned,
-            )
-        except (ArithError, ExitSignal):
-            # bash bound what the expression assigned before it failed
-            # (`declare -i n; x='y=5,1/0'; n=x` leaves y at 5, and a
-            # RANDOM seed in it seeds); they land, gated, before the
-            # refusal reports.
-            await _land_coercion(session, store, coercion)
-            raise
-    written = SessionContext(
-        verb="set",
-        key=name,
-        value=gate_rendering(value),
-        session_id=session.session_id,
-    )
-    await pre_session_gate(policies, written)
-    generator = (
-        session._random_state,
-        session._random_seed,
-        session._random_last,
-    )
-    if (
-        name == RANDOM
-        and session._random_seed != RANDOM_UNSET
-        and isinstance(value, str)
-    ):
-        # A seed that fails or writes a readonly name seeds nothing: its
-        # earlier writes land and the error is reported, but the line
-        # goes on, unless the write was in a subscript.
-        try:
-            seed = int(coercion.evaluate(value)) % RANDOM_MODULUS
-        except ExitSignal:
-            await _land_coercion(session, store, coercion)
-            raise
-        except (ArithError, ReadonlyVariableError) as exc:
-            await _land_coercion(session, store, coercion)
-            if isinstance(exc, ReadonlyVariableError) and (
-                exc.in_subscript or diagnostics is None
-            ):
-                raise exc.signal() from exc
-            if diagnostics is None:
-                raise
-            diagnostics.append(str(exc))
-            return
-        session._random_state = seed
-        session._random_seed = value
-        session._random_last = 0
-    note_random_kind(session, name, value)
-    # The assignments the coercion or the seed made land now, gated
-    # each, before the name they were made for.
-    await _land_coercion(session, store, coercion)
-    # A reference cannot hold an array: one landing on an unaimed
-    # `declare -n` record drops the mark (`with_value`) and bash says so
-    # (`declare -n r; r=(x)`). A declaration that named the kind (`-a`,
-    # `-A`) took the mark off before writing, silently, as bash does.
-    if (
-        diagnostics is not None
-        and existing is not None
-        and VarAttr.NAMEREF in existing.attrs
-        and isinstance(value, (ShellArray, dict))
-    ):
-        diagnostics.append(
-            encode_text(
-                f"{shell_voice()}warning: {name}: removing nameref attribute\n"
-            )
-        )
-    stored = (
-        ShellVar(value) if existing is None else with_value(existing, value)
-    )
-    # An agent write to a managed name shadows session-locally: the
-    # pointer drops and the record becomes a plain variable for this
-    # session only. Only the host-tier fill step writes pointer-keeping
-    # records, and it goes directly into `session.vars`, not here.
-    if stored.managed is not None:
-        stored = detach(stored)
-    # `set -a` marks every name assigned *while it is on*, which is why
-    # it is read here at write time rather than applied to the session
-    # in bulk when the option flips: `B=1; set -a; C=2; set +a; D=3`
-    # exports only C.
-    if session.shell_options.get("allexport"):
-        stored = with_attr(stored, VarAttr.EXPORT)
-    check_env(
+    raw, assoc = raw_value(value)
+    shell = session.vars.shell
+    keys = None if assigned is None else list(assigned)
+    await run_write(
         session,
-        0 if existing is None else entry_bytes(name, existing.value),
-        entry_bytes(name, stored.value),
+        policies,
+        lambda heard: shell.set(
+            name,
+            raw,
+            assoc=assoc,
+            follow_ref=follow_ref,
+            assigned=keys,
+            added=added,
+            listens=heard,
+            warns=diagnostics is not None,
+        ),
+        diagnostics,
     )
-    session.vars[name] = stored
-    try:
-        await post_session_gate(
-            policies,
-            written,
-            None if existing is None else gate_rendering(existing.value),
-        )
-    except BaseException:
-        # Whatever stops the check, a refusal or a host that failed to
-        # answer, the write does not stand, and neither does a seed.
-        _place(session, name, existing)
-        (
-            session._random_state,
-            session._random_seed,
-            session._random_last,
-        ) = generator
-        raise
 
 
 async def unset_var(
@@ -1223,218 +590,109 @@ async def unset_var(
     name: str,
     follow_ref: bool = True,
 ) -> None:
-    """Drop one variable through the session plane's gate; a missing
-    name is quiet.
+    """Drop one variable through the session plane's gate; a missing or
+    hidden name is quiet. A name an enclosing scope shadows is that
+    scope's to lose: the unset reveals the value it saved.
 
     Args:
         session (SessionState): the session being written.
         policies (Policies | None): admission policies the write clears.
         name (str): variable name.
         follow_ref (bool): resolve a ``declare -n`` reference to its
-            target, which is what ``unset r`` does in bash; ``unset -n r``
-            drops the reference itself and passes False.
+            target; ``unset -n r`` drops the reference and passes False.
 
     Raises:
         ReadonlyVariableError: the name is readonly.
         PolicyDenied: a pre_session policy refused the write.
     """
-    if follow_ref:
-        name = deref(session, name) or name
-    if var_hidden(session.visibility, name):
-        # Hidden reads as unset and bash's unset of a missing name is
-        # a quiet no-op; popping the real value would let a session
-        # mutate state it cannot see.
-        return
-    # Same as `set_var`: the record, not the projection. The hidden
-    # branch above has already returned, so the answers match.
-    if env_is_readonly(session, name, follow_ref=False):
-        raise ReadonlyVariableError(name)
-    written = SessionContext(
-        verb="unset",
-        key=name,
-        value=None,
-        session_id=session.session_id,
-    )
-    await pre_session_gate(policies, written)
-    old = session.vars.get(name)
-    frame = _shadowing_frame(session, name)
-    _drop(session, name)
-    try:
-        await post_session_gate(
-            policies,
-            written,
-            None if old is None else gate_rendering(old.value),
-        )
-    except BaseException:
-        # The unset revealed what an enclosing scope saved; that value
-        # goes back to the scope before the name's own record returns.
-        if frame is not None and name not in frame:
-            frame[name] = session.vars.get(name)
-        _place(session, name, old)
-        raise
-    if name == RANDOM:
-        # bash: unsetting RANDOM strips its special meaning for good.
-        session._random_seed = RANDOM_UNSET
-    elif name in (LINENO, BASHPID):
-        session._plain_specials = session._plain_specials | {name}
-
-
-def _shadowing_frame(
-    session: SessionState, name: str
-) -> dict[str, ShellVar | None] | None:
-    """The innermost scope on the call path that saved ``name``.
-
-    Args:
-        session (SessionState): the session.
-        name (str): variable name.
-    """
-    return next(
-        (f for f in reversed(session._local_frames) if name in f), None
+    shell = session.vars.shell
+    await run_write(
+        session,
+        policies,
+        lambda heard: shell.unset(name, follow_ref=follow_ref, listens=heard),
     )
 
 
-def _drop(session: SessionState, name: str) -> None:
-    """Remove a variable as bash's ``unset`` does.
-
-    A name the running function made local stays unset until it
-    returns. A name an enclosing scope shadows, a caller's ``local`` or
-    the temporary environment of ``x=1 f``, is that scope's to lose:
-    the unset reveals the value it saved, and the name holds that value
-    from then on (GNU: ``x=old; x=pre f`` where f runs ``unset x``
-    reads ``old`` inside f and after it).
+async def mark_var(
+    session: SessionState,
+    policies: Policies | None,
+    name: str,
+    attr: VarAttr | None,
+    on: bool = True,
+    follow_ref: bool = True,
+) -> None:
+    """Turn one attribute on or off through the session plane's gate,
+    writing no value: ``export NAME`` on a fresh name leaves it unset.
+    A None attribute declares the name and changes no attribute.
 
     Args:
         session (SessionState): the session being written.
+        policies (Policies | None): admission policies the mark clears.
         name (str): variable name.
+        attr (VarAttr | None): the attribute to change, None to declare
+            the name only.
+        on (bool): set it, or clear it.
+        follow_ref (bool): mark what a ``declare -n`` reference points
+            at; ``declare -rn r`` marks the reference itself.
+
+    Raises:
+        PolicyDenied: the name is hidden, or a policy refused the mark.
     """
-    frame = _shadowing_frame(session, name)
-    if frame is None or frame is session._local_vars or name == RANDOM:
-        session.vars.pop(name, None)
-        return
-    saved = frame.pop(name)
-    if saved is None:
-        session.vars.pop(name, None)
-    else:
-        session.vars[name] = saved
-
-
-def _place(session: SessionState, name: str, var: ShellVar | None) -> None:
-    if var is None:
-        session.vars.pop(name, None)
-    else:
-        session.vars[name] = var
+    shell = session.vars.shell
+    letter = None if attr is None else attr.value
+    await run_write(
+        session,
+        policies,
+        lambda heard: shell.mark(
+            name, letter, on, follow_ref=follow_ref, listens=heard
+        ),
+    )
 
 
 def reach_global(
     session: SessionState, names: list[str]
 ) -> Callable[[], None]:
     """Put each name's global record in place for a ``declare -g``, and
-    return the call that puts the running locals back.
-
-    Outside a function, or for a name no frame on the call path shadows,
-    the global record is already in place. Otherwise the running local
-    lives in ``session.vars`` and the global is what the *outermost*
-    shadowing frame saved, so the two swap for the declaration: its
-    writes, marks and kind checks reach the global, and the local comes
-    back untouched, which is what GNU shows (``local G=5; declare -gr
-    G=1`` leaves ``$G`` at 5 and writable in the function, 1 and frozen
-    outside, and a nested ``declare -g`` reaches past the caller's local
-    too). Arithmetic it runs still reads and writes the locals
-    (``_step_back``), so the local comes back with what that gave it.
+    return the call that puts the running locals back (``local G=5;
+    declare -gr G=1`` leaves ``$G`` at 5 in the function, 1 and frozen
+    outside).
 
     Args:
         session (SessionState): shell session state.
         names (list[str]): the declaration's operand names.
     """
-    swapped: list[tuple[str, dict[str, ShellVar | None], ShellVar | None]]
-    swapped = []
-    for name in dict.fromkeys(names):
-        outer = next(
-            (frame for frame in session._local_frames if name in frame), None
-        )
-        if outer is None:
-            continue
-        swapped.append((name, outer, session.vars.get(name)))
-        _place(session, name, outer[name])
-    session._reached = swapped
-
-    def restore() -> None:
-        for name, outer, running in session._reached:
-            outer[name] = session.vars.get(name)
-            _place(session, name, running)
-        session._reached = []
-
-    return restore
-
-
-def _step_back(session: SessionState) -> Callable[[], None]:
-    """Put the locals a running ``declare -g`` set aside back in place
-    for one arithmetic evaluation or the writes it made, and return the
-    call that reaches the globals again, keeping what those writes gave
-    the locals.
-
-    Args:
-        session (SessionState): shell session state.
-    """
-    reached = [
-        (name, session.vars.get(name)) for name, _, _ in session._reached
-    ]
-    for name, _, running in session._reached:
-        _place(session, name, running)
-
-    def again() -> None:
-        session._reached = [
-            (name, outer, session.vars.get(name))
-            for name, outer, _ in session._reached
-        ]
-        for name, var in reached:
-            _place(session, name, var)
-
-    return again
+    shell = session.vars.shell
+    shell.reach_global(names)
+    return shell.unreach
 
 
 def outlive_call(session: SessionState, name: str) -> None:
-    """Let a temporary-environment variable outlive its call.
-
-    bash keeps a name that ``x=1 f`` put in front of a function once
-    something inside runs ``export x`` or ``readonly x``: x still holds
-    its value after f returns, where otherwise the caller's comes back.
+    """Let a temporary-environment variable outlive its call: bash keeps
+    ``x`` from ``x=1 f`` once something inside runs ``export x`` or
+    ``readonly x``.
 
     Args:
         session (SessionState): the session.
         name (str): variable name.
     """
-    frame = _shadowing_frame(session, name)
-    if isinstance(frame, TempEnv):
-        del frame[name]
+    session.vars.shell.outlive_call(name)
 
 
 def in_call_env(session: SessionState, name: str) -> bool:
     """Whether the running function's call assigned ``name`` in front.
 
-    ``x=1 f`` puts ``x`` in f's temporary environment, which sits right
-    under f's own frame of locals.
-
     Args:
         session (SessionState): the session.
         name (str): variable name.
     """
-    frames = session._local_frames
-    return (
-        len(frames) > 1
-        and isinstance(frames[-2], TempEnv)
-        and name in frames[-2]
-    )
+    return session.vars.shell.in_call_env(name)
 
 
 def positional_params(
     session: SessionState, call_stack: CallStack | None
 ) -> list[str]:
-    """The positional parameters in scope.
-
-    Inside a function they are the function's own, even when it was
-    called with none: bash's ``f`` run bare sees ``$#`` as 0, never its
-    caller's count. Outside every function they are the shell's.
+    """The positional parameters in scope: inside a function its own,
+    even none; outside every function the shell's.
 
     Args:
         session (SessionState): shell session state.
@@ -1448,10 +706,8 @@ def positional_params(
 def set_positional_params(
     session: SessionState, call_stack: CallStack | None, values: list[str]
 ) -> None:
-    """Replace the positional parameters in scope.
-
-    ``set --`` and ``shift`` inside a function change the function's
-    own and leave the caller's alone, as bash's do.
+    """Replace the positional parameters in scope; ``set --`` and
+    ``shift`` inside a function change the function's own.
 
     Args:
         session (SessionState): shell session state.
@@ -1474,96 +730,31 @@ def set_positional_params(
 
 
 def shadow_local(
-    session: SessionState,
-    local_vars: dict[str, ShellVar | None],
-    name: str,
-    inherit: bool = False,
+    session: SessionState, name: str, inherit: bool = False
 ) -> None:
-    """Record the caller's record before a ``local`` shadows it, once
-    per frame.
-
-    ``RANDOM`` parks its generator marker too: a local ``RANDOM`` is an
-    ordinary variable for the function's extent (``local RANDOM=5; echo
-    $RANDOM`` prints 5, and ``local RANDOM=(7)`` leaves the caller's
-    generator alone), and ``restore_locals`` hands the marker back. A
-    local ``LINENO`` or ``BASHPID`` is ordinary the same way, its
+    """Record the caller's record before a ``local`` shadows it, once per
+    function; a local ``RANDOM`` is an ordinary variable for the
+    function's extent, and so is a local ``LINENO`` or ``BASHPID``, its
     ``unset`` the function's own; with ``-I`` it keeps the meaning the
     caller's has.
 
     Args:
         session (SessionState): the session the function runs in.
-        local_vars (dict[str, ShellVar | None]): the running frame.
         name (str): the variable being declared local.
         inherit (bool): the declaration carried ``-I``.
     """
-    if name in local_vars:
-        return
-    local_vars[name] = session.vars.get(name)
-    if name == RANDOM:
-        session._local_random.append(session._random_seed)
-        session._random_seed = RANDOM_UNSET
-    elif name in (LINENO, BASHPID):
-        session._local_plain.append((name, name in session._plain_specials))
-        if not inherit:
-            session._plain_specials = session._plain_specials | {name}
-
-
-def restore_locals(
-    session: SessionState, local_vars: dict[str, ShellVar | None]
-) -> None:
-    """Put a returning function's shadowed records back.
-
-    Deliberate divergence: bash reseeds the global generator when a
-    local ``RANDOM`` is popped (``RANDOM=42; f(){ local RANDOM; }; f;
-    echo $RANDOM`` prints 11074 where 17772 was next); mirage resumes
-    the caller's sequence where it left off.
-
-    Args:
-        session (SessionState): the session the function ran in.
-        local_vars (dict[str, ShellVar | None]): the frame being popped.
-    """
-    for key, old in local_vars.items():
-        if old is None:
-            session.vars.pop(key, None)
-        else:
-            session.vars[key] = old
-    if RANDOM in local_vars:
-        session._random_seed = session._local_random.pop()
-    for special in (LINENO, BASHPID):
-        if special in local_vars:
-            name, plain = session._local_plain.pop()
-            session._plain_specials = (
-                session._plain_specials | {name}
-                if plain
-                else session._plain_specials - {name}
-            )
+    session.vars.shell.shadow(name, inherit)
 
 
 def seed_var(session: SessionState, name: str, value: ShellValue) -> None:
     """Write a variable without consulting the gate.
 
-    Two kinds of caller. One is seeding a session before it is handed
-    out: the embedder populating an environment, a test arranging
-    state. `visible_arrays` already names this case ("the embedder can
-    seed session.arrays before narrowing"). The other is the shell
-    writing its own bookkeeping -- ``$PWD``/``$OLDPWD`` after a ``cd``,
-    ``BASH_REMATCH`` after a ``[[ =~ ]]`` -- which are the shell's to
-    maintain, not the session's to admit, and which a ``pre_session``
-    rule refusing them could only break. (A ``for`` loop's variable is
-    not one of these: bash leaves it holding its last value, so the
-    loop never writes it back.)
-
-    A variable the *line* named goes through `SessionView.set` instead,
-    which is the whole point of the store being read-only from outside.
-    One caller is neither, and is called out here rather than left to
-    be discovered: `execute_command` lands a prefix assignment
-    (``FOO=bar cmd``) through this entry point. That is not a way around the
-    gate. The same site asks ``ensure_var_visible`` and then
-    ``pre_session``, with the value, before it seeds anything, because
-    a prefix assignment is a session write like any other and the form
-    exports the name for the command. A policy refusal there takes the
-    whole statement; a readonly name is refused alone, as bash does,
-    and the command runs without it.
+    Two kinds of caller: seeding a session before it is handed out, and
+    the shell's own bookkeeping (``$PWD``/``$OLDPWD`` after a ``cd``,
+    ``BASH_REMATCH`` after ``[[ =~ ]]``). A variable the line named goes
+    through `SessionView.set` instead. A prefix assignment
+    (``FOO=bar cmd``) lands here too, after asking ``ensure_var_visible``
+    and ``pre_session`` with the value.
 
     Nor does it count against max_env: a caller that grows a value a
     line chose, as that prefix assignment does, calls ``check_env``
@@ -1574,28 +765,16 @@ def seed_var(session: SessionState, name: str, value: ShellValue) -> None:
         name (str): variable name.
         value (ShellValue): the value to store.
     """
-    existing = session.vars.get(name)
-    session.vars[name] = (
-        ShellVar(value) if existing is None else with_value(existing, value)
-    )
-    note_random_kind(session, name, value)
+    raw, assoc = raw_value(value)
+    session.vars.shell.seed(name, raw, assoc)
 
 
 def set_attr(
     session: SessionState, name: str, attr: VarAttr | None, on: bool = True
 ) -> None:
-    """Turn one attribute on or off, creating the name if needed.
-
-    bash's `readonly NAME` / `export NAME` on a name that does not exist
-    yet marks it anyway, and the name stays *unset*: GNU prints
-    `declare -r ONLY` with no value and `${ONLY-d}` still expands to
-    `d`. So the record is created with no value, not with an empty
-    string.
-
-    A None attribute changes no attribute and only ensures the name
-    exists, which is what a bare `local L` / `declare D` does: GNU
-    answers `declare -- L` and `${L-d}` still expands to `d`, so those
-    two cannot route through a value writer either.
+    """Turn one attribute on or off without the gate, creating the name
+    unset if needed, as ``readonly NAME`` on a fresh name does; a None
+    attribute only declares the name.
 
     Args:
         session (SessionState): the session being written.
@@ -1604,79 +783,9 @@ def set_attr(
             the name and change nothing.
         on (bool): set it, or clear it.
     """
-    existing = session.vars.get(name)
-    if existing is None:
+    if name not in session.vars:
         check_env(session, 0, entry_bytes(name, None))
-        existing = ShellVar()
-    session.vars[name] = (
-        existing if attr is None else with_attr(existing, attr, on)
-    )
-
-
-async def mark_var(
-    session: SessionState,
-    policies: Policies | None,
-    name: str,
-    attr: VarAttr | None,
-    on: bool = True,
-    follow_ref: bool = True,
-) -> None:
-    """Turn one attribute on or off through the session plane's gate.
-
-    The no-value writer beside ``set_var``. ``export NAME``,
-    ``readonly NAME`` and a bare ``local NAME`` on a fresh name write no
-    value at all -- the name stays unset and merely declared -- so
-    routing them through ``set_var`` would have to invent one, and
-    inventing ``""`` is exactly the divergence that made ``export Z``
-    show up in ``env`` and ``${L-d}`` stop expanding to ``d``. A None
-    attribute declares the name and changes no attribute.
-
-    Gated all the same, because a mark is still a session write: a
-    hidden name refuses, and ``pre_session`` sees it with a None value,
-    which is how a rule tells a mark from an assignment if it cares.
-    Skipping the gate here would let a line the agent types put an
-    attribute on a name the deployment refused it.
-
-    Args:
-        session (SessionState): the session being written.
-        policies (Policies | None): admission policies the mark clears.
-        name (str): variable name.
-        attr (VarAttr | None): the attribute to change, None to declare
-            the name and change nothing.
-        on (bool): set it, or clear it.
-        follow_ref (bool): mark what a ``declare -n`` reference points
-            at, as ``readonly r`` and ``export r`` do; ``declare -rn r``
-            marks the reference itself and passes False.
-
-    Raises:
-        PolicyDenied: the name is hidden for this session, or a
-            pre_session policy refused the mark.
-    """
-    # The nameref attribute itself is the one mark that belongs to the
-    # reference's own record, on and off.
-    if follow_ref and attr is not VarAttr.NAMEREF:
-        name = deref(session, name) or name
-    ensure_var_visible(session, name)
-    written = SessionContext(
-        verb="set",
-        key=name,
-        value=None,
-        session_id=session.session_id,
-    )
-    await pre_session_gate(policies, written)
-    old = session.vars.get(name)
-    seed = session._random_seed
-    set_attr(session, name, attr, on)
-    try:
-        await post_session_gate(
-            policies,
-            written,
-            None if old is None else gate_rendering(old.value),
-        )
-    except BaseException:
-        _place(session, name, old)
-        session._random_seed = seed
-        raise
+    session.vars.shell.set_attr(name, None if attr is None else attr.value, on)
 
 
 def _one_call(
@@ -1713,17 +822,16 @@ def session_view(
 ) -> SessionView:
     """The session plane's view: ten facts bound to one session.
 
-    The one constructor every tier uses — builtins, the command
-    dispatcher, a bare unit test — so the gate cannot be skipped by
-    picking a different entry point. The view is the whole capability: it
-    carries no handle back to the raw session.
+    The one constructor every tier uses, so the gate cannot be skipped by
+    picking a different entry point. The view carries no handle back to
+    the raw session.
 
     Args:
         session (SessionState): the session the view fronts.
         policies (Policies | None): admission policies writes clear;
-            None gates nothing (a view constructed outside a
-            workspace).
-        diagnostics (list[str | bytes] | None): the evaluator's warning sink.
+            None gates nothing (a view constructed outside a workspace).
+        diagnostics (list[str | bytes] | None): the evaluator's warning
+            sink.
     """
     return SessionView(
         get=functools.partial(env_get, session),

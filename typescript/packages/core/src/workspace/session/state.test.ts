@@ -15,7 +15,7 @@
 import { varsFromEnv } from '../../workspace/session/session.ts'
 import { setAttr } from '../../workspace/session/state.ts'
 import { ArithError } from '../../shell/errors.ts'
-import { TempEnv, VarAttr, type ShellVar } from '../../shell/variable.ts'
+import { VarAttr, type ShellVar } from '../../shell/variable.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { describe, expect, it } from 'vitest'
 import type { SessionView } from '../../view/types.ts'
@@ -23,26 +23,29 @@ import { PolicyDenied } from '../../policy/errors.ts'
 import { Policies } from '../../policy/policies.ts'
 import type { Action, SessionContext } from '../../policy/types.ts'
 import { ReadonlyVariableError } from '../../shell/errors.ts'
+import { ShellVars } from '../../rs/session.ts'
 import { SessionState } from './session.ts'
 import {
+  assignElement,
+  elementIsSet,
   envSnapshot,
-  gateRendering,
   gateRestoredVars,
   inCallEnv,
-  nextRandom,
   outliveCall,
   positionalParams,
   seedVar,
-  sessionElements,
   sessionView,
   setPositionalParams,
-  stripKeyQuotes,
   subscriptIndex,
+  visibleArrays,
+  visibleAssocs,
   visibleEnv,
 } from './state.ts'
 import { RANDOM } from '../../shell/constants.ts'
 import { makeVar } from '../../shell/variable.ts'
 import { makeArray, ShellArray } from '../../shell/array.ts'
+import { parseProgram } from '../../shell/parse/parse.ts'
+import { runWithSession } from '../../context/session_context.ts'
 
 class DenySecrets {
   preSession(ctx: SessionContext): Action | null {
@@ -299,13 +302,78 @@ function elementSession(): SessionState {
   return session
 }
 
-describe('stripKeyQuotes', () => {
-  it('removes one surrounding pair only', () => {
-    expect(stripKeyQuotes('"x"')).toBe('x')
-    expect(stripKeyQuotes("'x'")).toBe('x')
-    expect(stripKeyQuotes('x')).toBe('x')
-    expect(stripKeyQuotes('"x')).toBe('"x')
-    expect(stripKeyQuotes('""')).toBe('')
+describe('elementIsSet', () => {
+  it('reads a key verbatim and lands an indexed subscript', async () => {
+    const session = elementSession()
+    expect(await elementIsSet(session, 'm[a]')).toBe(true)
+    expect(await elementIsSet(session, 'm["a"]')).toBe(true)
+    expect(await elementIsSet(session, 'm[zz]')).toBe(false)
+    // The subscript is the key verbatim, never arithmetic.
+    expect(await elementIsSet(session, 'm[1+1]')).toBe(false)
+    expect(await elementIsSet(session, 'm[@]')).toBe(true)
+    expect(await elementIsSet(session, 'arr[2]')).toBe(true)
+    expect(await elementIsSet(session, 'arr[9]')).toBe(false)
+    expect(await elementIsSet(session, 'arr[@]')).toBe(true)
+    // An indexed subscript is arithmetic, and what it assigns lands.
+    expect(await elementIsSet(session, 'arr[j=2]')).toBe(true)
+    expect(session.vars.get('j')?.value).toBe('2')
+    // A bare name over an array checks element 0 (the literal key "0" for
+    // an associative one).
+    expect(await elementIsSet(session, 'm')).toBe(true)
+    expect(await elementIsSet(session, 'arr')).toBe(true)
+    expect(await elementIsSet(session, 's5')).toBe(true)
+    expect(await elementIsSet(session, 'missing')).toBe(false)
+    expect(await elementIsSet(session, 'not a ref')).toBe(false)
+    // PIPESTATUS answers from the shell's own bookkeeping.
+    session.pipeStatus = [0, 1]
+    expect(await elementIsSet(session, 'PIPESTATUS[1]')).toBe(true)
+    expect(await elementIsSet(session, 'PIPESTATUS[2]')).toBe(false)
+  })
+})
+
+describe('assignElement', () => {
+  it('writes an associative key and appends to it', async () => {
+    const session = elementSession()
+    expect(await assignElement(session, null, 'm', 'b', '2')).toBe('ok')
+    expect(await assignElement(session, null, 'm', 'b', 'x', true)).toBe('ok')
+    // A bare target over an associative array is the key "0".
+    expect(await assignElement(session, null, 'm', null, 'top')).toBe('ok')
+    expect(await assignElement(session, null, 'm', '', 'v')).toBe('subscript')
+    expect(session.assocs.m?.b).toBe('2x')
+    expect(session.assocs.m?.['0']).toBe('top')
+  })
+
+  it('writes an indexed element and answers each refusal', async () => {
+    const session = elementSession()
+    const held = session.vars.delete('s5')
+    session.vars.set('ro', { value: held?.value ?? null, attrs: new Set([VarAttr.Readonly]) })
+    session.visibility = { ...session.visibility, vars: { names: ['h'], patterns: [] } }
+    expect(await assignElement(session, null, 'arr', '1', 'X')).toBe('ok')
+    expect(await assignElement(session, null, 'arr', '-1', 'Y')).toBe('ok')
+    expect(await assignElement(session, null, 'arr', '-9', 'n')).toBe('subscript')
+    // An existing scalar migrates to element 0 under a subscript.
+    seedVar(session, 'sc', 'base')
+    expect(await assignElement(session, null, 'sc', '1', 'one')).toBe('ok')
+    expect(await assignElement(session, null, 'ro', '0', 'x')).toBe('readonly')
+    expect(await assignElement(session, null, 'h', '0', 'x')).toBe('denied')
+    expect(session.arrays.arr).toEqual(makeArray(['10', 'X', 'Y']))
+    expect(session.arrays.sc).toEqual(makeArray(['base', 'one']))
+  })
+})
+
+describe('visible views', () => {
+  it('list only what a lookup finds', () => {
+    const session = elementSession()
+    seedVar(session, 'SECRET', 'k')
+    session.visibility = { ...session.visibility, vars: { names: ['SECRET'], patterns: [] } }
+    const env = visibleEnv(session)
+    expect('SECRET' in env).toBe(false)
+    expect(Object.keys(env).every((name) => name in session.env)).toBe(true)
+    expect(Object.keys(visibleArrays(session))).toEqual(['arr'])
+    expect(Object.keys(visibleAssocs(session))).toEqual(['m'])
+    session.pipeStatus = [3]
+    expect(visibleArrays(session).PIPESTATUS).toEqual(makeArray(['3']))
+    expect(Object.keys(visibleArrays(session))).not.toContain('PIPESTATUS')
   })
 })
 
@@ -313,52 +381,25 @@ describe('subscriptIndex', () => {
   it('lands the assignments a subscript makes and seeds RANDOM', async () => {
     const s = new SessionState({ sessionId: 's' })
     seedVar(s, 'i', '1')
-    s.vars[RANDOM] = makeVar('1')
+    s.vars.set(RANDOM, makeVar('1'))
     expect(await subscriptIndex(s, '3')).toBe(3n)
     expect(await subscriptIndex(s, 'i+1')).toBe(2n)
     // The subscript's assignment lands, bash's `a[x=3]`.
     expect(await subscriptIndex(s, 'x=3')).toBe(3n)
-    expect(s.vars.x?.value).toBe('3')
+    expect(s.vars.get('x')?.value).toBe('3')
     // One that fails lands what it assigned before failing, then throws
     // in bash's words rather than reading element 0.
     await expect(subscriptIndex(s, 'y=4, 1/0')).rejects.toThrow(/^y=4, 1\/0: /)
-    expect(s.vars.y?.value).toBe('4')
+    expect(s.vars.get('y')?.value).toBe('4')
     // A seed reaches the generator, and the draw after it advances the
     // session past it.
     expect(await subscriptIndex(s, 'RANDOM=42, RANDOM')).toBe(17772n)
-    const drawn = s.vars[RANDOM].value
-    expect(nextRandom(s, typeof drawn === 'string' ? drawn : undefined)).toBe(26794)
-    // Through the session view, a refusal is the gate's.
-    const view = sessionView(s, new Policies([new DenySecrets()]))
-    await expect(subscriptIndex(s, 'SECRET_N=1', view)).rejects.toBeInstanceOf(PolicyDenied)
+    expect(s.vars.shell.nextRandom()).toBe(26794)
+    // Through the session policies, a refusal is the gate's.
+    await expect(
+      subscriptIndex(s, 'SECRET_N=1', new Policies([new DenySecrets()])),
+    ).rejects.toBeInstanceOf(PolicyDenied)
     expect(s.env.SECRET_N).toBeUndefined()
-  })
-})
-
-describe('sessionElements', () => {
-  it('resolves associative subscripts literally', () => {
-    const ops = sessionElements(elementSession())
-    expect(ops.resolve('m', 'a', {})).toBe('a')
-    expect(ops.resolve('m', '"a"', {})).toBe('a')
-    // A key spelled like arithmetic stays a key.
-    expect(ops.resolve('m', '1+1', {})).toBe('1+1')
-  })
-
-  it('wraps a negative indexed subscript', () => {
-    const ops = sessionElements(elementSession())
-    expect(ops.resolve('arr', '-1', {})).toBe('2')
-    expect(() => ops.resolve('arr', '-9', {})).toThrow(ArithError)
-  })
-
-  it('reads by kind, scalars answering as element 0', () => {
-    const ops = sessionElements(elementSession())
-    expect(ops.read('m', 'a')).toBe('1')
-    expect(ops.read('m', 'zz')).toBeNull()
-    expect(ops.read('arr', '1')).toBe('20')
-    expect(ops.read('arr', '9')).toBeNull()
-    expect(ops.read('s5', '0')).toBe('5')
-    expect(ops.read('s5', '1')).toBeNull()
-    expect(ops.read('missing', '0')).toBeNull()
   })
 })
 
@@ -373,28 +414,28 @@ describe('managed variables through the session view', () => {
 
   it('set detaches a fetched managed var', async () => {
     const [view, session] = makeView()
-    session.vars.TOKEN = managedVar('s3cr3t')
+    session.vars.set('TOKEN', managedVar('s3cr3t'))
     await view.set('TOKEN', 'mine')
-    const v = session.vars.TOKEN
-    expect(v.managed).toBeUndefined()
-    expect(v.value).toBe('mine')
-    expect(v.attrs).toEqual(new Set([VarAttr.Export]))
+    const v = session.vars.get('TOKEN')
+    expect(v?.managed).toBeUndefined()
+    expect(v?.value).toBe('mine')
+    expect(v?.attrs).toEqual(new Set([VarAttr.Export]))
   })
 
   it('set detaches an unfetched managed var', async () => {
     const [view, session] = makeView()
-    session.vars.TOKEN = managedVar(null)
+    session.vars.set('TOKEN', managedVar(null))
     await view.set('TOKEN', 'mine')
-    const v = session.vars.TOKEN
-    expect(v.managed).toBeUndefined()
-    expect(v.value).toBe('mine')
+    const v = session.vars.get('TOKEN')
+    expect(v?.managed).toBeUndefined()
+    expect(v?.value).toBe('mine')
   })
 
   it('unset deletes a managed name quietly', async () => {
     const [view, session] = makeView()
-    session.vars.TOKEN = managedVar('s3cr3t')
+    session.vars.set('TOKEN', managedVar('s3cr3t'))
     await view.unset('TOKEN')
-    expect('TOKEN' in session.vars).toBe(false)
+    expect(session.vars.has('TOKEN')).toBe(false)
   })
 })
 
@@ -403,18 +444,17 @@ describe('a failing coercion', () => {
     // bash: `declare -i n; x='y=5,1/0'; n=x` refuses the assignment but
     // leaves y at 5, and a RANDOM seed in the expression seeds.
     const [view, s] = makeView()
-    s.vars[RANDOM] = makeVar('1')
+    s.vars.set(RANDOM, makeVar('1'))
     seedVar(s, 'n', '0')
     setAttr(s, 'n', VarAttr.Integer)
     seedVar(s, 'x', 'y=5,1/0')
     await expect(view.set('n', 'x')).rejects.toBeInstanceOf(ArithError)
-    expect(s.vars.y?.value).toBe('5')
+    expect(s.vars.get('y')?.value).toBe('5')
     // The refused assignment left n as it was.
     expect(s.env.n).toBe('0')
     seedVar(s, 'x', 'RANDOM=42,1/0')
     await expect(view.set('n', 'x')).rejects.toBeInstanceOf(ArithError)
-    const drawn = s.vars[RANDOM].value
-    expect(nextRandom(s, typeof drawn === 'string' ? drawn : undefined)).toBe(17772)
+    expect(s.vars.shell.nextRandom()).toBe(17772)
   })
 })
 
@@ -429,9 +469,9 @@ describe('gateRestoredVars', () => {
   }
 
   it('refuses a denied name and passes the rest', async () => {
-    const table = varsFromEnv({ SECRET_A: '1', PUBLIC: '2' })
+    const table = ShellVars.of(varsFromEnv({ SECRET_A: '1', PUBLIC: '2' }))
     await expect(gateRestoredVars(denying(), 's', table)).rejects.toBeInstanceOf(PolicyDenied)
-    await gateRestoredVars(denying(), 's', varsFromEnv({ PUBLIC: '2' }))
+    await gateRestoredVars(denying(), 's', ShellVars.of(varsFromEnv({ PUBLIC: '2' })))
     await gateRestoredVars(null, 's', table)
   })
 
@@ -445,17 +485,26 @@ describe('gateRestoredVars', () => {
     }
     const policies = new Policies()
     policies.add(new DenyAll())
-    await gateRestoredVars(policies, 's', varsFromEnv({ PWD: '/', OLDPWD: '/' }))
-    await expect(gateRestoredVars(policies, 's', varsFromEnv({ X: '1' }))).rejects.toBeInstanceOf(
-      PolicyDenied,
-    )
+    await gateRestoredVars(policies, 's', ShellVars.of(varsFromEnv({ PWD: '/', OLDPWD: '/' })))
+    await expect(
+      gateRestoredVars(policies, 's', ShellVars.of(varsFromEnv({ X: '1' }))),
+    ).rejects.toBeInstanceOf(PolicyDenied)
   })
 
-  it('renders what setVar shows a method', () => {
-    expect(gateRendering('x')).toBe('x')
-    expect(gateRendering({ b: '2', a: '1' })).toBe('1 2')
-    expect(gateRendering(makeArray(['p', 'q']))).toBe('p q')
-    expect(gateRendering(null)).toBeNull()
+  it('shows a policy each value rendered', () => {
+    const shell = ShellVars.of({
+      s: makeVar('x'),
+      m: makeVar({ b: '2', a: '1' }),
+      a: makeVar(makeArray(['p', 'q'])),
+      d: makeVar(null),
+    }).shell
+    expect(['s', 'm', 'a', 'd', 'no'].map((n) => shell.rendered(n))).toEqual([
+      'x',
+      '1 2',
+      'p q',
+      null,
+      null,
+    ])
   })
 })
 
@@ -475,43 +524,66 @@ describe('positional parameters in scope', () => {
   })
 })
 
-function inFunction(session: SessionState, temp: TempEnv): Map<string, ShellVar | null> {
-  const locals = new Map<string, ShellVar | null>()
-  session.localFrames.push(temp, locals)
-  session.localVars = locals
-  return locals
-}
-
 describe('scopes on the call path', () => {
   it('unset reveals what an enclosing scope saved', async () => {
     const [view, session] = makeView()
-    inFunction(session, new TempEnv([['A', makeVar('old')]]))
+    const shell = session.vars.shell
+    seedVar(session, 'A', 'old')
+    const temp = shell.openTemp()
+    shell.saveTemp(temp, 'A')
     seedVar(session, 'A', 'pre')
+    const outer = shell.enter()
     await view.unset('A')
     expect(session.env.A).toBe('old')
-    expect(session.localFrames[0]?.has('A')).toBe(false)
+    shell.leave(outer)
+    shell.closeTemp(temp)
+    expect(session.env.A).toBe('old')
   })
 
   it('unset of a local leaves it unset', async () => {
     const [view, session] = makeView()
-    const locals = inFunction(session, new TempEnv())
-    locals.set('A', makeVar('1'))
+    const shell = session.vars.shell
+    seedVar(session, 'A', '1')
+    const outer = shell.enter()
+    shell.shadow('A', false)
     seedVar(session, 'A', 'local')
     await view.unset('A')
     expect('A' in session.env).toBe(false)
-    expect(locals.get('A')?.value).toBe('1')
+    shell.leave(outer)
+    expect(session.env.A).toBe('1')
   })
 
   it('outliveCall keeps a temporary-environment name', () => {
     const session = new SessionState({ sessionId: 's' })
-    const temp = new TempEnv([['A', null]])
-    const locals = inFunction(session, temp)
+    const shell = session.vars.shell
+    const temp = shell.openTemp()
+    shell.saveTemp(temp, 'A')
+    seedVar(session, 'A', 't')
+    const outer = shell.enter()
     expect(inCallEnv(session, 'A')).toBe(true)
-    locals.set('B', null)
-    outliveCall(session, 'B')
-    expect([...locals.keys()]).toEqual(['B'])
     outliveCall(session, 'A')
-    expect(temp.size).toBe(0)
     expect(inCallEnv(session, 'A')).toBe(false)
+    shell.leave(outer)
+    shell.closeTemp(temp)
+    expect(session.env.A).toBe('t')
+  })
+})
+
+describe('the frame a task reads', () => {
+  it('voices the session it frames while another runs', async () => {
+    const [, session] = makeView()
+    const [, other] = makeView()
+    const held = parseProgram('true\necho here')
+    session.lineNode = held.root.namedChildren[1] ?? null
+    const gone = parseProgram('echo there')
+    other.lineNode = gone.root.namedChildren[0] ?? null
+    gone.release()
+    setAttr(session, 'r', VarAttr.Nameref)
+    const notes: (string | Uint8Array)[] = []
+    await runWithSession(other, () => sessionView(session, null, notes).set('r', makeArray(['x'])))
+    held.release()
+    expect(
+      notes.map((note) => (typeof note === 'string' ? note : new TextDecoder().decode(note))),
+    ).toEqual(['bash: line 2: warning: r: removing nameref attribute\n'])
   })
 })

@@ -36,14 +36,13 @@ def _unused_execute_fn():
 
 
 @pytest.mark.asyncio
-async def test_env_prints_environment_in_insertion_order():
+async def test_env_prints_environment_sorted_by_name():
     session = make_session()
     seed_exported(session, "ZZZ", "1")
     seed_exported(session, "AAA", "2")
     out, io, _ = await handle_env(_unused_execute_fn, [], session)
     assert io.exit_code == 0
-    # `$PWD` is seeded at construction, so it leads the insertion order.
-    assert await materialize(out) == b"PWD=/\nZZZ=1\nAAA=2\n"
+    assert await materialize(out) == b"AAA=2\nPWD=/\nZZZ=1\n"
 
 
 @pytest.mark.asyncio

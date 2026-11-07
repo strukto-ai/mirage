@@ -47,7 +47,6 @@ from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.admission import Refused, admit
 from mirage.workspace.node.execute_node import execute_node
 from mirage.workspace.node.occurrence import claimant_for
-from mirage.workspace.session import session_view
 from mirage.workspace.types import ExecutionNode
 
 
@@ -64,6 +63,7 @@ async def run_command_tree(
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
     command_substitution: bool = False,
+    read: list[str] | None = None,
     call_stack: CallStack | None = None,
     execution_scope: ExecutionScope | None = None,
     route: RouteContext | None = None,
@@ -93,6 +93,9 @@ async def run_command_tree(
             command's gate.
         command_substitution (bool): capture a lone input redirect's data
             using the same expansion, dispatcher and output gates.
+        read (list[str] | None): the words the shell expanding the
+            substitution expanded the lone input redirect's file name to,
+            glob marks kept; None expands the redirect's own.
         call_stack (CallStack | None): the frames of the caller the tree
             runs in place of (``eval``), None for a line of its own.
         route (RouteContext | None): what ``pre_execute`` saw of the
@@ -130,11 +133,8 @@ async def run_command_tree(
             execute_fn,
             registry,
             links=namespace.session_links(session),
-            view=session_view(
-                session,
-                registry.policies,
-                diagnostics=context.frame.diagnostics,
-            ),
+            policies=registry.policies,
+            words=read,
         )
         # Bash's implicit file read has cat's policy identity, without
         # invoking a function/alias or expanding the filename a second time.

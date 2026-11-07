@@ -16,93 +16,13 @@ from collections.abc import Callable
 from typing import Any
 
 from mirage.io.yield_budget import YieldBudget
+from mirage.policy.policies import Policies
 from mirage.shell.call_stack import CallStack
-from mirage.shell.constants import SET_OPTION_DEFAULTS
-from mirage.shell.escapes import unescape_unquoted
-from mirage.shell.helpers import get_text
-from mirage.shell.types import TSNodeLike
 from mirage.types import PathSpec
-from mirage.utils.glob_walk import mark_escaped_globs
-from mirage.utils.path import expand_tilde
-from mirage.view.types import SessionView
 from mirage.workspace.evaluation import EvaluationContext
-from mirage.workspace.expand.brace import (
-    expand_template,
-    make_inert,
-    substitute,
-)
 from mirage.workspace.expand.classify import classify_word
-from mirage.workspace.expand.constants import (
-    BRACE_LITERAL_TYPES,
-    BRACE_WORD_TYPES,
-)
-from mirage.workspace.expand.fields import split_fields
-from mirage.workspace.expand.node import expand_chunks
-from mirage.workspace.expand.types import Chunk
-from mirage.workspace.expand.variable import ifs_value
+from mirage.workspace.expand.node import expand
 from mirage.workspace.mount import MountRegistry
-from mirage.workspace.session.shell_dirs import home_dir
-
-
-async def _expand_brace_word(
-    node: TSNodeLike,
-    context: EvaluationContext,
-    execute_fn: Callable[..., Any],
-    call_stack: CallStack | None,
-    view: SessionView | None = None,
-) -> list[list[Chunk]] | None:
-    """Brace-expand a concatenation or brace_expression into words.
-
-    Literal word tokens form the brace template; every other child
-    (expansions, strings, substitutions) expands first and joins as an
-    inert atom, so `{a,$v}` alternates on the expanded value while
-    `{1..$n}` stays literal, matching bash's brace-before-parameter
-    ordering. Deliberate divergence: bash rewrites `$v{a,b}` to
-    `$va $vb` before parameter expansion; here the prefix keeps its
-    own expansion (`prea preb`), which is the useful reading.
-
-    Quoting rides along per character: an atom keeps whatever marks its
-    own expansion produced, and the template's escapes are marked
-    before quote removal drops them, so `{'*',x}` stays literal while
-    `{$p,x}` keeps the value live. Each word keeps its atoms' pieces,
-    so an unquoted value still splits: `{a,b}$x` is `a$x b$x`.
-
-    Args:
-        node (TSNodeLike): concatenation or brace_expression.
-        context (EvaluationContext): the evaluation's session and frame.
-        execute_fn (Callable): evaluator for command substitutions.
-        call_stack (CallStack | None): shell call stack.
-    """
-    session = context.session
-    pieces: list[str] = []
-    atoms: list[TSNodeLike] = []
-    for child in node.children:
-        if not child.is_named or child.type in BRACE_LITERAL_TYPES:
-            pieces.append(get_text(child))
-        else:
-            atoms.append(child)
-            pieces.append(make_inert(len(atoms) - 1))
-    words = expand_template("".join(pieces))
-    if words is None:
-        return None
-    values = [
-        await expand_chunks(atom, context, execute_fn, call_stack, view=view)
-        for atom in atoms
-    ]
-    home = home_dir(session)
-    # `{1..1000000}` is a million words: they yield as they are made, so
-    # a cancel or the line's deadline lands before the last.
-    budget = YieldBudget()
-    out: list[list[Chunk]] = []
-    for w in words:
-        out.append(
-            substitute(
-                expand_tilde(unescape_unquoted(mark_escaped_globs(w)), home),
-                values,
-            )
-        )
-        await budget.run()
-    return out
 
 
 async def expand_words(
@@ -110,46 +30,34 @@ async def expand_words(
     context: EvaluationContext,
     execute_fn: Callable[..., Any],
     call_stack: CallStack | None = None,
-    view: SessionView | None = None,
+    policies: Policies | None = None,
 ) -> list[str]:
     """Expand parsed child nodes to words that still know their quoting.
 
-    Each node expands to its pieces, which IFS then splits into fields,
-    so an unquoted expansion anywhere in a word splits (``q$x`` too) and
-    quoted text never does. A glob character quoting made literal
-    travels under its own mark, so `"/data/"*.txt` still globs while
-    `'/data/*'.txt` does not and `'/data/*'?.txt` globs on the `?` alone;
-    ``unmark_globs`` takes the marks off.
+    Each node brace-expands, expands and splits on IFS, so an unquoted
+    expansion anywhere in a word splits (``q$x`` too) and quoted text
+    never does. A glob character quoting made literal travels under its
+    own mark, so `"/data/"*.txt` still globs while `'/data/*'.txt` does
+    not; ``unmark_globs`` takes the marks off.
 
     Args:
         parts (list[Any]): the word nodes to expand.
         context (EvaluationContext): the evaluation's session and frame.
         execute_fn (Callable): evaluator for command substitutions.
         call_stack (CallStack | None): shell call stack.
+        policies (Policies | None): the policies its writes clear.
     """
-    session = context.session
-    ifs = ifs_value(session, call_stack)
     result: list[str] = []
-    for p in parts:
-        # The default comes from the option table, not a literal here:
-        # two spellings of "brace expansion is on unless told otherwise"
-        # is one to drift.
-        if p.type in BRACE_WORD_TYPES and session.shell_options.get(
-            "braceexpand", SET_OPTION_DEFAULTS["braceexpand"]
-        ):
-            brace_words = await _expand_brace_word(
-                p, context, execute_fn, call_stack, view=view
+    # Each word expands in one step; the line yields between words, so a
+    # cancel or its deadline lands before the last.
+    budget = YieldBudget()
+    for part in parts:
+        result.extend(
+            await expand(
+                part, "fields", context, execute_fn, call_stack, policies
             )
-            if brace_words is not None:
-                budget = YieldBudget()
-                for chunks in brace_words:
-                    result.extend(await split_fields(chunks, ifs))
-                    await budget.run()
-                continue
-        chunks = await expand_chunks(
-            p, context, execute_fn, call_stack, view=view
         )
-        result.extend(await split_fields(chunks, ifs))
+        await budget.run()
     return result
 
 
@@ -160,7 +68,7 @@ async def expand_and_classify(
     registry: MountRegistry,
     cwd: str,
     call_stack: CallStack | None = None,
-    view: SessionView | None = None,
+    policies: Policies | None = None,
 ) -> list[str | PathSpec]:
     """Expand words, classify as PathSpec or text.
 
@@ -171,6 +79,13 @@ async def expand_and_classify(
     like bash, while `for f in '/data/*'?.txt` still globs on the `?`.
     """
     expanded = await expand_words(
-        words, context, execute_fn, call_stack, view=view
+        words, context, execute_fn, call_stack, policies
     )
-    return [classify_word(w, registry, cwd) for w in expanded]
+    # One word can expand to a million (`a=($x)`), so classifying them
+    # yields too.
+    budget = YieldBudget()
+    classified: list[str | PathSpec] = []
+    for word in expanded:
+        classified.append(classify_word(word, registry, cwd))
+        await budget.run()
+    return classified
