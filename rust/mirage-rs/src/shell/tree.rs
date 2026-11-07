@@ -456,49 +456,189 @@ impl Refusal {
     }
 }
 
-/// A token as bash's reader hands it to a syntax error: each `$'...'`
-/// outside double quotes as its value in single quotes, each `$"..."` as
-/// `"..."`, and a `\001` before each `\001` and `\177` no backslash
-/// escapes; the whole in `$'...'` when it does not show as it is.
+/// A token as bash's reader hands it to a syntax error: each `$'...'` it
+/// reads as a word (outside quotes, or in `$( )`, `<( )` or `${ }`) as its
+/// value in single quotes, bare in double quotes within a `${ }` that takes
+/// no pattern or a `$[ ]`, and as typed in double quotes and backticks;
+/// each `$"..."` as `"..."`, and a `\001` before each `\001` and `\177` no
+/// backslash escapes. The whole in `$'...'` when it does not show as it is.
 fn named(token: &[u8], utf8: bool) -> Vec<u8> {
-    let mut out = Vec::with_capacity(token.len());
-    let mut quote = 0u8;
-    let mut at = 0;
-    while at < token.len() {
-        let byte = token[at];
-        if quote != b'\'' && byte == b'\\' && at + 1 < token.len() {
-            out.extend_from_slice(&token[at..at + 2]);
-            at += 2;
-            continue;
-        }
-        if quote == 0 && byte == b'$' && token.get(at + 1) == Some(&b'\'') {
-            if let Some(end) = super::lex::ansi_c_end(token, at) {
-                let value = crate::interp::escapes::decode_ansi_c(&token[at + 2..end - 1], utf8);
-                single_quoted(&marked(&value), &mut out);
-                at = end;
+    let mut naming = Naming {
+        token,
+        utf8,
+        at: 0,
+        out: Vec::with_capacity(token.len()),
+    };
+    naming.words(None, false, true);
+    if crate::interp::quote::printable(&naming.out, utf8) {
+        naming.out
+    } else {
+        crate::interp::quote::ansi_c(&naming.out, utf8)
+    }
+}
+
+/// `named`'s reading of a token, from `at`, into `out`.
+struct Naming<'a> {
+    token: &'a [u8],
+    utf8: bool,
+    at: usize,
+    out: Vec<u8>,
+}
+
+impl Naming<'_> {
+    /// The words of the token, or of the `$( )`, `${ }` or `$[ ]` whose
+    /// `pair` opened before `at`, through its close: each `$'...'` read as
+    /// its value, in single quotes when `quoted`; `dq` when they stand in
+    /// double quotes.
+    fn words(&mut self, pair: Option<(u8, u8)>, dq: bool, quoted: bool) {
+        let mut depth = 0usize;
+        while self.at < self.token.len() {
+            if self.escaped() || self.nested(dq) {
                 continue;
             }
+            let byte = self.token[self.at];
+            let next = self.token.get(self.at + 1).copied();
+            if byte == b'$' && next == Some(b'\'') {
+                if let Some(end) = super::lex::ansi_c_end(self.token, self.at) {
+                    let value = crate::interp::escapes::decode_ansi_c(
+                        &self.token[self.at + 2..end - 1],
+                        self.utf8,
+                    );
+                    if quoted {
+                        single_quoted(&marked(&value), &mut self.out);
+                    } else {
+                        self.out.extend_from_slice(&marked(&value));
+                    }
+                    self.at = end;
+                    continue;
+                }
+            }
+            if byte == b'$' && next == Some(b'"') {
+                self.at += 1;
+                continue;
+            }
+            self.byte();
+            match byte {
+                b'\'' | b'`' => self.verbatim(byte),
+                b'"' => self.double(),
+                _ if pair.is_some_and(|(open, _)| open == byte) => depth += 1,
+                _ if pair.is_some_and(|(_, close)| close == byte) => {
+                    if depth == 0 {
+                        return;
+                    }
+                    depth -= 1;
+                }
+                _ => {}
+            }
         }
-        if quote == 0 && byte == b'$' && token.get(at + 1) == Some(&b'"') {
-            at += 1;
-            continue;
+    }
+
+    /// Double-quoted text past its opening quote, through its close:
+    /// `$'...'` as typed, and each `$( )`, `${ }` and `$[ ]` read anew.
+    fn double(&mut self) {
+        while self.at < self.token.len() {
+            if self.escaped() || self.nested(true) {
+                continue;
+            }
+            let byte = self.token[self.at];
+            self.byte();
+            match byte {
+                b'"' => return,
+                b'`' => self.verbatim(byte),
+                _ => {}
+            }
         }
-        if quote == 0 && matches!(byte, b'\'' | b'"') {
-            quote = byte;
-        } else if quote == byte {
-            quote = 0;
+    }
+
+    /// Whether a `$( )`, `<( )`, `${ }` or `$[ ]` opens at `at`, inside
+    /// double quotes or not (`dq`), reading it through its close if so.
+    fn nested(&mut self, dq: bool) -> bool {
+        let opener = (self.token[self.at], self.token.get(self.at + 1).copied());
+        let (pair, inner, quoted) = match opener {
+            (b'$', Some(b'(')) => ((b'(', b')'), false, true),
+            (b'<' | b'>', Some(b'(')) if !dq => ((b'(', b')'), false, true),
+            (b'$', Some(b'{')) => (
+                (b'{', b'}'),
+                dq,
+                !dq || takes_pattern(self.token, self.at + 2),
+            ),
+            (b'$', Some(b'[')) => ((b'[', b']'), dq, !dq),
+            _ => return false,
+        };
+        self.out
+            .extend_from_slice(&self.token[self.at..self.at + 2]);
+        self.at += 2;
+        self.words(Some(pair), inner, quoted);
+        true
+    }
+
+    /// Text as typed past the `'` or backtick (`close`) that opened it,
+    /// through its close; a backslash escapes a byte in backticks.
+    fn verbatim(&mut self, close: u8) {
+        while self.at < self.token.len() {
+            if close == b'`' && self.escaped() {
+                continue;
+            }
+            let byte = self.token[self.at];
+            self.byte();
+            if byte == close {
+                return;
+            }
         }
+    }
+
+    /// Whether a backslash stands at `at` with a byte after it, copying
+    /// the two as they are if so.
+    fn escaped(&mut self) -> bool {
+        if self.token[self.at] != b'\\' || self.at + 1 >= self.token.len() {
+            return false;
+        }
+        self.out
+            .extend_from_slice(&self.token[self.at..self.at + 2]);
+        self.at += 2;
+        true
+    }
+
+    /// Copies the byte at `at`, marked.
+    fn byte(&mut self) {
+        let byte = self.token[self.at];
         if matches!(byte, 0x01 | 0x7F) {
-            out.push(0x01);
+            self.out.push(0x01);
         }
-        out.push(byte);
+        self.out.push(byte);
+        self.at += 1;
+    }
+}
+
+/// Whether the `${ }` whose parameter starts at `at` takes a pattern: its
+/// operator, past the name and any subscript, is `/`, `#`, `%`, `^` or `,`.
+fn takes_pattern(token: &[u8], mut at: usize) -> bool {
+    let byte = |at: usize| token.get(at).copied();
+    if matches!(byte(at), Some(b'!' | b'#')) && byte(at + 1).is_some_and(|b| b != b'}') {
         at += 1;
     }
-    if crate::interp::quote::printable(&out, utf8) {
-        out
-    } else {
-        crate::interp::quote::ansi_c(&out, utf8)
+    let name = token
+        .get(at..)
+        .unwrap_or_default()
+        .iter()
+        .take_while(|b| b.is_ascii_alphanumeric() || **b == b'_')
+        .count();
+    at += name.max(usize::from(
+        byte(at).is_some_and(|b| b"@*#?-$!".contains(&b)),
+    ));
+    if byte(at) == Some(b'[') {
+        let mut depth = 0usize;
+        while let Some(b) = byte(at) {
+            at += 1;
+            match b {
+                b'[' => depth += 1,
+                b']' if depth == 1 => break,
+                b']' => depth -= 1,
+                _ => {}
+            }
+        }
     }
+    matches!(byte(at), Some(b'/' | b'#' | b'%' | b'^' | b','))
 }
 
 /// `text` with the `\001` bash's reader puts before each `\001` and

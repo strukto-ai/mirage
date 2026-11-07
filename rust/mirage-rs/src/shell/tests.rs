@@ -548,10 +548,11 @@ fn refusals_stand_on_the_lines_bash_names() {
 
 #[test]
 fn an_unexpected_token_is_named_as_bash_reads_it() {
-    // Pinned on bash -c under C.UTF-8 and C: a `$'...'` as its value in
-    // single quotes, a `$"..."` as `"..."`, a `\001` before each `\001`
-    // and `\177` no backslash escapes, and the whole in `$'...'` when it
-    // does not show as it is.
+    // Pinned on bash -c under C.UTF-8 and C: a `$'...'` read as a word as
+    // its value in single quotes, bare in a quoted `${ }` that takes no
+    // pattern or `$[ ]`, as typed in double quotes and backticks; a
+    // `$"..."` as `"..."`, a `\001` before each `\001` and `\177` no
+    // backslash escapes, and the whole in `$'...'` when it does not show.
     for (source, utf8, token) in [
         ("echo ($'a'", true, "'a'"),
         ("echo ($'a\\'b'", true, "'a'\\''b'"),
@@ -565,6 +566,28 @@ fn an_unexpected_token_is_named_as_bash_reads_it() {
         ("echo ($'\\0a'", true, "''"),
         ("echo (é", true, "é"),
         ("echo (é", false, "$'\\303\\251'"),
+        ("echo (\"$(echo $'a')\"", true, "\"$(echo 'a')\""),
+        ("echo ($(echo $'a')", true, "$(echo 'a')"),
+        ("echo (<(echo $'a')", true, "<(echo 'a')"),
+        ("echo (>(a)b", true, ">(a)b"),
+        ("echo (<<(a)", true, "<<"),
+        ("f() <(a)", true, "<(a)"),
+        ("echo (\"$((1+$'a'))\"", true, "\"$((1+'a'))\""),
+        ("echo (\"$(echo \\\"$'a')\"", true, "\"$(echo \\\"'a')\""),
+        ("echo (`echo $'a'`", true, "`echo $'a'`"),
+        ("echo (\"`echo $'a'`\"", true, "\"`echo $'a'`\""),
+        ("echo (${x:-$'a'}", true, "${x:-'a'}"),
+        ("echo (\"${x:-$'a'}\"", true, "\"${x:-a}\""),
+        ("echo (\"${x[$'a']}\"", true, "\"${x[a]}\""),
+        ("echo (\"${x/$'a'/b}\"", true, "\"${x/'a'/b}\""),
+        ("echo (\"${x^^$'a'}\"", true, "\"${x^^'a'}\""),
+        ("echo (\"${x#${y:-$'a'}}\"", true, "\"${x#${y:-a}}\""),
+        ("echo (\"${x:-${y#$'a'}}\"", true, "\"${x:-${y#'a'}}\""),
+        ("echo (\"${x:-\"$'a'\"}\"", true, "\"${x:-\"$'a'\"}\""),
+        ("echo (\"$[$'a']\"", true, "\"$[a]\""),
+        ("echo (\u{2028}", true, "$'\\342\\200\\250'"),
+        ("echo (é\u{2028}", true, "$'é\\342\\200\\250'"),
+        ("echo (\u{200b}", true, "\u{200b}"),
     ] {
         let said = String::from_utf8_lossy(&refused(source).worded(b"", 1, utf8)).into_owned();
         let near = format!("line 1: syntax error near unexpected token `{token}'");

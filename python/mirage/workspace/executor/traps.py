@@ -15,7 +15,7 @@
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from mirage.context import program_invocation
+from mirage.context import program_invocation, voice_name
 from mirage.io import IOResult
 from mirage.io.stream import async_chain
 from mirage.io.types import ByteSource, materialize
@@ -203,7 +203,7 @@ async def run_err_trap(
     session.err_trap_running = True
     try:
         return await _run_action(
-            execute_fn, action, session, stdin, call_stack
+            execute_fn, action, "error", session, stdin, call_stack
         )
     finally:
         session.err_trap_running = False
@@ -246,7 +246,7 @@ async def run_return_trap(
     session.return_trap_running = True
     try:
         return await _run_action(
-            execute_fn, action, session, stdin, call_stack
+            execute_fn, action, "return", session, stdin, call_stack
         )
     finally:
         session.return_trap_running = False
@@ -255,6 +255,7 @@ async def run_return_trap(
 async def _run_action(
     execute_fn: Callable[..., Any],
     action: str,
+    name: str,
     session: SessionState,
     stdin: ByteSource | None,
     call_stack: CallStack | None,
@@ -266,18 +267,22 @@ async def _run_action(
     after ``!`` leaves the ``set -e`` answer for the statement it
     answers as it was. A failure ``set -e`` acts on in it ends the shell
     with its status, and an ``exit`` or ``return`` in it leaves with
-    what it wrote, for the redirects of its statement to route.
+    what it wrote, for the redirects of its statement to route. A
+    syntax error in it leads with ``bash: <name> trap: ``.
 
     Args:
         execute_fn (Callable[..., Any]): runs a line in the caller's
             frames.
         action (str): the action's text.
+        name (str): the trap as bash names it, ``error`` or ``return``.
         session (SessionState): the shell running it.
         stdin (ByteSource | None): the shell's standard input.
         call_stack (CallStack | None): the frames it runs in.
     """
     held = snapshot_status(session)
     immune = session.errexit_immune
+    outer_head = session._parse_head
+    session._parse_head = f"{voice_name(session)}: {name} trap: "
     try:
         io = await execute_fn(
             action,
@@ -294,6 +299,7 @@ async def _run_action(
         raise
     finally:
         session.errexit_immune = immune
+        session._parse_head = outer_head
     stdout = await materialize(io.stdout)
     stderr = await materialize(io.stderr)
     if session.errexit_exiting:
@@ -349,6 +355,8 @@ async def run_exit_trap(
     record_status(session, status)
     saved = session._trap_status
     session._trap_status = status
+    outer_head = session._parse_head
+    session._parse_head = f"{voice_name(session)}: exit trap: "
     exiting = session.errexit_exiting
     session.errexit_exiting = False
     final = status
@@ -378,6 +386,7 @@ async def run_exit_trap(
         stderr = sig.stderr
     finally:
         session._trap_status = saved
+        session._parse_head = outer_head
         session.errexit_exiting = exiting
         session.exit_trap = None
         session.exit_trap_inherited = False

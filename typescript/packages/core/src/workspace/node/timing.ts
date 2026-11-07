@@ -1,4 +1,5 @@
 import { encodeText } from '../../shell/bytes.ts'
+import { concat } from '../../utils/bytes.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
 import { shellVoice } from '../../shell/voice.ts'
 
@@ -40,15 +41,21 @@ export function timingReport(
 
 /**
  * bash's refusal of the `%` escape `rest` starts with: past an optional
- * precision digit and `l`, the character standing where a format letter
+ * ASCII precision digit and `l`, the byte standing where a format letter
  * belongs, NUL at the end of the format. Mirrors Python's _bad_escape.
  */
 function badEscape(rest: string): Uint8Array {
+  const raw = encodeText(rest)
   let i = 1
-  if (i < rest.length && /[0-9]/.test(rest.charAt(i))) i += 1
-  if (i < rest.length && rest.charAt(i) === 'l') i += 1
-  const bad = i < rest.length ? rest.charAt(i) : '\0'
-  return encodeText(`${shellVoice()}TIMEFORMAT: \`${bad}': invalid format character\n`)
+  const digit = raw[i] ?? 0
+  if (digit >= 0x30 && digit <= 0x39) i += 1
+  if (raw[i] === 0x6c) i += 1
+  const bad = i < raw.length ? raw.subarray(i, i + 1) : Uint8Array.of(0)
+  return concat([
+    encodeText(`${shellVoice()}TIMEFORMAT: \``),
+    bad,
+    encodeText("': invalid format character\n"),
+  ])
 }
 
 /**

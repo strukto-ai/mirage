@@ -113,10 +113,10 @@
         "opfs",
         "disk"
       ],
-      "command": "TIMEFORMAT=''; time echo hi",
+      "command": "TIMEFORMAT=''; time echo hi; for f in % 'a%%%' %3 %ll '%3%' $'%\\331\\243x'; do TIMEFORMAT=$f; { time :; } 2>&1 | cat -v; done",
       "expect": {
         "exit": 0,
-        "stdout": "hi\n",
+        "stdout": "hi\n%\na%%\nbash: line 1: TIMEFORMAT: `^@': invalid format character\nbash: line 1: TIMEFORMAT: `l': invalid format character\nbash: line 1: TIMEFORMAT: `%': invalid format character\nbash: line 1: TIMEFORMAT: `M-Y': invalid format character\n",
         "stderr": ""
       }
     },

@@ -54,20 +54,23 @@ def timing_report(
 
 def _bad_escape(rest: str) -> bytes:
     """bash's refusal of the ``%`` escape ``rest`` starts with: past an
-    optional precision digit and ``l``, the character standing where a
+    optional ASCII precision digit and ``l``, the byte standing where a
     format letter belongs, NUL at the end of the format.
 
     Args:
         rest (str): the format from the escape's ``%`` on.
     """
+    raw = encode_text(rest)
     i = 1
-    if i < len(rest) and rest[i].isdigit():
+    if raw[i : i + 1].isdigit():
         i += 1
-    if i < len(rest) and rest[i] == "l":
+    if raw[i : i + 1] == b"l":
         i += 1
-    bad = rest[i] if i < len(rest) else "\0"
-    return encode_text(
-        f"{shell_voice()}TIMEFORMAT: `{bad}': invalid format character\n"
+    bad = raw[i : i + 1] or b"\0"
+    return (
+        encode_text(f"{shell_voice()}TIMEFORMAT: `")
+        + bad
+        + b"': invalid format character\n"
     )
 
 

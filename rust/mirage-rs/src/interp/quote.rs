@@ -2,6 +2,10 @@
 //! quotes, and `declare -p`'s double quotes, each turning to `$'...'` for a
 //! value holding a character the terminal would not show.
 
+use std::cmp::Ordering;
+
+use crate::generated::unicode_classes::PRINT;
+
 /// The escapes bash's `$'...'` form names, beside three-digit octal.
 fn named_escape(byte: u8) -> Option<&'static [u8]> {
     Some(match byte {
@@ -21,14 +25,31 @@ fn control(byte: u8) -> bool {
     byte < 0x20 || byte == 0x7F
 }
 
+/// Whether a UTF-8 locale prints `c`: `[[:print:]]`, which leaves out the
+/// controls, the line and paragraph separators and unassigned code points.
+fn prints(c: char) -> bool {
+    let c = u32::from(c);
+    PRINT
+        .binary_search_by(|&(low, high)| {
+            if high < c {
+                Ordering::Less
+            } else if low > c {
+                Ordering::Greater
+            } else {
+                Ordering::Equal
+            }
+        })
+        .is_ok()
+}
+
 /// Whether a value shows as it is: no control character, and under the
-/// C locale no byte past ASCII; under UTF-8 no byte that is no character.
+/// C locale no byte past ASCII; under UTF-8 only characters it prints.
 pub(crate) fn printable(value: &[u8], utf8: bool) -> bool {
     if value.iter().any(|&b| control(b)) {
         return false;
     }
     if utf8 {
-        std::str::from_utf8(value).is_ok()
+        std::str::from_utf8(value).is_ok_and(|text| text.chars().all(prints))
     } else {
         value.is_ascii()
     }
@@ -42,7 +63,9 @@ pub(crate) fn ansi_c(value: &[u8], utf8: bool) -> Vec<u8> {
         let mut shown = vec![false; value.len()];
         let mut at = 0;
         for chunk in value.utf8_chunks() {
-            shown[at..at + chunk.valid().len()].fill(true);
+            for (offset, c) in chunk.valid().char_indices().filter(|&(_, c)| prints(c)) {
+                shown[at + offset..at + offset + c.len_utf8()].fill(true);
+            }
             at += chunk.valid().len() + chunk.invalid().len();
         }
         shown
@@ -125,6 +148,18 @@ mod tests {
         assert_eq!(single(b"a\tb\x01", false), b"$'a\\tb\\001'");
         assert_eq!(single("é".as_bytes(), false), b"$'\\303\\251'");
         assert_eq!(single("é".as_bytes(), true), "'é'".as_bytes());
+        assert_eq!(
+            single("é\u{2028}a".as_bytes(), true),
+            "$'é\\342\\200\\250a'".as_bytes()
+        );
+        assert_eq!(
+            single("\u{85}\u{378}".as_bytes(), true),
+            b"$'\\302\\205\\315\\270'"
+        );
+        assert_eq!(
+            single("\u{200b}'x".as_bytes(), true),
+            "'\u{200b}'\\''x'".as_bytes()
+        );
     }
 
     #[test]

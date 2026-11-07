@@ -480,9 +480,13 @@ fn refusals(source: &[u8], options: &super::Options, ended: bool, first: Fail) -
         }
         found.push(fail);
     }
+    let newlines: Vec<usize> = memchr::memchr_iter(b'\n', source).collect();
     Refusal {
         at: found[0].at,
-        lines: found.iter().flat_map(|fail| said(source, fail)).collect(),
+        lines: found
+            .iter()
+            .flat_map(|fail| said(source, &newlines, fail))
+            .collect(),
         status: found.last().map_or(2, |last| last.status),
     }
 }
@@ -492,12 +496,13 @@ fn refusals(source: &[u8], options: &super::Options, ended: bool, first: Fail) -
 /// line there, quoted back; the opening of an unclosed quote or pair on
 /// the row it opened on, as a line anchored to an earlier text is on that
 /// text's; the rest of what the end of the input brings on the row past
-/// the last, as bash -c reads a newline after the input.
-fn said(source: &[u8], fail: &Fail) -> Vec<Said> {
-    let rows = |to: usize| source[..to].iter().filter(|&&b| b == b'\n').count();
+/// the last, as bash -c reads a newline after the input. `newlines` holds
+/// the offset of each newline in `source`.
+fn said(source: &[u8], newlines: &[usize], fail: &Fail) -> Vec<Said> {
+    let rows = |to: usize| newlines.partition_point(|&at| at < to);
     let at = fail.at.min(source.len());
     let last = fail.end.min(source.len()).saturating_sub(1).max(at);
-    let past = rows(source.len()) + usize::from(source.last().is_some_and(|&b| b != b'\n'));
+    let past = newlines.len() + usize::from(source.last().is_some_and(|&b| b != b'\n'));
     let mut out = Vec::new();
     for (index, text) in fail.lines.iter().enumerate() {
         let near = text.starts_with(b"syntax error near");
@@ -839,7 +844,8 @@ impl Parser<'_> {
             b";;&", b";;", b";&", b"&&", b"||", b"|&", b">>", b"<<", b"&>", b">&", b"<&", b">|",
             b"\n", b";", b"&", b"|", b"(", b")", b"<", b">",
         ];
-        for op in ops {
+        let procsub = rest.starts_with(b"<(") || rest.starts_with(b">(");
+        for op in ops.iter().filter(|_| !procsub) {
             if rest.starts_with(op) {
                 return Ok(op.to_vec());
             }
