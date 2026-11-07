@@ -1339,7 +1339,7 @@ async def run_steps(
                 answer = {"text": "stopped"}
             elif kind == "start_workspace":
                 await steps.start_workspace(wid)
-                answer = {"text": wid}
+                answer = {"text": step["id"]}
             elif kind == "snapshot":
                 await steps.snapshot(wid, prefix + step["name"])
                 answer = {"text": "saved"}
