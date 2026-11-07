@@ -98,6 +98,7 @@ import { resolveSources } from '../../secrets/sources.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { Terminal } from '../../shell/console/terminal.ts'
 import { BIN_PREFIX } from '../../shell/constants.ts'
+import { HANGUP_EXIT_CODE } from '../../execution/job/constants.ts'
 import { type Job, type JobState, JobTable } from '../../execution/job/index.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { literalTree } from '../../shell/literal.ts'
@@ -380,6 +381,42 @@ export class Workspace {
         this.processTable.records().find((process) => process.id.pid === record.pid)?.machine ??
         this.processTable.machine
       this.observer.traceJob(record, machine)
+    }
+    // What the daemon before this one left running ended with it, as its
+    // jobs did: hung up.
+    this.jobTable.taken = async () => {
+      const now = this.clock.now()
+      const hangup = HANGUP_EXIT_CODE - 128
+      const store = this.jobTable.store
+      const live = new Set(this.processTable.live().map((handle) => handle.record.id.pid))
+      for (const record of await store.findProcesses()) {
+        if (record.endedAt === null && !live.has(record.id.pid)) {
+          store.note({
+            ...record,
+            state: 'exited',
+            endedAt: now,
+            exit: HANGUP_EXIT_CODE,
+            signal: hangup,
+          })
+        }
+      }
+      const reading = new Set(
+        this.lineTable
+          .lines()
+          .filter((line) => line.endedAt === null)
+          .map((line) => line.id.value),
+      )
+      for (const line of await store.findLines()) {
+        if (line.endedAt === null && !reading.has(line.id.value)) {
+          store.note({
+            ...line,
+            state: 'exited',
+            endedAt: now,
+            exit: HANGUP_EXIT_CODE,
+            signal: hangup,
+          })
+        }
+      }
     }
     this.lineTable = new LineTable(this.clock, (record) => {
       this.jobTable.store.note(record)
@@ -1387,11 +1424,8 @@ export class Workspace {
     filter: { sessionId?: string; state?: JobState; lineId?: LineId } = {},
   ): Promise<Job[]> {
     if (!this.jobTable.claimed) {
-      await this.ensureSessionsLoaded()
       const ids =
-        filter.sessionId !== undefined
-          ? [filter.sessionId]
-          : this.listSessions().map((session) => session.sessionId)
+        filter.sessionId !== undefined ? [filter.sessionId] : await this.jobTable.store.sessions()
       for (const id of ids) await this.jobTable.sync(id)
     }
     const handles =
@@ -1453,16 +1487,10 @@ export class Workspace {
       if (pid !== null && claimed) {
         tree = this.processTable.tree(pid)
       } else if (pid !== null) {
-        tree.add(pid)
-        for (let grown = true; grown;) {
-          grown = false
-          for (const process of records) {
-            if (process.parent !== null && tree.has(process.parent) && !tree.has(process.id.pid)) {
-              tree.add(process.id.pid)
-              grown = true
-            }
-          }
-        }
+        tree = new Set([
+          pid,
+          ...records.filter((process) => process.ancestors.includes(pid)).map((p) => p.id.pid),
+        ])
       }
     }
     return records.filter(
@@ -1474,8 +1502,9 @@ export class Workspace {
     )
   }
 
-  /** One process's record, while the workspace keeps it. */
+  /** One process's record, while the workspace keeps it; none for another workspace's. */
   async process(id: ProcessId): Promise<Process | null> {
+    if (id.workspaceId !== this.wsId) return null
     const own = this.jobTable.claimed
       ? (this.processTable
           .records()

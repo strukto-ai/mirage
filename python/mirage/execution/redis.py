@@ -120,6 +120,7 @@ class RedisExecutionStore(ExecutionStore):
         self._lines_key = f"{key_prefix}records:lines"
         self._processes_key = f"{key_prefix}records:processes"
         self._pending: dict[tuple[bool, str], Line | Process] = {}
+        self._inflight: dict[tuple[bool, str], Line | Process] = {}
         self._pending_lock = threading.Lock()
         self._writing = False
         self._writer: asyncio.Task[None] | None = None
@@ -174,6 +175,7 @@ class RedisExecutionStore(ExecutionStore):
         while True:
             with self._pending_lock:
                 batch, self._pending = self._pending, {}
+                self._inflight = batch
                 if not batch:
                     self._writing = False
                     return
@@ -206,6 +208,9 @@ class RedisExecutionStore(ExecutionStore):
                 await pipe.execute()
             except Exception as exc:
                 logger.debug("execution records not written: %s", exc)
+            finally:
+                with self._pending_lock:
+                    self._inflight = {}
 
     async def _flush(self) -> None:
         """Wait for the records noted so far to be written."""
@@ -225,15 +230,22 @@ class RedisExecutionStore(ExecutionStore):
             is_line (bool): lines rather than processes.
         """
         with self._pending_lock:
-            return [
-                record
-                for (line, _), record in self._pending.items()
-                if line == is_line
-            ]
+            noted = {**self._inflight, **self._pending}
+        return [
+            record for (line, _), record in noted.items() if line == is_line
+        ]
+
+    def _noted_one(self, key: tuple[bool, str]) -> Line | Process | None:
+        """One record noted but not written yet.
+
+        Args:
+            key (tuple[bool, str]): whether it is a line, and its field.
+        """
+        with self._pending_lock:
+            return self._pending.get(key) or self._inflight.get(key)
 
     async def get_line(self, line_id: LineId) -> Line | None:
-        with self._pending_lock:
-            noted = self._pending.get((True, line_id.value))
+        noted = self._noted_one((True, line_id.value))
         if isinstance(noted, Line):
             return noted
         raw = await cast(
@@ -244,8 +256,7 @@ class RedisExecutionStore(ExecutionStore):
 
     async def get_process(self, process_id: ProcessId) -> Process | None:
         field = str(process_id.pid)
-        with self._pending_lock:
-            noted = self._pending.get((False, field))
+        noted = self._noted_one((False, field))
         if isinstance(noted, Process):
             return noted
         raw = await cast(
@@ -302,6 +313,12 @@ class RedisExecutionStore(ExecutionStore):
             key=lambda record: record.pid,
         )
 
+    async def sessions(self) -> list[str]:
+        names = await cast(
+            "Awaitable[list[bytes]]", self._client.hkeys(self._lists)
+        )
+        return sorted(name.decode() for name in names)
+
     def console(self, name: str) -> RedisConsoleStore:
         return RedisConsoleStore(
             url=self._url,
@@ -313,26 +330,27 @@ class RedisExecutionStore(ExecutionStore):
     async def lease(
         self, daemon: str, consoles: Sequence[str] = ()
     ) -> str | None:
-        """One round trip with no consoles to keep, and one pipeline
-        however many jobs the daemon runs, so the lease is never late
-        behind its consoles."""
+        """One pipeline however many jobs the daemon runs, so the lease is
+        never late behind its consoles; the line and process records are
+        kept another day with it, so a quiet run outlives no record."""
         expiry = (
             str(int(self.lease_seconds * 1000))
             if self.lease_seconds is not None
             else ""
         )
         args = [daemon, "take", expiry]
-        if not consoles:
-            held = await self._lease_script(keys=[self._lease], args=args)
-        else:
-            pipe = self._client.pipeline(transaction=False)
-            await self._lease_script(
-                keys=[self._lease], args=args, client=pipe
-            )
-            for name in consoles:
-                for key in self.console(name).keys:
-                    pipe.expire(key, CONSOLE_TTL_SECONDS)
-            held = (await pipe.execute())[0]
+        pipe = self._client.pipeline(transaction=False)
+        await self._lease_script(keys=[self._lease], args=args, client=pipe)
+        for kind in ("lines", "processes"):
+            for key in (
+                f"{self._prefix}records:{kind}",
+                f"{self._prefix}ended:{kind}",
+            ):
+                pipe.expire(key, CONSOLE_TTL_SECONDS)
+        for name in consoles:
+            for key in self.console(name).keys:
+                pipe.expire(key, CONSOLE_TTL_SECONDS)
+        held = (await pipe.execute())[0]
         return held.decode() if held is not None else None
 
     async def holder(self) -> str | None:

@@ -29,9 +29,8 @@ logger = logging.getLogger(__name__)
 # Every statement the sql console store runs, by name. Mirrors
 # TypeScript's ``CONSOLE_SQL``.
 CONSOLE_SQL: dict[str, str] = {
-    "top": "SELECT MAX(seq) AS top,"
-    " COUNT(CASE WHEN channel = 'control' THEN 1 END) AS ended"
-    " FROM mirage_console WHERE scope = ? AND name = ?",
+    "top": "SELECT seq, channel FROM mirage_console"
+    " WHERE scope = ? AND name = ? ORDER BY seq DESC LIMIT 1",
     "append": "INSERT INTO mirage_console"
     " (scope, name, seq, ts, channel, data) VALUES (?, ?, ?, ?, ?, ?)"
     " ON CONFLICT (scope, name, seq) DO NOTHING RETURNING seq",
@@ -126,10 +125,12 @@ class SqlConsoleStore:
 
     async def _top(self) -> tuple[int | None, bool]:
         """The console's last seq, None while it is empty, and whether it
-        holds its ending."""
-        [row] = await self._query("top", ())
-        top = row["top"]
-        return (None if top is None else int(top)), bool(row["ended"])
+        holds its ending, which is always its last chunk: one indexed
+        row, however long the console."""
+        rows = await self._query("top", ())
+        if not rows:
+            return None, False
+        return int(rows[0]["seq"] or 0), rows[0]["channel"] == "control"
 
     async def append(self, channel: Channel, data: bytes) -> ConsoleChunk:
         while True:

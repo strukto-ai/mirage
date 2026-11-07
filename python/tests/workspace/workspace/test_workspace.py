@@ -29,12 +29,12 @@ from mirage.cache.index.config import LookupStatus
 from mirage.commands.cli.builtin.gws import GWS
 from mirage.context import reset_current_session, set_current_session
 from mirage.execution.job import JobState
-from mirage.execution.line.types import LineState
-from mirage.execution.process.types import ProcessState
+from mirage.execution.line.types import Line, LineState
+from mirage.execution.process.types import Process, ProcessState
 from mirage.execution.ram import RAMExecutionStore
-from mirage.execution.types import MachineId
+from mirage.execution.types import LineId, MachineId, ProcessId
 from mirage.runtime.sandbox import RemoteSandbox
-from mirage.types import MountBackend, MountMode
+from mirage.types import MountBackend, MountMode, PathSpec
 from mirage.utils.abort import MirageAbortError
 from mirage.utils.clock import ManualClock
 from mirage.utils.ids import SeededIdSource, SystemIdSource
@@ -980,6 +980,43 @@ async def test_another_daemon_lists_what_the_holder_runs():
     finally:
         await a.close()
         await b.close()
+
+
+# The line and process records a daemon left running when it went end as
+# hung up once the next one takes the workspace's lease, and a process id
+# of another workspace names none here.
+@pytest.mark.asyncio
+async def test_records_a_lost_daemon_left_running_end_hung_up():
+    store = RAMWorkspaceStateStore()
+    ws = Workspace({"/m": RAMVFS()}, workspace_id="w", store=store)
+    try:
+        left = Process(
+            id=ProcessId("w", 99),
+            session_id="s",
+            line=LineId("lost"),
+            parent=None,
+            group=99,
+            command="sleep 30",
+            cwd=PathSpec.from_str_path("/"),
+            machine=MachineId("host", "gone"),
+            started_at=1.0,
+        )
+        ws.job_table.store.note(left)
+        ws.job_table.store.note(Line(LineId("lost"), "s", "sleep 30 &", 1.0))
+        await ws.shell("true")
+        process = await ws.process(left.id)
+        assert process is not None
+        assert (process.state, process.exit, process.signal) == (
+            ProcessState.EXITED,
+            129,
+            1,
+        )
+        line = await ws.line(LineId("lost"))
+        assert line is not None
+        assert (line.state, line.exit) == (LineState.EXITED, 129)
+        assert await ws.process(ProcessId("other", 99)) is None
+    finally:
+        await ws.close()
 
 
 # A line queued behind another of its session is listed as waiting, and

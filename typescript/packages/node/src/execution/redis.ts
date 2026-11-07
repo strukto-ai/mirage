@@ -25,6 +25,7 @@ import {
   processToFields,
 } from '@struktoai/mirage-core/execution/serde'
 import { type LineId, ProcessId } from '@struktoai/mirage-core/execution/types'
+import { compareCodePoints } from '@struktoai/mirage-core/utils/sort'
 import type { RecordFields } from '@struktoai/mirage-core/workspace/record/types'
 import { RedisConnection } from '../optional_peer.ts'
 import { RedisConsoleStore } from '../shell/console/redis/index.ts'
@@ -83,6 +84,7 @@ export class RedisExecutionStore extends ExecutionStore {
   private readonly redis: RedisConnection
   private raised = 0
   private readonly pending = new Map<string, Line | Process>()
+  private inflight = new Map<string, Line | Process>()
   private writing: Promise<void> | null = null
 
   constructor(options: RedisExecutionStoreOptions = {}) {
@@ -135,6 +137,7 @@ export class RedisExecutionStore extends ExecutionStore {
         this.writing = null
         return
       }
+      this.inflight = new Map(this.pending)
       const batch = [...this.pending.values()]
       this.pending.clear()
       try {
@@ -159,17 +162,31 @@ export class RedisExecutionStore extends ExecutionStore {
         await pipe.exec()
       } catch (err) {
         console.debug('execution records not written:', err)
+      } finally {
+        this.inflight = new Map()
       }
     }
   }
 
   /** The records noted but not written yet, of one kind. */
   private noted(kind: string): (Line | Process)[] {
-    return [...this.pending.values()].filter((record) => fieldOf(record)[0] === kind)
+    return [...new Map([...this.inflight, ...this.pending]).values()].filter(
+      (record) => fieldOf(record)[0] === kind,
+    )
+  }
+
+  /** One record noted but not written yet. */
+  private notedOne(key: string): Line | Process | undefined {
+    return this.pending.get(key) ?? this.inflight.get(key)
+  }
+
+  async sessions(): Promise<string[]> {
+    const c = await this.redis.client()
+    return (await c.hKeys(this.listsKey)).sort(compareCodePoints)
   }
 
   async getLine(lineId: LineId): Promise<Line | null> {
-    const noted = this.pending.get(`lines:${lineId.value}`)
+    const noted = this.notedOne(`lines:${lineId.value}`)
     if (noted !== undefined) return noted as Line
     const c = await this.redis.client()
     const raw = await c.hGet(`${this.prefix}records:lines`, lineId.value)
@@ -177,7 +194,7 @@ export class RedisExecutionStore extends ExecutionStore {
   }
 
   async getProcess(processId: ProcessId): Promise<Process | null> {
-    const noted = this.pending.get(`processes:${String(processId.pid)}`)
+    const noted = this.notedOne(`processes:${String(processId.pid)}`)
     if (noted !== undefined) return noted as Process
     const c = await this.redis.client()
     const raw = await c.hGet(`${this.prefix}records:processes`, String(processId.pid))
@@ -236,8 +253,13 @@ export class RedisExecutionStore extends ExecutionStore {
         this.leaseSeconds === null ? '' : String(Math.round(this.leaseSeconds * 1000)),
       ],
     }
-    if (consoles.length === 0) return (await c.eval(LEASE_SCRIPT, options)) as string | null
+    // The line and process records are kept another day with the lease, so a
+    // quiet run outlives no record.
     const pipe = c.multi().eval(LEASE_SCRIPT, options)
+    for (const kind of ['lines', 'processes']) {
+      pipe.expire(`${this.prefix}records:${kind}`, CONSOLE_TTL_SECONDS)
+      pipe.expire(`${this.prefix}ended:${kind}`, CONSOLE_TTL_SECONDS)
+    }
     for (const name of consoles)
       for (const key of this.console(name).keys) pipe.expire(key, CONSOLE_TTL_SECONDS)
     const [held] = (await pipe.exec()) as unknown as [string | null]

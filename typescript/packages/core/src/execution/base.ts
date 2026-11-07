@@ -88,6 +88,9 @@ export abstract class ExecutionStore {
    * the same stream, so the job's daemon writes it and any other daemon
    * reads or ends it.
    */
+  /** The sessions whose job list the store keeps, sorted. */
+  abstract sessions(): Promise<string[]>
+
   /**
    * Keep a line's or a process's record as it reads now, in place of the
    * one before. It never waits: a store over the network writes it in the

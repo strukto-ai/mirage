@@ -19,8 +19,9 @@ import { SessionProfile } from '../../policy/profile.ts'
 import { RemoteSandbox } from '../../runtime/sandbox/base.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { RAMExecutionStore } from '../../execution/ram.ts'
-import { MachineId } from '../../execution/types.ts'
-import { MountMode } from '../../types.ts'
+import type { Process } from '../../execution/process/types.ts'
+import { LineId, MachineId, ProcessId } from '../../execution/types.ts'
+import { MountMode, PathSpec } from '../../types.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { SeededIdSource, SystemIdSource } from '../../utils/ids.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -538,6 +539,55 @@ it('lists what the holder runs from another daemon', async () => {
   } finally {
     await a.close()
     await b.close()
+  }
+})
+
+// The line and process records a daemon left running when it went end as
+// hung up once the next one takes the workspace's lease, and a process id of
+// another workspace names none here.
+it('ends the records a lost daemon left running as hung up', async () => {
+  const store = new RAMWorkspaceStateStore()
+  const ws = new Workspace({ '/m': new RAMVFS() }, { workspaceId: 'w', store })
+  try {
+    const left: Process = {
+      id: new ProcessId('w', 99),
+      sessionId: 's',
+      line: new LineId('lost'),
+      parent: null,
+      group: 99,
+      command: 'sleep 30',
+      cwd: PathSpec.fromStrPath('/'),
+      machine: new MachineId('host', 'gone'),
+      startedAt: 1,
+      runtime: null,
+      machinePid: null,
+      state: 'running',
+      endedAt: null,
+      exit: null,
+      signal: null,
+      error: null,
+      ancestors: [],
+    }
+    ws.jobTable.store.note(left)
+    ws.jobTable.store.note({
+      id: new LineId('lost'),
+      sessionId: 's',
+      command: 'sleep 30 &',
+      startedAt: 1,
+      state: 'running',
+      endedAt: null,
+      exit: null,
+      signal: null,
+      error: null,
+    })
+    await ws.shell('true')
+    const process = await ws.process(left.id)
+    expect([process?.state, process?.exit, process?.signal]).toEqual(['exited', 129, 1])
+    const line = await ws.line(new LineId('lost'))
+    expect([line?.state, line?.exit]).toEqual(['exited', 129])
+    expect(await ws.process(new ProcessId('other', 99))).toBeNull()
+  } finally {
+    await ws.close()
   }
 })
 

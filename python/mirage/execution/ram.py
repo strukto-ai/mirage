@@ -130,6 +130,10 @@ class RAMExecutionStore(ExecutionStore):
             self._drop(_console_names(stored))
         return True
 
+    async def sessions(self) -> list[str]:
+        with self._lock:
+            return sorted(self._lists)
+
     def note(self, record: Line | Process) -> None:
         with self._lock:
             if isinstance(record, Line):

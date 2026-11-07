@@ -74,6 +74,7 @@ async def test_a_list_is_written_under_its_generation(stores):
     store = stores()
     assert await store.load("s") is None
     assert await store.cas_set("s", {"next": 2, "generation": 1}, 0)
+    assert await store.sessions() == ["s"]
     assert not await store.cas_set("s", {"next": 3, "generation": 1}, 0)
     assert await store.load("s") == {"next": 2, "generation": 1}
     assert not await store.delete("s", 0)
@@ -181,8 +182,14 @@ async def test_a_renewal_keeps_a_running_jobs_console(stores, prefix):
     client = aioredis.from_url(REDIS_URL)
     try:
         await client.expire(f"{prefix}console:c:stream", 5)
+        store.note(_line(1))
+        async with asyncio.timeout(5):
+            while not await client.exists(f"{prefix}records:lines"):
+                await asyncio.sleep(0.01)
+        await client.expire(f"{prefix}records:lines", 5)
         await store.lease("o", ["c"])
         assert await client.ttl(f"{prefix}console:c:stream") > 5
+        assert await client.ttl(f"{prefix}records:lines") > 5
     finally:
         await client.aclose()
 
@@ -217,6 +224,7 @@ async def test_a_noted_record_reaches_every_store(stores):
         runtime="docker",
         machine_pid=MachinePid(4242, 1.25),
         state=ProcessState.STOPPING,
+        ancestors=(1, 3),
     )
     a.note(_line(1))
     a.note(_line(1, ended_at=2.0))

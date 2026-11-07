@@ -81,6 +81,7 @@ describe('SqlExecutionStore', () => {
     expect(await store.casSet('s', { next: 2, generation: 1 }, 0)).toBe(true)
     expect(await store.casSet('s', { next: 3, generation: 1 }, 0)).toBe(false)
     expect(await store.load('s')).toEqual({ next: 2, generation: 1 })
+    expect(await store.sessions()).toEqual(['s'])
     expect(await store.casSet('s', { next: 3, generation: 2 }, 1)).toBe(true)
     expect(await store.casSet('s', { next: 4, generation: 3 }, 1)).toBe(false)
     expect(await store.delete('s', 0)).toBe(false)
@@ -196,6 +197,7 @@ describe('SqlExecutionStore', () => {
       exit: null,
       signal: null,
       error: null,
+      ancestors: [1, 3],
     }
     a.note(process)
     a.note(lineOf(0))

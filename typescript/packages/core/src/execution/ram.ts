@@ -14,6 +14,7 @@
 
 import { RAMConsoleStore, type ConsoleStore } from '../shell/console/index.ts'
 import { generationOf, type RecordFields } from '../workspace/record/types.ts'
+import { compareCodePoints } from '../utils/sort.ts'
 import { ExecutionStore } from './base.ts'
 import { HISTORY_MAX_RECORDS, HISTORY_SECONDS } from './constants.ts'
 import type { Line } from './line/types.ts'
@@ -95,6 +96,10 @@ export class RAMExecutionStore extends ExecutionStore {
     this.lists.delete(sessionId)
     this.drop([...consoleNames(stored)])
     return Promise.resolve(true)
+  }
+
+  sessions(): Promise<string[]> {
+    return Promise.resolve([...this.lists.keys()].sort(compareCodePoints))
   }
 
   note(record: Line | Process): void {

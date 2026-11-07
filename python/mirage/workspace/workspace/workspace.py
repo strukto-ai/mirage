@@ -69,6 +69,7 @@ from mirage.events.base import EventRuntime
 from mirage.execution.constants import LINE_STOP_SIGNAL
 from mirage.execution.context import new_line_id
 from mirage.execution.job import Job, JobState, JobTable
+from mirage.execution.job.constants import HANGUP_EXIT_CODE
 from mirage.execution.line.handle import LineHandle
 from mirage.execution.line.table import LineTable
 from mirage.execution.line.types import Line, LineState
@@ -461,6 +462,43 @@ class Workspace:
             self.observer.trace_job(record, machine)
 
         self.job_table.ended = trace_job
+
+        async def end_lost() -> None:
+            # What the daemon before this one left running ended with it,
+            # as its jobs did: hung up.
+            now = self._clock.now()
+            hangup = HANGUP_EXIT_CODE - 128
+            store = self.job_table.store
+            live = {handle.record.pid for handle in self.process_table.live()}
+            for record in await store.find_processes():
+                if record.ended_at is None and record.pid not in live:
+                    store.note(
+                        replace(
+                            record,
+                            state=ProcessState.EXITED,
+                            ended_at=now,
+                            exit=HANGUP_EXIT_CODE,
+                            signal=hangup,
+                        )
+                    )
+            reading = {
+                line.id
+                for line in self.line_table.lines()
+                if line.ended_at is None
+            }
+            for line in await store.find_lines():
+                if line.ended_at is None and line.id not in reading:
+                    store.note(
+                        replace(
+                            line,
+                            state=LineState.EXITED,
+                            ended_at=now,
+                            exit=HANGUP_EXIT_CODE,
+                            signal=hangup,
+                        )
+                    )
+
+        self.job_table.taken = end_lost
         self.line_table = LineTable(self._clock, note=stores.execution.note)
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
         self._shell_executions: dict[ShellExecution, None] = {}
@@ -2643,7 +2681,7 @@ class Workspace:
         """The jobs the workspace's sessions list, as ``jobs`` does:
         each until its ending is reported. A daemon that does not hold
         the workspace's lease reads each session's list from the store
-        first.
+        first, every session the store keeps a list for.
 
         Args:
             session_id (str | None): only this session's jobs.
@@ -2651,11 +2689,10 @@ class Workspace:
             line_id (LineId | None): only the jobs this line started.
         """
         if not self.job_table.claimed:
-            await self.ensure_sessions_loaded()
             for sid in (
                 [session_id]
                 if session_id is not None
-                else [s.session_id for s in self.list_sessions()]
+                else await self.job_table.store.sessions()
             ):
                 await self.job_table.sync(sid)
         handles = (
@@ -2723,14 +2760,12 @@ class Workspace:
             if job is not None and job.pid is not None and claimed:
                 tree = self.process_table.tree(job.pid)
             elif job is not None and job.pid is not None:
-                tree = {job.pid}
-                grown = True
-                while grown:
-                    grown = False
-                    for process in records:
-                        if process.parent in tree and process.pid not in tree:
-                            tree.add(process.pid)
-                            grown = True
+                pid = job.pid
+                tree = {pid} | {
+                    process.pid
+                    for process in records
+                    if pid in process.ancestors
+                }
         return [
             process
             for process in records
@@ -2741,11 +2776,14 @@ class Workspace:
         ]
 
     async def process(self, process_id: ProcessId) -> Process | None:
-        """One process's record, while the workspace keeps it.
+        """One process's record, while the workspace keeps it; none for
+        another workspace's.
 
         Args:
             process_id (ProcessId): the process.
         """
+        if process_id.workspace_id != self._workspace_id:
+            return None
         if self.job_table.claimed:
             record = next(
                 (

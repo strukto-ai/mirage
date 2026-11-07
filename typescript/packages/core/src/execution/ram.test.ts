@@ -158,6 +158,7 @@ function processOf(pid: number, sessionId = 's'): Process {
     exit: null,
     signal: null,
     error: null,
+    ancestors: [],
   }
 }
 
@@ -166,6 +167,9 @@ describe('RAMExecutionStore records', () => {
   // processes by pid, each a session's when one is named.
   it('finds noted records by id and session', async () => {
     const store = new RAMExecutionStore()
+    expect(await store.sessions()).toEqual([])
+    await store.casSet('t', { generation: 1 }, 0)
+    expect(await store.sessions()).toEqual(['t'])
     store.note(lineOf(2))
     store.note(lineOf(1, 't'))
     store.note(lineOf(2, 's', 5))

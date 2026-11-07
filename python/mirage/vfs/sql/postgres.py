@@ -106,9 +106,13 @@ class PostgresSqlDriver:
                     name="mirage-postgres",
                     daemon=True,
                 ).start()
-                self._pool = asyncio.run_coroutine_threadsafe(
-                    connect(), loop
-                ).result()
+                try:
+                    self._pool = asyncio.run_coroutine_threadsafe(
+                        connect(), loop
+                    ).result()
+                except BaseException:
+                    loop.call_soon_threadsafe(loop.stop)
+                    raise
                 self._loop = loop
             loop = self._loop
         return asyncio.run_coroutine_threadsafe(work, loop).result()

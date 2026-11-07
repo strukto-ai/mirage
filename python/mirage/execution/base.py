@@ -113,6 +113,11 @@ class ExecutionStore(ABC):
         raise NotImplementedError
 
     @abstractmethod
+    async def sessions(self) -> list[str]:
+        """The sessions whose job list the store keeps, sorted."""
+        raise NotImplementedError
+
+    @abstractmethod
     def note(self, record: Line | Process) -> None:
         """Keep a line's or a process's record as it reads now, in place
         of the one before. It never waits: a store over the network

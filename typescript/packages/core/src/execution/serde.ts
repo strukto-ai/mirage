@@ -71,6 +71,7 @@ export function processToFields(record: Process): RecordFields {
     exit: record.exit,
     signal: record.signal,
     error: record.error,
+    ancestors: [...record.ancestors],
   }
 }
 
@@ -105,5 +106,6 @@ export function processFromFields(fields: RecordFields): Process {
     exit: (fields.exit as number | null | undefined) ?? null,
     signal: (fields.signal as number | null | undefined) ?? null,
     error: (fields.error as string | null | undefined) ?? null,
+    ancestors: (fields.ancestors as number[] | null | undefined) ?? [],
   }
 }

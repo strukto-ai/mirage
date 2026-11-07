@@ -77,6 +77,7 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
     const store = open()
     expect(await store.load('s')).toBeNull()
     expect(await store.casSet('s', { next: 2, generation: 1 }, 0)).toBe(true)
+    expect(await store.sessions()).toEqual(['s'])
     expect(await store.casSet('s', { next: 3, generation: 1 }, 0)).toBe(false)
     expect(await store.load('s')).toEqual({ next: 2, generation: 1 })
     expect(await store.delete('s', 0)).toBe(false)
@@ -124,10 +125,17 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
     const client = createClient({ url: REDIS_URL })
     await client.connect()
     await client.expire(`${prefix}console:c:stream`, 5)
+    store.note(lineOf(1))
+    await vi.waitFor(async () => {
+      expect(await client.exists(`${prefix}records:lines`)).toBe(1)
+    })
+    await client.expire(`${prefix}records:lines`, 5)
     await store.lease('o', ['c'])
     const ttl = await client.ttl(`${prefix}console:c:stream`)
+    const records = await client.ttl(`${prefix}records:lines`)
     await client.quit()
     expect(ttl).toBeGreaterThan(5)
+    expect(records).toBeGreaterThan(5)
   })
 
   it('clear drops lists, consoles and the lease', async () => {
@@ -218,6 +226,7 @@ describe.skipIf(REDIS_URL === '')('RedisExecutionStore', () => {
       exit: null,
       signal: null,
       error: null,
+      ancestors: [1, 3],
     }
     a.note(lineOf(1))
     a.note(lineOf(1, 2))

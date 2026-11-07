@@ -101,6 +101,7 @@ async def test_a_list_is_written_under_its_generation(stores):
     assert await store.cas_set("s", {"next": 2, "generation": 1}, 0)
     assert not await store.cas_set("s", {"next": 3, "generation": 1}, 0)
     assert await store.load("s") == {"next": 2, "generation": 1}
+    assert await store.sessions() == ["s"]
     assert await store.cas_set("s", {"next": 3, "generation": 2}, 1)
     assert not await store.cas_set("s", {"next": 4, "generation": 3}, 1)
     assert not await store.delete("s", 0)
@@ -224,6 +225,7 @@ async def test_a_noted_record_reaches_every_store(stores):
         runtime="docker",
         machine_pid=MachinePid(4242, 1.25),
         state=ProcessState.STOPPING,
+        ancestors=(1, 3),
     )
     a.note(_line(1))
     a.note(_line(1, ended_at=2.0))

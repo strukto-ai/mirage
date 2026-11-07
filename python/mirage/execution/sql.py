@@ -18,7 +18,6 @@ import json
 import logging
 import threading
 import time
-import uuid
 from collections.abc import Mapping, Sequence
 
 from mirage.concurrency.limiter import run_blocking
@@ -76,6 +75,10 @@ EXECUTION_SQL: dict[str, str] = {
     " DO UPDATE SET fields = excluded.fields, ended = excluded.ended"
     " WHERE mirage_execution.fields = excluded.fields"
     " OR mirage_execution.ended <= ? RETURNING name",
+    "add_stop": "INSERT INTO mirage_execution"
+    " (scope, kind, name, fields, generation, ended)"
+    " VALUES (?, ?, ?, ?, ?, NULL) ON CONFLICT (scope, kind, name)"
+    " DO NOTHING RETURNING name",
     "release": "DELETE FROM mirage_execution"
     " WHERE scope = ? AND kind = 'lease' AND name = '' AND fields = ?",
     "raise_pid": "INSERT INTO mirage_execution"
@@ -185,6 +188,7 @@ class SqlExecutionStore(ExecutionStore):
         self._ready = False
         self._consoles: dict[str, SqlConsoleStore] = {}
         self._pending: dict[tuple[str, str], Line | Process] = {}
+        self._inflight: dict[tuple[str, str], Line | Process] = {}
         self._pending_lock = threading.Lock()
         self._writing = False
         self._writer: asyncio.Task[None] | None = None
@@ -282,6 +286,10 @@ class SqlExecutionStore(ExecutionStore):
             and await self._fields("list", session_id) is None
         )
 
+    async def sessions(self) -> list[str]:
+        rows = await self._query("kind", ("list",))
+        return sorted(str(row["name"]) for row in rows)
+
     def console(self, name: str) -> SqlConsoleStore:
         if name not in self._consoles:
             self._consoles[name] = SqlConsoleStore(
@@ -292,14 +300,20 @@ class SqlExecutionStore(ExecutionStore):
     async def lease(
         self, daemon: str, consoles: Sequence[str] = ()
     ) -> str | None:
-        now = time.time()
-        expires = (
-            None if self.lease_seconds is None else now + self.lease_seconds
-        )
         held = json.dumps(daemon)
-        if await self._query("lease", (held, expires, now)):
-            return None
-        return await self.holder()
+        while True:
+            now = time.time()
+            expires = (
+                None
+                if self.lease_seconds is None
+                else now + self.lease_seconds
+            )
+            if await self._query("lease", (held, expires, now)):
+                return None
+            # Refused, and released before the holder was read: ask again.
+            holder = await self.holder()
+            if holder is not None:
+                return holder
 
     async def holder(self) -> str | None:
         rows = await self._query("get", ("lease", ""))
@@ -359,21 +373,14 @@ class SqlExecutionStore(ExecutionStore):
         return int(rows[0]["generation"] or 0) if rows else 0
 
     async def request_stop(self, daemon: str, pid: int, signal: int) -> None:
-        await self._batch(
-            [
-                SqlStatement(
-                    EXECUTION_SQL["put"],
-                    (
-                        self._scope,
-                        f"stop:{daemon}",
-                        uuid.uuid4().hex,
-                        json.dumps([pid, signal]),
-                        time.time_ns(),
-                        None,
-                    ),
-                )
-            ]
-        )
+        # Named by when it was asked, in microseconds, which both hosts
+        # count exactly; a stop asked in the same microsecond takes the next.
+        at = time.time_ns() // 1000
+        while not await self._query(
+            "add_stop",
+            (f"stop:{daemon}", str(at), json.dumps([pid, signal]), at),
+        ):
+            at += 1
 
     async def take_stops(self, daemon: str) -> list[tuple[int, int]]:
         rows = await self._query("take_kind", (f"stop:{daemon}",))
@@ -412,6 +419,7 @@ class SqlExecutionStore(ExecutionStore):
         while True:
             with self._pending_lock:
                 batch, self._pending = self._pending, {}
+                self._inflight = batch
                 if not batch:
                     self._writing = False
                     return
@@ -454,6 +462,9 @@ class SqlExecutionStore(ExecutionStore):
                 await self._batch(statements)
             except Exception as exc:
                 logger.debug("execution records not written: %s", exc)
+            finally:
+                with self._pending_lock:
+                    self._inflight = {}
 
     async def _flush(self) -> None:
         """Wait for the records noted so far to be written."""
@@ -473,15 +484,20 @@ class SqlExecutionStore(ExecutionStore):
             kind (str): ``line`` or ``process``.
         """
         with self._pending_lock:
-            return [
-                record
-                for (noted, _), record in self._pending.items()
-                if noted == kind
-            ]
+            noted = {**self._inflight, **self._pending}
+        return [record for (one, _), record in noted.items() if one == kind]
+
+    def _noted_one(self, key: tuple[str, str]) -> Line | Process | None:
+        """One record noted but not written yet.
+
+        Args:
+            key (tuple[str, str]): its kind and name.
+        """
+        with self._pending_lock:
+            return self._pending.get(key) or self._inflight.get(key)
 
     async def get_line(self, line_id: LineId) -> Line | None:
-        with self._pending_lock:
-            noted = self._pending.get(("line", line_id.value))
+        noted = self._noted_one(("line", line_id.value))
         if isinstance(noted, Line):
             return noted
         fields = await self._fields("line", line_id.value)
@@ -489,8 +505,7 @@ class SqlExecutionStore(ExecutionStore):
 
     async def get_process(self, process_id: ProcessId) -> Process | None:
         name = str(process_id.pid)
-        with self._pending_lock:
-            noted = self._pending.get(("process", name))
+        noted = self._noted_one(("process", name))
         if isinstance(noted, Process):
             return noted
         fields = await self._fields("process", name)

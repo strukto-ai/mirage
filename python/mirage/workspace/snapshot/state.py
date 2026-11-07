@@ -1035,24 +1035,27 @@ async def _restore_jobs(ws: WorkspaceLike, state: dict[str, Any]) -> None:
 
 
 def _restore_records(ws: WorkspaceLike, state: dict[str, Any]) -> None:
-    """Keep the saved lines and processes in the workspace's store, each
-    process under this workspace's id, and number new processes past
-    them, so none takes a saved one's pid.
+    """Keep the saved lines and processes in the workspace's store, in
+    the order they ended, as the store trims its history by, each process
+    under this workspace's id, and number new processes past them, so
+    none takes a saved one's pid.
 
     Args:
         ws (WorkspaceLike): the workspace restored into.
         state (dict[str, Any]): the saved state.
     """
     store = ws.job_table.store
-    for fields in state.get(StateKey.LINES) or []:
-        store.note(line_from_fields(fields))
+    lines = [line_from_fields(f) for f in state.get(StateKey.LINES) or []]
+    for line in sorted(lines, key=lambda line: line.ended_at or 0.0):
+        store.note(line)
     workspace_id = ws.process_table.workspace_id
-    highest = 0
-    for fields in state.get(StateKey.PROCESS_RECORDS) or []:
-        record = process_from_fields(fields)
+    records = [
+        process_from_fields(f)
+        for f in state.get(StateKey.PROCESS_RECORDS) or []
+    ]
+    for record in sorted(records, key=lambda record: record.ended_at or 0.0):
         store.note(replace(record, id=ProcessId(workspace_id, record.pid)))
-        highest = max(highest, record.pid)
-    ws.process_table.continue_after(highest)
+    ws.process_table.continue_after(max((r.pid for r in records), default=0))
 
 
 async def _job_to_dict(job: JobHandle) -> dict[str, Any]:

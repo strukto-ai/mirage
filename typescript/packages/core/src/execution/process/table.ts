@@ -121,6 +121,8 @@ export class ProcessTable {
       throw new Error('parent process is no longer accepting children')
     const pid = init.pid == null || this.runners.has(init.pid) ? this.nextPid : init.pid
     this.nextPid = Math.max(this.nextPid, pid + 1)
+    const ancestry =
+      init.parent == null ? [] : [...(this.ancestors.get(init.parent) ?? []), init.parent]
     const handle: ProcessHandle = new ProcessHandle(
       {
         id: new ProcessId(this.workspaceId, pid),
@@ -139,6 +141,7 @@ export class ProcessTable {
         exit: null,
         signal: null,
         error: null,
+        ancestors: ancestry,
       },
       init.run,
       () => {
@@ -166,10 +169,7 @@ export class ProcessTable {
     handle.oneCommand = init.oneCommand === true
     const eager = init.started !== undefined && !this.queued()
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
-    this.ancestors.set(
-      pid,
-      init.parent == null ? [] : [...(this.ancestors.get(init.parent) ?? []), init.parent],
-    )
+    this.ancestors.set(pid, ancestry)
     if (this.note !== undefined) {
       handle.noted = this.note
       this.note(handle.record)

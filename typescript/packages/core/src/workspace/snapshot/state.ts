@@ -971,21 +971,22 @@ function jobFromDict(j: JobSnapshot): JobHandle {
 }
 
 /**
- * Keep the saved lines and processes in the workspace's store, each process
- * under this workspace's id, and number new processes past them, so none
- * takes a saved one's pid. Mirrors Python's `_restore_records`.
+ * Keep the saved lines and processes in the workspace's store, in the order
+ * they ended, as the store trims its history by, each process under this
+ * workspace's id, and number new processes past them, so none takes a saved
+ * one's pid. Mirrors Python's `_restore_records`.
  */
 function restoreRecords(ws: WorkspaceLike, state: WorkspaceStateDict): void {
   const store = ws.jobTable.store
-  for (const fields of state.lines ?? []) store.note(lineFromFields(fields))
+  const byEnd = (a: { endedAt: number | null }, b: { endedAt: number | null }): number =>
+    (a.endedAt ?? 0) - (b.endedAt ?? 0)
+  for (const line of (state.lines ?? []).map(lineFromFields).sort(byEnd)) store.note(line)
   const workspaceId = ws.processTable.workspaceId
-  let highest = 0
-  for (const fields of state.process_records ?? []) {
-    const record = processFromFields(fields)
+  const records = (state.process_records ?? []).map(processFromFields).sort(byEnd)
+  for (const record of records) {
     store.note({ ...record, id: new ProcessId(workspaceId, record.id.pid) })
-    highest = Math.max(highest, record.id.pid)
   }
-  ws.processTable.continueAfter(highest)
+  ws.processTable.continueAfter(Math.max(0, ...records.map((record) => record.id.pid)))
 }
 
 async function restoreJobs(ws: WorkspaceLike, state: WorkspaceStateDict): Promise<void> {

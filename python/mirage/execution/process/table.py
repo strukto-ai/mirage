@@ -175,6 +175,11 @@ class ProcessTable:
                 raise RuntimeError(
                     "parent process is no longer accepting children"
                 )
+            ancestry = (
+                ()
+                if parent is None
+                else (*self._ancestors.get(parent, ()), parent)
+            )
             handle = ProcessHandle(
                 Process(
                     ProcessId(self.workspace_id, pid),
@@ -191,6 +196,7 @@ class ProcessTable:
                     machine or self.machine,
                     self._now(),
                     runtime,
+                    ancestors=ancestry,
                 ),
                 run,
                 lambda done: self._retire(done, handle),
@@ -202,11 +208,7 @@ class ProcessTable:
             handle.one_command = one_command
             eager = started is not None and not self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
-            self._ancestors[pid] = (
-                ()
-                if parent is None
-                else (*self._ancestors.get(parent, ()), parent)
-            )
+            self._ancestors[pid] = ancestry
         if self._note is not None:
             handle.noted = self._note
             self._note(handle.record)

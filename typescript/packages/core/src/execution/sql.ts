@@ -54,6 +54,9 @@ export const EXECUTION_SQL = Object.freeze({
     " VALUES (?, 'lease', '', ?, 0, ?) ON CONFLICT (scope, kind, name)" +
     ' DO UPDATE SET fields = excluded.fields, ended = excluded.ended' +
     ' WHERE mirage_execution.fields = excluded.fields OR mirage_execution.ended <= ? RETURNING name',
+  add_stop:
+    'INSERT INTO mirage_execution (scope, kind, name, fields, generation, ended)' +
+    ' VALUES (?, ?, ?, ?, ?, NULL) ON CONFLICT (scope, kind, name) DO NOTHING RETURNING name',
   release:
     "DELETE FROM mirage_execution WHERE scope = ? AND kind = 'lease' AND name = '' AND fields = ?",
   raise_pid:
@@ -135,8 +138,8 @@ export class SqlExecutionStore extends ExecutionStore {
   private ready: Promise<void> | null = null
   private readonly consoles = new Map<string, SqlConsoleStore>()
   private readonly pending = new Map<string, Line | Process>()
+  private inflight = new Map<string, Line | Process>()
   private writing: Promise<void> | null = null
-  private stops = 0
 
   constructor(
     private readonly driver: SqlDriver,
@@ -240,10 +243,15 @@ export class SqlExecutionStore extends ExecutionStore {
   }
 
   async lease(daemon: string, _consoles: readonly string[] = []): Promise<string | null> {
-    const now = Date.now() / 1000
-    const expires = this.leaseSeconds === null ? null : now + this.leaseSeconds
-    const held = await this.query('lease', [JSON.stringify(daemon), expires, now])
-    return held.length > 0 ? null : this.holder()
+    for (;;) {
+      const now = Date.now() / 1000
+      const expires = this.leaseSeconds === null ? null : now + this.leaseSeconds
+      const held = await this.query('lease', [JSON.stringify(daemon), expires, now])
+      if (held.length > 0) return null
+      // Refused, and released before the holder was read: ask again.
+      const holder = await this.holder()
+      if (holder !== null) return holder
+    }
   }
 
   async holder(): Promise<string | null> {
@@ -296,19 +304,13 @@ export class SqlExecutionStore extends ExecutionStore {
   }
 
   async requestStop(daemon: string, pid: number, signal: number): Promise<void> {
-    await this.batch([
-      {
-        sql: EXECUTION_SQL.put,
-        params: [
-          this.scope,
-          `stop:${daemon}`,
-          crypto.randomUUID(),
-          JSON.stringify([pid, signal]),
-          Date.now() * 1000 + this.stops++,
-          null,
-        ],
-      },
-    ])
+    // Named by when it was asked, in microseconds, which both hosts count
+    // exactly; a stop asked in the same microsecond takes the next.
+    let at = Date.now() * 1000
+    const body = JSON.stringify([pid, signal])
+    while ((await this.query('add_stop', [`stop:${daemon}`, String(at), body, at])).length === 0) {
+      at += 1
+    }
   }
 
   async takeStops(daemon: string): Promise<[number, number][]> {
@@ -335,6 +337,7 @@ export class SqlExecutionStore extends ExecutionStore {
         this.writing = null
         return
       }
+      this.inflight = new Map(this.pending)
       const batch = [...this.pending.values()]
       this.pending.clear()
       const statements: SqlStatement[] = []
@@ -365,24 +368,38 @@ export class SqlExecutionStore extends ExecutionStore {
         await this.batch(statements)
       } catch (err) {
         console.debug('execution records not written:', err)
+      } finally {
+        this.inflight = new Map()
       }
     }
   }
 
   /** The records noted but not written yet, of one kind. */
   private noted(kind: string): (Line | Process)[] {
-    return [...this.pending.values()].filter((record) => recordOf(record)[0] === kind)
+    return [...new Map([...this.inflight, ...this.pending]).values()].filter(
+      (record) => recordOf(record)[0] === kind,
+    )
+  }
+
+  /** One record noted but not written yet. */
+  private notedOne(key: string): Line | Process | undefined {
+    return this.pending.get(key) ?? this.inflight.get(key)
+  }
+
+  async sessions(): Promise<string[]> {
+    const rows = await this.query('kind', ['list'])
+    return rows.map((row) => String(row.name)).sort(compareCodePoints)
   }
 
   async getLine(lineId: LineId): Promise<Line | null> {
-    const noted = this.pending.get(`line:${lineId.value}`)
+    const noted = this.notedOne(`line:${lineId.value}`)
     if (noted !== undefined) return noted as Line
     const fields = await this.fields('line', lineId.value)
     return fields === null ? null : lineFromFields(fields)
   }
 
   async getProcess(processId: ProcessId): Promise<Process | null> {
-    const noted = this.pending.get(`process:${String(processId.pid)}`)
+    const noted = this.notedOne(`process:${String(processId.pid)}`)
     if (noted !== undefined) return noted as Process
     const fields = await this.fields('process', String(processId.pid))
     return fields === null ? null : processFromFields(fields)

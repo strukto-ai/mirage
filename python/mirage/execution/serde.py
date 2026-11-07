@@ -93,6 +93,7 @@ def process_to_fields(record: Process) -> RecordFields:
         "exit": record.exit,
         "signal": record.signal,
         "error": record.error,
+        "ancestors": list(record.ancestors),
     }
 
 
@@ -125,4 +126,5 @@ def process_from_fields(fields: RecordFields) -> Process:
         exit=fields.get("exit"),
         signal=fields.get("signal"),
         error=fields.get("error"),
+        ancestors=tuple(fields.get("ancestors") or ()),
     )

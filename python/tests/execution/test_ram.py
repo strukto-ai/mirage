@@ -192,6 +192,9 @@ def _process(pid: int, session: str = "s") -> Process:
 @pytest.mark.asyncio
 async def test_noted_records_are_found_by_id_and_session():
     store = RAMExecutionStore()
+    assert await store.sessions() == []
+    await store.cas_set("t", {"generation": 1}, 0)
+    assert await store.sessions() == ["t"]
     store.note(_line(2))
     store.note(_line(1, session="t"))
     store.note(_line(2, ended_at=5.0))

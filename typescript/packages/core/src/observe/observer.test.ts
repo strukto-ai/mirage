@@ -36,6 +36,7 @@ import {
 import { Observer, logger } from './observer.ts'
 import { OpRecord } from './record.ts'
 import { RAMObserverStore } from './store.ts'
+import { RouteError } from '../runtime/routing/index.ts'
 import { RAMVFS } from '../vfs/ram/ram.ts'
 import { Workspace } from '../workspace/workspace/workspace.ts'
 
@@ -700,6 +701,22 @@ describe('a damaged history file', () => {
       ['slow', 3000],
     ])
   })
+})
+
+// A line whose route is refused still ends its span, as its history ends
+// its entry.
+it('ends the span of a line whose route is refused', async () => {
+  const spans = exported()
+  const ws = new Workspace({ '/data': new RAMVFS() })
+  try {
+    await expect(ws.shell('echo hi', { runtime: 'nope' })).rejects.toBeInstanceOf(RouteError)
+    const [command] = spans.filter((s) => s.name === 'command')
+    expect(command?.end).toBeDefined()
+    expect(command?.attributes['mirage.exit_code']).not.toBe(0)
+  } finally {
+    await ws.close()
+    trace.disable()
+  }
 })
 
 // A job and each process a line ran are spans of their own once they end,

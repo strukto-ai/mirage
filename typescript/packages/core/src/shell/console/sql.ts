@@ -15,14 +15,11 @@
 import type { SqlDriver, SqlRow, SqlValue } from '../../vfs/sql/types.ts'
 import { SQL_POLL_SECONDS } from './constants.ts'
 import type { ConsoleStore } from './store.ts'
-import type { Channel } from './types.ts'
-import { type ConsoleChunk, type ReadResult } from './types.ts'
+import { Channel, type ConsoleChunk, type ReadResult } from './types.ts'
 
 /** Every statement the sql console store runs, by name. Mirrors Python's `CONSOLE_SQL`. */
 export const CONSOLE_SQL = Object.freeze({
-  top:
-    "SELECT MAX(seq) AS top, COUNT(CASE WHEN channel = 'control' THEN 1 END) AS ended" +
-    ' FROM mirage_console WHERE scope = ? AND name = ?',
+  top: 'SELECT seq, channel FROM mirage_console WHERE scope = ? AND name = ? ORDER BY seq DESC LIMIT 1',
   append:
     'INSERT INTO mirage_console (scope, name, seq, ts, channel, data) VALUES (?, ?, ?, ?, ?, ?)' +
     ' ON CONFLICT (scope, name, seq) DO NOTHING RETURNING seq',
@@ -91,11 +88,15 @@ export class SqlConsoleStore implements ConsoleStore {
     return this.driver.query(CONSOLE_SQL[key], [this.scope, this.name, ...params])
   }
 
-  /** The console's last seq, null while it is empty, and whether it holds its ending. */
+  /**
+   * The console's last seq, null while it is empty, and whether it holds its
+   * ending, which is always its last chunk: one indexed row, however long the
+   * console.
+   */
   private async top(): Promise<[number | null, boolean]> {
     const [row] = await this.query('top', [])
-    const top = row?.top
-    return [top === null || top === undefined ? null : Number(top), Number(row?.ended ?? 0) > 0]
+    if (row === undefined) return [null, false]
+    return [Number(row.seq ?? 0), row.channel === Channel.CONTROL]
   }
 
   async append(channel: Channel, data: Uint8Array): Promise<ConsoleChunk> {
