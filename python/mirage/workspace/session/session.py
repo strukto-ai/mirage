@@ -444,9 +444,9 @@ class SessionState:
     # name, innermost last: a local `RANDOM` is an ordinary variable for
     # the function's extent, and the generator resumes when it returns.
     _local_random: list[str | None] = field(default_factory=list, repr=False)
-    # The caller's `_plain_specials` for every frame that makes `LINENO`
-    # or `BASHPID` local, innermost last.
-    _local_plain: list[frozenset[str]] = field(
+    # Whether `LINENO` or `BASHPID` was plain where a frame made it
+    # local, one entry per local, innermost last.
+    _local_plain: list[tuple[str, bool]] = field(
         default_factory=list, repr=False
     )
     # The names a running `declare -g` has put at global scope

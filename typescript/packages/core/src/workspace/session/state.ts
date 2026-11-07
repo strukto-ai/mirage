@@ -1105,12 +1105,15 @@ export function setPositionalParams(
  * `RANDOM` parks its generator marker too: a local `RANDOM` is an ordinary
  * variable for the function's extent (`local RANDOM=5; echo $RANDOM`
  * prints 5, and `local RANDOM=(7)` leaves the caller's generator alone),
- * and `restoreLocals` hands the marker back.
+ * and `restoreLocals` hands the marker back. A local `LINENO` or `BASHPID`
+ * is ordinary the same way, its `unset` the function's own; with `-I`
+ * (`inherit`) it keeps the meaning the caller's has.
  */
 export function shadowLocal(
   session: SessionState,
   locals: Map<string, ShellVar | null>,
   name: string,
+  inherit = false,
 ): void {
   if (locals.has(name)) return
   locals.set(name, sessionEntry(session.vars, name) ?? null)
@@ -1118,8 +1121,8 @@ export function shadowLocal(
     session.localRandom.push(session.randomSeed)
     session.randomSeed = RANDOM_UNSET
   } else if (name === LINENO || name === BASHPID) {
-    session.localPlain.push(session.plainSpecials)
-    session.plainSpecials = new Set([...session.plainSpecials, name])
+    session.localPlain.push([name, session.plainSpecials.has(name)])
+    if (!inherit) session.plainSpecials = new Set([...session.plainSpecials, name])
   }
 }
 
@@ -1141,8 +1144,13 @@ export function restoreLocals(session: SessionState, locals: Map<string, ShellVa
     }
   }
   if (locals.has(RANDOM)) session.randomSeed = session.localRandom.pop() ?? null
-  for (const name of [LINENO, BASHPID]) {
-    if (locals.has(name)) session.plainSpecials = session.localPlain.pop() ?? new Set()
+  for (const special of [LINENO, BASHPID]) {
+    const entry = locals.has(special) ? session.localPlain.pop() : undefined
+    if (entry === undefined) continue
+    const [name, plain] = entry
+    session.plainSpecials = plain
+      ? new Set([...session.plainSpecials, name])
+      : new Set([...session.plainSpecials].filter((kept) => kept !== name))
   }
 }
 

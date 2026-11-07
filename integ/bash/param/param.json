@@ -2093,10 +2093,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "( RANDOM=42; RANDOM=(1 2); echo $RANDOM; unset RANDOM; RANDOM=5; echo $RANDOM ); ( unset BASHPID; BASHPID=42; echo \"bp=$BASHPID ${BASHPID} $((BASHPID))\"; unset LINENO; echo \"ln=[$LINENO] [${LINENO}] $((LINENO+1))\"; LINENO=7; echo \"ln=$LINENO\" ); ( (unset BASHPID; echo \"sub=[$BASHPID]\"); [ -n \"$BASHPID\" ] && echo par; unset LINENO; bash -c 'echo nested=$LINENO' ) ; ( f(){ local LINENO; unset LINENO; }; f; echo \"after=[$LINENO]\"; f(){ local LINENO=7; echo \"loc=$LINENO\"; }; f; echo \"out=$LINENO\"; declare -n p=BASHPID; [ \"$p\" = \"$BASHPID\" ] && echo refpid; declare -n q=LINENO; echo \"q=$q\"; unset -n q; LINENO=(alpha beta); echo \"a=[$LINENO] [${LINENO}]\" )",
+      "command": "( RANDOM=42; RANDOM=(1 2); echo $RANDOM; unset RANDOM; RANDOM=5; echo $RANDOM ); ( unset BASHPID; BASHPID=42; echo \"bp=$BASHPID ${BASHPID} $((BASHPID))\"; unset LINENO; echo \"ln=[$LINENO] [${LINENO}] $((LINENO+1))\"; LINENO=7; echo \"ln=$LINENO\" ); ( (unset BASHPID; echo \"sub=[$BASHPID]\"); [ -n \"$BASHPID\" ] && echo par; unset LINENO; bash -c 'echo nested=$LINENO' ) ; ( f(){ local LINENO; unset LINENO; }; f; echo \"after=[$LINENO]\"; f(){ local LINENO=7; echo \"loc=$LINENO\"; }; f; echo \"out=$LINENO\"; declare -n p=BASHPID; [ \"$p\" = \"$BASHPID\" ] && echo refpid; declare -n q=LINENO; echo \"q=$q\"; unset -n q; LINENO=(alpha beta); echo \"a=[$LINENO] [${LINENO}]\" ) ; ( f(){ local LINENO; unset BASHPID; }; f; BASHPID=42; echo \"g=$BASHPID\"; f(){ local -I LINENO; set -u; echo \"i=[$LINENO]\"; set +u; }; f; f(){ local -I LINENO; unset LINENO; echo \"iu=[$LINENO]\"; }; f; echo \"o=[$LINENO]\"; unset LINENO; f(){ local -I LINENO; echo \"ip=[$LINENO]\"; }; f )",
       "expect": {
         "exit": 0,
-        "stdout": "1\n5\nbp=42 42 42\nln=[] [] 1\nln=7\nsub=[]\npar\nnested=1\nafter=[1]\nloc=7\nout=1\nrefpid\nq=1\na=[alpha] [alpha]\n",
+        "stdout": "1\n5\nbp=42 42 42\nln=[] [] 1\nln=7\nsub=[]\npar\nnested=1\nafter=[1]\nloc=7\nout=1\nrefpid\nq=1\na=[alpha] [alpha]\ng=42\ni=[1]\niu=[]\no=[1]\nip=[]\n",
         "stderr": ""
       }
     },

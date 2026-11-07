@@ -556,9 +556,9 @@ export class SessionState {
   // innermost last: a local `RANDOM` is an ordinary variable for the
   // function's extent, and the generator resumes when it returns.
   localRandom: (string | null)[] = []
-  // The caller's `plainSpecials` for every frame that makes `LINENO` or
-  // `BASHPID` local, innermost last.
-  localPlain: ReadonlySet<string>[] = []
+  // Whether `LINENO` or `BASHPID` was plain where a frame made it local,
+  // one entry per local, innermost last.
+  localPlain: [string, boolean][] = []
   mountModes: ReadonlyMap<string, MountMode> | null
   visibility: Visibility
   hideReasons: readonly HideReason[]

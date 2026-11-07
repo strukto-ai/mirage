@@ -361,7 +361,7 @@ export async function storeStagedArrays(
       continue
     }
     const fresh = locals !== null && !locals.has(name)
-    if (locals !== null) shadowLocal(session, locals, name)
+    if (locals !== null) shadowLocal(session, locals, name, inherit)
     if (fresh && !inCallEnv(session, name)) startLocal(session, name, inherit)
     const held = fresh && !inherit ? null : heldValue(session, name)
     const conflict = kindConflict(held, kind)

@@ -219,7 +219,7 @@ async function declareOperand(
   const [key, append, given] = operandParts(assign)
   const fresh = locals !== null && !locals.has(key)
   if (given === null) {
-    if (locals !== null) shadowLocal(session, locals, key)
+    if (locals !== null) shadowLocal(session, locals, key, inherit)
     if (fresh) {
       const line = await freshLocal(session, view, cmd, key, inherit)
       if (line !== null) return line
@@ -252,7 +252,7 @@ async function declareOperand(
   }
   const creates = fresh && !inCallEnv(session, key)
   if ((creates || !nameref) && view.isReadonly(key, !nameref)) return readonlyLine(cmd, key)
-  if (locals !== null) shadowLocal(session, locals, key)
+  if (locals !== null) shadowLocal(session, locals, key, inherit)
   if (creates) startLocal(session, key, inherit)
   // A reference is checked on the local, which exists from here on even
   // when the array it inherited cannot become a reference, as bash's does,

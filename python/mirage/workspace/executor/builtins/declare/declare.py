@@ -467,7 +467,7 @@ async def store_staged_arrays(
             continue
         fresh = local_vars is not None and name not in local_vars
         if local_vars is not None:
-            shadow_local(session, local_vars, name)
+            shadow_local(session, local_vars, name, inherit)
         if fresh and not in_call_env(session, name):
             start_local(session, name, inherit)
         held = None if fresh and not inherit else held_value(session, name)

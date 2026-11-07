@@ -1474,7 +1474,10 @@ def set_positional_params(
 
 
 def shadow_local(
-    session: SessionState, local_vars: dict[str, ShellVar | None], name: str
+    session: SessionState,
+    local_vars: dict[str, ShellVar | None],
+    name: str,
+    inherit: bool = False,
 ) -> None:
     """Record the caller's record before a ``local`` shadows it, once
     per frame.
@@ -1484,12 +1487,14 @@ def shadow_local(
     $RANDOM`` prints 5, and ``local RANDOM=(7)`` leaves the caller's
     generator alone), and ``restore_locals`` hands the marker back. A
     local ``LINENO`` or ``BASHPID`` is ordinary the same way, its
-    ``unset`` the function's own.
+    ``unset`` the function's own; with ``-I`` it keeps the meaning the
+    caller's has.
 
     Args:
         session (SessionState): the session the function runs in.
         local_vars (dict[str, ShellVar | None]): the running frame.
         name (str): the variable being declared local.
+        inherit (bool): the declaration carried ``-I``.
     """
     if name in local_vars:
         return
@@ -1498,8 +1503,9 @@ def shadow_local(
         session._local_random.append(session._random_seed)
         session._random_seed = RANDOM_UNSET
     elif name in (LINENO, BASHPID):
-        session._local_plain.append(session._plain_specials)
-        session._plain_specials = session._plain_specials | {name}
+        session._local_plain.append((name, name in session._plain_specials))
+        if not inherit:
+            session._plain_specials = session._plain_specials | {name}
 
 
 def restore_locals(
@@ -1523,8 +1529,14 @@ def restore_locals(
             session.vars[key] = old
     if RANDOM in local_vars:
         session._random_seed = session._local_random.pop()
-    for _ in (name for name in (LINENO, BASHPID) if name in local_vars):
-        session._plain_specials = session._local_plain.pop()
+    for special in (LINENO, BASHPID):
+        if special in local_vars:
+            name, plain = session._local_plain.pop()
+            session._plain_specials = (
+                session._plain_specials | {name}
+                if plain
+                else session._plain_specials - {name}
+            )
 
 
 def seed_var(session: SessionState, name: str, value: ShellValue) -> None:
