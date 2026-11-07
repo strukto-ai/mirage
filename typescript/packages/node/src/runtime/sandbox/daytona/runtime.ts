@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { MachineId } from '@struktoai/mirage-core/execution/types'
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { stdinPath, stdinRedirect } from './constants.ts'
@@ -50,6 +51,11 @@ export class DaytonaRuntime extends RemoteSandbox<DaytonaConfig> {
   constructor(options: RuntimeOptions<DaytonaConfig> = {}) {
     super(options, DaytonaRuntime.configFields)
     requireId('daytona', 'sandboxId', this.config.sandboxId)
+  }
+
+  /** The sandbox it runs programs in, `daytona:<sandboxId>`. */
+  override get machine(): MachineId {
+    return new MachineId(this.name, this.config.sandboxId)
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.

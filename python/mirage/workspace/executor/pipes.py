@@ -54,6 +54,7 @@ from mirage.workspace.executor.builtins.exec import (
 from mirage.workspace.executor.control import UNWINDING, carried, ended
 from mirage.workspace.executor.jobs import (
     handle_background,
+    one_program,
     pump,
     report_reaped,
     run_program,
@@ -247,6 +248,7 @@ async def handle_pipe(
                 decode_text(cmd.text or b""),
                 partial(run_segment, i, cmd),
                 session.process_id,
+                one_command=one_program(cmd, session),
             )
             children[i].session.process_id = process.record.pid
             stages[i] = process

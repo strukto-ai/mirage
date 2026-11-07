@@ -21,7 +21,7 @@ from mirage.context.session_context import current_caller, run_as_process
 from mirage.execution.constants import LOCAL_MACHINE
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.types import Process, ProcessState
-from mirage.execution.types import ProcessId
+from mirage.execution.types import MachineId, MachinePid, ProcessId
 from mirage.types import PathSpec
 
 
@@ -255,20 +255,29 @@ async def test_a_kill_racing_the_settle_is_the_status_it_reports():
     assert (killed, info.exit) == ([True], 137)
 
 
-# The native runs a runner has going are kept under their keys until each
-# ends, and the view of them is a copy.
-def test_a_runner_keeps_the_native_runs_it_has_going():
+# A runner started for one command is its program once, on the program's
+# machine and runtime; one started for more, or taken already, is not, and
+# a host program's pid lands on the record.
+def test_a_runner_started_for_one_command_is_its_program_once():
     handle = ProcessHandle(_info(), _exits_3, lambda _pid: None)
-    handle.add_run("host:41", {"host": "h", "pid": 41})
-    handle.add_run("box:t", {"runtime": "docker", "tag": "t"})
-    handle.runs.clear()
-    assert handle.runs == {
-        "host:41": {"host": "h", "pid": 41},
-        "box:t": {"runtime": "docker", "tag": "t"},
-    }
-    handle.drop_run("host:41")
-    handle.drop_run("host:41")
-    assert handle.runs == {"box:t": {"runtime": "docker", "tag": "t"}}
+    assert not handle.take(None, "docker")
+    handle.one_command = True
+    assert handle.take(MachineId("docker", "tools"), "docker")
+    assert not handle.take(None, "local")
+    record = handle.record
+    assert (record.machine, record.runtime) == (
+        MachineId("docker", "tools"),
+        "docker",
+    )
+    handle.set_machine_pid(MachinePid(41, 5.0))
+    assert handle.record.machine_pid == MachinePid(41, 5.0)
+    other = ProcessHandle(_info(), _exits_3, lambda _pid: None)
+    other.one_command = True
+    assert other.take(None, "local")
+    assert (other.record.machine, other.record.runtime) == (
+        LOCAL_MACHINE,
+        "local",
+    )
 
 
 # What a program the runner started exited with after handling the signal

@@ -15,7 +15,7 @@
 import type { ProcessPermissions } from '../process/config.ts'
 import type { ProcessHandle } from '../process/handle.ts'
 import { ProcessTable } from '../process/table.ts'
-import { PathSpec, type JsonValue } from '../../types.ts'
+import { PathSpec } from '../../types.ts'
 import { JobConsole } from '../../shell/console/index.ts'
 import {
   GENERATION_BITS,
@@ -30,7 +30,7 @@ import {
 import type { ExecutionStore } from '../base.ts'
 import { WorkspaceHeldError } from '../errors.ts'
 import { RAMExecutionStore } from '../ram.ts'
-import { JobId } from '../types.ts'
+import { JobId, LineId } from '../types.ts'
 import { JobHandle, type JobRunner, markKilled } from './handle.ts'
 import type { Job, JobState } from './types.ts'
 import { SystemClock, type Clock } from '../../utils/clock.ts'
@@ -43,6 +43,8 @@ interface ListEntry {
   command: string
   cwd: string
   started_at: number
+  line?: string | null
+  group?: number | null
   console: string
   owner: string
   state: JobState
@@ -57,6 +59,8 @@ function listEntry(record: Job, owner: string): ListEntry {
     command: record.command,
     cwd: record.cwd,
     started_at: record.startedAt,
+    line: record.line?.toString() ?? null,
+    group: record.group,
     console: record.id.console,
     owner,
     state: record.state,
@@ -162,13 +166,12 @@ export class JobTable {
   // workspace asks for has to find them.
   private jobTables = new Map<number, JobTable>()
   /**
-   * Stops the native runs a lapsed daemon left, given them and the first
-   * signal, and answers the ones this workspace cannot reach; the workspace
-   * sets it, since it holds the runtimes that reach them.
+   * Stops the program a lapsed daemon's process ran past the workspace,
+   * given the process as it was published and the first signal, and answers
+   * whether this workspace reached it; the workspace sets it, since it holds
+   * the runtimes that reach it.
    */
-  reaper:
-    | ((runs: Record<string, JsonValue>[], signum: number) => Promise<Record<string, JsonValue>[]>)
-    | null = null
+  reaper: ((record: RecordFields, signum: number) => Promise<boolean>) | null = null
 
   /**
    * @param store the job plane holding each session's list and each job's
@@ -257,12 +260,13 @@ export class JobTable {
   /**
    * Register a job in its session's list and start it.
    *
-   * The job's number is taken from the store first, so two workspaces
-   * starting a job on one session never share one; a process slot is
-   * reserved next, and a refused one gives the number back. The runner is
-   * deferred until the job and console are ready; failed setup cancels the
-   * reservation without entering the supplied runner. Only fully
-   * initialized jobs join the table. Throws `WorkspaceHeldError` when
+   * Its process is started first, so a session at its process cap refuses
+   * the job before it takes a number, and the job's entry names the line
+   * and group its process runs in. The number is taken from the store next,
+   * so two workspaces starting a job on one session never share one. The
+   * runner waits until the job and console are ready; failed setup stops the
+   * process before it enters the supplied runner. Only fully initialized
+   * jobs join the table. Throws `WorkspaceHeldError` when
    * another daemon holds the workspace's lease (`claim`).
    */
   async submit(init: {
@@ -282,60 +286,73 @@ export class JobTable {
     const sessionId = init.sessionId ?? ''
     const name = crypto.randomUUID().replaceAll('-', '')
     const createdAt = this.clock.now()
-    const jobId = await this.allocate(
-      sessionId,
-      listEntry(
-        {
-          id: new JobId(this.processes.workspaceId, name),
-          number: 0,
-          sessionId,
-          command: init.command,
-          cwd: init.cwd,
-          startedAt: createdAt,
-          state: 'running',
-          endedAt: null,
-          exit: null,
-          signal: null,
-        },
-        this.daemon,
-      ),
-    )
     let job: JobHandle | null = null
-    let process: ProcessHandle
-    try {
-      process = this.processes.start({
-        sessionId,
-        parent: init.parent ?? null,
-        command: init.command,
-        cwd: PathSpec.fromStrPath(init.cwd),
-        run: async () => {
+    let ready!: () => void
+    const begun = new Promise<void>((resolve) => {
+      ready = resolve
+    })
+    // The process starts first, so a session at its process cap refuses
+    // the job before it takes a number, and the job's entry names the line
+    // and group it runs in; its runner waits until the job is ready.
+    const process = this.processes.start({
+      sessionId,
+      parent: init.parent ?? null,
+      command: init.command,
+      cwd: PathSpec.fromStrPath(init.cwd),
+      run: async () => {
+        try {
+          await begun
+          if (job === null) return KILLED_EXIT_CODE
+          if (job.state !== 'running') return job.exitCode
+          const watching = new AbortController()
+          void job.watch(watching.signal).catch((err: unknown) => {
+            console.debug('job watch failed:', err)
+          })
           try {
-            if (job === null) return KILLED_EXIT_CODE
-            if (job.state !== 'running') return job.exitCode
-            const watching = new AbortController()
-            void job.watch(watching.signal).catch((err: unknown) => {
-              console.debug('job watch failed:', err)
-            })
-            try {
-              return await job.settle(init.run)
-            } finally {
-              watching.abort()
-              await this.recordEnding(job)
-              this.disowned = this.disowned.filter((j) => j !== job)
-              this.dropChecking()
-            }
+            return await job.settle(init.run)
           } finally {
-            await init.ended?.()
+            watching.abort()
+            await this.recordEnding(job)
+            this.disowned = this.disowned.filter((j) => j !== job)
+            this.dropChecking()
           }
-        },
-        cancel: () => {
-          init.abort.abort()
-        },
-        limit: init.limit ?? null,
-        ignores: IGNORED_SIGNALS,
-      })
+        } finally {
+          await init.ended?.()
+        }
+      },
+      cancel: () => {
+        init.abort.abort()
+      },
+      limit: init.limit ?? null,
+      ignores: IGNORED_SIGNALS,
+      oneCommand: init.simple === true,
+    })
+    const { line, group } = process.record
+    let jobId: number
+    try {
+      jobId = await this.allocate(
+        sessionId,
+        listEntry(
+          {
+            id: new JobId(this.processes.workspaceId, name),
+            number: 0,
+            sessionId,
+            command: init.command,
+            cwd: init.cwd,
+            startedAt: createdAt,
+            line,
+            group,
+            state: 'running',
+            endedAt: null,
+            exit: null,
+            signal: null,
+          },
+          this.daemon,
+        ),
+      )
     } catch (error) {
-      await this.remove(sessionId, new Set([name]), true)
+      process.terminate()
+      ready()
       throw error
     }
     try {
@@ -353,15 +370,19 @@ export class JobTable {
         owner: this.daemon,
         consoleName: name,
         workspaceId: this.processes.workspaceId,
+        line,
+        group,
         now: () => this.clock.now(),
       })
     } catch (error) {
       process.terminate()
+      ready()
       await this.remove(sessionId, new Set([name]), true)
       throw error
     }
     job.process = process
     this.sessionJobs(sessionId).set(job.id, job)
+    ready()
     const plane = this.plane
     const pid = process.record.id.pid
     plane.jobTables.set(pid, this)
@@ -839,6 +860,8 @@ export class JobTable {
       owner: entry.owner,
       consoleName: entry.console,
       workspaceId: this.processes.workspaceId,
+      line: entry.line != null && entry.line !== '' ? new LineId(entry.line) : null,
+      group: entry.group ?? null,
       now: () => this.clock.now(),
     })
     takeEntry(job, entry)
@@ -1155,8 +1178,8 @@ export class JobTable {
   }
 
   /**
-   * The live processes this workspace runs, as its record keeps them, each
-   * with the native runs it has going.
+   * The live processes this workspace runs, as its record keeps them: a
+   * program's with where it runs and its pid there.
    */
   private records(): Record<string, RecordFields> {
     const records: Record<string, RecordFields> = {}
@@ -1173,7 +1196,15 @@ export class JobTable {
         started_at: record.startedAt,
         state: record.state,
         line: record.line?.toString() ?? null,
-        runs: Object.values(handle.runs),
+        runtime: record.runtime,
+        machine_pid:
+          record.machinePid === null
+            ? null
+            : {
+                pid: record.machinePid.pid,
+                started: record.machinePid.started,
+                exited: record.machinePid.exited ?? null,
+              },
       }
     }
     return records
@@ -1313,7 +1344,7 @@ export class JobTable {
   }
 
   /**
-   * Stop the native runs a daemon that lost the lease left, those this
+   * Stop the programs a daemon that lost the lease left, those this
    * workspace reaches, and keep its record holding only the rest, for a
    * daemon that reaches them. This table's own daemon's record is its own
    * life's, so it is never reaped here.
@@ -1322,7 +1353,7 @@ export class JobTable {
     if (owner === this.daemon) return
     try {
       const records = (await this.store.processes())[owner] ?? {}
-      const kept = await this.reapRuns(owner, records)
+      const kept = await this.reapProcesses(owner, records)
       if (!(await this.running(owner))) await this.store.publish(owner, kept)
     } catch (err) {
       console.debug(`lapsed daemon ${owner} not reaped:`, err)
@@ -1330,43 +1361,35 @@ export class JobTable {
   }
 
   /**
-   * Stop the native runs this daemon left before a restart, which `claim`
+   * Stop the programs this daemon left before a restart, which `claim`
    * found under its id; this life's first publish replaces the record.
    */
   private async reapEarlier(records: Record<string, RecordFields>): Promise<void> {
     try {
-      await this.reapRuns(this.daemon, records)
+      await this.reapProcesses(this.daemon, records)
     } catch (err) {
       console.debug('runs left before a restart not reaped:', err)
     }
   }
 
   /**
-   * Hand each native run a daemon's records list to the reaper, with its
-   * record's `seen_at`, and answer the records holding only the runs this
-   * workspace could not reach. The lease is checked again before each run
-   * is stopped, so a daemon that took it back meanwhile keeps its runs, and
-   * its records as they are.
+   * Hand each process a daemon's records list that ran a program past the
+   * workspace (its `runtime`) to the reaper, and answer the ones this
+   * workspace could not reach. The lease is checked again before each is
+   * stopped, so a daemon that took it back meanwhile keeps its processes,
+   * and its records as they are.
    */
-  private async reapRuns(
+  private async reapProcesses(
     owner: string,
     records: Record<string, RecordFields>,
   ): Promise<Record<string, RecordFields>> {
-    const runsOf = (record: RecordFields) => record.runs as Record<string, JsonValue>[]
-    const left: Record<string, JsonValue>[] = []
-    for (const record of Object.values(records)) {
-      for (const run of runsOf(record)) {
-        if (await this.running(owner)) return records
-        const vouched = { ...run, seen_at: (record.seen_at ?? null) as JsonValue }
-        if (this.reaper === null || (await this.reaper([vouched], 15)).length > 0) left.push(run)
-      }
-    }
-    const kept: Record<string, RecordFields> = {}
+    const left: Record<string, RecordFields> = {}
     for (const [pid, record] of Object.entries(records)) {
-      const remaining = runsOf(record).filter((run) => left.includes(run))
-      if (remaining.length > 0) kept[pid] = { ...record, runs: remaining }
+      if (record.runtime == null) continue
+      if (await this.running(owner)) return records
+      if (this.reaper === null || !(await this.reaper(record, 15))) left[pid] = record
     }
-    return kept
+    return left
   }
 
   /**

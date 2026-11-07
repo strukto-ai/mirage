@@ -80,7 +80,10 @@ export class ProcessTable {
    * pid to run under, a session's `$$` that each of its lines takes in
    * turn; a fresh one when absent or when a live runner holds it.
    * `ownGroup` leads a process group of its own, as timeout's command does,
-   * instead of joining its parent's.
+   * instead of joining its parent's. `machine` is where its program runs,
+   * the table's when absent, and `runtime` what Mirage runs it with, none
+   * for Mirage itself. `oneCommand` marks a runner that runs exactly one
+   * command, whose program it is (`ProcessHandle.take`).
    */
   start(init: {
     sessionId: string
@@ -95,6 +98,9 @@ export class ProcessTable {
     ignores?: ReadonlySet<number>
     pid?: number | null
     ownGroup?: boolean
+    machine?: MachineId | null
+    runtime?: string | null
+    oneCommand?: boolean
   }): ProcessHandle {
     if (this.stopped) throw new Error('process table is stopped')
     const limit = underCeiling(init.limit ?? null, this.ceiling)
@@ -118,9 +124,9 @@ export class ProcessTable {
         group: (init.ownGroup === true ? undefined : above?.handle.record.group) ?? pid,
         command: init.command,
         cwd: init.cwd,
-        machine: this.machine,
+        machine: init.machine ?? this.machine,
         startedAt: this.now(),
-        runtime: null,
+        runtime: init.runtime ?? null,
         machinePid: null,
         state: 'running',
         endedAt: null,
@@ -144,6 +150,7 @@ export class ProcessTable {
       init.ignores,
       this.now,
     )
+    handle.oneCommand = init.oneCommand === true
     const eager = init.started !== undefined && !this.queued()
     this.runners.set(pid, { generation: this.generations.get(init.sessionId) ?? 0, handle })
     this.ancestors.set(

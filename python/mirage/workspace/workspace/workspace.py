@@ -76,7 +76,7 @@ from mirage.execution.process.stdio import ProcessInput, ProcessOutput
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.process.types import SpawnRequest
 from mirage.execution.process.view import ProcessView
-from mirage.execution.types import MachineId
+from mirage.execution.types import MachineId, MachinePid, ProcessId
 from mirage.io import IOResult
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget
@@ -191,6 +191,7 @@ from mirage.workspace.node.explain import (
     holds,
     line_judgments,
 )
+from mirage.workspace.record.types import RecordFields
 from mirage.workspace.session import SessionManager, SessionState
 from mirage.workspace.session.budget import check_env_fits
 from mirage.workspace.session.constants import DEFAULT_PROFILE, MAX_ENV
@@ -432,7 +433,7 @@ class Workspace:
             clock=self._clock,
             daemon=daemon_id,
         )
-        self.job_table.reaper = self._reap_runs
+        self.job_table.reaper = self._reap_process
         self.line_table = LineTable(self._clock)
         self._lines: dict[asyncio.Event, tuple[str | None, asyncio.Event]] = {}
         self._shell_executions: dict[ShellExecution, None] = {}
@@ -726,6 +727,7 @@ class Workspace:
             self._files,
             self.get_session,
             self._sandbox_mounts,
+            self.processes,
         )
         self._runtimes = Runtimes(self._registry, self._runtime_binding)
         self._runtimes.resolve(runtimes)
@@ -1513,44 +1515,43 @@ class Workspace:
         """The ordered runtime world, first capturer first."""
         return list(self._runtimes.entries)
 
-    async def _reap_runs(
-        self, runs: list[dict[str, JsonValue]], signum: int
-    ) -> list[dict[str, JsonValue]]:
-        """Stop native runs a lapsed workspace left, answering the ones
-        this workspace cannot reach: a host run directly when it runs on
-        this host, a sandbox run through every runtime of its name here,
-        each of which stops what its tag marks in the box it reaches. A
-        run counts as reached only once a box held it and it was stopped:
-        a box of the same name that holds none of it, or one that could
-        not be reached, leaves it to a workspace that reaches its own.
+    async def _reap_process(self, record: RecordFields, signum: int) -> bool:
+        """Stop the program a lapsed workspace's process ran past the
+        workspace, answering whether this workspace reached it: a host
+        program by its pid when it ran on this host, a sandbox's run
+        through each runtime here on the machine it ran on, which stops
+        what the process's tag marks there. It counts as reached only
+        once a box held it and it was stopped: a box that holds none of
+        it, or one that could not be reached, leaves it to a workspace
+        that reaches its own.
 
         Args:
-            runs (list[dict[str, JsonValue]]): the runs, as their process
-                records keep them.
+            record (RecordFields): the process, as its workspace published
+                it.
             signum (int): the first signal.
         """
-        left: list[dict[str, JsonValue]] = []
-        for run in runs:
-            if "host" in run:
-                if not await reap_host_run(run, signum):
-                    left.append(run)
+        machine, pid = record.get("machine"), record.get("pid")
+        found, seen = record.get("machine_pid"), record.get("seen_at")
+        if not isinstance(pid, int):
+            return False
+        if machine == str(self.processes.machine) and isinstance(found, dict):
+            return await reap_host_run(
+                MachinePid(found["pid"], found["started"], found["exited"]),
+                seen,
+                signum,
+            )
+        tag = str(ProcessId(self._workspace_id, pid))
+        reached = False
+        for runtime in self.runtimes():
+            if not isinstance(runtime, RemoteSandbox):
                 continue
-            reached = False
-            for runtime in self.runtimes():
-                if not isinstance(
-                    runtime, RemoteSandbox
-                ) or runtime.name != run.get("runtime"):
+            try:
+                if str(runtime.machine or self.processes.machine) != machine:
                     continue
-                try:
-                    reached = (
-                        await runtime.reap(str(run.get("tag")), signum)
-                        or reached
-                    )
-                except Exception as exc:
-                    logger.debug("%s: run not reaped: %s", runtime.name, exc)
-            if not reached:
-                left.append(run)
-        return left
+                reached = await runtime.reap(tag, signum) or reached
+            except Exception as exc:
+                logger.debug("%s: run not reaped: %s", runtime.name, exc)
+        return reached
 
     def add_runtime(self, runtime: Runtime[Any] | str) -> Runtime[Any]:
         """Add a runtime entry to the workspace's ordered set;

@@ -30,6 +30,7 @@ import {
   WATCH_RETRY_SECONDS,
 } from './constants.ts'
 import { WorkspaceHeldError } from '../errors.ts'
+import { LineId } from '../types.ts'
 import { RAMExecutionStore } from '../ram.ts'
 import { ProcessTable } from '../process/table.ts'
 import { PathSpec } from '../../types.ts'
@@ -142,6 +143,11 @@ function pending(abort: AbortController, prelude?: string): JobRunner {
     })
     throw new Error('unreachable')
   }
+}
+
+/** A published process that ran a program on `machine`. */
+function ran(pid: number, machine = 'docker:t'): Record<string, unknown> {
+  return { pid, session: 's', machine, runtime: 'x' }
 }
 
 describe('JobTable.submit', () => {
@@ -1580,7 +1586,8 @@ describe('JobTable process plane', () => {
     })
     await until(async () => a.daemon in (await b.remoteProcesses()))
     const record = (await b.remoteProcesses())[a.daemon]?.[String(job.pid)]
-    expect([record?.command, record?.session, record?.runs]).toEqual(['sleep 30', 's', []])
+    expect([record?.command, record?.session]).toEqual(['sleep 30', 's'])
+    expect([record?.runtime, record?.machine_pid]).toEqual([null, null])
     expect(Math.abs((record?.seen_at as number) - Date.now() / 1000)).toBeLessThan(5)
     expect(await a.remoteProcesses()).toEqual({})
     expect(await a.kill(job.id, 's')).toBe(true)
@@ -1701,36 +1708,40 @@ describe('JobTable process plane', () => {
     await b.close()
   })
 
-  // A lapsed owner's processes are not listed; the native runs it left are
-  // handed to the reaper, each with when its owner last vouched for it, and
-  // its record keeps only the runs nobody here reached.
-  it.each([false, true])("reaps a lapsed owner's runs (one unreached: %s)", async (unreached) => {
-    const store = new RAMExecutionStore(30)
-    const host = { host: 'h', pid: 41, started_at: 1, command: 'x' }
-    const box = { runtime: 'docker', tag: 't', command: 'y' }
-    await store.publish('dead', {
-      '2': { pid: 2, session: 's', runs: [host], seen_at: 5 },
-      '3': { pid: 3, session: 's', runs: [box] },
-    })
-    const reaped: [unknown[], number][] = []
-    const b = new JobTable(store)
-    b.reaper = (runs, signum) => {
-      reaped.push([runs, signum])
-      return Promise.resolve(runs.filter((run) => unreached && run.tag === 't'))
-    }
-    expect(await b.remoteProcesses()).toEqual({})
-    await until(
-      async () => reaped.length === 2 && (await store.processes()).dead?.['2'] === undefined,
-    )
-    expect(reaped).toEqual([
-      [[{ ...host, seen_at: 5 }], 15],
-      [[{ ...box, seen_at: null }], 15],
-    ])
-    expect(await store.processes()).toEqual(
-      unreached ? { dead: { '3': { pid: 3, session: 's', runs: [box] } } } : {},
-    )
-    await b.close()
-  })
+  // The processes of a daemon that lost the lease are not listed; each that
+  // ran a program past the workspace is handed to the reaper as published,
+  // and its record keeps only the processes nobody here reached. One that
+  // ran none (a shell) has nothing left to stop.
+  it.each([false, true])(
+    "reaps a lapsed owner's programs (one unreached: %s)",
+    async (unreached) => {
+      const store = new RAMExecutionStore(30)
+      const host = {
+        ...ran(2, 'host:h'),
+        machine_pid: { pid: 41, started: 1, exited: null },
+        seen_at: 5,
+      }
+      const box = ran(3)
+      const shell = { pid: 4, session: 's', runtime: null }
+      await store.publish('dead', { '2': host, '3': box, '4': shell })
+      const reaped: [unknown, number][] = []
+      const b = new JobTable(store)
+      b.reaper = (record, signum) => {
+        reaped.push([record, signum])
+        return Promise.resolve(!(unreached && record.pid === 3))
+      }
+      expect(await b.remoteProcesses()).toEqual({})
+      await until(
+        async () => reaped.length === 2 && (await store.processes()).dead?.['2'] === undefined,
+      )
+      expect(reaped).toEqual([
+        [host, 15],
+        [box, 15],
+      ])
+      expect(await store.processes()).toEqual(unreached ? { dead: { '3': box } } : {})
+      await b.close()
+    },
+  )
 
   // A start reaps the daemons on the store that lost the lease, and once
   // more a lease later: a daemon that still held it at the start, as one
@@ -1738,15 +1749,14 @@ describe('JobTable process plane', () => {
   it('reaps lapsed daemons as it starts', async () => {
     const store = new RAMExecutionStore(0.5)
     for (const owner of ['dead', 'dying']) {
-      const run = { runtime: 'docker', tag: owner, command: 'x' }
-      await store.publish(owner, { '2': { pid: 2, session: 's', runs: [run] } })
+      await store.publish(owner, { '2': ran(2, `docker:${owner}`) })
     }
     await store.lease('dying')
     const reaped: unknown[] = []
     const b = new JobTable(store)
-    b.reaper = (runs) => {
-      reaped.push(...runs.map((run) => run.tag))
-      return Promise.resolve([])
+    b.reaper = (record) => {
+      reaped.push(String(record.machine).split(':')[1])
+      return Promise.resolve(true)
     }
     b.reapLapsed()
     await until(() => Promise.resolve(reaped.length > 0))
@@ -1763,14 +1773,12 @@ describe('JobTable process plane', () => {
     const store = new RAMExecutionStore(0.5)
     const b = new JobTable(store)
     const reaped: unknown[] = []
-    b.reaper = (runs) => {
-      reaped.push(...runs.map((run) => run.tag))
-      return Promise.resolve([])
+    b.reaper = (record) => {
+      reaped.push(String(record.machine).split(':')[1])
+      return Promise.resolve(true)
     }
     try {
-      await store.publish('dying', {
-        '2': { pid: 2, session: 's', runs: [{ runtime: 'docker', tag: 'dying', command: 'x' }] },
-      })
+      await store.publish('dying', { '2': ran(2, 'docker:dying') })
       await store.lease('dying')
       b.reapLapsed()
       await vi.advanceTimersByTimeAsync(0)
@@ -1882,9 +1890,9 @@ describe('JobTable process plane', () => {
     await a.close()
   }, 15_000)
 
-  // A daemon that takes the lease back while its runs are being reaped keeps
-  // them: the lease is read again before each run is stopped.
-  it('lets a daemon that renews keep its runs', async () => {
+  // A daemon that takes the lease back while its programs are being reaped
+  // keeps them: the lease is read again before each is stopped.
+  it('lets a daemon that renews keep its programs', async () => {
     let asked = 0
     class Revives extends RAMExecutionStore {
       override holder(): Promise<string | null> {
@@ -1893,13 +1901,12 @@ describe('JobTable process plane', () => {
       }
     }
     const store = new Revives(30)
-    const run = { runtime: 'docker', tag: 't', command: 'x' }
-    await store.publish('back', { '2': { pid: 2, session: 's', runs: [run] } })
+    await store.publish('back', { '2': ran(2) })
     const reaped: unknown[] = []
     const b = new JobTable(store)
-    b.reaper = (runs) => {
-      reaped.push(runs)
-      return Promise.resolve([])
+    b.reaper = (record) => {
+      reaped.push(record)
+      return Promise.resolve(true)
     }
     expect(await b.remoteProcesses()).toEqual({})
     await b.killAll()
@@ -1912,8 +1919,7 @@ describe('JobTable process plane', () => {
   // a reap under way is waited for, and no listing starts another.
   it('stops the reaping at teardown', async () => {
     const store = new RAMExecutionStore(30)
-    const run = { runtime: 'docker', tag: 't', command: 'x' }
-    await store.publish('dead', { '2': { pid: 2, session: 's', runs: [run] } })
+    await store.publish('dead', { '2': ran(2) })
     let calls = 0
     let finished = false
     const b = new JobTable(store)
@@ -1921,13 +1927,13 @@ describe('JobTable process plane', () => {
       calls += 1
       await new Promise((resolve) => setTimeout(resolve, 50))
       finished = true
-      return []
+      return true
     }
     await b.remoteProcesses()
     await until(() => Promise.resolve(calls === 1))
     await b.killAll()
     expect(finished).toBe(true)
-    await store.publish('dead', { '2': { pid: 2, session: 's', runs: [run] } })
+    await store.publish('dead', { '2': ran(2) })
     await b.remoteProcesses()
     await new Promise((resolve) => setTimeout(resolve, 20))
     expect(calls).toBe(1)
@@ -2070,6 +2076,46 @@ describe('JobTable process plane', () => {
     await b.close()
   })
 
+  // A job's record, and its entry in the session's list, name the line that
+  // started it and the process group it runs in, its parent's.
+  it('names the line and group of its job', async () => {
+    const store = new RAMExecutionStore()
+    const a = new JobTable(store)
+    const abort = new AbortController()
+    const parent = a.processes.start({
+      sessionId: 's',
+      command: 'sh',
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => {
+        abort.abort()
+      },
+      run: () =>
+        new Promise<number>((_resolve, reject) => {
+          abort.signal.addEventListener('abort', () => {
+            reject(new DOMException('aborted', 'AbortError'))
+          })
+        }),
+      line: new LineId('l1'),
+    })
+    const stop = new AbortController()
+    const job = await a.submit({
+      command: 'sleep 30',
+      run: pending(stop),
+      abort: stop,
+      cwd: '/',
+      sessionId: 's',
+      parent: parent.record.id.pid,
+    })
+    expect([job.record.line, job.record.group]).toEqual([new LineId('l1'), parent.record.group])
+    const entries = Object.values(
+      ((await store.load('s'))?.jobs ?? {}) as Record<string, RecordFields>,
+    )
+    expect(entries.map((entry) => [entry.line, entry.group])).toEqual([['l1', parent.record.group]])
+    await a.killAll()
+    parent.terminate()
+    await parent.join()
+  })
+
   // A table that closes drops its record, so it never reads as lapsed, and
   // gives the lease up for another daemon to take.
   it('drops its record and the lease once closed', async () => {
@@ -2083,21 +2129,20 @@ describe('JobTable process plane', () => {
     expect(await store.holder()).toBeNull()
   })
 
-  // A daemon taking the lease stops the native runs it left before a restart
+  // A daemon taking the lease stops the programs it left before a restart
   // and numbers its pids past the highest the store recorded.
-  it("reaps this daemon's runs from before a restart as it claims", async () => {
+  it("reaps this daemon's programs from before a restart as it claims", async () => {
     const store = new RAMExecutionStore()
-    const run = { runtime: 'docker', tag: 't', command: 'x' }
-    await store.publish('d', { '7': { pid: 7, session: 's', runs: [run] } }, 7)
+    await store.publish('d', { '7': ran(7) }, 7)
     const reaped: unknown[] = []
     const a = new JobTable(store, undefined, null, undefined, 'd')
-    a.reaper = (runs) => {
-      reaped.push(runs)
-      return Promise.resolve([])
+    a.reaper = (record) => {
+      reaped.push(record)
+      return Promise.resolve(true)
     }
     await a.claim()
     await until(() => Promise.resolve(reaped.length > 0))
-    expect(reaped).toEqual([[{ ...run, seen_at: null }]])
+    expect(reaped).toEqual([ran(7)])
     const job = await sleeping(a)
     expect(job.pid).toBe(8)
     await a.killAll()

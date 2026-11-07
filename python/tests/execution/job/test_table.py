@@ -27,6 +27,7 @@ from mirage.execution.job.types import JobState
 from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.ram import RAMExecutionStore
+from mirage.execution.types import LineId
 from mirage.io import IOResult
 from mirage.shell.console import (
     Channel,
@@ -1279,11 +1280,8 @@ async def test_a_table_publishes_its_processes_while_it_runs_any(monkeypatch):
 
     await _until(listed)
     record = (await b.remote_processes())[a.daemon][str(job.pid)]
-    assert (record["command"], record["session"], record["runs"]) == (
-        "sleep 30",
-        "s",
-        [],
-    )
+    assert (record["command"], record["session"]) == ("sleep 30", "s")
+    assert (record["runtime"], record["machine_pid"]) == (None, None)
     assert abs(float(record["seen_at"]) - time.time()) < 5
     assert await a.remote_processes() == {}
     assert await a.kill(job.id, "s")
@@ -1403,27 +1401,32 @@ async def test_a_remote_signal_reads_the_grants_after_the_store(monkeypatch):
     await b.close()
 
 
-# The processes of a daemon that lost the lease are not listed; the native
-# runs it left are handed to the reaper, each with when that daemon last
-# vouched for it, and its record keeps only the runs nobody here reached.
+def _ran(pid: int, machine: str = "docker:t") -> dict:
+    """A published process that ran a program on ``machine``."""
+    return {"pid": pid, "session": "s", "machine": machine, "runtime": "x"}
+
+
+# The processes of a daemon that lost the lease are not listed; each that
+# ran a program past the workspace is handed to the reaper as published,
+# and its record keeps only the processes nobody here reached. One that
+# ran none (a shell) has nothing left to stop.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("unreached", [False, True])
-async def test_a_lapsed_daemons_runs_are_reaped(unreached):
+async def test_a_lapsed_daemons_programs_are_reaped(unreached):
     store = RAMExecutionStore(lease_seconds=30.0)
-    host = {"host": "h", "pid": 41, "started_at": 1.0, "command": "x"}
-    box = {"runtime": "docker", "tag": "t", "command": "y"}
-    await store.publish(
-        "dead",
-        {
-            "2": {"pid": 2, "session": "s", "runs": [host], "seen_at": 5.0},
-            "3": {"pid": 3, "session": "s", "runs": [box]},
-        },
-    )
-    reaped: list[tuple[list, int]] = []
+    host = {
+        **_ran(2, "host:h"),
+        "machine_pid": {"pid": 41, "started": 1.0, "exited": None},
+        "seen_at": 5.0,
+    }
+    box = _ran(3)
+    shell = {"pid": 4, "session": "s", "runtime": None}
+    await store.publish("dead", {"2": host, "3": box, "4": shell})
+    reaped: list[tuple[dict, int]] = []
 
-    async def reaper(runs: list, signum: int) -> list:
-        reaped.append((runs, signum))
-        return [run for run in runs if unreached and run.get("tag") == "t"]
+    async def reaper(record: dict, signum: int) -> bool:
+        reaped.append((record, signum))
+        return not (unreached and record["pid"] == 3)
 
     b = JobTable(store)
     b.reaper = reaper
@@ -1431,17 +1434,9 @@ async def test_a_lapsed_daemons_runs_are_reaped(unreached):
     async with asyncio.timeout(5):
         while b._reaping:
             await asyncio.sleep(0.01)
-    assert reaped == [
-        ([{**host, "seen_at": 5.0}], 15),
-        ([{**box, "seen_at": None}], 15),
-    ]
+    assert reaped == [(host, 15), (box, 15)]
     kept = await store.processes()
-    if unreached:
-        assert kept == {
-            "dead": {"3": {"pid": 3, "session": "s", "runs": [box]}}
-        }
-    else:
-        assert kept == {}
+    assert kept == ({"dead": {"3": box}} if unreached else {})
     await b.close()
 
 
@@ -1459,20 +1454,17 @@ async def test_a_closed_table_drops_its_record_and_the_lease():
     assert await store.holder() is None
 
 
-# A daemon taking the lease stops the native runs it left before a restart
+# A daemon taking the lease stops the programs it left before a restart
 # and numbers its pids past the highest the store recorded.
 @pytest.mark.asyncio
-async def test_a_claim_reaps_this_daemons_runs_from_before_a_restart():
+async def test_a_claim_reaps_this_daemons_programs_from_before_a_restart():
     store = RAMExecutionStore()
-    run = {"runtime": "docker", "tag": "t", "command": "x"}
-    await store.publish(
-        "d", {"7": {"pid": 7, "session": "s", "runs": [run]}}, 7
-    )
-    reaped: list[list] = []
+    await store.publish("d", {"7": _ran(7)}, 7)
+    reaped: list[dict] = []
 
-    async def reaper(runs: list, signum: int) -> list:
-        reaped.append(runs)
-        return []
+    async def reaper(record: dict, signum: int) -> bool:
+        reaped.append(record)
+        return True
 
     a = JobTable(store, daemon="d")
     a.reaper = reaper
@@ -1480,7 +1472,7 @@ async def test_a_claim_reaps_this_daemons_runs_from_before_a_restart():
     async with asyncio.timeout(5):
         while a._reaping:
             await asyncio.sleep(0.01)
-    assert reaped == [[{**run, "seen_at": None}]]
+    assert reaped == [_ran(7)]
     job = await a.submit("sleep 30", _run_forever, "/", session_id="s")
     assert job.pid == 8
     await a.kill_all()
@@ -1555,20 +1547,17 @@ class _Revives(RAMExecutionStore):
         return "back" if self.asked > 1 else None
 
 
-# A daemon that takes the lease back while its runs are being reaped keeps
-# them: the lease is read again before each run is stopped.
+# A daemon that takes the lease back while its programs are being reaped
+# keeps them: the lease is read again before each is stopped.
 @pytest.mark.asyncio
-async def test_a_daemon_that_renews_keeps_its_runs():
+async def test_a_daemon_that_renews_keeps_its_programs():
     store = _Revives()
-    run = {"runtime": "docker", "tag": "t", "command": "x"}
-    await store.publish(
-        "back", {"2": {"pid": 2, "session": "s", "runs": [run]}}
-    )
-    reaped: list[list] = []
+    await store.publish("back", {"2": _ran(2)})
+    reaped: list[dict] = []
 
-    async def reaper(runs: list, signum: int) -> list:
-        reaped.append(runs)
-        return []
+    async def reaper(record: dict, signum: int) -> bool:
+        reaped.append(record)
+        return True
 
     b = JobTable(store)
     b.reaper = reaper
@@ -1586,20 +1575,17 @@ async def test_a_daemon_that_renews_keeps_its_runs():
 @pytest.mark.asyncio
 async def test_teardown_stops_the_reaping():
     store = RAMExecutionStore(lease_seconds=30.0)
-    run = {"runtime": "docker", "tag": "t", "command": "x"}
-    await store.publish(
-        "dead", {"2": {"pid": 2, "session": "s", "runs": [run]}}
-    )
+    await store.publish("dead", {"2": _ran(2)})
     started, cancelled = asyncio.Event(), asyncio.Event()
 
-    async def reaper(runs: list, signum: int) -> list:
+    async def reaper(record: dict, signum: int) -> bool:
         started.set()
         try:
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             cancelled.set()
             raise
-        return []
+        return True
 
     b = JobTable(store)
     b.reaper = reaper
@@ -1620,16 +1606,13 @@ async def test_teardown_stops_the_reaping():
 async def test_a_start_reaps_lapsed_daemons():
     store = RAMExecutionStore(lease_seconds=0.5)
     for owner in ("dead", "dying"):
-        run = {"runtime": "docker", "tag": owner, "command": "x"}
-        await store.publish(
-            owner, {"2": {"pid": 2, "session": "s", "runs": [run]}}
-        )
+        await store.publish(owner, {"2": _ran(2, f"docker:{owner}")})
     await store.lease("dying")
     reaped: list[str] = []
 
-    async def reaper(runs: list, signum: int) -> list:
-        reaped.extend(run["tag"] for run in runs)
-        return []
+    async def reaper(record: dict, signum: int) -> bool:
+        reaped.append(record["machine"].partition(":")[2])
+        return True
 
     b = JobTable(store)
     b.reaper = reaper
@@ -1658,25 +1641,14 @@ async def test_a_start_finishes_the_lease_wait_after_an_early_timer(
         waits.append(seconds)
         clock.advance(seconds - 0.001 if len(waits) == 1 else seconds)
 
-    async def reaper(runs: list, signum: int) -> list:
-        reaped.extend(run["tag"] for run in runs)
-        return []
+    async def reaper(record: dict, signum: int) -> bool:
+        reaped.append(record["machine"].partition(":")[2])
+        return True
 
     monkeypatch.setattr(table_module.time, "monotonic", clock.monotonic)
     monkeypatch.setattr(table_module.asyncio, "sleep", sleep)
     store = RAMExecutionStore(lease_seconds=0.5)
-    await store.publish(
-        "dying",
-        {
-            "2": {
-                "pid": 2,
-                "session": "s",
-                "runs": [
-                    {"runtime": "docker", "tag": "dying", "command": "x"}
-                ],
-            }
-        },
-    )
+    await store.publish("dying", {"2": _ran(2, "docker:dying")})
     await store.lease("dying")
     b = JobTable(store)
     b.reaper = reaper
@@ -1847,3 +1819,33 @@ async def test_a_lease_taken_elsewhere_refuses_the_next_job():
         await a.submit("sleep 30", _run_forever, "/", session_id="s")
     assert held.value.holder == b.daemon
     await b.close()
+
+
+# A job's record, and its entry in the session's list, name the line that
+# started it and the process group it runs in, its parent's.
+@pytest.mark.asyncio
+async def test_a_jobs_record_names_its_line_and_group():
+    store = RAMExecutionStore()
+    a = JobTable(store)
+    parent = a.processes.start(
+        session_id="s",
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        run=_forever,
+        line=LineId("l1"),
+    )
+    job = await a.submit(
+        "sleep 30", _run_forever, "/", session_id="s", parent=parent.record.pid
+    )
+    assert (job.record.line, job.record.group) == (
+        LineId("l1"),
+        parent.record.group,
+    )
+    fields = await store.load("s")
+    assert fields is not None
+    [entry] = fields["jobs"].values()
+    assert (entry["line"], entry["group"]) == ("l1", parent.record.group)
+    await a.kill_all()
+    parent.terminate()
+    await parent.join()
+    await a.close()

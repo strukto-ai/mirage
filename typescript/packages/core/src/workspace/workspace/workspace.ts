@@ -69,7 +69,8 @@ import { ProcessInput, ProcessOutput } from '../../execution/process/stdio.ts'
 import { ProcessTable } from '../../execution/process/table.ts'
 import type { SpawnRequest } from '../../execution/process/types.ts'
 import { LOCAL_MACHINE } from '../../execution/constants.ts'
-import type { MachineId } from '../../execution/types.ts'
+import { type MachineId, type MachinePid, ProcessId } from '../../execution/types.ts'
+import type { RecordFields } from '../record/types.ts'
 import type { ProcessView } from '../../execution/process/view.ts'
 import { DiffPool } from '../../rs/diff_pool.ts'
 import type { Runtime, RuntimeEntry } from '../../runtime/base.ts'
@@ -96,7 +97,7 @@ import { literalTree } from '../../shell/literal.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { makeVar, VarAttr } from '../../shell/variable.ts'
-import type { FileEvent, JsonObject, JsonValue, Visibility } from '../../types.ts'
+import type { FileEvent, JsonObject, Visibility } from '../../types.ts'
 import {
   DEFAULT_READ_SPEC,
   DriftPolicy,
@@ -360,7 +361,7 @@ export class Workspace {
       this.clock,
       options.daemonId ?? null,
     )
-    this.jobTable.reaper = (runs, signum) => this.reapRuns(runs, signum)
+    this.jobTable.reaper = (record, signum) => this.reapProcess(record, signum)
     this.lineTable = new LineTable(this.clock)
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
@@ -673,6 +674,8 @@ export class Workspace {
       this.vfs,
       (sessionId) => this.getSession(sessionId),
       () => this.sandboxMounts(),
+      null,
+      this.processes,
     )
     this.runtimeWorld = new Runtimes({
       registry: this.registry,
@@ -729,44 +732,49 @@ export class Workspace {
   }
 
   /**
-   * Stop native runs a lapsed workspace left, answering the ones this
-   * workspace cannot reach: a host run through `reapHostRun`, a sandbox run
-   * through every runtime of its name here, each of which stops what its
-   * tag marks in the box it reaches. A run counts as reached only once a box
-   * held it and it was stopped: a box of the same name that holds none of
-   * it, or one that could not be reached, leaves it to a workspace that
-   * reaches its own. Mirrors Python's `Workspace._reap_runs`.
+   * Stop the program a lapsed workspace's process ran past the workspace,
+   * answering whether this workspace reached it: a host program by its pid
+   * when it ran on this host (`reapHostRun`), a sandbox's run through each
+   * runtime here on the machine it ran on, which stops what the process's
+   * tag marks there. It counts as reached only once a box held it and it was
+   * stopped: a box that holds none of it, or one that could not be reached,
+   * leaves it to a workspace that reaches its own. Mirrors Python's
+   * `Workspace._reap_process`.
+   *
+   * @param record the process, as its workspace published it.
+   * @param signum the first signal.
    */
-  private async reapRuns(
-    runs: Record<string, JsonValue>[],
-    signum: number,
-  ): Promise<Record<string, JsonValue>[]> {
-    const left: Record<string, JsonValue>[] = []
-    for (const run of runs) {
-      if ('host' in run) {
-        if (!(await this.reapHostRun(run, signum))) left.push(run)
-        continue
+  private async reapProcess(record: RecordFields, signum: number): Promise<boolean> {
+    const { machine, pid } = record
+    const found = record.machine_pid as MachinePid | null | undefined
+    const seen = record.seen_at
+    if (typeof pid !== 'number') return false
+    if (machine === this.processes.machine.toString() && found != null)
+      return this.reapHostRun(found, typeof seen === 'number' ? seen : null, signum)
+    const tag = new ProcessId(this.workspaceId, pid).toString()
+    let reached = false
+    for (const runtime of this.runtimes()) {
+      if (!(runtime instanceof RemoteSandbox)) continue
+      try {
+        if ((runtime.machine ?? this.processes.machine).toString() !== machine) continue
+        reached = (await runtime.reap(tag, signum)) || reached
+      } catch (err) {
+        console.debug(`${runtime.name}: run not reaped:`, err)
       }
-      let reached = false
-      for (const runtime of this.runtimes()) {
-        if (!(runtime instanceof RemoteSandbox) || runtime.name !== run.runtime) continue
-        try {
-          reached = (await runtime.reap(run.tag as string, signum)) || reached
-        } catch (err) {
-          console.debug(`${runtime.name}: run not reaped:`, err)
-        }
-      }
-      if (!reached) left.push(run)
     }
-    return left
+    return reached
   }
 
   /**
-   * Stop a host run a lapsed workspace left on this host, answering whether
-   * it is stopped or gone. A host whose processes this package cannot reach
-   * (a browser) reaches none; Node's workspace does.
+   * Stop a host program a lapsed workspace left on this host, answering
+   * whether it is stopped or gone. A host whose processes this package
+   * cannot reach (a browser) reaches none; Node's workspace does.
    */
-  protected reapHostRun(_run: Record<string, JsonValue>, _signum: number): Promise<boolean> {
+  protected reapHostRun(
+    _machinePid: MachinePid,
+    _seenAt: number | null,
+    _signum: number,
+  ): Promise<boolean> {
     return Promise.resolve(false)
   }
 

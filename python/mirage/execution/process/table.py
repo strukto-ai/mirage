@@ -86,6 +86,9 @@ class ProcessTable:
         ignores: frozenset[int] = frozenset(),
         pid: int | None = None,
         own_group: bool = False,
+        machine: MachineId | None = None,
+        runtime: str | None = None,
+        one_command: bool = False,
     ) -> ProcessHandle:
         """Track a runner; its caller owns admission before command effects.
 
@@ -118,6 +121,12 @@ class ProcessTable:
                 None or when a live runner holds it.
             own_group (bool): lead a process group of its own, as
                 timeout's command does, instead of joining its parent's.
+            machine (MachineId | None): where its program runs; None for
+                the table's machine.
+            runtime (str | None): what Mirage runs its program with; None
+                for Mirage itself.
+            one_command (bool): it runs exactly one command, whose
+                program it is (``ProcessHandle.take``).
 
         Raises:
             BlockingIOError: the session already holds ``limit``
@@ -162,8 +171,9 @@ class ProcessTable:
                     else pid,
                     command,
                     cwd,
-                    self.machine,
+                    machine or self.machine,
                     self._now(),
+                    runtime,
                 ),
                 run,
                 lambda done: self._retire(done, handle),
@@ -172,6 +182,7 @@ class ProcessTable:
                 ignores,
                 self._now,
             )
+            handle.one_command = one_command
             eager = started is not None and not self.queued()
             self._live[pid] = (self._generations.get(session_id, 0), handle)
             self._ancestors[pid] = (

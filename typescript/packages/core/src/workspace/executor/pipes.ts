@@ -46,7 +46,7 @@ import { divertStatement, divertedFile } from './builtins/exec/index.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, ended, isUnwinding } from './control.ts'
-import { handleBackground, pump, reportReaped, runProgram, startShell } from './jobs.ts'
+import { handleBackground, oneProgram, pump, reportReaped, runProgram, startShell } from './jobs.ts'
 import {
   answerClosed,
   asWritten,
@@ -216,6 +216,8 @@ export async function handlePipe(
       () => {
         stopped.abort()
       },
+      undefined,
+      oneProgram(cmd, session),
     )
     child.processId = process.record.id.pid
     stages[i] = process

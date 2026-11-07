@@ -23,13 +23,14 @@ from mirage.cache.index.config import LookupStatus
 from mirage.commands.config import Context
 from mirage.context.session_context import run_as_process
 from mirage.execution.process.table import ProcessTable
+from mirage.execution.types import MachineId
 from mirage.io.types import materialize
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
 from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.sandbox import RemoteSandbox, SandboxConfig
 from mirage.runtime.sandbox.constants import (
-    EXEC_ID,
+    PROCESS,
     REAP_ABSENT,
     faketime_probe,
     reap_line,
@@ -221,9 +222,9 @@ async def test_a_cancelled_run_stops_what_it_left_in_the_box():
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    exec_id = box.exec_envs[0][EXEC_ID]
-    assert [line for line, _, _ in box.execs] == ["yes", reap_line(exec_id)]
-    assert EXEC_ID not in box.exec_envs[1]
+    tag = box.exec_envs[0][PROCESS]
+    assert [line for line, _, _ in box.execs] == ["yes", reap_line(tag)]
+    assert PROCESS not in box.exec_envs[1]
 
 
 # A run a ``kill`` stopped is stopped in the box with the signal it named.
@@ -251,45 +252,28 @@ async def test_a_killed_run_is_stopped_in_the_box_with_its_signal():
         await asyncio.sleep(0)
     assert runner.terminate(2)
     assert (await runner.join()).exit == 130
-    exec_id = box.exec_envs[0][EXEC_ID]
-    assert [line for line, _, _ in box.execs] == ["yes", reap_line(exec_id, 2)]
+    assert box.exec_envs[0][PROCESS] == str(runner.record.id)
+    assert [line for line, _, _ in box.execs] == [
+        "yes",
+        reap_line(str(runner.record.id), 2),
+    ]
 
 
-# A run in the box is one its runner has going, by its runtime and tag,
-# so the process plane lists it and a workspace that outlives this one
-# stops it; it goes once the run ends.
+# A run in the box carries the id of the process it runs as, which a
+# workspace that outlives this one stops it by.
 @pytest.mark.asyncio
-async def test_a_run_in_the_box_is_kept_on_its_runner_while_it_runs():
-    seen: list[dict] = []
-
-    class WatchedBox(RecordingSandbox):
-        async def exec_line(
-            self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str
-        ) -> RunResult:
-            seen.append(dict(runner.runs))
-            return await super().exec_line(line, stdin, env, cwd)
-
-    box = WatchedBox(captures=("yes",))
+async def test_a_run_in_the_box_is_tagged_with_its_process():
+    box = RecordingSandbox(captures=("yes",))
     ctx = Context(flags={"c": "yes"}, cwd=PathSpec.from_str_path("/"))
 
     async def run() -> int:
         return (await box.run_line(None, [], [], ctx)).exit_code
 
-    runner = ProcessTable(bind=run_as_process).start(
+    runner = ProcessTable("w1", bind=run_as_process).start(
         session_id="s", command="yes", cwd=ctx.cwd, run=run
     )
     assert (await runner.join()).exit == 0
-    tag = box.exec_envs[0][EXEC_ID]
-    assert seen == [
-        {
-            f"box:{tag}": {
-                "runtime": "recbox",
-                "tag": tag,
-                "command": "/bin/sh -c yes",
-            }
-        }
-    ]
-    assert runner.runs == {}
+    assert box.exec_envs[0][PROCESS] == "w1:1"
 
 
 # A run another workspace left is stopped by its tag, the box reached
@@ -460,8 +444,9 @@ class KeyedBox(RecordingSandbox):
         self.answers = [1, 0]
         self.probes: list[str] = []
 
-    def _sandbox_key(self) -> str:
-        return self.key
+    @property
+    def machine(self) -> MachineId:
+        return MachineId(self.name, self.key)
 
     async def exec_line(
         self, line: str, stdin: bytes | None, env: dict[str, str], cwd: str

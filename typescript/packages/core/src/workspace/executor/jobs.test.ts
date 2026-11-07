@@ -19,6 +19,7 @@ import { IOResult } from '../../io/types.ts'
 import { SessionProfile } from '../../policy/profile.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { WorkspaceHeldError } from '../../execution/errors.ts'
+import { MachineId } from '../../execution/types.ts'
 import { type JobResult, type JobRunner, JobTable } from '../../execution/job/index.ts'
 import { MountMode } from '../../types.ts'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
@@ -986,17 +987,24 @@ it('a workspace runs on another daemon once its own closes', async () => {
   }
 })
 
-// ps lists this daemon's runners, each followed by the native runs it has
-// going.
-it('ps shows the native runs a process has going', async () => {
+// ps lists this daemon's runners, one that is a program a runtime runs
+// followed by where it runs: a sandbox's machine, a host program's pid.
+it.each([false, true])('ps shows where a program runs (host %s)', async (host) => {
   const ws = new Workspace({}, { sessionId: 's' })
   try {
     await ws.shell('sleep 30 &', { sessionId: 's' })
-    const job = ws.jobTable.get(1, 's')
-    job?.process?.addRun('box:t', { runtime: 'docker', tag: '0123456789abcdef', command: 'x' })
-    const run = '-\t└ docker 0123456789ab: x'
+    const process = ws.jobTable.get(1, 's')?.process
+    if (process == null) throw new Error('the job has no process')
+    process.oneCommand = true
+    if (host) {
+      expect(process.take(null, 'local')).toBe(true)
+      process.setMachinePid({ pid: 4242, started: 1 })
+    } else {
+      expect(process.take(new MachineId('docker', 'tools'), 'docker')).toBe(true)
+    }
+    const where = host ? 'host 4242' : 'docker:tools'
     const own = stdoutStr(await ws.shell('ps', { sessionId: 's' })).split('\n')
-    expect(own.slice(0, 2)).toEqual([`${String(job?.pid)}\tsleep 30`, run])
+    expect(own.slice(0, 2)).toEqual([`${String(process.record.id.pid)}\tsleep 30`, `-\t└ ${where}`])
     await ws.shell('kill %1', { sessionId: 's' })
   } finally {
     await ws.close()

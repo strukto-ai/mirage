@@ -27,11 +27,10 @@ import { savedVfsBuild } from '@struktoai/mirage-core/workspace/snapshot/state'
 import type { MountSnapshot } from '@struktoai/mirage-core/workspace/snapshot/types'
 import { buildVfs, knownVfsNames } from './vfs/registry.ts'
 import { reapHostRun } from './runtime/sandbox/program.ts'
-import { MachineId } from '@struktoai/mirage-core/execution/types'
+import { MachineId, type MachinePid } from '@struktoai/mirage-core/execution/types'
 import { hostname } from 'node:os'
 import { watch } from './io/gateway.ts'
 import { releaseNetwork, watchNetwork } from './io/network.ts'
-import type { JsonValue } from '@struktoai/mirage-core/types'
 import type { BaseVFS } from '@struktoai/mirage-core/vfs/base'
 import './commands/builtin/utils/http.ts'
 import './io/spool.ts'
@@ -47,9 +46,13 @@ export class Workspace extends CoreWorkspace {
     return build === null ? null : buildVfs(build.name, build.config)
   }
 
-  /** A host run a lapsed workspace left reaches this host's processes. */
-  protected override reapHostRun(run: Record<string, JsonValue>, signum: number): Promise<boolean> {
-    return reapHostRun(run, signum)
+  /** A host program a lapsed workspace left reaches this host's processes. */
+  protected override reapHostRun(
+    machinePid: MachinePid,
+    seenAt: number | null,
+    signum: number,
+  ): Promise<boolean> {
+    return reapHostRun(machinePid, seenAt, signum)
   }
 
   /** This host, by its name. */

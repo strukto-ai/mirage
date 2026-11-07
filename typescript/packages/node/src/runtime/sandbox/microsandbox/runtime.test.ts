@@ -18,7 +18,7 @@ import { MountMode, PathSpec } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '../../../workspace.ts'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
-import { EXEC_ID, EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { EXEC_PRELUDE, PROCESS } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { MicrosandboxRuntime } from './runtime.ts'
 import * as program from '../program.ts'
 
@@ -147,7 +147,7 @@ describe('MicrosandboxRuntime', () => {
             '-e',
             'MARK=request',
             '-e',
-            `${EXEC_ID}=runid`,
+            `${PROCESS}=runid`,
             '--',
             '/bin/sh',
             '-c',

@@ -77,7 +77,9 @@ class MachineId:
 @dataclass(frozen=True, slots=True)
 class MachinePid:
     """A process's pid on its machine, with the kernel's start time,
-    which tells it apart from a later process given the same pid."""
+    which tells it apart from a later process given the same pid, and
+    when it exited, should it exit while what it started runs on."""
 
     pid: int
     started: float
+    exited: float | None = None

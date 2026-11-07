@@ -19,8 +19,8 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   ENCODE_OUTPUT,
-  EXEC_ID,
   MOUNT_GUARD,
+  PROCESS,
   REAP_ABSENT,
   REAP_PATH,
   decodeOutput,
@@ -75,12 +75,12 @@ describe.skipIf(!existsSync('/proc/self'))('reapLine', () => {
   it.each([[undefined], ['/nowhere']])(
     'ends a run that ignores TERM (PATH %s)',
     async (path) => {
-      const execId = crypto.randomUUID().replaceAll('-', '')
+      const tag = `${crypto.randomUUID().replaceAll('-', '')}:9`
       const program = spawn(
         '/bin/sh',
         ['-c', 'trap "" TERM; echo ready; while :; do sleep 1; done'],
         {
-          env: { ...process.env, [EXEC_ID]: execId },
+          env: { ...process.env, [PROCESS]: tag },
         },
       )
       const ready = new Promise<void>((resolve) => {
@@ -95,7 +95,7 @@ describe.skipIf(!existsSync('/proc/self'))('reapLine', () => {
       })
       try {
         await ready
-        const done = spawnSync('/bin/sh', ['-c', reapLine(execId)], {
+        const done = spawnSync('/bin/sh', ['-c', reapLine(tag)], {
           env: path === undefined ? process.env : { PATH: path },
           timeout: 10_000,
         })
@@ -107,6 +107,27 @@ describe.skipIf(!existsSync('/proc/self'))('reapLine', () => {
     },
     15_000,
   )
+
+  // A tag names one process: the stop line for w:9 leaves the run of w:90
+  // running.
+  it('matches its process tag whole', async () => {
+    const workspace = crypto.randomUUID().replaceAll('-', '')
+    const program = spawn('/bin/sh', ['-c', 'echo ready; while :; do sleep 1; done'], {
+      env: { ...process.env, [PROCESS]: `${workspace}:90` },
+    })
+    try {
+      await new Promise<void>((resolve) => {
+        program.stdout.once('data', () => {
+          resolve()
+        })
+      })
+      const done = spawnSync('/bin/sh', ['-c', reapLine(`${workspace}:9`)], { timeout: 10_000 })
+      expect(done.status).toBe(REAP_ABSENT)
+      expect(program.exitCode).toBeNull()
+    } finally {
+      program.kill('SIGKILL')
+    }
+  }, 15_000)
 
   // A box that holds no process of the run says so, apart from one whose
   // processes it stopped.

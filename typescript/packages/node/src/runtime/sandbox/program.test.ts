@@ -24,7 +24,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { hostname, tmpdir } from 'node:os'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import {
@@ -32,7 +32,6 @@ import {
   serve,
   unserve,
   closeChildren,
-  hostRun,
   openProgramPipe,
   reapHostRun,
   runProgram,
@@ -635,10 +634,11 @@ describe('openProgramPipe', () => {
 })
 
 describe('host runs', () => {
-  // A host program a runtime keeps as its child is one of the runner's
-  // native runs while it runs: this host, its PID and when it started, so a
-  // workspace that outlives this one can stop it; it goes once it ended.
-  it("keeps a kept child as one of its runner's native runs", async () => {
+  // A host program a runtime runs directly is its runner's process on this
+  // host: the runner's record names its PID and when it started, so a
+  // workspace that outlives this one can stop it. A client that runs a
+  // program elsewhere (`docker exec`) is not the program, so it names none.
+  it.each([true, false])('names its host pid when run directly: %s', async (direct) => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
     const children = new Set<ChildProcess>()
@@ -651,24 +651,25 @@ describe('host runs', () => {
         (
           await runProgram('sh', null, ['-c', `echo $$ > ${pidFile}; sleep 0.3`], null, {
             children,
+            direct,
           })
         ).exitCode,
     })
     const pid = await escapedPid(pidFile)
-    const run = runner.runs[`host:${String(pid)}`]
-    expect([run?.host, run?.pid, run?.command]).toEqual([
-      hostname(),
-      pid,
-      `sh -c 'echo $$ > ${pidFile}; sleep 0.3'`,
-    ])
-    expect(Math.abs((run?.started_at as number) - Date.now() / 1000)).toBeLessThan(5)
+    const found = runner.record.machinePid
     expect((await runner.join()).exit).toBe(0)
-    expect(runner.runs).toEqual({})
+    if (!direct) {
+      expect(found).toBeNull()
+      return
+    }
+    expect(found?.pid).toBe(pid)
+    expect(Math.abs((found?.started ?? 0) - Date.now() / 1000)).toBeLessThan(5)
+    expect(found?.exited ?? null).toBeNull()
   })
 
-  // A kept child that exits while what it started holds its output open
-  // marks its run with when it exited, the last time its group was known.
-  it('marks the run of a kept child that exits first', async () => {
+  // A program that exits while what it started holds its output open marks
+  // its record with when it exited, the last time its group was known.
+  it('marks the record of a program that exits first', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
     const children = new Set<ChildProcess>()
@@ -681,23 +682,23 @@ describe('host runs', () => {
         (
           await runProgram('sh', null, ['-c', `echo $$ > ${pidFile}; sleep 0.5 &`], null, {
             children,
+            direct: true,
           })
         ).exitCode,
     })
-    const key = `host:${String(await escapedPid(pidFile))}`
+    await escapedPid(pidFile)
     const deadline = Date.now() + 5000
-    while (runner.runs[key]?.exited_at === undefined && Date.now() < deadline) {
+    while (runner.record.machinePid?.exited == null && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
-    const exited = runner.runs[key]?.exited_at
+    const exited = runner.record.machinePid?.exited
     expect(typeof exited === 'number' && Math.abs(exited - Date.now() / 1000) < 5).toBe(true)
     expect((await runner.join()).exit).toBe(0)
-    expect(runner.runs).toEqual({})
   })
 
-  // A run a lapsed workspace left on this host is stopped, its whole group,
-  // while its PID still names the process it started; a PID that names a
-  // later process, or a run of another host, is left alone.
+  // A program a lapsed workspace left on this host is stopped, its whole
+  // group, while its PID still names the process it started; a PID that
+  // names a later process is left alone.
   it('reaps a left host run only while it is the same', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'mirage-program-'))
     const pidFile = join(dir, 'pid')
@@ -712,13 +713,11 @@ describe('host runs', () => {
       })
     })
     const pid = await escapedPid(pidFile)
-    const run = hostRun(pid, ['sh'])
+    const found = { pid, started: Date.now() / 1000 }
     try {
-      expect(await reapHostRun({ ...run, host: 'elsewhere' }, 15)).toBe(false)
-      expect(await reapHostRun({ ...run, started_at: null }, 15)).toBe(false)
-      expect(await reapHostRun({ ...run, started_at: 0 }, 15)).toBe(true)
+      expect(await reapHostRun({ pid, started: 0 }, null, 15)).toBe(true)
       expect(child.exitCode === null && child.signalCode === null).toBe(true)
-      expect(await reapHostRun(run, 15)).toBe(true)
+      expect(await reapHostRun(found, null, 15)).toBe(true)
       expect(await exited).toBe('SIGKILL')
     } finally {
       if (child.exitCode === null && child.signalCode === null) process.kill(-pid, 'SIGKILL')
@@ -737,17 +736,14 @@ describe('host runs', () => {
       detached: true,
       stdio: 'ignore',
     })
-    const run = hostRun(child.pid ?? 0, ['sh'])
+    const found = { pid: child.pid ?? 0, started: Date.now() / 1000 }
     await new Promise((resolve) => child.once('exit', resolve))
-    const exited = { ...run, exited_at: Date.now() / 1000 }
     const survivor = await escapedPid(pidFile)
     try {
-      expect(await reapHostRun(run, 15)).toBe(false)
-      expect(await reapHostRun({ ...run, seen_at: (run.started_at as number) - 60 }, 15)).toBe(
-        false,
-      )
+      expect(await reapHostRun(found, null, 15)).toBe(false)
+      expect(await reapHostRun(found, found.started - 60, 15)).toBe(false)
       expect(running(survivor)).toBe(true)
-      expect(await reapHostRun(exited, 15)).toBe(true)
+      expect(await reapHostRun({ ...found, exited: Date.now() / 1000 }, null, 15)).toBe(true)
       expect(await ended(survivor)).toBe(true)
     } finally {
       if (running(survivor)) process.kill(survivor, 'SIGKILL')
@@ -764,7 +760,9 @@ describe('host runs', () => {
     const path = process.env.PATH
     process.env.PATH = `${dir}:${path ?? ''}`
     try {
-      expect(await reapHostRun(hostRun(2 ** 22 + 7, ['x']), 15)).toBe(false)
+      expect(await reapHostRun({ pid: 2 ** 22 + 7, started: Date.now() / 1000 }, null, 15)).toBe(
+        false,
+      )
     } finally {
       process.env.PATH = path
     }
@@ -787,7 +785,7 @@ describe('host runs', () => {
       return kill(target, signal)
     })
     try {
-      expect(await reapHostRun(hostRun(pid, ['sh']), 15)).toBe(false)
+      expect(await reapHostRun({ pid, started: Date.now() / 1000 }, null, 15)).toBe(false)
     } finally {
       spy.mockRestore()
       process.kill(-pid, 'SIGKILL')

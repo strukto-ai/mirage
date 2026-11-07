@@ -20,7 +20,7 @@ import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { Workspace } from '../../../workspace.ts'
 import { buildRuntime } from '@struktoai/mirage-core/runtime/table'
-import { EXEC_ID, EXEC_PRELUDE } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { EXEC_PRELUDE, PROCESS } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import type { RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { materialize, type ByteSource } from '@struktoai/mirage-core/io/types'
 import type { OutputFn, RunResult } from '@struktoai/mirage-core/runtime/types'
@@ -212,7 +212,7 @@ it('preserves argv through execute and shares the shell connection', async () =>
       '-e',
       'E=request',
       '-e',
-      `${EXEC_ID}=runid`,
+      `${PROCESS}=runid`,
       '--',
       '/bin/sh',
       '-c',

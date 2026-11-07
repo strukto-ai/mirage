@@ -65,9 +65,11 @@ export class MachineId {
 
 /**
  * A process's pid on its machine, with the kernel's start time, which tells
- * it apart from a later process given the same pid.
+ * it apart from a later process given the same pid, and when it exited,
+ * should it exit while what it started runs on.
  */
 export interface MachinePid {
   readonly pid: number
   readonly started: number
+  readonly exited?: number | null
 }

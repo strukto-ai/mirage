@@ -15,7 +15,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
-from mirage.execution.types import JobId
+from mirage.execution.types import JobId, LineId
 
 
 class JobState(str, Enum):
@@ -30,6 +30,8 @@ class Job:
     a ``cmd &`` started, numbered ``%N`` in its session's list.
 
     A job a ``kill`` reached is ``stopping`` until its runner stops.
+    ``line`` is the line that started it and ``group`` the process group
+    its process runs in, None for a job restored from a snapshot.
     ``ended_at`` is set exactly when ``state`` is final, with ``exit`` the
     status ``wait`` answers and ``signal`` the signal a kill or a hangup
     ended it with, if one did.
@@ -41,6 +43,8 @@ class Job:
     command: str
     cwd: str
     started_at: float
+    line: LineId | None = None
+    group: int | None = None
     state: JobState = JobState.RUNNING
     ended_at: float | None = None
     exit: int | None = None

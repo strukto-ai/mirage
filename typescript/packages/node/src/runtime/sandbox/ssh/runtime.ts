@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { MachineId } from '@struktoai/mirage-core/execution/types'
 import { constants } from 'node:os'
 import { Readable } from 'node:stream'
 import { once } from 'node:events'
@@ -25,7 +26,7 @@ import type { OutputFn, RunResult, SandboxPipe } from '@struktoai/mirage-core/ru
 import type { ConfigFields, RuntimeOptions } from '@struktoai/mirage-core/runtime/config'
 import { loadSdk, type Ssh2Sdk } from './sdk.ts'
 import { SSH_RUNTIME_CONFIG_FIELDS, type SSHRuntimeConfig } from './config.ts'
-import { EXEC_ID, stopSignal, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
+import { PROCESS, stopSignal, wrapLine } from '@struktoai/mirage-core/runtime/sandbox/constants'
 import { makeAbortError } from '@struktoai/mirage-core/utils/abort'
 import { feed } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
@@ -57,6 +58,11 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
   constructor(options: RuntimeOptions<SSHRuntimeConfig> = {}) {
     super(options, SSHRuntime.configFields)
     requireId('ssh', 'host', this.config.host)
+  }
+
+  /** The host it runs programs on, `ssh:<host>`. */
+  override get machine(): MachineId {
+    return new MachineId(this.name, this.config.host)
   }
 
   // The SDK loader as a seam: tests substitute a fake module here.
@@ -111,7 +117,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
       stdin,
       output,
       signal,
-      env[EXEC_ID] !== undefined,
+      env[PROCESS] !== undefined,
       errors,
     )
   }
@@ -127,7 +133,7 @@ export class SSHRuntime extends RemoteSandbox<SSHRuntimeConfig> implements PipeT
    * sshd counts against its sessions per connection; any other failure
    * closes the channel.
    *
-   * @param tagged whether the command carries its run's `EXEC_ID`, so a
+   * @param tagged whether the command carries its run's `PROCESS`, so a
    *   cancelled run's reap stops it.
    * @param errors receives stderr as it arrives, as `output` does stdout.
    */

@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { JobId } from '../types.ts'
+import type { JobId, LineId } from '../types.ts'
 
 export type JobState = 'running' | 'stopping' | 'exited'
 
@@ -20,9 +20,11 @@ export type JobState = 'running' | 'stopping' | 'exited'
  * One background job, as every daemon on its store reads it: what a
  * `cmd &` started, numbered `%N` in its session's list.
  *
- * A job a `kill` reached is `stopping` until its runner stops. `endedAt` is
- * set exactly when `state` is final, with `exit` the status `wait` answers
- * and `signal` the signal a kill or a hangup ended it with, if one did.
+ * A job a `kill` reached is `stopping` until its runner stops. `line` is
+ * the line that started it and `group` the process group its process runs
+ * in, null for a job restored from a snapshot. `endedAt` is set exactly when
+ * `state` is final, with `exit` the status `wait` answers and `signal` the
+ * signal a kill or a hangup ended it with, if one did.
  */
 export interface Job {
   readonly id: JobId
@@ -31,6 +33,8 @@ export interface Job {
   readonly command: string
   readonly cwd: string
   readonly startedAt: number
+  readonly line: LineId | null
+  readonly group: number | null
   readonly state: JobState
   readonly endedAt: number | null
   readonly exit: number | null

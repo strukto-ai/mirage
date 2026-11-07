@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from mirage.execution.types import MachineId
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import not_running_hint
@@ -46,6 +47,11 @@ class DockerRuntime(RemoteSandbox, PipeTransportMixin):
     name = "docker"
     config_cls = DockerConfig
     config: DockerConfig
+
+    @property
+    def machine(self) -> MachineId:
+        """The container it runs programs in, ``docker:<container>``."""
+        return MachineId(self.name, self.config.container)
 
     async def _docker(
         self,

@@ -93,7 +93,7 @@ from mirage.shell.signals import (
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.shell.voice import shell_voice
-from mirage.types import JsonValue, PathSpec, Refusal
+from mirage.types import PathSpec, Refusal
 from mirage.utils.clock import system_now
 from mirage.utils.timezone import zone_from_env
 from mirage.view.types import SessionView
@@ -243,7 +243,7 @@ def _job_streams(
     return {stream for stream in fds.values() if stream is not None}
 
 
-def _one_program(left: TSNodeLike, session: SessionState) -> bool:
+def one_program(left: TSNodeLike, session: SessionState) -> bool:
     """Whether a job is one program, as bash runs ``cmd &`` as the program
     itself: a simple command whose word names neither a function nor a
     shell builtin a runtime cannot take (``eval``, ``source``), either of
@@ -408,6 +408,7 @@ def start_shell(
     run: ProcessRunner,
     parent_pid: int | None,
     started: Callable[[ProcessHandle], None] | None = None,
+    one_command: bool = False,
 ) -> ProcessHandle:
     """Start a shell the running one forks (a subshell, a pipeline stage,
     a command substitution, a nested shell): a process in its session's
@@ -422,6 +423,8 @@ def start_shell(
         parent_pid (int | None): the process that forks it.
         started (Callable[[ProcessHandle], None] | None): called with the
             process before it runs.
+        one_command (bool): the shell runs one program, which runs as it
+            (``one_program``).
     """
     try:
         return processes.start(
@@ -433,6 +436,7 @@ def start_shell(
             limit=session.processes.max,
             started=started,
             ignores=SHELL_IGNORED_SIGNALS,
+            one_command=one_command,
         )
     except BlockingIOError as exc:
         raise ExitSignal(FORK_FAILED_STATUS, stderr=FORK_FAILED) from exc
@@ -758,7 +762,7 @@ async def handle_background(
             session_id=session.session_id,
             parent=session.process_id,
             limit=session.processes.max,
-            simple=_one_program(left, session),
+            simple=one_program(left, session),
         )
     except BaseException as exc:
         release_job()
@@ -2068,16 +2072,16 @@ def _ps_cell(key: str, info: Process, ctx: _PsContext) -> str:
     return info.command
 
 
-def _run_where(run: dict[str, JsonValue]) -> str:
-    """Where a native run goes on, as ``ps`` names it: ``host PID`` for a
-    host program, the runtime and the start of its tag for a sandbox's.
+def _run_where(info: Process) -> str:
+    """Where a process's program runs, as ``ps`` names it: ``host PID``
+    for a host program, its machine (``docker:tools``) for another's.
 
     Args:
-        run (dict[str, JsonValue]): the run, as its process record keeps it.
+        info (Process): the process, which a runtime runs.
     """
-    if "host" in run:
-        return f"host {run['pid']}"
-    return f"{run['runtime']} {str(run['tag'])[:12]}"
+    if info.machine_pid is not None:
+        return f"host {info.machine_pid.pid}"
+    return str(info.machine)
 
 
 async def handle_ps(
@@ -2097,10 +2101,10 @@ async def handle_ps(
     usage.
 
     The daemon running the line holds the workspace's lease, so its
-    runners are every one the workspace has. In the compact rows each
-    runner is followed by the native runs it has going, a host program
-    by its host PID and a sandbox's by its runtime and tag, each as
-    ``-<TAB>└ where: command``.
+    runners are every one the workspace has. In the compact rows a
+    runner that is a program a runtime runs is followed by where it
+    runs, a host program by its host PID and another by its machine, as
+    ``-<TAB>└ where``.
 
     Args:
         job_table (JobTable): the workspace's job table.
@@ -2116,14 +2120,8 @@ async def handle_ps(
     sid = _session_of(session)
     processes = _process_view(job_table, session)
     every = options.all or not options.pids
-    runs = {
-        handle.record.pid: list(handle.runs.values())
-        for handle in job_table.processes.live()
-    }
-    rows: list[tuple[Process, list[dict[str, JsonValue]]]] = [
-        (info, runs.get(info.pid, []))
-        for info in processes.list()
-        if every or info.pid in options.pids
+    rows = [
+        info for info in processes.list() if every or info.pid in options.pids
     ]
     if options.columns:
         keys = [key for key, _ in options.columns]
@@ -2136,17 +2134,16 @@ async def handle_ps(
         )
         lines = [
             _ps_row(keys, [_ps_cell(key, info, ctx) for key in keys])
-            for info, _ in rows
+            for info in rows
         ]
         if any(header for _, header in options.columns):
             lines.insert(0, _ps_row(keys, [h for _, h in options.columns]))
     else:
         lines = []
-        for info, native in rows:
+        for info in rows:
             lines.append(f"{info.pid}\t{info.command}")
-            lines += [
-                f"-\t└ {_run_where(run)}: {run['command']}" for run in native
-            ]
+            if info.runtime is not None:
+                lines.append(f"-\t└ {_run_where(info)}")
     code = 0 if rows else 1
     out = encode_text("\n".join(lines) + "\n") if lines else b""
     return (

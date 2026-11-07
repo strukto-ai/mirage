@@ -14,7 +14,7 @@ from mirage.execution.process.types import (
     ProcessRunner,
     ProcessState,
 )
-from mirage.types import JsonValue
+from mirage.execution.types import MachineId, MachinePid
 from mirage.utils.clock import system_now
 
 logger = logging.getLogger(__name__)
@@ -72,9 +72,11 @@ class ProcessHandle:
         self._signal: int | None = None
         self._program_code: int | None = None
         self._program_signal: int | None = None
-        self._runs: dict[str, dict[str, JsonValue]] = {}
         self._completion: Future[Process] = Future()
         self.begun = False
+        # Started for exactly one command, whose program, should it run
+        # on a runtime of its own, runs as this process (``take``).
+        self.one_command = False
         # The host stopped it (its table stopped, its session closed),
         # which ends whoever waits for it as well.
         self.revoked = False
@@ -145,32 +147,42 @@ class ProcessHandle:
         with self._lock:
             return self._program_code
 
-    @property
-    def runs(self) -> dict[str, dict[str, JsonValue]]:
-        """The native runs this runner has going, each under a key of
-        its own: a host program it started, a sandbox's run."""
-        with self._lock:
-            return dict(self._runs)
-
-    def add_run(self, key: str, run: dict[str, JsonValue]) -> None:
-        """Record a native run this runner started, which the process
-        plane publishes and a workspace that outlives this one stops.
+    def take(self, machine: MachineId | None, runtime: str) -> bool:
+        """Take the runner as the program it was started for
+        (``one_command``), which runs on ``machine`` with ``runtime``, as
+        bash execs a stage's or a job's one program in place. Its record
+        names both from then on.
 
         Args:
-            key (str): the run's key, unique among the runner's.
-            run (dict[str, JsonValue]): how another workspace reaches it.
+            machine (MachineId | None): where the program runs; None for
+                the workspace's own machine.
+            runtime (str): what runs it.
+
+        Returns:
+            bool: whether the runner was the program's to take; False
+            for one started for more than one command, or taken already.
         """
         with self._lock:
-            self._runs[key] = run
+            if not self.one_command:
+                return False
+            self.one_command = False
+            self._record = replace(
+                self._record,
+                machine=machine or self._record.machine,
+                runtime=runtime,
+            )
+            return True
 
-    def drop_run(self, key: str) -> None:
-        """Forget a native run once it ended.
+    def set_machine_pid(self, machine_pid: MachinePid) -> None:
+        """Record the pid of the native program the runner is, on its
+        machine, which a workspace that outlives this one stops it by.
 
         Args:
-            key (str): the key it was recorded under.
+            machine_pid (MachinePid): the program's pid and start, and
+                when it exited, once it did.
         """
         with self._lock:
-            self._runs.pop(key, None)
+            self._record = replace(self._record, machine_pid=machine_pid)
 
     def program_exited(self, code: int) -> None:
         """Record that a program the runner started handled the stop

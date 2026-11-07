@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { MachineId } from '@struktoai/mirage-core/execution/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/runtime/sandbox/mixin'
@@ -41,6 +42,11 @@ export class MicrosandboxRuntime
   constructor(options: RuntimeOptions<MicrosandboxConfig> | Record<string, unknown> = {}) {
     super(options, MicrosandboxRuntime.configFields)
     requireId('microsandbox', 'sandbox', this.config.sandbox)
+  }
+
+  /** The sandbox it runs programs in, `microsandbox:<sandbox>`. */
+  override get machine(): MachineId {
+    return new MachineId(this.name, this.config.sandbox)
   }
 
   /** Skip the connect-once latch: every exec probes the guest. */

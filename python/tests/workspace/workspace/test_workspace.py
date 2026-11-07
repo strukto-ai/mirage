@@ -28,6 +28,7 @@ from mirage.cache.index.config import LookupStatus
 from mirage.commands.cli.builtin.gws import GWS
 from mirage.context import reset_current_session, set_current_session
 from mirage.execution.ram import RAMExecutionStore
+from mirage.execution.types import MachineId
 from mirage.runtime.sandbox import RemoteSandbox
 from mirage.types import MountBackend, MountMode
 from mirage.utils.clock import ManualClock
@@ -809,46 +810,57 @@ async def test_close_cancels_streamed_lines_in_the_order_they_started(
 
 
 class _ReapedBox(RemoteSandbox):
-    """A sandbox runtime that records the runs it was asked to reap, and
-    holds those its tags name."""
+    """A sandbox runtime on machine ``reapbox:b1`` that records the
+    processes it was asked to reap, holds those of the pids in
+    ``holds``, and does not answer for pid 6."""
 
     name = "reapbox"
 
-    def __init__(self, holds: tuple[str, ...]) -> None:
+    def __init__(self, holds: tuple[int, ...]) -> None:
         super().__init__(captures=("never-run",))
         self.holds = holds
         self.reaped: list[tuple[str, int]] = []
+
+    @property
+    def machine(self) -> MachineId:
+        return MachineId(self.name, "b1")
 
     async def connect(self) -> None:
         return None
 
     async def reap(self, tag: str, signum: int) -> bool:
         self.reaped.append((tag, signum))
-        if tag == "broken":
+        pid = int(tag.rpartition(":")[2])
+        if pid == 6:
             raise RuntimeError("box not answering")
-        return tag in self.holds
+        return pid in self.holds
 
 
-# A lapsed workspace's runs are stopped by whatever reaches them here: a
-# sandbox run by the runtime of its name, and reached once its box held
-# it. A run the box does not hold (another box of the name, as another
-# workspace's docker may target), one whose box did not answer, a run of
-# another host and one of a runtime this workspace lacks are answered
-# back as out of reach.
+def _box_process(pid: int, machine: str = "reapbox:b1") -> dict:
+    return {"pid": pid, "session": "s", "machine": machine, "runtime": "x"}
+
+
+# A lapsed workspace's programs are stopped by whatever reaches them
+# here: a sandbox's by each runtime on the machine its record names,
+# reached once that box held it, by its process's tag. One the box does
+# not hold, one whose box did not answer, one on a machine no runtime
+# here reaches and a host program of another host are out of reach.
 @pytest.mark.asyncio
-async def test_a_workspace_reaps_the_runs_its_runtimes_reach():
-    box = _ReapedBox(("t1",))
+async def test_a_workspace_reaps_the_programs_its_runtimes_reach():
+    box = _ReapedBox((2,))
     ws = Workspace({}, runtimes=[box])
     try:
-        mine = {"runtime": "reapbox", "tag": "t1", "command": "x"}
-        elsewhere = {"runtime": "reapbox", "tag": "t3", "command": "z"}
-        broken = {"runtime": "reapbox", "tag": "broken", "command": "w"}
-        theirs = {"runtime": "otherbox", "tag": "t2", "command": "y"}
-        host = {"host": "elsewhere", "pid": 41, "started_at": 1.0}
-        runs = [mine, elsewhere, broken, theirs, host]
-        left = await ws._reap_runs(runs, 15)
-        assert left == [elsewhere, broken, theirs, host]
-        assert box.reaped == [("t1", 15), ("t3", 15), ("broken", 15)]
+        wid = ws.processes.workspace_id
+        assert await ws._reap_process(_box_process(2), 15)
+        assert not await ws._reap_process(_box_process(3), 15)
+        assert not await ws._reap_process(_box_process(6), 15)
+        assert not await ws._reap_process(_box_process(4, "other:b2"), 15)
+        host = {
+            **_box_process(5, "host:elsewhere"),
+            "machine_pid": {"pid": 41, "started": 1.0, "exited": None},
+        }
+        assert not await ws._reap_process(host, 15)
+        assert box.reaped == [(f"{wid}:2", 15), (f"{wid}:3", 15), (f"{wid}:6", 15)]
     finally:
         await ws.close()
 
@@ -857,20 +869,17 @@ async def test_a_workspace_reaps_the_runs_its_runtimes_reach():
 # anything lists processes.
 @pytest.mark.asyncio
 async def test_a_workspace_reaps_a_lapsed_instance_as_it_starts():
-    box = _ReapedBox(("t1",))
+    box = _ReapedBox((2,))
     ws = Workspace({}, runtimes=[box])
     try:
         store = RAMExecutionStore(lease_seconds=30.0)
         ws.job_table.store = store
-        run = {"runtime": "reapbox", "tag": "t1", "command": "x"}
-        await store.publish(
-            "dead", {"2": {"pid": 2, "session": "s", "runs": [run]}}
-        )
+        await store.publish("dead", {"2": _box_process(2)})
         await ws.shell("true")
         async with asyncio.timeout(5):
             while "dead" in await store.processes():
                 await asyncio.sleep(0.01)
-        assert box.reaped == [("t1", 15)]
+        assert box.reaped == [(f"{ws.processes.workspace_id}:2", 15)]
     finally:
         await ws.close()
 

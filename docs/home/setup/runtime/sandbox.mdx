@@ -37,9 +37,10 @@ installed in the sandbox image or on the remote machine. For Sandlock, they
 come from this host's interpreter. Mirage forwards the captured program's
 arguments, input, environment and working directory; a working directory
 the sandbox lacks fails the program with exit 126. Each run also gets
-`MIRAGE_EXEC_ID`: when a run is cut short, by a `head` that has read enough,
-a timeout or `kill`, Mirage stops every process in the sandbox that carries
-the run's id, with the signal `kill` named or TERM. `wait` returns once
+`MIRAGE_PROCESS`, the id of its Mirage process (`w1:9`): when a run is cut
+short, by a `head` that has read enough, a timeout or `kill`, Mirage stops
+every process in the sandbox that carries that id, with the signal `kill`
+named or TERM. `wait` returns once
 they have stopped and reports 128 plus the signal, since a sandbox does
 not report the program's own status. Each provider's
 **Runtime behavior** table describes that boundary.
@@ -85,8 +86,8 @@ its `@line` entry's `timeout_seconds` exits 124, and `max_bytes` and
 <Warning>
   A timeout stops the program. Sandlock kills it. For the other providers,
   Mirage sends TERM, then KILL a second later, to every process in the
-  sandbox that carries the run's `MIRAGE_EXEC_ID`; that needs `/bin/sh`,
-  `grep` and `/proc` in the sandbox, and Mirage gives up after 5 seconds
+  sandbox that carries the run's `MIRAGE_PROCESS`; that needs `/bin/sh`,
+  `tr`, `grep` and `/proc` in the sandbox, and Mirage gives up after 5 seconds
   if the sandbox stops answering. In TypeScript, a Daytona command keeps
   running after a timeout. A Daytona sandbox has no timeout of its own, so
   it keeps running and billing. Use the provider's own limits.

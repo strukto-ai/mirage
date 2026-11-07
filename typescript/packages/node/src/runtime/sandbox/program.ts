@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { type ChildProcess, execFile, spawn } from 'node:child_process'
-import { constants, hostname } from 'node:os'
+import { constants } from 'node:os'
 import { once } from 'node:events'
 import { constants as fsConstants, realpathSync } from 'node:fs'
 import { access, open, stat } from 'node:fs/promises'
@@ -35,10 +35,9 @@ import { debuglog } from 'node:util'
 import { asyncChain, closeQuietly } from '@struktoai/mirage-core/io/stream'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import type { ProcessHandle } from '@struktoai/mirage-core/execution/process/handle'
+import type { MachinePid } from '@struktoai/mirage-core/execution/types'
 import { abortable, makeAbortError } from '@struktoai/mirage-core/utils/abort'
-import { shellJoin } from '@struktoai/mirage-core/shell/join'
 import { rstripSlash } from '@struktoai/mirage-core/utils/slash'
-import type { JsonValue } from '@struktoai/mirage-core/types'
 import { CANNOT_EXECUTE_STATUS } from '@struktoai/mirage-core/shell/constants'
 import { boundSystemClock } from '@struktoai/mirage-core/utils/clock'
 import { FAKETIME_LIBRARIES, faketimeEnv } from '@struktoai/mirage-core/runtime/sandbox/constants'
@@ -323,12 +322,19 @@ export async function runProgram(
   }
   signal?.addEventListener('abort', abort, { once: true })
   children?.add(child)
-  const runKey = `host:${String(child.pid)}`
-  if (children !== undefined && child.pid !== undefined && runner !== null) {
-    const run = hostRun(child.pid, [executable, ...args])
-    runner.addRun(runKey, run)
+  // A program run directly is its runner's process on this host, which
+  // leads its own group, and when it started, so a pid the host reused is
+  // never taken for it.
+  if (
+    children !== undefined &&
+    child.pid !== undefined &&
+    runner !== null &&
+    options.direct === true
+  ) {
+    const machinePid: MachinePid = { pid: child.pid, started: Date.now() / 1000 }
+    runner.setMachinePid(machinePid)
     child.once('exit', () => {
-      if (runKey in runner.runs) runner.addRun(runKey, { ...run, exited_at: Date.now() / 1000 })
+      runner.setMachinePid({ ...machinePid, exited: Date.now() / 1000 })
     })
   }
   const exited = new Promise<number>((resolve, reject) => {
@@ -394,19 +400,7 @@ export async function runProgram(
     else await closeQuietly(stdin)
     signal?.removeEventListener('abort', abort)
     children?.delete(child)
-    if (children !== undefined) runner?.dropRun(runKey)
   }
-}
-
-/**
- * How another workspace on this host reaches a child `runProgram` started,
- * which leads its own process group: the host, the PID, and when it
- * started, so a PID the host reused is never taken for it. `runProgram` adds
- * `exited_at` once the child exits while what it started may run on. Mirrors
- * Python's `host_run`.
- */
-export function hostRun(pid: number, argv: readonly string[]): Record<string, JsonValue> {
-  return { host: hostname(), pid, started_at: Date.now() / 1000, command: shellJoin(argv) }
 }
 
 /**
@@ -470,15 +464,16 @@ async function groupStarted(group: number): Promise<number[]> {
 }
 
 /**
- * Stop a host run a lapsed workspace left: its process group gets `signum`,
- * then KILL after `STOP_GRACE_SECONDS`. Only a run of this host is reached,
- * and only while its PID still names a process started when the run did, to
- * the second `ps` shows, so a PID the host reused is left alone. A PID that
- * names no process may still name the run's group, whose leader exited
- * before the programs it started. That group is the run's while one of its
- * members started by the last time the group was known to be: when the
- * leader exited (`exited_at`), else when its workspace last vouched for the
- * run (`seen_at`), with the leader still unreaped. The host gives no new
+ * Stop a host program a lapsed workspace left, the one its process record
+ * names on this host: its process group gets `signum`, then KILL after
+ * `STOP_GRACE_SECONDS`. It is reached only while its PID still names a
+ * process started when the program did, to the second `ps` shows, so a PID
+ * the host reused is left alone. A PID that names no process may still name
+ * the program's group, whose leader exited before the programs it started.
+ * That group is the program's while one of its members started by the last
+ * time the group was known to be: when the leader exited (`exited`), else
+ * when its workspace last vouched for the process (`seenAt`), with the
+ * leader still unreaped. The host gives no new
  * process the id of a group that has members, and hands a number out again
  * only after a full round of the others, so a group that took the id later
  * has only members started since. One none of whose members proves it is not
@@ -486,22 +481,16 @@ async function groupStarted(group: number): Promise<number[]> {
  * its record stays. A group this workspace may not signal is not reached
  * while its leader still runs
  * (macOS answers EPERM for one that only exited unreaped). Answers true once
- * the run is stopped or gone, false when this workspace cannot reach it.
+ * the program is stopped or gone, false when this workspace cannot reach it.
  * Mirrors Python's `reap_host_run`.
  */
 export async function reapHostRun(
-  run: Readonly<Record<string, JsonValue>>,
+  machinePid: MachinePid,
+  seenAt: number | null,
   signum: number,
 ): Promise<boolean> {
-  const pid = run.pid
-  const recorded = run.started_at
-  if (
-    process.platform === 'win32' ||
-    run.host !== hostname() ||
-    typeof pid !== 'number' ||
-    typeof recorded !== 'number'
-  )
-    return false
+  const { pid, started: recorded } = machinePid
+  if (process.platform === 'win32') return false
   let started: number | null
   let members: number[] = []
   try {
@@ -515,11 +504,8 @@ export async function reapHostRun(
     if (Math.abs(started - recorded) > HOST_START_SLACK_SECONDS) return true
   } else {
     if (members.length === 0) return true
-    const known = run.exited_at ?? run.seen_at
-    if (
-      typeof known !== 'number' ||
-      !members.some((start) => start <= known + HOST_START_SLACK_SECONDS)
-    )
+    const known = machinePid.exited ?? seenAt
+    if (known === null || !members.some((start) => start <= known + HOST_START_SLACK_SECONDS))
       return false
   }
   try {

@@ -17,10 +17,11 @@ import logging
 from typing import Any
 
 from mirage.context.session_context import current_caller
+from mirage.execution.types import MachineId
 from mirage.io.stream import feed
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
-from mirage.runtime.sandbox.constants import EXEC_ID, stop_signal, wrap_line
+from mirage.runtime.sandbox.constants import PROCESS, stop_signal, wrap_line
 from mirage.runtime.sandbox.mixin import PipeTransportMixin
 from mirage.runtime.sandbox.program import read_into
 from mirage.runtime.sandbox.ssh import sdk
@@ -57,6 +58,12 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
     name = "ssh"
     config_cls = SSHRuntimeConfig
     config: SSHRuntimeConfig
+
+    @property
+    def machine(self) -> MachineId:
+        """The host it runs programs on, ``ssh:<host>``."""
+        return MachineId(self.name, self.config.host)
+
     _conn: Any = None
 
     def _connect_kwargs(self) -> dict[str, Any]:
@@ -97,7 +104,7 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
             stdin,
             output,
             errors,
-            tagged=EXEC_ID in env,
+            tagged=PROCESS in env,
         )
 
     async def _ssh(
@@ -124,7 +131,7 @@ class SSHRuntime(RemoteSandbox, PipeTransportMixin):
             output (OutputFn | None): receives stdout as it arrives.
             errors (OutputFn | None): receives stderr as it arrives.
             tagged (bool): whether the command carries its run's
-                ``EXEC_ID``, so a cancelled run's reap stops it.
+                ``PROCESS``, so a cancelled run's reap stops it.
         """
         process = await self._conn.create_process(command, encoding=None)
         exited = asyncio.Event()

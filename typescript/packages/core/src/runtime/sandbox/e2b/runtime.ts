@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { MachineId } from '../../../execution/types.ts'
 import { feed } from '../../../io/stream.ts'
 import type { ByteSource } from '../../../io/types.ts'
 import { abortable } from '../../../utils/abort.ts'
@@ -23,7 +24,7 @@ import type { OutputFn, PipeWriter, RunResult, SandboxPipe } from '../../types.t
 import type { ConfigFields, RuntimeOptions } from '../../config.ts'
 import { concat } from '../../../utils/bytes.ts'
 import { requireId } from '../config.ts'
-import { decodeOutput, encodeOutput, EXEC_ID, stopSignal, wrapLine } from '../constants.ts'
+import { decodeOutput, encodeOutput, PROCESS, stopSignal, wrapLine } from '../constants.ts'
 import { CLOSED_INPUT, PTY_MARK, PTY_RAW } from './constants.ts'
 import { loadSdk, type E2bSdk } from './sdk.ts'
 import { E2B_CONFIG_FIELDS, type E2BConfig } from './config.ts'
@@ -139,6 +140,11 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
     requireId('e2b', 'sandboxId', this.config.sandboxId)
   }
 
+  /** The sandbox it runs programs in, `e2b:<sandboxId>`. */
+  override get machine(): MachineId {
+    return new MachineId(this.name, this.config.sandboxId)
+  }
+
   // The SDK loader as a seam: tests substitute a fake module here.
   protected loadSdk(): Promise<E2bSdk> {
     return loadSdk()
@@ -228,13 +234,13 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
         try {
           // A tagged command a kill stopped with a gentler signal is left
           // to the caller's reap, which sends it that signal first.
-          if (env[EXEC_ID] === undefined || stopSignal(runner) === null) await handle.kill()
+          if (env[PROCESS] === undefined || stopSignal(runner) === null) await handle.kill()
         } catch (cleanupError) {
           console.warn('Failed to stop the E2B command', cleanupError)
         }
         if (signal?.aborted) throw new DOMException('execute aborted', 'AbortError')
         // The kill stops only the encoding shell; the caller reaps an abort.
-        const tag = env[EXEC_ID]
+        const tag = env[PROCESS]
         if (tag !== undefined) await this.reapRun(tag, 15)
         throw error
       }
@@ -252,9 +258,9 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
   }
 
   /**
-   * Execute one shell line, under an `EXEC_ID` of its own when the caller
-   * gave none: an abort kills only the encoding shell, so an aborted line
-   * is reaped by that tag.
+   * Execute one shell line, under a `PROCESS` tag of its own when the
+   * caller gave none: an abort kills only the encoding shell, so an aborted
+   * line is reaped by that tag.
    *
    * @param line the raw shell line.
    * @param stdin bytes piped into the line.
@@ -269,10 +275,10 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
     cwd: string,
     signal?: AbortSignal,
   ): Promise<RunResult> {
-    if (env[EXEC_ID] !== undefined) return super.execLine(line, stdin, env, cwd, signal)
+    if (env[PROCESS] !== undefined) return super.execLine(line, stdin, env, cwd, signal)
     const tag = crypto.randomUUID().replaceAll('-', '')
     try {
-      return await super.execLine(line, stdin, { ...env, [EXEC_ID]: tag }, cwd, signal)
+      return await super.execLine(line, stdin, { ...env, [PROCESS]: tag }, cwd, signal)
     } catch (error) {
       if (signal?.aborted === true) await this.reapRun(tag, 15)
       throw error

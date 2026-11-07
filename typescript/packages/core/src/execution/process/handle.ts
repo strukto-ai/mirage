@@ -1,5 +1,5 @@
 import { isAborting } from '../../errors/fs.ts'
-import type { JsonValue } from '../../types.ts'
+import type { MachineId, MachinePid } from '../types.ts'
 import { SignalStop } from '../../utils/abort.ts'
 import type { Process, ProcessRunner } from './types.ts'
 
@@ -27,12 +27,16 @@ export class ProcessHandle {
    * whoever waits for it as well.
    */
   revoked = false
+  /**
+   * Started for exactly one command, whose program, should it run on a
+   * runtime of its own, runs as this process (`take`).
+   */
+  oneCommand = false
   private current: Process
   private stopSignal: number | null = null
   private stopped = false
   private exitedCode: number | null = null
   private programSignal: number | null = null
-  private readonly nativeRuns = new Map<string, Record<string, JsonValue>>()
   // The programs `program` runs, each with the signal `interrupt` sent it.
   private readonly programs = new Map<AbortController, number | null>()
   private readonly takes = new Map<AbortController, ReadonlySet<number> | null>()
@@ -112,27 +116,32 @@ export class ProcessHandle {
   }
 
   /**
-   * The native runs this runner has going, each under a key of its own: a
-   * host program it started, a sandbox's run.
+   * Take the runner as the program it was started for (`oneCommand`),
+   * which runs on `machine` with `runtime`, as bash execs a stage's or a
+   * job's one program in place. Its record names both from then on.
+   * Answers whether the runner was the program's to take: false for one
+   * started for more than one command, or taken already.
+   *
+   * @param machine where the program runs; null for the workspace's own.
+   * @param runtime what runs it.
    */
-  get runs(): Record<string, Record<string, JsonValue>> {
-    return Object.fromEntries(this.nativeRuns)
+  take(machine: MachineId | null, runtime: string): boolean {
+    if (!this.oneCommand) return false
+    this.oneCommand = false
+    this.current = Object.freeze({
+      ...this.current,
+      machine: machine ?? this.current.machine,
+      runtime,
+    })
+    return true
   }
 
   /**
-   * Record a native run this runner started, which the process plane
-   * publishes and a workspace that outlives this one stops.
-   *
-   * @param key the run's key, unique among the runner's.
-   * @param run how another workspace reaches it.
+   * Record the pid of the native program the runner is, on its machine,
+   * which a workspace that outlives this one stops it by.
    */
-  addRun(key: string, run: Record<string, JsonValue>): void {
-    this.nativeRuns.set(key, run)
-  }
-
-  /** Forget a native run once it ended, by the key it was recorded under. */
-  dropRun(key: string): void {
-    this.nativeRuns.delete(key)
+  setMachinePid(machinePid: MachinePid): void {
+    this.current = Object.freeze({ ...this.current, machinePid })
   }
 
   /**

@@ -13,6 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../commands/config.ts'
+import type { ProcessTable } from '../execution/process/table.ts'
 import { compareCodePoints } from '../utils/sort.ts'
 import {
   awaitsAs,
@@ -56,6 +57,8 @@ export class WorkspaceBinding {
    * @param mountPrefixes every prefix a sandbox may be told of, whatever
    *   the session hides; null outside a workspace.
    * @param bridge the guest bridge a run with no files rides.
+   * @param processes the table a program a runtime runs starts its
+   *   process in; null outside a workspace.
    */
   constructor(
     readonly dispatch: DispatchFn | null,
@@ -65,6 +68,7 @@ export class WorkspaceBinding {
     readonly getSession: ((sessionId: string) => SessionState) | null = null,
     readonly mountPrefixes: (() => string[]) | null = null,
     readonly bridge: BridgeDispatchFn | null = null,
+    readonly processes: ProcessTable | null = null,
   ) {}
 
   /**

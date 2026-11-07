@@ -16,12 +16,18 @@ import asyncio
 import inspect
 import logging
 from abc import ABC
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from dataclasses import replace
 from typing import Any, Callable, ClassVar, Generic, cast
 
 from mirage.commands.config import Context
-from mirage.context.session_context import bind_caller, reset_caller
+from mirage.context.session_context import (
+    bind_caller,
+    current_caller,
+    program_invocation,
+    reset_caller,
+)
+from mirage.execution.types import MachineId
 from mirage.io.gateway import live_egress
 from mirage.runtime.binding import WorkspaceBinding, refused_run
 from mirage.runtime.config import RuntimeConfig
@@ -36,6 +42,8 @@ from mirage.runtime.types import (
     RuntimeIdentity,
     RuntimeReach,
 )
+from mirage.shell.constants import FORK_FAILED, FORK_FAILED_STATUS
+from mirage.shell.join import shell_join
 from mirage.types import PathSpec
 from mirage.utils.activity import Activity
 
@@ -119,6 +127,12 @@ class Runtime(ABC, Generic[E]):
             self.captures if captures is None else captures
         )
         self.config = self.config_cls.coerce(config)
+
+    @property
+    def machine(self) -> MachineId | None:
+        """The machine this runtime runs its programs on, which their
+        process records name; None for the workspace's own."""
+        return None
 
     @property
     def file_effects_dispatched(self) -> bool:
@@ -221,19 +235,116 @@ class Runtime(ABC, Generic[E]):
             )
             token = bind_caller(capture.caller)
             try:
-                return await self._run(
+                return await self._as_program(
                     kind,
-                    engine,
-                    list(paths),
                     list(texts),
                     run_ctx,
-                    output,
-                    errors,
+                    lambda: self._run(
+                        kind,
+                        engine,
+                        list(paths),
+                        list(texts),
+                        run_ctx,
+                        output,
+                        errors,
+                    ),
                 )
             finally:
                 reset_caller(token)
         finally:
             release()
+
+    async def _as_program(
+        self,
+        kind: ExecutionKind,
+        texts: list[str],
+        ctx: Context,
+        run: Callable[[], Awaitable[RunResult]],
+    ) -> RunResult:
+        """Run a program past the workspace's reach as a process of its
+        own, as bash forks one: the process started for it when it is
+        that process's one command (``ProcessHandle.take``), else a child
+        of the running one, in its group, on this runtime's machine. A
+        run the workspace reaches stays in its shell's process, as does
+        one outside a process. A child stopped with its shell gets the
+        signal the shell was stopped with, or the interrupt it took; one
+        stopped alone answers 128 plus its signal, and its shell goes on.
+
+        Args:
+            kind (ExecutionKind): what is asked, which names the program.
+            texts (list[str]): the text operands.
+            ctx (Context): the run's context.
+            run (Callable[[], Awaitable[RunResult]]): the program, to its
+                end.
+        """
+        processes = (
+            self._binding.processes if self._binding is not None else None
+        )
+        caller = current_caller()
+        shell, session = caller.process, caller.session
+        if (
+            self.reach == "workspace"
+            or processes is None
+            or shell is None
+            or session is None
+        ):
+            return await run()
+        if not program_invocation(session) and shell.take(
+            self.machine, self.name
+        ):
+            return await run()
+        line = ctx.flags.get("c")
+        if kind == "line" and isinstance(line, str):
+            command = line
+        elif kind == "process":
+            command = shell_join(texts)
+        else:
+            head = ctx.spec.name if ctx.spec is not None else self.name
+            command = shell_join([head, *ctx.argv])
+        done: list[RunResult] = []
+
+        async def program() -> int:
+            done.append(await run())
+            return done[0].exit_code
+
+        try:
+            child = processes.start(
+                session_id=session.session_id,
+                command=command,
+                cwd=ctx.cwd,
+                run=program,
+                parent=shell.record.pid,
+                limit=session.processes.max,
+                machine=self.machine,
+                runtime=self.name,
+            )
+        except BlockingIOError:
+            return RunResult(
+                stdout=b"", stderr=FORK_FAILED, exit_code=FORK_FAILED_STATUS
+            )
+        try:
+            code = await asyncio.shield(child.task)
+        except asyncio.CancelledError:
+            current = asyncio.current_task()
+            if current is None or not current.cancelling():
+                # The child alone was stopped (``kill`` of its pid); its
+                # shell goes on with its status.
+                return RunResult(
+                    stdout=b"",
+                    stderr=None,
+                    exit_code=128 + (child.signal or 9),
+                )
+            signal = (
+                shell.signal if shell.signal is not None else shell.interrupted
+            )
+            child.terminate(signal or 9)
+            await child.join()
+            raise
+        return (
+            done[0]
+            if done
+            else RunResult(stdout=b"", stderr=None, exit_code=code)
+        )
 
     async def _run(
         self,

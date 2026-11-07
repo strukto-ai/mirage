@@ -26,8 +26,8 @@ from mirage.runtime.constants import EXTERNAL_COMMANDS
 from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
 from mirage.runtime.sandbox.config import SandboxConfig, check_mount_type
 from mirage.runtime.sandbox.constants import (
-    EXEC_ID,
     FAKETIME_PROBE_SECONDS,
+    PROCESS,
     REAP_ABSENT,
     REAP_WAIT_SECONDS,
     faketime_env,
@@ -42,7 +42,6 @@ from mirage.runtime.types import (
     RuntimeReach,
 )
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
-from mirage.shell.join import shell_join
 from mirage.types import PathSpec
 from mirage.utils.clock import bound_system_clock
 
@@ -97,7 +96,7 @@ class RemoteSandbox(
         self._connected = False
         self._connect_lock = asyncio.Lock()
         self._mounts: SandboxMounts | None = None
-        # The libfaketime each sandbox holds (_sandbox_key), asked once the
+        # The libfaketime each sandbox holds (``machine``), asked once the
         # first program runs there under a system_time: None for none. A
         # lock per sandbox lets its concurrent first runs share one probe
         # without holding up another sandbox's; a failed probe is not kept,
@@ -215,22 +214,15 @@ class RemoteSandbox(
             run = self._mounts.guarded(argv)
         given = {**self.config.env, **(ctx.env or {})}
         clock = await self._system_time_env(given)
-        exec_id = uuid.uuid4().hex
+        # The run is the process it runs as, which its tag names; one run
+        # outside a process gets a tag of its own.
         runner = current_caller().process
-        if runner is not None:
-            runner.add_run(
-                f"box:{exec_id}",
-                {
-                    "runtime": self.name,
-                    "tag": exec_id,
-                    "command": shell_join(argv),
-                },
-            )
+        tag = str(runner.record.id) if runner is not None else uuid.uuid4().hex
         try:
             done = await self._exec_argv(
                 run,
                 ctx.stdin,
-                {**given, **clock, EXEC_ID: exec_id},
+                {**given, **clock, PROCESS: tag},
                 ctx.cwd.virtual,
                 output,
                 errors,
@@ -243,11 +235,8 @@ class RemoteSandbox(
                     if runner.signal is not None
                     else runner.interrupted
                 )
-            await asyncio.shield(self._reap(exec_id, signum or 15))
+            await asyncio.shield(self._reap(tag, signum or 15))
             raise
-        finally:
-            if runner is not None:
-                runner.drop_run(f"box:{exec_id}")
         if (
             self._mounts is not None
             and done.exit_code == CANNOT_EXECUTE_STATUS
@@ -267,12 +256,13 @@ class RemoteSandbox(
 
     async def reap(self, tag: str, signum: int) -> bool:
         """Stop a run a lapsed workspace left in the box: every process
-        its ``EXEC_ID`` tag marks gets ``signum``, then KILL a second
+        its ``PROCESS`` tag marks gets ``signum``, then KILL a second
         later. Connecting is bounded as the stop is
         (``REAP_WAIT_SECONDS``).
 
         Args:
-            tag (str): the run's ``EXEC_ID``, as its process record has it.
+            tag (str): the id of the process the run is, as ``PROCESS``
+                carries it.
             signum (int): the first signal.
 
         Returns:
@@ -291,13 +281,13 @@ class RemoteSandbox(
             raise RuntimeError(f"{self.name}: run {tag} not stopped")
         return code == 0
 
-    async def _reap(self, exec_id: str, signum: int) -> int | None:
+    async def _reap(self, tag: str, signum: int) -> int | None:
         """Stop what a cancelled or failed run left in the box
-        (``EXEC_ID``), for at most ``REAP_WAIT_SECONDS``: a box that
+        (``PROCESS``), for at most ``REAP_WAIT_SECONDS``: a box that
         stopped answering would otherwise hold the cancel or the error.
 
         Args:
-            exec_id (str): the run's id.
+            tag (str): the run's tag.
             signum (int): the signal the run is stopped with first.
 
         Returns:
@@ -307,7 +297,7 @@ class RemoteSandbox(
         try:
             async with asyncio.timeout(REAP_WAIT_SECONDS):
                 done = await self._exec_argv(
-                    ("/bin/sh", "-c", reap_line(exec_id, signum)),
+                    ("/bin/sh", "-c", reap_line(tag, signum)),
                     None,
                     dict(self.config.env),
                     "/",
@@ -316,14 +306,14 @@ class RemoteSandbox(
                 )
         except Exception:
             logger.debug(
-                "%s: run %s not stopped", self.name, exec_id, exc_info=True
+                "%s: run %s not stopped", self.name, tag, exc_info=True
             )
             return None
         if done.exit_code not in (0, REAP_ABSENT):
             logger.debug(
                 "%s: run %s not stopped: exit %d",
                 self.name,
-                exec_id,
+                tag,
                 done.exit_code,
             )
         return done.exit_code
@@ -342,7 +332,7 @@ class RemoteSandbox(
         """
         if bound_system_clock() is None:
             return {}
-        key = self._sandbox_key()
+        key = str(self.machine)
         if key not in self._faketime:
             await self._probe_faketime(key)
         library = self._faketime.get(key)
@@ -352,7 +342,7 @@ class RemoteSandbox(
         """Ask the sandbox ``key`` names for its libfaketime, once.
 
         Args:
-            key (str): the sandbox (``_sandbox_key``).
+            key (str): the sandbox, its ``machine``.
         """
         async with self._faketime_locks.setdefault(key, asyncio.Lock()):
             if key not in self._faketime:
@@ -384,13 +374,6 @@ class RemoteSandbox(
                         "%s: no libfaketime, so programs run on its clock",
                         self.name,
                     )
-
-    def _sandbox_key(self) -> str:
-        """Which sandbox a run of the current session goes to, which the
-        libfaketime probe is kept for: one per runtime unless a provider
-        picks its sandbox per session. Mirrors TypeScript's
-        ``SandboxRuntime.sandboxKey``."""
-        return ""
 
     async def _setup(self, line: str) -> RunResult:
         return await self.exec_line(line, None, dict(self.config.env), "/")

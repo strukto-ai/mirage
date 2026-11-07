@@ -69,7 +69,7 @@ import { NodeKind, nodeKind, simpleCommand } from '../../shell/node_kind.ts'
 import { commandInvocations } from '../../shell/parse/names.ts'
 import { retainPrograms } from '../../shell/parse/program.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { type JsonValue, PathSpec, type Refusal } from '../../types.ts'
+import { PathSpec, type Refusal } from '../../types.ts'
 import { abortable, atDeadline, runWithDeadline } from '../../utils/abort.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import { systemNow } from '../../utils/clock.ts'
@@ -230,7 +230,7 @@ function jobStreams(node: TSNodeLike, session: SessionState): Set<Channel | Owne
  * it runs, and words that run commands of their own (`$( )`) run them as
  * the job, so neither is one. Mirrors Python's `_one_program`.
  */
-function oneProgram(left: TSNodeLike, session: SessionState): boolean {
+export function oneProgram(left: TSNodeLike, session: SessionState): boolean {
   if (!simpleCommand(left)) return false
   const invocations = commandInvocations(left)
   const first = invocations[0]
@@ -393,7 +393,8 @@ export function reportReaped(
  * Start a shell the running one forks (a subshell, a pipeline stage, a
  * command substitution, a nested shell): a process in its session's
  * directory that ignores the signals every shell does. A fork past the
- * session's process limit fails as bash's does. Mirrors Python's
+ * session's process limit fails as bash's does. `oneCommand` marks a shell
+ * that runs one program, which runs as it (`oneProgram`). Mirrors Python's
  * start_shell.
  */
 export function startShell(
@@ -404,6 +405,7 @@ export function startShell(
   parent: number | null,
   cancel: () => void,
   started?: (process: ProcessHandle) => void,
+  oneCommand = false,
 ): ProcessHandle {
   try {
     return processes.start({
@@ -416,6 +418,7 @@ export function startShell(
       limit: session.processes.max,
       ...(started === undefined ? {} : { started }),
       ignores: SHELL_IGNORED_SIGNALS,
+      oneCommand,
     })
   } catch (error) {
     if ((error as { code?: unknown }).code === 'EAGAIN')
@@ -1788,12 +1791,12 @@ function psCell(key: string, info: Process, ctx: PsContext): string {
 }
 
 /**
- * Where a native run goes on, as `ps` names it: `host PID` for a host
- * program, the runtime and the start of its tag for a sandbox's.
+ * Where a process's program runs, as `ps` names it: `host PID` for a host
+ * program, its machine (`docker:tools`) for another's.
  */
-function runWhere(run: Record<string, JsonValue>): string {
-  if ('host' in run) return `host ${String(run.pid as number)}`
-  return `${run.runtime as string} ${(run.tag as string).slice(0, 12)}`
+function runWhere(info: Process): string {
+  if (info.machinePid !== null) return `host ${String(info.machinePid.pid)}`
+  return info.machine.toString()
 }
 
 /**
@@ -1806,9 +1809,9 @@ function runWhere(run: Record<string, JsonValue>): string {
  * procps's message and usage.
  *
  * The daemon running the line holds the workspace's lease, so its runners
- * are every one the workspace has. In the compact rows each runner is
- * followed by the native runs it has going, a host program by its host PID
- * and a sandbox's by its runtime and tag, each as `-<TAB>└ where: command`.
+ * are every one the workspace has. In the compact rows a runner that is a
+ * program a runtime runs is followed by where it runs, a host program by its
+ * host PID and another by its machine, as `-<TAB>└ where`.
  */
 export function handlePs(
   jobTable: JobTable,
@@ -1826,13 +1829,7 @@ export function handlePs(
   const sid = sessionOf(session)
   const processes = processView(jobTable, session)
   const every = options.all || options.pids.size === 0
-  const runs = new Map(
-    jobTable.processes.live().map((handle) => [handle.record.id.pid, Object.values(handle.runs)]),
-  )
-  const rows: [Process, Record<string, JsonValue>[]][] = processes
-    .list()
-    .filter((info) => every || options.pids.has(info.id.pid))
-    .map((info) => [info, runs.get(info.id.pid) ?? []])
+  const rows = processes.list().filter((info) => every || options.pids.has(info.id.pid))
   let lines: string[]
   if (options.columns.length > 0) {
     const keys = options.columns.map(([key]) => key)
@@ -1843,7 +1840,7 @@ export function handlePs(
       sessionId: sid,
       shellPid: session?.shellPid ?? null,
     }
-    lines = rows.map(([info]) =>
+    lines = rows.map((info) =>
       psRow(
         keys,
         keys.map((key) => psCell(key, info, ctx)),
@@ -1857,9 +1854,9 @@ export function handlePs(
         ),
       )
   } else {
-    lines = rows.flatMap(([info, native]) => [
+    lines = rows.flatMap((info) => [
       `${String(info.id.pid)}\t${info.command}`,
-      ...native.map((run) => `-\t└ ${runWhere(run)}: ${run.command as string}`),
+      ...(info.runtime !== null ? [`-\t└ ${runWhere(info)}`] : []),
     ])
   }
   const code = rows.length > 0 ? 0 : 1

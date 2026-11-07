@@ -29,8 +29,8 @@ from mirage.context.session_context import run_as_process
 from mirage.execution.process.table import ProcessTable
 from mirage.io.types import materialize
 from mirage.runtime.sandbox.constants import (
-    EXEC_ID,
     MOUNT_GUARD,
+    PROCESS,
     encode_output,
     reap_line,
     wrap_line,
@@ -224,7 +224,7 @@ async def test_native_stdin_eof_and_command_are_preserved(data, monkeypatch):
             encode_output(
                 wrap_line(
                     ("/bin/sh", "-c", "wc -l | cat"),
-                    {"E": "1", EXEC_ID: "run"},
+                    {"E": "1", PROCESS: "run"},
                     "/workspace",
                 )
             ),
@@ -336,7 +336,7 @@ async def test_a_tagged_run_that_fails_is_reaped_by_its_tag():
     commands = FakeSandbox.last.commands
     commands.input_error = RuntimeError("stdin transport failed")
     with pytest.raises(RuntimeError, match="stdin transport failed"):
-        await runtime.exec_line("cat", b"input", {EXEC_ID: "run"}, "/")
+        await runtime.exec_line("cat", b"input", {PROCESS: "run"}, "/")
     assert [shlex.split(command)[-1] for command, _ in commands.calls] == [
         "cat",
         reap_line("run", 15),
@@ -394,7 +394,7 @@ async def test_a_cancelled_line_is_killed_and_reaped_by_its_own_tag(
 # direct exec) has no reap behind it and is killed. Either way the runtime
 # runs nothing more: a cancelled run is the caller's to reap.
 @pytest.mark.asyncio
-@pytest.mark.parametrize("env,killed", [({EXEC_ID: "run"}, False), ({}, True)])
+@pytest.mark.parametrize("env,killed", [({PROCESS: "run"}, False), ({}, True)])
 async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
     env, killed
 ):

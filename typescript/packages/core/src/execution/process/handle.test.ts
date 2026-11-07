@@ -18,7 +18,7 @@ import { stopSignal } from '../../utils/abort.ts'
 import { ProcessHandle } from './handle.ts'
 import type { Process } from './types.ts'
 import { LOCAL_MACHINE } from '../constants.ts'
-import { ProcessId } from '../types.ts'
+import { MachineId, ProcessId } from '../types.ts'
 
 function info(): Process {
   return {
@@ -238,20 +238,25 @@ describe('ProcessHandle', () => {
     expect([done.exit, handle.signal, children]).toEqual([137, 9, [15, 9]])
   })
 
-  // The native runs a runner has going are kept under their keys until each
-  // ends, and the view of them is a copy.
-  it('keeps the native runs a runner has going', () => {
+  // A runner started for one command is its program once, on the program's
+  // machine and runtime; one started for more, or taken already, is not,
+  // and a host program's pid lands on the record.
+  it('is the program of the one command it was started for, once', () => {
     const handle = new ProcessHandle(info(), () => Promise.resolve(3), ignore, ignore)
-    handle.addRun('host:41', { host: 'h', pid: 41 })
-    handle.addRun('box:t', { runtime: 'docker', tag: 't' })
-    delete handle.runs['host:41']
-    expect(handle.runs).toEqual({
-      'host:41': { host: 'h', pid: 41 },
-      'box:t': { runtime: 'docker', tag: 't' },
-    })
-    handle.dropRun('host:41')
-    handle.dropRun('host:41')
-    expect(handle.runs).toEqual({ 'box:t': { runtime: 'docker', tag: 't' } })
+    expect(handle.take(null, 'docker')).toBe(false)
+    handle.oneCommand = true
+    expect(handle.take(new MachineId('docker', 'tools'), 'docker')).toBe(true)
+    expect(handle.take(null, 'local')).toBe(false)
+    expect([handle.record.machine.toString(), handle.record.runtime]).toEqual([
+      'docker:tools',
+      'docker',
+    ])
+    handle.setMachinePid({ pid: 41, started: 5 })
+    expect(handle.record.machinePid).toEqual({ pid: 41, started: 5 })
+    const other = new ProcessHandle(info(), () => Promise.resolve(3), ignore, ignore)
+    other.oneCommand = true
+    expect(other.take(null, 'local')).toBe(true)
+    expect([other.record.machine, other.record.runtime]).toEqual([LOCAL_MACHINE, 'local'])
   })
 
   // What a program the runner started exited with after handling the

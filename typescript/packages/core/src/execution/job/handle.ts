@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { ProcessHandle } from '../process/handle.ts'
-import { JobId } from '../types.ts'
+import { JobId, type LineId } from '../types.ts'
 import type { IOResult } from '../../io/types.ts'
 import type { ExecutionNode } from '../../workspace/types.ts'
 import {
@@ -83,6 +83,8 @@ export class JobHandle {
   owner: string
   consoleName: string
   workspaceId: string
+  line: LineId | null
+  group: number | null
   private readonly now: () => number
 
   state: JobState = 'running'
@@ -107,6 +109,8 @@ export class JobHandle {
     owner?: string
     consoleName?: string
     workspaceId?: string
+    line?: LineId | null
+    group?: number | null
     now?: () => number
   }) {
     this.id = init.id
@@ -120,6 +124,8 @@ export class JobHandle {
     this.owner = init.owner ?? ''
     this.consoleName = init.consoleName ?? ''
     this.workspaceId = init.workspaceId ?? ''
+    this.line = init.line ?? null
+    this.group = init.group ?? null
     this.now = init.now ?? (() => Date.now() / 1000)
     if (init.state !== undefined) this.state = init.state
     if (init.exitCode !== undefined) this.exitCode = init.exitCode
@@ -136,6 +142,8 @@ export class JobHandle {
       command: this.command,
       cwd: this.cwd,
       startedAt: this.createdAt,
+      line: this.line,
+      group: this.group,
       state: this.state,
       endedAt: this.endedAt,
       exit: this.state === 'exited' ? this.exitCode : null,

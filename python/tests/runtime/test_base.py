@@ -16,12 +16,17 @@ import asyncio
 
 import pytest
 
+from mirage import RAMVFS, Workspace
 from mirage.commands.config import Context
+from mirage.context.session_context import current_caller
+from mirage.execution.process.types import Process
+from mirage.execution.types import MachineId
 from mirage.runtime.base import Runtime
 from mirage.runtime.config import RuntimeConfig
 from mirage.runtime.errors import UnsupportedExecutionError
 from mirage.runtime.language import LanguageRuntime
-from mirage.runtime.mixin import LineExecutorMixin
+from mirage.runtime.mixin import LineExecutorMixin, ProcessExecutorMixin
+from mirage.runtime.types import RunResult
 
 
 class MarkerRuntime(Runtime):
@@ -108,3 +113,126 @@ async def test_a_cancelled_close_still_closes_the_engine_and_a_retry_waits():
     rt.release.set()
     await retry
     assert rt.closed == 1
+
+
+class SeenRuntime(Runtime, ProcessExecutorMixin):
+    """A runtime past the workspace's reach, on machine ``box:b1``, that
+    keeps the record of the process each program it runs runs as, and
+    holds one named ``hold`` until ``release``."""
+
+    name = "seen"
+    reach = "remote"
+    captures = ("probe", "hold")
+
+    def __init__(self, reach: str = "remote") -> None:
+        super().__init__()
+        self.reach = reach
+        self.seen: list[Process] = []
+        self.release = asyncio.Event()
+
+    @property
+    def machine(self) -> MachineId:
+        return MachineId("box", "b1")
+
+    async def run_process(
+        self, engine, paths, texts, ctx, output=None, errors=None
+    ) -> RunResult:
+        process = current_caller().process
+        assert process is not None
+        self.seen.append(process.record)
+        if texts[0] == "hold":
+            await self.release.wait()
+        return RunResult(stdout=b"", stderr=None, exit_code=0)
+
+
+async def _seen(line: str, reach: str = "remote") -> tuple[Process, str]:
+    runtime = SeenRuntime(reach)
+    ws = Workspace({"/data": RAMVFS()}, runtimes=[runtime, "workspace"])
+    try:
+        out = (await ws.shell(line)).stdout.decode()
+        [process] = runtime.seen
+        return process, out
+    finally:
+        await ws.close()
+
+
+# A program a runtime runs past the workspace is a process of its own on
+# the runtime's machine: the line's when it is the line's one command,
+# a pipeline stage's when it is the stage's, a job's when it is the job's,
+# as bash execs it there; a child of its shell otherwise.
+@pytest.mark.asyncio
+async def test_a_program_past_the_workspace_is_a_process_of_its_own():
+    alone, _ = await _seen("probe")
+    assert (alone.parent, alone.command) == (None, "probe")
+    assert (alone.machine, alone.runtime) == (MachineId("box", "b1"), "seen")
+    child, line = await _seen("echo $$; probe")
+    assert (child.parent, child.command) == (int(line), "probe")
+    assert (child.machine, child.runtime) == (MachineId("box", "b1"), "seen")
+    stage, line = await _seen("echo $$; probe | cat")
+    assert (stage.parent, stage.command, stage.runtime) == (
+        int(line),
+        "probe",
+        "seen",
+    )
+    job, pid = await _seen("probe & echo $!; wait")
+    assert (job.pid, job.runtime) == (int(pid), "seen")
+
+
+# A runtime the workspace reaches runs its program in its shell's process.
+@pytest.mark.asyncio
+async def test_a_program_the_workspace_reaches_stays_in_its_shell():
+    process, line = await _seen("echo $$; probe", "workspace")
+    assert (process.pid, process.runtime) == (int(line), None)
+
+
+# A program's process stopped with its shell ends by the shell's signal.
+@pytest.mark.asyncio
+async def test_a_programs_process_ends_by_its_shells_signal():
+    runtime = SeenRuntime()
+    ws = Workspace({"/data": RAMVFS()}, runtimes=[runtime, "workspace"])
+    try:
+        line = asyncio.ensure_future(ws.shell("true; hold"))
+        async with asyncio.timeout(5):
+            while not runtime.seen:
+                await asyncio.sleep(0.01)
+        [shell] = [
+            p
+            for p in ws.processes.live()
+            if p.record.pid == runtime.seen[0].parent
+        ]
+        [program] = [
+            p
+            for p in ws.processes.live()
+            if p.record.pid == runtime.seen[0].pid
+        ]
+        assert shell.terminate(15)
+        ended = await program.join()
+        assert (ended.exit, ended.signal) == (143, 15)
+        assert (await line).exit_code == 143
+    finally:
+        runtime.release.set()
+        await ws.close()
+
+
+# A program's process stopped alone answers 128 plus the signal, and its
+# shell goes on.
+@pytest.mark.asyncio
+async def test_a_programs_process_stopped_alone_leaves_its_shell_running():
+    runtime = SeenRuntime()
+    ws = Workspace({"/data": RAMVFS()}, runtimes=[runtime, "workspace"])
+    try:
+        line = asyncio.ensure_future(ws.shell("true; hold; echo after $?"))
+        async with asyncio.timeout(5):
+            while not runtime.seen:
+                await asyncio.sleep(0.01)
+        [program] = [
+            p
+            for p in ws.processes.live()
+            if p.record.pid == runtime.seen[0].pid
+        ]
+        assert program.terminate(15)
+        done = await line
+        assert (done.exit_code, done.stdout) == (0, b"after 143\n")
+    finally:
+        runtime.release.set()
+        await ws.close()

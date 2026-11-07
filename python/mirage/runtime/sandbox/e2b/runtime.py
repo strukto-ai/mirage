@@ -19,12 +19,13 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from mirage.context.session_context import current_caller
+from mirage.execution.types import MachineId
 from mirage.io.stream import feed
 from mirage.io.types import ByteSource
 from mirage.runtime.constants import sdk_install_hint
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import (
-    EXEC_ID,
+    PROCESS,
     decode_output,
     encode_output,
     stop_signal,
@@ -144,6 +145,12 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
     name = "e2b"
     config_cls = E2BConfig
     config: E2BConfig
+
+    @property
+    def machine(self) -> MachineId:
+        """The sandbox it runs programs in, ``e2b:<sandbox_id>``."""
+        return MachineId(self.name, self.config.sandbox_id)
+
     _sandbox: Any = None
 
     def _api_params(self) -> dict[str, Any]:
@@ -237,15 +244,15 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
             # to the caller's reap, which sends it that signal first.
             try:
                 if (
-                    EXEC_ID not in env
+                    PROCESS not in env
                     or stop_signal(current_caller().process) is None
                 ):
                     await handle.kill()
             except Exception:
                 logger.warning("Failed to stop the E2B command", exc_info=True)
             # The kill stops only the encoding shell; the caller reaps a cancel.
-            if EXEC_ID in env and not isinstance(exc, asyncio.CancelledError):
-                await self._reap(env[EXEC_ID], 15)
+            if PROCESS in env and not isinstance(exc, asyncio.CancelledError):
+                await self._reap(env[PROCESS], 15)
             raise
         finally:
             for task in (feeding, reaping):
@@ -274,9 +281,9 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
         env: dict[str, str],
         cwd: str,
     ) -> RunResult:
-        """Execute one shell line, under an ``EXEC_ID`` of its own when
-        the caller gave none: a cancel kills only the encoding shell, so a
-        cancelled line is reaped by that tag.
+        """Execute one shell line, under a ``PROCESS`` tag of its own
+        when the caller gave none: a cancel kills only the encoding shell,
+        so a cancelled line is reaped by that tag.
 
         Args:
             line (str): the raw shell line.
@@ -284,15 +291,15 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
             env (dict[str, str]): the merged environment.
             cwd (str): the working directory, passed through verbatim.
         """
-        if EXEC_ID in env:
+        if PROCESS in env:
             return await super().exec_line(line, stdin, env, cwd)
-        exec_id = uuid.uuid4().hex
+        tag = uuid.uuid4().hex
         try:
             return await super().exec_line(
-                line, stdin, {**env, EXEC_ID: exec_id}, cwd
+                line, stdin, {**env, PROCESS: tag}, cwd
             )
         except asyncio.CancelledError:
-            await asyncio.shield(self._reap(exec_id, 15))
+            await asyncio.shield(self._reap(tag, 15))
             raise
 
     async def open_pipe(self, command: str) -> SandboxPipe:

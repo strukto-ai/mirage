@@ -19,6 +19,7 @@ import { SessionProfile } from '../../policy/profile.ts'
 import { RemoteSandbox } from '../../runtime/sandbox/base.ts'
 import type { RunResult } from '../../runtime/types.ts'
 import { RAMExecutionStore } from '../../execution/ram.ts'
+import { MachineId } from '../../execution/types.ts'
 import { MountMode } from '../../types.ts'
 import { ManualClock } from '../../utils/clock.ts'
 import { SeededIdSource, SystemIdSource } from '../../utils/ids.ts'
@@ -386,13 +387,21 @@ describe('a manual clock workspace', () => {
   })
 })
 
-/** A sandbox runtime that records the runs it was asked to reap, and holds those its tags name. */
+/**
+ * A sandbox runtime on machine `reapbox:b1` that records the processes it
+ * was asked to reap, holds those of the pids in `holds`, and does not answer
+ * for pid 6.
+ */
 class ReapedBox extends RemoteSandbox {
   readonly name = 'reapbox'
   readonly reaped: [string, number][] = []
 
-  constructor(private readonly holds: readonly string[]) {
+  constructor(private readonly holds: readonly number[]) {
     super({ captures: ['never-run'] })
+  }
+
+  override get machine(): MachineId {
+    return new MachineId(this.name, 'b1')
   }
 
   connect(): Promise<void> {
@@ -405,41 +414,44 @@ class ReapedBox extends RemoteSandbox {
 
   override reap(tag: string, signum: number): Promise<boolean> {
     this.reaped.push([tag, signum])
-    if (tag === 'broken') return Promise.reject(new Error('box not answering'))
-    return Promise.resolve(this.holds.includes(tag))
+    const pid = Number(tag.slice(tag.lastIndexOf(':') + 1))
+    if (pid === 6) return Promise.reject(new Error('box not answering'))
+    return Promise.resolve(this.holds.includes(pid))
   }
 }
 
-// A lapsed workspace's runs are stopped by whatever reaches them here: a
-// sandbox run by the runtime of its name, and reached once its box held it.
-// A run the box does not hold (another box of the name, as another
-// workspace's docker may target), one whose box did not answer, a run of
-// another host and one of a runtime this workspace lacks are answered back
-// as out of reach.
-it('reaps the runs its runtimes reach', async () => {
-  const box = new ReapedBox(['t1'])
+function boxProcess(pid: number, machine = 'reapbox:b1'): Record<string, unknown> {
+  return { pid, session: 's', machine, runtime: 'x' }
+}
+
+// A lapsed workspace's programs are stopped by whatever reaches them here: a
+// sandbox's by each runtime on the machine its record names, reached once
+// that box held it, by its process's tag. One the box does not hold, one
+// whose box did not answer, one on a machine no runtime here reaches and a
+// host program of another host are out of reach.
+it('reaps the programs its runtimes reach', async () => {
+  const box = new ReapedBox([2])
   const ws = new Workspace({}, { runtimes: [box] })
   try {
-    const mine = { runtime: 'reapbox', tag: 't1', command: 'x' }
-    const elsewhere = { runtime: 'reapbox', tag: 't3', command: 'z' }
-    const broken = { runtime: 'reapbox', tag: 'broken', command: 'w' }
-    const theirs = { runtime: 'otherbox', tag: 't2', command: 'y' }
-    const host = { host: 'elsewhere', pid: 41, started_at: 1 }
+    const wid = ws.processes.workspaceId
     const reap = (
       ws as unknown as {
-        reapRuns: (runs: Record<string, unknown>[], signum: number) => Promise<unknown[]>
+        reapProcess: (record: Record<string, unknown>, signum: number) => Promise<boolean>
       }
-    ).reapRuns.bind(ws)
-    expect(await reap([mine, elsewhere, broken, theirs, host], 15)).toEqual([
-      elsewhere,
-      broken,
-      theirs,
-      host,
-    ])
+    ).reapProcess.bind(ws)
+    expect(await reap(boxProcess(2), 15)).toBe(true)
+    expect(await reap(boxProcess(3), 15)).toBe(false)
+    expect(await reap(boxProcess(6), 15)).toBe(false)
+    expect(await reap(boxProcess(4, 'other:b2'), 15)).toBe(false)
+    const host = {
+      ...boxProcess(5, 'host:elsewhere'),
+      machine_pid: { pid: 41, started: 1, exited: null },
+    }
+    expect(await reap(host, 15)).toBe(false)
     expect(box.reaped).toEqual([
-      ['t1', 15],
-      ['t3', 15],
-      ['broken', 15],
+      [`${wid}:2`, 15],
+      [`${wid}:3`, 15],
+      [`${wid}:6`, 15],
     ])
   } finally {
     await ws.close()
@@ -449,18 +461,17 @@ it('reaps the runs its runtimes reach', async () => {
 // A workspace stops what a lapsed instance left as it starts, before anything
 // lists processes.
 it('reaps a lapsed instance as it starts', async () => {
-  const box = new ReapedBox(['t1'])
+  const box = new ReapedBox([2])
   const ws = new Workspace({}, { runtimes: [box] })
   try {
     const store = new RAMExecutionStore(30)
     ws.jobTable.store = store
-    const run = { runtime: 'reapbox', tag: 't1', command: 'x' }
-    await store.publish('dead', { '2': { pid: 2, session: 's', runs: [run] } })
+    await store.publish('dead', { '2': boxProcess(2) })
     await ws.shell('true')
     await vi.waitFor(async () => {
       expect('dead' in (await store.processes())).toBe(false)
     })
-    expect(box.reaped).toEqual([['t1', 15]])
+    expect(box.reaped).toEqual([[`${ws.processes.workspaceId}:2`, 15]])
   } finally {
     await ws.close()
   }

@@ -28,8 +28,8 @@ import type { Context } from '@struktoai/mirage-core/commands/config'
 import type { SessionProfile } from '@struktoai/mirage-core/policy/profile'
 import type { RunResult, SandboxPipe } from '@struktoai/mirage-core/runtime/types'
 import {
-  EXEC_ID,
   MOUNT_GUARD,
+  PROCESS,
   encodeOutput,
   reapLine,
   wrapLine,
@@ -303,7 +303,7 @@ describe('E2BRuntime', () => {
     expect(FakeSandbox.last.commands.calls).toEqual([
       [
         encodeOutput(
-          wrapLine(['/bin/sh', '-c', 'wc -l | cat'], { E: '1', [EXEC_ID]: 'runid' }, '/workspace'),
+          wrapLine(['/bin/sh', '-c', 'wc -l | cat'], { E: '1', [PROCESS]: 'runid' }, '/workspace'),
         ),
         data !== null,
       ],
@@ -417,7 +417,7 @@ describe('E2BRuntime', () => {
     const commands = FakeSandbox.last.commands
     commands.inputError = new Error('stdin transport failed')
     await expect(
-      runtime.execLine('cat', new Uint8Array([1]), { [EXEC_ID]: 'run' }, '/'),
+      runtime.execLine('cat', new Uint8Array([1]), { [PROCESS]: 'run' }, '/'),
     ).rejects.toThrow('stdin transport failed')
     expect(commands.calls.map(([command]) => lineOf(command))).toEqual(['cat', reapLine('run', 15)])
   })
@@ -479,7 +479,7 @@ describe('E2B cancellation and validation', () => {
   // direct exec) has no reap behind it and is killed. Either way the
   // runtime runs nothing more: an aborted run is the caller's to reap.
   it.each([
-    [{ [EXEC_ID]: 'run' }, false],
+    [{ [PROCESS]: 'run' }, false],
     [{}, true],
   ])('leaves only a tagged command to the reap on TERM: %j', async (env, killed) => {
     const runtime = makeRuntime()

@@ -20,7 +20,7 @@ import pytest
 
 from mirage import RAMVFS, MountMode, Workspace
 from mirage.commands.config import Context
-from mirage.runtime.sandbox.constants import EXEC_ID, EXEC_PRELUDE
+from mirage.runtime.sandbox.constants import EXEC_PRELUDE, PROCESS
 from mirage.runtime.sandbox.microsandbox import MicrosandboxRuntime
 from mirage.runtime.table import build_runtime
 from mirage.runtime.types import RunResult
@@ -141,7 +141,7 @@ async def test_process_maps_the_msb_cli_contract(monkeypatch, stdin, stream):
                 "-e",
                 "MARK=request",
                 "-e",
-                f"{EXEC_ID}=run",
+                f"{PROCESS}=run",
                 "--",
                 "/bin/sh",
                 "-c",

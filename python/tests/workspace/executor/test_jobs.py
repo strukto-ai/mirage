@@ -22,6 +22,7 @@ from mirage.bridge.sync import handed
 from mirage.execution.errors import WorkspaceHeldError
 from mirage.execution.job import JobHandle, JobState, JobTable
 from mirage.execution.process.types import ProcessState
+from mirage.execution.types import MachineId, MachinePid
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import (
     AsyncLineIterator,
@@ -1516,22 +1517,28 @@ async def test_a_workspace_runs_on_another_daemon_once_its_own_closes():
         await b.close()
 
 
-# ps lists this daemon's runners, each followed by the native runs it has
-# going.
+# ps lists this daemon's runners, one that is a program a runtime runs
+# followed by where it runs: a sandbox's machine, a host program's pid.
 @pytest.mark.asyncio
-async def test_ps_shows_the_native_runs_a_process_has_going():
+@pytest.mark.parametrize("host", [False, True])
+async def test_ps_shows_where_a_program_runs(host):
     ws = Workspace({}, session_id="s")
     try:
         await ws.shell("sleep 30 &", session_id="s")
         job = ws.job_table.get(1, "s")
         assert job is not None and job.process is not None
-        job.process.add_run(
-            "box:t",
-            {"runtime": "docker", "tag": "0123456789abcdef", "command": "x"},
-        )
-        run = "-\t└ docker 0123456789ab: x"
+        job.process.one_command = True
+        if host:
+            assert job.process.take(None, "local")
+            job.process.set_machine_pid(MachinePid(4242, 1.0))
+        else:
+            assert job.process.take(MachineId("docker", "tools"), "docker")
+        where = "host 4242" if host else "docker:tools"
         own = (await ws.shell("ps", session_id="s")).stdout.decode()
-        assert own.splitlines()[:2] == [f"{job.pid}\tsleep 30", run]
+        assert own.splitlines()[:2] == [
+            f"{job.pid}\tsleep 30",
+            f"-\t└ {where}",
+        ]
         await ws.shell("kill %1", session_id="s")
     finally:
         await ws.close()

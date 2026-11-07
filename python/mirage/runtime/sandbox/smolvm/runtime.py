@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+from mirage.execution.types import MachineId
 from mirage.io.types import ByteSource
 from mirage.runtime.sandbox.base import RemoteSandbox
 from mirage.runtime.sandbox.constants import not_running_hint
@@ -55,6 +56,11 @@ class SmolvmRuntime(RemoteSandbox, PipeTransportMixin):
     name = "smolvm"
     config_cls = SmolvmConfig
     config: SmolvmConfig
+
+    @property
+    def machine(self) -> MachineId:
+        """The machine it runs programs on, ``smolvm:<machine>``."""
+        return MachineId(self.name, self.config.machine)
 
     async def _smolvm(
         self,

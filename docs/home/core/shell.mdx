@@ -74,17 +74,18 @@ that takes over never reuses one.
 If the running instance goes away without closing the workspace, another
 can run its lines about 30 seconds later. It reports the jobs left behind as
 ended with status 129, as Bash reports a hangup, and stops what they ran
-outside Mirage: a sandbox run through a runtime of the same name, or a host
-program on the same machine whose PID still matches.
+outside Mirage: a sandbox program through a runtime on the same machine,
+or a host program on the same machine whose PID still matches.
 
-Each process in `ps`'s rows is followed by what it runs outside Mirage: a
-host program by its host PID, a sandbox run by its runtime and tag.
+A program a runtime runs outside Mirage is a process of its own. In `ps`,
+its row is followed by where it runs: a host program's host PID, or a
+sandbox's machine.
 
 ```
 1	ps
 2	sleep 300
 3	python3 train.py
--	└ host 19443: python3 train.py
+-	└ host 19443
 ```
 
 ### Per-session mount modes

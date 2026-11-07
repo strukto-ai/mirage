@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { MachineId } from '@struktoai/mirage-core/execution/types'
 import type { ByteSource } from '@struktoai/mirage-core/io/types'
 import { RemoteSandbox } from '@struktoai/mirage-core/runtime/sandbox/base'
 import { PIPE_TRANSPORT, type PipeTransport } from '@struktoai/mirage-core/runtime/sandbox/mixin'
@@ -47,6 +48,11 @@ export class SmolvmRuntime extends RemoteSandbox<SmolvmConfig> implements PipeTr
   constructor(options: RuntimeOptions<SmolvmConfig> = {}) {
     super(options, SmolvmRuntime.configFields)
     requireId('smolvm', 'machine', this.config.machine)
+  }
+
+  /** The machine it runs programs on, `smolvm:<machine>`. */
+  override get machine(): MachineId {
+    return new MachineId(this.name, this.config.machine)
   }
 
   // Run `smolvm` once; the seam tests override.

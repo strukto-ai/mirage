@@ -38,9 +38,9 @@ from mirage.execution.process.config import ProcessPermissions
 from mirage.execution.process.handle import ProcessHandle
 from mirage.execution.process.table import ProcessTable
 from mirage.execution.ram import RAMExecutionStore
-from mirage.execution.types import JobId
+from mirage.execution.types import JobId, LineId
 from mirage.shell.console import JobConsole
-from mirage.types import JsonValue, PathSpec
+from mirage.types import PathSpec
 from mirage.utils.clock import Clock, SystemClock
 from mirage.workspace.record.types import RecordFields, generation_of
 
@@ -60,6 +60,8 @@ def _entry(record: Job, owner: str) -> RecordFields:
         "command": record.command,
         "cwd": record.cwd,
         "started_at": record.started_at,
+        "line": str(record.line) if record.line is not None else None,
+        "group": record.group,
         "console": record.id.console,
         "owner": owner,
         "state": record.state.value,
@@ -190,17 +192,13 @@ class JobTable:
         # on the plane: a child shell's jobs are in its own table, where a
         # stop another workspace asks for has to find them.
         self._job_tables: dict[int, JobTable] = {}
-        # Stops the native runs a lapsed owner left, given them and the
-        # first signal, and answers the ones this workspace cannot reach;
-        # the workspace sets it, since it holds the runtimes that reach
-        # them.
-        self.reaper: (
-            Callable[
-                [list[dict[str, JsonValue]], int],
-                Awaitable[list[dict[str, JsonValue]]],
-            ]
-            | None
-        ) = None
+        # Stops the program a lapsed owner's process ran past the
+        # workspace, given the process as it was published and the first
+        # signal, and answers whether this workspace reached it; the
+        # workspace sets it, since it holds the runtimes that reach it.
+        self.reaper: Callable[[RecordFields, int], Awaitable[bool]] | None = (
+            None
+        )
         # The bounds on killed jobs' stops (``_end_killed``), each with
         # its job.
         self._stopping: dict[asyncio.Task[None], JobHandle] = {}
@@ -272,13 +270,14 @@ class JobTable:
     ) -> JobHandle:
         """Register a job in its session's list and start it.
 
-        The job's number is taken from the store first, so two
-        workspaces starting a job on one session never share one; a
-        process slot is reserved next, and a refused one gives the
-        number back. The runner is deferred until the job and console
-        are ready; failed setup cancels the reservation without
-        entering the supplied runner. Only fully initialized jobs join
-        the table.
+        Its process is started first, so a session at its process cap
+        refuses the job before it takes a number, and the job's entry
+        names the line and group its process runs in. The number is
+        taken from the store next, so two workspaces starting a job on
+        one session never share one. The runner waits until the job and
+        console are ready; failed setup stops the process before it
+        enters the supplied runner. Only fully initialized jobs join the
+        table.
 
         Args:
             command (str): the command line being run.
@@ -290,7 +289,7 @@ class JobTable:
             limit (int | None): the session's process cap
                 (``processes.max``); None for no cap.
             simple (bool): the job is one simple command
-                (``JobHandle.simple``).
+                (``JobHandle.simple``), which its process runs as.
 
         Raises:
             BlockingIOError: the session is at its process cap.
@@ -300,29 +299,11 @@ class JobTable:
         await self.claim()
         name = uuid.uuid4().hex
         created_at = self.clock.now()
-        try:
-            job_id = await self._allocate(
-                session_id,
-                _entry(
-                    Job(
-                        JobId(self.processes.workspace_id, name),
-                        0,
-                        session_id,
-                        command,
-                        cwd,
-                        created_at,
-                    ),
-                    self.daemon,
-                ),
-            )
-        except BaseException:
-            # A cancel can land after the store took the entry but before
-            # its answer did; the entry names a job no runner will start.
-            await self._remove(session_id, {name}, give_back=True)
-            raise
         job: JobHandle | None = None
+        ready = asyncio.Event()
 
         async def execute() -> int:
+            await ready.wait()
             if job is None:
                 return KILLED_EXIT_CODE
             if job.state != JobState.RUNNING:
@@ -336,17 +317,39 @@ class JobTable:
                 self._disowned = [j for j in self._disowned if j is not job]
                 self._drop_checking()
 
+        process = self.processes.start(
+            session_id=session_id,
+            command=command,
+            cwd=PathSpec.from_str_path(cwd),
+            run=execute,
+            parent=parent,
+            limit=limit,
+            ignores=IGNORED_SIGNALS,
+            one_command=simple,
+        )
+        line, group = process.record.line, process.record.group
         try:
-            process = self.processes.start(
-                session_id=session_id,
-                command=command,
-                cwd=PathSpec.from_str_path(cwd),
-                run=execute,
-                parent=parent,
-                limit=limit,
-                ignores=IGNORED_SIGNALS,
+            job_id = await self._allocate(
+                session_id,
+                _entry(
+                    Job(
+                        JobId(self.processes.workspace_id, name),
+                        0,
+                        session_id,
+                        command,
+                        cwd,
+                        created_at,
+                        line,
+                        group,
+                    ),
+                    self.daemon,
+                ),
             )
         except BaseException:
+            # A cancel can land after the store took the entry but before
+            # its answer did; the entry names a job no runner will start.
+            process.terminate()
+            ready.set()
             await self._remove(session_id, {name}, give_back=True)
             raise
         try:
@@ -363,14 +366,18 @@ class JobTable:
                 owner=self.daemon,
                 console_name=name,
                 workspace_id=self.processes.workspace_id,
+                line=line,
+                group=group,
                 now=self.clock.now,
             )
         except Exception:
             process.terminate()
+            ready.set()
             await self._remove(session_id, {name}, give_back=True)
             raise
         job.process = process
         self._jobs.setdefault(session_id, {})[job_id] = job
+        ready.set()
         plane, pid = self._plane, process.record.pid
         plane._job_tables[pid] = self
         process.task.add_done_callback(
@@ -894,6 +901,8 @@ class JobTable:
             owner=entry["owner"],
             console_name=entry["console"],
             workspace_id=self.processes.workspace_id,
+            line=LineId(entry["line"]) if entry.get("line") else None,
+            group=entry.get("group"),
             now=self.clock.now,
         )
         _take_entry(job, entry)
@@ -1256,7 +1265,7 @@ class JobTable:
 
     def _records(self) -> dict[str, RecordFields]:
         """The live processes this workspace runs, as its record keeps
-        them, each with the native runs it has going."""
+        them: a program's with where it runs and its pid there."""
         records: dict[str, RecordFields] = {}
         for handle in self.processes.live():
             record = handle.record
@@ -1271,7 +1280,16 @@ class JobTable:
                 "started_at": record.started_at,
                 "state": record.state.value,
                 "line": str(record.line) if record.line is not None else None,
-                "runs": list(handle.runs.values()),
+                "runtime": record.runtime,
+                "machine_pid": (
+                    {
+                        "pid": record.machine_pid.pid,
+                        "started": record.machine_pid.started,
+                        "exited": record.machine_pid.exited,
+                    }
+                    if record.machine_pid is not None
+                    else None
+                ),
             }
         return records
 
@@ -1398,7 +1416,7 @@ class JobTable:
         task.add_done_callback(self._reaping.discard)
 
     async def _reap_owner(self, owner: str) -> None:
-        """Stop the native runs a daemon that lost the lease left, those
+        """Stop the programs a daemon that lost the lease left, those
         this workspace reaches, and keep its record holding only the
         rest, for a daemon that reaches them. This table's own daemon's
         record is its own life's, so it is never reaped here.
@@ -1410,14 +1428,14 @@ class JobTable:
             return
         try:
             records = (await self.store.processes()).get(owner, {})
-            kept = await self._reap_runs(owner, records)
+            kept = await self._reap_processes(owner, records)
             if not await self._running(owner):
                 await self.store.publish(owner, kept)
         except Exception as exc:
             logger.debug("lapsed daemon %s not reaped: %s", owner, exc)
 
     async def _reap_earlier(self, records: dict[str, RecordFields]) -> None:
-        """Stop the native runs this daemon left before a restart, which
+        """Stop the programs this daemon left before a restart, which
         ``claim`` found under its id; this life's first publish replaces
         the record.
 
@@ -1426,40 +1444,32 @@ class JobTable:
                 earlier life last published them.
         """
         try:
-            await self._reap_runs(self.daemon, records)
+            await self._reap_processes(self.daemon, records)
         except Exception as exc:
             logger.debug("runs left before a restart not reaped: %s", exc)
 
-    async def _reap_runs(
+    async def _reap_processes(
         self, owner: str, records: dict[str, RecordFields]
     ) -> dict[str, RecordFields]:
-        """Hand each native run a daemon's records list to the reaper,
-        with its record's ``seen_at``, and answer the records holding
-        only the runs this workspace could not reach. The lease is
-        checked again before each run is stopped, so a daemon that took
-        it back meanwhile keeps its runs, and its records as they are.
+        """Hand each process a daemon's records list that ran a program
+        past the workspace (its ``runtime``) to the reaper, and answer
+        the ones this workspace could not reach. The lease is checked
+        again before each is stopped, so a daemon that took it back
+        meanwhile keeps its processes, and its records as they are.
 
         Args:
             owner (str): the daemon's id.
             records (dict[str, RecordFields]): PID to process.
         """
-        left: list[dict[str, JsonValue]] = []
-        for record in records.values():
-            for run in record["runs"]:
-                if await self._running(owner):
-                    return records
-                if self.reaper is None or await self.reaper(
-                    [{**run, "seen_at": record.get("seen_at")}], 15
-                ):
-                    left.append(run)
-        return {
-            pid: {
-                **record,
-                "runs": [r for r in record["runs"] if r in left],
-            }
-            for pid, record in records.items()
-            if any(run in left for run in record["runs"])
-        }
+        left: dict[str, RecordFields] = {}
+        for pid, record in records.items():
+            if record.get("runtime") is None:
+                continue
+            if await self._running(owner):
+                return records
+            if self.reaper is None or not await self.reaper(record, 15):
+                left[pid] = record
+        return left
 
     async def _renew(self, interval: float) -> None:
         """Renew the workspace's lease every ``interval`` seconds, with

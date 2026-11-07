@@ -25,7 +25,7 @@ from mirage.execution.job.constants import (
 )
 from mirage.execution.job.types import Job, JobState
 from mirage.execution.process.handle import ProcessHandle
-from mirage.execution.types import JobId
+from mirage.execution.types import JobId, LineId
 from mirage.io.types import IOResult
 from mirage.shell.bytes import encode_text
 from mirage.shell.console import (
@@ -106,6 +106,8 @@ class JobHandle:
     console_name: str = ""
     reported: bool = False
     workspace_id: str = ""
+    line: LineId | None = None
+    group: int | None = None
     now: Callable[[], float] = field(default=time.time, repr=False)
 
     @property
@@ -119,6 +121,8 @@ class JobHandle:
             command=self.command,
             cwd=self.cwd,
             started_at=self.created_at,
+            line=self.line,
+            group=self.group,
             state=self.state,
             ended_at=self.ended_at,
             exit=self.exit_code if ended else None,

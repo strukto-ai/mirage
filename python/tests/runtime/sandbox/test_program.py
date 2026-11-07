@@ -18,7 +18,6 @@ import os
 import re
 import shlex
 import signal
-import socket
 import sys
 import time
 from collections import Counter
@@ -28,13 +27,13 @@ import pytest
 
 from mirage.context.session_context import run_as_process
 from mirage.execution.process.table import ProcessTable
+from mirage.execution.types import MachinePid
 from mirage.runtime.sandbox.constants import PIPE_DIAGNOSTIC_BYTES
 from mirage.runtime.sandbox.program import (
     FAKETIME_LIBRARIES,
     Children,
     _served,
     close_children,
-    host_run,
     open_program_pipe,
     reap_host_run,
     run_program,
@@ -652,11 +651,13 @@ async def test_stopping_a_pipe_does_not_wait_on_output_nobody_read(script):
         await pipe.stop()
 
 
-# A host program a runtime keeps as its child is one of the runner's
-# native runs while it runs: this host, its PID and when it started, so a
-# workspace that outlives this one can stop it; it goes once it ended.
+# A host program a runtime runs directly is its runner's process on this
+# host: the runner's record names its PID and when it started, so a
+# workspace that outlives this one can stop it. A client that runs a
+# program elsewhere (``docker exec``) is not the program, so it names none.
 @pytest.mark.asyncio
-async def test_a_kept_child_is_a_native_run_of_its_runner(tmp_path):
+@pytest.mark.parametrize("direct", [True, False])
+async def test_a_program_run_directly_names_its_host_pid(tmp_path, direct):
     pid_file = tmp_path / "pid"
     children: Children = {}
 
@@ -667,6 +668,7 @@ async def test_a_kept_child_is_a_native_run_of_its_runner(tmp_path):
             ["-c", f"echo $$ > {pid_file}; sleep 0.3"],
             None,
             children=children,
+            direct=direct,
         )
         return ran.exit_code
 
@@ -674,21 +676,19 @@ async def test_a_kept_child_is_a_native_run_of_its_runner(tmp_path):
         session_id="s", command="sh", cwd=PathSpec.from_str_path("/"), run=run
     )
     pid = await _wait_for_pid(pid_file)
-    run = runner.runs[f"host:{pid}"]
-    assert (run["host"], run["pid"], run["command"]) == (
-        socket.gethostname(),
-        pid,
-        f"sh -c 'echo $$ > {pid_file}; sleep 0.3'",
-    )
-    assert abs(float(run["started_at"]) - time.time()) < 5
+    found = runner.record.machine_pid
     assert (await runner.join()).exit == 0
-    assert runner.runs == {}
+    if not direct:
+        assert found is None
+        return
+    assert found is not None and found.pid == pid
+    assert abs(found.started - time.time()) < 5 and found.exited is None
 
 
-# A kept child that exits while what it started holds its output open
-# marks its run with when it exited, the last time its group was known.
+# A program that exits while what it started holds its output open marks
+# its record with when it exited, the last time its group was known.
 @pytest.mark.asyncio
-async def test_a_kept_child_that_exits_first_marks_its_run(tmp_path):
+async def test_a_program_that_exits_first_marks_its_record(tmp_path):
     pid_file = tmp_path / "pid"
     children: Children = {}
 
@@ -699,25 +699,30 @@ async def test_a_kept_child_that_exits_first_marks_its_run(tmp_path):
             ["-c", f"echo $$ > {pid_file}; sleep 0.5 &"],
             None,
             children=children,
+            direct=True,
         )
         return ran.exit_code
 
     runner = ProcessTable(bind=run_as_process).start(
         session_id="s", command="sh", cwd=PathSpec.from_str_path("/"), run=run
     )
-    key = f"host:{await _wait_for_pid(pid_file)}"
+    await _wait_for_pid(pid_file)
+
+    def exited() -> float | None:
+        found = runner.record.machine_pid
+        return found.exited if found is not None else None
+
     async with asyncio.timeout(5):
-        while "exited_at" not in runner.runs.get(key, {}):
+        while exited() is None:
             await asyncio.sleep(0.01)
-    exited = runner.runs[key]["exited_at"]
-    assert isinstance(exited, float) and abs(exited - time.time()) < 5
+    at = exited()
+    assert at is not None and abs(at - time.time()) < 5
     assert (await runner.join()).exit == 0
-    assert runner.runs == {}
 
 
-# A run a lapsed workspace left on this host is stopped, its whole group,
-# while its PID still names the process it started; a PID that names a
-# later process, or a run of another host, is left alone.
+# A program a lapsed workspace left on this host is stopped, its whole
+# group, while its PID still names the process it started; a PID that
+# names a later process is left alone.
 @pytest.mark.asyncio
 async def test_a_left_host_run_is_reaped_only_while_it_is_the_same(tmp_path):
     pid_file = tmp_path / "pid"
@@ -728,14 +733,12 @@ async def test_a_left_host_run_is_reaped_only_while_it_is_the_same(tmp_path):
         start_new_session=True,
     )
     pid = await _wait_for_pid(pid_file)
-    run = host_run(pid, ["sh"])
+    found = MachinePid(pid, time.time())
     try:
-        assert not await reap_host_run({**run, "host": "elsewhere"}, 15)
-        assert not await reap_host_run({**run, "started_at": None}, 15)
-        assert await reap_host_run({**run, "started_at": 0.0}, 15)
+        assert await reap_host_run(MachinePid(pid, 0.0), None, 15)
         assert child.returncode is None
         async with asyncio.timeout(5):
-            assert await reap_host_run(run, 15)
+            assert await reap_host_run(found, None, 15)
             await child.wait()
         assert child.returncode == -9
     finally:
@@ -758,17 +761,16 @@ async def test_a_left_host_run_whose_leader_exited_is_reaped(tmp_path):
         f"sleep 30 & echo $! > {pid_file}",
         start_new_session=True,
     )
-    run = host_run(child.pid, ["sh"])
+    found = MachinePid(child.pid, time.time())
     await child.wait()
-    exited = {**run, "exited_at": time.time()}
     survivor = await _wait_for_pid(pid_file)
     try:
-        assert not await reap_host_run(run, 15)
-        assert not await reap_host_run(
-            {**run, "seen_at": float(run["started_at"]) - 60}, 15
-        )
+        assert not await reap_host_run(found, None, 15)
+        assert not await reap_host_run(found, found.started - 60, 15)
         assert await _running(survivor)
-        assert await reap_host_run(exited, 15)
+        assert await reap_host_run(
+            MachinePid(found.pid, found.started, time.time()), None, 15
+        )
         assert await _ended(survivor)
     finally:
         if await _running(survivor):
@@ -783,7 +785,9 @@ async def test_a_host_run_is_out_of_reach_when_ps_fails(tmp_path, monkeypatch):
     fake.write_text('#!/bin/sh\ncase "$1" in -A) kill -9 $$ ;; esac\nexit 1\n')
     fake.chmod(0o755)
     monkeypatch.setenv("PATH", f"{tmp_path}:{os.environ['PATH']}")
-    assert not await reap_host_run(host_run(2**22 + 7, ["x"]), 15)
+    assert not await reap_host_run(
+        MachinePid(2**22 + 7, time.time()), None, 15
+    )
 
 
 def _denied(group: int, signum: int) -> None:
@@ -805,10 +809,9 @@ async def test_a_host_run_it_may_not_signal_is_out_of_reach(
         start_new_session=True,
     )
     pid = await _wait_for_pid(pid_file)
-    run = host_run(pid, ["sh"])
     monkeypatch.setattr(os, "killpg", _denied)
     try:
-        assert not await reap_host_run(run, 15)
+        assert not await reap_host_run(MachinePid(pid, time.time()), None, 15)
     finally:
         monkeypatch.undo()
         child.kill()
