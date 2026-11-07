@@ -18,7 +18,7 @@ import { buildApp } from '../app.ts'
 describe('health router', () => {
   it('answers ready 503 while full or shutting down', async () => {
     const app = buildApp({ maxWorkspaces: 1 })
-    const ready = () => app.inject({ method: 'GET', url: '/v1/ready' })
+    const ready = () => app.inject({ method: 'GET', url: '/v1/daemon/ready' })
     let r = await ready()
     expect([r.statusCode, r.json()]).toEqual([200, { status: 'ready' }])
     const created = await app.inject({
@@ -38,7 +38,7 @@ describe('health router', () => {
 
   it('counts a workspace still being built', async () => {
     const app = buildApp({ maxWorkspaces: 1 })
-    const ready = () => app.inject({ method: 'GET', url: '/v1/ready' })
+    const ready = () => app.inject({ method: 'GET', url: '/v1/daemon/ready' })
     await app.registry.creating('w', 'config', async () => {
       const r = await ready()
       expect([r.statusCode, r.json()]).toEqual([503, { status: 'full' }])

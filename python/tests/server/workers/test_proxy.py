@@ -253,14 +253,18 @@ async def test_max_workspaces_holds_across_workers_and_lets_a_retry_through():
             "/v1/workspaces", json={"id": kept, "config": CONFIG}
         )
         assert retry.status_code == 200
-        assert (await d.client.get("/v1/ready")).json() == {"status": "full"}
+        assert (await d.client.get("/v1/daemon/ready")).json() == {
+            "status": "full"
+        }
         assert (
             await d.client.delete(f"/v1/workspaces/{kept}")
         ).status_code == 200
         stopped = await d.client.post(f"/v1/workspaces/{other}/stop")
         assert stopped.status_code == 200
         assert (await d.client.get("/v1/health")).json()["workspaces"] == 0
-        assert (await d.client.get("/v1/ready")).json() == {"status": "ready"}
+        assert (await d.client.get("/v1/daemon/ready")).json() == {
+            "status": "ready"
+        }
 
 
 @pytest.mark.asyncio
@@ -294,7 +298,7 @@ async def test_a_refused_caller_and_an_uploading_body_hold_no_slot():
         finish.set()
         assert (await slow).status_code == 503
         assert [i for ids in _ids(d) for i in ids] == ["a"]
-        for path in ("/v1/health", "/v1/ready"):
+        for path in ("/v1/health", "/v1/daemon/ready"):
             got = await d.client.get(path, headers={"host": "evil.example"})
             assert got.status_code == 400
         explained = await d.client.post(
@@ -448,7 +452,7 @@ async def test_a_multipart_load_is_read_up_to_its_request_part(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_shutdown_its_worker_lets_through_stops_the_daemon():
     async with _daemon() as d:
-        r = await d.client.post("/v1/shutdown")
+        r = await d.client.post("/v1/daemon/shutdown")
         assert r.json() == {"status": "shutting_down", "pid": os.getpid()}
         assert d.exits == [1]
 

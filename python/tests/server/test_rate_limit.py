@@ -92,7 +92,7 @@ async def test_past_the_rate_a_request_answers_429_until_the_window_ends():
         assert refused.json() == {"detail": "Too Many Requests"}
         assert 1 <= int(refused.headers["retry-after"]) <= 60
         assert (await client.get("/v1/health")).status_code == 200
-        assert (await client.get("/v1/ready")).status_code == 200
+        assert (await client.get("/v1/daemon/ready")).status_code == 200
 
 
 @pytest.mark.asyncio
@@ -195,7 +195,7 @@ async def test_default_limits_authentication_before_verifying_tokens(
         assert refused.json() == {"detail": "Too Many Requests"}
         assert refused.headers["retry-after"] == "60"
         assert (await client.get("/v1/health")).status_code == 200
-        assert (await client.get("/v1/ready")).status_code == 200
+        assert (await client.get("/v1/daemon/ready")).status_code == 200
         now += 61
         assert (
             await client.get("/v1/workspaces", headers=right)

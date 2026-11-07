@@ -722,7 +722,7 @@ async def server_checks(server: Server, report: Report) -> None:
             (await http.get("/v1/health")).status_code,
             want["health_without_token"],
         )
-        ready = await http.get("/v1/ready")
+        ready = await http.get("/v1/daemon/ready")
         report.check(
             f"{server.key} server.ready_without_token",
             [ready.status_code, ready.json()],
@@ -816,7 +816,7 @@ async def server_checks(server: Server, report: Report) -> None:
             (await http.get("/v1/stores", headers=auth)).status_code,
             404,
         )
-        stop = await http.post("/v1/shutdown", headers=auth)
+        stop = await http.post("/v1/daemon/shutdown", headers=auth)
         report.check(
             f"{server.key} server.shutdown",
             stop.status_code,

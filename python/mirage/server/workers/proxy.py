@@ -205,7 +205,8 @@ class WorkerProxy:
                     "workers": sum(1 for w in pool.workers if not w.dead),
                 },
             )
-        if resource == "ready" and len(parts) == 2 and method == "GET":
+        daemon = resource == "daemon" and len(parts) == 3
+        if daemon and workspace_id == "ready" and method == "GET":
             status = (
                 "shutting_down"
                 if self.draining
@@ -216,7 +217,7 @@ class WorkerProxy:
             return await send_json(
                 send, 200 if status == "ready" else 503, {"status": status}
             )
-        if resource == "shutdown" and len(parts) == 2 and method == "POST":
+        if daemon and workspace_id == "shutdown" and method == "POST":
             # A worker answers whether the caller may stop the daemon.
             answer = await self._fetch(first, scope, b"", receive)
             if answer.status != 200:

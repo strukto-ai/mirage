@@ -39,7 +39,7 @@ async def health(request: Request) -> HealthResponse:
     )
 
 
-@router.get("/v1/ready")
+@router.get("/v1/daemon/ready")
 async def ready(request: Request) -> JSONResponse:
     """Whether the server takes new workspaces: 503 while it drains for
     shutdown or holds ``max_workspaces``, so a load balancer sends new
@@ -56,7 +56,7 @@ async def ready(request: Request) -> JSONResponse:
     )
 
 
-@router.post("/v1/shutdown", response_model=ShutdownResponse)
+@router.post("/v1/daemon/shutdown", response_model=ShutdownResponse)
 async def shutdown(request: Request) -> ShutdownResponse:
     """Trip the exit event, which the app's ``on_idle_exit`` acts on.
 

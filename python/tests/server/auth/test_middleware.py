@@ -612,6 +612,6 @@ async def test_a_stored_workspace_reopens_only_for_its_owner(
 async def test_an_account_cannot_shut_the_daemon_down(rsa_keys, tmp_path):
     app = _jwt_app(rsa_keys, tmp_path)
     async with _client(app, _bearer(rsa_keys, {"sub": "alice"})) as c:
-        r = await c.post("/v1/shutdown")
+        r = await c.post("/v1/daemon/shutdown")
         assert r.status_code == 403
     assert not app.state.exit_event.is_set()

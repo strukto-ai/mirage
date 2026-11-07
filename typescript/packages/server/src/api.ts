@@ -38,7 +38,7 @@ export interface ApiDeps {
   auth: AuthConfig
   /** When the server started, in seconds since the epoch. */
   startedAt: number
-  /** What `POST /v1/shutdown` runs. */
+  /** What `POST /v1/daemon/shutdown` runs. */
   exit: () => void
   snapshotStore: S3Config | undefined
   /** Saved configs; undefined serves no `/v1/templates` and creates from no template. */

@@ -51,7 +51,7 @@ uvicorn.run(app, host="127.0.0.1", port=8765)
 | `ssh_config` | from the `ssh_*` settings | The SSH server, opened with the app; off unless a port is set. |
 | `snapshot_store` | `None` | An `S3Config`: the store a snapshot request may name a key in. Without one, a snapshot only goes back to the caller; the server never writes one to its own disk. |
 | `state_root` | under `$MIRAGE_HOME` | Where live state is kept. |
-| `on_idle_exit` | `None` | Called when the last workspace has been gone `idle_grace_seconds` (30), or on `POST /v1/shutdown`. `None` keeps serving. |
+| `on_idle_exit` | `None` | Called when the last workspace has been gone `idle_grace_seconds` (30), or on `POST /v1/daemon/shutdown`. `None` keeps serving. |
 | `pid_file` | `None` | A file that holds the process id while the app runs. |
 
 ## Workers
@@ -60,7 +60,7 @@ By default the daemon is one process, and one thread holds every workspace. With
 
 `worker_type` (`MIRAGE_WORKER_TYPE`, or the `worker_type` key) is `thread` or `process`. TypeScript defaults to threads. Python defaults to threads on an interpreter without the GIL (3.14t) and to processes otherwise, since threads under the GIL take turns.
 
-The daemon answers `/v1/health` and `/v1/ready` itself, merges their `GET /v1/workspaces` lists, and holds `max_workspaces` across the workers. A worker that exits stays gone, and so do its workspaces. Each worker counts its own rate limits, so a limit keyed on the address or the account allows that many requests per worker. The SSH port is one server's, so it does not combine with workers yet.
+The daemon answers `/v1/health` and `/v1/daemon/ready` itself, merges their `GET /v1/workspaces` lists, and holds `max_workspaces` across the workers. A worker that exits stays gone, and so do its workspaces. Each worker counts its own rate limits, so a limit keyed on the address or the account allows that many requests per worker. The SSH port is one server's, so it does not combine with workers yet.
 
 ## Started by the CLI
 

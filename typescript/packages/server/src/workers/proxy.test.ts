@@ -231,11 +231,11 @@ describe('WorkerProxy', () => {
     const [kept, other] = live.map((w) => w.id)
     const retry = await call(`${d.url}/v1/workspaces`, 'POST', { id: kept, config: CONFIG })
     expect(retry.status).toBe(200)
-    expect((await call(`${d.url}/v1/ready`, 'GET')).json).toEqual({ status: 'full' })
+    expect((await call(`${d.url}/v1/daemon/ready`, 'GET')).json).toEqual({ status: 'full' })
     expect((await call(`${d.url}/v1/workspaces/${String(kept)}`, 'DELETE')).status).toBe(200)
     expect((await call(`${d.url}/v1/workspaces/${String(other)}/stop`, 'POST')).status).toBe(200)
     expect((await call(`${d.url}/v1/health`, 'GET')).json).toMatchObject({ workspaces: 0 })
-    expect((await call(`${d.url}/v1/ready`, 'GET')).json).toEqual({ status: 'ready' })
+    expect((await call(`${d.url}/v1/daemon/ready`, 'GET')).json).toEqual({ status: 'ready' })
   })
 
   it('refuses a caller the worker refuses, and holds no slot while a body uploads', async () => {
@@ -271,7 +271,7 @@ describe('WorkerProxy', () => {
     expect(await slow).toBe(503)
     expect(ids(d).flat()).toEqual(['a'])
     expect(await withHost(d.url, 'GET', '/v1/health', 'evil.example')).toBe(400)
-    expect(await withHost(d.url, 'GET', '/v1/ready', 'evil.example')).toBe(400)
+    expect(await withHost(d.url, 'GET', '/v1/daemon/ready', 'evil.example')).toBe(400)
     expect(await withHost(d.url, 'GET', '/v1/workspaces/%E0', 'localhost')).toBe(400)
     const explained = await call(`${d.url}/v1/workspaces?explain=true`, 'POST', {
       id: 'b',
@@ -345,7 +345,7 @@ describe('WorkerProxy', () => {
 
   it('stops the daemon on a shutdown its worker lets through', async () => {
     d = await daemon()
-    const res = await call(`${d.url}/v1/shutdown`, 'POST')
+    const res = await call(`${d.url}/v1/daemon/shutdown`, 'POST')
     expect(res.json).toMatchObject({ status: 'shutting_down', pid: process.pid })
     expect(d.exited()).toBe(1)
   })
