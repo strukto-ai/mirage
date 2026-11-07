@@ -181,6 +181,7 @@ describe('RequestTable', () => {
     await joined
     expect(cleaned).toBe(true)
     expect(job.line.record.signal).toBe(2)
+    expect(table.requests()).toEqual([])
     await table.close()
   })
 

@@ -178,7 +178,7 @@ class RequestTable:
 
         A caller cancelled while it waits cancels the request and waits
         for its cleanup before giving up, so the work never outlives the
-        request that started it.
+        request that started it; the table then lets the request go.
 
         Args:
             line_id (LineId): the request's line.
@@ -189,6 +189,7 @@ class RequestTable:
             with anyio.CancelScope(shield=True):
                 self.cancel(line_id)
                 await self.drain(line_id)
+                self._requests.pop(line_id, None)
             raise
 
     def cancel(self, line_id: LineId) -> bool:

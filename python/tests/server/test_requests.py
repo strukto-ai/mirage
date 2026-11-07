@@ -177,6 +177,7 @@ async def test_a_cancelled_join_cancels_the_work_and_waits_for_cleanup():
         await joined
     assert cleaned.is_set()
     assert job.line.record.signal == 2
+    assert table.requests() == []
     await table.close()
 
 
