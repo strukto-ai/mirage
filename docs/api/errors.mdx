@@ -13,21 +13,74 @@ so check `Content-Type` before parsing. The full status table is in
 
 ## HTTP status codes
 
-| Status | Meaning |
-| --- | --- |
-| `400` | Malformed request, disallowed host or disallowed browser origin. |
-| `401` | Missing or incorrect token. |
-| `403` | A policy or mount mode refused the call. |
-| `404` | The workspace, session, job or file does not exist. |
-| `409` | An identifier is taken, the workspace is busy or a file changed since it was read. |
-| `422` | Request fields failed validation. |
-| `429` | A rate limit or session limit was reached. Check `Retry-After` before retrying. |
-| `501` | A saved-config operation requires a server configured for one account. |
-| `503` | The server reached its workspace limit or is shutting down. |
+| Status | Meaning | Recovery |
+| --- | --- | --- |
+| `400` | Malformed request, disallowed host or disallowed browser origin. | Check the body, API host and browser origin. |
+| `401` | Missing or incorrect token. | Send a valid bearer token; sign in again if it expired. |
+| `403` | A policy or mount mode refused the call. | Check workspace policies and mount permissions. |
+| `404` | The workspace, session, job or file does not exist. | Verify the identifier or file path. |
+| `409` | An identifier is taken, the workspace is busy or a file changed since it was read. | Resolve the conflict before retrying; see the workspace example below. |
+| `422` | Request fields failed validation. | Correct the fields named in `detail`. |
+| `429` | A rate limit or session limit was reached. | Respect `Retry-After` when present; reduce the request rate or close unused sessions. |
+| `501` | A saved-config operation requires a server configured for one account. | Check the deployment's saved-configuration support. |
+| `503` | The server reached its workspace limit or is shutting down. | Retry after capacity or availability recovers. |
 
-Each endpoint lists its documented responses and their schemas. JSON errors can
+Each endpoint's **Errors** section lists its documented failures. The complete
+[OpenAPI contract](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml)
+retains every response schema. JSON errors can
 include `errno` and `refusal` alongside `detail`. Those fields describe filesystem
 errors and policy refusals when available.
+
+## Examples
+
+### Missing or invalid credentials
+
+The TypeScript daemon returns HTTP `401` with JSON:
+
+```json
+{"detail": "Unauthorized"}
+```
+
+The Python daemon returns the same status with `Content-Type: text/plain`:
+
+```text
+Unauthorized
+```
+
+Check `Content-Type` before decoding the body. Supply a valid token before retrying.
+See [Authentication](/api/authentication).
+
+### Workspace identifier conflict
+
+Creating `demo` again with a different configuration returns HTTP `409`:
+
+```json
+{"detail": "workspace id already exists: 'demo'"}
+```
+
+Choose another identifier for a different workspace. Retrying the original
+configuration with the same identifier returns HTTP `200` and the existing
+workspace, with the same response shape as a successful `201` creation.
+
+### Invalid request field
+
+Sending a numeric workspace `id` returns HTTP `422`:
+
+```json
+{
+  "detail": [
+    {
+      "type": "string_type",
+      "loc": ["body", "id"],
+      "msg": "Input should be a valid string",
+      "input": 4
+    }
+  ]
+}
+```
+
+`loc` identifies the invalid field. Change `id` to a string before retrying.
+Validation messages can differ between server implementations.
 
 ## Shell exit codes
 

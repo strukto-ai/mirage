@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import argparse
+import json
 import re
 import sys
 from html import unescape
@@ -24,6 +25,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 SPEC = ROOT / "docs" / "openapi.yaml"
 PAGE = ROOT / "docs" / "api" / "reference.mdx"
+OVERLAY = ROOT / "docs" / "api-display.overlay.json"
 TAG_ORDER = (
     "Workspaces",
     "Sessions",
@@ -177,32 +179,149 @@ def order(item: tuple[str, str, dict[str, Any]]) -> tuple[int, str, int]:
     return rank, path, METHOD_ORDER.index(method)
 
 
+def operations(doc: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:
+    """Visible operations in resource order.
+
+    Args:
+        doc (dict[str, Any]): the OpenAPI document.
+    """
+    return sorted(
+        [
+            (path, method, op)
+            for path, methods in doc["paths"].items()
+            for method, op in methods.items()
+            if method in METHOD_ORDER
+            and not op.get("x-hidden")
+            and not op.get("x-excluded")
+        ],
+        key=order,
+    )
+
+
 def render(doc: dict[str, Any]) -> str:
     """The whole reference page.
 
     Args:
         doc (dict[str, Any]): the OpenAPI document.
     """
-    ops = [
-        (path, method, op)
-        for path, methods in doc["paths"].items()
-        for method, op in methods.items()
-        if method in METHOD_ORDER
-        and not op.get("x-excluded")
-        and not op.get("x-hidden")
-    ]
     lines = [HEADER, "<ApiExplorer>", ""]
-    for path, method, op in sorted(ops, key=order):
+    for path, method, op in operations(doc):
         lines += operation(doc, path, method, op)
     lines.append("</ApiExplorer>")
     return "\n".join(lines) + "\n"
+
+
+def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
+    """Success example overrides and a secondary list of endpoint errors.
+
+    Args:
+        doc (dict[str, Any]): the OpenAPI document.
+        op (dict[str, Any]): the operation object.
+    """
+    responses = op.get("responses", {})
+    lines = []
+    created = (
+        responses.get("201", {}).get("content", {}).get("application/json", {})
+    )
+    if "200" in responses and "example" in created:
+        lines += [
+            '<div className="hidden">',
+            "<ResponseExample>",
+            "",
+            "```json 201 Created",
+            json.dumps(created["example"], indent=2),
+            "```",
+            "",
+            "</ResponseExample>",
+            "</div>",
+            "",
+        ]
+    errors = [
+        (code, value)
+        for code, value in responses.items()
+        if not code.startswith("2")
+    ]
+    if errors:
+        lines += [
+            '<Accordion title="Errors">',
+            "",
+            "| Status | Meaning |",
+            "| --- | --- |",
+        ]
+        for code, response in errors:
+            if "$ref" in response:
+                response = {
+                    **doc["components"]["responses"][
+                        response["$ref"].split("/")[-1]
+                    ],
+                    **response,
+                }
+            description = (
+                attr(response["description"])
+                .replace("\n", " ")
+                .replace("|", "\\|")
+            )
+            lines.append(f"| `{code}` | {description} |")
+        lines += [
+            "",
+            "See [error examples and recovery steps](/api/errors). "
+            "The [complete OpenAPI contract]("
+            "https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml) "
+            "includes every response schema.",
+            "",
+            "</Accordion>",
+        ]
+    return "\n".join(lines)
+
+
+def render_overlay(doc: dict[str, Any]) -> str:
+    """Presentation changes that leave the source API contract complete.
+
+    Args:
+        doc (dict[str, Any]): the OpenAPI document.
+    """
+    actions: list[dict[str, Any]] = []
+    secondary_codes: set[str] = set()
+    for path, method, op in operations(doc):
+        secondary_codes.update(
+            code
+            for code in op.get("responses", {})
+            if not code.startswith("2")
+        )
+        content = response_content(doc, op)
+        if content:
+            actions.append(
+                {
+                    "target": f"$.paths[{json.dumps(path)}].{method}",
+                    "update": {"x-mint": {"content": content}},
+                }
+            )
+    if secondary_codes:
+        codes = ",".join(json.dumps(code) for code in sorted(secondary_codes))
+        actions.append(
+            {"target": f"$.paths.*.*.responses[{codes}]", "remove": True}
+        )
+    return (
+        json.dumps(
+            {
+                "overlay": "1.0.0",
+                "info": {
+                    "title": "API documentation presentation",
+                    "version": "1.0.0",
+                },
+                "actions": actions,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
 
 
 def selftest() -> None:
     """Check search coverage and valid attribute text on a recursive schema."""
     shared = {"$ref": "#/components/schemas/Shared"}
     node = {"$ref": "#/components/schemas/Node"}
-    doc = {
+    doc: dict[str, Any] = {
         "tags": [
             {"name": "Workspace operations", "x-group": "Workspaces"},
             {"name": "VFS", "parent": "Workspace operations"},
@@ -219,7 +338,7 @@ def selftest() -> None:
             }
         },
     }
-    op = {
+    op: dict[str, Any] = {
         "summary": "Read files",
         "description": 'Read a "file" at {path} & return <bytes>.',
         "tags": ["VFS"],
@@ -267,6 +386,25 @@ def selftest() -> None:
     page = render(doc)
     assert 'path="/visible"' in page
     assert 'path="/hidden"' not in page
+
+    doc["components"]["responses"] = {
+        "409": {"description": "Conflicting configuration"}
+    }
+    op["responses"]["201"] = {
+        "content": {"application/json": {"example": {"id": "demo"}}}
+    }
+    op["responses"]["409"] = {"$ref": "#/components/responses/409"}
+    original = json.dumps(doc)
+    overlay = json.loads(render_overlay(doc))
+    assert json.dumps(doc) == original
+    assert len(overlay["actions"]) == 2
+    content = overlay["actions"][0]["update"]["x-mint"]["content"]
+    assert "201 Created" in content and "Conflicting configuration" in content
+    assert '<Accordion title="Errors">' in content
+    assert overlay["actions"][-1] == {
+        "target": '$.paths.*.*.responses["409"]',
+        "remove": True,
+    }
     print("API reference self-test passed")
 
 
@@ -287,19 +425,27 @@ def main() -> int:
         selftest()
         if not args.check:
             return 0
-    page = render(yaml.safe_load(SPEC.read_text()))
+    doc = yaml.safe_load(SPEC.read_text())
+    outputs = {PAGE: render(doc), OVERLAY: render_overlay(doc)}
     if args.check:
-        if not PAGE.exists() or PAGE.read_text() != page:
+        stale = [
+            path
+            for path, content in outputs.items()
+            if not path.exists() or path.read_text() != content
+        ]
+        for path in stale:
             print(
-                f"{PAGE.relative_to(ROOT)} is stale; run "
+                f"{path.relative_to(ROOT)} is stale; run "
                 "python scripts/gen_api_reference.py"
             )
+        if stale:
             return 1
-        print(f"{PAGE.relative_to(ROOT)} is up to date")
+        print("API reference and presentation overlay are up to date")
         return 0
-    PAGE.parent.mkdir(parents=True, exist_ok=True)
-    PAGE.write_text(page)
-    print(f"wrote {PAGE.relative_to(ROOT)}")
+    for path, content in outputs.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+        print(f"wrote {path.relative_to(ROOT)}")
     return 0
 
 

@@ -739,6 +739,7 @@
             "group": "Resources",
             "openapi": {
               "source": "openapi.yaml",
+              "overlays": ["api-display.overlay.json"],
               "directory": "api/operations"
             }
           }

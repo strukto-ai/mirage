@@ -117,6 +117,7 @@ paths:
           $ref: '#/components/responses/403'
         '409':
           $ref: '#/components/responses/409'
+          description: The identifier already exists with a different workspace configuration.
         '422':
           description: Validation Error
           content:
@@ -5020,6 +5021,12 @@ components:
         \ variable's own name.\n    fetch (Literal[\"lazy\", \"eager\"]): eager joins every\
         \ line's\n        fetch set instead of waiting for a reference."
     HTTPValidationError:
+      example:
+        detail:
+          - type: string_type
+            loc: [body, id]
+            msg: Input should be a valid string
+            input: 4
       properties:
         detail:
           items:
@@ -6868,9 +6875,12 @@ components:
       description: The token is missing or wrong
       content:
         application/json:
+          example:
+            detail: Unauthorized
           schema:
             $ref: '#/components/schemas/Error'
         text/plain:
+          example: Unauthorized
           schema:
             type: string
             description: The Python daemon answers Unauthorized as plain text.
@@ -6884,6 +6894,8 @@ components:
       description: The workspace, session, job or file does not exist
       content:
         application/json:
+          example:
+            detail: workspace not found
           schema:
             $ref: '#/components/schemas/Error'
     '409':
@@ -6891,6 +6903,8 @@ components:
         it was read
       content:
         application/json:
+          example:
+            detail: "workspace id already exists: 'demo'"
           schema:
             $ref: '#/components/schemas/Error'
     '429':
