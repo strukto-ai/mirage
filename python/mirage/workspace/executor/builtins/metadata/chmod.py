@@ -25,11 +25,13 @@ from mirage.utils.quote import shell_quote_always
 from mirage.workspace.executor.builtins.metadata.metadata import (
     apply_attrs,
     before_recursive_change,
+    preserves_root,
     reference_operands,
     reference_stat,
     resolve_operand,
     root_refusal,
     traversal,
+    unfollowed_error,
     unread_error,
     verbosity,
     walk_stats,
@@ -168,16 +170,26 @@ async def handle_chmod(
                 errors.append(f"{exc}\n")
                 continue
             entries = await walk_stats(
-                links, dispatch, resolved, stat, follow=walk == "L"
+                links,
+                dispatch,
+                resolved,
+                stat,
+                follow=walk == "L",
+                preserve_root=preserves_root(fl),
             )
         else:
             entries = [(resolved, stat, None)]
         for path, path_stat, unread in entries:
             if path_stat.type == FileType.SYMLINK:
-                if report == "verbose":
-                    out.append(
-                        link_line(walked_name(target.raw_path, resolved, path))
-                    )
+                name = walked_name(target.raw_path, resolved, path)
+                if walk != "L":
+                    if report == "verbose":
+                        out.append(link_line(name))
+                elif unread is not None:
+                    errors.append(unfollowed_error("chmod", name, unread))
+                else:
+                    top = PathSpec.from_str_path("/")
+                    errors.append(root_refusal("chmod", fl, name, top) or "")
                 continue
             # Backends without a mode default to what ls renders: 755 for
             # directories, 644 for files (symbolic clauses build on this).
@@ -205,7 +217,7 @@ async def handle_chmod(
                 and new_mode != path_stat.mode
             ):
                 out.append(mode_line(name, path_stat, new_mode, failed))
-            if unread is not None:
+            if isinstance(unread, PermissionError):
                 errors.append(unread_error("chmod", name, unread))
     quiet = fl.as_bool("silent") or fl.as_bool("quiet")
     return result(

@@ -34,6 +34,7 @@ from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.errors.fs import fs_strerror, walk_refusal
 from mirage.errors.render import fs_error_line
+from mirage.errors.types import DotWalkLoop
 from mirage.policy import PolicyDenied
 from mirage.runtime.types import DispatchFn
 from mirage.shell.bytes import encode_text
@@ -370,9 +371,10 @@ async def apply_attrs(
         errors.append(permission_error(cmd, ATTR_ACTIONS[cmd], name, exc))
 
 
-# One entry of a walked subtree: its path, its stat, and the refusal its
-# listing met (None for a file, or a directory that listed).
-WalkEntry = tuple[PathSpec, FileStat, PermissionError | None]
+# One entry of a walked subtree: its path, its stat, and the refusal it
+# met: a directory's listing's, or under -L a link's that could not be
+# followed (None for an entry that read).
+WalkEntry = tuple[PathSpec, FileStat, OSError | None]
 
 
 async def before_recursive_change(
@@ -413,6 +415,7 @@ async def walk_stats(
     root: PathSpec,
     root_stat: FileStat,
     follow: bool = False,
+    preserve_root: bool = False,
 ) -> list[WalkEntry]:
     """A subtree as ``(path, stat, unread)`` triples, in fts's pre-order.
 
@@ -426,7 +429,11 @@ async def walk_stats(
     itself. Under ``-L`` (``follow``) the link is followed instead: its
     referent is the entry, named by the link, and a directory it names
     is walked unless the branch already holds it, as fts refuses a
-    cycle. ``unread`` is the refusal a directory's listing met (a rule
+    cycle. A link ``-L`` cannot follow (dangling, or a loop) is an
+    entry of its own, with its own stat and the error as its
+    ``unread``, and so is one that leads to ``/`` under
+    ``--preserve-root``, with no error, for the caller to refuse.
+    ``unread`` is the refusal a directory's listing met (a rule
     that denies the directory lets its stat through): fts's unreadable
     directory, which the caller reports after the directory's own
     change, and whose subtree is not walked.
@@ -438,6 +445,8 @@ async def walk_stats(
         root (PathSpec): subtree root (already link-resolved).
         root_stat (FileStat): the root's stat, already read.
         follow (bool): ``-L``, which follows every traversed link.
+        preserve_root (bool): ``--preserve-root``, which follows no link
+            to ``/``.
     """
     plain_readdir = functools.partial(dispatched_call, dispatch, "readdir")
     plain_stat = functools.partial(dispatched_call, dispatch, "stat")
@@ -456,14 +465,16 @@ async def walk_stats(
     # mark that leaves it. ``branch`` holds the directories entered and not
     # yet left, which ``-L`` will not enter again.
     branch: set[str] = set()
-    stack = [(root, root_stat, root.virtual, False)]
+    stack: list[tuple[PathSpec, FileStat, str, bool, OSError | None]] = [
+        (root, root_stat, root.virtual, False, None)
+    ]
     while stack:
-        path, stat, real, leaving = stack.pop()
+        path, stat, real, leaving, refused = stack.pop()
         if leaving:
             branch.discard(real)
             continue
-        if stat.type != FileType.DIRECTORY:
-            entries.append((path, stat, None))
+        if refused is not None or stat.type != FileType.DIRECTORY:
+            entries.append((path, stat, refused))
             continue
         try:
             children = await readdir(path)
@@ -472,8 +483,8 @@ async def walk_stats(
             continue
         entries.append((path, stat, None))
         branch.add(real)
-        stack.append((path, stat, real, True))
-        found: list[tuple[PathSpec, FileStat, str, bool]] = []
+        stack.append((path, stat, real, True, None))
+        found: list[tuple[PathSpec, FileStat, str, bool, OSError | None]] = []
         for listed in children:
             # A folder-backed readdir spells a directory child with its
             # slash; a child is named below the path walked, which under
@@ -486,19 +497,29 @@ async def walk_stats(
                 follow and links.is_link(child.virtual)
             ):
                 real = links.follow(child.virtual) if follow else child.virtual
-                found.append((child, await stat_of(child), real, False))
+                found.append((child, await stat_of(child), real, False, None))
                 continue
             if not follow:
                 own, _ = await dispatch("stat", child, nofollow=True)
-                found.append((child, own, child.virtual, False))
+                found.append((child, own, child.virtual, False, None))
                 continue
             try:
                 real = links.follow(child.virtual)
                 target = await stat_of(child)
-            except (CycleError, FileNotFoundError, NotADirectoryError):
+            except (
+                CycleError,
+                DotWalkLoop,
+                FileNotFoundError,
+                NotADirectoryError,
+            ) as exc:
+                own, _ = await dispatch("stat", child, nofollow=True)
+                found.append((child, own, child.virtual, False, exc))
                 continue
-            if real not in branch:
-                found.append((child, target, real, False))
+            if preserve_root and not real.strip("/"):
+                own, _ = await dispatch("stat", child, nofollow=True)
+                found.append((child, own, child.virtual, False, None))
+            elif real not in branch:
+                found.append((child, target, real, False, None))
         stack.extend(reversed(found))
     return entries
 
@@ -538,6 +559,35 @@ async def walk_owned(
         if unread.isdisjoint(["/", *ancestors(path)])
     ]
     return walked, owned
+
+
+def unfollowed_error(cmd: str, name: str, exc: OSError) -> str:
+    """The report for a link ``-L`` could not follow, worded as GNU
+    words it: a loop cannot be accessed, and a dangling link is one chmod
+    cannot operate on and chown and chgrp cannot dereference.
+
+    Args:
+        cmd (str): the command.
+        name (str): the link, as the line names it.
+        exc (OSError): what following it raised.
+    """
+    shown = shell_quote_always(name)
+    if isinstance(exc, (CycleError, DotWalkLoop)):
+        return f"{cmd}: cannot access {shown}: {fs_strerror(exc)}\n"
+    if cmd == "chmod":
+        return f"chmod: cannot operate on dangling symlink {shown}\n"
+    return f"{cmd}: cannot dereference {shown}: {fs_strerror(exc)}\n"
+
+
+def preserves_root(fl: FlagView) -> bool:
+    """Whether ``--preserve-root`` is on: the last of it and
+    ``--no-preserve-root`` wins, and neither is off.
+
+    Args:
+        fl (FlagView): the line's flags.
+    """
+    order = fl.typed_order("preserve_root", "no_preserve_root")
+    return order[-1:] == ["preserve_root"]
 
 
 def verbosity(fl: FlagView) -> str | None:
@@ -618,12 +668,7 @@ def root_refusal(
         typed (str): the operand as typed.
         resolved (PathSpec): the operand, link-resolved.
     """
-    order = fl.typed_order("preserve_root", "no_preserve_root")
-    if (
-        not order
-        or order[-1] != "preserve_root"
-        or resolved.virtual.strip("/")
-    ):
+    if not preserves_root(fl) or resolved.virtual.strip("/"):
         return None
     named = shell_quote_always(typed)
     same = "" if typed == "/" else " (same as '/')"
@@ -805,7 +850,7 @@ async def change_owner(
     async def own_referent(link: PathSpec, name: str) -> None:
         try:
             stat, _ = await dispatch("stat", link)
-        except (FileNotFoundError, NotADirectoryError) as exc:
+        except (DotWalkLoop, FileNotFoundError, NotADirectoryError) as exc:
             shown = shell_quote_always(name)
             errors.append(
                 f"{cmd}: cannot dereference {shown}: {fs_strerror(exc)}\n"
@@ -819,13 +864,16 @@ async def change_owner(
         describe(name, stat, len(errors) > before)
 
     # Under -H or -L a link the walk meets is changed through, unless -h
-    # asks for the link itself.
+    # asks for the link itself; the walk goes on through it either way.
     order = fl.typed_order("no_dereference", "dereference")
-    through = traversal(fl, "P") != "P" and order[-1:] != ["no_dereference"]
+    itself = order[-1:] == ["no_dereference"]
+    through = traversal(fl, "P") != "P" and not itself
+    recursive = fl.as_bool("recursive")
     links = namespace.session_links(session)
     for target in await expand_operands(namespace, dispatch, operands):
         typed = target.raw_path or target.virtual
-        if not follow and links.is_link(target.virtual):
+        operand_link = links.is_link(target.virtual)
+        if not follow and operand_link:
             await own_link(target, typed)
             continue
         found = await resolve_operand(links, dispatch, cmd, target, errors)
@@ -833,7 +881,7 @@ async def change_owner(
             describe(typed, None, True)
             continue
         resolved, stat = found
-        if fl.as_bool("recursive"):
+        if recursive:
             refusal = root_refusal(cmd, fl, typed, resolved)
             if refusal is not None:
                 errors.append(refusal)
@@ -847,7 +895,12 @@ async def change_owner(
                 continue
             if traversal(fl, "P") == "L":
                 walked = await walk_stats(
-                    links, dispatch, resolved, stat, follow=True
+                    links,
+                    dispatch,
+                    resolved,
+                    stat,
+                    follow=True,
+                    preserve_root=preserves_root(fl),
                 )
                 owned: list[str] = []
             else:
@@ -856,15 +909,33 @@ async def change_owner(
                 )
         else:
             walked, owned = [(resolved, stat, None)], []
+        # -h under -H or -L changes the operand link, not what it names.
+        skip = resolved.virtual if itself and operand_link else None
+        if skip is not None:
+            await own_link(target, typed)
         for path, path_stat, unread in walked:
             name = walked_name(typed, resolved, path)
+            if path.virtual == skip:
+                continue
+            if path_stat.type == FileType.SYMLINK:
+                if unread is None:
+                    top = PathSpec.from_str_path("/")
+                    errors.append(root_refusal(cmd, fl, name, top) or "")
+                elif itself:
+                    await own_link(path, name)
+                else:
+                    errors.append(unfollowed_error(cmd, name, unread))
+                continue
+            if itself and links.is_link(path.virtual):
+                await own_link(path, name)
+                continue
             before = len(errors)
             if matches(path_stat):
                 await apply_attrs(
                     dispatch, cmd, path, name, errors, uid=uid, gid=gid
                 )
             describe(name, path_stat, len(errors) > before)
-            if unread is not None:
+            if isinstance(unread, PermissionError):
                 errors.append(unread_error(cmd, name, unread))
         for link in owned:
             link_spec = PathSpec.from_str_path(link)

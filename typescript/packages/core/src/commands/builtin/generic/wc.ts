@@ -269,10 +269,13 @@ export async function wcGeneric(
     const sizes: (number | null)[] = []
     const total: WcCounts = { lines: 0, words: 0, bytes: 0, chars: 0, maxLineLength: 0 }
     let err = ''
+    // A listed name may sit on another mount than the one that counts lines,
+    // so a list reads every file it names.
     const counted =
       parsed.lines &&
       !(parsed.words || parsed.bytes || parsed.chars || parsed.maxLineLength) &&
-      lineCount !== undefined
+      lineCount !== undefined &&
+      listedFrom === null
         ? lineCount
         : null
     const sized =

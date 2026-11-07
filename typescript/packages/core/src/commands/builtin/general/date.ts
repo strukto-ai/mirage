@@ -14,7 +14,9 @@
 
 import type { PathSpec } from '../../../types.ts'
 import type { Accessor } from '../../../accessor/base.ts'
-import { IOResult, materialize } from '../../../io/types.ts'
+import { IOResult } from '../../../io/types.ts'
+import { concat } from '../../../utils/bytes.ts'
+import { resolveSource } from '../utils/stream.ts'
 import { isoTimestamp, parseDateExprAsync, parsePosixTimeAsync } from '../../../utils/dates.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { isFsError } from '../../../errors/fs.ts'
@@ -110,41 +112,82 @@ async function named(expression: string, zone: Zone, signal?: AbortSignal): Prom
   return parseDateExprAsync(expression, zone, undefined, signal)
 }
 
-// -f: each line of the file a -d expression, printed in turn; a line that
-// names no date is reported and the next one still prints, exit 1, and `-`
-// reads standard input. Mirrors Python's _each_line.
+/**
+ * `-f`'s output, a line at a time as the expressions arrive; what names no
+ * date goes to `io`'s stderr, exit 1, once the input ends. Mirrors Python's
+ * `_dated`.
+ */
+async function* dated(
+  first: Uint8Array,
+  rest: AsyncIterator<Uint8Array>,
+  zone: Zone,
+  fmt: string,
+  io: IOResult,
+  signal?: AbortSignal,
+): AsyncIterable<Uint8Array> {
+  const errors: string[] = []
+  const one = async (raw: Uint8Array): Promise<Uint8Array | null> => {
+    const text = decodeText(raw)
+    const dt = await named(text, zone, signal)
+    if (dt === null) {
+      errors.push(`date: invalid date '${quoteText(text)}'\n`)
+      return null
+    }
+    return encodeText(gnuStrftime(dt, fmt, zone) + '\n')
+  }
+  let held: Uint8Array[] = []
+  let chunk: Uint8Array | undefined = first
+  while (chunk !== undefined) {
+    let start = 0
+    for (let at = chunk.indexOf(0x0a); at !== -1; at = chunk.indexOf(0x0a, start)) {
+      held.push(chunk.subarray(start, at))
+      const out = await one(concat(held))
+      if (out !== null) yield out
+      held = []
+      start = at + 1
+    }
+    if (start < chunk.length) held.push(chunk.subarray(start))
+    const next = await rest.next()
+    chunk = next.done === true ? undefined : next.value
+  }
+  if (held.length > 0) {
+    const out = await one(concat(held))
+    if (out !== null) yield out
+  }
+  if (errors.length > 0) {
+    io.exitCode = 1
+    io.stderr = encodeText(errors.join(''))
+  }
+}
+
+/**
+ * `-f`: each line of the file a `-d` expression, printed in turn as it is
+ * read. A line that names no date is reported and the next one still prints,
+ * exit 1; `-` reads standard input. A file that cannot be opened is reported
+ * before anything prints. Mirrors Python's `_each_line`.
+ */
 async function eachLine(
   ctx: Context,
   datefile: PathSpec,
   zone: Zone,
   fmt: string,
 ): Promise<CommandFnResult> {
-  let data: Uint8Array
+  let source: AsyncIterator<Uint8Array>
+  let first: Uint8Array
   try {
-    if (datefile.rawPath === '-') data = await materialize(ctx.stdin)
-    else if (ctx.vfs !== undefined) data = await ctx.vfs.read(datefile)
-    else throw Object.assign(new Error(datefile.rawPath), { code: 'ENOENT' })
+    if (datefile.rawPath === '-') source = resolveSource(ctx.stdin)[Symbol.asyncIterator]()
+    else if (ctx.vfs !== undefined) {
+      source = (await ctx.vfs.read(datefile, { stream: true }))[Symbol.asyncIterator]()
+    } else throw Object.assign(new Error(datefile.rawPath), { code: 'ENOENT' })
+    const step = await source.next()
+    first = step.done === true ? new Uint8Array() : step.value
   } catch (err) {
     if (!isFsError(err)) throw err
     const line = fsErrorLine(CommandName.DATE, datefile, err)
     return [null, new IOResult({ exitCode: 1, stderr: encodeText(line) })]
   }
-  const lines = decodeText(data).split('\n')
-  if (lines.at(-1) === '') lines.pop()
-  let out = ''
-  let err = ''
-  for (const text of lines) {
-    const dt = await named(text, zone, ctx.signal)
-    if (dt === null) {
-      err += `date: invalid date '${quoteText(text)}'\n`
-      continue
-    }
-    out += gnuStrftime(dt, fmt, zone) + '\n'
-  }
-  return [
-    out === '' ? null : encodeText(out),
-    new IOResult({ exitCode: err === '' ? 0 : 1, stderr: err === '' ? null : encodeText(err) }),
-  ]
+  const io = new IOResult()
+  return [dated(first, source, zone, fmt, io, ctx.signal), io]
 }
 
 /**
@@ -237,7 +280,8 @@ async function date(
     dt = systemDate()
   }
   const fmt = formats[0] ?? DEFAULT_FORMAT
-  const out = encodeText(gnuStrftime(dt, fmt, zone) + '\n')
+  // --resolution names one nanosecond past the epoch.
+  const out = encodeText(gnuStrftime(dt, fmt, zone, resolution ? 1 : undefined) + '\n')
   if (setting !== null) return [out, new IOResult({ exitCode: 1, stderr: ENC.encode(CANNOT_SET) })]
   return [out, new IOResult()]
 }

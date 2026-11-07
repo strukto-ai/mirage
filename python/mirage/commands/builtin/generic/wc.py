@@ -510,6 +510,9 @@ async def wc_generic(
         )
         paths = listed
     if paths or listed_from is not None:
+        # A listed name may sit on another mount than the one that counts
+        # lines, so a list reads every file it names.
+        counted = line_count if listed_from is None else None
         body, err, records = await format_multi(
             paths,
             read=stream,
@@ -519,7 +522,7 @@ async def wc_generic(
             chars=parsed.chars,
             max_line_length=parsed.max_line_length,
             total=parsed.total,
-            line_count=line_count,
+            line_count=counted,
             size_of=size_of,
             listed_from=listed_from,
         )

@@ -78,6 +78,20 @@ def encode_value(value: bytes, encoding: str | None) -> bytes:
     return bytes(out)
 
 
+def _escaped(name: str) -> bytes:
+    """A ``# file:`` name as attr writes it, for ``setfattr --restore`` to
+    read back: a backslash, a newline and a carriage return as ``\\ooo``,
+    every other byte as it is.
+
+    Args:
+        name (str): the name.
+    """
+    return b"".join(
+        b"\\%03o" % byte if byte in b"\\\n\r" else bytes((byte,))
+        for byte in encode_text(name)
+    )
+
+
 async def _walk(
     dispatch: DispatchFn,
     walk: tuple[WalkCall, WalkCall],
@@ -122,6 +136,14 @@ async def _walk(
     if stat.type != FileType.DIRECTORY:
         return entries
     here = links.follow(path.virtual)
+    # A directory a link leads onto another mount is reported, not
+    # listed, as nftw stays on the operand's device.
+    if (
+        home is not None
+        and budget.mounts is not None
+        and budget.mounts.root_of(here) != home
+    ):
+        return entries
     if not budget.opens(here):
         return entries
     limit = budget.listing_limit(here)
@@ -342,5 +364,5 @@ async def _file_block(
                 + b"\n"
             )
     if block:
-        out += encode_text(f"# file: {header}\n") + block + b"\n"
+        out += b"# file: " + _escaped(header) + b"\n" + block + b"\n"
     return bytes(out), missing

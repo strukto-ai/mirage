@@ -151,6 +151,22 @@ describe('getfattr', () => {
     expect((await run(ws, 'getfattr -R --one-file-system -d in'))[1]).toBe(
       `# file: in\n${block}# file: in/g\n${block}`,
     )
+    await ws.shell('ln -s /r/in /r/lk')
+    expect((await run(ws, 'getfattr -R -L --one-file-system -d .'))[1]).toBe(
+      `# file: ./f\n${block}# file: ./lk\n${block}`,
+    )
+  })
+
+  it('escapes a name in a dump, so restore reads it back', async () => {
+    const ws = new Workspace({ '/r': new RAMVFS() }, { mode: MountMode.WRITE })
+    await ws.shell("cd /r && printf x > 'a\\155b' && printf y > amb")
+    await ws.vfs.setxattr('/r/a\\155b', 'user.k', ENC.encode('1'))
+    const block = '# file: a\\134155b\nuser.k="1"\n\n'
+    expect((await run(ws, "getfattr -d 'a\\155b'"))[1]).toBe(block)
+    const line =
+      "getfattr -d 'a\\155b' > dump; setfattr -x user.k 'a\\155b'; " +
+      "setfattr --restore=dump; getfattr -d 'a\\155b' amb"
+    expect(await run(ws, line)).toEqual([0, block, ''])
   })
 
   it.each([

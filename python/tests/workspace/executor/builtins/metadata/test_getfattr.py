@@ -169,6 +169,9 @@ async def test_one_file_system_stays_off_a_nested_mount():
     ) + (b"# file: ./in/g\n" + block)
     assert stayed == b"# file: ./f\n" + block
     assert inside == b"# file: in\n" + block + b"# file: in/g\n" + block
+    await ws.shell("ln -s /r/in /r/lk")
+    _, linked, _ = await _run(ws, "getfattr -R -L --one-file-system -d .")
+    assert linked == b"# file: ./f\n" + block + b"# file: ./lk\n" + block
 
 
 @pytest.mark.asyncio
@@ -192,3 +195,18 @@ async def test_a_bad_match_pattern():
         b"",
         'getfattr: invalid regular expression "["\n',
     )
+
+
+@pytest.mark.asyncio
+async def test_a_dump_escapes_a_name_so_restore_reads_it_back():
+    ws = Workspace({"/r/": RAMVFS()}, mode=MountMode.WRITE)
+    await ws.shell("cd /r && printf x > 'a\\155b' && printf y > amb")
+    await ws.vfs.setxattr("/r/a\\155b", "user.k", b"1")
+    block = b'# file: a\\134155b\nuser.k="1"\n\n'
+    _, dump, _ = await _run(ws, "getfattr -d 'a\\155b'")
+    assert dump == block
+    line = (
+        "getfattr -d 'a\\155b' > dump; setfattr -x user.k 'a\\155b'; "
+        "setfattr --restore=dump; getfattr -d 'a\\155b' amb"
+    )
+    assert await _run(ws, line) == (0, block, "")

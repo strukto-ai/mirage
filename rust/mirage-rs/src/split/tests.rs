@@ -215,6 +215,12 @@ fn line_bytes_pack_whole_records_and_cut_a_long_one() {
             vec!["abc", "def", "ghi", "jk\n", "l\n"],
         ),
         ("a\nb\nc\nd\n", "4", vec!["a\nb\n", "c\nd\n"]),
+        ("abcdefg", "1", vec!["a", "b", "c", "d", "e", "f", "g"]),
+        (
+            "abcdefgh\nij",
+            "2",
+            vec!["ab", "cd", "ef", "gh", "\n", "ij"],
+        ),
         ("", "5", vec![]),
     ] {
         let host = split(json!({"line_bytes": limit}), input);
@@ -270,4 +276,24 @@ fn elided_pieces_make_no_file_and_verbose_names_the_ones_made() {
     );
     let host = split(json!({"line_bytes": "3", "verbose": true}), "ab\ncd\n");
     assert_eq!(host.out, b"creating file 'xaa'\ncreating file 'xab'\n");
+}
+
+#[test]
+fn unbuffered_pieces_send_each_put() {
+    use super::pieces::Piece;
+    use crate::request::{Io, Request};
+    let writes = |unbuffered: bool| {
+        let mut io = Io::default();
+        let mut piece = Piece::new(b"xaa".to_vec());
+        piece.unbuffered = unbuffered;
+        piece.put(b"a\n", &mut io);
+        piece.put(b"b\n", &mut io);
+        io.requests
+            .iter()
+            .filter(|request| matches!(request, Request::Write { .. }))
+            .count()
+    };
+    assert_eq!((writes(false), writes(true)), (0, 2));
+    let host = split(json!({"number": "r/2", "unbuffered": true}), "a\nb\nc\n");
+    assert_eq!((file(&host, "xaa"), file(&host, "xab")), ("a\nc\n", "b\n"));
 }

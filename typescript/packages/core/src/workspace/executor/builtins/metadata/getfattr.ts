@@ -76,6 +76,19 @@ export function encodeValue(value: Uint8Array, encoding: string | null): Uint8Ar
  * walk's readdir and lstat, answered from a mount's `readTree` where one
  * answers; `dispatch` follows a link. Mirrors Python's `_walk`.
  */
+// A `# file:` name as attr writes it, for `setfattr --restore` to read back: a
+// backslash, a newline and a carriage return as `\ooo`, every other byte as
+// it is. Mirrors Python's _escaped.
+function escaped(name: string): number[] {
+  const out: number[] = []
+  for (const byte of encodeText(name)) {
+    if (byte === 0x5c || byte === 0x0a || byte === 0x0d) {
+      out.push(...encodeText(`\\${byte.toString(8).padStart(3, '0')}`))
+    } else out.push(byte)
+  }
+  return out
+}
+
 async function walk(
   dispatch: DispatchFn,
   calls: [WalkCall<string[]>, WalkCall<FileStat>],
@@ -102,6 +115,9 @@ async function walk(
   }
   if (!(stat instanceof FileStat) || stat.type !== FileType.DIRECTORY) return entries
   const here = links.follow(path.virtual)
+  // A directory a link leads onto another mount is reported, not listed, as
+  // nftw stays on the operand's device.
+  if (home !== null && budget.mounts?.rootOf(here) !== home) return entries
   if (!budget.opens(here)) return entries
   const limit = budget.listingLimit(here)
   const children = await (limit === null ? readdir(path) : readdir(path, false, limit))
@@ -184,7 +200,8 @@ async function fileBlock(
     if (want.onlyValues) for (const item of value) out.push(item)
     else block.push(...encodeText(`${attr}=`), ...encodeValue(value, want.encoding), 0x0a)
   }
-  if (block.length > 0) out.push(...encodeText(`# file: ${header}\n`), ...block, 0x0a)
+  if (block.length > 0)
+    out.push(...encodeText('# file: '), ...escaped(header), 0x0a, ...block, 0x0a)
   return [Uint8Array.from(out), missing]
 }
 

@@ -78,6 +78,8 @@ pub(super) struct Piece {
     pub(super) elide: bool,
     /// Whether a byte has been put.
     pub(super) touched: bool,
+    /// -u: what a put holds is sent before it returns.
+    pub(super) unbuffered: bool,
 }
 
 impl Piece {
@@ -89,6 +91,7 @@ impl Piece {
             limit: LIMIT,
             elide: false,
             touched: false,
+            unbuffered: false,
         }
     }
 
@@ -106,6 +109,9 @@ impl Piece {
             if self.held.len() >= self.limit {
                 self.send(io);
             }
+        }
+        if self.unbuffered && !self.held.is_empty() {
+            self.send(io);
         }
     }
 

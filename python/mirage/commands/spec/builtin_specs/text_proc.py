@@ -189,7 +189,6 @@ SPECS: dict[str, CommandSpec] = {
             Argument("-C", "--line-bytes"),
             Argument("-n", "--number"),
             Argument("-e", "--elide-empty-files", action="store_true"),
-            # Every write goes straight to its piece already.
             Argument("-u", "--unbuffered", action="store_true"),
             Argument("--verbose", action="store_true"),
             # GNU: -d/-x never take an argument; only --numeric-suffixes=

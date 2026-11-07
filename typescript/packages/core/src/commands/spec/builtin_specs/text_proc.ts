@@ -190,7 +190,6 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument(['-C', '--line-bytes']),
       new Argument(['-n', '--number']),
       new Argument(['-e', '--elide-empty-files'], { action: 'store_true' }),
-      // Every write goes straight to its piece already.
       new Argument(['-u', '--unbuffered'], { action: 'store_true' }),
       new Argument('--verbose', { action: 'store_true' }),
       new Argument(['-d', '--numeric-suffixes'], {

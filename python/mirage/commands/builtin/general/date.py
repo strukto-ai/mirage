@@ -12,9 +12,11 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone, tzinfo
 
 from mirage.accessor.base import Accessor
+from mirage.commands.builtin.utils.stream import resolve_source
 from mirage.commands.builtin.utils.strftime import gnu_strftime
 from mirage.commands.config import Context, command
 from mirage.commands.errors import UsageError
@@ -29,7 +31,7 @@ from mirage.commands.spec.usage import (
 )
 from mirage.errors.constants import FS_ERRORS
 from mirage.errors.render import fs_error_line
-from mirage.io.types import ByteSource, IOResult, materialize
+from mirage.io.types import ByteSource, IOResult
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.types import PathSpec
 from mirage.utils.clock import system_date
@@ -132,13 +134,66 @@ async def _named(expression: str, zone: tzinfo | None) -> datetime | None:
     return await parse_date_expr_async(expression, tz=zone)
 
 
+async def _dated(
+    first: bytes,
+    rest: AsyncIterator[bytes],
+    zone: tzinfo | None,
+    fmt: str,
+    io: IOResult,
+) -> AsyncIterator[bytes]:
+    """``-f``'s output, a line at a time as the expressions arrive; what
+    names no date goes to ``io``'s stderr, exit 1, once the input ends.
+
+    Args:
+        first (bytes): the input's first chunk, already read.
+        rest (AsyncIterator[bytes]): the rest of it.
+        zone (tzinfo | None): the command's zone; None is the host's.
+        fmt (str): the output format.
+        io (IOResult): the result the refusals settle into.
+    """
+    errors: list[str] = []
+
+    async def one(raw: bytes) -> bytes:
+        text = decode_text(raw)
+        dt = await _named(text, zone)
+        if dt is None:
+            errors.append(f"date: invalid date '{quote_text(text)}'\n")
+            return b""
+        return encode_text(
+            gnu_strftime(dt if zone else dt.astimezone(), fmt) + "\n"
+        )
+
+    held = bytearray()
+    chunk = first
+    while True:
+        start = 0
+        while (at := chunk.find(b"\n", start)) != -1:
+            held += chunk[start:at]
+            if out := await one(bytes(held)):
+                yield out
+            held.clear()
+            start = at + 1
+        held += chunk[start:]
+        try:
+            chunk = await anext(rest)
+        except StopAsyncIteration:
+            break
+    if held and (out := await one(bytes(held))):
+        yield out
+    if errors:
+        io.exit_code = 1
+        io.stderr = encode_text("".join(errors))
+
+
 async def _each_line(
     ctx: Context, datefile: PathSpec, zone: tzinfo | None, fmt: str
 ) -> tuple[ByteSource | None, IOResult]:
-    """``-f``: each line of the file a ``-d`` expression, printed in turn.
+    """``-f``: each line of the file a ``-d`` expression, printed in turn
+    as it is read.
 
     A line that names no date is reported and the next one still
-    prints, exit 1; ``-`` reads standard input.
+    prints, exit 1; ``-`` reads standard input. A file that cannot be
+    opened is reported before anything prints.
 
     Args:
         ctx (Context): the command's context.
@@ -148,30 +203,17 @@ async def _each_line(
     """
     try:
         if datefile.raw_path == "-":
-            data = await materialize(ctx.stdin)
+            source = resolve_source(ctx.stdin)
         elif ctx.vfs is not None:
-            data = await ctx.vfs.read(datefile)
+            source = await ctx.vfs.read(datefile, stream=True)
         else:
             raise FileNotFoundError(datefile.raw_path)
+        first = await anext(source, b"")
     except FS_ERRORS as exc:
         line = fs_error_line(CommandName.DATE, datefile, exc)
         return None, IOResult(exit_code=1, stderr=encode_text(line))
-    lines = data.split(b"\n")
-    if lines and lines[-1] == b"":
-        lines.pop()
-    out: list[str] = []
-    errors: list[str] = []
-    for raw in lines:
-        text = decode_text(raw)
-        dt = await _named(text, zone)
-        if dt is None:
-            errors.append(f"date: invalid date '{quote_text(text)}'\n")
-            continue
-        out.append(gnu_strftime(dt if zone else dt.astimezone(), fmt) + "\n")
-    err = encode_text("".join(errors))
-    return encode_text("".join(out)) or None, IOResult(
-        exit_code=1 if errors else 0, stderr=err or None
-    )
+    io = IOResult()
+    return _dated(first, source, zone, fmt, io), io
 
 
 async def _modified(ctx: Context, reference: PathSpec) -> datetime:
@@ -289,7 +331,9 @@ async def date(
     if zone is None:
         dt = dt.astimezone()
     fmt = formats[0] if formats else DEFAULT_FORMAT
-    out = encode_text(gnu_strftime(dt, fmt) + "\n")
+    # --resolution names one nanosecond past the epoch.
+    tick = 1 if resolution else None
+    out = encode_text(gnu_strftime(dt, fmt, nanosecond=tick) + "\n")
     if setting is not None:
         return out, IOResult(exit_code=1, stderr=CANNOT_SET)
     return out, IOResult()

@@ -30,6 +30,7 @@ const FLAGS = [
   'number',
   'elide_empty_files',
   'verbose',
+  'unbuffered',
   'suffix_length',
   'numeric_suffixes',
   'hex_suffixes',

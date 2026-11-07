@@ -115,6 +115,7 @@ export async function truncateGeneric(
   flags: TruncateFlags,
   stat: (path: PathSpec) => Promise<FileStat>,
   truncate: (path: PathSpec, length: number, noCreate: boolean) => Promise<void>,
+  referenceStat: (path: PathSpec) => Promise<FileStat> = stat,
 ): Promise<[ByteSource | null, IOResult]> {
   if (paths.length === 0)
     throw new UsageError(`truncate: missing file operand\n${usageHint('truncate')}`, 1)
@@ -122,7 +123,7 @@ export async function truncateGeneric(
   const reference = flags.reference ?? null
   if (reference !== null) {
     try {
-      base = BigInt((await stat(reference)).size ?? 0)
+      base = BigInt((await referenceStat(reference)).size ?? 0)
     } catch (e) {
       if (!isFsError(e)) throw e
       const line = `truncate: cannot stat ${shellQuoteAlways(reference.rawPath)}: ${fsStrerror(e) ?? ''}\n`

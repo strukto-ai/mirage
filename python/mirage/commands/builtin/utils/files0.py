@@ -23,7 +23,8 @@ async def listed_names(
 ) -> list[str]:
     """The names a ``--files0-from`` list holds: NUL-terminated, the last
     one with or without its NUL. An empty name stays in place, for the
-    command to refuse by its number.
+    command to refuse by its number. The list is read in one pass,
+    holding each name once and no more of the listing than one name.
 
     Args:
         source (PathSpec): the list, ``-`` for stdin when ``stream`` reads
@@ -31,11 +32,19 @@ async def listed_names(
         stream (Callable[[PathSpec], AsyncIterator[bytes]]): the reader;
             what it raises propagates.
     """
-    listing = b"".join([chunk async for chunk in stream(source)])
-    names = listing.split(b"\0")
-    if names[-1] == b"":
-        names.pop()
-    return [decode_text(name) for name in names]
+    names: list[str] = []
+    held = bytearray()
+    async for chunk in stream(source):
+        start = 0
+        while (at := chunk.find(b"\0", start)) != -1:
+            held += chunk[start:at]
+            names.append(decode_text(bytes(held)))
+            held.clear()
+            start = at + 1
+        held += chunk[start:]
+    if held:
+        names.append(decode_text(bytes(held)))
+    return names
 
 
 __all__ = ["listed_names"]

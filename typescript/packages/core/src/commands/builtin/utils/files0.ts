@@ -19,16 +19,26 @@ import { concat } from '../../../utils/bytes.ts'
 /**
  * The names a `--files0-from` list holds: NUL-terminated, the last one with or
  * without its NUL. An empty name stays in place, for the command to refuse by
- * its number. What the reader throws propagates. Mirrors Python's
- * `listed_names`.
+ * its number. The list is read in one pass, holding each name once and no
+ * more of the listing than one name. What the reader throws propagates.
+ * Mirrors Python's `listed_names`.
  */
 export async function listedNames(
   source: PathSpec,
   stream: (p: PathSpec) => AsyncIterable<Uint8Array>,
 ): Promise<string[]> {
-  const chunks: Uint8Array[] = []
-  for await (const chunk of stream(source)) chunks.push(chunk)
-  const names = decodeText(concat(chunks)).split('\0')
-  if (names[names.length - 1] === '') names.pop()
+  const names: string[] = []
+  let held: Uint8Array[] = []
+  for await (const chunk of stream(source)) {
+    let start = 0
+    for (let at = chunk.indexOf(0); at !== -1; at = chunk.indexOf(0, start)) {
+      held.push(chunk.subarray(start, at))
+      names.push(decodeText(concat(held)))
+      held = []
+      start = at + 1
+    }
+    if (start < chunk.length) held.push(chunk.slice(start))
+  }
+  if (held.length > 0) names.push(decodeText(concat(held)))
   return names
 }

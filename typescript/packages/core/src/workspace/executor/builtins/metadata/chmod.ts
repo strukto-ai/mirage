@@ -19,7 +19,7 @@ import type { RedirectResult } from '../../../../context/session_context.ts'
 import { isRefusal } from '../../../../errors/fs.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
-import { FileStat, FileType, type PathSpec } from '../../../../types.ts'
+import { FileStat, FileType, PathSpec } from '../../../../types.ts'
 import { DEFAULT_DIR_MODE, DEFAULT_FILE_MODE, parseChmod } from '../../../../utils/mode.ts'
 import { shellQuoteAlways } from '../../../../utils/quote.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
@@ -29,12 +29,14 @@ import {
   type WalkEntry,
   beforeRecursiveChange,
   permissionError,
+  preservesRoot,
   referenceOperands,
   referenceStat,
   resolveOperand,
   rootRefusal,
   setattrVia,
   traversal,
+  unfollowedError,
   unreadError,
   verbosity,
   walkedName,
@@ -137,11 +139,15 @@ export async function handleChmod(
       }
     }
     const entries: WalkEntry[] = recursive
-      ? await walkStats(links, dispatch, resolved, stat, walk === 'L')
+      ? await walkStats(links, dispatch, resolved, stat, walk === 'L', preservesRoot(fl))
       : [[resolved, stat, null]]
     for (const [path, entryStat, unread] of entries) {
       if (entryStat.type === FileType.SYMLINK) {
-        if (report === 'verbose') out.push(linkLine(walkedName(target.rawPath, resolved, path)))
+        const name = walkedName(target.rawPath, resolved, path)
+        if (walk !== 'L') {
+          if (report === 'verbose') out.push(linkLine(name))
+        } else if (unread !== null) errors.push(unfollowedError('chmod', name, unread))
+        else errors.push(rootRefusal('chmod', fl, name, PathSpec.fromStrPath('/')) ?? '')
         continue
       }
       // Backends without a mode default to what ls renders: 755 for

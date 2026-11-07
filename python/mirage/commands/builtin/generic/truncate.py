@@ -19,7 +19,7 @@ from mirage.rs.errors import StreamRefusal
 from mirage.rs.scan import refused, scan
 from mirage.shell.bytes import encode_text
 from mirage.types import FileStat, PathSpec
-from mirage.utils.path import ends_at_dot
+from mirage.utils.path import CycleError, ends_at_dot
 from mirage.utils.quote import shell_quote_always
 from mirage.utils.stat_view import is_dir
 
@@ -128,6 +128,7 @@ async def truncate_generic(
     flags: TruncateFlags,
     stat: Callable[[PathSpec], Awaitable[FileStat]],
     truncate_fn: Callable[[PathSpec, int, bool], Awaitable[None]],
+    reference_stat: Callable[[PathSpec], Awaitable[FileStat]] | None = None,
 ) -> tuple[ByteSource | None, IOResult]:
     """Set each operand's length, GNU ``truncate -s``.
 
@@ -140,6 +141,8 @@ async def truncate_generic(
         flags (TruncateFlags): the parsed flags.
         stat (Callable): stats a path; raises when missing.
         truncate_fn (Callable): sets the length and enforces no_create.
+        reference_stat (Callable | None): stats ``-r``'s file through its
+            links; ``stat`` when None.
     """
     if not paths:
         raise UsageError(
@@ -148,8 +151,8 @@ async def truncate_generic(
     base: int | None = None
     if flags.reference is not None:
         try:
-            base = (await stat(flags.reference)).size or 0
-        except FS_ERRORS as exc:
+            base = (await (reference_stat or stat)(flags.reference)).size or 0
+        except FS_ERRORS + (CycleError,) as exc:
             label = shell_quote_always(flags.reference.raw_path)
             line = f"truncate: cannot stat {label}: {fs_strerror(exc)}\n"
             return None, IOResult(exit_code=1, stderr=encode_text(line))

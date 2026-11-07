@@ -45,6 +45,9 @@ struct Config {
     /// --verbose: each file is announced on the output as it is made.
     #[serde(default)]
     verbose: bool,
+    /// -u: each write goes to its piece as it is cut, none held.
+    #[serde(default)]
+    unbuffered: bool,
     #[serde(default, deserialize_with = "crate::latin1_opt")]
     suffix_length: Option<Vec<u8>>,
     /// -d, or `--numeric-suffixes=START`: `true`, or the start as typed.
@@ -148,6 +151,7 @@ struct Plan {
     additional: Vec<u8>,
     elide: bool,
     verbose: bool,
+    unbuffered: bool,
 }
 
 /// A count as split reads one: C blanks, at most one `+`, and decimal
@@ -360,6 +364,7 @@ fn plan(config: Config) -> Result<Plan, Vec<u8>> {
         additional: config.additional_suffix,
         elide: config.elide_empty_files,
         verbose: config.verbose,
+        unbuffered: config.unbuffered,
     })
 }
 
@@ -495,7 +500,9 @@ impl Split {
     fn start(&mut self) -> Option<Piece> {
         let name = self.name()?;
         self.announce(&name);
-        Some(Piece::new(name))
+        let mut piece = Piece::new(name);
+        piece.unbuffered = self.plan.unbuffered;
+        Some(piece)
     }
 
     fn put(&mut self, from: usize, to: usize, out: &mut Vec<u8>) {
@@ -639,12 +646,18 @@ impl Split {
             self.close();
             return;
         }
+        // Every piece the open record fills is cut now, so what is held
+        // stays within one piece however long the record runs.
         let mut open = std::mem::take(&mut self.hold);
         open.extend_from_slice(rest);
         self.input.at = self.input.buf.len();
         let cut = usize::try_from(limit).unwrap_or(usize::MAX);
-        self.hold = open.split_off(cut);
-        self.fill(&open, limit);
+        let full = (open.len() - 1) / cut * cut;
+        for at in (0..full).step_by(cut) {
+            self.fill(&open[at..at + cut], limit);
+        }
+        open.drain(..full);
+        self.hold = open;
     }
 
     /// Place one whole record: in the piece being cut when it fits, else
@@ -801,6 +814,7 @@ impl Split {
                     // The group holds what one piece would.
                     let mut piece = Piece::new(self.named(&suffix.unwrap_or_default()));
                     piece.limit /= usize::try_from(want).unwrap_or(1);
+                    piece.unbuffered = self.plan.unbuffered;
                     // Under -e a piece is made by its first line, if any.
                     piece.elide = self.plan.elide;
                     if !piece.elide {
