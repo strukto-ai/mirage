@@ -40,9 +40,7 @@ from mirage.utils.hidden import var_hidden
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.alias.alias import body_alias_values
 from mirage.workspace.executor.builtins.declare.constants import (
-    ANSI_C_ESCAPES,
-    BARE_KEY_RE,
-    CONTROL_RE,
+    ELEMENT_OPERAND_RE,
     EXPORT_FLAGS,
     LISTED_ATTRIBUTES,
     READONLY_FLAGS,
@@ -71,6 +69,7 @@ from mirage.workspace.session.state import (
     deref,
     in_call_env,
     outlive_call,
+    prefix_temporaries,
     set_attr,
     shadow_local,
     subscript_index,
@@ -532,46 +531,6 @@ async def store_staged_arrays(
     return None
 
 
-def is_control(ch: str) -> bool:
-    return ord(ch) < 0x20 or ord(ch) == 0x7F
-
-
-def bash_declare_quote(value: str) -> str:
-    """Quote a value the way bash ``declare -p`` / ``export -p`` does.
-
-    A value holding any control character takes the ``$'...'`` form, with
-    the named escapes bash uses (``\\a \\b \\t \\n \\v \\f \\r``, and
-    ``\\E`` for escape) and three-digit octal for the rest; ``"``, ``$``
-    and backtick need no escaping there because ``$'...'`` does not
-    expand. Everything else is double-quoted with escapes for ``\\``,
-    ``"``, ``$`` and backtick. Non-ASCII printable text stays literal,
-    which is what bash emits in a UTF-8 locale.
-
-    Args:
-        value (str): the variable value to serialize.
-
-    Returns:
-        str: the quoted value, ready to follow ``declare -x NAME=``.
-    """
-    parts: list[str] = []
-    if CONTROL_RE.search(value):
-        for ch in value:
-            escape = ANSI_C_ESCAPES.get(ch)
-            if escape is not None:
-                parts.append(escape)
-            elif is_control(ch):
-                parts.append(f"\\{ord(ch):03o}")
-            else:
-                parts.append(ch)
-        return "$'" + "".join(parts) + "'"
-    for ch in value:
-        if ch in '\\"$`':
-            parts.append("\\" + ch)
-        else:
-            parts.append(ch)
-    return '"' + "".join(parts) + '"'
-
-
 def split_decl_flags(
     args: list[DeclarationOperand],
     allowed: frozenset[str],
@@ -605,11 +564,15 @@ def split_decl_flags(
 
 def operand_parts(word: str) -> tuple[str, bool, str | None]:
     """A declaration operand as its name, whether it appends, and its
-    value, None for a bare name: ``X+=y`` appends ``y`` to ``X``.
+    value, None for a bare name: ``X+=y`` appends ``y`` to ``X``. An
+    element's ``=`` is the first after its subscript (``a[x=5]=1``).
 
     Args:
         word (str): the operand as typed.
     """
+    element = ELEMENT_OPERAND_RE.match(word)
+    if element is not None:
+        return element.group(1), bool(element.group(2)), element.group(3)
     name, eq, value = word.partition("=")
     if not eq:
         return word, False, None
@@ -677,95 +640,13 @@ def declaration_result(
     )
 
 
-def assoc_key_text(key: str) -> str:
-    """One associative key as ``declare -p`` spells it.
-
-    Bare when every character is one GNU leaves unquoted (pinned by a
-    character sweep on 5.2.37: alphanumerics and the punctuation
-    ``_ % + , - . / : = @ ~``), quoted like a value otherwise. A key
-    that *is* ``@`` or ``*`` quotes even though the character is bare
-    mid-key, since the bare spelling would read back as a splat.
-
-    Args:
-        key (str): the key to render.
-    """
-    if key not in ("@", "*") and BARE_KEY_RE.fullmatch(key):
-        return key
-    return bash_declare_quote(key)
-
-
-def assoc_body(amap: dict[str, str]) -> str:
-    """The ``=(...)`` tail of an associative ``declare`` line.
-
-    Sorted keys (mirage's pinned order, where GNU prints hash order)
-    and GNU's trailing space before the closing paren, which an empty
-    map does not carry: ``m=([a]="1" )`` but ``m=()``.
-
-    Args:
-        amap (dict[str, str]): the associative array.
-    """
-    if not amap:
-        return "=()"
-    parts = " ".join(
-        f"[{assoc_key_text(k)}]={bash_declare_quote(amap[k])}"
-        for k in sorted(amap)
-    )
-    return f"=({parts} )"
-
-
-def array_body(arr: ShellArray) -> str:
-    """The ``=(...)`` an indexed array's ``declare -p`` line ends with:
-    ``a=([0]="x" [2]="z")``.
-
-    Args:
-        arr (ShellArray): the indexed array.
-    """
-    parts = [f"[{i}]={bash_declare_quote(v)}" for i, v in arr.elements.items()]
-    return f"=({' '.join(parts)})"
-
-
-def declare_line(session: SessionState, name: str) -> str | None:
-    """The ``declare -p`` line for one name, or None when it has none.
-
-    The attribute cluster is `attr_letters`, which is why this renders
-    `declare -rx` and `declare -ar` without a table of its own: the
-    record already knows its own letters and their print order. bash
-    spells an empty cluster ``--``, and that spelling is the caller's
-    because only a `declare` line needs it.
-
-    A hidden name answers None, the same way `env_is_readonly` answers
-    False for one: reporting it as declared would leak it.
-
-    Args:
-        session (SessionState): shell session state.
-        name (str): the variable to render.
-
-    Returns:
-        str | None: the rendered line, or None when unset and
-        unattributed, hidden, or absent.
-    """
-    if var_hidden(session.visibility, name):
-        return None
-    var = session.vars.get(name)
-    if var is None:
-        return None
-    letters = attr_letters(var)
-    head = f"declare -{letters}" if letters else "declare --"
-    if var.value is None:
-        return f"{head} {name}"
-    if isinstance(var.value, ShellArray):
-        return f"{head} {name}{array_body(var.value)}"
-    if isinstance(var.value, dict):
-        return f"{head} {name}{assoc_body(var.value)}"
-    return f"{head} {name}={bash_declare_quote(var.value)}"
-
-
 def declaration_listed(
     session: SessionState, name: str, flags: set[str]
 ) -> bool:
     """Whether a no-name ``declare`` listing's letters keep ``name``:
     ``-a`` / ``-A`` narrow it to that array kind (``kind_listed``), and
     any of ``-i -l -n -r -t -u -x`` keeps a name carrying one of them.
+    A running command's temporary is never listed.
 
     Args:
         session (SessionState): shell session state.
@@ -773,7 +654,11 @@ def declaration_listed(
         flags (set[str]): the listing's option letters.
     """
     var = session.vars.get(name)
-    if var is None or not kind_listed(session, name, flags):
+    if (
+        var is None
+        or not kind_listed(session, name, flags)
+        or name in prefix_temporaries(session)
+    ):
         return False
     wanted = flags & LISTED_ATTRIBUTES
     return not wanted or bool(wanted & set(attr_letters(var)))
@@ -807,7 +692,7 @@ async def handle_declare_print(
     lines: list[str] = []
     errors: list[str] = []
     for name in targets:
-        line = declare_line(session, name)
+        line = session.vars.shell.declaration(name)
         if line is None:
             errors.append(f"{shell_voice()}{cmd}: {name}: not found")
         else:
@@ -994,10 +879,13 @@ async def mark_names(
             cmd, session, marked, names, on, state, kind, policies
         )
     if not names:
+        temporaries = prefix_temporaries(session)
         lines = (
-            declare_line(session, name)
+            session.vars.shell.declaration(name)
             for name, var in sorted(session.vars.items())
-            if attr in var.attrs and kind_listed(session, name, flags)
+            if attr in var.attrs
+            and kind_listed(session, name, flags)
+            and name not in temporaries
         )
         return ok(cmd, encode_text("".join(f"{x}\n" for x in lines if x)))
     return await mark_variables(

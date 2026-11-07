@@ -75,7 +75,7 @@ pub trait Gate {
         key: &str,
         value: Option<&[u8]>,
         store: &Store,
-    ) -> impl Future<Output = Result<(), Denied>>;
+    ) -> impl Future<Output = Result<(), Fault>>;
 
     fn post(
         &mut self,
@@ -84,7 +84,7 @@ pub trait Gate {
         value: Option<&[u8]>,
         old: Option<&[u8]>,
         store: &Store,
-    ) -> impl Future<Output = Result<(), Denied>>;
+    ) -> impl Future<Output = Result<(), Fault>>;
 }
 
 /// Why a write did not land.
@@ -109,8 +109,9 @@ pub enum Fault {
     },
     /// What the operation builds outgrows the workspace's `max_memory`.
     Memory,
-    /// A construct the engine does not run yet; the host runs the line.
-    Unsupported(&'static str),
+    /// The host failed what it was asked, or answered something else; the
+    /// operation stops, and the host raises its own error.
+    Host(&'static str),
 }
 
 impl From<Signal> for Fault {
@@ -241,8 +242,7 @@ impl<G: Gate> Writer<'_, G> {
         if self.gate.listens() {
             self.gate
                 .pre(Verb::Set, &name, Some(&rendering), self.store)
-                .await
-                .map_err(Fault::Denied)?;
+                .await?;
         }
         let generator = self.store.generator();
         let seeding = match &value {
@@ -305,7 +305,7 @@ impl<G: Gate> Writer<'_, G> {
                 .as_ref()
                 .and_then(|var| var.value.as_ref())
                 .map(Value::rendering);
-            if let Err(denied) = self
+            if let Err(fault) = self
                 .gate
                 .post(
                     Verb::Set,
@@ -318,7 +318,7 @@ impl<G: Gate> Writer<'_, G> {
             {
                 self.store.place(&name, old);
                 self.store.set_generator(generator);
-                return Err(Fault::Denied(denied));
+                return Err(fault);
             }
         }
         Ok(())
@@ -344,10 +344,7 @@ impl<G: Gate> Writer<'_, G> {
             });
         }
         if self.gate.listens() {
-            self.gate
-                .pre(Verb::Unset, &name, None, self.store)
-                .await
-                .map_err(Fault::Denied)?;
+            self.gate.pre(Verb::Unset, &name, None, self.store).await?;
         }
         let marks = self.store.marks();
         let (old, frame) = self.store.drop_var(&name);
@@ -356,7 +353,7 @@ impl<G: Gate> Writer<'_, G> {
                 .as_ref()
                 .and_then(|var| var.value.as_ref())
                 .map(Value::rendering);
-            if let Err(denied) = self
+            if let Err(fault) = self
                 .gate
                 .post(
                     Verb::Unset,
@@ -368,7 +365,7 @@ impl<G: Gate> Writer<'_, G> {
                 .await
             {
                 self.store.undrop(&name, old, frame, marks);
-                return Err(Fault::Denied(denied));
+                return Err(fault);
             }
         }
         Ok(())
@@ -393,10 +390,7 @@ impl<G: Gate> Writer<'_, G> {
         };
         self.visible(&name)?;
         if self.gate.listens() {
-            self.gate
-                .pre(Verb::Set, &name, None, self.store)
-                .await
-                .map_err(Fault::Denied)?;
+            self.gate.pre(Verb::Set, &name, None, self.store).await?;
         }
         let old = self.store.share(&name);
         let generator = self.store.generator();
@@ -409,14 +403,14 @@ impl<G: Gate> Writer<'_, G> {
                 .as_ref()
                 .and_then(|var| var.value.as_ref())
                 .map(Value::rendering);
-            if let Err(denied) = self
+            if let Err(fault) = self
                 .gate
                 .post(Verb::Set, &name, None, old_rendering.as_deref(), self.store)
                 .await
             {
                 self.store.place(&name, old);
                 self.store.set_generator(generator);
-                return Err(Fault::Denied(denied));
+                return Err(fault);
             }
         }
         Ok(())
@@ -506,7 +500,9 @@ impl<G: Gate> Writer<'_, G> {
             return Ok(index);
         }
         let mut draws = Draws::default();
-        let outcome = self.store.arith(&mut draws, subscript, None, self.nounset);
+        let outcome = self
+            .store
+            .arith(&mut draws, subscript, None, self.nounset, false);
         let (index, error) = match outcome.value {
             Ok(index) => (index, None),
             Err(error) => (0, Some(error)),
@@ -517,6 +513,17 @@ impl<G: Gate> Writer<'_, G> {
             .map_err(|error| fatal(self.store.voice(), error))?;
         match error {
             None => Ok(index),
+            Some(arith::Error::Arith {
+                reason,
+                expression,
+                token,
+                ..
+            }) => Err(Fault::Arith(arith::Error::Arith {
+                reason,
+                expression,
+                token,
+                subscript: true,
+            })),
             Some(error) => Err(fatal(self.store.voice(), error)),
         }
     }
@@ -526,7 +533,8 @@ impl<G: Gate> Writer<'_, G> {
     /// associative one's key `0`), `name[@]` and `name[*]` whether any
     /// element is set. An associative subscript is the key as typed, one
     /// quote pair removed, or verbatim once `expanded`; an indexed one is
-    /// arithmetic, whose writes land (`[[ -v a[x=2] ]]` leaves x at 2).
+    /// arithmetic, evaluated even on an unset name, whose writes land
+    /// (`[[ -v a[x=2] ]]` leaves x at 2).
     /// `array` is the indexed array the name reads as, `PIPESTATUS` and
     /// `FUNCNAME` included.
     pub async fn is_set(
@@ -557,13 +565,13 @@ impl<G: Gate> Writer<'_, G> {
             }
             Some(_) => {}
         }
+        let index = self.subscript_index(subscript.unwrap_or_default()).await?;
         let held = match array {
             Some(array) => array,
             None if scalar => Indexed::dense([Vec::new()]),
             None => return Ok(false),
         };
-        let index = held.back(self.subscript_index(subscript.unwrap_or_default()).await?);
-        Ok(held.get(index).is_some())
+        Ok(held.get(held.back(index)).is_some())
     }
 
     /// Write one element a builtin names (`read 'a[k]'`, `printf -v
@@ -649,10 +657,12 @@ impl<G: Gate> Writer<'_, G> {
     /// itself (`let 'X=5, R=3'` leaves X at 5). The draws settle either
     /// way, and an unset name under `set -u` stops the line only after the
     /// writes before it. An error comes back unworded, for the command to
-    /// voice.
-    pub async fn arith(&mut self, text: &[u8]) -> Result<i64, Fault> {
+    /// voice. `expand` for a `let` operand, whose subscripts expand first.
+    pub async fn arith(&mut self, text: &[u8], expand: bool) -> Result<i64, Fault> {
         let mut draws = Draws::default();
-        let outcome = self.store.arith(&mut draws, text, None, self.nounset);
+        let outcome = self
+            .store
+            .arith(&mut draws, text, None, self.nounset, expand);
         let value = outcome.value;
         let mut landed = Ok(());
         for write in outcome.writes {
@@ -696,23 +706,6 @@ impl<G: Gate> Writer<'_, G> {
     }
 }
 
-/// What a `+=` hands `set`: the held text then the added one, or on an
-/// integer the held text with the added one as `added`, the two evaluated
-/// in turn. An array extends element 0 and a map key `0`.
-pub fn appended(held: Option<&Value>, added: &[u8], integer: bool) -> (Vec<u8>, Option<Vec<u8>>) {
-    let text = match held {
-        Some(Value::Scalar(text)) => text.clone(),
-        Some(Value::Indexed(array)) => array.get(0).unwrap_or_default().to_vec(),
-        Some(Value::Assoc(map)) => map.get(b"0").unwrap_or_default().to_vec(),
-        None => Vec::new(),
-    };
-    if integer {
-        (text, Some(added.to_vec()))
-    } else {
-        ([text.as_slice(), added].concat(), None)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::pin::pin;
@@ -739,7 +732,7 @@ mod tests {
             key: &str,
             value: Option<&[u8]>,
             _: &Store,
-        ) -> Result<(), Denied> {
+        ) -> Result<(), Fault> {
             self.heard
                 .push((verb, key.to_owned(), value.map(<[u8]>::to_vec)));
             Ok(())
@@ -752,12 +745,12 @@ mod tests {
             _: Option<&[u8]>,
             _: Option<&[u8]>,
             _: &Store,
-        ) -> Result<(), Denied> {
+        ) -> Result<(), Fault> {
             if self.refuse_post.as_deref() == Some(key) {
-                return Err(Denied {
+                return Err(Fault::Denied(Denied {
                     name: key.to_owned(),
                     record: 1,
-                });
+                }));
             }
             Ok(())
         }
@@ -883,7 +876,7 @@ mod tests {
         assert!(matches!(failed, Err(Fault::Signal(_))));
         let mut strict = writer(&mut store, &mut gate);
         strict.nounset = true;
-        let failed = run(strict.arith(b"w=5, nope"));
+        let failed = run(strict.arith(b"w=5, nope", false));
         assert!(matches!(failed, Err(Fault::Signal(_))));
         assert_eq!(text(&store, "z").as_deref(), Some("4"));
         assert_eq!(text(&store, "w").as_deref(), Some("5"));
@@ -958,15 +951,5 @@ mod tests {
         assert_eq!(refused(&mut writer, "s", b"-9"), Element::Subscript);
         let keys: Vec<_> = gate.heard.iter().map(|(_, key, _)| key.as_str()).collect();
         assert_eq!(keys, ["m", "s", "s", "t"]);
-    }
-
-    #[test]
-    fn appending_reads_element_zero() {
-        let array = Value::Indexed(Indexed::dense([b"x".to_vec()]));
-        assert_eq!(appended(Some(&array), b"y", false), (b"xy".to_vec(), None));
-        assert_eq!(
-            appended(Some(&scalar("2")), b"3", true),
-            (b"2".to_vec(), Some(b"3".to_vec()))
-        );
     }
 }

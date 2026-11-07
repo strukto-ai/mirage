@@ -16,13 +16,12 @@ from mirage.policy import PolicyDenied
 from mirage.policy.policies import Policies
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError
-from mirage.shell.variable import VarAttr
+from mirage.shell.variable import VarAttr, VarKind
 from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.executor.builtins.declare.constants import SUBSCRIPT_RE
 from mirage.workspace.executor.builtins.declare.declare import (
     declaration_result,
-    declare_line,
     drop_reference,
     held_value,
     identifier_refusal,
@@ -53,9 +52,11 @@ from mirage.workspace.executor.builtins.shared import (
     require_view,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.expand.types import SubscriptFn
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     appended,
+    assign_element,
     deref,
     env_get,
     evaluate_integer,
@@ -74,6 +75,7 @@ async def handle_local(
     state: SessionView | None = None,
     decl: Declaration = Declaration(),
     policies: Policies | None = None,
+    subscripts: SubscriptFn | None = None,
 ) -> Result:
     """Declare names in the running function's scope, or globally.
 
@@ -93,6 +95,8 @@ async def handle_local(
         decl (Declaration): the spelling and the letters it carried.
         policies (Policies | None): the policies an ``-i`` value's
             assignments clear.
+        subscripts (SubscriptFn | None): expands an element operand's
+            subscript (``declare 'd[$i]=w'``); None takes it as typed.
     """
     if decl.cmd == "local" and not session.vars.shell.in_function():
         # `local` is the one spelling that needs a function scope;
@@ -107,7 +111,8 @@ async def handle_local(
         # A bare `local`, whatever its letters, lists the running
         # function's locals as `declare -p` prints them.
         listed = (
-            declare_line(session, name) for name in session.vars.shell.locals()
+            session.vars.shell.declaration(name)
+            for name in session.vars.shell.locals()
         )
         return ok(
             "local",
@@ -133,6 +138,7 @@ async def handle_local(
             decl,
             not decl.global_scope and session.vars.shell.in_function(),
             policies,
+            subscripts,
         )
     finally:
         if restore is not None:
@@ -146,6 +152,7 @@ async def _declare_operands(
     decl: Declaration,
     scoped: bool,
     policies: Policies | None = None,
+    subscripts: SubscriptFn | None = None,
 ) -> Result:
     """Run ``handle_local``'s operands in the scope it settled on.
 
@@ -158,6 +165,8 @@ async def _declare_operands(
             False at global scope.
         policies (Policies | None): the policies an ``-i`` value's
             assignments clear.
+        subscripts (SubscriptFn | None): expands an element operand's
+            subscript.
     """
     cmd, kind, shaping, marks, plus, nameref, _, inherit = decl
     errors: list[str] = []
@@ -185,7 +194,13 @@ async def _declare_operands(
                     None
                     if refused is not None
                     else await _declare_operand(
-                        session, view, operand, decl, scoped, policies
+                        session,
+                        view,
+                        operand,
+                        decl,
+                        scoped,
+                        policies,
+                        subscripts,
                     )
                 )
             elif position in stored:
@@ -251,9 +266,10 @@ async def _declare_operand(
     decl: Declaration,
     scoped: bool,
     policies: Policies | None = None,
+    subscripts: SubscriptFn | None = None,
 ) -> str | None:
-    """Declare one ``NAME``, ``NAME=value`` or ``NAME+=value`` operand
-    and mark it.
+    """Declare one ``NAME``, ``NAME=value``, ``NAME+=value`` or element
+    operand and mark it.
 
     A ``-n`` declaration writes the reference itself, so a frozen
     reference refuses it (``declare -rn r=T; declare -n r=U``) even when
@@ -268,6 +284,8 @@ async def _declare_operand(
             False at global scope.
         policies (Policies | None): the policies an ``-i`` value's
             assignments clear.
+        subscripts (SubscriptFn | None): expands an element operand's
+            subscript.
 
     Returns:
         The operand's refusal line, or None when it declared.
@@ -277,10 +295,14 @@ async def _declare_operand(
         ArithError: an ``-i`` value did not evaluate.
     """
     cmd, kind, shaping, marks, plus, nameref, _, inherit = decl
+    key, append, val = operand_parts(assign)
+    if val is not None and SUBSCRIPT_RE.fullmatch(key):
+        return await _declare_element(
+            session, view, key, append, val, decl, scoped, policies, subscripts
+        )
     bad_name = identifier_refusal(cmd, assign)
     if bad_name is not None:
         return bad_name
-    key, append, val = operand_parts(assign)
     fresh = scoped and not session.vars.shell.is_local(key)
     if nameref:
         # The reference's own `-i -l -u` come off unless asked for, as
@@ -367,6 +389,86 @@ async def _declare_operand(
         await drop_reference(session, view, key)
     await view.set(key, value, assigned=assigned, added=added)
     await stamp_marks(session, view, key, checked, marks)
+    return None
+
+
+async def _declare_element(
+    session: SessionState,
+    view: SessionView,
+    key: str,
+    append: bool,
+    val: str,
+    decl: Declaration,
+    scoped: bool,
+    policies: Policies | None = None,
+    subscripts: SubscriptFn | None = None,
+) -> str | None:
+    """Assign one ``NAME[SUB]=value`` operand as bash's declaration does:
+    the subscript expands once more (``declare 'd[$i]=w'``), the name
+    becomes an array (a function's new local, an associative one under
+    ``-A``, a held scalar its element 0) and the element takes the value,
+    shaped by the declaration's ``-i -l -u``, before the marks go on.
+
+    Args:
+        session (SessionState): shell session state.
+        view (SessionView): the gated session view.
+        key (str): the target as typed, ``NAME[SUB]``.
+        append (bool): the operand was ``NAME[SUB]+=value``.
+        val (str): the value.
+        decl (Declaration): the spelling and the letters it carried.
+        scoped (bool): a function's own scope, which a local shadows.
+        policies (Policies | None): the policies the write clears.
+        subscripts (SubscriptFn | None): expands the subscript.
+
+    Returns:
+        The operand's refusal line, or None when it declared.
+
+    Raises:
+        PolicyDenied: the gate refused a write or a mark.
+        ArithError: an ``-i`` value or the index did not evaluate.
+    """
+    cmd, kind, shaping, marks, plus, nameref, _, inherit = decl
+    if nameref:
+        return (
+            f"{shell_voice()}{cmd}: {key}: reference variable cannot be"
+            " an array"
+        )
+    name, _, raw = key[:-1].partition("[")
+    if view.is_readonly(name):
+        return readonly_line(cmd, name)
+    fresh = scoped and not session.vars.shell.is_local(name)
+    if scoped:
+        shadow_local(session, name, inherit)
+    if fresh and not in_call_env(session, name):
+        start_local(session, name, inherit)
+    line = plus_refusal(cmd, session, view, name, plus)
+    if line is not None:
+        return line
+    held = held_value(session, name)
+    conflict = kind_conflict(held, kind)
+    if conflict is not None:
+        return f"{shell_voice()}{cmd}: {name}: {conflict}"
+    assoc = kind is VarKind.ASSOC or isinstance(held, dict)
+    if not raw or (not assoc and raw in ("@", "*")):
+        return f"{shell_voice()}{key}: bad array subscript"
+    if assoc and not isinstance(held, dict):
+        await view.set(
+            name,
+            {"0": held} if isinstance(held, str) else {},
+            follow_ref=False,
+        )
+    subscript = raw if subscripts is None else await subscripts(raw)
+    await premark(view, name, shaping)
+    status = await assign_element(
+        session, policies, name, subscript, val, append
+    )
+    if status == "readonly":
+        return readonly_line(cmd, name)
+    if status == "denied":
+        return f"{shell_voice()}{name}: permission denied"
+    if status != "ok":
+        return f"{shell_voice()}{key}: bad array subscript"
+    await stamp_marks(session, view, name, name, marks)
     return None
 
 

@@ -12,7 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from typing import Any, Callable
+from functools import partial
+from typing import Any, Callable, TypeVar
 
 from mirage.io import IOResult
 from mirage.policy import PolicyDenied
@@ -37,6 +38,7 @@ from mirage.workspace.executor.builtins import (
 )
 from mirage.workspace.executor.builtins.declare.constants import (
     LISTED_ATTRIBUTES,
+    SUBSCRIPT_RE,
     VISIBLE_SCOPE_BUILTINS,
 )
 from mirage.workspace.executor.builtins.declare.declare import (
@@ -54,6 +56,7 @@ from mirage.workspace.executor.builtins.declare.types import (
 from mirage.workspace.executor.builtins.help import flag_help
 from mirage.workspace.executor.builtins.shared import builtin_usage, fail
 from mirage.workspace.expand import expand_node
+from mirage.workspace.expand.node import expand_subscript
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.assignment import expand_array_items
@@ -105,6 +108,8 @@ _DECLARE_LETTERS = frozenset("aAfFgiIlnprtux")
 _DISPLACES = {"l": VarAttr.UPPER, "u": VarAttr.LOWER}
 # The attributes that shape a value as it stores.
 _SHAPING = frozenset({VarAttr.INTEGER, VarAttr.LOWER, VarAttr.UPPER})
+# A word or an operand of either kind, handed back as the kind it came in.
+_Operand = TypeVar("_Operand", str, DeclarationOperand)
 
 
 def _declare_option_refusal(
@@ -346,16 +351,25 @@ async def execute_declaration(
         return await handle_declare_print(words, session, flag_chars, keyword)
     conversion_errors: list[str] = []
     kind = declared_kind(flag_chars)
-    if kind is not None:
+    # A bare element operand (`declare t[1]`, `local h[2]`) declares its
+    # name an array, as `declare -a t` does.
+    elements = {
+        word.partition("[")[0] for word in words if _element_base(word) != word
+    }
+    if elements:
+        operands = [_element_base(operand) for operand in operands]
+        words = [_element_base(word) for word in words]
+    if kind is not None or elements:
         # `declare -a NAME` / `declare -A NAME` with no value declare
         # an empty array of that kind, so ${#NAME[@]} is 0 and an
         # element write leaves the other slots unassigned. GNU
         # refuses to convert between the two kinds and says so per
         # name while the rest of the operands still declare.
-        want_assoc = kind is VarKind.ASSOC
         for bare in words:
-            if "=" in bare:
+            want = kind or (VarKind.INDEXED if bare in elements else None)
+            if "=" in bare or want is None:
                 continue
+            want_assoc = want is VarKind.ASSOC
             # A hidden name refuses like any assignment spelling
             # before anything lands, and the array both branches below
             # write (the top-level one migrates an existing scalar)
@@ -384,7 +398,7 @@ async def execute_declaration(
             if local and fresh:
                 start_local(session, bare, "I" in flag_chars)
             held = held_value(session, bare)
-            conflict = kind_conflict(held, kind)
+            conflict = kind_conflict(held, want)
             if conflict is not None:
                 conversion_errors.append(
                     f"{shell_voice()}{cmd_word}: {bare}: {conflict}"
@@ -421,11 +435,18 @@ async def execute_declaration(
                         encode_text(f"{exc.strerror}\n")
                     ) from exc
                 seed_var(session, bare, fill)
-                continue
-            try:
-                await view.set(bare, fill, follow_ref=False)
-            except PolicyDenied as exc:
-                raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
+            else:
+                try:
+                    await view.set(bare, fill, follow_ref=False)
+                except PolicyDenied as exc:
+                    raise DiscardSignal(
+                        encode_text(f"{exc.strerror}\n")
+                    ) from exc
+            if held is None:
+                # Declared over nothing (a `local -I` holds the caller's
+                # value): `declare -p` prints no value and a bare `set`
+                # leaves it out until a write.
+                session.vars.shell.unassigned(bare)
     # declare/typeset scope like `local` inside a function (bash
     # semantics) and assign globally at top level, which is exactly
     # handle_local's fallback when no function scope is active. `-r`
@@ -442,6 +463,32 @@ async def execute_declaration(
         inherit="I" in flag_chars,
     )
     result = await handle_local(
-        operands, session, view, decl, registry.policies
+        operands,
+        session,
+        view,
+        decl,
+        registry.policies,
+        partial(
+            expand_subscript,
+            context=context,
+            execute_fn=execute_fn,
+            call_stack=cs,
+            policies=registry.policies,
+        ),
     )
     return _merge_conversion_errors(result, conversion_errors)
+
+
+def _element_base(operand: _Operand) -> _Operand:
+    """A bare element operand as the name it declares, any other as is.
+
+    Args:
+        operand (_Operand): one operand, a word or a staged array.
+    """
+    if (
+        isinstance(operand, str)
+        and "=" not in operand
+        and SUBSCRIPT_RE.fullmatch(operand)
+    ):
+        return operand.partition("[")[0]
+    return operand

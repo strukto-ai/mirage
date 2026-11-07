@@ -33,6 +33,9 @@ pub const EXPORT: u8 = 1 << 4;
 pub const LOWER: u8 = 1 << 5;
 /// `declare -u`: a value assigned is uppercased.
 pub const UPPER: u8 = 1 << 6;
+/// An array `declare -a` / `-A` made and nothing assigned yet: it lists
+/// with no value and no letter, and the first write clears it.
+pub const UNASSIGNED: u8 = 1 << 7;
 
 /// The stored attributes as `declare -p` prints them, in bash's own order,
 /// pinned over every ordered pair of `a A i l n r t u x`: `i n r t x`, then
@@ -125,10 +128,6 @@ impl Indexed {
 
     pub fn set(&mut self, index: i64, value: Vec<u8>) {
         self.0.insert(index, value);
-    }
-
-    pub fn unset(&mut self, index: i64) {
-        self.0.remove(&index);
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (i64, &[u8])> {
@@ -324,9 +323,9 @@ impl Var {
 
     /// The record holding `value` with the same attributes, but a
     /// reference's under an array: bash's reference cannot hold one, so
-    /// `declare -n r; r=(x)` leaves `declare -a r`.
+    /// `declare -n r; r=(x)` leaves `declare -a r`. It is assigned now.
     pub fn holding(&self, value: Option<Value>) -> Self {
-        let mut attrs = self.attrs;
+        let mut attrs = self.attrs & !UNASSIGNED;
         if value.as_ref().is_some_and(Value::is_array) {
             attrs &= !NAMEREF;
         }
@@ -449,17 +448,6 @@ impl std::fmt::Debug for Store {
             .field("held", &self.held)
             .finish_non_exhaustive()
     }
-}
-
-/// Why a step of a write stopped.
-#[derive(Debug)]
-pub enum Refused {
-    /// The name is hidden for this session.
-    Hidden(String),
-    Readonly(String),
-    /// An `-i` value did not evaluate, or reached a readonly name; the
-    /// writes it made before stopping are still owed.
-    Arith(arith::Error),
 }
 
 impl Store {
@@ -964,7 +952,8 @@ impl Store {
     /// a local `RANDOM` hands the caller's generator back, and a local
     /// `LINENO` or `BASHPID` the meaning the caller's had. Deliberate
     /// divergence: bash reseeds the generator there; mirage resumes the
-    /// caller's sequence where it left off.
+    /// caller's sequence where it left off. An `outer` scope no frame
+    /// holds is the top level.
     pub fn leave(&mut self, outer: Option<usize>) {
         if let Some(frame) = self.frames.pop() {
             let random = frame.saved.contains_key(RANDOM);
@@ -980,7 +969,7 @@ impl Store {
             }
             for (name, plain) in self
                 .local_plain
-                .split_off(self.local_plain.len() - specials)
+                .split_off(self.local_plain.len().saturating_sub(specials))
             {
                 self.plain.retain(|held| *held != name);
                 if plain {
@@ -988,7 +977,7 @@ impl Store {
                 }
             }
         }
-        self.local = outer;
+        self.local = outer.filter(|&index| index < self.frames.len());
     }
 
     /// Whether a function is running.
@@ -1049,11 +1038,16 @@ impl Store {
         self.frames.len() - 1
     }
 
-    /// Save `name`'s record in the prefix scope `index`, once.
+    /// Save `name`'s record in the prefix scope `index`, once; an index no
+    /// frame holds saves nothing.
     pub fn save_temp(&mut self, index: usize, name: &str) {
-        if !self.frames[index].saved.contains_key(name) {
-            let old = self.vars.get(name).cloned();
-            self.frames[index].saved.insert(name.to_owned(), old);
+        let Some(frame) = self.frames.get_mut(index) else {
+            return;
+        };
+        if !frame.saved.contains_key(name) {
+            frame
+                .saved
+                .insert(name.to_owned(), self.vars.get(name).cloned());
         }
     }
 
@@ -1193,21 +1187,17 @@ impl Store {
         child
     }
 
-    pub fn random_seed(&self) -> &Seed {
-        &self.random_seed
-    }
-
     /// Whether `RANDOM` is special here: not hidden, not ended.
     fn random_special(&self, name: &str) -> bool {
         name == RANDOM && !self.hidden(name) && self.random_seed != Seed::Off
     }
 
     /// One `$RANDOM` read: a draw from the generator, or None once it is
-    /// no longer special. A value the host seeded is consumed on its first
-    /// read; a seed that does not evaluate is an arithmetic error.
+    /// no longer special, or hidden. A value the host seeded is consumed on
+    /// its first read; a seed that does not evaluate is an arithmetic error.
     pub fn next_random(&mut self) -> Result<Option<u32>, arith::Error> {
         let stored = self.scalar(RANDOM).map(<[u8]>::to_vec);
-        if self.random_seed == Seed::Off || (stored.is_none() && self.random_seed != Seed::Fresh) {
+        if !self.random_special(RANDOM) || (stored.is_none() && self.random_seed != Seed::Fresh) {
             return Ok(None);
         }
         let reseed = match (&stored, &self.random_seed) {
@@ -1237,7 +1227,7 @@ impl Store {
     /// without the generator on offer, modulo 2^32.
     fn seed_from(&mut self, word: &[u8]) -> Result<u32, arith::Error> {
         let mut reading = Reading::plain(self);
-        let outcome = reading.evaluate(word, None, false, &[]);
+        let outcome = reading.evaluate(word, None, false, &[], false);
         outcome.value.map(|value| value as u32)
     }
 
@@ -1269,14 +1259,16 @@ impl Store {
 
     /// Evaluate `text` as arithmetic against the session, as every
     /// arithmetic context does: drawing through `draws`, stopping at a
-    /// write to a readonly name. The writes come back for the caller to
-    /// land through the gate.
+    /// write to a readonly name, its subscripts expanding first when
+    /// `expand` (a `let` operand, an `-i` value). The writes come back for
+    /// the caller to land through the gate.
     pub fn arith(
         &mut self,
         draws: &mut Draws,
         text: &[u8],
         added: Option<&[u8]>,
         nounset: bool,
+        expand: bool,
     ) -> Outcome {
         let mut reading = Reading {
             store: self,
@@ -1289,7 +1281,7 @@ impl Store {
             .filter(|&name| store.random_special(name) || store.dynamic(name).is_some())
             .map(str::to_owned)
             .collect();
-        reading.evaluate(text, added, nounset, &dynamic)
+        reading.evaluate(text, added, nounset, &dynamic, expand)
     }
 
     /// Replay an evaluation's scratch draws on the generator, once the gate
@@ -1319,7 +1311,7 @@ impl Store {
         added: Option<&[u8]>,
     ) -> Result<Vec<u8>, arith::Error> {
         let globals = self.step_back();
-        let outcome = self.arith(&mut coercion.draws, text, added, false);
+        let outcome = self.arith(&mut coercion.draws, text, added, false, true);
         self.step_forward(globals);
         coercion.writes.extend(outcome.writes);
         outcome.value.map(|value| value.to_string().into_bytes())
@@ -1488,6 +1480,7 @@ impl<'s> Reading<'s> {
         added: Option<&[u8]>,
         nounset: bool,
         dynamic: &[String],
+        expand: bool,
     ) -> Outcome {
         let request = arith::Request {
             expression: text,
@@ -1495,6 +1488,7 @@ impl<'s> Reading<'s> {
             nounset,
             elements: true,
             dynamic,
+            expand,
         };
         let mut outcome = arith::evaluate(&request, self);
         if let Err(arith::Error::Halt { subscript }) = outcome.value {
@@ -1640,52 +1634,6 @@ pub fn strip_key_quotes(text: &[u8]) -> &[u8] {
     }
 }
 
-/// Split one `[key]=value` array-literal word at its first `]=`, None for
-/// a plain word.
-pub fn keyed_word(word: &[u8]) -> Option<(&[u8], &[u8])> {
-    if word.first() != Some(&b'[') {
-        return None;
-    }
-    let at = word[1..].windows(2).position(|pair| pair == b"]=")? + 1;
-    if at <= 1 {
-        return None;
-    }
-    Some((&word[1..at], &word[at + 2..]))
-}
-
-/// The associative array a compound literal makes. The first word picks
-/// the grammar, as bash's does: a `[key]=value` first word makes every
-/// plain word an error, handed back for the caller to report, while a
-/// plain first word reads the list as alternating keys and values, an odd
-/// one out storing an empty value. `+=` merges over `base`.
-pub fn assoc_literal(
-    base: Option<&Assoc>,
-    words: &[Vec<u8>],
-    append: bool,
-) -> (Assoc, Vec<Vec<u8>>) {
-    let mut out = match base {
-        Some(base) if append => base.clone(),
-        _ => Assoc::default(),
-    };
-    let Some(first) = words.first() else {
-        return (out, Vec::new());
-    };
-    if keyed_word(first).is_none() {
-        for pair in words.chunks(2) {
-            out.set(pair[0].clone(), pair.get(1).cloned().unwrap_or_default());
-        }
-        return (out, Vec::new());
-    }
-    let mut errors = Vec::new();
-    for word in words {
-        match keyed_word(word) {
-            Some((key, value)) => out.set(key.to_vec(), value.to_vec()),
-            None => errors.push(word.clone()),
-        }
-    }
-    (out, errors)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1722,7 +1670,7 @@ mod tests {
         assert_eq!(array.slice(2, None), vec![&b"d"[..], b"j"]);
         assert_eq!(array.slice(-9, Some(-1)), vec![&b"b"[..], b"d"]);
         assert_eq!(array.slice(-11, None), Vec::<&[u8]>::new());
-        array.unset(9);
+        array.0.remove(&9);
         assert_eq!(array.extent(), 4);
         assert_eq!(array.back(-4), 0);
         assert_eq!(array.back(-5), -1);
@@ -1955,6 +1903,10 @@ mod tests {
         assert_eq!(draws, vec![17772, 26794, 1435]);
         store.drop_var(RANDOM);
         assert_eq!(store.next_random().unwrap(), None);
+        let mut hidden = self::store();
+        hidden.hide_vars(&[RANDOM.to_owned()], &[]);
+        assert_eq!(hidden.next_random().unwrap(), None);
+        assert_eq!(hidden.scalar(RANDOM), None);
     }
 
     #[test]
@@ -2006,15 +1958,22 @@ mod tests {
             b"PIPESTATUS[0] * 10 + PIPESTATUS[1] + PIPESTATUS + PIPESTATUS[-2]",
             None,
             false,
+            false,
         );
         assert_eq!(outcome.value.unwrap(), 12);
         store.set_specials(vec![3], None, 0, 0, Vec::new());
-        let outcome = store.arith(&mut draws, b"PIPESTATUS[0] + FUNCNAME[0]", None, false);
+        let outcome = store.arith(
+            &mut draws,
+            b"PIPESTATUS[0] + FUNCNAME[0]",
+            None,
+            false,
+            false,
+        );
         assert_eq!(outcome.value.unwrap(), 3);
         store.seed("r", Value::Scalar(b"PIPESTATUS".to_vec()));
         store.set_attr("r", Some(NAMEREF), true);
         assert_eq!(store.special("r"), Some(Indexed::dense([b"3".to_vec()])));
-        let outcome = store.arith(&mut draws, b"r[-1] + r", None, false);
+        let outcome = store.arith(&mut draws, b"r[-1] + r", None, false, false);
         assert_eq!(outcome.value.unwrap(), 6);
         store.hide_vars(&["PIPESTATUS".to_owned()], &[]);
         assert_eq!(store.special("PIPESTATUS"), None);
@@ -2031,7 +1990,7 @@ mod tests {
         assert_eq!(store.dynamic("r"), Some(b"7".to_vec()));
         assert_eq!(store.dynamic(BASHPID), Some(b"42".to_vec()));
         let mut draws = Draws::default();
-        let outcome = store.arith(&mut draws, b"LINENO * 100 + BASHPID", None, false);
+        let outcome = store.arith(&mut draws, b"LINENO * 100 + BASHPID", None, false, false);
         assert_eq!(outcome.value.unwrap(), 742);
 
         let outer = store.enter();
@@ -2062,6 +2021,20 @@ mod tests {
     }
 
     #[test]
+    fn scopes_a_host_names_wrongly_change_nothing() {
+        let mut store = store();
+        store.seed("x", Value::Scalar(b"1".to_vec()));
+        store.save_temp(9, "x");
+        let temp = store.open_temp();
+        store.save_temp(temp, LINENO);
+        store.leave(Some(9));
+        assert!(!store.in_function());
+        store.shadow("x", false);
+        assert_eq!(store.locals(), Vec::<String>::new());
+        assert_eq!(scalar(&store, "x").as_deref(), Some("1"));
+    }
+
+    #[test]
     fn negative_subscripts_count_back_or_fail() {
         let mut store = store();
         store.seed(
@@ -2069,15 +2042,15 @@ mod tests {
             Value::Indexed(Indexed::dense([b"p".to_vec(), b"q".to_vec()])),
         );
         let mut draws = Draws::default();
-        let outcome = store.arith(&mut draws, b"a[-1]", None, false);
+        let outcome = store.arith(&mut draws, b"a[-1]", None, false, false);
         assert_eq!(outcome.value.ok(), Some(0));
         store.seed(
             "n",
             Value::Indexed(Indexed::dense([b"5".to_vec(), b"6".to_vec()])),
         );
-        let outcome = store.arith(&mut draws, b"n[-1] + n", None, false);
+        let outcome = store.arith(&mut draws, b"n[-1] + n", None, false, false);
         assert_eq!(outcome.value.ok(), Some(11));
-        let outcome = store.arith(&mut draws, b"n[-3]", None, false);
+        let outcome = store.arith(&mut draws, b"n[-3]", None, false, false);
         match outcome.value {
             Err(arith::Error::Arith {
                 reason, expression, ..
@@ -2090,16 +2063,8 @@ mod tests {
     }
 
     #[test]
-    fn literals_pick_their_grammar_from_the_first_word() {
-        let words: Vec<Vec<u8>> = vec![b"k".to_vec(), b"v".to_vec(), b"odd".to_vec()];
-        let (map, errors) = assoc_literal(None, &words, false);
-        assert!(errors.is_empty());
-        assert_eq!(map.get(b"odd"), Some(&b""[..]));
-        let words: Vec<Vec<u8>> = vec![b"[a]=1".to_vec(), b"plain".to_vec()];
-        let (map, errors) = assoc_literal(None, &words, false);
-        assert_eq!(map.get(b"a"), Some(&b"1"[..]));
-        assert_eq!(errors, vec![b"plain".to_vec()]);
-        assert_eq!(keyed_word(b"[]=x"), None);
+    fn a_key_loses_one_pair_of_quotes() {
         assert_eq!(strip_key_quotes(b"\"x\""), b"x");
+        assert_eq!(strip_key_quotes(b"'x\""), b"'x\"");
     }
 }

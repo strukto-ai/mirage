@@ -10,7 +10,7 @@ use streams::interp::job::{Job, Output, Running, Step};
 use streams::interp::shell::Shell as Inner;
 use streams::interp::task::{self, Answer, Ask, Expanded, Mode, Write};
 use streams::interp::write::{Denied, Fault, Verb};
-use streams::interp::{Diagnostic, Signal, quote};
+use streams::interp::{Diagnostic, Signal, listing, quote};
 use streams::shell::Tree;
 use streams::vars::{self, Assigned, Indexed, Kind, Managed, Store, Value, Var};
 
@@ -177,7 +177,7 @@ fn fault_out<'py>(py: Python<'py>, fault: &Fault) -> PyResult<Bound<'py, PyAny>>
             .into_pyobject(py)?
             .into_any(),
         Fault::Memory => ("memory",).into_pyobject(py)?.into_any(),
-        Fault::Unsupported(what) => ("unsupported", *what).into_pyobject(py)?.into_any(),
+        Fault::Host(what) => ("host", *what).into_pyobject(py)?.into_any(),
     };
     Ok(out)
 }
@@ -223,8 +223,6 @@ fn diagnostics_out<'py>(
 #[pyclass(module = "mirage._rs")]
 pub struct Shell {
     inner: Option<Inner>,
-    /// The globals each running `declare -g` set aside, innermost last.
-    stepped: Vec<Vec<(String, Option<Arc<Var>>)>>,
     /// The bytes the records held when a task took the shell, which the
     /// workspace's memory count reads while it runs.
     parked: usize,
@@ -234,7 +232,6 @@ impl Shell {
     fn wrap(inner: Inner) -> Self {
         Self {
             inner: Some(inner),
-            stepped: Vec::new(),
             parked: 0,
         }
     }
@@ -429,11 +426,6 @@ impl Shell {
         Ok(self.store()?.is_readonly(name, follow_ref))
     }
 
-    /// The readonly variable a write to `name` reaches, if any.
-    fn frozen(&self, name: &str) -> PyResult<Option<String>> {
-        Ok(self.store()?.frozen(name))
-    }
-
     /// The exported scalars a child process inherits, hidden names left
     /// out.
     fn exported<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyList>> {
@@ -458,6 +450,35 @@ impl Shell {
         let attr = letter.map(vars::attrs_of);
         self.store_mut()?.set_attr(name, attr, on);
         Ok(())
+    }
+
+    /// Mark an array `declare -a` / `-A` just made as never assigned,
+    /// which its first write clears: bookkeeping, not a write.
+    fn unassigned(&mut self, name: &str) -> PyResult<()> {
+        self.store_mut()?
+            .set_attr(name, Some(vars::UNASSIGNED), true);
+        Ok(())
+    }
+
+    /// The line `declare -p` prints for a name; None for one unset or
+    /// hidden.
+    fn declaration<'py>(&self, py: Python<'py>, name: &str) -> PyResult<Option<Bound<'py, PyAny>>> {
+        listing::declaration(self.store()?, name)
+            .map(|line| text_of(py, &line))
+            .transpose()
+    }
+
+    /// The variable lines a bare `set` prints, sorted by name, the running
+    /// command's temporaries in `skip` left out.
+    fn assignments<'py>(
+        &self,
+        py: Python<'py>,
+        skip: Vec<String>,
+    ) -> PyResult<Vec<Bound<'py, PyAny>>> {
+        listing::assignments(self.store()?, &skip)
+            .iter()
+            .map(|line| text_of(py, line))
+            .collect()
     }
 
     /// Open a function call's scope; the token closes it.
@@ -525,19 +546,6 @@ impl Shell {
 
     fn unreach(&mut self) -> PyResult<()> {
         self.store_mut()?.unreach();
-        Ok(())
-    }
-
-    /// Step out to the caller's scope until `step_forward`.
-    fn step_back(&mut self) -> PyResult<()> {
-        let globals = self.store_mut()?.step_back();
-        self.stepped.push(globals);
-        Ok(())
-    }
-
-    fn step_forward(&mut self) -> PyResult<()> {
-        let globals = self.stepped.pop().unwrap_or_default();
-        self.store_mut()?.step_forward(globals);
         Ok(())
     }
 
@@ -624,18 +632,6 @@ impl Shell {
                 .into_pyobject(py)?
                 .into_any()),
         }
-    }
-
-    /// `$?` as the last operation left it.
-    #[getter]
-    fn status(&self) -> PyResult<i32> {
-        Ok(self.shell()?.status)
-    }
-
-    /// The status of the last command substitution since the last take,
-    /// None for none.
-    fn take_substituted(&mut self) -> PyResult<Option<i32>> {
-        Ok(self.shell_mut()?.substituted.take())
     }
 
     /// A copy for a fork of the session: the same records, a fresh
@@ -806,11 +802,17 @@ impl Shell {
         Self::write_task(slf, write, listens, warns)
     }
 
-    /// Evaluate an arithmetic command or `let` operand, its writes landed.
-    #[pyo3(signature = (text, *, listens = false))]
-    fn arith(slf: &Bound<'_, Self>, text: Bound<'_, PyAny>, listens: bool) -> PyResult<ShellTask> {
+    /// Evaluate an arithmetic command or `let` operand, its writes landed;
+    /// `expand` for a `let` operand, whose subscripts expand first.
+    #[pyo3(signature = (text, *, listens = false, expand = false))]
+    fn arith(
+        slf: &Bound<'_, Self>,
+        text: Bound<'_, PyAny>,
+        listens: bool,
+        expand: bool,
+    ) -> PyResult<ShellTask> {
         let text = bytes_of(&text)?;
-        Self::write_task(slf, Write::Arith { text }, listens, true)
+        Self::write_task(slf, Write::Arith { text, expand }, listens, true)
     }
 
     /// Evaluate a value as an `-i` write coerces it, its writes landed;
@@ -1028,7 +1030,7 @@ impl ShellTask {
 
     /// The host could not do what was asked; the operation stops.
     fn answer_failed(&mut self, py: Python<'_>) -> PyResult<()> {
-        self.answer(py, Answer::Failed(Fault::Unsupported("the host failed")))
+        self.answer(py, Answer::Failed(Fault::Host("the host failed")))
     }
 
     /// The result once `step` has returned None: the shell is the

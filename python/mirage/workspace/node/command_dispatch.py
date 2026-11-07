@@ -157,10 +157,10 @@ from mirage.workspace.session import SessionState
 from mirage.workspace.session.budget import check_env, entry_bytes
 from mirage.workspace.session.state import (
     bind_last_word,
+    deref,
     ensure_var_visible,
     env_is_readonly,
     seed_var,
-    set_attr,
     visible_env,
 )
 from mirage.workspace.types import ExecutionNode
@@ -505,7 +505,10 @@ async def execute_command(
         # expands them with the values from before the assignment:
         # `x=new echo $x` prints the old x and `IFS=, cmd $v` splits on
         # the old IFS.
-        for k, v in prefix_assignments:
+        for given, v in prefix_assignments:
+            # A reference's temporary is its target's (`N=5 cmd` over
+            # `declare -n N=T` sets T).
+            k = deref(session, given)
             # A first write's old record stays held; a repeat drops the earlier value.
             old = session.vars.get(k) if k in saved_env_overrides else None
             check_env(
@@ -524,10 +527,11 @@ async def execute_command(
             # merely in the shell. Seeding it plain left it invisible to
             # every reader of `env_snapshot` -- the command's own env, an
             # installed CLI, a guest runtime -- once that view narrowed
-            # to the exported set. The saved record is put back below, so
-            # neither the value nor the attribute outlives the command.
-            seed_var(session, k, v)
-            set_attr(session, k, VarAttr.EXPORT)
+            # to the exported set. The temporary carries that mark alone,
+            # as bash's does: `declare -i n; n=1+2 cmd` hands cmd `1+2`
+            # and `declare -p n` there prints `declare -x`. The saved
+            # record is put back below, so neither outlives the command.
+            session.vars[k] = ShellVar(v, frozenset({VarAttr.EXPORT}))
         # Judged before the command reads them; on a refusal the
         # restore below puts the old values back.
         await judge_landed(saved_renderings)

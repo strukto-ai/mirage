@@ -94,6 +94,24 @@ export function ownRecord<T>(record?: Record<string, T>): Record<string, T> {
 }
 
 /**
+ * A live view of the names `readonly` has marked: a lookup reads the one
+ * record it names. Mirrors Python's `_ReadonlyNames`.
+ */
+export class ReadonlyNames {
+  constructor(private readonly vars: ShellVars) {}
+
+  has(name: string): boolean {
+    return this.vars.get(name)?.attrs.has(VarAttr.Readonly) === true
+  }
+
+  *[Symbol.iterator](): Iterator<string> {
+    for (const [name, v] of this.vars.records()) {
+      if (v.attrs.has(VarAttr.Readonly)) yield name
+    }
+  }
+}
+
+/**
  * A live, read-only view of the records holding one kind of value, as
  * stored: hidden names and references are not resolved, and a lookup reads
  * the one record it names, so `session.arrays[key]` costs one record however
@@ -526,6 +544,11 @@ export class SessionState {
   // on from the running command's line, as `eval` and `$( )` do, or from 0
   // for a shell's own input.
   parseFrom: number | null = null
+  // Whether the next nested parse is a `$( )` or `<( )` body, which bash
+  // reads again as it prints it; and that running parse's line per row
+  // (`rereadRows`), null when its rows count as typed.
+  reread = false
+  lineRows: readonly number[] | null = null
   // Where each function was defined (`FunctionSite`), so its body expands
   // the aliases of that place and its approvals stand under it; a function
   // loaded from a stored session has none and runs as a parse of its own.
@@ -617,6 +640,8 @@ export class SessionState {
     this.decisions = init.decisions ?? []
     this.generation = init.generation ?? 0
     this.lastBgJobId = init.lastBgJobId ?? null
+    // A shell handed over whole, a fork's, is taken as it stands.
+    if (init.vars instanceof ShellVars) return
     // bash exports $PWD from startup, so a session that has never run
     // `cd` still has one. Seeding here rather than at lookup time is what
     // makes it an ordinary variable: assignable, unsettable, and listed
@@ -725,7 +750,7 @@ export class SessionState {
       sessionId: overrides.sessionId ?? this.sessionId,
       cwd: overrides.cwd ?? this.cwd,
       logicalCwd: movedTo !== undefined ? undefined : (overrides.logicalCwd ?? this.logicalCwd),
-      vars: records === null ? (overrides.vars ?? {}) : {},
+      vars: records ?? overrides.vars ?? {},
       createdAt: overrides.createdAt ?? this.createdAt,
       functions: overrides.functions ?? { ...this.functions },
       readonlyFunctions: overrides.readonlyFunctions ?? new Set(this.readonlyFunctions),
@@ -751,11 +776,6 @@ export class SessionState {
       generation: overrides.generation ?? this.generation,
       lastBgJobId: overrides.lastBgJobId ?? this.lastBgJobId,
     })
-    if (records !== null) {
-      const seeded = forked.vars
-      forked.vars = records
-      seeded.shell.close()
-    }
     forked.versions = this.versions
     forked.ids = this.ids
     forked.terminalOutput = this.terminalOutput
@@ -810,6 +830,7 @@ export class SessionState {
     child.parseCurrent = this.parseCurrent
     child.parseRow = this.parseRow
     child.lineRow = this.lineRow
+    child.lineRows = this.lineRows
     child.parseName = this.parseName
     child.parseHead = this.parseHead
     child.lineNode = this.lineNode
@@ -849,9 +870,8 @@ export class SessionState {
     const functions = Object.fromEntries(
       Object.entries(this.functions).filter(([name]) => this.exportedFunctions.has(name)),
     )
-    const started = ShellVars.of(vars)
     const child = this.fork({
-      vars: started.subshell(),
+      vars,
       functions,
       exportedFunctions: new Set(Object.keys(functions)),
       readonlyFunctions: new Set(),
@@ -871,7 +891,6 @@ export class SessionState {
     child.getoptsPos = 0
     child.getoptsOptind = null
     child.errexitIgnored = false
-    started.shell.close()
     return child
   }
 
@@ -885,10 +904,19 @@ export class SessionState {
 
   /**
    * The line of the command running, `$LINENO`: its row in the text that
-   * spelled it, numbered on from where that text's parse starts (`lineRow`).
+   * spelled it, as a body read again counts it (`lineRows`), numbered on
+   * from where that text's parse starts (`lineRow`).
    */
   get lineNumber(): number {
-    return this.lineRow + (this.lineNode === null ? 0 : lineRow(this.lineNode)) + 1
+    const row = this.lineNode === null ? 0 : this.countedRow(lineRow(this.lineNode))
+    return this.lineRow + row + 1
+  }
+
+  /** A row of the running parse's text as its lines count it. */
+  countedRow(row: number): number {
+    const rows = this.lineRows
+    if (rows === null || rows.length === 0) return row
+    return rows[Math.min(row, rows.length - 1)] ?? row
   }
 
   /**
@@ -940,12 +968,8 @@ export class SessionState {
   }
 
   /** The names `readonly` has marked. Read-only, like `env`. */
-  get readonlyVars(): ReadonlySet<string> {
-    const out = new Set<string>()
-    for (const [name, v] of this.vars.records()) {
-      if (v.attrs.has(VarAttr.Readonly)) out.add(name)
-    }
-    return out
+  get readonlyVars(): ReadonlyNames {
+    return new ReadonlyNames(this.vars)
   }
 
   openInputs(): SharedInput[] {

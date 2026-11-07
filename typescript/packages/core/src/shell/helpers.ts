@@ -59,12 +59,22 @@ export function sourceRow(node: TSNodeLike, end = false): number {
  * The row bash numbers `node` by, `$LINENO` and a diagnostic's `line N`: a
  * simple command's is where the token after its first element ends, which
  * bash has read by the time it makes the command (a redirect's operator, the
- * element itself when none follows); any other node's is the row it starts
- * on. Mirrors Python's line_row.
+ * element itself when none follows), or where that element ends when it is
+ * an assignment, which bash takes without reading on; any other node's is the
+ * row it starts on. Mirrors Python's line_row.
  */
 export function lineRow(node: TSNodeLike): number {
+  const parent = node.parent
+  if (node.type === NT.VARIABLE_ASSIGNMENT) {
+    if (parent?.type !== NT.VARIABLE_ASSIGNMENTS) return sourceRow(node, true)
+    node = parent
+  }
   const [first, second] = node.children
-  if (node.type !== NT.COMMAND || first === undefined) return sourceRow(node)
+  if (node.type === NT.VARIABLE_ASSIGNMENTS && first !== undefined) return sourceRow(first, true)
+  if ((node.type !== NT.COMMAND && node.type !== NT.DECLARATION_COMMAND) || first === undefined) {
+    return sourceRow(node)
+  }
+  if (first.type === NT.VARIABLE_ASSIGNMENT) return sourceRow(first, true)
   let after = second ?? first
   if (
     after.type === NT.FILE_REDIRECT ||

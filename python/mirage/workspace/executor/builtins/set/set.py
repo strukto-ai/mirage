@@ -19,15 +19,7 @@ from mirage.shell.call_stack import CallStack
 from mirage.shell.constants import SET_OPTION_DEFAULTS, SET_OPTION_NAMES
 from mirage.shell.options import parse_option_word
 from mirage.shell.voice import shell_voice
-from mirage.utils.quote import single_quote
-from mirage.workspace.executor.builtins.constants import SET_QUOTED_CHARS
-from mirage.workspace.executor.builtins.declare.constants import CONTROL_RE
-from mirage.workspace.executor.builtins.declare.declare import (
-    array_body,
-    assoc_body,
-    bash_declare_quote,
-    function_lines,
-)
+from mirage.workspace.executor.builtins.declare.declare import function_lines
 from mirage.workspace.executor.builtins.shared import (
     builtin_error,
     builtin_usage,
@@ -35,10 +27,8 @@ from mirage.workspace.executor.builtins.shared import (
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
+    prefix_temporaries,
     set_positional_params,
-    visible_arrays,
-    visible_assocs,
-    visible_env,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -135,47 +125,12 @@ def _listing(session: SessionState) -> list[str]:
     Args:
         session (SessionState): shell session state.
     """
-    values = {
-        k: f"{k}={_listed_value(v)}" for k, v in visible_env(session).items()
-    }
-    values.update(
-        (k, k + array_body(v)) for k, v in visible_arrays(session).items()
-    )
-    values.update(
-        (k, k + assoc_body(v)) for k, v in visible_assocs(session).items()
-    )
-    lines = [values[name] for name in sorted(values)]
+    lines = session.vars.shell.assignments(prefix_temporaries(session))
     if not session.shell_options.get("posix"):
         lines += function_lines(
             session, sorted(session.functions), True, False
         )
     return lines
-
-
-def _listed_value(value: str) -> str:
-    """A value as bash's bare ``set`` prints it.
-
-    ``$'...'`` when it holds a control character, the form ``declare
-    -p`` writes; single quotes when the shell would read a character in
-    it specially; bare otherwise. GNU prints ``IFS=$' \\t\\n'``,
-    ``x='a b'`` and ``y=a,b``.
-
-    Args:
-        value (str): the variable's value.
-    """
-    if CONTROL_RE.search(value):
-        return bash_declare_quote(value)
-    tilde = any(
-        ch == "~" and (i == 0 or value[i - 1] in "=:")
-        for i, ch in enumerate(value)
-    )
-    if (
-        tilde
-        or value.startswith("#")
-        or any(ch in SET_QUOTED_CHARS for ch in value)
-    ):
-        return single_quote(value)
-    return value
 
 
 def _option_listing(session: SessionState, plus: bool) -> bytes:

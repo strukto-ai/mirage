@@ -38,16 +38,6 @@ ALLOWED = {
     "`view.set` gated it; a write that re-aimed a `declare -n` "
     "reference marks its new target through `view.mark`",
     (
-        "mirage/workspace/node/command_dispatch.py",
-        "execute_command",
-    ): "the prefix-assignment loop calls `pre_session_gate` explicitly "
-    "before seeding, since `seed_var` is the ungated entry point",
-    (
-        "mirage/workspace/node/command_dispatch.py",
-        "seed_prefix",
-    ): "execute_command's seeding, run once the command's words are "
-    "expanded, of values its `pre_session_gate` loop already admitted",
-    (
         "mirage/workspace/node/explain.py",
         "_seeded",
     ): "the line pass's preview of a command's own prefix, on a fork of "

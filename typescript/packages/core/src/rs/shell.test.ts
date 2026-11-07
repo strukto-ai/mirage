@@ -221,7 +221,6 @@ describe('Shell', () => {
     expect(asked).toEqual(['c'])
     expect(result).toEqual(['ok', ['a', 'bc', 'd']])
     expect(diagnostics).toEqual([new TextEncoder().encode('w\n')])
-    expect(shell.takeSubstituted()).toBe(0)
   })
 
   it('asks the gate before a write lands, and stops on a refusal', () => {
@@ -251,7 +250,7 @@ describe('Shell', () => {
     expect(() => shell.get('x')).toThrow('the shell is running a task')
     task.answerFailed()
     const [result] = run(task, () => undefined)
-    expect(result).toEqual(['unsupported', 'the host failed'])
+    expect(result).toEqual(['host', 'the host failed'])
     expect(shell.get('x')).toBeNull()
   })
 })

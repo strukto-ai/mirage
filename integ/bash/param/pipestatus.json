@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "false | true; echo ${PIPESTATUS[@]}",
+      "command": "false | true; echo ${PIPESTATUS[@]}; false | true; declare -p PIPESTATUS; echo ${PIPESTATUS[@]@A}; zpf() { declare -p FUNCNAME; }; zpf; declare -p FUNCNAME LINENO",
       "expect": {
         "exit": 0,
-        "stdout": "1 0\n",
+        "stdout": "1 0\ndeclare -a PIPESTATUS=([0]=\"1\" [1]=\"0\")\ndeclare -a PIPESTATUS=([0]=\"0\")\ndeclare -a FUNCNAME=([0]=\"zpf\")\ndeclare -a FUNCNAME\ndeclare -- LINENO=\"1\"\n",
         "stderr": ""
       }
     },

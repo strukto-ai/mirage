@@ -22,12 +22,6 @@ export const COUNT_WORD_RE = /^[ \t\n\v\f\r]*[+-]?[0-9]+[ \t]*$/
 // identifier, while `a[ ]` is a valid arithmetic 0.
 export const TARGET_RE = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[(.+)\])?$/
 
-// What makes bash's bare `set` single-quote a value: IFS whitespace,
-// quoting and control characters, reserved-word and glob characters, and
-// the expansion introducers (`$` and a backquote). A `~` counts at
-// the start or after `=` or `:`, and a `#` only at the start.
-export const SET_QUOTED_CHARS: ReadonlySet<string> = new Set(' \t\n\'"\\|&;()<>!{}*[?]^$`')
-
 // The largest PID operand kill and ps read as a number: the bound both hosts
 // hold exactly (bash's own is intmax_t).
 export const MAX_PID_OPERAND = Number.MAX_SAFE_INTEGER

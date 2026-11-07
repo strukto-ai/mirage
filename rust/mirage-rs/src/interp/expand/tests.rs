@@ -4,7 +4,7 @@ use std::task::{Context, Poll, Waker};
 
 use super::patterns::regex_text;
 use super::*;
-use crate::interp::write::{Denied, Verb};
+use crate::interp::write::Verb;
 use crate::vars::{Assoc, Indexed, Store, Value};
 
 struct Fake;
@@ -14,7 +14,7 @@ impl Gate for Fake {
         false
     }
 
-    async fn pre(&mut self, _: Verb, _: &str, _: Option<&[u8]>, _: &Store) -> Result<(), Denied> {
+    async fn pre(&mut self, _: Verb, _: &str, _: Option<&[u8]>, _: &Store) -> Result<(), Fault> {
         Ok(())
     }
 
@@ -25,7 +25,7 @@ impl Gate for Fake {
         _: Option<&[u8]>,
         _: Option<&[u8]>,
         _: &Store,
-    ) -> Result<(), Denied> {
+    ) -> Result<(), Fault> {
         Ok(())
     }
 }

@@ -13,9 +13,10 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { RedirectResult } from '../../../../context/session_context.ts'
-import { runAsProgram } from '../../../../context/session_context.ts'
+import { isProgramInvocation, runAsProgram } from '../../../../context/session_context.ts'
 import type { ByteSource } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { BIN_PREFIX } from '../../../../shell/constants.ts'
 import { shellJoin } from '../../../../shell/join.ts'
 import type { ShellVar } from '../../../../shell/variable.ts'
 import { ownRecord, type SessionState, varsFromEnv } from '../../../session/session.ts'
@@ -31,10 +32,11 @@ function envError(message: string): RedirectResult {
 
 /**
  * What `env` runs and the environment it runs it in, read off its words:
- * the command's words, the environment (the session's sorted by name, each
- * `NAME=VALUE` replacing its name in place or adding it last), whether `-i`
- * cleared it and whether `-0` was given; or the message for words env
- * refuses. Mirrors the Python `env_child`.
+ * the command's words, the environment (the session's sorted by name, then
+ * `_` as env's path when the shell runs it, as bash hands every program it
+ * runs; each `NAME=VALUE` replacing its name in place or adding it last),
+ * whether `-i` cleared it and whether `-0` was given; or the message for
+ * words env refuses. Mirrors the Python `env_child`.
  */
 export function envChild(
   args: string[],
@@ -110,7 +112,11 @@ export function envChild(
   }
 
   const dropSet = new Set(unset)
-  const source = ignoreEnv ? {} : envSnapshot(session)
+  const source: Record<string, string> = ignoreEnv ? ownRecord() : envSnapshot(session)
+  if (!ignoreEnv && !isProgramInvocation(session)) {
+    delete source._
+    source._ = `${BIN_PREFIX}/env`
+  }
   const base: Record<string, string> = ownRecord()
   for (const [k, v] of Object.entries(source)) {
     if (!dropSet.has(k)) base[k] = v

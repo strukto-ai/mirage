@@ -1329,9 +1329,6 @@
    }
   },
   "workspace/session/session": {
-   "python_only": {
-    "_Readonly": "Python's live Set of the readonly names (session.readonly_vars); TypeScript's getter builds the set each call."
-   },
    "typescript_only": {
     "drawFrom": "A closure over the session's id source for the shell to draw seeds from; Python hands the shell the source's bound method."
    }

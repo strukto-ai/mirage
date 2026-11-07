@@ -63,7 +63,10 @@ impl<H: Host> Expander<'_, H> {
     pub(super) async fn evaluate(&mut self, text: &[u8], lead: &str) -> Result<i64, Fault> {
         let mut draws = Draws::default();
         let nounset = self.shell.option("nounset");
-        let outcome = self.shell.vars.arith(&mut draws, text, None, nounset);
+        let outcome = self
+            .shell
+            .vars
+            .arith(&mut draws, text, None, nounset, false);
         let value = outcome.value;
         for write in outcome.writes {
             let (name, key) = (write.name.clone(), write.key.clone());
@@ -236,7 +239,10 @@ impl<H: Host> Expander<'_, H> {
         };
         let mut draws = Draws::default();
         let nounset = self.shell.option("nounset");
-        let outcome = self.shell.vars.arith(&mut draws, &text, None, nounset);
+        let outcome = self
+            .shell
+            .vars
+            .arith(&mut draws, &text, None, nounset, false);
         let value = outcome.value;
         for write in outcome.writes {
             let key = write.key.clone();

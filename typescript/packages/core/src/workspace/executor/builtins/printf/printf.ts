@@ -62,6 +62,7 @@ export async function handlePrintf(
   policies: Policies | null = null,
   signal?: AbortSignal,
   subscripts: SubscriptFn | null = null,
+  diagnostics: (string | Uint8Array)[] | null = null,
 ): Promise<RedirectResult> {
   const program = isProgramInvocation(session)
   let target: string | null = null
@@ -132,7 +133,7 @@ export async function handlePrintf(
   const text = decodeText(output).split('\0', 1)[0] ?? ''
   let status: 'ok' | 'denied' | 'readonly' | 'subscript'
   try {
-    status = await assignElement(session, policies, base, subscript, text)
+    status = await assignElement(session, policies, base, subscript, text, false, diagnostics)
   } catch (err) {
     if (err instanceof ArithError) {
       // The target carries `-i` and the formatted text does not
@@ -187,5 +188,6 @@ export async function printfBuiltin(call: BuiltinCall): Promise<RedirectResult> 
     call.registry.policies,
     call.signal,
     subscriptExpansion(call),
+    call.context.frame.diagnostics,
   )
 }

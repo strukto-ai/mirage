@@ -51,6 +51,7 @@ async def handle_printf(
     session: SessionState,
     policies: Policies | None = None,
     subscripts: SubscriptFn | None = None,
+    diagnostics: list[str | bytes] | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Print formatted output, honoring GNU printf's format-reuse rules.
 
@@ -86,6 +87,8 @@ async def handle_printf(
             words.
         subscripts (SubscriptFn | None): expands the ``-v`` target's
             subscript given as text; None keeps it as typed.
+        diagnostics (list[str | bytes] | None): where the ``-v`` write's
+            warnings go (a ``RANDOM`` seed that does not evaluate).
     """
     program = program_invocation(session)
     target: str | None = None
@@ -155,7 +158,9 @@ async def handle_printf(
         subscript = await subscripts(subscript)
     text = decode_text(output).partition("\0")[0]
     try:
-        status = await assign_element(session, policies, base, subscript, text)
+        status = await assign_element(
+            session, policies, base, subscript, text, diagnostics=diagnostics
+        )
     except PolicyDenied as exc:
         return fail("printf", errors + f"{shell_voice()}{exc.strerror}\n")
     except ArithError as exc:
@@ -222,4 +227,5 @@ async def printf_builtin(call: BuiltinCall) -> Result:
         call.context.session,
         call.namespace.registry.policies,
         subscript_expansion(call),
+        call.context.frame.diagnostics,
     )

@@ -38,9 +38,6 @@ pub struct Shell {
     /// The bytes the session holds outside its variables, which
     /// `max_env` counts too: functions, aliases, positional parameters.
     pub outside: usize,
-    /// The status of the last command substitution a statement ran, which
-    /// an assignment-only statement reports as its own.
-    pub substituted: Option<i32>,
     /// The shell is a `( )` subshell, a compound command forked as a stage
     /// or job, or a fork of one, which a refused `${var:=word}` ends with 2.
     pub paren: bool,
@@ -61,7 +58,6 @@ impl Shell {
             env_limit: None,
             memory_room: None,
             outside: 0,
-            substituted: None,
             paren: false,
         }
     }

@@ -180,32 +180,80 @@ async function readRaw(
   exact: number | null,
   signal?: AbortSignal,
 ): Promise<[string, boolean]> {
-  if (exact !== null) {
-    const [data, complete] = await buffer.readChars(exact, null, signal)
+  const count = exact ?? nchars
+  const stop = exact !== null ? null : delim
+  if (count !== null && raw) {
+    const [data, complete] = await buffer.readChars(count, stop, signal)
     return [decodeText(data), complete]
   }
-  if (nchars !== null) {
-    let [data, complete] = await buffer.readChars(nchars, delim, signal)
-    let held = data.byteLength
-    let text = decodeText(data)
-    while (!raw && complete && endsEscaped(text) && text.length < nchars) {
-      ;[data, complete] = await buffer.readChars(nchars - text.length, delim, signal)
-      held += data.byteLength
-      checkMemory(held)
-      text += decodeText(data)
-    }
-    return [text, complete]
-  }
+  if (count !== null) return readCounted(buffer, count, stop, signal)
   let [data, complete] = await buffer.readUntil(delim, signal)
   let held = data.byteLength
   let text = decodeText(data)
-  while (!raw && complete && delim === 10 && endsEscaped(text)) {
+  while (!raw && complete && endsEscaped(text)) {
     ;[data, complete] = await buffer.readUntil(delim, signal)
     held += data.byteLength + 1
     checkMemory(held)
-    text += '\n' + decodeText(data)
+    text += decodeText(new Uint8Array([delim])) + decodeText(data)
   }
   return [text, complete]
+}
+
+/**
+ * Read `count` characters as `-n` and `-N` count them without `-r`: once
+ * backslashes are processed, so `\x` is one and a backslash-newline none.
+ * The character after a backslash is always read, and a quoted delimiter
+ * kept. Mirrors Python's _read_counted.
+ */
+async function readCounted(
+  buffer: AsyncLineIterator,
+  count: number,
+  delim: number | null,
+  signal?: AbortSignal,
+): Promise<[string, boolean]> {
+  let text = ''
+  let got = 0
+  let held = 0
+  let escaped = false
+  while (got < count) {
+    const want = escaped ? 1 : count - got
+    const [data, complete] = await buffer.readChars(want, delim, signal)
+    held += data.byteLength
+    checkMemory(held)
+    const piece = decodeText(data)
+    const [n, after] = counted(piece, escaped)
+    escaped = after
+    text += piece
+    got += n
+    if (!complete) return [text, false]
+    if (Array.from(piece).length < want) {
+      if (!escaped || delim === null) return [text, true]
+      text += decodeText(new Uint8Array([delim]))
+      if (delim !== 10) got++
+      escaped = false
+    }
+  }
+  return [text, true]
+}
+
+/**
+ * How many characters `piece` leaves once backslashes are processed, and
+ * whether a backslash ends it, quoting what follows. Mirrors Python's
+ * _counted.
+ */
+function counted(piece: string, escaped: boolean): [number, boolean] {
+  let n = 0
+  for (const ch of piece) {
+    if (escaped) {
+      if (ch !== '\n') n++
+      escaped = false
+    } else if (ch === '\\') {
+      escaped = true
+    } else {
+      n++
+    }
+  }
+  return [n, escaped]
 }
 
 /**
