@@ -358,7 +358,7 @@
             }
           }
         },
-        "description": "<Note>\nCloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example. Cloud creates with `201` and returns `409` for an existing name. OSS Server can return `200` for an identical retry or policy explanation. `explain=true` is supported only by OSS Server.\n</Note>\n\nCreate a workspace from a configuration or a saved template.\n\nAn identical configuration retried with the same id returns the existing workspace with 200. A conflicting id returns 409. Policies check the configuration before creation and return 403 on refusal. Set explain=true to inspect those decisions without creating a workspace.",
+        "description": "<Note>\nCloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example. Cloud creates with `201` and returns `409` for an existing name. OSS Server can return `200` for an identical retry or policy explanation. `explain=true` is supported only by OSS Server.\n</Note>\n\nCreate a workspace from a configuration or a saved template. Policies check the configuration before creation and return 403 on refusal.",
         "tags": [
           "Workspaces"
         ]
@@ -1621,7 +1621,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The line's result; with explain=true, its explanation; with stream=true, an NDJSON stream ending in a status record",
+            "description": "The shell result, or an NDJSON stream ending in a status record when stream=true.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1724,24 +1724,6 @@
               },
               "example": {
                 "command": "echo hello"
-              }
-            },
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "request": {
-                    "$ref": "#/components/schemas/ShellRequest"
-                  },
-                  "stdin": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "Up to 64 MiB, read as it arrives."
-                  }
-                },
-                "required": [
-                  "request"
-                ]
               }
             }
           }

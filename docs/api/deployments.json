@@ -768,6 +768,63 @@
               }
             }
           }
+        },
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "Create a workspace from a configuration or a saved template. Policies check the configuration before creation and return 403 on refusal."
+        },
+        {
+          "op": "replace",
+          "path": "/responses/200/content/application~1json/example",
+          "value": {
+            "id": "demo",
+            "mode": "write",
+            "created_at": 1794009600,
+            "fuse_mountpoints": {},
+            "system_time": null,
+            "sessions": [
+              {
+                "session_id": "01a1b425-ec80-7038-86e0-75b597344043",
+                "cwd": "/"
+              }
+            ],
+            "mounts": [
+              {
+                "prefix": "/data",
+                "vfs": "ram",
+                "mode": "write",
+                "description": ""
+              }
+            ],
+            "internals": null
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/responses/201/content/application~1json/example",
+          "value": {
+            "id": "demo",
+            "mode": "write",
+            "created_at": 1794009600,
+            "fuse_mountpoints": {},
+            "system_time": null,
+            "sessions": [
+              {
+                "session_id": "01a1b425-ec80-7038-86e0-75b597344043",
+                "cwd": "/"
+              }
+            ],
+            "mounts": [
+              {
+                "prefix": "/data",
+                "vfs": "ram",
+                "mode": "write",
+                "description": ""
+              }
+            ],
+            "internals": null
+          }
         }
       ]
     },
@@ -2600,6 +2657,15 @@
           "stderr": "",
           "refusal": null
         }
+      },
+      {
+        "op": "remove",
+        "path": "/requestBody/content/multipart~1form-data"
+      },
+      {
+        "op": "replace",
+        "path": "/responses/200/description",
+        "value": "The shell result, or an NDJSON stream ending in a status record when stream=true."
       }
     ],
     "POST /v1/workspaces/{workspace_id}/vfs/read": [],

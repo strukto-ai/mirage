@@ -88,15 +88,14 @@ def deployment_documents(
         for method, original in methods.items():
             if method not in METHODS:
                 continue
-            if (
+            hidden = (
                 original["tags"][0] in settings["hidden_tags"]
                 or "/sessions/" in path
-            ):
-                continue
-            if original.get("x-excluded") and not path.startswith(
-                "/v1/daemon/"
-            ):
-                continue
+                or (
+                    original.get("x-excluded", False)
+                    and not path.startswith("/v1/daemon/")
+                )
+            )
             op = copy.deepcopy(original)
             for field in (
                 "servers",
@@ -106,6 +105,8 @@ def deployment_documents(
                 "x-codeSamples",
             ):
                 op.pop(field, None)
+            if hidden:
+                op["x-excluded"] = True
             if path.startswith("/v1/daemon/"):
                 op["tags"] = ["Daemon"]
             elif op["tags"] == ["Server"]:
@@ -214,6 +215,8 @@ def navigation(
     tags: dict[str, list[str]] = {}
     for path, methods in doc["paths"].items():
         for method, op in methods.items():
+            if op.get("x-excluded"):
+                continue
             tags.setdefault(op["tags"][0], []).append(
                 method.upper() + " " + path
             )
@@ -338,6 +341,13 @@ def deployment_outputs(root: Path, source: dict[str, Any]) -> dict[Path, str]:
         overview.replace("<Tabs>", "<Tabs defaultTabIndex={1}>", 1)
         .replace("](/api/operations/", "](/api/server/operations/")
         .replace("](/api/reference)", "](/api/server/reference)")
+        .replace('href="/api/quickstart"', 'href="/api/server/quickstart"')
+        .replace('href="/api/reference"', 'href="/api/server/reference"')
+        .replace('href="/api/errors"', 'href="/api/server/errors"')
+        .replace('title="Cloud quickstart"', 'title="OSS Server quickstart"')
+        .replace(
+            "Create a hosted workspace", "Create a workspace on your server"
+        )
     )
     outputs[root / "docs/docs.json"] = json.dumps(config, indent=2) + "\n"
     return outputs

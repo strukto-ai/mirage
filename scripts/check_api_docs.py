@@ -127,6 +127,37 @@ def main() -> None:
     assert "/v1/daemon/ready" not in views["cloud"]["paths"]
     assert "/v1/me" not in views["server"]["paths"]
     assert "/v1/workspaces/{workspace_id}/shell" in views["cloud"]["paths"]
+    cloud_shell = views["cloud"]["paths"][
+        "/v1/workspaces/{workspace_id}/shell"
+    ]["post"]
+    assert set(cloud_shell["requestBody"]["content"]) == {"application/json"}
+    cloud_result = cloud_shell["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"]
+    assert cloud_result == {"$ref": "#/components/schemas/CloudShellResult"}
+    assert (
+        "line_id"
+        not in views["cloud"]["components"]["schemas"]["CloudShellResult"][
+            "required"
+        ]
+    )
+    assert set(views["server"]["paths"]) == set(source["paths"])
+    session = views["server"]["paths"][
+        "/v1/workspaces/{workspace_id}/sessions/{session_id}"
+    ]["patch"]
+    assert session["x-excluded"]
+    create = views["server"]["paths"]["/v1/workspaces"]["post"]
+    mounts = create["requestBody"]["content"]["application/json"]["example"][
+        "config"
+    ]["mounts"]
+    for code in ("200", "201"):
+        example = create["responses"][code]["content"]["application/json"][
+            "example"
+        ]
+        assert {mount["prefix"] for mount in example["mounts"]} == set(mounts)
+    overview = (ROOT / "docs/api/server/overview.mdx").read_text()
+    assert 'href="/api/server/reference"' in overview
+    assert 'href="/api/server/errors"' in overview
     for _, _, op in operations(views["cloud"]):
         if op["tags"] == ["VFS"]:
             assert op["x-cloud-implementation-status"] == "planned"
