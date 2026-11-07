@@ -60,6 +60,7 @@ from mirage.commands.config import Context
 from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.pull import (
+    BranchFilter,
     PullListFilter,
     comment_pull,
     create_pull,
@@ -607,7 +608,7 @@ async def create_cmd(
     # same base before it asks for one.
     try:
         existing = await pull_for_branch(
-            accessor, ref, head, states=("OPEN",), base=base
+            accessor, ref, head, BranchFilter(states=("OPEN",), base=base)
         )
     except Exception as exc:
         raise ValueError(
@@ -665,6 +666,7 @@ async def merge_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
+    _at_most_one(texts)
     methods = [
         name for name in ("merge", "rebase", "squash") if gh_bool(fl, name)
     ]
@@ -744,8 +746,8 @@ async def comment_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    body = await body_value(ctx, fl, required=True)
     ref, number = await _target(accessor, texts, fl)
+    body = await body_value(ctx, fl, required=True)
     comment = _pull(await comment_pull(accessor, ref, number, body or ""))
     return text_out(f"{comment.get('url', '')}\n")
 

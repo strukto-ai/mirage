@@ -19,6 +19,7 @@ import pytest
 from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.issue import (
     ISSUE_FIELDS,
+    comment_cmd,
     edit_cmd,
     list_cmd,
     reopen_cmd,
@@ -276,26 +277,36 @@ def _url(number: int) -> str:
     return f"https://github.com/o/r/issues/{number}"
 
 
-def _edit_calls(monkeypatch, failing=()) -> list[tuple]:
+def _edit_calls(monkeypatch, failing=(), repos=None) -> list[tuple]:
     calls: list[tuple] = []
+    seen = [] if repos is None else repos
 
     async def get(config, ref, number):
         calls.append(("get", number))
+        seen.append(f"{ref.owner}/{ref.repo}")
         return {"number": number, "title": "t", "url": _url(number)}
 
-    async def edit(config, ref, number, body):
+    async def update(config, ref, number, body):
         calls.append(("edit", number, body))
+        seen.append(f"{ref.owner}/{ref.repo}")
         if number in failing:
             raise ValueError("Validation Failed (HTTP 422)")
         return {"url": _url(number)}
 
     monkeypatch.setitem(edit_cmd.__globals__, "get_issue", get)
-    monkeypatch.setitem(edit_cmd.__globals__, "edit_issue", edit)
+    monkeypatch.setitem(edit_cmd.__globals__, "update_issue", update)
     return calls
 
 
 def _ctx(**flags) -> Context:
     return Context(argv=(), flags=flags)
+
+
+# gh counts the issues and finds the one named before it reads a body.
+@pytest.mark.asyncio
+async def test_issue_comment_counts_before_it_reads_the_body():
+    with pytest.raises(ValueError, match=r"accepts 1 arg\(s\), received 2"):
+        await comment_cmd(ACCOUNT, [], ["1", "2"], _ctx(repo="o/r"))
 
 
 # cobra's counts: exactly one issue for each verb but edit, which takes at
@@ -361,11 +372,13 @@ async def test_issue_edit_names_each_issue_it_could_not_edit(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_issue_edit_puts_every_issue_in_the_url_repo(monkeypatch):
-    calls = _edit_calls(monkeypatch)
+    repos: list[str] = []
+    calls = _edit_calls(monkeypatch, repos=repos)
     await edit_cmd(
         ACCOUNT, [], ["1", "https://github.com/a/b/issues/2"], _ctx(title="x")
     )
     assert calls[:2] == [("get", 1), ("get", 2)]
+    assert repos == ["a/b", "a/b", "a/b", "a/b"]
     with pytest.raises(
         ValueError,
         match='multiple issues must be in same repo: found "c/d", '

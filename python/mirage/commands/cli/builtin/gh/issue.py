@@ -53,6 +53,7 @@ from mirage.core.github.issue import (
     issue_fields,
     list_issue_fields,
     list_issues,
+    update_issue,
 )
 from mirage.core.github.repo import RepoRef
 from mirage.io.types import ByteSource, IOResult
@@ -397,7 +398,7 @@ async def edit_cmd(
                 )
             )
         try:
-            row = _issue(await edit_issue(accessor, ref, number, body))
+            row = _issue(await update_issue(accessor, ref, number, body))
         except Exception as exc:
             failed.append(f"failed to update {current.get('url', '')}: {exc}")
             continue
@@ -457,8 +458,8 @@ async def comment_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    body = await body_value(ctx, fl, required=True)
     ref, number = _target(accessor, texts, fl)
+    body = await body_value(ctx, fl, required=True)
     comment = _issue(await comment_issue(accessor, ref, number, body or ""))
     return text_out(f"{comment.get('url', '')}\n")
 

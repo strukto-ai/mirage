@@ -535,6 +535,7 @@ export async function mergeCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
+  atMostOne(texts)
   const methods = ['merge', 'rebase', 'squash'].filter((name) => ghBool(fl, name))
   if (methods.length > 1) throw new Error('choose only one merge strategy')
   const body: Record<string, unknown> = { merge_method: methods[0] ?? 'merge' }

@@ -23,6 +23,7 @@ import {
   issueFields,
   listIssueFields,
   listIssues,
+  updateIssue,
 } from '../../../../core/github/issue.ts'
 import type { RepoRef } from '../../../../core/github/repo.ts'
 import type { JsonObject, PathSpec } from '../../../../types.ts'
@@ -327,7 +328,7 @@ export async function editCmd(
       ]
     }
     try {
-      edited.push(textValue(issue(await editIssue(transport, ref, numbers[at] ?? 0, body)).url))
+      edited.push(textValue(issue(await updateIssue(transport, ref, numbers[at] ?? 0, body)).url))
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err)
       failed.push(`failed to update ${textValue(current.url)}: ${reason}`)
@@ -391,8 +392,8 @@ export async function commentCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const body = await bodyValue(ctx, fl, { required: true })
   const [ref, number] = target(accessor, texts, fl)
+  const body = await bodyValue(ctx, fl, { required: true })
   const comment = issue(await commentIssue(accessor.transport, ref, number, body ?? ''))
   return textOut(`${textValue(comment.url)}\n`)
 }

@@ -69,8 +69,19 @@ vi.mock('../../../../core/github/pull.ts', async (importOriginal) => {
   }
 })
 
-const { PR_FIELDS, checksCmd, closeCmd, createCmd, diffCmd, editCmd, listCmd, reopenCmd, viewCmd } =
-  await import('./pull.ts')
+const {
+  PR_FIELDS,
+  checksCmd,
+  closeCmd,
+  commentCmd,
+  createCmd,
+  diffCmd,
+  editCmd,
+  listCmd,
+  mergeCmd,
+  reopenCmd,
+  viewCmd,
+} = await import('./pull.ts')
 
 function json(result: Awaited<ReturnType<typeof viewCmd>>): Record<string, unknown> {
   if (result === null) throw new Error('expected a result tuple')
@@ -513,6 +524,17 @@ describe('gh pr selectors', () => {
     expect(CALLS).toEqual([])
   })
 
+  // gh counts the selectors before it reads a body or a message.
+  it('refuses a second selector to comment on or merge before reading anything', async () => {
+    await expect(commentCmd(...at(['1', '2']))).rejects.toThrow(
+      'accepts at most 1 arg(s), received 2',
+    )
+    await expect(mergeCmd(...at(['1', '2']))).rejects.toThrow(
+      'accepts at most 1 arg(s), received 2',
+    )
+    expect(CALLS).toEqual([])
+  })
+
   it('refuses an edit with no field before it looks anything up', async () => {
     await expect(editCmd(...at([]))).rejects.toThrow(
       '--title, --body, --reviewer, --assignee, --label, --project, or --milestone required when not running interactively',
@@ -529,24 +551,25 @@ describe('gh pr selectors', () => {
   })
 })
 
+/** A transport that records each request, on a repository whose default branch is trunk. */
+function recording(sent: unknown[]): GitHubTransport {
+  return {
+    get: (path) => {
+      sent.push(['GET', path])
+      return Promise.resolve({ default_branch: 'trunk' })
+    },
+    request: (method, path, body) => {
+      sent.push([method, path, body])
+      return Promise.resolve({ html_url: 'https://github.com/o/r/pull/9' })
+    },
+  }
+}
+
 describe('gh pr create', () => {
   beforeEach(() => {
     CALLS.length = 0
     FOUND = null
   })
-
-  function recording(sent: unknown[]): GitHubTransport {
-    return {
-      get: (path) => {
-        sent.push(['GET', path])
-        return Promise.resolve({ default_branch: 'trunk' })
-      },
-      request: (method, path, body) => {
-        sent.push([method, path, body])
-        return Promise.resolve({ html_url: 'https://github.com/o/r/pull/9' })
-      },
-    }
-  }
 
   // gh opens it from the current branch unless --head names one, into the
   // repository's default branch unless --base names one.

@@ -149,28 +149,38 @@ def head_branch(head: str) -> str:
     return parts[-1]
 
 
+@dataclass(frozen=True, slots=True)
+class BranchFilter:
+    """What gh's finder narrows a branch's pull requests by.
+
+    Args:
+        states (tuple[str, ...] | None): the states asked for; every
+            state when None.
+        base (str | None): the base branch a match must merge into; any
+            when None.
+    """
+
+    states: tuple[str, ...] | None = None
+    base: str | None = None
+
+
 async def pull_for_branch(
     account: GitHubAccount,
     ref: RepoRef,
     head: str,
-    *,
-    states: tuple[str, ...] | None = None,
-    base: str | None = None,
+    filter_: BranchFilter = BranchFilter(),
 ) -> dict[str, Any] | None:
     """The pull request a branch heads, picked as gh's finder picks it:
     of the newest 30 whose head ref is the branch's name, open ones
     first, the first whose head is exactly ``head`` (``owner:branch`` for
-    a fork's) and whose base is ``base``, passing over a closed or merged
-    one when ``head`` is the default branch. None when none is.
+    a fork's) and whose base is the filter's, passing over a closed or
+    merged one when ``head`` is the default branch. None when none is.
 
     Args:
         account (GitHubAccount): the API client.
         ref (RepoRef): the base repository.
         head (str): the branch, or ``owner:branch``.
-        states (tuple[str, ...] | None): the states asked for; every
-            state when None.
-        base (str | None): the base branch a match must merge into; any
-            when None.
+        filter_ (BranchFilter): the states and the base to narrow by.
     """
     data = await graphql_data(
         account,
@@ -179,7 +189,9 @@ async def pull_for_branch(
             "owner": ref.owner,
             "repo": ref.repo,
             "headRefName": head_branch(head),
-            "states": list(states) if states is not None else None,
+            "states": (
+                list(filter_.states) if filter_.states is not None else None
+            ),
         },
     )
     repository = data.get("repository")
@@ -203,7 +215,10 @@ async def pull_for_branch(
         )
         if label != head:
             continue
-        if base is not None and node.get("baseRefName") != base:
+        if (
+            filter_.base is not None
+            and node.get("baseRefName") != filter_.base
+        ):
             continue
         if node.get("state") != "OPEN" and default_branch == head:
             continue

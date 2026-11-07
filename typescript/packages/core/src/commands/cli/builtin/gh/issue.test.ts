@@ -23,15 +23,19 @@ const FIELDS = vi.fn<typeof IssueModule.issueFields>()
 const CALLS: unknown[][] = []
 let REOPEN_ROW: Record<string, unknown> = {}
 const FAILING = new Set<number>()
+// The repository each read and update went to, in order.
+const REPOS: string[] = []
 const url = (number: number) => `https://github.com/o/r/issues/${String(number)}`
+const repoOf = (ref: { owner: string; repo: string }) => `${ref.owner}/${ref.repo}`
 const LIST = vi.fn<typeof IssueModule.listIssueFields>()
 
 vi.mock('../../../../core/github/issue.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof IssueModule>()
   return {
     ...actual,
-    getIssue: (_t: unknown, _r: unknown, number: number) => {
+    getIssue: (_t: unknown, ref: { owner: string; repo: string }, number: number) => {
       CALLS.push(['get', number])
+      REPOS.push(repoOf(ref))
       return Promise.resolve({ number, title: 't', url: url(number), ...REOPEN_ROW })
     },
     commentIssue: (_t: unknown, _r: unknown, number: number, body: string) => {
@@ -40,6 +44,16 @@ vi.mock('../../../../core/github/issue.ts', async (importOriginal) => {
     },
     editIssue: (_t: unknown, _r: unknown, number: number, body: unknown) => {
       CALLS.push(['edit', number, body])
+      return Promise.resolve({})
+    },
+    updateIssue: (
+      _t: unknown,
+      ref: { owner: string; repo: string },
+      number: number,
+      body: unknown,
+    ) => {
+      CALLS.push(['edit', number, body])
+      REPOS.push(repoOf(ref))
       if (FAILING.has(number)) return Promise.reject(new Error('Validation Failed (HTTP 422)'))
       return Promise.resolve({ url: url(number) })
     },
@@ -48,7 +62,8 @@ vi.mock('../../../../core/github/issue.ts', async (importOriginal) => {
   }
 })
 
-const { ISSUE_FIELDS, editCmd, listCmd, reopenCmd, viewCmd } = await import('./issue.ts')
+const { ISSUE_FIELDS, commentCmd, editCmd, listCmd, reopenCmd, viewCmd } =
+  await import('./issue.ts')
 
 const ACCOUNT = new GitHubAccount({ token: 't' })
 
@@ -220,14 +235,26 @@ describe('gh issue reopen', () => {
   })
 })
 
-describe('gh issue selectors', () => {
-  const at = (texts: string[], flags: Context['flags'] = {}) =>
-    [ACCOUNT, [], texts, context({ flags })] as [GitHubAccount, PathSpec[], string[], Context]
+function at(
+  texts: string[],
+  flags: Context['flags'] = {},
+): [GitHubAccount, PathSpec[], string[], Context] {
+  return [ACCOUNT, [], texts, context({ flags })]
+}
 
+describe('gh issue selectors', () => {
   beforeEach(() => {
     CALLS.length = 0
+    REPOS.length = 0
     REOPEN_ROW = {}
     FAILING.clear()
+  })
+
+  // gh counts the issues and finds the one named before it reads a body.
+  it('refuses a second issue to comment on before it reads the body', async () => {
+    await expect(commentCmd(...at(['1', '2'], { repo: 'o/r' }))).rejects.toThrow(
+      'accepts 1 arg(s), received 2',
+    )
   })
 
   // cobra's counts: exactly one issue for each verb but edit, which takes
@@ -281,6 +308,7 @@ describe('gh issue selectors', () => {
       ['get', 1],
       ['get', 2],
     ])
+    expect(REPOS).toEqual(['a/b', 'a/b', 'a/b', 'a/b'])
     await expect(
       editCmd(
         ...at(['https://github.com/a/b/issues/1', 'https://github.com/c/d/issues/2'], {

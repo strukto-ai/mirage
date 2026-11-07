@@ -17,6 +17,7 @@ import pytest
 from mirage.accessor.github import GitHubAccount
 from mirage.core.github.config import GhConfig
 from mirage.core.github.pull import (
+    BranchFilter,
     PullListFilter,
     comment_pull,
     commit_statuses,
@@ -374,12 +375,12 @@ async def test_pull_for_branch_narrows_by_states_and_base(monkeypatch):
     ref = RepoRef("o", "r")
     assert (
         await pull_for_branch(
-            ACCOUNT, ref, "dev", states=("OPEN",), base="main"
+            ACCOUNT, ref, "dev", BranchFilter(states=("OPEN",), base="main")
         )
         is None
     )
     found = pull_for_branch(
-        ACCOUNT, ref, "dev", states=("OPEN",), base="release"
+        ACCOUNT, ref, "dev", BranchFilter(states=("OPEN",), base="release")
     )
     assert await _number_of(found) == 5
     assert graphql.sent[0][1]["states"] == ["OPEN"]

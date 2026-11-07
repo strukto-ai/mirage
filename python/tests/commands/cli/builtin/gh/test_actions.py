@@ -308,6 +308,10 @@ async def _fake_workflow(config, ref, workflow):
     return _WORKFLOW
 
 
+async def _view_main(accessor, ref):
+    return {"default_branch": "main"}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "flags,branch", [({}, "main"), ({"ref": "dev"}, "dev")]
@@ -319,13 +323,10 @@ async def test_workflow_run_dispatches_on_ref_else_the_default_branch(
     # leaves the dispatch on the repository's default branch.
     sent: list[dict] = []
 
-    async def _view_repo(accessor, ref):
-        return {"default_branch": "main"}
-
     async def _dispatch(accessor, ref, workflow, body):
         sent.append(body)
 
-    monkeypatch.setitem(workflow_run_cmd.__globals__, "view_repo", _view_repo)
+    monkeypatch.setitem(workflow_run_cmd.__globals__, "view_repo", _view_main)
     monkeypatch.setitem(
         workflow_run_cmd.__globals__, "dispatch_workflow", _dispatch
     )

@@ -22,10 +22,12 @@ from mirage.commands.cli.builtin.gh.pull import (
     _check,
     checks_cmd,
     close_cmd,
+    comment_cmd,
     create_cmd,
     diff_cmd,
     edit_cmd,
     list_cmd,
+    merge_cmd,
     reopen_cmd,
     view_cmd,
 )
@@ -599,7 +601,7 @@ BRANCHED = GitHubAccount(GhConfig(token="t", branch="dev"))
 def _selector_calls(monkeypatch, found=None) -> list[tuple]:
     calls: list[tuple] = []
 
-    async def for_branch(config, ref, head, **narrowing):
+    async def for_branch(config, ref, head, filter_=None):
         calls.append(("branch", head))
         return {"number": 7} if found is None else found or None
 
@@ -670,6 +672,19 @@ async def test_a_second_selector_is_refused_as_gh_does(monkeypatch):
     assert calls == []
 
 
+# gh counts the selectors before it reads a body or a message.
+@pytest.mark.asyncio
+async def test_comment_and_merge_count_before_reading_anything(monkeypatch):
+    calls = _selector_calls(monkeypatch)
+    ctx = Context(argv=(), flags={"repo": "o/r"})
+    for cmd in (comment_cmd, merge_cmd):
+        with pytest.raises(
+            ValueError, match=r"accepts at most 1 arg\(s\), received 2"
+        ):
+            await cmd(BRANCHED, [], ["1", "2"], ctx)
+    assert calls == []
+
+
 @pytest.mark.asyncio
 async def test_an_edit_with_no_field_is_refused_before_any_lookup(
     monkeypatch,
@@ -701,8 +716,8 @@ async def test_close_and_reopen_take_no_current_branch(monkeypatch):
 def _create_calls(monkeypatch, existing=None) -> list[tuple]:
     calls: list[tuple] = []
 
-    async def for_branch(config, ref, head, *, states=None, base=None):
-        calls.append(("branch", head, states, base))
+    async def for_branch(config, ref, head, filter_=None):
+        calls.append(("branch", head, filter_.states, filter_.base))
         return existing
 
     async def view(config, ref):
