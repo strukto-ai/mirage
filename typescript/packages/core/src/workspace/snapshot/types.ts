@@ -18,6 +18,7 @@ import type { JsonObject, JsonValue, MountMode } from '../../types.ts'
 import type { RAMVFSState } from '../../vfs/ram/ram.ts'
 import type { VFSStateBase } from '../../vfs/types.ts'
 import type { NodeFields } from '../mount/namespace/store.ts'
+import type { RecordFields } from '../record/types.ts'
 import type { VarFields } from '../session/session.ts'
 import type { IndexConfigSnapshot } from './config.ts'
 
@@ -75,6 +76,8 @@ export interface JobSnapshot {
   created_at: number
   ended_at: number | null
   session_id: string
+  line?: string | null
+  group?: number | null
 }
 
 /**
@@ -135,6 +138,10 @@ export interface WorkspaceStateDict {
   cache: CacheSnapshot
   history: JsonObject[]
   jobs: JobSnapshot[]
+  /** The finished lines, as their store keeps them. */
+  lines?: RecordFields[]
+  /** The finished processes, as their store keeps them. */
+  process_records?: RecordFields[]
   /**
    * Per-path fingerprint/revision pairs captured at snapshot time.
    * Optional for backwards compatibility with v1 snapshots that

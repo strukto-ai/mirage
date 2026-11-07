@@ -42,6 +42,16 @@ import {
 } from '../../shell/console/index.ts'
 import { BIN_PREFIX } from '../../shell/constants.ts'
 import { JobHandle, type JobTable } from '../../execution/job/index.ts'
+import type { Line } from '../../execution/line/types.ts'
+import type { ProcessTable } from '../../execution/process/table.ts'
+import type { Process } from '../../execution/process/types.ts'
+import {
+  lineFromFields,
+  lineToFields,
+  processFromFields,
+  processToFields,
+} from '../../execution/serde.ts'
+import { LineId, ProcessId } from '../../execution/types.ts'
 import type { ShellVar } from '../../shell/variable.ts'
 import type { JsonObject } from '../../types.ts'
 import {
@@ -117,6 +127,7 @@ export interface WorkspaceLike {
   readonly syntheticRoot: boolean
   readonly sessionManager: SessionManager
   readonly jobTable: JobTable
+  readonly processTable: ProcessTable
   readonly writeDefault: WritePolicy
   readonly cache: FileCacheMixin & BaseVFS
   readonly namespace: Namespace
@@ -132,6 +143,8 @@ export interface WorkspaceLike {
   adoptDefaultSession(sessionId: string): Promise<void>
   forgetReads(): void
   quiesced<T>(capture: () => Promise<T>): Promise<T>
+  lines(): Promise<Line[]>
+  processes(): Promise<Process[]>
 }
 
 const VALID_MODES: readonly string[] = [MountMode.READ, MountMode.WRITE, MountMode.EXEC]
@@ -199,6 +212,12 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
       .filter((j) => j.state !== 'running' && (j.process === null || j.console.finished))
       .map((j) => jobToDict(j)),
   )
+  const lines = (await ws.lines())
+    .filter((line) => line.state === 'exited')
+    .map((line) => lineToFields(line))
+  const processRecords = (await ws.processes())
+    .filter((process) => process.state === 'exited')
+    .map((process) => processToFields(process))
   const clisState: CLISnapshot[] = [...ws.registry.clis.items()].map(([name, install]) =>
     cliSnapshot(name, install),
   )
@@ -233,6 +252,8 @@ export async function toStateDict(ws: WorkspaceLike): Promise<WorkspaceStateDict
     },
     history: historyEvents,
     jobs,
+    lines,
+    process_records: processRecords,
     fingerprints,
     live_only_mounts: liveOnly,
     nodes,
@@ -730,6 +751,7 @@ export async function applyStateDict(
   restoreCache(ws, state)
   await restoreHistory(ws, state)
   await restoreJobs(ws, state)
+  restoreRecords(ws, state)
   await restoreNodes(ws, state)
 }
 
@@ -902,6 +924,8 @@ async function jobToDict(j: JobHandle): Promise<JobSnapshot> {
     ended_at: j.endedAt,
     session_id: j.sessionId,
     process: j.processId,
+    line: j.line?.value ?? null,
+    group: j.group,
   }
 }
 
@@ -941,7 +965,27 @@ function jobFromDict(j: JobSnapshot): JobHandle {
     signal: j.signal,
     endedAt: j.ended_at,
     console: restoredConsole(j),
+    line: j.line === null || j.line === undefined ? null : new LineId(j.line),
+    group: j.group ?? null,
   })
+}
+
+/**
+ * Keep the saved lines and processes in the workspace's store, each process
+ * under this workspace's id, and number new processes past them, so none
+ * takes a saved one's pid. Mirrors Python's `_restore_records`.
+ */
+function restoreRecords(ws: WorkspaceLike, state: WorkspaceStateDict): void {
+  const store = ws.jobTable.store
+  for (const fields of state.lines ?? []) store.note(lineFromFields(fields))
+  const workspaceId = ws.processTable.workspaceId
+  let highest = 0
+  for (const fields of state.process_records ?? []) {
+    const record = processFromFields(fields)
+    store.note({ ...record, id: new ProcessId(workspaceId, record.id.pid) })
+    highest = Math.max(highest, record.id.pid)
+  }
+  ws.processTable.continueAfter(highest)
 }
 
 async function restoreJobs(ws: WorkspaceLike, state: WorkspaceStateDict): Promise<void> {

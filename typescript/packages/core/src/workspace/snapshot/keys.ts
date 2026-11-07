@@ -23,6 +23,8 @@ export const StateKey = Object.freeze({
   CACHE: 'cache',
   HISTORY: 'history',
   JOBS: 'jobs',
+  LINES: 'lines',
+  PROCESS_RECORDS: 'process_records',
   FINGERPRINTS: 'fingerprints',
   LIVE_ONLY_MOUNTS: 'live_only_mounts',
   NODES: 'nodes',
@@ -78,6 +80,8 @@ export const JobKey = Object.freeze({
   CREATED_AT: 'created_at',
   ENDED_AT: 'ended_at',
   SESSION_ID: 'session_id',
+  LINE: 'line',
+  GROUP: 'group',
 } as const)
 
 /** An MCP CLI's tool list as a snapshot carries it, spelled as Python's and as MCP spells it. */
