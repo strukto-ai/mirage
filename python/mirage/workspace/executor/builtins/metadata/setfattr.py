@@ -217,8 +217,8 @@ async def handle_setfattr(
     fl = FlagView(parse_to_kwargs(parsed), spec=spec)
     raw = fl.as_bool("raw")
     nofollow = fl.as_bool("no_dereference")
-    restore = parsed.raw_path_flags.get("restore")
-    if isinstance(restore, str):
+    restore = fl.as_str("restore")
+    if restore is not None:
         return await _restore(
             dispatch, session, restore, stdin, raw=raw, nofollow=nofollow
         )

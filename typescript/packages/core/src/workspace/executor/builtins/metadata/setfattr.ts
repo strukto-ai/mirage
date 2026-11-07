@@ -196,8 +196,8 @@ export async function handleSetfattr(
   const fl = new FlagView(parseToKwargs(parsed), spec)
   const raw = fl.asBool('raw')
   const nofollow = fl.asBool('no_dereference')
-  const typedRestore = parsed.rawPathFlags.restore
-  if (typeof typedRestore === 'string') {
+  const typedRestore = fl.asStr('restore')
+  if (typedRestore !== undefined) {
     return restore(dispatch, session, typedRestore, stdin, raw, nofollow)
   }
   const name = fl.asStr('name') ?? null

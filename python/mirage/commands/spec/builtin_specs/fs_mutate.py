@@ -337,7 +337,6 @@ SPECS: dict[str, CommandSpec] = {
             ),
             Argument(
                 "--restore",
-                type="path",
                 help="set the attributes a getfattr --dump listing names",
             ),
             PATHS_OPERAND,

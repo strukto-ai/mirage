@@ -235,7 +235,6 @@ export const SPECS: Record<string, CommandSpec> = {
         help: 'store each value exactly as typed, undecoded',
       }),
       new Argument('--restore', {
-        type: 'path',
         help: 'set the attributes a getfattr --dump listing names',
       }),
       PATHS_OPERAND,
