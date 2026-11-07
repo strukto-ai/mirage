@@ -127,7 +127,7 @@ it.each([
   ["printf 'outer\\n' | cat <(echo one) - <(echo two)", [0, 'one\nouter\ntwo\n', '']],
   [
     'exec 3< <(printf a); echo st:$?',
-    [0, 'st:2\n', 'mirage: unsupported: exec onto a process substitution\n'],
+    [0, 'st:2\n', 'bash: line 1: exec: a process substitution as a descriptor: not supported\n'],
   ],
 ])('releases its descriptors: %s', async (command, expected) => {
   const ws = workspace()

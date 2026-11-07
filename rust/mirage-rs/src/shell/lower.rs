@@ -464,8 +464,10 @@ impl Tree {
     /// What bash warns of while it reads the line's heredocs, in the order
     /// it reads them: a substitution closing with bodies still to read, on
     /// the line its reader stands on then, and a body the input ends
-    /// inside.
-    pub fn warnings(&self) -> Vec<u8> {
+    /// inside. Each leads with `head` (`bash: `, a sourced file's
+    /// `name: `) and its line, the input's first row being line `first`.
+    pub fn warnings(&self, head: &[u8], first: usize) -> Vec<u8> {
+        let on = |line: usize| first + line - 1;
         let mut heredocs: Vec<&Heredoc> = self.heredocs.iter().collect();
         heredocs.sort_by_key(|heredoc| heredoc.body_start);
         let mut out = Vec::new();
@@ -481,19 +483,23 @@ impl Tree {
                     line = line.max(newlines(&self.original[..previous.end.saturating_sub(1)]) + 1);
                 }
                 let plural = if opened.len() > 1 { "s" } else { "" };
+                out.extend_from_slice(head);
                 out.extend(
                     format!(
-                        "mirage: line {line}: warning: command substitution: {} unterminated here-document{plural}\n",
+                        "line {}: warning: command substitution: {} unterminated here-document{plural}\n",
+                        on(line),
                         opened.len()
                     )
                     .into_bytes(),
                 );
             }
             if !heredoc.terminated {
+                out.extend_from_slice(head);
                 out.extend(
                     format!(
-                        "mirage: line {}: warning: here-document at line {} delimited by end-of-file (wanted `",
-                        heredoc.eof_line, heredoc.line
+                        "line {}: warning: here-document at line {} delimited by end-of-file (wanted `",
+                        on(heredoc.eof_line),
+                        on(heredoc.line)
                     )
                     .into_bytes(),
                 );

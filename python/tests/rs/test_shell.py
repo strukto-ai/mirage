@@ -49,24 +49,32 @@ def test_tree_reads_as_bash_reads(line: str, sexp: str) -> None:
     assert _sexp(tree.root_node) == sexp
 
 
+def _refusal(line: str, extglob: bool = True) -> tuple[int, int, bytes]:
+    tree = parse_shell(line, extglob=extglob)
+    assert tree.error is not None
+    said = tree.root_node.refusal(b"bash: -c: ", 1, True)
+    return (*tree.error, said or b"")
+
+
 def test_a_refused_line_reports_bash_words() -> None:
-    tree = parse_shell("if true; then")
-    assert tree.error == (
+    assert _refusal("if true; then") == (
         13,
-        b"mirage: syntax error: unexpected end of file\n",
         2,
+        b"bash: -c: line 2: syntax error: unexpected end of file\n",
     )
-    assert parse_shell("echo a; fi").error == (
+    assert _refusal("echo a; fi") == (
         8,
-        b"mirage: syntax error near 'fi'\n",
         2,
+        b"bash: -c: line 1: syntax error near unexpected token `fi'\n"
+        b"bash: -c: line 1: `echo a; fi'\n",
     )
     # With extglob off a pattern group is no word.
     assert parse_shell("echo @(a)").error is None
-    assert parse_shell("echo @(a)", extglob=False).error == (
+    assert _refusal("echo @(a)", extglob=False) == (
         6,
-        b"mirage: syntax error near '('\n",
         2,
+        b"bash: -c: line 1: syntax error near unexpected token `('\n"
+        b"bash: -c: line 1: `echo @(a)'\n",
     )
 
 

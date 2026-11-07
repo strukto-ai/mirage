@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { RAMVFS } from '../../vfs/ram/ram.ts'
 import { Workspace } from '../../workspace/workspace/workspace.ts'
@@ -21,16 +21,24 @@ import { getParts, getRedirects, getText } from '../helpers.ts'
 import { NodeType as NT, type TSNodeLike } from '../types.ts'
 import { parse, syntaxRefusal } from './parse.ts'
 
-const CORPUS = (
-  JSON.parse(
-    readFileSync(
-      new URL('../../../../../../integ/fixtures/shell/bash_syntax.json', import.meta.url),
-      'utf8',
-    ),
-  ) as { lines: { line: string; status: number; stderr: string }[] }
-).lines
+const SYNTAX = new URL('../../../../../../integ/fixtures/shell/bash_syntax/', import.meta.url)
+const CORPUS = Object.fromEntries(
+  readdirSync(SYNTAX)
+    .filter((name) => name.endsWith('.json'))
+    .sort()
+    .map((name) => [
+      name.slice(0, -'.json'.length),
+      (
+        JSON.parse(readFileSync(new URL(name, SYNTAX), 'utf8')) as {
+          lines: { line: string; status: number; stderr: string }[]
+        }
+      ).lines,
+    ]),
+)
 
-// Rows of bash_syntax.json, pinned with `bash -c`, that mirage reads
+const HEAD = 'bash: -c: '
+
+// Rows of the bash_syntax fixtures, pinned with `bash -c`, that mirage reads
 // otherwise. Mirrors Python's DIVERGES.
 const DIVERGES = new Set([
   'cat <<EOF\n$(\nEOF',
@@ -43,9 +51,12 @@ const DIVERGES = new Set([
 ])
 
 const refusal = (line: string, aliases: ReadonlySet<string> = new Set()): [number, string] => {
-  const io = syntaxRefusal(parse(line, aliases, false))
+  const io = syntaxRefusal(parse(line, aliases, false), HEAD, 1, false)
   return io === null ? [0, ''] : [io.exitCode, decodeText(io.stderr as Uint8Array)]
 }
+
+const near = (token: string, line: string): string =>
+  `${HEAD}line 1: syntax error near unexpected token \`${token}'\n${HEAD}line 1: \`${line}'\n`
 
 describe('parse', () => {
   it('parses a simple command to a program root with a command child', () => {
@@ -266,7 +277,9 @@ describe('heredoc source reader: operator-line regressions', () => {
     const root = parse('cat <<EOF; echo x\nhi\n')
     expect(root.error).toBeNull()
     expect(root.sourceText).toBe('cat <<EOF; echo x\nhi\n')
-    expect(root.warnings).not.toBe('')
+    expect(root.warnings?.('bash: ', 1)).toBe(
+      "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n",
+    )
   })
 })
 
@@ -462,11 +475,12 @@ it('keeps process substitution in one extended-pattern word', () => {
 })
 
 describe('syntax refusals', () => {
-  it('reads every line as bash reads it', () => {
-    // integ/fixtures/shell/bash_syntax.json is pinned against bash by
+  it.each(Object.keys(CORPUS))('reads every %s line as bash reads it', (kind) => {
+    // integ/fixtures/shell/bash_syntax/ holds one file per kind of bash's
+    // reading, pinned against bash in the C locale by
     // scripts/pin_bash_syntax.py; the python suite reads the same rows. A
     // line ending in a backslash is read as a script reads it.
-    const differ = CORPUS.filter(
+    const differ = (CORPUS[kind] ?? []).filter(
       (row) =>
         !DIVERGES.has(row.line) &&
         !endsEscaped(row.line) &&
@@ -479,34 +493,56 @@ describe('syntax refusals', () => {
   it.each([
     [
       [...encode('echo ('), 0xff],
-      [...encode("mirage: syntax error near '"), 0xff, ...encode("'\n")],
+      [
+        ...encode(
+          `${HEAD}line 1: syntax error near unexpected token \`$'\\377''\n${HEAD}line 1: \`echo (`,
+        ),
+        0xff,
+        ...encode("'\n"),
+      ],
     ],
     [
       [...encode("[[ '"), 0xff, ...encode("'")],
       [
         ...encode(
-          "mirage: unexpected token `newline', conditional binary operator expected\n" +
-            "mirage: syntax error near ''",
+          `${HEAD}line 1: unexpected token \`newline', conditional binary operator expected\n` +
+            `${HEAD}line 1: syntax error near \`'`,
         ),
+        0xff,
+        ...encode(`''\n${HEAD}line 1: \`[[ '`),
         0xff,
         ...encode("''\n"),
       ],
     ],
   ])('keeps an invalid byte as typed in %j', (raw, stderr) => {
+    // Pinned against bash 5.2.37: only an unexpected token is named in
+    // `$'...'` when it does not show as it is.
     const [, message] = refusal(decodeText(new Uint8Array(raw)))
     expect(Array.from(encodeText(message))).toEqual(stderr)
+  })
+
+  it.each([
+    ['echo (é', true, 'é'],
+    ['echo (é', false, "$'\\303\\251'"],
+    ["echo ($'\\u00e9'", true, "'é'"],
+  ])('names the unexpected token of %j in the shell locale (UTF-8 %j)', (line, utf8, token) => {
+    // Pinned against bash 5.2.37 under C.UTF-8 and C.
+    const io = syntaxRefusal(parse(line, new Set(), false), HEAD, 1, utf8)
+    expect(decodeText(io?.stderr as Uint8Array).split('\n')[0]).toBe(
+      `${HEAD}line 1: syntax error near unexpected token \`${token}'`,
+    )
   })
 
   it('refuses a line nested past the reader at the next opener', () => {
     // bash refuses a line nested past its own reader at the opener it can no
     // longer take (thousands deep there), so nothing on the line runs.
     const deep = `echo ${'$(echo '.repeat(4096)}x${')'.repeat(4096)}; fi`
-    expect(refusal(deep)).toEqual([127, "mirage: syntax error near '$('\n"])
+    expect(refusal(deep)).toEqual([127, near('$(', deep)])
     const braces = (n: number) => `${'{ '.repeat(n)}a; ${'} '.repeat(64)}`
     expect(refusal(braces(64))).toEqual([0, ''])
-    expect(refusal(braces(65))).toEqual([2, "mirage: syntax error near '{'\n"])
+    expect(refusal(braces(65))).toEqual([2, near('{', braces(65))])
     const bangs = `[[ ${'! '.repeat(200_000)}x ]]`
-    expect(refusal(bangs)).toEqual([2, 'mirage: syntax error: nesting too deep\n'])
+    expect(refusal(bangs)).toEqual([2, `${HEAD}line 1: syntax error: nesting too deep\n`])
   })
 
   it('reads a substitution once however often its word is', () => {
@@ -524,9 +560,7 @@ describe('syntax refusals', () => {
     ['echo $( (fi) )', 'fi', 'fi'],
     ['echo <(fi)', 'fi', 'fi'],
   ])('reads %j with an alias %j as %j', (cmd, alias, word) => {
-    expect(refusal(cmd, new Set([alias]))[1]).toBe(
-      word === null ? '' : `mirage: syntax error near '${word}'\n`,
-    )
+    expect(refusal(cmd, new Set([alias]))[1]).toBe(word === null ? '' : near(word, cmd))
   })
 })
 

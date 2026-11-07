@@ -19,7 +19,7 @@ import { applyBarrier, BarrierPolicy } from '../../shell/barrier.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { ExitSignal, ReturnSignal } from '../../shell/errors.ts'
 import { NodeKind, nodeKind } from '../../shell/node_kind.ts'
-import { isProgramInvocation } from '../../context/session_context.ts'
+import { isProgramInvocation, voiceName } from '../../context/session_context.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { SessionState } from '../session/session.ts'
 import type { ExecutionNode } from '../types.ts'
@@ -174,7 +174,7 @@ export async function runErrTrap(
     return []
   session.errTrapRunning = true
   try {
-    return await runAction(executeFn, action, session, stdin, callStack)
+    return await runAction(executeFn, action, 'error', session, stdin, callStack)
   } finally {
     session.errTrapRunning = false
   }
@@ -206,7 +206,7 @@ export async function runReturnTrap(
     return []
   session.returnTrapRunning = true
   try {
-    return await runAction(executeFn, action, session, stdin, callStack)
+    return await runAction(executeFn, action, 'return', session, stdin, callStack)
   } finally {
     session.returnTrapRunning = false
   }
@@ -219,16 +219,20 @@ export async function runReturnTrap(
  * `set -e` answer for the statement it answers as it was. A failure `set -e`
  * acts on in it ends the shell with its status, and an `exit` or `return` in
  * it leaves with what it wrote, for the redirects of its statement to route.
+ * A syntax error in it leads with `bash: <name> trap: `.
  */
 async function runAction(
   executeFn: ExecuteStringFn,
   action: string,
+  name: string,
   session: SessionState,
   stdin: ByteSource | null,
   callStack: CallStack | null,
 ): Promise<Written[]> {
   const held = snapshotStatus(session)
   const immune = session.errexitImmune
+  const outerHead = session.parseHead
+  session.parseHead = `${voiceName(session)}: ${name} trap: `
   let io: IOResult
   try {
     io = await executeFn(action, {
@@ -242,6 +246,7 @@ async function runAction(
     throw err
   } finally {
     session.errexitImmune = immune
+    session.parseHead = outerHead
   }
   const stdout = await materialize(io.stdout)
   const stderr = await io.materializeStderr()
@@ -289,6 +294,8 @@ export async function runExitTrap(
   recordStatus(session, status)
   const saved = session.trapStatus
   session.trapStatus = status
+  const outerHead = session.parseHead
+  session.parseHead = `${voiceName(session)}: exit trap: `
   const exiting = session.errexitExiting
   session.errexitExiting = false
   let final = status
@@ -318,6 +325,7 @@ export async function runExitTrap(
     }
   } finally {
     session.trapStatus = saved
+    session.parseHead = outerHead
     session.errexitExiting = exiting
     session.exitTrap = null
     session.exitTrapInherited = false

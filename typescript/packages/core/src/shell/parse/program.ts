@@ -92,14 +92,17 @@ export class ProgramNode implements ShellNode {
   get heredoc() {
     return this.node.heredoc
   }
-  get warnings() {
-    return this.node.warnings ?? ''
+  warnings(head: string, first: number): string {
+    return this.node.warnings?.(head, first) ?? ''
   }
   get offsets() {
     return this.program.offsets
   }
   get error() {
     return this.node.error ?? null
+  }
+  refusal(head: string, first: number, utf8: boolean): string {
+    return this.node.refusal?.(head, first, utf8) ?? ''
   }
   get sourceText() {
     return this.node.sourceText ?? this.node.text

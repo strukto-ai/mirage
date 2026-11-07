@@ -67,7 +67,10 @@ export function handleTrap(args: readonly string[], session: SessionState): Redi
     for (const flag of word.slice(1)) {
       if (flag === 'p') printing = true
       else if (flag === 'l') {
-        return result('trap', { exitCode: 2, stderr: 'mirage: trap: -l: not supported\n' })
+        return result('trap', {
+          exitCode: 2,
+          stderr: decodeText(builtinError('trap', '-l: not supported')),
+        })
       } else {
         const message = decodeText(builtinError('trap', `-${flag}: invalid option`))
         return result('trap', { exitCode: 2, stderr: message + builtinUsage('trap') })
@@ -108,7 +111,7 @@ export function handleTrap(args: readonly string[], session: SessionState): Redi
       session[field] = action === '-' ? null : action
       session[scoped] = false
     } else if (action !== '-') {
-      errors.push(`mirage: trap: ${spec}: not supported\n`)
+      errors.push(decodeText(builtinError('trap', `${spec}: not supported`)))
     }
   }
   return result('trap', { exitCode: errors.length > 0 ? 1 : 0, stderr: errors.join('') })

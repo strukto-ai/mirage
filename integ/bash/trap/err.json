@@ -238,11 +238,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( set -e; trap '(exit 7)' ERR; false; echo BAD ); echo rc=$?; ( trap '(exit 7)' ERR; false; echo \"after $?\" ); echo rc=$?; ( set -eT; trap '(exit 7)' RETURN; f() { :; }; f; echo BAD ); echo rc=$?; ( trap '(exit 7)' RETURN; f() { return 3; }; f; echo \"after $?\" ); ( trap 'echo ERR' ERR; true | false | false; echo \"${PIPESTATUS[*]} $?\" ); ( trap 'echo T; exit 7' ERR; { false; } > /data/f ); echo \"rc=$? f[$(cat /data/f)]\"; rm -f /data/f",
+      "command": "( set -e; trap '(exit 7)' ERR; false; echo BAD ); echo rc=$?; ( trap '(exit 7)' ERR; false; echo \"after $?\" ); echo rc=$?; ( set -eT; trap '(exit 7)' RETURN; f() { :; }; f; echo BAD ); echo rc=$?; ( trap '(exit 7)' RETURN; f() { return 3; }; f; echo \"after $?\" ); ( trap 'echo ERR' ERR; true | false | false; echo \"${PIPESTATUS[*]} $?\" ); ( trap 'echo T; exit 7' ERR; { false; } > /data/f ); echo \"rc=$? f[$(cat /data/f)]\"; rm -f /data/f; ( trap 'fi' ERR; false; echo \"err $?\" ); ( set -T; trap 'fi' RETURN; f() { :; }; f; echo \"ret $?\" ); bash -c 'trap \"fi\" EXIT; exit 3'; echo \"exit $?\"",
       "expect": {
         "exit": 0,
-        "stdout": "rc=7\nafter 1\nrc=0\nrc=7\nafter 3\nERR\n0 1 1 1\nrc=7 f[T]\n",
-        "stderr": ""
+        "stdout": "rc=7\nafter 1\nrc=0\nrc=7\nafter 3\nERR\n0 1 1 1\nrc=7 f[T]\nerr 1\nret 0\nexit 3\n",
+        "stderr": "bash: error trap: line 1: syntax error near unexpected token `fi'\nbash: error trap: line 1: `fi'\nenvironment: return trap: line 1: syntax error near unexpected token `fi'\nenvironment: return trap: line 1: `fi'\nbash: exit trap: line 1: syntax error near unexpected token `fi'\nbash: exit trap: line 1: `fi'\n"
       }
     }
   ]

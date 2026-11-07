@@ -155,5 +155,5 @@ async function evalCondBinary(
     return compare(values[0] ?? 0n, values[1] ?? 0n)
   }
   if (FILE_PAIR_BINARY.has(node.op)) return applyFilePair(ctx, node.op, node.left, node.right)
-  throw new CondError('mirage: conditional binary operator expected')
+  throw new CondError(`${shellVoice()}conditional binary operator expected`)
 }

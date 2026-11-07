@@ -143,12 +143,8 @@ pub extern "C" fn mirage_rs_shell_parse(len: usize, aliases_len: usize, extglob:
                 parsed.error_at =
                     i32::try_from(typed[refusal.at.min(source.len())]).unwrap_or(i32::MAX);
                 parsed.status = refusal.status;
-                parsed.message.clone_from(&refusal.message);
             }
-            None => {
-                parsed.error_at = -1;
-                parsed.message.clear();
-            }
+            None => parsed.error_at = -1,
         }
         extras(&tree, &utf16, &typed, parsed);
     });
@@ -180,14 +176,14 @@ pub extern "C" fn mirage_rs_shell_drop_tree(handle: u32) {
 }
 
 /// Fill `extras` and `text`: a header of the source's byte length, the
-/// heredoc count, the count of nodes with an inlined text and the
-/// warnings' byte length; then where each UTF-16 unit of the source came
-/// from in the line as typed, and its end; then per heredoc its `<` in
-/// the source, its `<<`, word end, body start and end in the line as
-/// typed, flags (1 quoted, 2 terminated, 4 `<<-`) and the byte lengths of
-/// its word, delimiter and body; then per such node its index and the byte
-/// length of its text. `text` holds the source, each heredoc's word,
-/// delimiter and body, each inlined text and the warnings, in that order.
+/// heredoc count and the count of nodes with an inlined text; then where
+/// each UTF-16 unit of the source came from in the line as typed, and its
+/// end; then per heredoc its `<` in the source, its `<<`, word end, body
+/// start and end in the line as typed, flags (1 quoted, 2 terminated, 4
+/// `<<-`) and the byte lengths of its word, delimiter and body; then per
+/// such node its index and the byte length of its text. `text` holds the
+/// source, each heredoc's word, delimiter and body and each inlined text,
+/// in that order.
 fn extras(tree: &mirage_rs::shell::Tree, utf16: &[u32], typed: &[u32], parsed: &mut Parsed) {
     let inlined: Vec<(usize, Vec<u8>)> = if tree.closes.is_empty() {
         Vec::new()
@@ -197,7 +193,6 @@ fn extras(tree: &mirage_rs::shell::Tree, utf16: &[u32], typed: &[u32], parsed: &
             .filter(|(_, text)| !text.is_empty())
             .collect()
     };
-    let warnings = tree.warnings();
     let extras = &mut parsed.extras;
     let text = &mut parsed.text;
     extras.clear();
@@ -207,7 +202,6 @@ fn extras(tree: &mirage_rs::shell::Tree, utf16: &[u32], typed: &[u32], parsed: &
         count(tree.source.len()),
         count(tree.heredocs.len()),
         count(inlined.len()),
-        count(warnings.len()),
     ]);
     // Each unit a byte starts maps to where that byte came from.
     for at in 0..tree.source.len() {
@@ -238,7 +232,6 @@ fn extras(tree: &mirage_rs::shell::Tree, utf16: &[u32], typed: &[u32], parsed: &
         extras.extend_from_slice(&[count(*index), count(inlined.len())]);
         text.extend_from_slice(inlined);
     }
-    text.extend_from_slice(&warnings);
 }
 
 #[unsafe(no_mangle)]
@@ -277,6 +270,38 @@ pub extern "C" fn mirage_rs_shell_error_at() -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn mirage_rs_shell_status() -> u32 {
     PARSED.with_borrow(|parsed| u32::from(parsed.status))
+}
+
+/// Word what bash prints of the tree kept under `handle` into the message
+/// buffer, each line led by the args buffer's first `head_len` bytes and
+/// its line, the input's first row being `first`: its refusal for `what`
+/// 0, under a UTF-8 locale when `utf8` is 1, its heredoc warnings for 1.
+/// Returns the byte length.
+#[unsafe(no_mangle)]
+pub extern "C" fn mirage_rs_shell_words(
+    handle: u32,
+    what: u32,
+    head_len: usize,
+    first: usize,
+    utf8: u32,
+) -> usize {
+    let args = ARGS.with_borrow_mut(std::mem::take);
+    let head = &args[..head_len.min(args.len())];
+    let words = TREES
+        .with_borrow(|trees| trees.kept.get(&handle).cloned())
+        .map(|tree| match what {
+            0 => tree
+                .error
+                .as_ref()
+                .map(|refusal| refusal.worded(head, first, utf8 == 1))
+                .unwrap_or_default(),
+            _ => tree.warnings(head, first),
+        })
+        .unwrap_or_default();
+    PARSED.with_borrow_mut(|parsed| {
+        parsed.message = words;
+        parsed.message.len()
+    })
 }
 
 #[unsafe(no_mangle)]

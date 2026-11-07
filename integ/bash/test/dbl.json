@@ -557,7 +557,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: conditional binary operator expected\nmirage: syntax error near '-bogus'\n"
+        "stderr": "bash: -c: line 1: conditional binary operator expected\nbash: -c: line 1: syntax error near `-bogus'\nbash: -c: line 1: `[[ a -bogus b ]]; echo after'\n"
       }
     },
     {
@@ -938,11 +938,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "( for l in '[[ -f = -f ]]' '[[ -x -lt 3 ]]' '[[ -f ]]' '[[ a =~ ^(a|b$ ]]'; do bash -c \"$l\"; echo $?; done )",
+      "command": "( for l in '[[ -f = -f ]]' '[[ -x -lt 3 ]]' '[[ -f ]]' '[[ a =~ ^(a|b$ ]]' ':\n[[ -f a' '[[ (\na\n-x b ]]'; do bash -c \"$l\"; echo $?; done )",
       "expect": {
         "exit": 0,
-        "stdout": "2\n2\n2\n2\n",
-        "stderr": "mirage: syntax error in conditional expression\nmirage: syntax error near '-f'\nmirage: syntax error in conditional expression\nmirage: syntax error near '3'\nmirage: unexpected argument `]]' to conditional unary operator\nmirage: syntax error near ']]'\nmirage: unexpected EOF while looking for matching `)'\nmirage: unexpected argument to conditional binary operator\n"
+        "stdout": "2\n2\n2\n2\n2\n2\n",
+        "stderr": "bash: -c: line 1: syntax error in conditional expression\nbash: -c: line 1: syntax error near `-f'\nbash: -c: line 1: `[[ -f = -f ]]'\nbash: -c: line 1: syntax error in conditional expression\nbash: -c: line 1: syntax error near `3'\nbash: -c: line 1: `[[ -x -lt 3 ]]'\nbash: -c: line 1: unexpected argument `]]' to conditional unary operator\nbash: -c: line 1: syntax error near `]]'\nbash: -c: line 1: `[[ -f ]]'\nbash: -c: line 1: unexpected EOF while looking for matching `)'\nbash: -c: line 2: unexpected argument to conditional binary operator\nbash: -c: line 2: unexpected EOF while looking for `]]'\nbash: -c: line 3: syntax error: unexpected end of file\nbash: -c: line 2: unexpected token `newline', conditional binary operator expected\nbash: -c: line 1: expected `)'\nbash: -c: line 2: syntax error near `a'\nbash: -c: line 2: `a'\n"
       }
     },
     {

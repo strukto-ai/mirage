@@ -516,6 +516,10 @@ export class SessionState {
   // for one sourced; and the command running in it, whose line is `$LINENO`
   // (`lineNumber`).
   parseName: string | null = null
+  // What a syntax error in the running parse leads with: `eval`'s
+  // `bash: eval: `, a sourced file's `name: `; null for the shell's own
+  // input, `bash: -c: ` (`syntaxHead`).
+  parseHead: string | null = null
   lineNode: TSNodeLike | null = null
   // The row the next nested parse starts on, which a sourced file (0) and
   // the rest of an input read again (its own parse's) set; null numbers it
@@ -807,6 +811,7 @@ export class SessionState {
     child.parseRow = this.parseRow
     child.lineRow = this.lineRow
     child.parseName = this.parseName
+    child.parseHead = this.parseHead
     child.lineNode = this.lineNode
     child.aliasExpansion = this.aliasExpansion
     return child

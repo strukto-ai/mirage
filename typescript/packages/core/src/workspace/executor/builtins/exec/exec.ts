@@ -109,7 +109,7 @@ export async function handleExecCommand(
             builtinError('exec', `${scan.bad}: invalid option`),
             encodeText(builtinUsage('exec')),
           ])
-        : encodeText(`mirage: exec: -${refused ?? ''}: not supported\n`)
+        : builtinError('exec', `-${refused ?? ''}: not supported`)
     return [
       null,
       new IOResult({ exitCode: 2, stderr: err }),

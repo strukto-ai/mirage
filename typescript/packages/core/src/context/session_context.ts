@@ -577,8 +577,29 @@ export function sessionUmask(access?: SessionAccess): number {
 export function sessionVoice(session: SessionState | null): string {
   if (session === null) return 'bash: '
   if (isProgramInvocation(session)) return ''
+  return `${voiceName(session)}: line ${String(session.lineNumber)}: `
+}
+
+/**
+ * The name `session`'s shell leads its diagnostics with: the file a sourced
+ * script, or a function defined in one, came from; `environment` for a
+ * function defined in the shell's own input; else the nested shell's `$0`,
+ * else `bash`. Mirrors Python's voice_name.
+ */
+export function voiceName(session: SessionState): string {
   const name = session.parseName ?? session.scriptName ?? 'bash'
-  return `${name === '' ? 'bash' : name}: line ${String(session.lineNumber)}: `
+  return name === '' ? 'bash' : name
+}
+
+/**
+ * What a syntax error in `session`'s running parse leads with, its line after
+ * it: `bash: -c: ` for the shell's own input, as bash -c reads its command
+ * string; `bash: eval: ` in `eval`; `name: ` in a sourced file or a script.
+ * Mirrors Python's syntax_head.
+ */
+export function syntaxHead(session: SessionState): string {
+  const name = session.scriptName ?? ''
+  return session.parseHead ?? `${name === '' ? 'bash' : name}: -c: `
 }
 
 function runningVoice(): string {

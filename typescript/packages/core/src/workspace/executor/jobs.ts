@@ -1298,7 +1298,7 @@ export async function handleKill(
     const number = signalNumber(spec)
     if (number === null)
       return jobResult(cmdStr, `${voice}kill: ${spec}: invalid signal specification\n`, 1)
-    if (number === SIGSTOP) return jobResult(cmdStr, `mirage: kill: ${spec}: not supported\n`, 1)
+    if (number === SIGSTOP) return jobResult(cmdStr, `${voice}kill: ${spec}: not supported\n`, 1)
     signal = number
     sawSignal = true
   }

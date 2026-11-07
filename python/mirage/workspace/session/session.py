@@ -537,6 +537,10 @@ class SessionState:
     # the file for one sourced; and the command running in it, whose line
     # is `$LINENO` (`line_number`).
     _parse_name: str | None = field(default=None, repr=False)
+    # What a syntax error in the running parse leads with: `eval`'s
+    # `bash: eval: `, a sourced file's `name: `; None for the shell's own
+    # input, `bash: -c: ` (`syntax_head`).
+    _parse_head: str | None = field(default=None, repr=False)
     _line_node: TSNodeLike | None = field(default=None, repr=False)
     # The row the next nested parse starts on, which a sourced file (0)
     # and the rest of an input read again (its own parse's) set; None
@@ -1110,6 +1114,7 @@ class SessionState:
         child._parse_row = self._parse_row
         child._line_row = self._line_row
         child._parse_name = self._parse_name
+        child._parse_head = self._parse_head
         child._line_node = self._line_node
         child._alias_expansion = self._alias_expansion
         return child

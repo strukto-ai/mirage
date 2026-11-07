@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import type { RedirectResult } from '../../../../context/session_context.ts'
+import { voiceName, type RedirectResult } from '../../../../context/session_context.ts'
 import type { ByteSource, IOResult } from '../../../../io/types.ts'
 import { CallStack } from '../../../../shell/call_stack.ts'
 import type { JobConsole } from '../../../../shell/console/index.ts'
@@ -37,6 +37,8 @@ export async function handleEval(
 ): Promise<RedirectResult> {
   const script = args.join(' ')
   let io: IOResult
+  const outerHead = session.parseHead
+  session.parseHead = `${voiceName(session)}: eval: `
   try {
     io = await callStack.nested('eval', () =>
       executeFn(script, {
@@ -49,6 +51,8 @@ export async function handleEval(
   } catch (err) {
     if (err instanceof ExitSignal) err.sourced = true
     throw err
+  } finally {
+    session.parseHead = outerHead
   }
   return [io.stdout, io, new ExecutionNode({ command: 'eval', exitCode: io.exitCode })]
 }

@@ -148,7 +148,7 @@ describe('unsupported constructs', () => {
       expect(await runResult(ws, 'case x')).toEqual([
         2,
         '',
-        'mirage: syntax error: unexpected end of file\n',
+        'bash: -c: line 2: syntax error: unexpected end of file\n',
       ])
     })
   })

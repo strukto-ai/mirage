@@ -26,6 +26,8 @@ from mirage.context import (
     get_current_evaluation,
     reset_caller,
     set_current_evaluation,
+    syntax_head,
+    voice_name,
 )
 from mirage.errors.types import CommandTimeoutError
 from mirage.execution.context import new_execution_id
@@ -47,6 +49,7 @@ from mirage.runtime.routing import RouteError
 from mirage.runtime.table import whole_line_runtime
 from mirage.runtime.types import DispatchFn, RouteDecision, RuntimeIdentity
 from mirage.secrets.types import ResolvedSource
+from mirage.shell.bytes import encode_text, utf8_locale
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole, Terminal
 from mirage.shell.constants import (
@@ -95,7 +98,7 @@ from mirage.workspace.node.occurrence import (
     claimant_for,
     evaluated_from,
 )
-from mirage.workspace.node.program import refused_row
+from mirage.workspace.node.program import parse_rows, refused_row
 from mirage.workspace.node.run_tree import run_command_tree
 from mirage.workspace.session import (
     SessionState,
@@ -105,6 +108,7 @@ from mirage.workspace.session import (
 )
 from mirage.workspace.session.budget import run_with_env_limit
 from mirage.workspace.session.manager import SessionManager
+from mirage.workspace.session.state import visible_env
 from mirage.workspace.snapshot import ContentDriftError
 from mirage.workspace.snapshot.drift import DriftQueue
 from mirage.workspace.types import StatusWriter
@@ -340,6 +344,9 @@ async def recurse(
         context = child_context(context, records)
         context.frame.substitution = True
         session = context.session
+        # A backtick's body is read as it runs, so a refusal in it names
+        # the substitution, as bash's does; a `$( )` was read with its line.
+        session._parse_head = f"{voice_name(session)}: command substitution: "
         child_token = set_current_evaluation(context, owner=ws.sessions)
     capture = Terminal()
     waits = JobWaits(capture.jobs)
@@ -848,8 +855,18 @@ async def run_prepared_line(
         # consulted about it. A refusal on a later line leaves the lines
         # before it to run first (``refused_row``), as bash reads its
         # input a line at a time.
+        # The input's first row is the line its parse starts on, as
+        # bash numbers an `eval` on from the line it runs on.
+        first_line = (
+            parse_rows(effective_session, call_stack is not None)[1] + 1
+        )
         unreadable = (
-            syntax_refusal(ast)
+            syntax_refusal(
+                ast,
+                syntax_head(effective_session),
+                first_line,
+                utf8_locale(visible_env(effective_session)),
+            )
             if argv is None and refused_row(ast) is None
             else None
         )
@@ -1247,7 +1264,14 @@ async def run_prepared_line(
                 )
         # The program loop stamped each statement; the line as a whole
         # is a wrapper around them, like a group.
-        warnings = getattr(ast, "warnings", b"")
+        worded = getattr(ast, "warnings", None)
+        warnings = (
+            b""
+            if worded is None
+            else worded(
+                encode_text(f"{voice_name(effective_session)}: "), first_line
+            )
+        )
         if warnings:
             io.stderr = warnings + await io.materialize_stderr()
         record_status(session, io.exit_code, transparent=True)

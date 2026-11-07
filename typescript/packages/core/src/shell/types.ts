@@ -374,17 +374,19 @@ export interface Heredoc {
  */
 export interface TSNodeLike {
   readonly heredoc?: Heredoc | undefined
-  readonly warnings?: string
+  /** What bash warns of while it reads the tree's heredocs, each line led by `head` and its line, the input's first row being `first`. */
+  warnings?(head: string, first: number): string
   readonly sourceText?: string
   readonly inlined?: string | undefined
   /** Where each UTF-16 unit of the text the tree reads came from in the line as typed, then its end. */
   readonly offsets?: ArrayLike<number>
-  /** bash's refusal of the tree's line: where, its diagnostic as mirage prints it, and its status. */
+  /** Where bash refuses the tree's line, and the status. */
   readonly error?: {
     readonly index: number
-    readonly message: string
     readonly status: number
   } | null
+  /** bash's refusal of the tree's line as it prints it, each line led by `head` and its line, the input's first row being `first`, under a UTF-8 locale or not (`utf8`). */
+  refusal?(head: string, first: number, utf8: boolean): string
   type: string
   text: string
   children: TSNodeLike[]

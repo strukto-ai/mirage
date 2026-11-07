@@ -1,0 +1,20 @@
+{
+ "pinned": "bash 5.2.37 (debian:stable-slim), C locale, parse only: bash -n -c LINE",
+ "lines": [
+  {"line": "for ((  ; b ; c ; d )); do :; done", "status": 2, "stderr": "bash: -c: line 1: syntax error: `;' unexpected\nbash: -c: line 1: syntax error: `((  ; b ; c ; d ))'\n"},
+  {"line": "for (( a ;  ; c ; d )); do :; done", "status": 2, "stderr": "bash: -c: line 1: syntax error: `;' unexpected\nbash: -c: line 1: syntax error: `(( a ;  ; c ; d ))'\n"},
+  {"line": "for (( a ; b ;  ; d )); do :; done", "status": 2, "stderr": "bash: -c: line 1: syntax error: `;' unexpected\nbash: -c: line 1: syntax error: `(( a ; b ;  ; d ))'\n"},
+  {"line": "for (( a ; b ; c ;  )); do :; done", "status": 2, "stderr": "bash: -c: line 1: syntax error: `;' unexpected\nbash: -c: line 1: syntax error: `(( a ; b ; c ;  ))'\n"},
+  {"line": "for (( a ; b ; c ; d )); do :; done", "status": 2, "stderr": "bash: -c: line 1: syntax error: `;' unexpected\nbash: -c: line 1: syntax error: `(( a ; b ; c ; d ))'\n"},
+  {"line": "for (( a ; b ; c ; d )); do :;done", "status": 2, "stderr": "bash: -c: line 1: syntax error: `;' unexpected\nbash: -c: line 1: syntax error: `(( a ; b ; c ; d ))'\n"},
+  {"line": "for (()); do :; done", "status": 2, "stderr": "bash: -c: line 1: syntax error: arithmetic expression required\nbash: -c: line 1: syntax error: `(())'\n"},
+  {"line": "for ((a b c)); do :; done", "status": 2, "stderr": "bash: -c: line 1: syntax error: arithmetic expression required\nbash: -c: line 1: syntax error: `((a b c))'\n"},
+  {"line": "for ((a;b)); do :; done", "status": 2, "stderr": "bash: -c: line 1: syntax error: arithmetic expression required\nbash: -c: line 1: syntax error: `((a;b))'\n"},
+  {"line": "for ((i)); do $; done", "status": 2, "stderr": "bash: -c: line 1: syntax error: arithmetic expression required\nbash: -c: line 1: syntax error: `((i))'\n"},
+  {"line": "for ((i)); do :; done", "status": 2, "stderr": "bash: -c: line 1: syntax error: arithmetic expression required\nbash: -c: line 1: syntax error: `((i))'\n"},
+  {"line": "for ((i)); do :;done", "status": 2, "stderr": "bash: -c: line 1: syntax error: arithmetic expression required\nbash: -c: line 1: syntax error: `((i))'\n"},
+  {"line": "for ((i));do :; done", "status": 2, "stderr": "bash: -c: line 1: syntax error: arithmetic expression required\nbash: -c: line 1: syntax error: `((i))'\n"},
+  {"line": "for ((i=0;i<2;i++ ;; )) { :; }", "status": 2, "stderr": "bash: -c: line 1: syntax error: `;' unexpected\nbash: -c: line 1: syntax error: `((i=0;i<2;i++ ;; ))'\n"},
+  {"line": "for((i)); do :; done", "status": 2, "stderr": "bash: -c: line 1: syntax error: arithmetic expression required\nbash: -c: line 1: syntax error: `((i))'\n"}
+ ]
+}

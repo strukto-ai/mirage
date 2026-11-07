@@ -473,7 +473,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near '('\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `('\nbash: -c: line 1: `echo before; case a in @(a)) echo yes;; *) echo no;; esac'\n"
       }
     }
   ]

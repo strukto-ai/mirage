@@ -3,6 +3,7 @@ import re
 from mirage.shell.bytes import encode_text
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
+from mirage.shell.voice import shell_voice
 
 DEFAULT_FORMAT = "\nreal\t%3lR\nuser\t%3lU\nsys\t%3lS"
 TOKEN = re.compile(r"%(?:([0-9])?(l)?([RUS])|([%P]))")
@@ -32,7 +33,7 @@ def timing_report(
     for match in TOKEN.finditer(template):
         gap = template[cursor : match.start()]
         if "%" in gap:
-            return b"mirage: TIMEFORMAT: invalid format character\n"
+            return _bad_escape(template[cursor + gap.index("%") :])
         pieces.append(gap)
         if match.group(4):
             pieces.append("%" if match.group(4) == "%" else "0.00")
@@ -46,9 +47,31 @@ def timing_report(
                 pieces.append(f"{value:.{precision}f}")
         cursor = match.end()
     tail = template[cursor:]
-    if "%" in tail:
-        return b"mirage: TIMEFORMAT: invalid format character\n"
+    if "%" in tail[:-1]:
+        return _bad_escape(tail[tail.index("%") :])
     return encode_text("".join(pieces) + tail + "\n")
+
+
+def _bad_escape(rest: str) -> bytes:
+    """bash's refusal of the ``%`` escape ``rest`` starts with: past an
+    optional ASCII precision digit and ``l``, the byte standing where a
+    format letter belongs, NUL at the end of the format.
+
+    Args:
+        rest (str): the format from the escape's ``%`` on.
+    """
+    raw = encode_text(rest)
+    i = 1
+    if raw[i : i + 1].isdigit():
+        i += 1
+    if raw[i : i + 1] == b"l":
+        i += 1
+    bad = raw[i : i + 1] or b"\0"
+    return (
+        encode_text(f"{shell_voice()}TIMEFORMAT: `")
+        + bad
+        + b"': invalid format character\n"
+    )
 
 
 def timed_by(node: TSNodeLike) -> bool | None:

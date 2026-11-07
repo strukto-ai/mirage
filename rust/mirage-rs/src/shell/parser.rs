@@ -1,7 +1,7 @@
 use super::heredoc::Body;
 use super::lex::{is_blank, is_space, is_word};
 use super::lower::lower;
-use super::tree::{Refusal, Syn, Tree, lay_out, place_comments};
+use super::tree::{Refusal, Said, Syn, Tree, lay_out, place_comments};
 
 /// How deep constructs may nest before the parser refuses the line, so a
 /// hostile line cannot run the host out of stack.
@@ -62,6 +62,54 @@ pub(super) struct Fail {
     pub eof: bool,
     /// The input ended inside a quote or a matched pair.
     pub matching: bool,
+    /// Where bash words the refusal off the rows of the text it refuses;
+    /// boxed, as it is rare and a refusal rides every parse's result.
+    pub placed: Option<Box<Placed>>,
+}
+
+/// Where bash words a refusal off the rows of the text it refuses.
+#[derive(Debug, Clone, Default)]
+pub(super) struct Placed {
+    /// The lines bash puts on the row of another text, a conditional's
+    /// `[[` or one of its `(` or the end of the heredoc bodies it reads
+    /// first, by index and offset.
+    pub anchored: Vec<(usize, usize)>,
+    /// Where bash's quote of the line starts when not at its start: past
+    /// a heredoc's delimiter that ended mid-line, or at the second `(` of
+    /// a `((` it rereads as subshells.
+    pub echo_from: Option<usize>,
+}
+
+impl Fail {
+    /// Add a line bash puts on the row of `from`.
+    pub(super) fn push_from(&mut self, line: Vec<u8>, from: usize) {
+        self.anchor(self.lines.len(), from);
+        self.lines.push(line);
+    }
+
+    /// Put line `index` on the row of `from`, unless it stands on another
+    /// text's already.
+    pub(super) fn anchor(&mut self, index: usize, from: usize) {
+        let placed = self.placed.get_or_insert_default();
+        if placed.anchored.iter().all(|&(line, _)| line != index) {
+            placed.anchored.push((index, from));
+        }
+    }
+
+    /// Quote the line from `from`, unless from a later start already.
+    pub(super) fn echo_from(&mut self, from: usize) {
+        let placed = self.placed.get_or_insert_default();
+        placed.echo_from = placed.echo_from.max(Some(from));
+    }
+
+    fn anchored(&self, index: usize) -> Option<usize> {
+        let placed = self.placed.as_deref()?;
+        placed
+            .anchored
+            .iter()
+            .find(|(line, _)| *line == index)
+            .map(|&(_, from)| from)
+    }
 }
 
 /// A construct whose refusal bash gives a status of its own.
@@ -300,11 +348,26 @@ fn joined(
     } = pass;
     let error = error.map(|fail| {
         let to_source = |at: usize| offsets[at.min(text.len())];
-        let first = Fail {
-            at: to_source(fail.at),
+        let at = to_source(fail.at);
+        let placed = fail.placed.as_deref().map(|placed| {
+            Box::new(Placed {
+                anchored: placed
+                    .anchored
+                    .iter()
+                    .map(|&(index, from)| (index, to_source(from)))
+                    .collect(),
+                echo_from: placed.echo_from.map(to_source),
+            })
+        });
+        let mut first = Fail {
+            at,
             end: to_source(fail.end),
+            placed,
             ..fail
         };
+        if let Some(from) = resumed(source, &heredocs, at) {
+            first.echo_from(from);
+        }
         refusals(source, options, ended, first)
     });
     place_comments(&mut root, &comments);
@@ -319,6 +382,16 @@ fn joined(
     tree.heredocs = heredocs;
     tree.closes = closes;
     tree
+}
+
+/// Where bash's quote of the line holding `at` starts when a heredoc's
+/// delimiter line inside a substitution goes on past the delimiter: there.
+fn resumed(source: &[u8], heredocs: &[super::lower::Heredoc], at: usize) -> Option<usize> {
+    heredocs
+        .iter()
+        .map(|heredoc| heredoc.end)
+        .filter(|&end| end > 0 && end <= at && source.get(end - 1).is_some_and(|&b| b != b'\n'))
+        .max()
 }
 
 /// `text` less the bytes at `dropped` (sorted), and where each byte left
@@ -407,31 +480,61 @@ fn refusals(source: &[u8], options: &super::Options, ended: bool, first: Fail) -
         }
         found.push(fail);
     }
+    let newlines: Vec<usize> = memchr::memchr_iter(b'\n', source).collect();
     Refusal {
         at: found[0].at,
-        message: found
+        lines: found
             .iter()
-            .flat_map(|fail| &fail.lines)
-            .flat_map(|line| worded(line))
+            .flat_map(|fail| said(source, &newlines, fail))
             .collect(),
         status: found.last().map_or(2, |last| last.status),
     }
 }
 
-/// One of bash's diagnostic lines as mirage prints it.
-fn worded(line: &[u8]) -> Vec<u8> {
-    for opener in [
-        &b"syntax error near unexpected token `"[..],
-        b"syntax error near `",
-    ] {
-        if let Some(text) = line
-            .strip_prefix(opener)
-            .and_then(|rest| rest.strip_suffix(b"'"))
-        {
-            return [&b"mirage: syntax error near '"[..], text, b"'\n"].concat();
+/// One refusal's lines on the rows bash reports them on. A line naming a
+/// token stands on the row the token ends on and is followed by the input
+/// line there, quoted back; the opening of an unclosed quote or pair on
+/// the row it opened on, as a line anchored to an earlier text is on that
+/// text's; the rest of what the end of the input brings on the row past
+/// the last, as bash -c reads a newline after the input. `newlines` holds
+/// the offset of each newline in `source`.
+fn said(source: &[u8], newlines: &[usize], fail: &Fail) -> Vec<Said> {
+    let rows = |to: usize| newlines.partition_point(|&at| at < to);
+    let at = fail.at.min(source.len());
+    let last = fail.end.min(source.len()).saturating_sub(1).max(at);
+    let past = newlines.len() + usize::from(source.last().is_some_and(|&b| b != b'\n'));
+    let mut out = Vec::new();
+    for (index, text) in fail.lines.iter().enumerate() {
+        let near = text.starts_with(b"syntax error near");
+        let opened = index == 0 && fail.matching;
+        let row = match fail.anchored(index) {
+            Some(from) => rows(from.min(source.len())),
+            None if near => rows(last),
+            None if fail.eof && !opened => past,
+            None => rows(at),
+        };
+        out.push(Said {
+            row,
+            text: text.clone(),
+            quoted: false,
+        });
+        if near {
+            let start = memchr::memrchr(b'\n', &source[..last]).map_or(0, |i| i + 1);
+            let start = fail
+                .placed
+                .as_deref()
+                .and_then(|placed| placed.echo_from)
+                .filter(|&from| (start..=at).contains(&from))
+                .unwrap_or(start);
+            let end = memchr::memchr(b'\n', &source[last..]).map_or(source.len(), |i| last + i);
+            out.push(Said {
+                row,
+                text: source[start..end].to_vec(),
+                quoted: true,
+            });
         }
     }
-    [&b"mirage: "[..], line, b"\n"].concat()
+    out
 }
 
 /// A diagnostic line from its pieces.
@@ -654,6 +757,7 @@ impl Parser<'_> {
             status,
             eof,
             matching: false,
+            placed: None,
         }
     }
 
@@ -714,12 +818,9 @@ impl Parser<'_> {
             Err(fail) => return fail,
         };
         let end = at + token.len().max(1);
-        let token = if token == b"\n" {
-            b"newline".to_vec()
-        } else {
-            token
-        };
-        self.refusal(
+        let newline = token == b"\n";
+        let token = if newline { b"newline".to_vec() } else { token };
+        let fail = self.refusal(
             at,
             end,
             vec![line(&[
@@ -728,7 +829,11 @@ impl Parser<'_> {
                 b"'",
             ])],
             false,
-        )
+        );
+        if newline {
+            return self.past_bodies(fail, at);
+        }
+        fail
     }
 
     /// The token at `at` as bash names it; bash's lexer reads a word
@@ -739,7 +844,8 @@ impl Parser<'_> {
             b";;&", b";;", b";&", b"&&", b"||", b"|&", b">>", b"<<", b"&>", b">&", b"<&", b">|",
             b"\n", b";", b"&", b"|", b"(", b")", b"<", b">",
         ];
-        for op in ops {
+        let procsub = rest.starts_with(b"<(") || rest.starts_with(b">(");
+        for op in ops.iter().filter(|_| !procsub) {
             if rest.starts_with(op) {
                 return Ok(op.to_vec());
             }
@@ -908,7 +1014,10 @@ impl Parser<'_> {
             }
             return Ok((!items.is_empty()).then_some(items));
         }
-        let statement = self.statement()?;
+        let start = self.i;
+        let statement = self
+            .statement()
+            .map_err(|fail| self.listed(fail, start, close))?;
         let index = items.len();
         items.push(statement);
         self.skip_blank();
@@ -917,7 +1026,7 @@ impl Parser<'_> {
             items.push(Syn::hidden(at, at));
         } else if self.starts(b";;") || self.starts(b";&") {
             if close != Close::CaseItem {
-                return self.fail(at);
+                return Err(self.listed(self.unexpected(at), at, close));
             }
         } else if self.peek() == b';' {
             self.i += 1;
@@ -947,7 +1056,7 @@ impl Parser<'_> {
                     return Err(self.refusal(at, end + 2, vec![line], false));
                 }
             }
-            return self.fail(at);
+            return Err(self.listed(self.unexpected(at), at, close));
         }
         if self.eof() {
             self.ended = true;
@@ -957,6 +1066,32 @@ impl Parser<'_> {
             items = Syn::fielded(items, field);
         }
         Ok(Some(items))
+    }
+
+    /// `fail`, which refuses the token at `at`: outside every construct,
+    /// where the line's list could end, bash first reads the bodies of the
+    /// heredocs the line opened.
+    fn listed(&self, fail: Fail, at: usize, close: Close) -> Fail {
+        if close == Close::Eof && self.comsub == 0 && fail.at == at && !fail.eof {
+            return self.past_bodies(fail, at);
+        }
+        fail
+    }
+
+    /// `fail` named on the row the bodies of the pending heredocs end on,
+    /// read from the newline at or after `at`.
+    fn past_bodies(&self, mut fail: Fail, at: usize) -> Fail {
+        let near = fail
+            .lines
+            .iter()
+            .position(|line| line.starts_with(b"syntax error near"));
+        let Some(index) = near.filter(|_| !self.pending.is_empty()) else {
+            return fail;
+        };
+        let start = memchr::memchr(b'\n', &self.s[at..]).map_or(self.s.len(), |i| at + i + 1);
+        let end = super::heredoc::bodies_end(self.s, start, &mut self.pending.clone());
+        fail.anchor(index, end.saturating_sub(1));
+        fail
     }
 
     /// A statement list up to `close`; `required` refuses an empty one,

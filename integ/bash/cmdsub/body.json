@@ -872,7 +872,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n2\n2\na ) y\n",
-        "stderr": "mirage: syntax error near ')'\nmirage: syntax error near ')'\nmirage: unexpected EOF while looking for matching `)'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `)'\nbash: -c: line 1: `echo $((case x in x) echo y;; esac))'\nbash: -c: line 2: syntax error near unexpected token `)'\nbash: -c: line 2: `))'\nbash: -c: line 1: unexpected EOF while looking for matching `)'\n"
       }
     },
     {

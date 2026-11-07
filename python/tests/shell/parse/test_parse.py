@@ -36,9 +36,12 @@ from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 
 ROOT = Path(__file__).resolve().parents[4]
-CORPUS = json.loads(
-    (ROOT / "integ/fixtures/shell/bash_syntax.json").read_text()
-)["lines"]
+HEAD = "bash: -c: "
+SYNTAX = ROOT / "integ/fixtures/shell/bash_syntax"
+CORPUS = {
+    path.stem: json.loads(path.read_text())["lines"]
+    for path in sorted(SYNTAX.glob("*.json"))
+}
 SIDE_EFFECT_COMMANDS = [
     case["command"]
     for case in json.loads(
@@ -48,7 +51,7 @@ SIDE_EFFECT_COMMANDS = [
 ]
 
 
-# Rows of bash_syntax.json, pinned with `bash -c`, that mirage reads
+# Rows of the bash_syntax fixtures, pinned with `bash -c`, that mirage reads
 # otherwise: a heredoc body whose substitution or expansion does not
 # close, which bash refuses only when it expands the body and mirage with
 # the line; and three lines the parser refuses at an earlier token than
@@ -71,8 +74,15 @@ DIVERGES = frozenset(
 def _refusal(
     line: str, aliases: frozenset[str] = frozenset()
 ) -> tuple[int, bytes]:
-    io = syntax_refusal(parse(line, aliases, extglob=False))
+    io = syntax_refusal(parse(line, aliases, extglob=False), HEAD, 1, False)
     return (0, b"") if io is None else (io.exit_code, io.stderr)
+
+
+def _near(token: str, line: str) -> bytes:
+    return (
+        f"{HEAD}line 1: syntax error near unexpected token `{token}'\n"
+        f"{HEAD}line 1: `{line}'\n"
+    ).encode()
 
 
 def test_parse_returns_node():
@@ -440,7 +450,10 @@ def test_heredoc_unterminated_body_is_left_as_typed():
     root = parse("cat <<EOF; echo x\nhi\n")
     assert root.error is None
     assert root.source_text.decode() == "cat <<EOF; echo x\nhi\n"
-    assert root.warnings
+    assert root.warnings(b"bash: ", 1) == (
+        b"bash: line 2: warning: here-document at line 1 delimited by "
+        b"end-of-file (wanted `EOF')\n"
+    )
 
 
 @pytest.mark.parametrize(
@@ -582,7 +595,7 @@ def test_assignments_with_a_redirect_keep_their_source(line):
 )
 def test_a_substring_leaves_its_arithmetic_to_execution(source):
     root = parse(source)
-    assert syntax_refusal(root) is None
+    assert syntax_refusal(root, HEAD, 1, False) is None
     assert root.text.decode() == source
 
 
@@ -678,14 +691,16 @@ def test_extended_pattern_keeps_process_substitution_in_one_word():
     assert sub.children[0].type == "<("
 
 
-def test_every_line_reads_as_bash_reads_it():
-    # integ/fixtures/shell/bash_syntax.json is pinned against bash by
-    # scripts/pin_bash_syntax.py, which also fuzzes the parser against it;
-    # the TypeScript suite (packages/core/src/shell/parse/parse.test.ts)
-    # reads the same rows.
+@pytest.mark.parametrize("kind", sorted(CORPUS))
+def test_every_line_reads_as_bash_reads_it(kind):
+    # integ/fixtures/shell/bash_syntax/ holds one file per kind of bash's
+    # reading (the lines it reads, refuses at a token, ends inside, ...),
+    # pinned against bash in the C locale by scripts/pin_bash_syntax.py,
+    # which also fuzzes the parser against it; the TypeScript suite
+    # (packages/core/src/shell/parse/parse.test.ts) reads the same rows.
     assert [
         row["line"]
-        for row in CORPUS
+        for row in CORPUS[kind]
         if row["line"] not in DIVERGES
         and not ends_escaped(row["line"])
         and _refusal(row["line"])
@@ -696,30 +711,54 @@ def test_every_line_reads_as_bash_reads_it():
 @pytest.mark.parametrize(
     ("raw", "stderr"),
     [
-        (b"echo (\xff", b"mirage: syntax error near '\xff'\n"),
+        (
+            b"echo (\xff",
+            b"bash: -c: line 1: syntax error near unexpected token `$'\\377''\n"
+            b"bash: -c: line 1: `echo (\xff'\n",
+        ),
         (
             b"[[ '\xff'",
-            b"mirage: unexpected token `newline', conditional binary "
-            b"operator expected\nmirage: syntax error near ''\xff''\n",
+            b"bash: -c: line 1: unexpected token `newline', conditional binary "
+            b"operator expected\nbash: -c: line 1: syntax error near `'\xff''\n"
+            b"bash: -c: line 1: `[[ '\xff''\n",
         ),
     ],
 )
 def test_a_diagnostic_keeps_an_invalid_byte_as_typed(raw, stderr):
+    # Pinned against bash 5.2.37: only an unexpected token is named in
+    # `$'...'` when it does not show as it is.
     assert _refusal(decode_text(raw))[1] == stderr
+
+
+@pytest.mark.parametrize(
+    ("line", "utf8", "token"),
+    [
+        ("echo (é", True, "é"),
+        ("echo (é", False, "$'\\303\\251'"),
+        ("echo ($'\\u00e9'", True, "'é'"),
+    ],
+)
+def test_an_unexpected_token_is_named_in_the_shells_locale(line, utf8, token):
+    # Pinned against bash 5.2.37 under C.UTF-8 and C.
+    io = syntax_refusal(parse(line, extglob=False), HEAD, 1, utf8)
+    assert io is not None
+    near = f"syntax error near unexpected token `{token}'"
+    assert decode_text(io.stderr).split("\n")[0] == f"{HEAD}line 1: {near}"
 
 
 def test_a_line_nested_past_the_reader_is_refused_at_the_next_opener():
     # bash refuses a line nested past its own reader at the opener it can
     # no longer take (thousands deep there), so nothing on the line runs.
     deep = "echo " + "$(echo " * 4096 + "x" + ")" * 4096 + "; fi"
-    assert _refusal(deep) == (127, b"mirage: syntax error near '$('\n")
+    assert _refusal(deep) == (127, _near("$(", deep))
     assert _refusal("{ " * 64 + "a; " + "} " * 64) == (0, b"")
-    assert _refusal("{ " * 65 + "a; " + "} " * 64) == (
-        2,
-        b"mirage: syntax error near '{'\n",
-    )
+    braces = "{ " * 65 + "a; " + "} " * 64
+    assert _refusal(braces) == (2, _near("{", braces))
     bangs = "[[ " + "! " * 5000 + "x ]]"
-    assert _refusal(bangs) == (2, b"mirage: syntax error: nesting too deep\n")
+    assert _refusal(bangs) == (
+        2,
+        b"bash: -c: line 1: syntax error: nesting too deep\n",
+    )
 
 
 def test_a_substitution_is_read_once_however_often_its_word_is():
@@ -744,11 +783,7 @@ def test_a_reserved_word_the_shell_expands_as_an_alias_is_a_command(
     # Pinned against bash 5.2.37, which takes the reserved word first
     # inside `$(...)` and a process substitution.
     _, stderr = _refusal(command, frozenset({alias}))
-    assert stderr == (
-        b""
-        if word is None
-        else f"mirage: syntax error near '{word}'\n".encode()
-    )
+    assert stderr == (b"" if word is None else _near(word, command))
 
 
 @pytest.mark.asyncio

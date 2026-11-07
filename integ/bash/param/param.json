@@ -1148,11 +1148,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "pc2='hello world'; echo \"${pc2^^}\"; (echo \"${pc2@U}|${pc2@u}|${pc2@L}\"; pzt='a\\tb'\\''c'; echo \"${pzt@Q}\" \"${pzt@E}\"; declare -A pzm=([k]=v); pza=(a 'b c'); declare -ir pzi=7; echo \"${pzi@a} ${pza@a} ${pzm@a} ${pzi@A}\"; echo \"${pza[@]@Q}|${pzm[@]@K}|${pzm[@]@k}|${pza[@]@A}\"; declare -n pzr=pzi; declare -a pzs=([1]=x); declare -i pzn; echo \"${pzm@A}|${pzm[zz]@A}|${pza[5]@A}|${pzs@A}|${pzn@A}|${pzr@A}|[${pzu@A}]|${pzs-unset}\"); (pzg='aBc dE'; echo \"${pzg~}|${pzg~~}|${pzg~~[a-c]}|${pzg~[a-z]}\"); (pzc=($'\\x01\\'x' $'\\x01\\\\y'); echo \"${pzc[*]@A}\"; eval \"${pzc[*]@A}\"; printf '%q\\n' \"${pzc[@]}\")",
+      "command": "pc2='hello world'; echo \"${pc2^^}\"; (echo \"${pc2@U}|${pc2@u}|${pc2@L}\"; pzt='a\\tb'\\''c'; echo \"${pzt@Q}\" \"${pzt@E}\"; declare -A pzm=([k]=v); pza=(a 'b c'); declare -ir pzi=7; echo \"${pzi@a} ${pza@a} ${pzm@a} ${pzi@A}\"; echo \"${pza[@]@Q}|${pzm[@]@K}|${pzm[@]@k}|${pza[@]@A}\"; declare -n pzr=pzi; declare -a pzs=([1]=x); declare -i pzn; echo \"${pzm@A}|${pzm[zz]@A}|${pza[5]@A}|${pzs@A}|${pzn@A}|${pzr@A}|[${pzu@A}]|${pzs-unset}\"); (pzg='aBc dE'; echo \"${pzg~}|${pzg~~}|${pzg~~[a-c]}|${pzg~[a-z]}\"); (pzc=($'\\x01\\'x' $'\\x01\\\\y'); echo \"${pzc[*]@A}\"; eval \"${pzc[*]@A}\"; printf '%q\\n' \"${pzc[@]}\"); (export LC_ALL=C.UTF-8; v=$'\\303\\251\\342\\200\\250'; w=$'\\342\\200\\213'; echo \"${v@Q} ${w@Q}\"; eval $'echo (\\342\\200\\250'); echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "HELLO WORLD\nHELLO WORLD|Hello world|hello world\n'a\\tb'\\''c' a\tb'c\nir a A declare -ir pzi='7'\n'a' 'b c'|k \"v\" |k v|declare -a pza=([0]=\"a\" [1]=\"b c\")\ndeclare -A pzm|declare -A pzm|declare -a pza|declare -a pzs|declare -i pzn|declare -ir pzi='7'|[]|unset\nABc dE|AbC De|ABC dE|ABc dE\ndeclare -a pzc=([0]=$'\\001\\'x' [1]=$'\\001\\\\y')\n$'\\001\\'x'\n$'\\001\\\\y'\n",
-        "stderr": ""
+        "stdout": "HELLO WORLD\nHELLO WORLD|Hello world|hello world\n'a\\tb'\\''c' a\tb'c\nir a A declare -ir pzi='7'\n'a' 'b c'|k \"v\" |k v|declare -a pza=([0]=\"a\" [1]=\"b c\")\ndeclare -A pzm|declare -A pzm|declare -a pza|declare -a pzs|declare -i pzn|declare -ir pzi='7'|[]|unset\nABc dE|AbC De|ABC dE|ABc dE\ndeclare -a pzc=([0]=$'\\001\\'x' [1]=$'\\001\\\\y')\n$'\\001\\'x'\n$'\\001\\\\y'\n$'é\\342\\200\\250' '​'\nrc=2\n",
+        "stderr": "bash: eval: line 1: syntax error near unexpected token `$'\\342\\200\\250''\nbash: eval: line 1: `echo ( '\n"
       }
     },
     {

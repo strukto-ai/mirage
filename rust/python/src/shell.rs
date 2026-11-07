@@ -44,18 +44,14 @@ impl ShellTree {
         }
     }
 
-    /// What bash reports of the line when it refuses it: where in the line
-    /// as typed, the diagnostic lines as mirage prints them, and the
-    /// status; None when bash reads the line.
+    /// Where in the line as typed bash refuses it, and the status; None
+    /// when bash reads the line.
     #[getter]
-    fn error<'py>(&self, py: Python<'py>) -> Option<(usize, Bound<'py, PyBytes>, u8)> {
-        self.tree.error.as_ref().map(|refusal| {
-            (
-                refusal.at,
-                PyBytes::new(py, &refusal.message),
-                refusal.status,
-            )
-        })
+    fn error(&self) -> Option<(usize, u8)> {
+        self.tree
+            .error
+            .as_ref()
+            .map(|refusal| (refusal.at, refusal.status))
     }
 
     /// What the nodes read: the line with its heredoc bodies folded in and
@@ -309,22 +305,35 @@ impl ShellNode {
         self.tree.offsets.clone()
     }
 
-    /// What bash warns of while it reads the tree's heredocs.
-    #[getter]
-    fn warnings<'py>(&self, py: Python<'py>) -> Bound<'py, PyBytes> {
-        PyBytes::new(py, &self.tree.warnings())
+    /// What bash warns of while it reads the tree's heredocs, each line
+    /// led by `head` and its line, the input's first row being `first`.
+    fn warnings<'py>(&self, py: Python<'py>, head: &[u8], first: usize) -> Bound<'py, PyBytes> {
+        PyBytes::new(py, &self.tree.warnings(head, first))
     }
 
     /// The tree's refusal, as `ShellTree.error` gives it.
     #[getter]
-    fn error<'py>(&self, py: Python<'py>) -> Option<(usize, Bound<'py, PyBytes>, u8)> {
-        self.tree.error.as_ref().map(|refusal| {
-            (
-                refusal.at,
-                PyBytes::new(py, &refusal.message),
-                refusal.status,
-            )
-        })
+    fn error(&self) -> Option<(usize, u8)> {
+        self.tree
+            .error
+            .as_ref()
+            .map(|refusal| (refusal.at, refusal.status))
+    }
+
+    /// The tree's refusal as bash prints it, each line led by `head` and
+    /// its line, the input's first row being `first`, under a UTF-8 locale
+    /// or not (`utf8`); None when bash reads the line.
+    fn refusal<'py>(
+        &self,
+        py: Python<'py>,
+        head: &[u8],
+        first: usize,
+        utf8: bool,
+    ) -> Option<Bound<'py, PyBytes>> {
+        self.tree
+            .error
+            .as_ref()
+            .map(|refusal| PyBytes::new(py, &refusal.worded(head, first, utf8)))
     }
 
     fn child_by_field_name(&self, name: &str) -> Option<ShellNode> {

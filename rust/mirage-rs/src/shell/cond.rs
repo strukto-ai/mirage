@@ -50,6 +50,8 @@ enum Stop {
     Refused(Fail),
     Test {
         lines: Vec<Vec<u8>>,
+        /// As `Placed::anchored`.
+        anchored: Vec<(usize, usize)>,
         at: Tok,
         eof: bool,
     },
@@ -66,6 +68,17 @@ type S<T> = Result<T, Stop>;
 fn test<T>(line: Vec<u8>, at: Tok) -> S<T> {
     Err(Stop::Test {
         lines: vec![line],
+        anchored: Vec::new(),
+        at,
+        eof: at.kind == Kind::Eof,
+    })
+}
+
+/// A refusal at `at` that bash words on the row of `from`.
+fn test_from<T>(line: Vec<u8>, at: Tok, from: usize) -> S<T> {
+    Err(Stop::Test {
+        lines: vec![line],
+        anchored: vec![(0, from)],
         at,
         eof: at.kind == Kind::Eof,
     })
@@ -75,6 +88,8 @@ fn test<T>(line: Vec<u8>, at: Tok) -> S<T> {
 /// takes and words its refusals in a family of its own.
 struct Cond<'p, 'a> {
     parser: &'p Parser<'a>,
+    /// Just past the `[[`.
+    open: usize,
     pos: usize,
     /// The newline bash supposes at the end of the input was read.
     ended: bool,
@@ -311,7 +326,13 @@ impl Cond<'_, '_> {
         if self.depth > 0 {
             return Ok(self.test_peek()?);
         }
-        operand("unexpected EOF while looking for `]]'", self.test_peek())
+        let open = self.open;
+        self.test_peek().map_err(|mut fail| {
+            if fail.eof {
+                fail.push_from("unexpected EOF while looking for `]]'".into(), open);
+            }
+            Stop::Refused(fail)
+        })
     }
 
     fn test_close(&mut self) -> S<()> {
@@ -321,22 +342,27 @@ impl Cond<'_, '_> {
             return Ok(());
         }
         if tok.kind == Kind::Eof {
-            return Err(Stop::Test {
-                lines: vec!["unexpected EOF while looking for `]]'".into()],
-                at: tok,
-                eof: true,
-            });
+            return test_from(
+                "unexpected EOF while looking for `]]'".into(),
+                tok,
+                self.open,
+            );
         }
         if tok.kind == Kind::Word {
-            return test("syntax error in conditional expression".into(), tok);
+            return test_from(
+                "syntax error in conditional expression".into(),
+                tok,
+                self.open,
+            );
         }
-        test(
+        test_from(
             self.naming(
                 "syntax error in conditional expression: unexpected token `",
                 tok,
                 "'",
             ),
             tok,
+            self.open,
         )
     }
 
@@ -376,15 +402,12 @@ impl Cond<'_, '_> {
             tok = self.test_peek()?;
         }
         if tok.kind == Kind::Eof {
-            return Err(Stop::Test {
-                lines: vec!["unexpected token `EOF' in conditional command".into()],
-                at: tok,
-                eof: true,
-            });
+            return test("unexpected token `EOF' in conditional command".into(), tok);
         }
         if self.is_close(tok) {
             return Err(Stop::Test {
                 lines: Vec::new(),
+                anchored: Vec::new(),
                 at: tok,
                 eof: false,
             });
@@ -478,13 +501,24 @@ impl Cond<'_, '_> {
         self.depth -= 1;
         let close = match inside {
             Ok(close) => close,
-            Err(Stop::Test { mut lines, at, eof }) => {
+            Err(Stop::Test {
+                mut lines,
+                mut anchored,
+                at,
+                eof,
+            }) => {
+                anchored.push((lines.len(), tok.start));
                 lines.push("expected `)'".into());
-                return Err(Stop::Test { lines, at, eof });
+                return Err(Stop::Test {
+                    lines,
+                    anchored,
+                    at,
+                    eof,
+                });
             }
             Err(Stop::Refused(mut fail)) => {
                 if fail.eof {
-                    fail.lines.push("expected `)'".into());
+                    fail.push_from("expected `)'".into(), tok.start);
                 }
                 return Err(Stop::Refused(fail));
             }
@@ -494,11 +528,12 @@ impl Cond<'_, '_> {
             return Ok(());
         }
         if close.kind == Kind::Word && !self.is_close(close) {
-            return test("expected `)'".into(), close);
+            return test_from("expected `)'".into(), close, tok.start);
         }
-        test(
+        test_from(
             self.naming("unexpected token `", close, "', expected `)'"),
             close,
+            tok.start,
         )
     }
 
@@ -591,6 +626,7 @@ impl Parser<'_> {
     pub(super) fn check_conditional(&self, start: usize) -> R<usize> {
         let mut cond = Cond {
             parser: self,
+            open: start,
             pos: start,
             ended: self.ended,
             depth: 0,
@@ -600,15 +636,25 @@ impl Parser<'_> {
         match read {
             Ok(()) => Ok(cond.pos),
             Err(Stop::Refused(fail)) => Err(fail),
-            Err(Stop::Test { mut lines, at, eof }) => {
-                if eof {
+            Err(Stop::Test {
+                mut lines,
+                anchored,
+                at,
+                eof,
+            }) => {
+                let mut fail = if eof {
                     lines.push(self.eof_line().into());
-                    return Err(self.refusal(self.s.len(), self.s.len(), lines, true));
+                    self.refusal(self.s.len(), self.s.len(), lines, true)
+                } else {
+                    let reach = at.end + usize::from(at.kind != Kind::Newline);
+                    let (from, to) = self.near_span(reach);
+                    lines.push(line(&[b"syntax error near `", &self.s[from..to], b"'"]));
+                    self.refusal(from, to, lines, false)
+                };
+                for (index, from) in anchored {
+                    fail.anchor(index, from);
                 }
-                let reach = at.end + usize::from(at.kind != Kind::Newline);
-                let (from, to) = self.near_span(reach);
-                lines.push(line(&[b"syntax error near `", &self.s[from..to], b"'"]));
-                Err(self.refusal(from, to, lines, false))
+                Err(fail)
             }
         }
     }

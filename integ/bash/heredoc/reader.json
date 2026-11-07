@@ -38,7 +38,7 @@
       "expect": {
         "exit": 0,
         "stdout": "\nbody\n",
-        "stderr": "mirage: line 1: warning: here-document at line 1 delimited by end-of-file (wanted `true')\n"
+        "stderr": "bash: line 1: warning: here-document at line 1 delimited by end-of-file (wanted `true')\n"
       },
       "seq": 509984,
       "targets": [
@@ -422,7 +422,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\nEOF;\n",
-        "stderr": "mirage: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509912,
       "targets": [
@@ -454,7 +454,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\nEOF \n",
-        "stderr": "mirage: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509913,
       "targets": [
@@ -486,7 +486,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\n EOF\n",
-        "stderr": "mirage: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509914,
       "targets": [
@@ -518,7 +518,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\n  EOF\n",
-        "stderr": "mirage: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509915,
       "targets": [
@@ -550,7 +550,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\nEOFX\n",
-        "stderr": "mirage: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509916,
       "targets": [
@@ -582,7 +582,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\n",
-        "stderr": "mirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509917,
       "targets": [
@@ -614,7 +614,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\nx\n",
-        "stderr": "mirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509918,
       "targets": [
@@ -646,7 +646,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\n",
-        "stderr": "mirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509919,
       "targets": [
@@ -678,7 +678,7 @@
       "expect": {
         "exit": 0,
         "stdout": "one\ntwo\n",
-        "stderr": "mirage: line 4: warning: here-document at line 3 delimited by end-of-file (wanted `B')\n"
+        "stderr": "bash: line 4: warning: here-document at line 3 delimited by end-of-file (wanted `B')\n"
       },
       "seq": 509920,
       "targets": [
@@ -710,7 +710,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\n",
-        "stderr": "mirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509921,
       "targets": [
@@ -742,7 +742,7 @@
       "expect": {
         "exit": 0,
         "stdout": "a\nhi\n",
-        "stderr": "mirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509922,
       "targets": [
@@ -774,7 +774,7 @@
       "expect": {
         "exit": 0,
         "stdout": "HI\n",
-        "stderr": "mirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509923,
       "targets": [
@@ -806,7 +806,7 @@
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "mirage: line 1: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 1: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509924,
       "targets": [
@@ -934,7 +934,7 @@
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "mirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `A')\nmirage: line 2: warning: here-document at line 2 delimited by end-of-file (wanted `B')\n"
+        "stderr": "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `A')\nbash: line 2: warning: here-document at line 2 delimited by end-of-file (wanted `B')\n"
       },
       "seq": 509928,
       "targets": [
@@ -966,7 +966,7 @@
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "mirage: line 3: warning: here-document at line 3 delimited by end-of-file (wanted `B')\n"
+        "stderr": "bash: line 3: warning: here-document at line 3 delimited by end-of-file (wanted `B')\n"
       },
       "seq": 509929,
       "targets": [
@@ -998,7 +998,7 @@
       "expect": {
         "exit": 1,
         "stdout": "",
-        "stderr": "mirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509930,
       "targets": [
@@ -1030,7 +1030,7 @@
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "mirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509931,
       "targets": [
@@ -1734,7 +1734,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\nEOF;\n",
-        "stderr": "mirage: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509953,
       "targets": [
@@ -1798,7 +1798,7 @@
       "expect": {
         "exit": 0,
         "stdout": "abc\n",
-        "stderr": "mirage: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509955,
       "targets": [
@@ -1830,7 +1830,7 @@
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "mirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509956,
       "targets": [
@@ -1862,7 +1862,7 @@
       "expect": {
         "exit": 7,
         "stdout": "",
-        "stderr": "mirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509957,
       "targets": [
@@ -1894,7 +1894,7 @@
       "expect": {
         "exit": 0,
         "stdout": "body\n",
-        "stderr": "mirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509958,
       "targets": [
@@ -2054,7 +2054,7 @@
       "expect": {
         "exit": 0,
         "stdout": "",
-        "stderr": "mirage: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `A')\nmirage: line 3: warning: here-document at line 3 delimited by end-of-file (wanted `B')\n"
+        "stderr": "bash: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `A')\nbash: line 3: warning: here-document at line 3 delimited by end-of-file (wanted `B')\n"
       },
       "seq": 509963,
       "targets": [
@@ -2374,7 +2374,7 @@
       "expect": {
         "exit": 0,
         "stdout": "[hello]\n",
-        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+        "stderr": "bash: line 1: warning: command substitution: 1 unterminated here-document\n"
       },
       "seq": 509973,
       "targets": [
@@ -2406,7 +2406,7 @@
       "expect": {
         "exit": 0,
         "stdout": "a\nb\nc\n",
-        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+        "stderr": "bash: line 1: warning: command substitution: 1 unterminated here-document\n"
       },
       "seq": 509974,
       "targets": [
@@ -2438,7 +2438,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\n",
-        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+        "stderr": "bash: line 1: warning: command substitution: 1 unterminated here-document\n"
       },
       "seq": 509975,
       "targets": [
@@ -2470,7 +2470,7 @@
       "expect": {
         "exit": 0,
         "stdout": "b c\n",
-        "stderr": "mirage: line 1: warning: command substitution: 2 unterminated here-documents\nmirage: line 5: warning: command substitution: 1 unterminated here-document\n"
+        "stderr": "bash: line 1: warning: command substitution: 2 unterminated here-documents\nbash: line 5: warning: command substitution: 1 unterminated here-document\n"
       },
       "seq": 509976,
       "targets": [
@@ -2502,7 +2502,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\n",
-        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+        "stderr": "bash: line 1: warning: command substitution: 1 unterminated here-document\n"
       },
       "seq": 509977,
       "targets": [
@@ -2534,7 +2534,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\nhi\n",
-        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+        "stderr": "bash: line 1: warning: command substitution: 1 unterminated here-document\n"
       },
       "seq": 509978,
       "targets": [
@@ -2566,7 +2566,7 @@
       "expect": {
         "exit": 0,
         "stdout": "echo BAD\n",
-        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+        "stderr": "bash: line 1: warning: command substitution: 1 unterminated here-document\n"
       },
       "seq": 509979,
       "targets": [
@@ -2598,7 +2598,7 @@
       "expect": {
         "exit": 0,
         "stdout": "abc\n",
-        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\nmirage: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 1: warning: command substitution: 1 unterminated here-document\nbash: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509980,
       "targets": [
@@ -2630,7 +2630,7 @@
       "expect": {
         "exit": 0,
         "stdout": "1\n",
-        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\nmirage: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 1: warning: command substitution: 1 unterminated here-document\nbash: line 2: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       },
       "seq": 509981,
       "targets": [
@@ -2662,7 +2662,7 @@
       "expect": {
         "exit": 0,
         "stdout": "fi\n",
-        "stderr": "mirage: line 5: warning: here-document at line 4 delimited by end-of-file (wanted `body\n')\n"
+        "stderr": "bash: line 5: warning: here-document at line 4 delimited by end-of-file (wanted `body\n')\n"
       },
       "seq": 509982,
       "targets": [
@@ -2694,7 +2694,7 @@
       "expect": {
         "exit": 0,
         "stdout": "body\n",
-        "stderr": "mirage: line 3: warning: here-document at line 2 delimited by end-of-file (wanted `E')\n"
+        "stderr": "bash: line 3: warning: here-document at line 2 delimited by end-of-file (wanted `E')\n"
       },
       "seq": 509983,
       "targets": [
@@ -2726,7 +2726,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hello\n",
-        "stderr": "mirage: line 2: warning: command substitution: 1 unterminated here-document\n"
+        "stderr": "bash: line 2: warning: command substitution: 1 unterminated here-document\n"
       },
       "seq": 509984,
       "targets": [
@@ -2758,7 +2758,7 @@
       "expect": {
         "exit": 0,
         "stdout": "yes\n",
-        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+        "stderr": "bash: line 1: warning: command substitution: 1 unterminated here-document\n"
       },
       "seq": 509985,
       "targets": [
@@ -2822,7 +2822,7 @@
       "expect": {
         "exit": 0,
         "stdout": "a b\n",
-        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\nmirage: line 3: warning: command substitution: 1 unterminated here-document\n"
+        "stderr": "bash: line 1: warning: command substitution: 1 unterminated here-document\nbash: line 3: warning: command substitution: 1 unterminated here-document\n"
       },
       "seq": 509987,
       "targets": [

@@ -115,7 +115,9 @@ async def handle_source(
         session.function_names = cs.function_names()
     # Its diagnostics name the file, as spelled, and count its own lines.
     outer_name = session._parse_name
+    outer_head = session._parse_head
     session._parse_name = word_text(path)
+    session._parse_head = f"{session._parse_name}: "
     session._parse_from = 0
     try:
         try:
@@ -131,6 +133,7 @@ async def handle_source(
         finally:
             # The RETURN trap speaks as the caller, as bash's does.
             session._parse_name = outer_name
+            session._parse_head = outer_head
             session._parse_from = None
         stdout, io = await returning(
             execute_fn, session, stdin, cs, io.stdout, io

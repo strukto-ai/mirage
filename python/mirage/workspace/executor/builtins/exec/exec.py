@@ -128,7 +128,7 @@ async def handle_exec_command(
             builtin_error("exec", f"{scan.bad}: invalid option")
             + encode_text(builtin_usage("exec"))
             if scan.bad is not None
-            else encode_text(f"mirage: exec: -{refused}: not supported\n")
+            else builtin_error("exec", f"-{refused}: not supported")
         )
         return (
             None,

@@ -1,5 +1,7 @@
 import { encodeText } from '../../shell/bytes.ts'
+import { concat } from '../../utils/bytes.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
+import { shellVoice } from '../../shell/voice.ts'
 
 const DEFAULT_FORMAT = '\nreal\t%3lR\nuser\t%3lU\nsys\t%3lS'
 const TOKEN = /%(?:([0-9])?(l)?([RUS])|([%P]))/g
@@ -18,7 +20,7 @@ export function timingReport(
   let cursor = 0
   for (const match of template.matchAll(TOKEN)) {
     const gap = template.slice(cursor, match.index)
-    if (gap.includes('%')) return encodeText('mirage: TIMEFORMAT: invalid format character\n')
+    if (gap.includes('%')) return badEscape(template.slice(cursor + gap.indexOf('%')))
     pieces.push(gap)
     if (match[4] !== undefined) pieces.push(match[4] === '%' ? '%' : '0.00')
     else {
@@ -33,8 +35,27 @@ export function timingReport(
     cursor = match.index + match[0].length
   }
   const tail = template.slice(cursor)
-  if (tail.includes('%')) return encodeText('mirage: TIMEFORMAT: invalid format character\n')
+  if (tail.slice(0, -1).includes('%')) return badEscape(tail.slice(tail.indexOf('%')))
   return encodeText(pieces.join('') + tail + '\n')
+}
+
+/**
+ * bash's refusal of the `%` escape `rest` starts with: past an optional
+ * ASCII precision digit and `l`, the byte standing where a format letter
+ * belongs, NUL at the end of the format. Mirrors Python's _bad_escape.
+ */
+function badEscape(rest: string): Uint8Array {
+  const raw = encodeText(rest)
+  let i = 1
+  const digit = raw[i] ?? 0
+  if (digit >= 0x30 && digit <= 0x39) i += 1
+  if (raw[i] === 0x6c) i += 1
+  const bad = i < raw.length ? raw.subarray(i, i + 1) : Uint8Array.of(0)
+  return concat([
+    encodeText(`${shellVoice()}TIMEFORMAT: \``),
+    bad,
+    encodeText("': invalid format character\n"),
+  ])
 }
 
 /**

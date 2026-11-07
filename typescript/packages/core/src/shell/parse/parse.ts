@@ -50,8 +50,16 @@ export function parseProgram(
  * reads it. Status 2 is a syntax error, 1 an array bash cannot read, 127 a
  * substitution whose body bash cannot parse. Mirrors Python's syntax_refusal.
  */
-export function syntaxRefusal(root: TSNodeLike): IOResult | null {
+export function syntaxRefusal(
+  root: TSNodeLike,
+  head: string,
+  first: number,
+  utf8: boolean,
+): IOResult | null {
   const error = root.error
   if (error === undefined || error === null) return null
-  return new IOResult({ exitCode: error.status, stderr: encodeText(error.message) })
+  return new IOResult({
+    exitCode: error.status,
+    stderr: encodeText(root.refusal?.(head, first, utf8) ?? ''),
+  })
 }

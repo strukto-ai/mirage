@@ -486,8 +486,8 @@
       "command": "bg; echo $?",
       "expect": {
         "exit": 0,
-        "stdout": "2\n",
-        "stderr": "mirage: unsupported builtin: bg\n"
+        "stdout": "1\n",
+        "stderr": "bash: line 1: bg: no job control\n"
       }
     },
     {
@@ -522,7 +522,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "mirage: unsupported builtin: ulimit\n"
+        "stderr": "bash: line 1: ulimit: not supported\n"
       }
     },
     {
@@ -907,7 +907,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "mirage: unsupported builtin: complete\n"
+        "stderr": "bash: line 1: complete: not supported\n"
       }
     },
     {
@@ -942,7 +942,7 @@
       "expect": {
         "exit": 0,
         "stdout": "2\n",
-        "stderr": "mirage: unsupported builtin: compgen\n"
+        "stderr": "bash: line 1: compgen: not supported\n"
       }
     },
     {

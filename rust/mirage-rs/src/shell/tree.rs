@@ -401,16 +401,263 @@ pub struct Node {
     pub child_count: u32,
 }
 
+/// One line of a refusal: the row of the input bash reports it on, 0 for
+/// the first, and its text; `quoted` for the input line bash quotes back
+/// after a `syntax error near`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Said {
+    pub row: usize,
+    pub text: Vec<u8>,
+    pub quoted: bool,
+}
+
 /// What bash reports of a line it refuses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
     /// Where its first refusal stands in the line as typed.
     pub at: usize,
-    /// Its diagnostic lines as mirage prints them, each ended by a
-    /// newline, the line's own bytes in them as typed.
-    pub message: Vec<u8>,
+    /// Its diagnostic lines, the line's own bytes in them as typed.
+    pub lines: Vec<Said>,
     /// The status the line is refused with.
     pub status: u8,
+}
+
+const UNEXPECTED: &[u8] = b"syntax error near unexpected token `";
+
+impl Refusal {
+    /// The refusal as bash prints it: each line led by `head` (`bash: -c: `,
+    /// `bash: eval: `, a sourced file's `name: `) and the line it stands
+    /// on, the input's first row being line `first`; an unexpected token
+    /// named as bash names it under a UTF-8 locale or not (`utf8`).
+    pub fn worded(&self, head: &[u8], first: usize, utf8: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        for said in &self.lines {
+            out.extend_from_slice(head);
+            out.extend_from_slice(format!("line {}: ", first + said.row).as_bytes());
+            let token = said
+                .text
+                .strip_prefix(UNEXPECTED)
+                .and_then(|rest| rest.strip_suffix(b"'"))
+                .filter(|_| !said.quoted);
+            if said.quoted {
+                out.push(b'`');
+                out.extend_from_slice(&said.text);
+                out.push(b'\'');
+            } else if let Some(token) = token {
+                out.extend_from_slice(UNEXPECTED);
+                out.extend_from_slice(&named(token, utf8));
+                out.push(b'\'');
+            } else {
+                out.extend_from_slice(&said.text);
+            }
+            out.push(b'\n');
+        }
+        out
+    }
+}
+
+/// A token as bash's reader hands it to a syntax error: each `$'...'` it
+/// reads as a word (outside quotes, or in `$( )`, `<( )` or `${ }`) as its
+/// value in single quotes, bare in double quotes within a `${ }` that takes
+/// no pattern or a `$[ ]`, and as typed in double quotes and backticks;
+/// each `$"..."` as `"..."`, and a `\001` before each `\001` and `\177` no
+/// backslash escapes. The whole in `$'...'` when it does not show as it is.
+fn named(token: &[u8], utf8: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(token.len());
+    let mut scopes = vec![Scope::Words {
+        pair: None,
+        dq: false,
+        quoted: true,
+        depth: 0,
+    }];
+    let mut ends = None;
+    let mut at = 0;
+    while let (Some(&scope), Some(&byte)) = (scopes.last(), token.get(at)) {
+        let next = token.get(at + 1).copied();
+        if byte == b'\\' && next.is_some() && !matches!(scope, Scope::Verbatim(b'\'')) {
+            out.extend_from_slice(&token[at..at + 2]);
+            at += 2;
+            continue;
+        }
+        let dq = match scope {
+            Scope::Words { dq, .. } => Some(dq),
+            Scope::Double => Some(true),
+            Scope::Verbatim(_) => None,
+        };
+        if let Some(inner) = dq.and_then(|dq| opened(token, at, dq, &mut ends)) {
+            out.extend_from_slice(&token[at..at + 2]);
+            at += 2;
+            scopes.push(inner);
+            continue;
+        }
+        if let Scope::Words { quoted, .. } = scope {
+            if byte == b'$' && next == Some(b'\'') {
+                if let Some(end) = super::lex::ansi_c_end(token, at) {
+                    let value = marked(&crate::interp::escapes::decode_ansi_c(
+                        &token[at + 2..end - 1],
+                        utf8,
+                    ));
+                    if quoted {
+                        single_quoted(&value, &mut out);
+                    } else {
+                        out.extend_from_slice(&value);
+                    }
+                    at = end;
+                    continue;
+                }
+            }
+            if byte == b'$' && next == Some(b'"') {
+                at += 1;
+                continue;
+            }
+        }
+        if matches!(byte, 0x01 | 0x7F) {
+            out.push(0x01);
+        }
+        out.push(byte);
+        at += 1;
+        match scope {
+            Scope::Verbatim(close) if byte == close => {
+                scopes.pop();
+            }
+            Scope::Double if byte == b'"' => {
+                scopes.pop();
+            }
+            Scope::Double | Scope::Words { .. } if byte == b'`' => {
+                scopes.push(Scope::Verbatim(byte))
+            }
+            Scope::Words { .. } if byte == b'\'' => scopes.push(Scope::Verbatim(byte)),
+            Scope::Words { .. } if byte == b'"' => scopes.push(Scope::Double),
+            Scope::Words {
+                pair: Some((open, close)),
+                depth,
+                ..
+            } if byte == open || byte == close => {
+                if byte == close && depth == 0 {
+                    scopes.pop();
+                } else if let Some(Scope::Words { depth, .. }) = scopes.last_mut() {
+                    *depth = if byte == open { *depth + 1 } else { *depth - 1 };
+                }
+            }
+            _ => {}
+        }
+    }
+    if crate::interp::quote::printable(&out, utf8) {
+        out
+    } else {
+        crate::interp::quote::ansi_c(&out, utf8)
+    }
+}
+
+/// Where `named` stands in a token: its words, or those of a `$( )`,
+/// `${ }` or `$[ ]` whose `pair` opened them and closes at `depth` 0, with
+/// each `$'...'` read as its value, in single quotes when `quoted`, and
+/// `dq` when they stand in double quotes; double-quoted text; or text kept
+/// as typed through the `'` or backtick that closes it.
+#[derive(Clone, Copy)]
+enum Scope {
+    Words {
+        pair: Option<(u8, u8)>,
+        dq: bool,
+        quoted: bool,
+        depth: usize,
+    },
+    Double,
+    Verbatim(u8),
+}
+
+/// The scope a `$( )`, `<( )`, `${ }` or `$[ ]` opening at `at` reads,
+/// inside double quotes or not (`dq`), if one opens there. `ends` holds
+/// each `[`'s matching `]`, found once for the token when first asked.
+fn opened(token: &[u8], at: usize, dq: bool, ends: &mut Option<Vec<usize>>) -> Option<Scope> {
+    let (pair, dq, quoted) = match (token[at], token.get(at + 1).copied()) {
+        (b'$', Some(b'(')) => ((b'(', b')'), false, true),
+        (b'<' | b'>', Some(b'(')) if !dq => ((b'(', b')'), false, true),
+        (b'$', Some(b'{')) => {
+            let ends = ends.get_or_insert_with(|| bracket_ends(token));
+            ((b'{', b'}'), dq, !dq || takes_pattern(token, at + 2, ends))
+        }
+        (b'$', Some(b'[')) => ((b'[', b']'), dq, !dq),
+        _ => return None,
+    };
+    Some(Scope::Words {
+        pair: Some(pair),
+        dq,
+        quoted,
+        depth: 0,
+    })
+}
+
+/// Past each `[` in `token`, the offset past the `]` that matches it,
+/// brackets counted bare; the token's length for one left open.
+fn bracket_ends(token: &[u8]) -> Vec<usize> {
+    let mut ends = vec![token.len(); token.len()];
+    let mut open = Vec::new();
+    for (at, &byte) in token.iter().enumerate() {
+        match byte {
+            b'[' => open.push(at),
+            b']' => {
+                if let Some(start) = open.pop() {
+                    ends[start] = at + 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    ends
+}
+
+/// Whether the `${ }` whose parameter starts at `at` takes a pattern: its
+/// operator, past the name and any subscript (`ends` from
+/// `bracket_ends`), is `/`, `#`, `%`, `^` or `,`.
+fn takes_pattern(token: &[u8], mut at: usize, ends: &[usize]) -> bool {
+    let byte = |at: usize| token.get(at).copied();
+    if matches!(byte(at), Some(b'!' | b'#')) && byte(at + 1).is_some_and(|b| b != b'}') {
+        at += 1;
+    }
+    let name = token
+        .get(at..)
+        .unwrap_or_default()
+        .iter()
+        .take_while(|b| b.is_ascii_alphanumeric() || **b == b'_')
+        .count();
+    at += name.max(usize::from(
+        byte(at).is_some_and(|b| b"@*#?-$!".contains(&b)),
+    ));
+    if byte(at) == Some(b'[') {
+        at = ends[at];
+    }
+    matches!(byte(at), Some(b'/' | b'#' | b'%' | b'^' | b','))
+}
+
+/// `text` with the `\001` bash's reader puts before each `\001` and
+/// `\177`.
+fn marked(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    for &byte in text {
+        if matches!(byte, 0x01 | 0x7F) {
+            out.push(0x01);
+        }
+        out.push(byte);
+    }
+    out
+}
+
+/// `value` in single quotes, `'` as `'\''`; a lone `'` as `\'`.
+fn single_quoted(value: &[u8], out: &mut Vec<u8>) {
+    if value == b"'" {
+        out.extend_from_slice(b"\\'");
+        return;
+    }
+    out.push(b'\'');
+    for &byte in value {
+        if byte == b'\'' {
+            out.extend_from_slice(b"'\\''");
+        } else {
+            out.push(byte);
+        }
+    }
+    out.push(b'\'');
 }
 
 /// A parsed program.

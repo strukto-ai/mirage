@@ -24,6 +24,13 @@ interface Exports {
   mirage_rs_shell_table(): number
   mirage_rs_shell_error_at(): number
   mirage_rs_shell_status(): number
+  mirage_rs_shell_words(
+    handle: number,
+    what: number,
+    headLen: number,
+    first: number,
+    utf8: number,
+  ): number
   mirage_rs_shell_message(): number
   mirage_rs_shell_message_len(): number
   mirage_rs_shell_names(): number
@@ -99,13 +106,11 @@ export class ShellTree {
     /** The engine's own copy of the tree, which a shell's tasks expand nodes of. */
     readonly handle: number,
     /**
-     * What bash reports of the line when it refuses it: where in the line as
-     * typed, in UTF-16 units, the diagnostic lines as mirage prints them, and
-     * the status.
+     * Where in the line as typed, in UTF-16 units, bash refuses it, and the
+     * status.
      */
     readonly error: {
       readonly index: number
-      readonly message: string
       readonly status: number
     } | null,
     private readonly extras: ReturnType<typeof readExtras>,
@@ -129,8 +134,29 @@ export class ShellTree {
     return this.extras.heredocs
   }
 
-  get warnings(): string {
-    return this.extras.warnings
+  /**
+   * What bash warns of while it reads the tree's heredocs, each line led by
+   * `head` and its line, the input's first row being `first`.
+   */
+  warnings(head: string, first: number): string {
+    return this.words(1, head, first, false)
+  }
+
+  /**
+   * The tree's refusal as bash prints it, each line led by `head` and its
+   * line, the input's first row being `first`, under a UTF-8 locale or not
+   * (`utf8`).
+   */
+  refusal(head: string, first: number, utf8: boolean): string {
+    return this.error === null ? '' : this.words(0, head, first, utf8)
+  }
+
+  private words(what: number, head: string, first: number, utf8: boolean): string {
+    const wasm = instance()
+    const bytes = encodeText(head)
+    bytesAt(wasm, wasm.mirage_rs_args(bytes.byteLength), bytes.byteLength).set(bytes)
+    const len = wasm.mirage_rs_shell_words(this.handle, what, bytes.byteLength, first, utf8 ? 1 : 0)
+    return decodeText(bytesAt(wasm, wasm.mirage_rs_shell_message(), len))
   }
 
   inlined(index: number): string | undefined {
@@ -305,14 +331,19 @@ export class ShellTreeNode implements ShellNode {
     return this.tree.offsets
   }
 
-  /** What bash warns of while it reads the tree's heredocs. */
-  get warnings(): string {
-    return this.tree.warnings
+  /** What bash warns of while it reads the tree's heredocs, as `ShellTree.warnings` words it. */
+  warnings(head: string, first: number): string {
+    return this.tree.warnings(head, first)
   }
 
   /** The tree's refusal, as `ShellTree.error` gives it. */
   get error(): ShellTree['error'] {
     return this.tree.error
+  }
+
+  /** The tree's refusal as bash prints it, as `ShellTree.refusal` words it. */
+  refusal(head: string, first: number, utf8: boolean): string {
+    return this.tree.refusal(head, first, utf8)
   }
 }
 
@@ -339,14 +370,7 @@ export function parseShell(
   const table = new Uint32Array(wasm.memory.buffer, ptr, count * WORDS).slice()
   const at = wasm.mirage_rs_shell_error_at()
   let error: ShellTree['error'] = null
-  if (at >= 0) {
-    const message = wasm.mirage_rs_shell_message()
-    error = {
-      index: at,
-      message: decodeText(bytesAt(wasm, message, wasm.mirage_rs_shell_message_len())),
-      status: wasm.mirage_rs_shell_status(),
-    }
-  }
+  if (at >= 0) error = { index: at, status: wasm.mirage_rs_shell_status() }
   const extras = readExtras(wasm)
   return new ShellTree(source, table, wasm.mirage_rs_shell_tree(), error, extras)
 }
@@ -360,11 +384,11 @@ export function readExtras(wasm: Exports) {
     wasm.mirage_rs_shell_extras_len(),
   ).slice()
   const text = bytesAt(wasm, wasm.mirage_rs_shell_text(), wasm.mirage_rs_shell_text_len()).slice()
-  const [sourceBytes = 0, heredocCount = 0, inlinedCount = 0, warningBytes = 0] = words
+  const [sourceBytes = 0, heredocCount = 0, inlinedCount = 0] = words
   let at = sourceBytes
   const next = (bytes: number): string => decodeText(text.subarray(at, (at += bytes)))
   const source = decodeText(text.subarray(0, sourceBytes))
-  let word = 4
+  let word = 3
   const offsets = words.subarray(word, (word += source.length + 1))
   const heredocs: Heredoc[] = []
   for (let index = 0; index < heredocCount; index += 1, word += 9) {
@@ -388,7 +412,7 @@ export function readExtras(wasm: Exports) {
   for (let index = 0; index < inlinedCount; index += 1, word += 2) {
     inlined.set(words[word] ?? 0, next(words[word + 1] ?? 0))
   }
-  return { source, offsets, heredocs, inlined, warnings: next(warningBytes) }
+  return { source, offsets, heredocs, inlined }
 }
 
 /**

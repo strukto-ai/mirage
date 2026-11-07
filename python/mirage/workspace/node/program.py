@@ -146,21 +146,8 @@ async def execute_program(
         session._line_node,
     )
     session._parse_current = session._parse_seq
-    start = session._parse_from
+    start, line_start = parse_rows(session, inline)
     session._parse_from = None
-    if start is not None:
-        line_start = start
-    else:
-        # A nested parse (`eval`, `$( )`) numbers on from the row the
-        # running command ends on, as bash's reader stands there.
-        running = session._line_node
-        ends = (
-            source_row(running, end=True)
-            if inline and running is not None
-            else None
-        )
-        start = 0 if ends is None else session._parse_row + ends
-        line_start = 0 if ends is None else session._line_row + ends
     session._parse_row = start
     session._line_row = line_start
     root = not session._line_open
@@ -655,6 +642,27 @@ def _next_line(
     while j < len(children) and same_line(node, children[j - 1], children[j]):
         j += 1
     return j
+
+
+def parse_rows(session: SessionState, inline: bool) -> tuple[int, int]:
+    """Where the parse about to run starts: its row in the text that
+    spelled it (``_parse_row``) and the same row as ``$LINENO`` counts it
+    (``_line_row``). A sourced file and the rest of an input read again
+    start where ``_parse_from`` says; a nested parse (``eval``, ``$( )``)
+    numbers on from the row the running command ends on, as bash's reader
+    stands there; any other at 0.
+
+    Args:
+        session (SessionState): shell session state.
+        inline (bool): the parse runs on its caller's frames.
+    """
+    if session._parse_from is not None:
+        return session._parse_from, session._parse_from
+    running = session._line_node
+    if not inline or running is None:
+        return 0, 0
+    ends = source_row(running, end=True)
+    return session._parse_row + ends, session._line_row + ends
 
 
 def refused_row(node: TSNodeLike) -> int | None:

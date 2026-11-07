@@ -91,17 +91,32 @@ async def test_a_lazy_run_shells_out_under_its_prefix(line):
 
 
 @pytest.mark.parametrize(
-    ("line", "own", "word"),
+    ("line", "own", "stderr"),
     [
-        ("echo F; fi", {"fi": (0, 10)}, "fi"),
+        (
+            "echo F; fi",
+            {"fi": (0, 10)},
+            "bash: -c: line 1: syntax error near unexpected token `fi'\n"
+            "bash: -c: line 1: `echo F; fi'\n",
+        ),
         ("echo F; fi", {"fi": (0, 7)}, None),
         ("echo C; fi echo F", {"c": (0, 11), "fi": (11, 17)}, None),
-        ("echo C; echo F; fi", {"c": (0, 8), "fi": (8, 18)}, "fi"),
-        ("echo F \\\n; fi", {"fi": (0, 13)}, "fi"),
+        (
+            "echo C; echo F; fi",
+            {"c": (0, 8), "fi": (8, 18)},
+            "bash: -c: line 1: syntax error near unexpected token `fi'\n"
+            "bash: -c: line 1: `echo C; echo F; fi'\n",
+        ),
+        (
+            "echo F \\\n; fi",
+            {"fi": (0, 13)},
+            "bash: -c: line 2: syntax error near unexpected token `fi'\n"
+            "bash: -c: line 2: `; fi'\n",
+        ),
         ("echo F \\\n; fi", {"fi": (0, 10)}, None),
     ],
 )
-def test_an_alias_name_is_reserved_inside_its_own_text(line, own, word):
+def test_an_alias_name_is_reserved_inside_its_own_text(line, own, stderr):
     # Pinned against bash 5.2.37: a name stays reserved only inside the
     # text its alias put there, a trailing blank's chained one included.
     # Spans are in the line as typed, which a continuation shifts.
@@ -114,9 +129,5 @@ def test_an_alias_name_is_reserved_inside_its_own_text(line, own, word):
     aliases = parser_aliases(
         line, frozenset(own), owners, tuple(range(len(line) + 1))
     )
-    io = syntax_refusal(parse(line, aliases))
-    assert (io and io.stderr) == (
-        None
-        if word is None
-        else f"mirage: syntax error near '{word}'\n".encode()
-    )
+    io = syntax_refusal(parse(line, aliases), "bash: -c: ", 1, True)
+    assert (io and io.stderr) == (stderr and stderr.encode())

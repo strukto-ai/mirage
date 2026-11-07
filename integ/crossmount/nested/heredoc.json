@@ -101,7 +101,7 @@
       "expect": {
         "exit": 0,
         "stdout": "hi\nEOF;\n",
-        "stderr": "mirage: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
+        "stderr": "bash: line 3: warning: here-document at line 1 delimited by end-of-file (wanted `EOF')\n"
       }
     },
     {

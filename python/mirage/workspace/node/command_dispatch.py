@@ -43,7 +43,11 @@ from mirage.context import (
     set_program_invocation,
     set_redirect_paths,
 )
-from mirage.context.session_context import RedirectResult, redirect_syntax_for
+from mirage.context.session_context import (
+    RedirectResult,
+    redirect_syntax_for,
+    syntax_head,
+)
 from mirage.io import IOResult
 from mirage.io.stream import ensure_stream
 from mirage.io.types import ByteSource, OutputState, materialize
@@ -59,7 +63,7 @@ from mirage.policy import (
 from mirage.policy.policies import post_session_gate, pre_session_gate
 from mirage.policy.types import Claimant, HandOff, SessionContext
 from mirage.runtime.types import DispatchFn, OutputFn, RunResult
-from mirage.shell.bytes import decode_text, encode_text
+from mirage.shell.bytes import decode_text, encode_text, utf8_locale
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import Channel, JobConsole
 from mirage.shell.constants import CANNOT_EXECUTE_STATUS
@@ -156,6 +160,7 @@ from mirage.workspace.session.state import (
     env_is_readonly,
     seed_var,
     set_attr,
+    visible_env,
 )
 from mirage.workspace.types import ExecutionNode
 
@@ -299,7 +304,12 @@ async def execute_command(
                     parser_aliases(line, aliases, owners, offsets),
                     session.shopts.get("extglob", False),
                 )
-                io = syntax_refusal(ast)
+                io = syntax_refusal(
+                    ast,
+                    syntax_head(session),
+                    session.line_number,
+                    utf8_locale(visible_env(session)),
+                )
                 if io is not None:
                     bad = io.stderr if isinstance(io.stderr, bytes) else b""
                     return (
@@ -1169,13 +1179,16 @@ async def _route_argv(
     # ── unsupported bash builtins ──────────────
     # Constructs the parser accepts but the executor cannot honor.
     # Returning a clear error lets LLMs detect a capability gap instead
-    # of treating it as a missing binary or a silent no-op.
+    # of treating it as a missing binary or a silent no-op; `bg` says
+    # what bash -c says, which has no job control either.
     if name in UNSUPPORTED_BUILTINS:
-        err = encode_text(f"mirage: unsupported builtin: {name}\n")
+        code = 1 if name == "bg" else 2
+        why = "no job control" if name == "bg" else "not supported"
+        err = encode_text(f"{shell_voice()}{name}: {why}\n")
         return (
             None,
-            IOResult(exit_code=2, stderr=err),
-            ExecutionNode(command=name, exit_code=2, stderr=err),
+            IOResult(exit_code=code, stderr=err),
+            ExecutionNode(command=name, exit_code=code, stderr=err),
         )
 
     at = mirage_program_at(

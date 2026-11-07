@@ -15,6 +15,7 @@
 
 from mirage.io.types import IOResult
 from mirage.rs.shell import parse_shell
+from mirage.shell.bytes import encode_text
 from mirage.shell.parse.program import ParsedProgram
 from mirage.shell.types import TSNodeLike
 
@@ -57,13 +58,20 @@ def parse_program(
     )
 
 
-def syntax_refusal(root: TSNodeLike) -> IOResult | None:
+def syntax_refusal(
+    root: TSNodeLike, head: str, first: int, utf8: bool
+) -> IOResult | None:
     """What a line bash refuses yields: its diagnostic and status. Status
     2 is a syntax error, 1 an array bash cannot read, 127 a substitution
     whose body bash cannot parse.
 
     Args:
         root (TSNodeLike): the line's root node.
+        head (str): what each diagnostic line leads with, before its line
+            (``bash: -c: ``, ``bash: eval: ``).
+        first (int): the line the input's first row is.
+        utf8 (bool): whether the shell's locale is UTF-8, which decides
+            how a token holding a byte past ASCII is named.
 
     Returns:
         IOResult | None: None when bash reads the line.
@@ -71,5 +79,5 @@ def syntax_refusal(root: TSNodeLike) -> IOResult | None:
     error = getattr(root, "error", None)
     if error is None:
         return None
-    _, message, status = error
-    return IOResult(exit_code=status, stderr=message)
+    message = getattr(root, "refusal")(encode_text(head), first, utf8)
+    return IOResult(exit_code=error[1], stderr=message)
