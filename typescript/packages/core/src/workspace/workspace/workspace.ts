@@ -98,6 +98,7 @@ import { resolveSources } from '../../secrets/sources.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { Terminal } from '../../shell/console/terminal.ts'
 import { BIN_PREFIX } from '../../shell/constants.ts'
+import { compareCodePoints } from '../../utils/sort.ts'
 import { HANGUP_EXIT_CODE } from '../../execution/job/constants.ts'
 import { type Job, type JobState, JobTable } from '../../execution/job/index.ts'
 import { shellJoin } from '../../shell/join.ts'
@@ -388,8 +389,11 @@ export class Workspace {
       const now = this.clock.now()
       const hangup = HANGUP_EXIT_CODE - 128
       const store = this.jobTable.store
+      // Read the store first: a process or line started while it answers is
+      // this workspace's own by the time it is checked.
+      const records = await store.findProcesses()
       const live = new Set(this.processTable.live().map((handle) => handle.record.id.pid))
-      for (const record of await store.findProcesses()) {
+      for (const record of records) {
         if (record.endedAt === null && !live.has(record.id.pid)) {
           store.note({
             ...record,
@@ -400,13 +404,14 @@ export class Workspace {
           })
         }
       }
+      const lines = await store.findLines()
       const reading = new Set(
         this.lineTable
           .lines()
           .filter((line) => line.endedAt === null)
           .map((line) => line.id.value),
       )
-      for (const line of await store.findLines()) {
+      for (const line of lines) {
         if (line.endedAt === null && !reading.has(line.id.value)) {
           store.note({
             ...line,
@@ -1424,8 +1429,17 @@ export class Workspace {
     filter: { sessionId?: string; state?: JobState; lineId?: LineId } = {},
   ): Promise<Job[]> {
     if (!this.jobTable.claimed) {
+      // Every session the store keeps a list for, and every one this table
+      // lists jobs of, whose list may have gone with its session.
       const ids =
-        filter.sessionId !== undefined ? [filter.sessionId] : await this.jobTable.store.sessions()
+        filter.sessionId !== undefined
+          ? [filter.sessionId]
+          : [
+              ...new Set([
+                ...(await this.jobTable.store.sessions()),
+                ...this.jobTable.allJobs().map((job) => job.sessionId),
+              ]),
+            ].sort(compareCodePoints)
       for (const id of ids) await this.jobTable.sync(id)
     }
     const handles =

@@ -542,6 +542,30 @@ it('lists what the holder runs from another daemon', async () => {
   }
 })
 
+// A daemon that does not hold the lease stops listing the jobs of a session
+// the holder closed.
+it('drops the jobs of a session the holder closed', async () => {
+  const store = new RAMWorkspaceStateStore()
+  const [a, b] = [0, 1].map(
+    () =>
+      new Workspace(
+        { '/m': [new RAMVFS(), MountMode.WRITE] },
+        { mode: MountMode.WRITE, workspaceId: 'shared', sessionId: 's', store },
+      ),
+  )
+  if (a === undefined || b === undefined) throw new Error('no workspace')
+  try {
+    a.createSession('t')
+    await a.shell('sleep 30 &', { sessionId: 't' })
+    expect((await b.jobs()).map((job) => job.sessionId)).toEqual(['t'])
+    await a.closeSession('t')
+    expect(await b.jobs()).toEqual([])
+  } finally {
+    await a.close()
+    await b.close()
+  }
+})
+
 // The line and process records a daemon left running when it went end as
 // hung up once the next one takes the workspace's lease, and a process id of
 // another workspace names none here.

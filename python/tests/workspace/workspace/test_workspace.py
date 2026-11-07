@@ -982,6 +982,32 @@ async def test_another_daemon_lists_what_the_holder_runs():
         await b.close()
 
 
+# A daemon that does not hold the lease stops listing the jobs of a session
+# the holder closed.
+@pytest.mark.asyncio
+async def test_another_daemon_drops_a_closed_sessions_jobs():
+    store = RAMWorkspaceStateStore()
+    a, b = (
+        Workspace(
+            {"/m": (RAMVFS(), MountMode.WRITE)},
+            mode=MountMode.WRITE,
+            workspace_id="shared",
+            session_id="s",
+            store=store,
+        )
+        for _ in range(2)
+    )
+    try:
+        a.create_session("t")
+        await a.shell("sleep 30 &", session_id="t")
+        assert [job.session_id for job in await b.jobs()] == ["t"]
+        await a.close_session("t")
+        assert await b.jobs() == []
+    finally:
+        await a.close()
+        await b.close()
+
+
 # The line and process records a daemon left running when it went end as
 # hung up once the next one takes the workspace's lease, and a process id
 # of another workspace names none here.

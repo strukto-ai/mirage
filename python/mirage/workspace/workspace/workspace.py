@@ -469,8 +469,11 @@ class Workspace:
             now = self._clock.now()
             hangup = HANGUP_EXIT_CODE - 128
             store = self.job_table.store
+            # Read the store first: a process or line started while it
+            # answers is this workspace's own by the time it is checked.
+            records = await store.find_processes()
             live = {handle.record.pid for handle in self.process_table.live()}
-            for record in await store.find_processes():
+            for record in records:
                 if record.ended_at is None and record.pid not in live:
                     store.note(
                         replace(
@@ -481,12 +484,13 @@ class Workspace:
                             signal=hangup,
                         )
                     )
+            lines = await store.find_lines()
             reading = {
                 line.id
                 for line in self.line_table.lines()
                 if line.ended_at is None
             }
-            for line in await store.find_lines():
+            for line in lines:
                 if line.ended_at is None and line.id not in reading:
                     store.note(
                         replace(
@@ -2689,10 +2693,15 @@ class Workspace:
             line_id (LineId | None): only the jobs this line started.
         """
         if not self.job_table.claimed:
+            # Every session the store keeps a list for, and every one this
+            # table lists jobs of, whose list may have gone with its session.
             for sid in (
                 [session_id]
                 if session_id is not None
-                else await self.job_table.store.sessions()
+                else sorted(
+                    set(await self.job_table.store.sessions())
+                    | {job.session_id for job in self.job_table.all_jobs()}
+                )
             ):
                 await self.job_table.sync(sid)
         handles = (
