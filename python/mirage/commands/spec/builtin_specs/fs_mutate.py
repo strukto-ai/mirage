@@ -19,18 +19,25 @@ from mirage.commands.spec.constants import (
 )
 from mirage.commands.spec.types import Argument, CommandSpec
 
-OWNERSHIP = CommandSpec(
-    arguments=(
-        Argument("-c", "--changes", action="store_true"),
-        Argument("-f", "--silent", action="store_true"),
-        Argument("--quiet", action="store_true"),
-        Argument("-v", "--verbose", action="store_true"),
-        Argument("--dereference", action="store_true"),
-        Argument("-h", "--no-dereference", action="store_true"),
-        Argument("-R", "--recursive", action="store_true"),
-        TEXT_OPERAND,
-        PATHS_OPERAND,
-    )
+# The walk and failsafe options chmod, chown and chgrp share.
+_TREE_OPTIONS: tuple[Argument, ...] = (
+    Argument("--reference", type="path"),
+    Argument("--preserve-root", action="store_true"),
+    Argument("--no-preserve-root", action="store_true"),
+    Argument("-H", action="store_true"),
+    Argument("-L", action="store_true"),
+    Argument("-P", action="store_true"),
+)
+
+_OWNERSHIP_OPTIONS: tuple[Argument, ...] = (
+    Argument("-c", "--changes", action="store_true"),
+    Argument("-f", "--silent", action="store_true"),
+    Argument("--quiet", action="store_true"),
+    Argument("-v", "--verbose", action="store_true"),
+    Argument("--dereference", action="store_true"),
+    Argument("-h", "--no-dereference", action="store_true"),
+    Argument("-R", "--recursive", action="store_true"),
+    *_TREE_OPTIONS,
 )
 
 _OVERWRITE_OPTIONS: tuple[Argument, ...] = (
@@ -106,12 +113,22 @@ SPECS: dict[str, CommandSpec] = {
             Argument("--quiet", action="store_true"),
             Argument("-v", "--verbose", action="store_true"),
             Argument("-R", "--recursive", action="store_true"),
+            *_TREE_OPTIONS,
             TEXT_OPERAND,
             PATHS_OPERAND,
         )
     ),
-    "chown": OWNERSHIP,
-    "chgrp": OWNERSHIP,
+    "chown": CommandSpec(
+        arguments=(
+            *_OWNERSHIP_OPTIONS,
+            Argument("--from"),
+            TEXT_OPERAND,
+            PATHS_OPERAND,
+        )
+    ),
+    "chgrp": CommandSpec(
+        arguments=(*_OWNERSHIP_OPTIONS, TEXT_OPERAND, PATHS_OPERAND)
+    ),
     "cp": CommandSpec(
         arguments=(
             Argument("-r", action="store_true"),

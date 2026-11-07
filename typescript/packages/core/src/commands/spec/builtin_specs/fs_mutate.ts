@@ -14,19 +14,26 @@
 import { CommandSpec, Argument } from '../types.ts'
 import { PATHS_OPERAND, TEXTS_OPERAND, TEXT_OPERAND } from '../constants.ts'
 
-const OWNERSHIP = new CommandSpec({
-  arguments: [
-    new Argument(['-c', '--changes'], { action: 'store_true' }),
-    new Argument(['-f', '--silent'], { action: 'store_true' }),
-    new Argument('--quiet', { action: 'store_true' }),
-    new Argument(['-v', '--verbose'], { action: 'store_true' }),
-    new Argument('--dereference', { action: 'store_true' }),
-    new Argument(['-h', '--no-dereference'], { action: 'store_true' }),
-    new Argument(['-R', '--recursive'], { action: 'store_true' }),
-    TEXT_OPERAND,
-    PATHS_OPERAND,
-  ],
-})
+// The walk and failsafe options chmod, chown and chgrp share.
+const TREE_OPTIONS: readonly Argument[] = [
+  new Argument('--reference', { type: 'path' }),
+  new Argument('--preserve-root', { action: 'store_true' }),
+  new Argument('--no-preserve-root', { action: 'store_true' }),
+  new Argument('-H', { action: 'store_true' }),
+  new Argument('-L', { action: 'store_true' }),
+  new Argument('-P', { action: 'store_true' }),
+]
+
+const OWNERSHIP_OPTIONS: readonly Argument[] = [
+  new Argument(['-c', '--changes'], { action: 'store_true' }),
+  new Argument(['-f', '--silent'], { action: 'store_true' }),
+  new Argument('--quiet', { action: 'store_true' }),
+  new Argument(['-v', '--verbose'], { action: 'store_true' }),
+  new Argument('--dereference', { action: 'store_true' }),
+  new Argument(['-h', '--no-dereference'], { action: 'store_true' }),
+  new Argument(['-R', '--recursive'], { action: 'store_true' }),
+  ...TREE_OPTIONS,
+]
 
 const OVERWRITE_OPTIONS: readonly Argument[] = [
   new Argument(['-f', '--force'], { action: 'store_true' }),
@@ -48,7 +55,7 @@ export const SPECS: Record<string, CommandSpec> = {
       TEXTS_OPERAND,
     ],
   }),
-  chgrp: OWNERSHIP,
+  chgrp: new CommandSpec({ arguments: [...OWNERSHIP_OPTIONS, TEXT_OPERAND, PATHS_OPERAND] }),
   chmod: new CommandSpec({
     arguments: [
       new Argument(['-c', '--changes'], { action: 'store_true' }),
@@ -56,11 +63,14 @@ export const SPECS: Record<string, CommandSpec> = {
       new Argument('--quiet', { action: 'store_true' }),
       new Argument(['-v', '--verbose'], { action: 'store_true' }),
       new Argument(['-R', '--recursive'], { action: 'store_true' }),
+      ...TREE_OPTIONS,
       TEXT_OPERAND,
       PATHS_OPERAND,
     ],
   }),
-  chown: OWNERSHIP,
+  chown: new CommandSpec({
+    arguments: [...OWNERSHIP_OPTIONS, new Argument('--from'), TEXT_OPERAND, PATHS_OPERAND],
+  }),
   cp: new CommandSpec({
     arguments: [
       new Argument('-r', { action: 'store_true' }),

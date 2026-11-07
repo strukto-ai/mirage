@@ -25,7 +25,11 @@ from mirage.utils.quote import shell_quote_always
 from mirage.workspace.executor.builtins.metadata.metadata import (
     apply_attrs,
     before_recursive_change,
+    reference_operands,
+    reference_stat,
     resolve_operand,
+    root_refusal,
+    traversal,
     unread_error,
     verbosity,
     walk_stats,
@@ -64,6 +68,16 @@ def mode_line(name: str, stat: FileStat, new: int, failed: bool) -> str:
     return f"{lead}{verb} {old:04o} ({was}) to {new:04o} ({perms})\n"
 
 
+def link_line(name: str) -> str:
+    """chmod -v's report for a link it neither changes nor follows.
+
+    Args:
+        name (str): the link as GNU names it.
+    """
+    shown = shell_quote_always(name)
+    return f"neither symbolic link {shown} nor referent has been changed\n"
+
+
 async def handle_chmod(
     namespace: Namespace,
     dispatch: DispatchFn,
@@ -77,10 +91,12 @@ async def handle_chmod(
     operand's subtree and applies the mode to every entry, skipping
     symlinks the way GNU does (a traversed link changes neither itself
     nor its referent); a command-line link to a directory is still
-    followed and its target walked. A refused file is that file's
-    error and the rest are still changed; a directory whose listing is
-    refused is changed but not descended. ``-v`` reports every file,
-    ``-c`` the changed ones, and ``-f`` drops the per-file errors.
+    followed and its target walked, unless ``-P`` leaves it, and ``-L``
+    follows every link. A refused file is that file's error and the
+    rest are still changed; a directory whose listing is refused is
+    changed but not descended. ``-v`` reports every file, ``-c`` the
+    changed ones, and ``-f`` drops the per-file errors.
+    ``--reference`` takes the mode of a file in place of MODE.
 
     Args:
         namespace (Namespace): addressing authority.
@@ -91,19 +107,45 @@ async def handle_chmod(
     parsed, fl, refused = parse_line("chmod", args, session.cwd)
     if refused is not None:
         return refused
-    if not parsed.texts or not parsed.paths:
+    links = namespace.session_links(session)
+    reference = fl.as_path("reference")
+    copied: int | None = None
+    operands = parsed.paths
+    if reference is not None:
+        operands = reference_operands(parsed.texts, parsed.paths, session.cwd)
+        if not operands:
+            error = missing_operand_error("chmod", None)
+            return fail("chmod", f"{error}\n", error.exit_code)
+        source = await reference_stat(links, dispatch, "chmod", reference)
+        if not isinstance(source, FileStat):
+            return source
+        copied = (
+            source.mode
+            if source.mode is not None
+            else DEFAULT_DIR_MODE
+            if source.type == FileType.DIRECTORY
+            else DEFAULT_FILE_MODE
+        )
+        mode_text = f"{copied:o}"
+    elif not parsed.texts or not parsed.paths:
         last = parsed.texts[0] if parsed.texts else None
         error = missing_operand_error("chmod", last)
         return fail("chmod", f"{error}\n", error.exit_code)
-    mode_text = parsed.texts[0]
+    else:
+        mode_text = parsed.texts[0]
     if parse_chmod(mode_text, 0) is None:
         return fail("chmod", f"chmod: invalid mode: '{mode_text}'\n", 1)
 
     report = verbosity(fl)
+    walk = traversal(fl, "H")
+    recursive = fl.as_bool("recursive")
     errors: list[str] = []
     out: list[str] = []
-    links = namespace.session_links(session)
-    for target in await expand_operands(namespace, dispatch, parsed.paths):
+    for target in await expand_operands(namespace, dispatch, operands):
+        if recursive and walk == "P" and links.is_link(target.virtual):
+            if report == "verbose":
+                out.append(link_line(target.raw_path or target.virtual))
+            continue
         found = await resolve_operand(links, dispatch, "chmod", target, errors)
         if found is None:
             if report == "verbose":
@@ -113,7 +155,11 @@ async def handle_chmod(
                 )
             continue
         resolved, stat = found
-        if fl.as_bool("recursive"):
+        if recursive:
+            refusal = root_refusal("chmod", fl, target.raw_path, resolved)
+            if refusal is not None:
+                errors.append(refusal)
+                continue
             try:
                 await before_recursive_change(
                     links.mounts(False), dispatch, resolved, "chmod"
@@ -121,10 +167,18 @@ async def handle_chmod(
             except UsageError as exc:
                 errors.append(f"{exc}\n")
                 continue
-            entries = await walk_stats(links, dispatch, resolved, stat)
+            entries = await walk_stats(
+                links, dispatch, resolved, stat, follow=walk == "L"
+            )
         else:
             entries = [(resolved, stat, None)]
         for path, path_stat, unread in entries:
+            if path_stat.type == FileType.SYMLINK:
+                if report == "verbose":
+                    out.append(
+                        link_line(walked_name(target.raw_path, resolved, path))
+                    )
+                continue
             # Backends without a mode default to what ls renders: 755 for
             # directories, 644 for files (symbolic clauses build on this).
             if path_stat.mode is None:

@@ -218,7 +218,7 @@ async def handle_setfattr(
     raw = fl.as_bool("raw")
     nofollow = fl.as_bool("no_dereference")
     restore = parsed.raw_path_flags.get("restore")
-    if restore is not None:
+    if isinstance(restore, str):
         return await _restore(
             dispatch, session, restore, stdin, raw=raw, nofollow=nofollow
         )

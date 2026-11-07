@@ -504,9 +504,9 @@ async def wc_generic(
         listed = await _listed(parsed.files0_from, stream, ctx.cwd)
         if isinstance(listed, IOResult):
             return None, listed
-        source = parsed.files0_from
+        named = parsed.files0_from
         listed_from = (
-            source.raw_path if source.raw_path is not None else source.virtual
+            named.raw_path if named.raw_path is not None else named.virtual
         )
         paths = listed
     if paths or listed_from is not None:
