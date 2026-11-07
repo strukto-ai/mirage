@@ -55,7 +55,7 @@ describe('mirage CLI program', () => {
         'delete',
         'deny',
         'get',
-        'history',
+        'logs',
         'list',
         'list-asks',
         'load',

@@ -550,8 +550,11 @@
     "_document_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "skill_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "vfs_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
-    "history_cmd": "Typer commands are module functions; commander registers the same action inline in registerWorkspaceCommands.",
+    "logs_cmd": "Typer commands are module functions; commander registers the same action inline in registerWorkspaceCommands.",
     "use_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
+   },
+   "typescript_only": {
+    "LogPage": "TypeScript types the HTTP page passed to its formatter; Python uses a dictionary from the HTTP response."
    }
   },
   "server/auth/middleware": {
@@ -579,12 +582,12 @@
     "kill_workspace_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy.",
     "set_cli": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
-    "workspace_history": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes."
+    "workspace_logs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes."
    },
    "typescript_only": {
     "answer": "Fastify sends a reply when send is called, so code holding a workspace id sets the status and returns the body, for Fastify to send once the id is released; FastAPI answers only after a route returns or raises, past its async with blocks.",
     "isBusy": "TypeScript awaits a capture inline and asks isBusy for the EBUSY that answers 409; Python's run_capture does both.",
-    "WorkspaceHistoryQuery": "Fastify types a route's query string with an interface; FastAPI reads each parameter from the route function's signature."
+    "WorkspaceLogsQuery": "Fastify types a route's query string with an interface; FastAPI reads each parameter from the route function's signature."
    }
   },
   "server/schemas": {
@@ -1503,6 +1506,19 @@
   "workspace/workspace/execute": {
    "python_only": {
     "_run_as_shell": "Python runs the line as its session's process in a module function given what it needs; TypeScript's runAsShell is a closure inside runLine over the line's options, frame and argv."
+   }
+  },
+  "server/logs": {
+   "python_only": {
+    "CommandLog": "Pydantic response model for the live FastAPI OpenAPI schema; TypeScript infers the command object from completedLogs.",
+    "LogMount": "Pydantic response model for the live FastAPI OpenAPI schema; TypeScript infers the mount object from completedLogs."
+   },
+   "typescript_only": {
+    "common": "Zod schema for persisted recorder events or pagination cursors; Python reads typed response models and validates cursor fields directly.",
+    "commandRecord": "Zod schema for persisted recorder events or pagination cursors; Python reads typed response models and validates cursor fields directly.",
+    "resultRecord": "Zod schema for persisted recorder events or pagination cursors; Python reads typed response models and validates cursor fields directly.",
+    "mountRecord": "Zod schema for persisted recorder events or pagination cursors; Python reads typed response models and validates cursor fields directly.",
+    "cursorValue": "Zod schema for persisted recorder events or pagination cursors; Python reads typed response models and validates cursor fields directly."
    }
   }
  }

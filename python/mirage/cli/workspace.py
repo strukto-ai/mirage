@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import codecs
 import json
 import os
 from datetime import UTC, datetime
@@ -184,40 +185,23 @@ def _format_workspace_explanation(data: dict[str, Any]) -> str:
     return "\n".join(out)
 
 
-def _format_history(items: list[dict[str, Any]]) -> str:
-    if not items:
-        return "No history."
+def _format_logs(page: dict[str, Any]) -> str:
+    if not page["items"]:
+        return "No logs."
     rows = [
         [
-            datetime.fromtimestamp(item["timestamp"] / 1000, UTC).strftime(
+            datetime.fromtimestamp(item["started_at"] / 1000, UTC).strftime(
                 "%Y-%m-%d %H:%M:%S"
             ),
-            item["session"],
-            item["type"],
-            str(item.get("exit_code", "")),
-            _history_entry(item),
+            str(item["exit_code"]) if item["exit_code"] is not None else "",
+            item["command"].replace("\n", "\\n"),
         ]
-        for item in items
+        for item in page["items"]
     ]
-    return format_table(["TIME", "SESSION", "TYPE", "EXIT", "ENTRY"], rows)
-
-
-def _history_entry(item: dict[str, Any]) -> str:
-    """A history entry's text on one row: the line, the vfs call, or the
-    start of what the line wrote, its newlines escaped.
-
-    Args:
-        item (dict[str, Any]): the entry.
-    """
-    text: str
-    if item["type"] == "command":
-        text = item["command"]
-    elif item["type"] == "vfs":
-        text = f"{item['vfs']} {item['path']}"
-    else:
-        text = item.get("stdout", "") + item.get("stderr", "")
-    text = text.replace("\n", "\\n")
-    return text if len(text) <= 60 else text[:57] + "..."
+    text = format_table(["TIME", "EXIT", "COMMAND"], rows)
+    if page["next"] is not None:
+        text += f"\nNext page: --after {page['next']}"
+    return text
 
 
 def _format_asks(items: list[dict[str, Any]]) -> str:
@@ -536,40 +520,44 @@ def load_cmd(
     emit(handle_response(r), human=_format_workspace_detail)
 
 
-@app.command("history")
-def history_cmd(
+@app.command("logs")
+def logs_cmd(
     workspace_id: str = typer.Argument(..., help="Workspace id."),
     session: str = typer.Option(
-        "", "--session", help="Only this session's entries."
+        "", "--session", help="Only this session's commands."
     ),
-    since: int | None = typer.Option(
-        None, "--since", help="Only entries at or after this epoch ms."
+    limit: int = typer.Option(
+        50, "--limit", help="Commands per page (1-200)."
     ),
-    last: int | None = typer.Option(
-        None, "--last", help="Only the newest this many entries."
+    after: str = typer.Option(
+        "", "--after", help="Cursor from the previous page."
     ),
-    vfs: bool = typer.Option(
-        False, "--vfs", help="Include each call a line made to a mount."
+    jsonl: bool = typer.Option(
+        False,
+        "--jsonl",
+        help="Export all matching retained commands, oldest first.",
     ),
 ) -> None:
-    """Show what the workspace ran, oldest first."""
-    params: dict[str, str] = {}
+    """Show completed commands, newest first."""
+    params = {"limit": str(limit)}
     if session:
-        params["session_id"] = session
-    if since is not None:
-        params["since"] = str(since)
-    if last is not None:
-        params["last"] = str(last)
-    if vfs:
-        params["vfs"] = "true"
+        params["session"] = session
+    if after:
+        params["after"] = after
+    path = f"/v1/workspaces/{quote(workspace_id, safe='')}/logs"
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
-        r = client.request(
-            "GET",
-            f"/v1/workspaces/{quote(workspace_id, safe='')}/history",
-            params=params,
-        )
-    emit(handle_response(r), human=_format_history)
+        if jsonl:
+            params["format"] = "jsonl"
+            with client.stream("GET", path, params=params) as response:
+                if response.status_code >= 400:
+                    response.read()
+                    handle_response(response)
+                for text in codecs.iterdecode(response.iter_bytes(), "utf-8"):
+                    typer.echo(text, nl=False)
+            return
+        response = client.request("GET", path, params=params)
+    emit(handle_response(response), human=_format_logs)
 
 
 @app.command("list-asks")

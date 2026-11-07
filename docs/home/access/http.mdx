@@ -322,30 +322,6 @@ Returns an array of workspace summaries:
 
 Returns the workspace object.
 
-### Read a workspace's history
-
-<Badge color="blue">GET</Badge> `/v1/workspaces/{id}/history`
-
-<ParamField query="session_id" type="string">Only this session's entries.</ParamField>
-<ParamField query="since" type="integer">Only entries at or after this time, in epoch milliseconds.</ParamField>
-<ParamField query="last" type="integer">Only the newest this many entries.</ParamField>
-<ParamField query="vfs" type="boolean" default="false">Add a `vfs` entry for each call a line made to a mount.</ParamField>
-
-Returns what the workspace ran, oldest first. A line is a `command` entry
-when it starts and a `result` entry when it ends, which names the line as its
-`parent`; a line still running has no `result` yet. With `vfs`, each call the
-line made to a mount is a `vfs` entry between them.
-
-```json
-[
-  {"type": "command", "id": "exec_01a1", "command": "cat /data/a.txt", "cwd": "/", "session": "s1", "timestamp": 1792630121040},
-  {"type": "vfs", "parent": "exec_01a1", "vfs": "read", "path": "/data/a.txt", "source": "s3", "bytes": 6, "duration_ms": 12, "session": "s1", "timestamp": 1792630121048},
-  {"type": "result", "parent": "exec_01a1", "exit_code": 0, "stdout": "hello\n", "stderr": "", "duration_ms": 21, "cwd": "/", "session": "s1", "timestamp": 1792630121061}
-]
-```
-
-`stdout` and `stderr` keep their first 4096 characters.
-
 ### Delete a workspace
 
 <Badge color="red">DELETE</Badge> `/v1/workspaces/{id}`

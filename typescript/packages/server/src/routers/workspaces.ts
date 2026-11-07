@@ -37,8 +37,15 @@ import { isSafeBlobPath } from '@struktoai/mirage-core/workspace/snapshot/utils'
 import type { MountSpec } from '@struktoai/mirage-core/workspace/workspace/workspace'
 import type { WorkspaceConfigRaw } from '@struktoai/mirage-core/config'
 import type { Workspace } from '@struktoai/mirage-core/workspace/workspace/workspace'
-import type { RouteApp, RouteReply, RouteRequest, ServerHost } from '../routes.ts'
+import {
+  streamOf,
+  type RouteApp,
+  type RouteReply,
+  type RouteRequest,
+  type ServerHost,
+} from '../routes.ts'
 import { Buffer } from 'node:buffer'
+import { completedLogs, logAttachment, logLines, logPage, sessionFilter } from '../logs.ts'
 import { createHash } from 'node:crypto'
 import { buildOverrideMounts, cloneWorkspaceWithOverride } from '../clone.ts'
 import { MAX_SNAPSHOT_BYTES } from '../constants.ts'
@@ -120,11 +127,11 @@ interface WorkspaceGetQuery {
   verbose?: string
 }
 
-interface WorkspaceHistoryQuery {
-  session_id?: string
-  since?: string
-  last?: string
-  vfs?: string
+interface WorkspaceLogsQuery {
+  session?: string
+  limit?: string
+  after?: string
+  format?: string
 }
 
 const LoadBodySchema = z
@@ -676,32 +683,30 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
     },
   )
 
-  // The workspace's recorded history, oldest first: a `command` entry for
-  // every line its sessions ran, and with `vfs` a `vfs` entry for every
-  // call a line made to a mount.
-  app.get<{ Params: WorkspaceIdParams; Querystring: WorkspaceHistoryQuery }>(
-    '/v1/workspaces/:id/history',
+  app.get<{ Params: WorkspaceIdParams; Querystring: WorkspaceLogsQuery }>(
+    '/v1/workspaces/:id/logs',
     async (req, reply) => {
       const entry = deps.registry.visible(req.params.id, req.account)
-      if (entry === null || deps.registry.removing(req.params.id)) {
+      if (entry === null || deps.registry.removing(req.params.id))
         return reply.status(404).send({ detail: 'workspace not found' })
-      }
-      const options: NonNullable<Parameters<Workspace['history']>[0]> = {}
-      if (req.query.session_id !== undefined) options.sessionId = req.query.session_id
-      for (const name of ['since', 'last'] as const) {
-        const value = req.query[name]
-        if (value === undefined) continue
-        if (!/^[0-9]+$/.test(value)) {
-          return reply.status(400).send({ detail: `${name} must be a whole number` })
-        }
-        options[name] = Number(value)
-      }
+      let session: string | undefined
       try {
-        options.vfs = queryFlag(req.query.vfs, 'vfs')
+        session = sessionFilter(req.query.session)
+        if (req.query.format !== 'jsonl') logPage([], req.query.limit, req.query.after)
       } catch (e) {
         return reply.status(400).send({ detail: (e as Error).message })
       }
-      return await entry.runner.ws.history(options)
+      const logs = completedLogs(await entry.runner.ws.observer.events(session))
+      if (req.query.format === 'jsonl')
+        return reply
+          .header('content-type', 'application/x-ndjson')
+          .header('content-disposition', logAttachment(req.params.id))
+          .send(streamOf(logLines(logs)))
+      try {
+        return logPage(logs, req.query.limit, req.query.after)
+      } catch (e) {
+        return reply.status(400).send({ detail: (e as Error).message })
+      }
     },
   )
 

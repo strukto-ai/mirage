@@ -1202,8 +1202,8 @@ async def lifecycle(
         "api", "/v1/workspaces/i/shell", "--command", "echo api"
     )
     got["api_sends_fields"] = json.loads(out)["stdout"]
-    _, out, _ = await cli("api", "/v1/workspaces/i/history?last=1")
-    got["api_keeps_the_route_query"] = str(len(json.loads(out)))
+    _, out, _ = await cli("api", "/v1/workspaces/i/logs?limit=1")
+    got["api_keeps_the_route_query"] = str(len(json.loads(out)["items"]))
     code, _, _ = await cli("api", "https://mirage.invalid/v1/workspaces")
     got["api_takes_only_a_route"] = str(code)
     code, _, _ = await cli("workspace", "get", "nope")

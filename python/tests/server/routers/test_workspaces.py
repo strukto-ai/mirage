@@ -24,6 +24,7 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Iterator
+from urllib.parse import quote
 
 import boto3
 import jwt as pyjwt
@@ -1871,46 +1872,94 @@ async def test_a_server_shutting_down_refuses_new_workspaces():
 
 
 @pytest.mark.asyncio
-async def test_history_reads_what_the_workspace_ran():
+async def test_logs_page_and_export():
     app, _ = _make_app_with_short_grace(grace=10.0)
+    content = app.openapi()["paths"]["/v1/workspaces/{workspace_id}/logs"][
+        "get"
+    ]["responses"]["200"]["content"]
+    assert "application/json" in content
+    assert "application/x-ndjson" in content
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
         wid = (
             await client.post("/v1/workspaces", json=_minimal_config())
         ).json()["id"]
+        url = f"/v1/workspaces/{wid}/logs"
+        assert (await client.get(url)).json() == {"items": [], "next": None}
+        assert (await client.get(url, params={"format": "jsonl"})).text == ""
         for line in ("echo hi > /a.txt", "cat /a.txt"):
-            r = await client.post(
-                f"/v1/workspaces/{wid}/shell", json={"command": line}
-            )
-            assert r.status_code == 200, r.text
-        url = f"/v1/workspaces/{wid}/history"
-        r = await client.get(url)
-        assert r.status_code == 200, r.text
-        assert [
-            (e["type"], e.get("command", e.get("exit_code"))) for e in r.json()
-        ] == [
-            ("command", "echo hi > /a.txt"),
-            ("result", 0),
-            ("command", "cat /a.txt"),
-            ("result", 0),
+            assert (
+                await client.post(
+                    f"/v1/workspaces/{wid}/shell", json={"command": line}
+                )
+            ).status_code == 200
+        page = (await client.get(url)).json()
+        assert len(page["items"]) == 2
+        assert page["next"] is None
+        assert {item["command"] for item in page["items"]} == {
+            "echo hi > /a.txt",
+            "cat /a.txt",
+        }
+        assert [item["started_at"] for item in page["items"]] == sorted(
+            [item["started_at"] for item in page["items"]], reverse=True
+        )
+        for item in page["items"]:
+            assert set(item) == {
+                "id",
+                "command",
+                "cwd",
+                "started_at",
+                "duration_ms",
+                "exit_code",
+                "stdout",
+                "stderr",
+                "user_id",
+                "api_key_id",
+                "mounts",
+            }
+            assert item["exit_code"] == 0
+            assert item["user_id"] is None and item["api_key_id"] is None
+            assert 1_000_000_000_000 < item["started_at"] < 10_000_000_000_000
+            assert len(item["mounts"]) == 1
+        first = (await client.get(url, params={"limit": 1})).json()
+        second = (
+            await client.get(url, params={"limit": 1, "after": first["next"]})
+        ).json()
+        assert first["items"] + second["items"] == page["items"]
+        assert second["next"] is None
+        exported = await client.get(
+            url, params={"format": "jsonl", "limit": "bad", "after": "bad"}
+        )
+        assert exported.status_code == 200
+        assert exported.headers["content-type"].startswith(
+            "application/x-ndjson"
+        )
+        assert exported.text.endswith("\n")
+        lines = [json.loads(line) for line in exported.text.splitlines()]
+        commands = [line for line in lines if line["type"] == "command"]
+        assert [line["id"] for line in commands] == [
+            item["id"] for item in reversed(page["items"])
         ]
-        r = await client.get(url, params={"vfs": "true"})
-        assert [(e["type"], e.get("vfs")) for e in r.json()] == [
-            ("command", None),
-            ("vfs", "write"),
-            ("result", None),
-            ("command", None),
-            ("vfs", "read"),
-            ("result", None),
-        ]
-        r = await client.get(url, params={"last": 1})
-        assert [(e["type"], e["stdout"]) for e in r.json()] == [
-            ("result", "hi\n")
-        ]
-        assert (await client.get(url, params={"last": -1})).status_code == 422
+        assert commands[0]["timestamp"] == page["items"][-1]["started_at"]
         assert (
-            await client.get("/v1/workspaces/nope/history")
+            await client.get(url, params={"session": commands[0]["session"]})
+        ).json() == page
+        assert (
+            await client.get(url, params={"session": "missing"})
+        ).json() == {"items": [], "next": None}
+        for params in (
+            {"session": "bad\nsession"},
+            {"limit": "0"},
+            {"limit": "201"},
+            {"after": "bad"},
+        ):
+            assert (await client.get(url, params=params)).status_code == 400
+        assert (
+            await client.get(f"/v1/workspaces/{wid}/history")
+        ).status_code == 404
+        assert (
+            await client.get("/v1/workspaces/nope/logs")
         ).status_code == 404
     await app.state.registry.close_all()
 
@@ -2210,3 +2259,82 @@ async def test_a_create_outside_its_network_never_reaches_the_server(
         assert r.status_code == 400
         assert "cannot list the server's tools" in r.json()["detail"]
         assert fake.requests == []
+
+
+@pytest.mark.asyncio
+async def test_logs_support_existing_session_ids_and_unicode_workspaces():
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    wid = "工作"
+    url = f"/v1/workspaces/{quote(wid, safe='')}"
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        assert (
+            await client.post(
+                "/v1/workspaces", json={**_minimal_config(), "id": wid}
+            )
+        ).status_code == 201
+        empty = await client.get(f"{url}/logs", params={"format": "jsonl"})
+        assert empty.status_code == 200 and empty.content == b""
+        assert (
+            "filename*=UTF-8''%E5%B7%A5%E4%BD%9C-logs.jsonl"
+            in empty.headers["content-disposition"]
+        )
+        for sid in ("user:42", "s" * 65, "会话"):
+            created = await client.post(
+                f"{url}/sessions", json={"session_id": sid}
+            )
+            assert created.status_code == 201, created.text
+            result = await client.post(
+                f"{url}/shell",
+                params={"session_id": sid},
+                json={"command": "echo hi"},
+            )
+            assert result.status_code == 200, result.text
+            page = await client.get(f"{url}/logs", params={"session": sid})
+            assert page.status_code == 200, page.text
+            assert len(page.json()["items"]) == 1
+            exported = await client.get(
+                f"{url}/logs", params={"session": sid, "format": "jsonl"}
+            )
+            assert exported.status_code == 200
+            assert [
+                json.loads(line)["session"]
+                for line in exported.text.splitlines()
+            ] == [sid, sid]
+    await app.state.registry.close_all()
+
+
+@pytest.mark.asyncio
+async def test_large_log_reads_do_not_block_health_requests(monkeypatch):
+    app, _ = _make_app_with_short_grace(grace=10.0)
+    entered = threading.Event()
+    release = threading.Event()
+    original = workspaces_router.completed_logs
+
+    def paused(records):
+        entered.set()
+        release.wait(5)
+        return original(records)
+
+    monkeypatch.setattr(workspaces_router, "completed_logs", paused)
+    watchdog = threading.Timer(5, release.set)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        wid = (
+            await client.post("/v1/workspaces", json=_minimal_config())
+        ).json()["id"]
+        watchdog.start()
+        pending = asyncio.create_task(client.get(f"/v1/workspaces/{wid}/logs"))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            health = await asyncio.wait_for(client.get("/v1/health"), 1)
+            assert health.status_code == 200
+            assert not release.is_set()
+        finally:
+            release.set()
+            watchdog.cancel()
+            await pending
+            await asyncio.to_thread(watchdog.join)
+    await app.state.registry.close_all()

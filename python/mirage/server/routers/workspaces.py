@@ -23,7 +23,7 @@ from typing import Any, TypeVar
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from mirage import Workspace, WorkspaceRunner
 from mirage.commands.cli import mcp
@@ -50,6 +50,14 @@ from mirage.server.clone import (
 )
 from mirage.server.constants import MAX_SNAPSHOT_BYTES
 from mirage.server.io_serde import explanation_to_dict
+from mirage.server.logs import (
+    LogPage,
+    completed_logs,
+    log_attachment,
+    log_lines,
+    log_page,
+    session_filter,
+)
 from mirage.server.metrics import refused
 from mirage.server.multipart import (
     MAX_REQUEST_PART,
@@ -598,36 +606,53 @@ async def get_workspace(
     return await make_detail(entry, verbose=verbose)
 
 
-@router.get("/{workspace_id}/history")
-async def workspace_history(
+@router.get(
+    "/{workspace_id}/logs",
+    response_model=LogPage,
+    responses={
+        200: {
+            "content": {"application/x-ndjson": {"schema": {"type": "string"}}}
+        }
+    },
+)
+async def workspace_logs(
     workspace_id: str,
     request: Request,
-    session_id: str | None = Query(None),
-    since: int | None = Query(None, ge=0),
-    last: int | None = Query(None, ge=0),
-    vfs: bool = Query(False),
-) -> list[dict[str, Any]]:
-    """The workspace's recorded history, oldest first: a ``command``
-    entry for every line its sessions ran, and with ``vfs`` a ``vfs``
-    entry for every call a line made to a mount. Read on the workspace's
-    own loop.
+    session: str | None = Query(None),
+    limit: str = Query("50"),
+    after: str | None = Query(None),
+    format: str = Query("json"),
+) -> LogPage | Response:
+    """Read completed commands, newest first, or export their records.
 
     Args:
-        workspace_id (str): the workspace.
-        request (Request): the request, for the registry.
-        session_id (str | None): only this session's entries.
-        since (int | None): only entries at or after this epoch
-            millisecond.
-        last (int | None): only the newest this many entries.
-        vfs (bool): include the ``vfs`` entries.
+        workspace_id (str): workspace ID.
+        request (Request): registry request.
+        session (str | None): session filter.
+        limit (str): page size, 1-200.
+        after (str | None): opaque pagination cursor.
+        format (str): jsonl requests an export; otherwise JSON.
     """
     entry = require_entry(request, workspace_id)
     if request.app.state.registry.removing(workspace_id):
         raise HTTPException(status_code=404, detail="workspace not found")
-    history = entry.runner.ws.history(
-        session_id=session_id, since=since, last=last, vfs=vfs
+    try:
+        selected_session = session_filter(session)
+        if format != "jsonl":
+            log_page([], limit, after)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    records = await entry.runner.call(
+        entry.runner.ws.observer.events(selected_session)
     )
-    return await entry.runner.call(history)
+    logs = await run_blocking(completed_logs, records)
+    if format == "jsonl":
+        return StreamingResponse(
+            log_lines(logs),
+            media_type="application/x-ndjson",
+            headers={"Content-Disposition": log_attachment(workspace_id)},
+        )
+    return await run_blocking(log_page, logs, limit, after)
 
 
 @router.delete("/{workspace_id}", response_model=DeleteWorkspaceResponse)
