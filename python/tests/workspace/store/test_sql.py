@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
+import asyncio
 import contextlib
 from collections.abc import Callable, Iterator
 
@@ -60,18 +61,20 @@ def open_workspace(request, tmp_path) -> Iterator[Callable[[], Workspace]]:
 
 # Two daemons on one database share a workspace's execution plane: the
 # one that does not hold the lease lists the lines, jobs and processes
-# the holder runs and kills its job, and a workspace opened on the
-# database later lists the lines that ended.
+# the holder runs, once the holder has written them a moment after the
+# line returns, and kills its job; a workspace opened on the database
+# later lists the lines that ended.
 @pytest.mark.asyncio
 async def test_the_execution_plane_lives_in_the_database(open_workspace):
     a, b = open_workspace(), open_workspace()
     try:
         pid = int((await a.shell("sleep 30 & echo $!", session_id="s")).stdout)
-        [line] = await b.lines()
-        assert (line.command, line.state) == (
-            "sleep 30 & echo $!",
-            LineState.EXITED,
-        )
+        ended = [("sleep 30 & echo $!", LineState.EXITED)]
+        async with asyncio.timeout(5):
+            while [
+                (line.command, line.state) for line in await b.lines()
+            ] != ended:
+                await asyncio.sleep(0.01)
         [running] = await b.processes(state=ProcessState.RUNNING)
         assert running.pid == pid
         [job] = await b.jobs()
