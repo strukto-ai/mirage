@@ -41,8 +41,8 @@ from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec, word_text
 from mirage.utils.fnmatch import fnmatch
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.background import run_program, run_statement
 from mirage.workspace.executor.builtins.read.read import read_reply
-from mirage.workspace.executor.jobs import run_program, run_statement
 from mirage.workspace.executor.statement import (
     errexit_acts,
     fd0_binding,

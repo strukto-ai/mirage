@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import contextlib
 import inspect
 import io
 import itertools
@@ -27,10 +28,14 @@ from mirage.cache.index import IndexConfig
 from mirage.cache.index.config import LookupStatus
 from mirage.commands.cli.builtin.gws import GWS
 from mirage.context import reset_current_session, set_current_session
+from mirage.execution.job import JobState
+from mirage.execution.line.types import LineState
+from mirage.execution.process.types import ProcessState
 from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.types import MachineId
 from mirage.runtime.sandbox import RemoteSandbox
 from mirage.types import MountBackend, MountMode
+from mirage.utils.abort import MirageAbortError
 from mirage.utils.clock import ManualClock
 from mirage.utils.ids import SeededIdSource, SystemIdSource
 from mirage.vfs.gdrive.config import GoogleDriveConfig
@@ -849,7 +854,7 @@ async def test_a_workspace_reaps_the_programs_its_runtimes_reach():
     box = _ReapedBox((2,))
     ws = Workspace({}, runtimes=[box])
     try:
-        wid = ws.processes.workspace_id
+        wid = ws.process_table.workspace_id
         assert await ws._reap_process(_box_process(2), 15)
         assert not await ws._reap_process(_box_process(3), 15)
         assert not await ws._reap_process(_box_process(6), 15)
@@ -882,7 +887,7 @@ async def test_a_workspace_reaps_a_lapsed_instance_as_it_starts():
         async with asyncio.timeout(5):
             while "dead" in await store.processes():
                 await asyncio.sleep(0.01)
-        assert box.reaped == [(f"{ws.processes.workspace_id}:2", 15)]
+        assert box.reaped == [(f"{ws.process_table.workspace_id}:2", 15)]
     finally:
         await ws.close()
 
@@ -905,3 +910,63 @@ def test_ram_workspace_loads_no_ssh_or_redis():
         ],
         check=True,
     )
+
+
+# Each line, job and process a workspace runs has a record it lists, by
+# session, state or line, and finds by id.
+@pytest.mark.asyncio
+async def test_a_workspace_lists_its_lines_jobs_and_processes():
+    ws = Workspace({"/data": RAMVFS()})
+    try:
+        pid = int((await ws.shell("sleep 30 & echo $!")).stdout)
+        [line] = ws.lines()
+        assert (line.command, line.state, line.exit) == (
+            "sleep 30 & echo $!",
+            LineState.EXITED,
+            0,
+        )
+        assert ws.line(line.id) == line
+        assert ws.lines(session_id="other") == []
+        assert ws.lines(state=LineState.RUNNING) == []
+        [job] = ws.jobs(state=JobState.RUNNING)
+        assert (job.command, job.line) == ("sleep 30", line.id)
+        assert ws.job(job.id) == job
+        [running] = ws.processes(state=ProcessState.RUNNING)
+        assert running.pid == pid
+        assert ws.process(running.id) == running
+        assert pid in [p.pid for p in ws.processes(line_id=line.id)]
+        await ws.shell("kill %1; wait")
+        ended = ws.process(running.id)
+        assert ended is not None
+        assert (ended.state, ended.signal) == (ProcessState.EXITED, 15)
+    finally:
+        await ws.close()
+
+
+# A line queued behind another of its session is listed as waiting, and
+# ends stopped when it is cancelled before it starts.
+@pytest.mark.asyncio
+async def test_a_queued_line_is_listed_waiting_until_it_is_cancelled():
+    ws = Workspace({"/data": RAMVFS()})
+    first = asyncio.ensure_future(ws.shell("sleep 30"))
+    try:
+        async with asyncio.timeout(5):
+            while not ws.lines(state=LineState.RUNNING):
+                await asyncio.sleep(0.01)
+        second = asyncio.ensure_future(ws.shell("echo next"))
+        async with asyncio.timeout(5):
+            while not ws.lines(state=LineState.WAITING):
+                await asyncio.sleep(0.01)
+        [waiting] = ws.lines(state=LineState.WAITING)
+        assert waiting.command == "echo next"
+        second.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await second
+        ended = ws.line(waiting.id)
+        assert ended is not None
+        assert (ended.state, ended.signal) == (LineState.EXITED, 2)
+    finally:
+        first.cancel()
+        with contextlib.suppress(asyncio.CancelledError, MirageAbortError):
+            await first
+        await ws.close()

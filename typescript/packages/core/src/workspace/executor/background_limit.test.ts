@@ -74,7 +74,7 @@ describe('a job past its limit', () => {
         'line: timed out after 0.2s\n',
       )
       expect(reader.channels).toEqual([Channel.STDOUT, Channel.STDERR])
-      expect(ws.processes.live()).toHaveLength(0)
+      expect(ws.processTable.live()).toHaveLength(0)
     } finally {
       vi.useRealTimers()
       await ws.close()

@@ -375,6 +375,23 @@ async function steps(
             )
             .join('\n'),
         })
+      } else if (kind === 'records') {
+        const ws = get(wid)
+        const state = typeof step.state === 'string' ? step.state : undefined
+        const listed: { command: string; state: string; exit: number | null; number?: number }[] =
+          step.kind === 'lines' ? ws.lines() : step.kind === 'jobs' ? ws.jobs() : ws.processes()
+        answers.push({
+          text: listed
+            .filter((r) => state === undefined || r.state === state)
+            .map((r) =>
+              step.kind === 'jobs'
+                ? `%${String(r.number)} ${r.command} ${r.state}`
+                : step.kind === 'processes'
+                  ? `${r.command} ${r.state}`
+                  : `${r.command} ${r.state} ${String(r.exit)}`,
+            )
+            .join('\n'),
+        })
       } else if (kind === 'asks') {
         answers.push({
           text: get(wid)

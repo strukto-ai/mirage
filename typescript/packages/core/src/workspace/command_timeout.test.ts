@@ -228,7 +228,7 @@ describe('background job at the line limit', () => {
         expect(DEC.decode(await done.console.snapshot(Channel.STDERR))).toBe(
           'line: timed out after 0.2s\n',
         )
-        expect(ws.processes.live()).toHaveLength(0)
+        expect(ws.processTable.live()).toHaveLength(0)
       } finally {
         await ws.close()
       }
@@ -249,7 +249,7 @@ describe('background job at the line limit', () => {
       )
       expect(take).toHaveBeenCalledTimes(1)
       expect(debug).toHaveBeenCalledWith('kept output not written: Error: spool lost a write')
-      expect(ws.processes.live()).toHaveLength(0)
+      expect(ws.processTable.live()).toHaveLength(0)
     } finally {
       take.mockRestore()
       debug.mockRestore()

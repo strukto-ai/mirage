@@ -22,6 +22,8 @@ from urllib.parse import quote
 
 from opentelemetry import trace
 
+from mirage.execution.job.types import Job
+from mirage.execution.process.types import Process
 from mirage.io.cooperative import CHUNK_SIZE
 from mirage.io.types import IOResult
 from mirage.io.yield_budget import YieldBudget
@@ -203,6 +205,71 @@ def _trace_line(
             )
             call.end(end_time=rec.timestamp * _NS_PER_MS)
     line.end(end_time=span[1] * _NS_PER_MS)
+
+
+def _trace_ended(
+    name: str,
+    attributes: dict[str, str | int],
+    started_at: float,
+    ended_at: float | None,
+) -> None:
+    """Send an ended record to OpenTelemetry as one span over its run.
+
+    Args:
+        name (str): the span's name.
+        attributes (dict[str, str | int]): what it carries.
+        started_at (float): when the record started, epoch seconds.
+        ended_at (float | None): when it ended, epoch seconds.
+    """
+    start = int(started_at * 1_000_000_000)
+    span = _tracer().start_span(name, start_time=start, attributes=attributes)
+    span.end(
+        end_time=int(ended_at * 1_000_000_000)
+        if ended_at is not None
+        else start
+    )
+
+
+def trace_process(record: Process) -> None:
+    """Send an ended process to OpenTelemetry as a ``process`` span.
+
+    Args:
+        record (Process): the process's record.
+    """
+    attributes: dict[str, str | int] = {
+        "process.pid": record.pid,
+        "process.command_line": record.command,
+        "host.id": str(record.machine),
+        "mirage.workspace.id": record.id.workspace_id,
+        "mirage.session.id": record.session_id,
+    }
+    if record.parent is not None:
+        attributes["process.parent_pid"] = record.parent
+    if record.exit is not None:
+        attributes["process.exit.code"] = record.exit
+    if record.line is not None:
+        attributes["mirage.line.id"] = str(record.line)
+    _trace_ended("process", attributes, record.started_at, record.ended_at)
+
+
+def trace_job(record: Job) -> None:
+    """Send an ended job to OpenTelemetry as a ``job`` span.
+
+    Args:
+        record (Job): the job's record.
+    """
+    attributes: dict[str, str | int] = {
+        "mirage.job.id": record.id.console,
+        "mirage.job.number": record.number,
+        "mirage.command": record.command,
+        "mirage.workspace.id": record.id.workspace_id,
+        "mirage.session.id": record.session_id,
+    }
+    if record.exit is not None:
+        attributes["mirage.exit_code"] = record.exit
+    if record.line is not None:
+        attributes["mirage.line.id"] = str(record.line)
+    _trace_ended("job", attributes, record.started_at, record.ended_at)
 
 
 def _parse_files(files: dict[str, bytes]) -> list[dict[str, Any]]:

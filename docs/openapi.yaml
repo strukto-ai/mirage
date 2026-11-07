@@ -31,6 +31,12 @@ tags:
   - name: Policies
   - name: Asks
     parent: Workspace operations
+  - name: Lines
+    parent: Workspace operations
+  - name: Jobs
+    parent: Workspace operations
+  - name: Processes
+    parent: Workspace operations
   - name: Server
   - name: Auth
 servers:
@@ -1642,6 +1648,313 @@ paths:
       servers:
         - url: http://127.0.0.1:8765
           description: A local daemon on its default port
+  /v1/workspaces/{workspace_id}/lines:
+    get:
+      summary: List lines
+      operationId: list_lines_v1_workspaces__workspace_id__lines_get
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+        - name: session_id
+          in: query
+          required: false
+          description: Only this session's records; every session's when absent.
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          description: Only the records in this state.
+          schema:
+            $ref: '#/components/schemas/LineState'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/LineResponse'
+                title: Response List Lines V1 Workspaces  Workspace Id  Lines Get
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+      description: 'The lines the workspace keeps, oldest first: every one not ended
+
+        yet and the newest ended ones, a session''s or those in a state when
+
+        named.'
+      tags:
+        - Lines
+      x-hosts:
+        - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
+  /v1/workspaces/{workspace_id}/lines/{line_id}:
+    get:
+      summary: Get a line
+      operationId: get_line_v1_workspaces__workspace_id__lines__line_id__get
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+        - name: line_id
+          in: path
+          required: true
+          description: The line's id, as a shell result's `line_id` names it.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LineDetailResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+      description: 'One line, with the ids of the jobs it started, the pids of the
+
+        processes it ran that the workspace still keeps and the machines
+
+        those ran on.'
+      tags:
+        - Lines
+      x-hosts:
+        - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
+  /v1/workspaces/{workspace_id}/jobs:
+    get:
+      summary: List jobs
+      operationId: list_jobs_v1_workspaces__workspace_id__jobs_get
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+        - name: session_id
+          in: query
+          required: false
+          description: Only this session's records; every session's when absent.
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          description: Only the records in this state.
+          schema:
+            $ref: '#/components/schemas/JobState'
+        - name: line_id
+          in: query
+          required: false
+          description: Only the jobs this line started.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/JobResponse'
+                title: Response List Jobs V1 Workspaces  Workspace Id  Jobs Get
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+      description: 'The jobs the workspace''s sessions list, as ``jobs`` does, a
+
+        session''s, those in a state or those a line started when named.'
+      tags:
+        - Jobs
+      x-hosts:
+        - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
+  /v1/workspaces/{workspace_id}/jobs/{job_id}:
+    get:
+      summary: Get a job
+      operationId: get_job_v1_workspaces__workspace_id__jobs__job_id__get
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+        - name: job_id
+          in: path
+          required: true
+          description: The job's id, as its listing gives it.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDetailResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+      description: 'One job, named by the id its listing gives, with the pids of the
+
+        processes it ran that the workspace still keeps: its own and every
+
+        one under it.'
+      tags:
+        - Jobs
+      x-hosts:
+        - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
+  /v1/workspaces/{workspace_id}/processes:
+    get:
+      summary: List processes
+      operationId: list_processes_v1_workspaces__workspace_id__processes_get
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+        - name: session_id
+          in: query
+          required: false
+          description: Only this session's records; every session's when absent.
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: false
+          description: Only the records in this state.
+          schema:
+            $ref: '#/components/schemas/ProcessState'
+        - name: line_id
+          in: query
+          required: false
+          description: Only the processes this line ran.
+          schema:
+            type: string
+        - name: job_id
+          in: query
+          required: false
+          description: Only the processes this job ran, its own and every one under it.
+          schema:
+            type: string
+        - name: machine
+          in: query
+          required: false
+          description: Only the processes run on this machine, written `provider:name`.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProcessResponse'
+                title: Response List Processes V1 Workspaces  Workspace Id  Processes Get
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+      description: 'The processes the workspace keeps, by pid: every live one and the
+
+        newest ended ones, a session''s, those in a state, those a line ran,
+
+        those a job ran or those run on a machine (``provider:name``) when
+
+        named.'
+      tags:
+        - Processes
+      x-hosts:
+        - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
+  /v1/workspaces/{workspace_id}/processes/{pid}:
+    get:
+      summary: Get a process
+      operationId: get_process_v1_workspaces__workspace_id__processes__pid__get
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+        - name: pid
+          in: path
+          required: true
+          description: The process's pid.
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessResponse'
+        '401':
+          $ref: '#/components/responses/401'
+        '404':
+          $ref: '#/components/responses/404'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+      description: One process, by its pid.
+      tags:
+        - Processes
+      x-hosts:
+        - daemon
+      servers:
+        - url: http://127.0.0.1:8765
+          description: A local daemon on its default port
   /v1/workspaces/{workspace_id}/shell:
     post:
       summary: Run a shell line
@@ -1680,6 +1993,7 @@ paths:
                 stdout: "hello\n"
                 stderr: ''
                 refusal: null
+                line_id: line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37
             application/x-ndjson:
               schema:
                 type: string
@@ -4914,6 +5228,391 @@ components:
         - scope
         - note
       title: AskResponse
+    JobDetailResponse:
+      properties:
+        command:
+          title: Command
+          type: string
+        cwd:
+          title: Cwd
+          type: string
+        ended_at:
+          anyOf:
+            - type: number
+            - type: 'null'
+          title: Ended At
+        exit:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Exit
+        group:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Group
+        id:
+          title: Id
+          type: string
+        line_id:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Line Id
+        number:
+          title: Number
+          type: integer
+        pid:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Pid
+        processes:
+          items:
+            type: integer
+          title: Processes
+          type: array
+        session_id:
+          title: Session Id
+          type: string
+        signal:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Signal
+        started_at:
+          title: Started At
+          type: number
+        state:
+          title: State
+          type: string
+      required:
+        - id
+        - number
+        - session_id
+        - command
+        - cwd
+        - line_id
+        - group
+        - pid
+        - state
+        - started_at
+        - ended_at
+        - exit
+        - signal
+        - processes
+      title: JobDetailResponse
+      type: object
+    JobResponse:
+      properties:
+        command:
+          title: Command
+          type: string
+        cwd:
+          title: Cwd
+          type: string
+        ended_at:
+          anyOf:
+            - type: number
+            - type: 'null'
+          title: Ended At
+        exit:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Exit
+        group:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Group
+        id:
+          title: Id
+          type: string
+        line_id:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Line Id
+        number:
+          title: Number
+          type: integer
+        pid:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Pid
+        session_id:
+          title: Session Id
+          type: string
+        signal:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Signal
+        started_at:
+          title: Started At
+          type: number
+        state:
+          title: State
+          type: string
+      required:
+        - id
+        - number
+        - session_id
+        - command
+        - cwd
+        - line_id
+        - group
+        - pid
+        - state
+        - started_at
+        - ended_at
+        - exit
+        - signal
+      title: JobResponse
+      type: object
+    JobState:
+      enum:
+        - running
+        - stopping
+        - exited
+      title: JobState
+      type: string
+    LineDetailResponse:
+      properties:
+        command:
+          title: Command
+          type: string
+        ended_at:
+          anyOf:
+            - type: number
+            - type: 'null'
+          title: Ended At
+        error:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Error
+        exit:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Exit
+        id:
+          title: Id
+          type: string
+        jobs:
+          items:
+            type: string
+          title: Jobs
+          type: array
+        machines:
+          items:
+            type: string
+          title: Machines
+          type: array
+        processes:
+          items:
+            type: integer
+          title: Processes
+          type: array
+        session_id:
+          title: Session Id
+          type: string
+        signal:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Signal
+        started_at:
+          title: Started At
+          type: number
+        state:
+          title: State
+          type: string
+      required:
+        - id
+        - session_id
+        - command
+        - state
+        - started_at
+        - ended_at
+        - exit
+        - signal
+        - error
+        - jobs
+        - processes
+        - machines
+      title: LineDetailResponse
+      type: object
+    LineResponse:
+      properties:
+        command:
+          title: Command
+          type: string
+        ended_at:
+          anyOf:
+            - type: number
+            - type: 'null'
+          title: Ended At
+        error:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Error
+        exit:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Exit
+        id:
+          title: Id
+          type: string
+        session_id:
+          title: Session Id
+          type: string
+        signal:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Signal
+        started_at:
+          title: Started At
+          type: number
+        state:
+          title: State
+          type: string
+      required:
+        - id
+        - session_id
+        - command
+        - state
+        - started_at
+        - ended_at
+        - exit
+        - signal
+        - error
+      title: LineResponse
+      type: object
+    LineState:
+      enum:
+        - waiting
+        - running
+        - stopping
+        - exited
+      title: LineState
+      type: string
+    MachinePidResponse:
+      properties:
+        exited:
+          anyOf:
+            - type: number
+            - type: 'null'
+          title: Exited
+        pid:
+          title: Pid
+          type: integer
+        started:
+          title: Started
+          type: number
+      required:
+        - pid
+        - started
+        - exited
+      title: MachinePidResponse
+      type: object
+    ProcessResponse:
+      properties:
+        command:
+          title: Command
+          type: string
+        cwd:
+          title: Cwd
+          type: string
+        ended_at:
+          anyOf:
+            - type: number
+            - type: 'null'
+          title: Ended At
+        error:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Error
+        exit:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Exit
+        group:
+          title: Group
+          type: integer
+        line_id:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Line Id
+        machine:
+          title: Machine
+          type: string
+        machine_pid:
+          anyOf:
+            - $ref: '#/components/schemas/MachinePidResponse'
+            - type: 'null'
+        parent:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Parent
+        pid:
+          title: Pid
+          type: integer
+        runtime:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Runtime
+        session_id:
+          title: Session Id
+          type: string
+        signal:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Signal
+        started_at:
+          title: Started At
+          type: number
+        state:
+          title: State
+          type: string
+      required:
+        - pid
+        - session_id
+        - line_id
+        - parent
+        - group
+        - command
+        - cwd
+        - machine
+        - runtime
+        - machine_pid
+        - state
+        - started_at
+        - ended_at
+        - exit
+        - signal
+        - error
+      title: ProcessResponse
+      type: object
+    ProcessState:
+      enum:
+        - running
+        - stopping
+        - exited
+      title: ProcessState
+      type: string
     CLIBlock:
       properties:
         cli:
@@ -6745,11 +7444,15 @@ components:
           anyOf:
             - type: object
             - type: 'null'
+        line_id:
+          type: string
+          description: The line's id, by which `GET .../lines/{line_id}` finds it.
       required:
         - kind
         - exit_code
         - stdout
         - stderr
+        - line_id
       title: Shell result
     ShellRequest:
       type: object

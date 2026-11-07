@@ -110,7 +110,7 @@ async function cappedByProfile(ws: Workspace): Promise<void> {
   await sh(ws, 'n=0; while true; do sleep 30 & n=$((n+1)); done', 'sandbox')
   await sh(ws, 'echo "status=$? started=$n"; jobs', 'sandbox')
   await sh(ws, 'kill %1; kill %2', 'sandbox')
-  await ws.processes.drain()
+  await ws.processTable.drain()
   await sh(ws, 'echo a | tr a b', 'sandbox')
 }
 
@@ -119,7 +119,7 @@ async function nothingOutlivesClose(ws: Workspace): Promise<void> {
   await sh(ws, 'sleep 60 &', 'agent-a')
   await sh(ws, 'sleep 60 | sleep 60 &', 'agent-b')
   ws.spawn({ argv: ['sleep', '60'] })
-  const live = ws.processes.live().map((p) => p.record)
+  const live = ws.processTable.live().map((p) => p.record)
   console.log(
     `  live before close: ${String(live.length)} -> ` +
       live.map((i) => `${String(i.id.pid)}:${i.command}`).join(', '),
@@ -127,7 +127,7 @@ async function nothingOutlivesClose(ws: Workspace): Promise<void> {
   const t0 = Date.now()
   await ws.close()
   console.log(
-    `  live after close:  ${String(ws.processes.live().length)} (close took ${String(Date.now() - t0)}ms)`,
+    `  live after close:  ${String(ws.processTable.live().length)} (close took ${String(Date.now() - t0)}ms)`,
   )
 }
 

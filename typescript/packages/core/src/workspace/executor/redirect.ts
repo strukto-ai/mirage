@@ -84,7 +84,7 @@ import { toScope } from './builtins/scope.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, isUnwinding, takeStderr, takeStdout, type Unwinding } from './control.ts'
 import { createFile, soleStream, writeDescription } from './create.ts'
-import { drained, pump } from './jobs.ts'
+import { drained, pump } from './background.ts'
 import { writeErrorLine } from './statement.ts'
 
 // What these return streams into a redirect's file as it is read; a file one

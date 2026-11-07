@@ -182,6 +182,9 @@ export class JobTable {
    * the runtimes that reach it.
    */
   reaper: ((record: RecordFields, signum: number) => Promise<boolean>) | null = null
+  // Told each job this table's jobs run as it ends; the workspace sets it,
+  // to trace the job.
+  ended: ((record: Job) => void) | null = null
 
   /**
    * @param store the job plane holding each session's list and each job's
@@ -387,6 +390,7 @@ export class JobTable {
             startedAt: createdAt,
             line,
             group,
+            pid: process.record.id.pid,
             state: 'running',
             endedAt: null,
             exit: null,
@@ -418,6 +422,7 @@ export class JobTable {
         line,
         group,
         now: () => this.clock.now(),
+        ended: this.plane.ended,
       })
     } catch (error) {
       process.terminate()

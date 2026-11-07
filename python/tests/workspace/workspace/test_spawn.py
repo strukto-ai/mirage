@@ -54,7 +54,7 @@ async def test_profile_process_views_and_revocation():
         child.stdin.close()
         view = ws._process_view(a)
         assert [i.pid for i in view.list()] == [child.pid]
-        assert ws.processes.view("b").list() == ()
+        assert ws.process_table.view("b").list() == ()
         await ws.set_session_profile("a", {"processes": {"max": 1}})
         assert view.list() == ()
         assert view.spawn is not None
@@ -173,7 +173,7 @@ async def test_top_level_line_cannot_bypass_spawn_process_cap():
             b"bash: fork: Resource temporarily unavailable\n"
         )
         assert session.process_id is None
-        assert len(ws.processes.live()) == 1
+        assert len(ws.process_table.live()) == 1
         assert (await ws.shell("test ! -e /data/file")).exit_code == 0
         child.terminate()
         await child.wait()
@@ -229,6 +229,6 @@ async def test_a_fork_bomb_meets_the_default_cap():
         result = await ws.shell("b() { b | b; }; b")
         assert result.exit_code == 254
         assert b"bash: fork: Resource temporarily unavailable" in result.stderr
-        assert len(ws.processes.live()) == 0
+        assert len(ws.process_table.live()) == 0
     finally:
         await ws.close()

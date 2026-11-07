@@ -1,0 +1,275 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import asyncio
+
+from mirage.context import (
+    current_caller,
+    session_voice,
+)
+from mirage.execution.job import JobHandle, JobTable
+from mirage.execution.process.types import ProcessState
+from mirage.execution.process.view import ProcessView
+from mirage.io import IOResult
+from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
+from mirage.shell.constants import (
+    SIGSTOP,
+    SIGTERM,
+)
+from mirage.shell.signals import (
+    listed_signal,
+    signal_number,
+    signal_table,
+)
+from mirage.shell.voice import shell_voice
+from mirage.view.types import SessionView
+from mirage.workspace.executor.builtins.constants import MAX_PID_OPERAND
+from mirage.workspace.executor.builtins.jobspec import (
+    job_numbered,
+    job_result,
+    process_view,
+    session_of,
+)
+from mirage.workspace.executor.builtins.kill.constants import KEPT_SIGNALS
+from mirage.workspace.executor.builtins.shared import builtin_usage
+from mirage.workspace.session import SessionState
+from mirage.workspace.types import ExecutionNode
+
+
+def _kill_list(
+    cmd_str: str, words: list[str], voice: str
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """``kill -l``: the signal table, or each operand's name for a
+    number (a ``$?`` of 128 plus one too) and number for a name.
+
+    Args:
+        cmd_str (str): the command line.
+        words (list[str]): the operands after ``-l``.
+        voice (str): the prefix bash's diagnostics carry.
+    """
+    if words[:1] == ["--"]:
+        words = words[1:]
+    if not words:
+        out = encode_text(signal_table())
+        return out, IOResult(), ExecutionNode(command=cmd_str, exit_code=0)
+    lines: list[str] = []
+    errors: list[str] = []
+    for word in words:
+        line = listed_signal(word)
+        if line is None:
+            errors.append(f"{voice}kill: {word}: invalid signal specification")
+        elif line:
+            lines.append(line)
+    code = 1 if errors else 0
+    out = encode_text("".join(f"{line}\n" for line in lines))
+    err = encode_text("".join(f"{line}\n" for line in errors))
+    return (
+        out,
+        IOResult(exit_code=code, stderr=err or None),
+        ExecutionNode(command=cmd_str, exit_code=code, stderr=err),
+    )
+
+
+def _kill_pid(jobs: list[JobHandle], operand: str) -> tuple[int | None, str]:
+    """The managed PID one kill operand names, or bash's refusal.
+
+    A ``%N`` job with no process, one restored from a snapshot, has
+    ended: it answers no such process, and never reaches the process
+    table, where its stand-in PID may name another process.
+
+    Args:
+        jobs (list[JobHandle]): the jobs the builtin can see.
+        operand (str): the operand as typed.
+    """
+    if operand == "":
+        return None, "`': not a pid or valid job spec"
+    if operand.startswith("%"):
+        raw = operand[1:]
+        job = job_numbered(jobs, int(raw)) if raw.isdigit() else None
+        if job is None:
+            return None, f"{operand}: no such job"
+        if job.process is None:
+            return None, f"({job.pid}) - No such process"
+        return job.pid, ""
+    digits = operand[1:] if operand.startswith("-") else operand
+    if (
+        not digits.isascii()
+        or not digits.isdigit()
+        or int(digits) > MAX_PID_OPERAND
+    ):
+        return None, f"{operand}: arguments must be process or job IDs"
+    return int(operand), ""
+
+
+async def handle_kill(
+    job_table: JobTable,
+    parts: list[str],
+    session: SessionState | None = None,
+    view: SessionView | None = None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Signal managed runners with bash's kill surface.
+
+    The signal comes from ``-s``/``-n``, or from the first ``-sigspec``;
+    ``0`` probes and every other signal cancels the runner with it. Every
+    operand is tried and each failure is named in bash's words; the
+    status is 0 when any operand was signalled, as bash's is. A job
+    spec is ``%N``; a negative number is a process group, the session's
+    ``-$$`` among them, whose every runner gets the signal (killpg). A
+    signal that stops the shell running ``kill`` lands before the next
+    statement, as bash's signal to itself does.
+
+    Args:
+        job_table (JobTable): the session's jobs.
+        parts (list[str]): the command words, `kill` first.
+        session (SessionState | None): the shell session, if any.
+        view (SessionView | None): the gated session view.
+    """
+    cmd_str = " ".join(parts)
+    sid = session_of(session)
+    signal = SIGTERM
+    words = parts[1:]
+    saw_signal = False
+    voice = shell_voice() if session is None else session_voice(session)
+    if words[:1] in (["-l"], ["-L"]):
+        return _kill_list(cmd_str, words[1:], voice)
+    while words:
+        word = words[0]
+        if word in ("-s", "-n"):
+            if len(words) < 2:
+                return job_result(
+                    cmd_str,
+                    f"{voice}kill: {word}: option requires an argument\n",
+                    1,
+                )
+            spec, words = words[1], words[2:]
+        elif word == "--":
+            words = words[1:]
+            break
+        elif word == "-?":
+            return job_result(cmd_str, builtin_usage("kill"), 2)
+        elif (word[:2] == "-s" and word[2:3].isalpha()) or (
+            word[:2] == "-n" and word[2:3].isdigit()
+        ):
+            spec, words = word[2:], words[1:]
+        elif word.startswith("-") and len(word) > 1 and not saw_signal:
+            spec, words = word[1:], words[1:]
+        else:
+            break
+        number = signal_number(spec)
+        if number is None:
+            return job_result(
+                cmd_str,
+                f"{voice}kill: {spec}: invalid signal specification\n",
+                1,
+            )
+        if number == SIGSTOP:
+            return job_result(
+                cmd_str, f"{voice}kill: {spec}: not supported\n", 1
+            )
+        signal, saw_signal = number, True
+    if not words:
+        return job_result(cmd_str, builtin_usage("kill"), 2)
+    processes = process_view(job_table, session)
+    errors: list[str] = []
+    signalled = False
+    await job_table.sync(sid)
+    for operand in words:
+        jobs = job_table.list_jobs(sid)
+        pid, refusal = _kill_pid(jobs, operand)
+        if pid is None:
+            errors.append(f"{voice}kill: {refusal}")
+            continue
+        if operand.startswith("-"):
+            try:
+                found = await _kill_group(
+                    job_table, processes, jobs, -pid, signal, sid
+                )
+            except PermissionError:
+                errors.append(
+                    f"{voice}kill: ({pid}) - Operation not permitted"
+                )
+                continue
+            if not found:
+                errors.append(f"{voice}kill: ({pid}) - No such process")
+                continue
+            signalled = True
+            continue
+        try:
+            if signal in KEPT_SIGNALS:
+                found = processes.probe(pid)
+            else:
+                found = processes.terminate(pid, signal)
+                job = next(
+                    (
+                        j
+                        for j in jobs
+                        if j.process is not None and j.pid == pid
+                    ),
+                    None,
+                )
+                if found and job is not None:
+                    await job_table.kill(job.id, sid, signal)
+        except PermissionError:
+            errors.append(f"{voice}kill: ({pid}) - Operation not permitted")
+            continue
+        if not found:
+            errors.append(f"{voice}kill: ({pid}) - No such process")
+            continue
+        signalled = True
+    runner = current_caller().process
+    if runner is not None and runner.record.state == ProcessState.STOPPING:
+        # The shell running kill stopped itself (`kill $$`): the signal
+        # lands here, before its next statement.
+        raise asyncio.CancelledError
+    code = 0 if signalled else 1
+    err = encode_text("\n".join(errors) + "\n") if errors else b""
+    node = ExecutionNode(command=cmd_str, exit_code=code, stderr=err)
+    return None, IOResult(exit_code=code, stderr=err or None), node
+
+
+async def _kill_group(
+    job_table: JobTable,
+    processes: ProcessView,
+    jobs: list[JobHandle],
+    group: int,
+    signal: int,
+    session_id: str,
+) -> bool:
+    """Signal a process group as killpg(2) does, its jobs recorded as
+    killed by a signal they take.
+
+    Args:
+        job_table (JobTable): the session's jobs.
+        processes (ProcessView): the session's view of the runners.
+        jobs (list[JobHandle]): the jobs the builtin can see.
+        group (int): the group.
+        signal (int): the signal; a kept one probes.
+        session_id (str): the calling session.
+
+    Returns:
+        bool: whether the group had a runner the view sees.
+    """
+    if signal in KEPT_SIGNALS:
+        return processes.probe_group(group)
+    if not processes.probe_group(group):
+        return False
+    for job in jobs:
+        if (
+            job.process is not None
+            and job.process.record.group == group
+            and signal not in job.process.ignores
+        ):
+            await job_table.kill(job.id, session_id, signal)
+    return processes.signal_group(group, signal)

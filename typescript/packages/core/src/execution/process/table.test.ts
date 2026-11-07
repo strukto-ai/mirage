@@ -1,6 +1,7 @@
 import { expect, it } from 'vitest'
 import { PathSpec } from '../../types.ts'
 import { ProcessTable } from './table.ts'
+import { HISTORY_SECONDS } from '../constants.ts'
 import { LineId } from '../types.ts'
 import { currentProcessId, runAsProcess } from '../../context/session_context.ts'
 import type { ProcessHandle } from './handle.ts'
@@ -634,4 +635,81 @@ it('tells the publisher of each runner it started', async () => {
     await handle.join()
   }
   expect(live).toEqual([1, 1])
+})
+
+// The table keeps an ended process's record beside the live ones, until it
+// is older than the history keeps.
+it('keeps an ended process listed until its history lapses', async () => {
+  let clock = 100
+  const processes = new ProcessTable(undefined, undefined, undefined, undefined, () => clock)
+  const start = (command: string, run: () => Promise<number>) =>
+    processes.start({
+      sessionId: 'a',
+      command,
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => undefined,
+      run,
+    })
+  await start('done', () => Promise.resolve(3)).join()
+  const release = gate()
+  const live = start('held', async () => {
+    await release.promise
+    return 0
+  })
+  try {
+    expect(processes.records().map((r) => [r.command, r.state, r.exit])).toEqual([
+      ['done', 'exited', 3],
+      ['held', 'running', null],
+    ])
+    clock += HISTORY_SECONDS + 1
+    expect(processes.records().map((r) => r.command)).toEqual(['held'])
+  } finally {
+    release.release()
+    await live.join()
+  }
+})
+
+// A process stays in its ancestor's tree after the process between them has
+// ended and its record lapsed, and a process outside it never joins.
+it('keeps a live grandchild in the tree once its parent has lapsed', async () => {
+  let clock = 100
+  const processes = new ProcessTable(undefined, undefined, undefined, undefined, () => clock)
+  const start = (command: string, run: () => Promise<number>, parent: number | null) =>
+    processes.start({
+      sessionId: 'a',
+      command,
+      cwd: PathSpec.fromStrPath('/'),
+      cancel: () => undefined,
+      run,
+      parent,
+    })
+  const release = gate()
+  const middle = gate()
+  const held = async (): Promise<number> => {
+    await release.promise
+    return 0
+  }
+  const root = start('root', held, null)
+  const child = start(
+    'child',
+    async () => {
+      await middle.promise
+      return 0
+    },
+    root.record.id.pid,
+  )
+  const grandchild = start('grandchild', held, child.record.id.pid)
+  const other = start('other', held, null)
+  try {
+    middle.release()
+    await child.join()
+    clock += HISTORY_SECONDS + 1
+    expect(processes.records().map((r) => r.id.pid)).not.toContain(child.record.id.pid)
+    expect([...processes.tree(root.record.id.pid)].sort()).toEqual(
+      [root.record.id.pid, grandchild.record.id.pid].sort(),
+    )
+  } finally {
+    release.release()
+    await Promise.all([root.join(), grandchild.join(), other.join()])
+  }
 })

@@ -194,7 +194,7 @@ async def test_a_job_runs_under_the_line_limit_from_its_own_start(job):
     assert (
         await done.console.snapshot(Channel.STDERR)
     ) == b"line: timed out after 0.2s\n"
-    assert not list(ws.processes.live())
+    assert not list(ws.process_table.live())
 
 
 @pytest.mark.asyncio
@@ -214,7 +214,7 @@ async def test_output_cleanup_failure_preserves_job_timeout(
     )
     take.assert_awaited_once()
     assert "spool lost a write" in caplog.text
-    assert not list(ws.processes.live())
+    assert not list(ws.process_table.live())
 
 
 @pytest.mark.asyncio

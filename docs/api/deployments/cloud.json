@@ -55,6 +55,18 @@
       "parent": "Workspace operations"
     },
     {
+      "name": "Lines",
+      "parent": "Workspace operations"
+    },
+    {
+      "name": "Jobs",
+      "parent": "Workspace operations"
+    },
+    {
+      "name": "Processes",
+      "parent": "Workspace operations"
+    },
+    {
       "name": "Daemon"
     },
     {
@@ -1613,14 +1625,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/ShellResult"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ShellExplanation"
-                    }
-                  ]
+                  "$ref": "#/components/schemas/CloudShellResult"
                 },
                 "example": {
                   "kind": "io",
@@ -7643,34 +7648,7 @@
           "command"
         ]
       },
-      "ShellExplanation": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/Explanation"
-          },
-          {
-            "type": "object",
-            "properties": {
-              "line": {
-                "type": "string"
-              },
-              "exit_code": {
-                "type": "integer",
-                "description": "What the line is refused with, 0 when it runs."
-              },
-              "stderr": {
-                "type": "string"
-              },
-              "node": {
-                "type": "object",
-                "description": "The parsed line and each command's explanation."
-              }
-            }
-          }
-        ],
-        "title": "Shell explanation"
-      },
-      "ShellResult": {
+      "CloudShellResult": {
         "type": "object",
         "properties": {
           "kind": {

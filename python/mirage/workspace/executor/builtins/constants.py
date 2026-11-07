@@ -29,3 +29,7 @@ TARGET_RE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)(?:\[(.+)\])?\Z")
 # the expansion introducers (`$` and a backquote). A `~` counts at
 # the start or after `=` or `:`, and a `#` only at the start.
 SET_QUOTED_CHARS = frozenset(" \t\n'\"\\|&;()<>!{}*[?]^$`")
+
+# The largest PID operand kill and ps read as a number: the bound both hosts
+# hold exactly (bash's own is intmax_t).
+MAX_PID_OPERAND = 2**53 - 1

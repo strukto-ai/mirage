@@ -1002,6 +1002,27 @@
                       "GET /v1/workspaces/{workspace_id}/asks",
                       "POST /v1/workspaces/{workspace_id}/asks/{ask_id}"
                     ]
+                  },
+                  {
+                    "group": "Lines",
+                    "pages": [
+                      "GET /v1/workspaces/{workspace_id}/lines",
+                      "GET /v1/workspaces/{workspace_id}/lines/{line_id}"
+                    ]
+                  },
+                  {
+                    "group": "Jobs",
+                    "pages": [
+                      "GET /v1/workspaces/{workspace_id}/jobs",
+                      "GET /v1/workspaces/{workspace_id}/jobs/{job_id}"
+                    ]
+                  },
+                  {
+                    "group": "Processes",
+                    "pages": [
+                      "GET /v1/workspaces/{workspace_id}/processes",
+                      "GET /v1/workspaces/{workspace_id}/processes/{pid}"
+                    ]
                   }
                 ]
               },

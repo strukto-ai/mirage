@@ -277,6 +277,14 @@ mirage policy get guard.py -o yaml
 | `mirage workspace allow ID ASK [--scope once\|session]` | Allow one. |
 | `mirage workspace deny ID ASK` | Deny one. |
 
+### Lines, jobs and processes
+
+| Command | Does |
+| --- | --- |
+| `mirage workspace list-lines ID [--session S] [--state STATE]` | List the lines the workspace keeps. |
+| `mirage workspace list-jobs ID [--session S] [--state STATE] [--line LINE]` | List its jobs. |
+| `mirage workspace list-processes ID [--session S] [--state STATE] [--line LINE] [--job JOB] [--machine M]` | List its processes. |
+
 ## Saved connections
 
 `mirage vfs`, `mirage cli` and `mirage runtime` keep connections on the

@@ -61,7 +61,7 @@ it.each([false, true])(
       expect(requestSignal).toBeDefined()
       abort.abort()
       await result
-      await ws.processes.drain()
+      await ws.processTable.drain()
       expect(requestSignal?.aborted).toBe(true)
       expect(body.locked).toBe(false)
       expect(await ws.cache.get(path)).toBeNull()

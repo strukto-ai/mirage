@@ -275,7 +275,7 @@ describe('max sessions', () => {
       expect(patched.statusCode).toBe(200)
       const ws = app.registry.get('lifted').runner.ws
       expect(ws.registry.memory?.limit).toBe(1 << 20)
-      expect(ws.processes.ceiling).toBe(8)
+      expect(ws.processTable.ceiling).toBe(8)
       const ran = await app.inject({
         method: 'POST',
         url: '/v1/workspaces/lifted/shell?session_id=agent',

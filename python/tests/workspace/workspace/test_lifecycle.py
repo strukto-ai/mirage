@@ -1469,7 +1469,7 @@ async def test_close_releases_later_resources_after_multiple_errors(
         closed.append("processes")
         raise OSError("process cancellation failed")
 
-    monkeypatch.setattr(ws.processes, "stop", processes_stop)
+    monkeypatch.setattr(ws.process_table, "stop", processes_stop)
     monkeypatch.setattr(ws._runtimes, "close", runtime_close)
     monkeypatch.setattr(vfs, "close", vfs_close)
     monkeypatch.setattr(ws._state_store, "close", store_close)

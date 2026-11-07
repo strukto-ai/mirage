@@ -54,7 +54,7 @@ import type { MountRegistry } from '../../../mount/registry.ts'
 import { VarAttr } from '../../../../shell/variable.ts'
 import { envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
-import { pump } from '../../jobs.ts'
+import { pump } from '../../background.ts'
 import { readScriptBytes } from '../script/script.ts'
 import type { BuiltinCall, ExecuteStringFn } from '../types.ts'
 

@@ -210,6 +210,9 @@ class JobTable:
         self.reaper: Callable[[RecordFields, int], Awaitable[bool]] | None = (
             None
         )
+        # Told each job this table's jobs run as it ends; the workspace
+        # sets it, to trace the job.
+        self.ended: Callable[[Job], None] | None = None
         # The bounds on killed jobs' stops (``_end_killed``), each with
         # its job.
         self._stopping: dict[asyncio.Task[None], JobHandle] = {}
@@ -382,6 +385,7 @@ class JobTable:
                         created_at,
                         line,
                         group,
+                        process.record.pid,
                     ),
                     self.daemon,
                 ),
@@ -410,6 +414,7 @@ class JobTable:
                 line=line,
                 group=group,
                 now=self.clock.now,
+                ended=self._plane.ended,
             )
         except Exception:
             process.terminate()

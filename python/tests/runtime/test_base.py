@@ -206,12 +206,12 @@ async def test_a_programs_process_ends_by_its_shells_signal():
                 await asyncio.sleep(0.01)
         [shell] = [
             p
-            for p in ws.processes.live()
+            for p in ws.process_table.live()
             if p.record.pid == runtime.seen[0].parent
         ]
         [program] = [
             p
-            for p in ws.processes.live()
+            for p in ws.process_table.live()
             if p.record.pid == runtime.seen[0].pid
         ]
         assert shell.terminate(15)
@@ -236,7 +236,7 @@ async def test_a_programs_process_stopped_alone_leaves_its_shell_running():
                 await asyncio.sleep(0.01)
         [program] = [
             p
-            for p in ws.processes.live()
+            for p in ws.process_table.live()
             if p.record.pid == runtime.seen[0].pid
         ]
         assert program.terminate(15)

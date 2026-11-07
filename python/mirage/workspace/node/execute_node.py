@@ -90,6 +90,13 @@ from mirage.shell.types import (
 from mirage.shell.voice import shell_voice
 from mirage.types import PathSpec
 from mirage.workspace.evaluation import EvaluationContext, child_context
+from mirage.workspace.executor.background import (
+    drained,
+    report_jobs,
+    report_reaped,
+    start_shell,
+    tell,
+)
 from mirage.workspace.executor.builtins import handle_test, handle_unset
 from mirage.workspace.executor.builtins.alias import alias_mark, alias_view
 from mirage.workspace.executor.builtins.exec import install_exec_redirects
@@ -109,13 +116,6 @@ from mirage.workspace.executor.control import (
     handle_select,
     handle_while,
     trailed,
-)
-from mirage.workspace.executor.jobs import (
-    drained,
-    report_jobs,
-    report_reaped,
-    start_shell,
-    tell,
 )
 from mirage.workspace.executor.pipes import (
     handle_connection,

@@ -88,7 +88,7 @@ import {
   LoopSignal,
   trailed,
 } from '../executor/control.ts'
-import { drained, reportJobs, reportReaped, startShell, tell } from '../executor/jobs.ts'
+import { drained, reportJobs, reportReaped, startShell, tell } from '../executor/background.ts'
 import { handleConnection, handlePipe, handleSubshell } from '../executor/pipes.ts'
 import { handleRedirect } from '../executor/redirect.ts'
 import {

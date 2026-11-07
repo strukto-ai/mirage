@@ -47,12 +47,7 @@ from mirage.shell.node_kind import simple_command
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.workspace.evaluation import EvaluationContext, child_context
-from mirage.workspace.executor.builtins.exec import (
-    divert_statement,
-    diverted_file,
-)
-from mirage.workspace.executor.control import UNWINDING, carried, ended
-from mirage.workspace.executor.jobs import (
+from mirage.workspace.executor.background import (
     handle_background,
     one_program,
     pump,
@@ -60,6 +55,11 @@ from mirage.workspace.executor.jobs import (
     run_program,
     start_shell,
 )
+from mirage.workspace.executor.builtins.exec import (
+    divert_statement,
+    diverted_file,
+)
+from mirage.workspace.executor.control import UNWINDING, carried, ended
 from mirage.workspace.executor.statement import (
     answer_closed,
     as_written,

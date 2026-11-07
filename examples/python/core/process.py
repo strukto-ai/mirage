@@ -119,7 +119,7 @@ async def capped_by_profile(ws: Workspace) -> None:
     await sh(ws, "n=0; while true; do sleep 30 & n=$((n+1)); done", "sandbox")
     await sh(ws, 'echo "status=$? started=$n"; jobs', "sandbox")
     await sh(ws, "kill %1; kill %2", "sandbox")
-    await ws.processes.drain()
+    await ws.process_table.drain()
     await sh(ws, "echo a | tr a b", "sandbox")
 
 
@@ -128,7 +128,7 @@ async def nothing_outlives_close(ws: Workspace) -> None:
     await sh(ws, "sleep 60 &", "agent-a")
     await sh(ws, "sleep 60 | sleep 60 &", "agent-b")
     ws.spawn(SpawnRequest(argv=("sleep", "60")))
-    live = [p.record for p in ws.processes.live()]
+    live = [p.record for p in ws.process_table.live()]
     print(
         f"  live before close: {len(live)} -> "
         + ", ".join(f"{i.pid}:{i.command}" for i in live)
@@ -136,7 +136,7 @@ async def nothing_outlives_close(ws: Workspace) -> None:
     started = time.monotonic()
     await ws.close()
     print(
-        f"  live after close:  {len(ws.processes.live())} "
+        f"  live after close:  {len(ws.process_table.live())} "
         f"(close took {(time.monotonic() - started) * 1000:.0f}ms)"
     )
 

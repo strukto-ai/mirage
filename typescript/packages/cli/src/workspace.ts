@@ -179,6 +179,34 @@ interface AskRecord {
   note: string
 }
 
+interface LineRecord {
+  id: string
+  session_id: string
+  command: string
+  state: string
+  exit: number | null
+}
+
+interface JobRecord {
+  id: string
+  number: number
+  pid: number | null
+  session_id: string
+  command: string
+  state: string
+  exit: number | null
+}
+
+interface ProcessRecord {
+  pid: number
+  parent: number | null
+  machine: string
+  session_id: string
+  command: string
+  state: string
+  exit: number | null
+}
+
 interface LogPage {
   items: { id: string; command: string; started_at: number; exit_code: number | null }[]
   next: string | null
@@ -209,6 +237,69 @@ function formatAsks(items: AskRecord[]): string {
       a.reason,
     ]),
   )
+}
+
+function exitCell(item: { exit: number | null }): string {
+  return item.exit === null ? '-' : String(item.exit)
+}
+
+function formatLines(items: LineRecord[]): string {
+  if (items.length === 0) return 'No lines.'
+  return formatTable(
+    ['ID', 'SESSION', 'STATE', 'EXIT', 'COMMAND'],
+    items.map((l) => [l.id, l.session_id, l.state, exitCell(l), l.command]),
+  )
+}
+
+function formatJobs(items: JobRecord[]): string {
+  if (items.length === 0) return 'No jobs.'
+  return formatTable(
+    ['ID', 'JOB', 'PID', 'SESSION', 'STATE', 'EXIT', 'COMMAND'],
+    items.map((j) => [
+      j.id,
+      `%${String(j.number)}`,
+      j.pid === null ? '-' : String(j.pid),
+      j.session_id,
+      j.state,
+      exitCell(j),
+      j.command,
+    ]),
+  )
+}
+
+function formatProcesses(items: ProcessRecord[]): string {
+  if (items.length === 0) return 'No processes.'
+  return formatTable(
+    ['PID', 'PPID', 'MACHINE', 'SESSION', 'STATE', 'EXIT', 'COMMAND'],
+    items.map((p) => [
+      String(p.pid),
+      String(p.parent ?? 0),
+      p.machine,
+      p.session_id,
+      p.state,
+      exitCell(p),
+      p.command,
+    ]),
+  )
+}
+
+/** One of the workspace's record lists, by its route: `lines`, `jobs` or `processes`. */
+async function listRecords(
+  id: string,
+  kind: string,
+  filters: Record<string, string | undefined>,
+): Promise<unknown> {
+  const params = new URLSearchParams()
+  for (const [key, value] of Object.entries(filters))
+    if (value !== undefined && value !== '') params.set(key, value)
+  const c = makeClient()
+  await c.ensureRunning({ allowSpawn: false })
+  const qs = params.toString()
+  const r = await c.request(
+    'GET',
+    `/v1/workspaces/${encodeURIComponent(id)}/${kind}${qs === '' ? '' : `?${qs}`}`,
+  )
+  return handleResponse(r)
 }
 
 export function registerWorkspaceCommands(program: Command): Command {
@@ -467,6 +558,55 @@ export function registerWorkspaceCommands(program: Command): Command {
       )
       emit((await handleResponse(r)) as AskRecord[], formatAsks)
     })
+
+  ws.command('list-lines')
+    .description('List the lines the workspace keeps: running and newest ended.')
+    .argument('<id>')
+    .option('--session <sessionId>', "Only this session's lines")
+    .option('--state <state>', 'Only the lines in this state')
+    .action(async (id: string, opts: { session?: string; state?: string }) => {
+      const found = await listRecords(id, 'lines', { session_id: opts.session, state: opts.state })
+      emit(found as LineRecord[], formatLines)
+    })
+
+  ws.command('list-jobs')
+    .description("List the workspace's jobs, as each session's jobs shows them.")
+    .argument('<id>')
+    .option('--session <sessionId>', "Only this session's jobs")
+    .option('--state <state>', 'Only the jobs in this state')
+    .option('--line <lineId>', 'Only the jobs this line started')
+    .action(async (id: string, opts: { session?: string; state?: string; line?: string }) => {
+      const found = await listRecords(id, 'jobs', {
+        session_id: opts.session,
+        state: opts.state,
+        line_id: opts.line,
+      })
+      emit(found as JobRecord[], formatJobs)
+    })
+
+  ws.command('list-processes')
+    .description('List the processes the workspace keeps: live and newest ended.')
+    .argument('<id>')
+    .option('--session <sessionId>', "Only this session's processes")
+    .option('--state <state>', 'Only the processes in this state')
+    .option('--line <lineId>', 'Only the processes this line ran')
+    .option('--job <jobId>', 'Only the processes this job ran')
+    .option('--machine <machine>', 'Only the processes run on this machine (provider:name)')
+    .action(
+      async (
+        id: string,
+        opts: { session?: string; state?: string; line?: string; job?: string; machine?: string },
+      ) => {
+        const found = await listRecords(id, 'processes', {
+          session_id: opts.session,
+          state: opts.state,
+          line_id: opts.line,
+          job_id: opts.job,
+          machine: opts.machine,
+        })
+        emit(found as ProcessRecord[], formatProcesses)
+      },
+    )
 
   ws.command('allow')
     .description('Allow a pending ask; the retry of the asked line passes.')

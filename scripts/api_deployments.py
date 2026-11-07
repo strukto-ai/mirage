@@ -242,6 +242,9 @@ def navigation(
                 ("VFS", "VFS"),
                 ("Documents", "Documents"),
                 ("Asks", "Asks"),
+                ("Lines", "Lines"),
+                ("Jobs", "Jobs"),
+                ("Processes", "Processes"),
             ],
         ),
         ("Templates", [("Templates", "Templates")]),
@@ -314,6 +317,20 @@ def deployment_outputs(root: Path, source: dict[str, Any]) -> dict[Path, str]:
             template.replace("{{STDIN_SECTION}}", stdin)
             .replace("{{BASE_URL}}", url)
             .replace("{{API_PREFIX}}", "/" + prefix)
+            .replace(
+                "{{LINE_ID}}",
+                ',"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"'
+                if key == "server"
+                else "",
+            )
+            .replace(
+                "{{LINE_NOTE}}",
+                "OSS Server includes `line_id` in the result. "
+                "Use it to [get the line record]"
+                "(/api/server/operations/lines/get-a-line)."
+                if key == "server"
+                else "",
+            )
         )
         outputs[root / f"docs/{prefix}/streaming.mdx"] = guide
     overview = (root / "docs/api/overview.mdx").read_text()

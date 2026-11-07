@@ -652,6 +652,44 @@
       "op": "replace",
       "path": "/parameters/workspaceId/description",
       "value": "The workspace identifier. Cloud accepts the UID or name; OSS Server uses the workspace ID."
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudShellResult",
+      "value": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "exit_code": {
+            "type": "integer"
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "exit_code",
+          "stdout",
+          "stderr"
+        ],
+        "title": "Shell result"
+      }
     }
   ],
   "operations": {
@@ -1922,6 +1960,204 @@
           ]
         }
       ]
+    },
+    "GET /v1/workspaces/{workspace_id}/lines": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "The lines the workspace keeps, oldest first: every one not ended\nyet and the newest ended ones, a session's or those in a state when\nnamed.\n\nLines and processes remain available while running and, after completion, the newest 1,024 records are kept for up to an hour. Jobs are listed only while the session retains them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix epoch seconds."
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/example",
+          "value": [
+            {
+              "id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37",
+              "session_id": "default",
+              "command": "sleep 30 & wait",
+              "state": "running",
+              "started_at": 1794009600,
+              "ended_at": null,
+              "exit": null,
+              "signal": null,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/lines/{line_id}": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "One line, with the ids of the jobs it started, the pids of the\nprocesses it ran that the workspace still keeps and the machines\nthose ran on.\n\nLines and processes remain available while running and, after completion, the newest 1,024 records are kept for up to an hour. Jobs are listed only while the session retains them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix epoch seconds."
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/example",
+          "value": {
+            "id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37",
+            "session_id": "default",
+            "command": "sleep 30 & wait",
+            "state": "running",
+            "started_at": 1794009600,
+            "ended_at": null,
+            "exit": null,
+            "signal": null,
+            "error": null,
+            "jobs": [
+              "job_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38"
+            ],
+            "processes": [
+              42
+            ],
+            "machines": [
+              "host:my-laptop"
+            ]
+          }
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/jobs": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "The jobs the workspace's sessions list, as ``jobs`` does, a\nsession's, those in a state or those a line started when named.\n\nLines and processes remain available while running and, after completion, the newest 1,024 records are kept for up to an hour. Jobs are listed only while the session retains them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix epoch seconds."
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/example",
+          "value": [
+            {
+              "id": "job_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38",
+              "number": 1,
+              "session_id": "default",
+              "command": "sleep 30",
+              "cwd": "/",
+              "line_id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37",
+              "group": 42,
+              "pid": 42,
+              "state": "running",
+              "started_at": 1794009600,
+              "ended_at": null,
+              "exit": null,
+              "signal": null
+            }
+          ]
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/jobs/{job_id}": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "One job, named by the id its listing gives, with the pids of the\nprocesses it ran that the workspace still keeps: its own and every\none under it.\n\nLines and processes remain available while running and, after completion, the newest 1,024 records are kept for up to an hour. Jobs are listed only while the session retains them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix epoch seconds."
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/example",
+          "value": {
+            "id": "job_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38",
+            "number": 1,
+            "session_id": "default",
+            "command": "sleep 30",
+            "cwd": "/",
+            "line_id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37",
+            "group": 42,
+            "pid": 42,
+            "state": "running",
+            "started_at": 1794009600,
+            "ended_at": null,
+            "exit": null,
+            "signal": null,
+            "processes": [
+              42
+            ]
+          }
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/processes": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "The processes the workspace keeps, by pid: every live one and the\nnewest ended ones, a session's, those in a state, those a line ran,\nthose a job ran or those run on a machine (``provider:name``) when\nnamed.\n\nLines and processes remain available while running and, after completion, the newest 1,024 records are kept for up to an hour. Jobs are listed only while the session retains them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix epoch seconds."
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/example",
+          "value": [
+            {
+              "pid": 42,
+              "session_id": "default",
+              "line_id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37",
+              "parent": null,
+              "group": 42,
+              "command": "sleep 30",
+              "cwd": "/",
+              "machine": "host:my-laptop",
+              "runtime": "process",
+              "machine_pid": {
+                "pid": 12345,
+                "started": 1794009600,
+                "exited": null
+              },
+              "state": "running",
+              "started_at": 1794009600,
+              "ended_at": null,
+              "exit": null,
+              "signal": null,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/processes/{pid}": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "One process, by its pid.\n\nLines and processes remain available while running and, after completion, the newest 1,024 records are kept for up to an hour. Jobs are listed only while the session retains them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix epoch seconds."
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/example",
+          "value": {
+            "pid": 42,
+            "session_id": "default",
+            "line_id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37",
+            "parent": null,
+            "group": 42,
+            "command": "sleep 30",
+            "cwd": "/",
+            "machine": "host:my-laptop",
+            "runtime": "process",
+            "machine_pid": {
+              "pid": 12345,
+              "started": 1794009600,
+              "exited": null
+            },
+            "state": "running",
+            "started_at": 1794009600,
+            "ended_at": null,
+            "exit": null,
+            "signal": null,
+            "error": null
+          }
+        }
+      ]
     }
   },
   "cloud_operations": {
@@ -2346,7 +2582,26 @@
         "value": "#/components/schemas/CloudTemplate"
       }
     ],
-    "POST /v1/workspaces/{workspace_id}/shell": [],
+    "POST /v1/workspaces/{workspace_id}/shell": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema",
+        "value": {
+          "$ref": "#/components/schemas/CloudShellResult"
+        }
+      },
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/example",
+        "value": {
+          "kind": "io",
+          "exit_code": 0,
+          "stdout": "hello\n",
+          "stderr": "",
+          "refusal": null
+        }
+      }
+    ],
     "POST /v1/workspaces/{workspace_id}/vfs/read": [],
     "POST /v1/workspaces/{workspace_id}/vfs/write": [],
     "POST /v1/workspaces/{workspace_id}/vfs/append": [],

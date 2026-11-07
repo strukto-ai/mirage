@@ -26,7 +26,7 @@ Output records identify `stdout` or `stderr` and carry base64-encoded `data`:
 
 ```json
 {"stream":"stdout","data":"aGVsbG8K"}
-{"status":"done","result":{"kind":"io","exit_code":0,"stdout":"","stderr":"","refusal":null},"error":null}
+{"status":"done","result":{"kind":"io","exit_code":0,"stdout":"","stderr":"","refusal":null,"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"},"error":null}
 ```
 
 Decode each output record's `data` to display the bytes. The output example decodes
@@ -42,6 +42,8 @@ Read through the final record:
 A stream without a final status record was interrupted. HTTP `200` alone does not
 mean the shell command succeeded. Closing the request cancels the running line.
 Streaming cannot be combined with `explain`.
+
+OSS Server includes `line_id` in the result. Use it to [get the line record](/api/server/operations/lines/get-a-line).
 
 ## Send stdin
 
