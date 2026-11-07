@@ -283,6 +283,10 @@ fn joined(
     source: &[u8],
 ) -> Tree {
     let mut dropped = continuations(&text, &pass);
+    // bash -c keeps a backslash ending the input unless it continues a
+    // line that started in single quotes.
+    let kept = super::heredoc::ends_escaped(source)
+        && !(super::heredoc::ends_escaped(&text) && dropped.last() == Some(&(text.len() - 1)));
     let text = if dropped.is_empty() {
         text
     } else {
@@ -376,7 +380,7 @@ fn joined(
         if let Some(from) = resumed(source, &heredocs, at) {
             first.echo_from(from);
         }
-        refusals(source, options, ended, first)
+        refusals(source, options, ended, kept, first)
     });
     place_comments(&mut root, &comments);
     root.start = root
@@ -463,7 +467,13 @@ fn parse_pass(source: &[u8], options: &super::Options, ended: bool) -> Pass {
 /// line, and bash reads on from the next, where a later refusal's status
 /// wins, but for one that ends inside a quote or pair after an earlier
 /// one.
-fn refusals(source: &[u8], options: &super::Options, ended: bool, first: Fail) -> Refusal {
+fn refusals(
+    source: &[u8],
+    options: &super::Options,
+    ended: bool,
+    kept: bool,
+    first: Fail,
+) -> Refusal {
     let mut found = vec![first];
     while let Some(last) = found.last().filter(|last| last.status == 1 && !last.eof) {
         let Some(newline) = memchr::memchr(b'\n', &source[last.end.min(source.len())..]) else {
@@ -493,7 +503,7 @@ fn refusals(source: &[u8], options: &super::Options, ended: bool, first: Fail) -
         at: found[0].at,
         lines: found
             .iter()
-            .flat_map(|fail| said(source, &newlines, fail))
+            .flat_map(|fail| said(source, &newlines, kept, fail))
             .collect(),
         status: found.last().map_or(2, |last| last.status),
     }
@@ -506,7 +516,7 @@ fn refusals(source: &[u8], options: &super::Options, ended: bool, first: Fail) -
 /// text's; the rest of what the end of the input brings on the row past
 /// the last, as bash -c reads a newline after the input. `newlines` holds
 /// the offset of each newline in `source`.
-fn said(source: &[u8], newlines: &[usize], fail: &Fail) -> Vec<Said> {
+fn said(source: &[u8], newlines: &[usize], kept: bool, fail: &Fail) -> Vec<Said> {
     let rows = |to: usize| newlines.partition_point(|&at| at < to);
     let at = fail.at.min(source.len());
     let end = fail.end.min(source.len());
@@ -526,15 +536,15 @@ fn said(source: &[u8], newlines: &[usize], fail: &Fail) -> Vec<Said> {
     }
     // bash -c reads a line after a backslash ending the input, and after a
     // line continuation ending a word there.
-    let kept = super::heredoc::ends_escaped(source);
-    let continued = source.strip_suffix(b"\n").is_some_and(|text| {
+    let glued = |text: &[u8]| {
         super::heredoc::ends_escaped(text)
             && text
                 .iter()
                 .rev()
                 .find(|&&b| b != b'\\')
                 .is_some_and(|&b| !is_blank(b))
-    });
+    };
+    let continued = source.strip_suffix(b"\n").is_some_and(glued) || !kept && glued(source);
     let past = newlines.len()
         + usize::from(source.last().is_some_and(|&b| b != b'\n'))
         + usize::from(kept || continued);
@@ -618,10 +628,11 @@ pub(super) fn line(pieces: &[&[u8]]) -> Vec<u8> {
 
 /// The bytes bash's reader deletes as line continuations: a backslash
 /// that an odd run ends before a newline, and that newline; bash -c keeps
-/// one that ends the input. Single-quoted and ANSI-C text and a comment
-/// keep theirs.
+/// one that ends the input, unless the input's last line started inside
+/// single-quoted or ANSI-C text. That text and a comment keep theirs.
 fn continuations(source: &[u8], pass: &Pass) -> Vec<usize> {
-    if memchr::memmem::find(source, b"\\\n").is_none() {
+    let ending = source.ends_with(b"\\") && memchr::memchr(b'\n', source).is_some();
+    if memchr::memmem::find(source, b"\\\n").is_none() && !ending {
         return Vec::new();
     }
     let mut verbatim = pass.comments.clone();
@@ -635,6 +646,11 @@ fn continuations(source: &[u8], pass: &Pass) -> Vec<usize> {
         scan_verbatim(source, error.start, &mut verbatim);
     }
     verbatim.sort_unstable();
+    let quoted_end = memchr::memrchr(b'\n', source).is_some_and(|newline| {
+        verbatim
+            .iter()
+            .any(|&(from, to)| from <= newline && newline < to)
+    });
     // The candidates come in order: a sweep finds the spans holding each.
     let mut spans = verbatim.iter().peekable();
     let mut covered = 0;
@@ -650,9 +666,16 @@ fn continuations(source: &[u8], pass: &Pass) -> Vec<usize> {
         while let Some(&(_, to)) = spans.next_if(|span| span.0 <= last) {
             covered = covered.max(to);
         }
-        let live = (end - start) % 2 == 1 && source.get(end) == Some(&b'\n') && covered <= last;
-        if live {
-            dropped.extend([last, end]);
+        let continues = match source.get(end) {
+            Some(b'\n') => true,
+            None => quoted_end,
+            Some(_) => false,
+        };
+        if (end - start) % 2 == 1 && continues && covered <= last {
+            dropped.push(last);
+            if end < source.len() {
+                dropped.push(end);
+            }
         }
         at = end;
     }

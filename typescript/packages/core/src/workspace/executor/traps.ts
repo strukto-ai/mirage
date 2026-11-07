@@ -316,7 +316,8 @@ export async function runExitTrap(
     if (err instanceof ExitSignal) {
       stdout = err.stdout ?? new Uint8Array()
       stderr = err.stderr
-      final = err.exitCode
+      // A substitution bash cannot parse ends the action, not the status.
+      final = err.refused ? status : err.exitCode
     } else if (err instanceof ReturnSignal) {
       stdout = await materialize(err.stdout)
       stderr = err.stderr

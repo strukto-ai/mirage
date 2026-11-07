@@ -380,7 +380,9 @@ async def run_exit_trap(
         ):
             final = io.exit_code
     except ExitSignal as sig:
-        stdout, stderr, final = sig.stdout or b"", sig.stderr, sig.exit_code
+        stdout, stderr = sig.stdout or b"", sig.stderr
+        # A substitution bash cannot parse ends the action, not the status.
+        final = status if sig.refused else sig.exit_code
     except ReturnSignal as sig:
         stdout = await materialize(sig.stdout)
         stderr = sig.stderr

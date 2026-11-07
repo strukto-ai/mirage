@@ -143,7 +143,9 @@ class ExitSignal(Exception):
     end of ``stdout``. ``sourced`` marks one raised in text ``eval`` or
     ``source`` ran: a forked stage or job reports its contained status
     even for a simple command (``eval ': ${U?}' | cat`` is 1,
-    ``: ${U?} | cat`` 127).
+    ``: ${U?} | cat`` 127). ``refused`` marks the end of a line whose
+    substitution bash cannot parse, which an EXIT action ends without
+    changing the status the shell leaves with.
     """
 
     def __init__(
@@ -164,6 +166,7 @@ class ExitSignal(Exception):
         self.unrouted = False
         self.cleanup = b""
         self.sourced = False
+        self.refused = False
 
 
 class DiscardSignal(ExitSignal):

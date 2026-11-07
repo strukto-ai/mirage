@@ -66,7 +66,7 @@
       "command": "echo \\",
       "expect": {
         "exit": 0,
-        "stdout": "\n",
+        "stdout": "\\\n",
         "stderr": ""
       }
     },
@@ -171,7 +171,7 @@
       "command": "echo `echo a\\\\`",
       "expect": {
         "exit": 0,
-        "stdout": "a\n",
+        "stdout": "a\\\n",
         "stderr": ""
       }
     },
