@@ -32,6 +32,7 @@ from mirage.runtime.sandbox.constants import (
     EXEC_ID,
     MOUNT_GUARD,
     encode_output,
+    reap_line,
     wrap_line,
 )
 from mirage.runtime.sandbox.e2b import E2BConfig, E2BRuntime, sdk
@@ -319,6 +320,23 @@ async def test_input_transport_failure_kills_only_its_command_and_disconnects(
         await runtime.exec_line("cat", b"input", {}, "/workspace")
     handle = FakeSandbox.last.commands.handles[0]
     assert handle.killed and handle.disconnected
+    assert len(FakeSandbox.last.commands.calls) == 1
+
+
+# A kill reaches only the shell that encodes the output, so a tagged run
+# that fails for a reason other than a cancel is also stopped by its tag.
+@pytest.mark.asyncio
+async def test_a_tagged_run_that_fails_is_reaped_by_its_tag():
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    commands = FakeSandbox.last.commands
+    commands.input_error = RuntimeError("stdin transport failed")
+    with pytest.raises(RuntimeError, match="stdin transport failed"):
+        await runtime.exec_line("cat", b"input", {EXEC_ID: "run"}, "/")
+    assert [shlex.split(command)[-1] for command, _ in commands.calls] == [
+        "cat",
+        reap_line("run", 15),
+    ]
 
 
 # A streamed command's stderr goes to its errors callback as it arrives,
@@ -356,7 +374,8 @@ async def test_cancellation_kills_command_and_disconnects():
 
 # A kill that names a gentler signal leaves a run's tagged command to the
 # reap, which sends it that signal first; an untagged one (mount setup, a
-# direct exec) has no reap behind it and is killed.
+# direct exec) has no reap behind it and is killed. Either way the runtime
+# runs nothing more: a cancelled run is the caller's to reap.
 @pytest.mark.asyncio
 @pytest.mark.parametrize("env,killed", [({EXEC_ID: "run"}, False), ({}, True)])
 async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
@@ -383,6 +402,7 @@ async def test_a_term_kill_leaves_only_a_tagged_command_to_the_reap(
     assert runner.terminate(15)
     await runner.join()
     assert (handle.killed, handle.disconnected) == (killed, True)
+    assert len(FakeSandbox.last.commands.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -696,3 +716,42 @@ async def test_output_streams_while_the_program_runs():
         10,
     )
     assert (result.exit_code, bytes(said)) == (0, b"one\ntwo\n")
+
+
+class TailCommands:
+    """A command that streams a line, then a tail with no newline, on
+    stdout and on stderr."""
+
+    async def run(
+        self, command, *, background, stdin, on_stdout, on_stderr, timeout
+    ):
+        handle = FakeHandle(command, stdin)
+        await on_stdout(b64("a")[:3])
+        await on_stdout(b64("a")[3:] + "mirage: tail")
+        await on_stderr(b64("b")[:3])
+        await on_stderr(b64("b")[3:] + "mirage: etail")
+        return handle
+
+
+# Streamed text decodes a whole line at a time; what is left when the
+# stream ends without a newline still comes out, once.
+@pytest.mark.asyncio
+async def test_a_streamed_tail_without_a_newline_still_comes_out():
+    runtime = E2BRuntime(config={"sandbox_id": "sb-live"})
+    await runtime.connect()
+    FakeSandbox.last.commands = TailCommands()
+    said: dict[str, list[bytes]] = {"out": [], "err": []}
+
+    async def output(chunk: bytes) -> None:
+        said["out"].append(chunk)
+
+    async def errors(chunk: bytes) -> None:
+        said["err"].append(chunk)
+
+    result = await runtime._exec_argv(
+        ("/bin/sh", "-c", "x"), None, {}, "/", output, errors
+    )
+    assert (result.exit_code, said) == (
+        0,
+        {"out": [b"a", b"mirage: tail\n"], "err": [b"b", b"mirage: etail\n"]},
+    )

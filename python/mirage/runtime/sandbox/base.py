@@ -276,9 +276,9 @@ class RemoteSandbox(
         return code == 0
 
     async def _reap(self, exec_id: str, signum: int) -> int | None:
-        """Stop what a cancelled run left in the box (``EXEC_ID``), for
-        at most ``REAP_WAIT_SECONDS``: a box that stopped answering would
-        otherwise hold the cancel.
+        """Stop what a cancelled or failed run left in the box
+        (``EXEC_ID``), for at most ``REAP_WAIT_SECONDS``: a box that
+        stopped answering would otherwise hold the cancel or the error.
 
         Args:
             exec_id (str): the run's id.

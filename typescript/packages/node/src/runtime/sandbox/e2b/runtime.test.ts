@@ -31,6 +31,7 @@ import {
   EXEC_ID,
   MOUNT_GUARD,
   encodeOutput,
+  reapLine,
   wrapLine,
 } from '@struktoai/mirage-core/runtime/sandbox/constants'
 
@@ -370,6 +371,19 @@ describe('E2BRuntime', () => {
       'stdin transport failed',
     )
     expect(FakeSandbox.last.commands.handles[0]).toMatchObject({ killed: true, disconnected: true })
+    expect(FakeSandbox.last.commands.calls).toHaveLength(1)
+  })
+  // A kill reaches only the shell that encodes the output, so a tagged run
+  // that fails for a reason other than a cancel is also stopped by its tag.
+  it('reaps a tagged run that fails by its tag', async () => {
+    const runtime = makeRuntime()
+    await runtime.connect()
+    const commands = FakeSandbox.last.commands
+    commands.inputError = new Error('stdin transport failed')
+    await expect(
+      runtime.execLine('cat', new Uint8Array([1]), { [EXEC_ID]: 'run' }, '/'),
+    ).rejects.toThrow('stdin transport failed')
+    expect(commands.calls.map(([command]) => lineOf(command))).toEqual(['cat', reapLine('run', 15)])
   })
   it('registers under e2b', () => {
     const runtime = buildRuntime('e2b', { config: { sandboxId: 'sb-live' } })
@@ -426,7 +440,8 @@ describe('E2B cancellation and validation', () => {
 
   // A kill that names a gentler signal leaves a run's tagged command to the
   // reap, which sends it that signal first; an untagged one (mount setup, a
-  // direct exec) has no reap behind it and is killed.
+  // direct exec) has no reap behind it and is killed. Either way the
+  // runtime runs nothing more: an aborted run is the caller's to reap.
   it.each([
     [{ [EXEC_ID]: 'run' }, false],
     [{}, true],
@@ -449,6 +464,7 @@ describe('E2B cancellation and validation', () => {
     expect(runner.terminate(15)).toBe(true)
     expect((await runner.join()).exitCode).toBe(143)
     expect(FakeSandbox.last.commands.handles[0]).toMatchObject({ killed, disconnected: true })
+    expect(FakeSandbox.last.commands.calls).toHaveLength(1)
   })
 
   it('kills a handle that arrives after startup was aborted', async () => {
@@ -811,4 +827,54 @@ describe('E2BRuntime output bytes', () => {
     })
     expect([result.exitCode, said]).toEqual([0, 'one\ntwo\n'])
   }, 10_000)
+})
+
+/** A command that streams a line, then a tail with no newline, on stdout and on stderr. */
+class TailSandbox {
+  readonly commands = {
+    async run(
+      _command: string,
+      opts: {
+        onStdout?: (text: string) => Promise<void>
+        onStderr?: (text: string) => Promise<void>
+      },
+    ) {
+      await opts.onStdout?.(b64('a').slice(0, 3))
+      await opts.onStdout?.(`${b64('a').slice(3)}mirage: tail`)
+      await opts.onStderr?.(b64('b').slice(0, 3))
+      await opts.onStderr?.(`${b64('b').slice(3)}mirage: etail`)
+      return new FakeHandle('x', true)
+    },
+  }
+  static connect(): Promise<TailSandbox> {
+    return Promise.resolve(new TailSandbox())
+  }
+}
+
+class TailE2BRuntime extends E2BRuntime {
+  protected override loadSdk(): Promise<E2bSdk> {
+    return Promise.resolve({
+      Sandbox: TailSandbox,
+      CommandExitError: FakeExitError,
+      NotFoundError: FakeNotFoundError,
+      SandboxError: FakeSandboxError,
+    } as unknown as E2bSdk)
+  }
+}
+
+// Streamed text decodes a whole line at a time; what is left when the
+// stream ends without a newline still comes out, once.
+it('passes on a streamed tail without a newline', async () => {
+  const runtime = new TailE2BRuntime({ config: { sandboxId: 'sb-live' } })
+  const said = { out: [] as string[], err: [] as string[] }
+  const ctx = { stdin: null, flags: { c: 'x' }, env: {}, cwd: PathSpec.fromStrPath('/') }
+  const collect = (into: string[]) => (chunk: Uint8Array) => {
+    into.push(DEC.decode(chunk))
+    return Promise.resolve()
+  }
+  const result = await runtime.runLine(undefined, [], [], ctx, collect(said.out), collect(said.err))
+  expect([result.exitCode, said]).toEqual([
+    0,
+    { out: ['a', 'mirage: tail\n'], err: ['b', 'mirage: etail\n'] },
+  ])
 })

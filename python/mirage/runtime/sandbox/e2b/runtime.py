@@ -65,7 +65,7 @@ class LineDecoder:
 
     def flush(self) -> bytes:
         held, self._held = self._held, ""
-        return decode_output(held) if held else b""
+        return decode_output(held)
 
 
 class PtyWriter:
@@ -231,9 +231,9 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
         try:
             await asyncio.gather(feeding, reaping)
             result = reaping.result()
-        except BaseException:
+        except BaseException as exc:
             # A tagged command a kill stopped with a gentler signal is left
-            # to the reap, which sends it that signal first.
+            # to the caller's reap, which sends it that signal first.
             try:
                 if (
                     EXEC_ID not in env
@@ -242,6 +242,9 @@ class E2BRuntime(RemoteSandbox, PipeTransportMixin):
                     await handle.kill()
             except Exception:
                 logger.warning("Failed to stop the E2B command", exc_info=True)
+            # The kill stops only the encoding shell; the caller reaps a cancel.
+            if EXEC_ID in env and not isinstance(exc, asyncio.CancelledError):
+                await self._reap(env[EXEC_ID], 15)
             raise
         finally:
             for task in (feeding, reaping):

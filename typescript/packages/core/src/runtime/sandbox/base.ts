@@ -238,16 +238,16 @@ export abstract class RemoteSandbox<C extends SandboxConfig = SandboxConfig>
   }
 
   /**
-   * Stop what a cancelled run left in the box (`EXEC_ID`), for at most
-   * `REAP_WAIT_SECONDS`: a box that stopped answering would otherwise hold
-   * the cancel.
+   * Stop what a cancelled or failed run left in the box (`EXEC_ID`), for at
+   * most `REAP_WAIT_SECONDS`: a box that stopped answering would otherwise hold
+   * the cancel or the error.
    *
    * @param execId the run's id.
    * @param signum the signal the run is stopped with first.
    * @returns the stop line's status (`reapLine`); null when the box did not
    *   answer.
    */
-  private async reapRun(execId: string, signum: number): Promise<number | null> {
+  protected async reapRun(execId: string, signum: number): Promise<number | null> {
     const signal = AbortSignal.timeout(REAP_WAIT_SECONDS * 1000)
     try {
       const done = await abortable(

@@ -59,7 +59,7 @@ class LineDecoder {
   flush(): Uint8Array {
     const held = this.held
     this.held = ''
-    return held === '' ? new Uint8Array() : decodeOutput(held)
+    return decodeOutput(held)
   }
 }
 
@@ -227,12 +227,15 @@ export class E2BRuntime extends RemoteSandbox<E2BConfig> implements PipeTranspor
       } else {
         try {
           // A tagged command a kill stopped with a gentler signal is left
-          // to the reap, which sends it that signal first.
+          // to the caller's reap, which sends it that signal first.
           if (env[EXEC_ID] === undefined || stopSignal(runner) === null) await handle.kill()
         } catch (cleanupError) {
           console.warn('Failed to stop the E2B command', cleanupError)
         }
         if (signal?.aborted) throw new DOMException('execute aborted', 'AbortError')
+        // The kill stops only the encoding shell; the caller reaps an abort.
+        const tag = env[EXEC_ID]
+        if (tag !== undefined) await this.reapRun(tag, 15)
         throw error
       }
     } finally {
