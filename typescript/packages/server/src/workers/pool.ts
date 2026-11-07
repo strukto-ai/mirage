@@ -22,7 +22,7 @@ import { ProcessWorker, ThreadWorker, type Worker } from './worker.ts'
 
 /**
  * The workers and which holds each workspace. A workspace's worker
- * outlives its close, so a create under its id reaches the worker that
+ * outlives its stop, so a create or start of its id reaches the worker that
  * has its state; a delete forgets it. Mirrors Python's
  * `WorkerPool`.
  */
@@ -112,7 +112,7 @@ export class WorkerPool {
     worker.live.add(id)
   }
 
-  /** Record `id` as closed: its worker stays its home. */
+  /** Record `id` as stopped: its worker stays its home. */
   release(id: string): void {
     this.homes.get(id)?.live.delete(id)
   }

@@ -189,14 +189,14 @@ describe('the server API in workerd', () => {
     expect(JSON.stringify(named.json)).toContain("runtime 'quickjs' does not run on Cloudflare")
   })
 
-  it('reopens a closed workspace with its sessions', async () => {
+  it('starts a stopped workspace with its sessions', async () => {
     const config = { mounts: { '/': { vfs: 'ram' } } }
     expect((await call('POST', '/v1/workspaces', { id: 'keep', config })).status).toBe(201)
     await call('POST', '/v1/workspaces/keep/sessions', { session_id: 'agent' })
     await call('POST', '/v1/workspaces/keep/shell?session_id=agent', { command: 'export N=7' })
-    expect((await call('POST', '/v1/workspaces/keep/close')).status).toBe(200)
+    expect((await call('POST', '/v1/workspaces/keep/stop')).status).toBe(200)
     expect((await call('GET', '/v1/workspaces/keep')).status).toBe(404)
-    expect((await call('POST', '/v1/workspaces', { id: 'keep', config })).status).toBe(201)
+    expect((await call('POST', '/v1/workspaces/keep/start')).status).toBe(200)
     const again = await call('POST', '/v1/workspaces/keep/shell?session_id=agent', {
       command: 'echo $N',
     })

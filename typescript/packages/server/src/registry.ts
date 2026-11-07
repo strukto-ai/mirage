@@ -52,6 +52,9 @@ import { mirageHome } from './paths.ts'
 // Under the daemon's state root: one record per workspace id naming the
 // account that owns it.
 export const OWNERS_PREFIX = 'owners'
+// Beside it: one record per workspace id holding the config it was created
+// from, as written, which `start` builds again.
+export const CONFIGS_PREFIX = 'configs'
 
 /**
  * One registered workspace. `owner` is the account that created it; null
@@ -273,6 +276,7 @@ export class WorkspaceRegistry {
   private idleTimer: ReturnType<typeof setTimeout> | null = null
   accountsRequired: boolean
   private readonly owners: RecordClient | null
+  private readonly configs: RecordClient | null
   private readonly watchNetwork: () => void
   readonly maxWorkspaces: number | null
   readonly maxSessions: number | null
@@ -298,6 +302,11 @@ export class WorkspaceRegistry {
        * ownership in memory.
        */
       owners?: RecordClient
+      /**
+       * Where each workspace id's config is kept, so a stopped workspace
+       * can be started again. Absent keeps none, and nothing can be started.
+       */
+      configs?: RecordClient
       /** Start watching the host's sockets, once a workspace is held to a network rule. */
       watchNetwork?: () => void
       /** The most workspaces held at once, those being built among them; null for no cap. */
@@ -328,6 +337,7 @@ export class WorkspaceRegistry {
     this.onIdleExit = options.onIdleExit ?? null
     this.accountsRequired = options.accountsRequired ?? false
     this.owners = options.owners ?? null
+    this.configs = options.configs ?? null
     this.watchNetwork = options.watchNetwork ?? (() => undefined)
   }
 
@@ -446,7 +456,7 @@ export class WorkspaceRegistry {
     }
   }
 
-  /** Whether `id` is being deleted or closed. */
+  /** Whether `id` is being deleted or stopped. */
   removing(id: string): boolean {
     return this.removals.has(id)
   }
@@ -482,7 +492,7 @@ export class WorkspaceRegistry {
 
   /**
    * Whether `account` may reach a record `id` made at `at` (seconds):
-   * the same rule as `visible`, for an id that may not be live. A closed
+   * the same rule as `visible`, for an id that may not be live. A stopped
    * workspace's jobs, or a stored workspace after a restart, answer to
    * the owner its claim names. A live workspace answers only for records
    * made since it was created, so a workspace created again under a
@@ -516,6 +526,24 @@ export class WorkspaceRegistry {
       ;[record] = await this.owners.get(id)
     }
     return record !== null && record.account === account ? Claim.Held : Claim.Taken
+  }
+
+  /**
+   * Keep the config `id` is built from, as written with its pointers
+   * unresolved, so `start` can build it again once it is stopped.
+   */
+  async saveConfig(id: string, config: Record<string, JsonValue>): Promise<void> {
+    if (this.configs !== null) await this.configs.put(id, { config })
+  }
+
+  /**
+   * The config a stopped `id` starts from, as written, when `account` may
+   * start it; null otherwise.
+   */
+  async savedConfig(id: string, account: string | null): Promise<Record<string, JsonValue> | null> {
+    if (this.configs === null || !(await this.allows(id, account, 0))) return null
+    const [record] = await this.configs.get(id)
+    return record === null ? null : (record.config as Record<string, JsonValue>)
   }
 
   /** Drop the owner a failed create recorded, freeing the id. */
@@ -598,6 +626,7 @@ export class WorkspaceRegistry {
     try {
       await stop(entry, true)
       if (this.owners !== null) await this.owners.delete([entry.id])
+      if (this.configs !== null) await this.configs.delete([entry.id])
     } finally {
       this.jobs.discardWorkspace(entry.id)
       this.removals.delete(entry.id)
@@ -608,14 +637,14 @@ export class WorkspaceRegistry {
   }
 
   /**
-   * Close `id` and keep its state. The runner stops, which cancels its
-   * lines and closes its sessions; the stored sessions, links, history
-   * and owner stay, so the owner creating the same id later picks them
-   * up. No new request reaches the closing runner, and the id stays
-   * reserved until it has stopped, so a create under it never loads state
-   * the old runner is still writing.
+   * Stop `id` and keep its state. The runner stops, which cancels its
+   * lines and closes its sessions; the stored sessions, links, history,
+   * owner and config stay, so the owner starting the same id later picks
+   * them up. No new request reaches the stopping runner, and the id stays
+   * reserved until it has stopped, so a start never loads state the old
+   * runner is still writing.
    */
-  async close(id: string): Promise<WorkspaceEntry> {
+  async stop(id: string): Promise<WorkspaceEntry> {
     let removal = this.removals.get(id)
     if (removal === undefined) {
       const entry = this.entries.get(id)
@@ -628,7 +657,7 @@ export class WorkspaceRegistry {
     return removal
   }
 
-  /** Run one close, releasing the id once the runner has stopped. */
+  /** Run one stop, releasing the id once the runner has stopped. */
   private async shut(entry: WorkspaceEntry): Promise<WorkspaceEntry> {
     try {
       await stop(entry)

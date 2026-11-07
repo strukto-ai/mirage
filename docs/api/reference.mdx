@@ -350,44 +350,6 @@ The workspace's id.
 
 </Operation>
 
-<Operation resource="Workspaces" method="POST" path="/v1/workspaces/{workspace_id}/close" summary="Close a workspace" hosts="daemon">
-
-[Open page](/api/operations/workspaces/close-a-workspace)
-
-Close the workspace and keep its state for the owner to reopen.
-
-**Path**
-
-<ParamField path="workspace_id" type="string" required>
-The workspace's id.
-</ParamField>
-
-**Responses**
-
-`200` OK
-
-`application/json` `DeleteWorkspaceResponse`
-
-<ResponseField name="id" type="string" required>
-</ResponseField>
-<ResponseField name="closed_at" type="number" required>
-</ResponseField>
-
-`401` The token is missing or wrong
-
-`404` The workspace, session, job or file does not exist
-
-`422` Validation Error
-
-`application/json` `HTTPValidationError`
-
-<ResponseField name="detail" type="ValidationError[]">
-</ResponseField>
-
-`429` Past a rate limit, or a new session past max_sessions
-
-</Operation>
-
 <Operation resource="Workspaces" method="GET" path="/v1/workspaces/{workspace_id}/history" summary="Read a workspace's history" hosts="daemon">
 
 [Open page](/api/operations/workspaces/read-a-workspaces-history)
@@ -517,6 +479,104 @@ The workspace's id.
 `200` OK
 
 `application/json` `object`
+
+`401` The token is missing or wrong
+
+`404` The workspace, session, job or file does not exist
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+</Operation>
+
+<Operation resource="Workspaces" method="POST" path="/v1/workspaces/{workspace_id}/start" summary="Start a workspace" hosts="daemon">
+
+[Open page](/api/operations/workspaces/start-a-workspace)
+
+Start a stopped workspace from the config it was created with, over the state it kept; a running one answers as it is.
+
+The server's policies judge the config again, and the secrets and saved entries it names are read again, so a rotated secret is picked up.
+
+**Path**
+
+<ParamField path="workspace_id" type="string" required>
+The workspace's id.
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `WorkspaceDetail`
+
+<ResponseField name="id" type="string" required>
+</ResponseField>
+<ResponseField name="mode" type="string" required>
+</ResponseField>
+<ResponseField name="created_at" type="number" required>
+</ResponseField>
+<ResponseField name="fuse_mountpoints" type="object">
+</ResponseField>
+<ResponseField name="system_time" type="string | null">
+</ResponseField>
+<ResponseField name="sessions" type="SessionSummary[]">
+</ResponseField>
+<ResponseField name="mounts" type="MountSummary[]">
+</ResponseField>
+<ResponseField name="internals" type="WorkspaceInternals | null">
+</ResponseField>
+
+`400` Bad request: malformed, a host not allowed, or a browser page from another origin
+
+`401` The token is missing or wrong
+
+`403` A policy or mount mode refused the call
+
+`404` The workspace, session, job or file does not exist
+
+`409` The id or name is taken, the workspace is busy, or a file changed since it was read
+
+`422` Validation Error
+
+`application/json` `HTTPValidationError`
+
+<ResponseField name="detail" type="ValidationError[]">
+</ResponseField>
+
+`429` Past a rate limit, or a new session past max_sessions
+
+`503` The server is at max_workspaces, or shutting down
+
+</Operation>
+
+<Operation resource="Workspaces" method="POST" path="/v1/workspaces/{workspace_id}/stop" summary="Stop a workspace" hosts="daemon">
+
+[Open page](/api/operations/workspaces/stop-a-workspace)
+
+Stop the workspace and keep its state and config for start. A stopped workspace answers as it is, so a stop can be repeated.
+
+**Path**
+
+<ParamField path="workspace_id" type="string" required>
+The workspace's id.
+</ParamField>
+
+**Responses**
+
+`200` OK
+
+`application/json` `DeleteWorkspaceResponse`
+
+<ResponseField name="id" type="string" required>
+</ResponseField>
+<ResponseField name="closed_at" type="number" required>
+</ResponseField>
 
 `401` The token is missing or wrong
 

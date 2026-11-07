@@ -347,15 +347,23 @@ line made to a mount is a `vfs` entry between them.
 
 <Badge color="red">DELETE</Badge> `/v1/workspaces/{id}`
 
-Closes the workspace, deletes its persistent state, and returns `{"id": "demo", "closed_at": 1792630121.33}`.
+Stops the workspace, deletes its persistent state, and returns `{"id": "demo", "closed_at": 1792630121.33}`.
 
-### Close a workspace
+### Stop a workspace
 
-<Badge color="green">POST</Badge> `/v1/workspaces/{id}/close`
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/stop`
 
-Stops the workspace, preserves its state on disk, and returns `{"id": "demo", "closed_at": 1792630121.32}`.
-Creating the same id again picks up its sessions, history and disk files. RAM
-mounts are lost unless you snapshot first.
+Stops the workspace, keeps its state and the config it was created with on disk, and returns `{"id": "demo", "closed_at": 1792630121.32}`.
+Stopping a stopped workspace returns the same; an id that was never created, or was deleted, returns HTTP 404.
+
+### Start a workspace
+
+<Badge color="green">POST</Badge> `/v1/workspaces/{id}/start`
+
+Builds a stopped workspace again from its saved config and returns its details, as `GET /v1/workspaces/{id}` does.
+Its sessions, history and disk files are back; RAM mounts start empty unless you snapshot first.
+The server policies judge the config again, and the secrets and saved entries it names are read again.
+Starting a running workspace returns it unchanged. A workspace loaded from a snapshot or cloned has no saved config, so it cannot be started once stopped.
 
 ### Cancel a workspace's lines
 

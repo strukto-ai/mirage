@@ -206,10 +206,9 @@ a `workspace_id`.
 | `mirage workspace list` | List workspaces. |
 | `mirage workspace use ID` | Make it the current workspace of the [context](#log-in). |
 | `mirage workspace get ID [--verbose]` | Show mounts and sessions. |
-| `mirage workspace delete ID` | Close a workspace and delete its state. |
-| `mirage workspace close ID` | Close a workspace and keep its state for the same id. |
-| `mirage workspace cancel ID` | Cancel the running lines of every session. |
-| `mirage workspace kill ID` | Kill the background jobs of every session. |
+| `mirage workspace delete ID` | Stop a workspace and delete its state. |
+| `mirage workspace stop ID` | Stop a workspace and keep its state and config. Stopping a stopped workspace does nothing. |
+| `mirage workspace start ID` | Start a stopped workspace again from the config it was created with. Starting a running workspace does nothing. |
 | `mirage workspace set-profile ID NAME FILE` | Add a [profile](/home/policy/overview) from a YAML or JSON file, or replace what `NAME` means. Sessions keep their rules until `session update` moves them, and the workspace's config is not rewritten. |
 | `mirage workspace history ID [--session S] [--since MS] [--last N] [--vfs]` | Show what it ran, oldest first: each line as it started and how it ended; `--vfs` adds each call a line made to a mount. |
 | `mirage workspace clone SRC [--id ID]` | Copy a workspace. |

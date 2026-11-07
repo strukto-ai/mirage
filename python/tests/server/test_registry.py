@@ -195,7 +195,7 @@ async def test_a_released_claim_frees_the_id(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_a_closing_id_stays_reserved_until_the_runner_stops(
+async def test_a_stopping_id_stays_reserved_until_the_runner_stops(
     monkeypatch,
 ):
     registry = WorkspaceRegistry(idle_grace_seconds=10.0)
@@ -208,14 +208,14 @@ async def test_a_closing_id_stays_reserved_until_the_runner_stops(
         await stop(delete=delete)
 
     monkeypatch.setattr(entry.runner, "stop", held_stop)
-    closing = asyncio.create_task(registry.close("w"))
+    stopping_task = asyncio.create_task(registry.stop("w"))
     await asyncio.sleep(0)
     assert "w" not in registry
     assert registry.removing("w")
     with pytest.raises(ValueError):
         registry.add(_ws(), "w")
     stopping.set()
-    assert await closing is entry
+    assert await stopping_task is entry
     assert not registry.removing("w")
     registry.add(_ws(), "w")
     await registry.close_all()

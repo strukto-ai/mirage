@@ -331,10 +331,10 @@ async function steps(
       } else if (kind === 'delete_cli') {
         await get(wid).unregisterCli(step.name as string)
         answers.push({ text: step.name })
-      } else if (kind === 'close_workspace') {
+      } else if (kind === 'stop_workspace') {
         await get(wid).close()
         workspaces.delete(wid)
-        answers.push({ text: 'closed' })
+        answers.push({ text: 'stopped' })
       } else if (kind === 'snapshot') {
         await get(wid).snapshot(join(scratch, prefix + (step.name as string)))
         answers.push({ text: 'saved' })

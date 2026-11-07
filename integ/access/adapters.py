@@ -774,8 +774,8 @@ class HttpSteps:
     async def delete_cli(self, wid: str, name: str) -> None:
         await self._ok("DELETE", f"/v1/workspaces/{wid}/clis/{name}")
 
-    async def close_workspace(self, wid: str) -> None:
-        await self._ok("POST", f"/v1/workspaces/{wid}/close")
+    async def stop_workspace(self, wid: str) -> None:
+        await self._ok("POST", f"/v1/workspaces/{wid}/stop")
 
     async def snapshot(self, wid: str, name: str) -> None:
         reply = await self.http.get(f"/v1/workspaces/{wid}/snapshot")
@@ -949,7 +949,7 @@ class CliSteps:
     async def cancel_lines(self, wid: str, session: str | None) -> int:
         reply = await self._json(
             *(
-                ("workspace", "cancel", wid)
+                ("api", "-X", "POST", f"/v1/workspaces/{wid}/cancel")
                 if session is None
                 else (
                     "workspace",
@@ -967,7 +967,7 @@ class CliSteps:
     async def kill_jobs(self, wid: str, session: str | None) -> int:
         reply = await self._json(
             *(
-                ("workspace", "kill", wid)
+                ("api", "-X", "POST", f"/v1/workspaces/{wid}/kill")
                 if session is None
                 else ("workspace", "session", "kill", "-w", wid, "-s", session)
             )
@@ -1020,8 +1020,8 @@ class CliSteps:
             "workspace", "set-profile", wid, name, self._profile_file(profile)
         )
 
-    async def close_workspace(self, wid: str) -> None:
-        await self._json("workspace", "close", wid)
+    async def stop_workspace(self, wid: str) -> None:
+        await self._json("workspace", "stop", wid)
 
     async def snapshot(self, wid: str, name: str) -> None:
         await self._json(
@@ -1180,7 +1180,7 @@ class InAppSteps:
     async def delete_cli(self, wid: str, name: str) -> None:
         await self.workspaces[wid].unregister_cli(name)
 
-    async def close_workspace(self, wid: str) -> None:
+    async def stop_workspace(self, wid: str) -> None:
         await self.workspaces.pop(wid).close()
 
     async def snapshot(self, wid: str, name: str) -> None:
@@ -1324,9 +1324,9 @@ async def run_steps(
             elif kind == "delete_cli":
                 await steps.delete_cli(wid, step["name"])
                 answer = {"text": step["name"]}
-            elif kind == "close_workspace":
-                await steps.close_workspace(wid)
-                answer = {"text": "closed"}
+            elif kind == "stop_workspace":
+                await steps.stop_workspace(wid)
+                answer = {"text": "stopped"}
             elif kind == "snapshot":
                 await steps.snapshot(wid, prefix + step["name"])
                 answer = {"text": "saved"}

@@ -234,10 +234,10 @@ paths:
         - Workspaces
       x-hosts:
         - daemon
-  /v1/workspaces/{workspace_id}/close:
+  /v1/workspaces/{workspace_id}/stop:
     post:
-      summary: Close a workspace
-      operationId: close_workspace_v1_workspaces__workspace_id__close_post
+      summary: Stop a workspace
+      operationId: stop_workspace_v1_workspaces__workspace_id__stop_post
       parameters:
         - $ref: '#/components/parameters/workspaceId'
       responses:
@@ -259,7 +259,52 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: Close the workspace and keep its state for the owner to reopen.
+      description: 'Stop the workspace and keep its state and config for start.
+        A stopped workspace answers as it is, so a stop can be repeated.'
+      tags:
+        - Workspaces
+      x-hosts:
+        - daemon
+  /v1/workspaces/{workspace_id}/start:
+    post:
+      summary: Start a workspace
+      operationId: start_workspace_v1_workspaces__workspace_id__start_post
+      parameters:
+        - $ref: '#/components/parameters/workspaceId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkspaceDetail'
+        '400':
+          $ref: '#/components/responses/400'
+        '401':
+          $ref: '#/components/responses/401'
+        '403':
+          $ref: '#/components/responses/403'
+        '404':
+          $ref: '#/components/responses/404'
+        '409':
+          $ref: '#/components/responses/409'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          $ref: '#/components/responses/429'
+        '503':
+          $ref: '#/components/responses/503'
+      description: 'Start a stopped workspace from the config it was created
+        with, over the state it kept; a running one answers as it is.
+
+
+        The server''s policies judge the config again, and the secrets and
+        saved entries it names are read again, so a rotated secret is picked
+        up.'
       tags:
         - Workspaces
       x-hosts:

@@ -71,14 +71,12 @@ profile is the one the config's `profile:` names, else the one called
 | RPC | `$/cancelRequest` |
 | HTTP | A dropped request |
 
-To stop a whole session or workspace, whichever way its lines came in:
+To stop a whole session, whichever way its lines came in:
 
 | Stop | HTTP | CLI |
 | --- | --- | --- |
 | A session's running lines | `POST /v1/workspaces/{id}/sessions/{session_id}/cancel` | `mirage workspace session cancel -w ID -s S` |
 | A session's background jobs | `POST /v1/workspaces/{id}/sessions/{session_id}/kill` | `mirage workspace session kill -w ID -s S` |
-| Every session's running lines | `POST /v1/workspaces/{id}/cancel` | `mirage workspace cancel ID` |
-| Every session's background jobs | `POST /v1/workspaces/{id}/kill` | `mirage workspace kill ID` |
 
 ## Auth
 

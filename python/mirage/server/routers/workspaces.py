@@ -406,54 +406,33 @@ async def _with_saved(
         raise store_refusal(e) from e
 
 
-@router.post("", response_model=WorkspaceDetail, status_code=201)
-async def create_workspace(
-    req: CreateWorkspaceRequest,
+async def _open_workspace(
     request: Request,
     response: Response,
-    explain: bool = Query(False),
-) -> WorkspaceDetail | Response:
-    """Create a workspace, or answer the live one created from this config.
+    wid: str,
+    config: WorkspaceConfig,
+    written: dict[str, Any],
+) -> WorkspaceDetail:
+    """Build ``config`` as workspace ``wid``, or answer the live one built
+    from it, and keep the config for ``start``.
 
-    Creating is idempotent for one config: an id already held by a
-    workspace created from an identical config answers that workspace
-    with 200, so a client that names its workspace can run again and
-    reach it; an id held by anything else is refused with 409. The
-    server's policies judge the config as written (``pre_workspace``)
-    before any of it is built: a refusal is 403 with its reason, and
-    ``explain`` answers what they say without creating anything.
+    Builds of one id run one at a time, so a second of the same config
+    answers what the first built, and one of another config is refused
+    at once. A held id is answered or refused before its secrets resolve
+    or its mounts build, and before a second Workspace opens the live
+    one's state; one being deleted or stopped is refused, since its state
+    is about to go or is still being written. The server's policies judge
+    the config as written before any of it is built.
 
     Args:
-        req (CreateWorkspaceRequest): the config or a template's name,
-            and an optional id.
         request (Request): the HTTP request, for the app's registry.
         response (Response): the response, whose status a held id sets.
-        explain (bool): answer what the server's policies say instead.
-
-    Returns:
-        WorkspaceDetail | Response: the created or the matching live
-            workspace, or the explanation.
+        wid (str): the workspace id.
+        config (WorkspaceConfig): the checked config.
+        written (dict[str, Any]): the config as written.
     """
     registry = request.app.state.registry
-    config, written = await _config_of(req, request)
-    if explain:
-        said = await registry.explanation(written, request.state.account)
-        return JSONResponse(content=explanation_to_dict(said))
     digest = config_digest(config)
-    # The registry id and the state-store scope must be the same identity,
-    # so resolve it before construction: explicit REST id, then the
-    # config's workspace_id, then a fresh mint. A held id is answered or
-    # refused here, before its secrets resolve or its mounts build, and
-    # before a second Workspace opens the live one's state; one being
-    # deleted is refused, since its state is about to go. Creates of one
-    # id run one at a time, so a second of the same config answers what
-    # the first built, and one of another config is refused at once.
-    wid = (
-        req.id
-        if req.id is not None
-        else config.workspace_id or new_workspace_id()
-    )
-    _refuse_id(wid)
     async with registry.creating(wid, digest) as admitted:
         if not admitted:
             raise HTTPException(
@@ -510,6 +489,7 @@ async def create_workspace(
                         mountpoint,
                         backend=backend,
                     )
+                await registry.save_config(wid, written)
                 entry = registry.add(
                     runner, workspace_id=wid, owner=request.state.account
                 )
@@ -523,6 +503,51 @@ async def create_workspace(
                 await runner.stop()
                 raise
         return await make_detail(entry)
+
+
+@router.post("", response_model=WorkspaceDetail, status_code=201)
+async def create_workspace(
+    req: CreateWorkspaceRequest,
+    request: Request,
+    response: Response,
+    explain: bool = Query(False),
+) -> WorkspaceDetail | Response:
+    """Create a workspace, or answer the live one created from this config.
+
+    Creating is idempotent for one config: an id already held by a
+    workspace created from an identical config answers that workspace
+    with 200, so a client that names its workspace can run again and
+    reach it; an id held by anything else is refused with 409. The
+    server's policies judge the config as written (``pre_workspace``)
+    before any of it is built: a refusal is 403 with its reason, and
+    ``explain`` answers what they say without creating anything.
+
+    Args:
+        req (CreateWorkspaceRequest): the config or a template's name,
+            and an optional id.
+        request (Request): the HTTP request, for the app's registry.
+        response (Response): the response, whose status a held id sets.
+        explain (bool): answer what the server's policies say instead.
+
+    Returns:
+        WorkspaceDetail | Response: the created or the matching live
+            workspace, or the explanation.
+    """
+    registry = request.app.state.registry
+    config, written = await _config_of(req, request)
+    if explain:
+        said = await registry.explanation(written, request.state.account)
+        return JSONResponse(content=explanation_to_dict(said))
+    # The registry id and the state-store scope must be the same identity,
+    # so resolve it before construction: explicit REST id, then the
+    # config's workspace_id, then a fresh mint.
+    wid = (
+        req.id
+        if req.id is not None
+        else config.workspace_id or new_workspace_id()
+    )
+    _refuse_id(wid)
+    return await _open_workspace(request, response, wid, config, written)
 
 
 @router.get("", response_model=list[WorkspaceBrief])
@@ -595,17 +620,59 @@ async def delete_workspace(
     return DeleteWorkspaceResponse(id=workspace_id, closed_at=time.time())
 
 
-@router.post("/{workspace_id}/close", response_model=DeleteWorkspaceResponse)
-async def close_workspace(
+@router.post("/{workspace_id}/stop", response_model=DeleteWorkspaceResponse)
+async def stop_workspace(
     workspace_id: str, request: Request
 ) -> DeleteWorkspaceResponse:
-    """Close the workspace and keep its state for the owner to reopen."""
-    require_entry(request, workspace_id)
-    try:
-        await request.app.state.registry.close(workspace_id)
-    except KeyError:
+    """Stop the workspace and keep its state and config for ``start``.
+
+    A stopped workspace answers as it is, so a stop can be repeated.
+
+    Args:
+        workspace_id (str): the workspace.
+        request (Request): the request, for the registry and its account.
+    """
+    registry = request.app.state.registry
+    account = request.state.account
+    live = registry.visible(workspace_id, account) is not None
+    if not live and await registry.saved_config(workspace_id, account) is None:
         raise HTTPException(status_code=404, detail="workspace not found")
+    if live or registry.removing(workspace_id):
+        await registry.stop(workspace_id)
     return DeleteWorkspaceResponse(id=workspace_id, closed_at=time.time())
+
+
+@router.post("/{workspace_id}/start", response_model=WorkspaceDetail)
+async def start_workspace(
+    workspace_id: str, request: Request, response: Response
+) -> WorkspaceDetail:
+    """Start a stopped workspace from the config it was created with, over
+    the state it kept; a running one answers as it is.
+
+    The server's policies judge the config again, and the secrets and
+    saved entries it names are read again, so a rotated secret is picked
+    up.
+
+    Args:
+        workspace_id (str): the workspace.
+        request (Request): the request, for the registry and its account.
+        response (Response): the response, whose status a held id sets.
+    """
+    registry = request.app.state.registry
+    account = request.state.account
+    held = registry.visible(workspace_id, account)
+    if held is not None and not registry.removing(workspace_id):
+        return await make_detail(held)
+    written = await registry.saved_config(workspace_id, account)
+    if written is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    try:
+        config = check_config(written)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return await _open_workspace(
+        request, response, workspace_id, config, written
+    )
 
 
 @router.post("/{workspace_id}/cancel", response_model=CancelLinesResponse)

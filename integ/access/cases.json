@@ -258,7 +258,7 @@
     {"id": "deletes", "input": {"step": "delete", "id": "w1"}, "expect": {"text": "deleted"}},
     {"id": "lists_what_is_left", "input": {"step": "list"}, "expect": {"text": "w2"}},
     {"id": "creates_a_third", "input": {"step": "create", "id": "w3"}, "expect": {"text": "w3"}},
-    {"id": "closes_it", "input": {"step": "close_workspace", "id": "w3"}, "expect": {"text": "closed"}},
+    {"id": "stops_it", "input": {"step": "stop_workspace", "id": "w3"}, "expect": {"text": "stopped"}},
     {"id": "lists_without_it", "input": {"step": "list"}, "expect": {"text": "w2"}},
     {"id": "deletes_the_clone", "input": {"step": "delete", "id": "w2"}, "expect": {"text": "deleted"}}
    ]

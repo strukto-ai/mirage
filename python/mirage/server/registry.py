@@ -62,6 +62,9 @@ logger = logging.getLogger(__name__)
 # Under the daemon's state root: one record per workspace id naming the
 # account that owns it.
 OWNERS_PREFIX = "owners"
+# Beside it: one record per workspace id holding the config it was created
+# from, as written, which ``start`` builds again.
+CONFIGS_PREFIX = "configs"
 
 
 class Claim(StrEnum):
@@ -328,6 +331,7 @@ class WorkspaceRegistry:
         exit_event: asyncio.Event | None = None,
         accounts_required: bool = False,
         owners: DiskRecordClient | None = None,
+        configs: DiskRecordClient | None = None,
         max_workspaces: int | None = None,
         policies: Sequence[Policy] = (),
         programs: ProfileScripts | None = None,
@@ -349,6 +353,9 @@ class WorkspaceRegistry:
                 owning account is kept across restarts, so a stored
                 workspace is only ever reopened by its owner. None keeps
                 ownership in memory.
+            configs (DiskRecordClient | None): where each workspace id's
+                config is kept, so a stopped workspace can be started
+                again. None keeps none, and nothing can be started.
             max_workspaces (int | None): the most workspaces held at
                 once, those being built among them; None for no cap.
             policies (Sequence[Policy]): the server's own policies, which
@@ -378,6 +385,7 @@ class WorkspaceRegistry:
         self.jobs = ExecutionTable()
         self.accounts_required = accounts_required
         self._owners = owners
+        self._configs = configs
         self._removals: dict[str, asyncio.Task[WorkspaceEntry]] = {}
         self._creates: dict[str, tuple[str, asyncio.Future[None]]] = {}
         self.idle_grace_seconds = idle_grace_seconds
@@ -524,13 +532,13 @@ class WorkspaceRegistry:
         )
 
     def removing(self, workspace_id: str) -> bool:
-        """Whether ``workspace_id`` is being deleted or closed.
+        """Whether ``workspace_id`` is being deleted or stopped.
 
         Args:
             workspace_id (str): id to check.
 
         Returns:
-            bool: True while a ``remove`` or ``close`` of it is in flight.
+            bool: True while a ``remove`` or ``stop`` of it is in flight.
         """
         return workspace_id in self._removals
 
@@ -574,7 +582,7 @@ class WorkspaceRegistry:
         """Whether ``account`` may reach a record ``workspace_id`` made.
 
         The same rule as ``visible``, for an id that may not be live:
-        a closed workspace's jobs, or a stored workspace after a
+        a stopped workspace's jobs, or a stored workspace after a
         restart, answer to the owner its claim names. A live workspace
         answers only for records made since it was created, so a
         workspace created again under a deleted one's id never reaches
@@ -628,6 +636,37 @@ class WorkspaceRegistry:
             return Claim.HELD
         return Claim.TAKEN
 
+    async def save_config(
+        self, workspace_id: str, config: dict[str, JsonValue]
+    ) -> None:
+        """Keep the config ``workspace_id`` is built from, as written, so
+        ``start`` can build it again once it is stopped.
+
+        Args:
+            workspace_id (str): the workspace.
+            config (dict[str, JsonValue]): the config as the caller wrote
+                it, its pointers unresolved.
+        """
+        if self._configs is not None:
+            await self._configs.put(workspace_id, {"config": config})
+
+    async def saved_config(
+        self, workspace_id: str, account: str | None
+    ) -> dict[str, JsonValue] | None:
+        """The config a stopped ``workspace_id`` starts from, as written,
+        when ``account`` may start it; None otherwise.
+
+        Args:
+            workspace_id (str): the stopped workspace.
+            account (str | None): the caller's account.
+        """
+        if self._configs is None or not await self.allows(
+            workspace_id, account, 0.0
+        ):
+            return None
+        record, _ = await self._configs.get(workspace_id)
+        return None if record is None else record["config"]
+
     async def release(self, workspace_id: str) -> None:
         """Drop the owner a failed create recorded, freeing the id.
 
@@ -677,7 +716,7 @@ class WorkspaceRegistry:
 
         Raises:
             ValueError: ``workspace_id`` is already registered, or still
-                being deleted or closed.
+                being deleted or stopped.
         """
         if isinstance(workspace, WorkspaceRunner):
             runner: WorkspaceRunner | None = workspace
@@ -748,6 +787,8 @@ class WorkspaceRegistry:
             await _stop(entry, delete=True)
             if self._owners is not None:
                 await self._owners.delete([entry.id])
+            if self._configs is not None:
+                await self._configs.delete([entry.id])
         finally:
             self.jobs.discard_workspace(entry.id)
             del self._removals[entry.id]
@@ -756,21 +797,21 @@ class WorkspaceRegistry:
                 self._start_idle_timer()
         return entry
 
-    async def close(self, workspace_id: str) -> WorkspaceEntry:
-        """Close ``workspace_id`` and keep its state.
+    async def stop(self, workspace_id: str) -> WorkspaceEntry:
+        """Stop ``workspace_id`` and keep its state.
 
         The runner stops, which cancels its lines and closes its
-        sessions; the stored sessions, links, history and owner stay, so
-        the owner creating the same id later picks them up. No new
-        request reaches the closing runner, and the id stays reserved
-        until it has stopped, so a create under it never loads state the
+        sessions; the stored sessions, links, history, owner and config
+        stay, so the owner starting the same id later picks them up. No
+        new request reaches the stopping runner, and the id stays
+        reserved until it has stopped, so a start never loads state the
         old runner is still writing.
 
         Args:
-            workspace_id (str): id to close.
+            workspace_id (str): id to stop.
 
         Returns:
-            WorkspaceEntry: the closed entry.
+            WorkspaceEntry: the stopped entry.
 
         Raises:
             KeyError: ``workspace_id`` is not registered.
@@ -779,15 +820,15 @@ class WorkspaceRegistry:
         if removal is None:
             entry = self._entries.pop(workspace_id)
             entry.accepting_jobs = False
-            removal = asyncio.create_task(self._close(entry))
+            removal = asyncio.create_task(self._stop_kept(entry))
             self._removals[workspace_id] = removal
         return await asyncio.shield(removal)
 
-    async def _close(self, entry: WorkspaceEntry) -> WorkspaceEntry:
-        """Run one close, releasing the id once the runner has stopped.
+    async def _stop_kept(self, entry: WorkspaceEntry) -> WorkspaceEntry:
+        """Run one stop, releasing the id once the runner has stopped.
 
         Args:
-            entry (WorkspaceEntry): the entry being closed.
+            entry (WorkspaceEntry): the entry being stopped.
         """
         try:
             await _stop(entry)

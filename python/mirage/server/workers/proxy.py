@@ -48,7 +48,7 @@ from mirage.server.workers.http import (
 )
 from mirage.server.workers.peek import chunks, id_of, peek
 from mirage.server.workers.pool import WorkerPool
-from mirage.server.workers.types import Answer
+from mirage.server.workers.types import Answer, Peeked
 from mirage.server.workers.worker import Worker
 
 logger = logging.getLogger(__name__)
@@ -241,16 +241,18 @@ class WorkerProxy:
             return await self._pass(first, scope, receive, send)
         if workspace_id == "load" and len(parts) == 3 and method == "POST":
             return await self._create(scope, receive, send, None)
+        if action == "start" and len(parts) == 4 and method == "POST":
+            return await self._create(scope, receive, send, None, workspace_id)
         home = pool.home(workspace_id)
         if home is None or home.dead:
             return await self._pass(first, scope, receive, send)
         if action == "clone" and len(parts) == 4 and method == "POST":
             return await self._create(scope, receive, send, home)
         deletes = action is None and method == "DELETE"
-        closes = action == "close" and len(parts) == 4 and method == "POST"
-        if deletes or closes:
+        stops = action == "stop" and len(parts) == 4 and method == "POST"
+        if deletes or stops:
             answer = await self._fetch(home, scope, b"", receive)
-            # A close or delete that fails in the worker may still have
+            # A stop or delete that fails in the worker may still have
             # removed the workspace. A refusal (4xx) leaves it, and may hide
             # it from this caller, so only a 5xx is checked.
             gone = answer.status < 300 or (
@@ -272,10 +274,12 @@ class WorkerProxy:
         receive: Receive,
         send: Send,
         source: Worker | None,
+        started: str | None = None,
     ) -> None:
-        """A create, load or clone: to the worker holding or creating the
-        id it names, else to ``source``'s for a clone, else to a worker at
-        random."""
+        """A create, load, clone or start: to the worker holding or
+        creating the id it names, else to ``source``'s for a clone, else to
+        a worker at random. A start names its id in the path, ``started``,
+        and sends no body."""
         pool = self.pool
         if self.draining:
             return await send_json(
@@ -286,7 +290,13 @@ class WorkerProxy:
             refused = await self._refused(scope, source or pool.first())
             if refused is not None:
                 return await send_answer(send, refused)
-            peeked = await peek(scope, receive)
+            peeked = (
+                await peek(scope, receive)
+                if started is None
+                else Peeked(
+                    head=b"", more=False, id=started, lost=False, twice=False
+                )
+            )
             if peeked.lost:
                 return await send_json(
                     send,
@@ -309,7 +319,7 @@ class WorkerProxy:
             home = pool.home(named) if named is not None else None
             live = home is not None and named in home.live
             # A retry of a live id goes to its worker even when full, but
-            # holds a slot too: the worker may close that id first and
+            # holds a slot too: the worker may stop that id first and
             # build it again.
             if not live and not self._has_room(1):
                 return await send_json(
@@ -328,7 +338,7 @@ class WorkerProxy:
                     {"detail": f"workspace id already exists: {named}"},
                 )
             # A clone builds on its source's worker, so an id another
-            # worker holds, even closed, stays there: a create reaches it.
+            # worker holds, even stopped, stays there: a create reaches it.
             if (
                 source is not None
                 and home is not None
@@ -360,7 +370,9 @@ class WorkerProxy:
                     receive if peeked.more else None,
                     counted=True,
                 )
-                if answer.status == 201:
+                if answer.status == 201 or (
+                    started is not None and answer.status == 200
+                ):
                     made = id_of(answer.body)
                     if made is not None:
                         pool.adopt(made, worker)

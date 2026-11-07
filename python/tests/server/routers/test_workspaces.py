@@ -1663,8 +1663,56 @@ async def test_workspace_cancel_and_kill_reach_every_session(tmp_path):
         await asyncio.gather(running, return_exceptions=True)
 
 
+def _disk_body(root) -> dict:
+    return {
+        "id": "keep",
+        "config": {
+            "mounts": {
+                "/": {
+                    "vfs": "disk",
+                    "mode": "WRITE",
+                    "config": {"root": str(root)},
+                }
+            }
+        },
+    }
+
+
 @pytest.mark.asyncio
-async def test_close_keeps_state_for_the_same_id(tmp_path):
+async def test_a_stopped_workspace_starts_with_its_files_and_cwd(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await client.post("/v1/workspaces", json=_disk_body(data))
+        assert r.status_code == 201, r.text
+        r = await client.post(
+            "/v1/workspaces/keep/sessions", json={"session_id": "s"}
+        )
+        assert r.status_code == 201, r.text
+        r = await client.post(
+            "/v1/workspaces/keep/shell?session_id=s",
+            json={"command": "mkdir /d && echo kept > /d/f.txt && cd /d"},
+        )
+        assert r.json()["exit_code"] == 0, r.text
+        r = await client.post("/v1/workspaces/keep/stop")
+        assert r.status_code == 200, r.text
+        assert (await client.get("/v1/workspaces/keep")).status_code == 404
+        r = await client.post("/v1/workspaces/keep/start")
+        assert r.status_code == 200, r.text
+        assert r.json()["id"] == "keep"
+        r = await client.post(
+            "/v1/workspaces/keep/shell?session_id=s",
+            json={"command": "pwd && cat f.txt"},
+        )
+        assert r.json()["stdout"] == "/d\nkept\n"
+        await client.delete("/v1/workspaces/keep")
+
+
+@pytest.mark.asyncio
+async def test_a_second_stop_answers_as_the_first(tmp_path):
     app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
@@ -1673,20 +1721,43 @@ async def test_close_keeps_state_for_the_same_id(tmp_path):
         assert (
             await client.post("/v1/workspaces", json=body)
         ).status_code == 201
-        await client.post(
-            "/v1/workspaces/keep/shell", json={"command": "echo kept"}
-        )
-        r = await client.post("/v1/workspaces/keep/close")
-        assert r.status_code == 200
-        assert (await client.get("/v1/workspaces/keep")).status_code == 404
+        for _ in range(2):
+            r = await client.post("/v1/workspaces/keep/stop")
+            assert r.status_code == 200, r.text
+            assert r.json()["id"] == "keep"
+        assert (await client.get("/v1/workspaces")).json() == []
+
+
+@pytest.mark.asyncio
+async def test_a_second_start_answers_the_running_workspace(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        body = {**_minimal_config(), "id": "keep"}
         assert (
             await client.post("/v1/workspaces", json=body)
         ).status_code == 201
-        r = await client.post(
-            "/v1/workspaces/keep/shell", json={"command": "history"}
-        )
-        assert "echo kept" in r.json()["stdout"]
+        await client.post("/v1/workspaces/keep/stop")
+        first = await client.post("/v1/workspaces/keep/start")
+        second = await client.post("/v1/workspaces/keep/start")
+        assert (first.status_code, second.status_code) == (200, 200)
+        assert first.json()["created_at"] == second.json()["created_at"]
+        assert len(app.state.registry) == 1
         await client.delete("/v1/workspaces/keep")
+
+
+@pytest.mark.asyncio
+async def test_start_of_an_unknown_id_is_not_found(tmp_path):
+    app = build_app(idle_grace_seconds=10.0, state_root=tmp_path / "state")
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        r = await client.post("/v1/workspaces/nope/start")
+        assert r.status_code == 404
+        assert r.json() == {"detail": "workspace not found"}
+        r = await client.post("/v1/workspaces/nope/stop")
+        assert r.status_code == 404
 
 
 @pytest.mark.asyncio
@@ -1871,7 +1942,7 @@ async def test_a_reopen_past_max_sessions_is_refused(monkeypatch, tmp_path):
             )
             assert r.status_code == 201, r.text
         assert (
-            await client.post("/v1/workspaces/keep/close")
+            await client.post("/v1/workspaces/keep/stop")
         ).status_code == 200
     async with AsyncClient(
         transport=ASGITransport(app=capped), base_url="http://test"
