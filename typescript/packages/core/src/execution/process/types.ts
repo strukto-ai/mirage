@@ -11,7 +11,8 @@ export type ProcessState = 'running' | 'stopping' | 'exited'
  *
  * `endedAt` is set exactly when `state` is final, with `exit` the status,
  * `signal` the signal that ended it, if one did, and `error` why its runner
- * failed, if it did.
+ * failed, if it did. `ancestors` are the pids above it, its parent last, so a
+ * process stays under an ancestor whose own record has gone.
  */
 export interface Process {
   readonly id: ProcessId
@@ -30,6 +31,7 @@ export interface Process {
   readonly exit: number | null
   readonly signal: number | null
   readonly error: string | null
+  readonly ancestors: readonly number[]
 }
 
 export type ProcessRunner = () => Promise<number>

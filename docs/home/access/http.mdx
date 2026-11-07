@@ -855,7 +855,8 @@ Returns the updated ask object with its `outcome` set.
 
 Every line a session runs, every `&` job and every process has a record. Lines
 and processes are kept while they run and, once ended, the newest 1,024 for up
-to an hour. A job is listed only while its session's `jobs` would show it: once
+to an hour. Every server on the workspace's store lists the same records, and a
+snapshot keeps the ended ones. A job is listed only while its session's `jobs` would show it: once
 `wait` or `jobs` reports how it ended, it is gone. Each list takes `session_id`
 and `state`. Jobs also take `line_id`. Processes take `line_id`, `job_id` (the
 job's own process and every one under it) and `machine`, written

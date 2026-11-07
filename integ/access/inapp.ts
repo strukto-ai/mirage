@@ -379,7 +379,11 @@ async function steps(
         const ws = get(wid)
         const state = typeof step.state === 'string' ? step.state : undefined
         const listed: { command: string; state: string; exit: number | null; number?: number }[] =
-          step.kind === 'lines' ? ws.lines() : step.kind === 'jobs' ? ws.jobs() : ws.processes()
+          step.kind === 'lines'
+            ? await ws.lines()
+            : step.kind === 'jobs'
+              ? await ws.jobs()
+              : await ws.processes()
         answers.push({
           text: listed
             .filter((r) => state === undefined || r.state === state)

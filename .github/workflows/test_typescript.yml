@@ -107,6 +107,19 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: mirage
+          POSTGRES_PASSWORD: mirage
+          POSTGRES_DB: mirage_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
 
     # Job level, not step level: 27 test files across core and node skip
     # themselves through `skipIf(...)` when REDIS_URL is unset. A leg that
@@ -117,6 +130,8 @@ jobs:
     # which the tests find through MIRAGE_QUICKJS_HOME.
     env:
       REDIS_URL: redis://localhost:6379/0
+      # The sql mount's and the SQL state store's Postgres suites.
+      POSTGRES_URL: postgres://mirage:mirage@localhost:5432/mirage_test
       QUICKJS_BUILD: v0.16.2
       MIRAGE_QUICKJS_HOME: /tmp/quickjs
 

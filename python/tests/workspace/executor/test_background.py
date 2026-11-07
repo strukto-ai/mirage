@@ -767,8 +767,8 @@ def _sharing(store: RAMWorkspaceStateStore) -> Workspace:
 
 # One daemon runs a workspace's lines at a time: a line on another daemon's
 # workspace is refused, naming the daemon that holds the lease, and listed
-# as ended with why, while that daemon lists, kills and waits on the jobs
-# through the store.
+# as ended with why after the holder's lines, while that daemon lists,
+# kills and waits on the jobs through the store.
 @pytest.mark.asyncio
 async def test_another_daemon_reaches_a_job_but_runs_no_line():
     store = RAMWorkspaceStateStore()
@@ -778,7 +778,8 @@ async def test_another_daemon_reaches_a_job_but_runs_no_line():
         with pytest.raises(WorkspaceHeldError) as held:
             await b.shell("jobs", session_id="s")
         assert held.value.holder == a.job_table.daemon
-        [refused] = b.lines()
+        ran, refused = await b.lines()
+        assert ran.command == "sleep 30 &"
         assert (refused.command, refused.state, refused.exit) == (
             "jobs",
             LineState.EXITED,

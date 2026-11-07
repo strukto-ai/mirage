@@ -16,6 +16,7 @@ import importlib
 import logging
 import tempfile
 from contextlib import AbstractAsyncContextManager
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from typing import Any, Protocol, cast, get_args
 
@@ -31,7 +32,17 @@ from mirage.commands.spec.types import CommandSpec
 from mirage.concurrency.limiter import run_blocking
 from mirage.core.disk.utils import open_regular
 from mirage.execution.job import JobHandle, JobState, JobTable
+from mirage.execution.line.types import Line, LineState
 from mirage.execution.process.config import ProcessPermissions
+from mirage.execution.process.table import ProcessTable
+from mirage.execution.process.types import Process, ProcessState
+from mirage.execution.serde import (
+    line_from_fields,
+    line_to_fields,
+    process_from_fields,
+    process_to_fields,
+)
+from mirage.execution.types import LineId, ProcessId
 from mirage.io.config import IOConfig
 from mirage.io.memory import MAX_BODY_BYTES, MAX_MEMORY
 from mirage.io.network import NetworkSetting
@@ -140,6 +151,7 @@ class WorkspaceLike(Protocol):
 
     observer: Observer
     job_table: JobTable
+    process_table: ProcessTable
     _session_mgr: SessionManager
     _implicit_root: bool
     _write_default: WritePolicy
@@ -170,6 +182,10 @@ class WorkspaceLike(Protocol):
     def policies(self) -> Policies: ...
 
     def _forget_reads(self) -> None: ...
+
+    async def lines(self) -> list[Line]: ...
+
+    async def processes(self) -> list[Process]: ...
 
     async def _adopt_default_session(self, session_id: str) -> None: ...
 
@@ -399,6 +415,16 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
         if j.state != JobState.RUNNING
         and (j.process is None or j.console.finished)
     ]
+    finished_lines = [
+        line_to_fields(line)
+        for line in await ws.lines()
+        if line.state == LineState.EXITED
+    ]
+    finished_processes = [
+        process_to_fields(process)
+        for process in await ws.processes()
+        if process.state == ProcessState.EXITED
+    ]
 
     if mounted != ws.registry.mounts() or any(m.retiring for m in mounted):
         raise RuntimeError("mounts changed during snapshot")
@@ -422,6 +448,8 @@ async def to_state_dict(ws: WorkspaceLike) -> dict[str, Any]:
         StateKey.HISTORY: history_events,
         StateKey.CLIS: clis_state,
         StateKey.JOBS: finished_jobs,
+        StateKey.LINES: finished_lines,
+        StateKey.PROCESS_RECORDS: finished_processes,
         StateKey.FINGERPRINTS: fingerprints,
         StateKey.LIVE_ONLY_MOUNTS: live_only_mounts,
         StateKey.NODES: {
@@ -788,6 +816,7 @@ async def apply_state_dict(
     _restore_cache(ws, state)
     await _restore_history(ws, state)
     await _restore_jobs(ws, state)
+    _restore_records(ws, state)
     await _restore_nodes(ws, state)
 
 
@@ -1005,6 +1034,30 @@ async def _restore_jobs(ws: WorkspaceLike, state: dict[str, Any]) -> None:
         await ws.job_table.load(_job_from_dict(job_d))
 
 
+def _restore_records(ws: WorkspaceLike, state: dict[str, Any]) -> None:
+    """Keep the saved lines and processes in the workspace's store, in
+    the order they ended, as the store trims its history by, each process
+    under this workspace's id, and number new processes past them, so
+    none takes a saved one's pid.
+
+    Args:
+        ws (WorkspaceLike): the workspace restored into.
+        state (dict[str, Any]): the saved state.
+    """
+    store = ws.job_table.store
+    lines = [line_from_fields(f) for f in state.get(StateKey.LINES) or []]
+    for line in sorted(lines, key=lambda line: line.ended_at or 0.0):
+        store.note(line)
+    workspace_id = ws.process_table.workspace_id
+    records = [
+        process_from_fields(f)
+        for f in state.get(StateKey.PROCESS_RECORDS) or []
+    ]
+    for record in sorted(records, key=lambda record: record.ended_at or 0.0):
+        store.note(replace(record, id=ProcessId(workspace_id, record.pid)))
+    ws.process_table.continue_after(max((r.pid for r in records), default=0))
+
+
 async def _job_to_dict(job: JobHandle) -> dict[str, Any]:
     """Serialize one finished job.
 
@@ -1029,6 +1082,8 @@ async def _job_to_dict(job: JobHandle) -> dict[str, Any]:
         JobKey.ENDED_AT: job.ended_at,
         JobKey.SESSION_ID: job.session_id,
         JobKey.PROCESS: job.process_id,
+        JobKey.LINE: job.line.value if job.line is not None else None,
+        JobKey.GROUP: job.group,
     }
 
 
@@ -1078,6 +1133,7 @@ def _restored_console(
 def _job_from_dict(d: dict[str, Any]) -> JobHandle:
     signal = d.get(JobKey.SIGNAL)
     exit_code = d.get(JobKey.EXIT_CODE, 0)
+    line = d.get(JobKey.LINE)
     return JobHandle(
         id=d[JobKey.ID],
         command=d[JobKey.COMMAND],
@@ -1089,6 +1145,8 @@ def _job_from_dict(d: dict[str, Any]) -> JobHandle:
         console=_restored_console(d, exit_code, signal),
         created_at=d.get(JobKey.CREATED_AT, 0.0),
         session_id=d.get(JobKey.SESSION_ID, "default"),
+        line=LineId(line) if line is not None else None,
+        group=d.get(JobKey.GROUP),
     )
 
 

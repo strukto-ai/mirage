@@ -89,14 +89,23 @@ machine's disk.
 ## Send it to OpenTelemetry
 
 Every line that ends is also a trace span: `command`, from its start to its
-end, and under it a `vfs.<call>` span for each call it made to a mount. Nothing
+end, and under it a `vfs.<call>` span for each call it made to a mount. Each
+`&` job and each process the line started is a `job` or `process` span under
+it once it ends, so one trace shows a line with everything it ran. Nothing
 is sent until the process sets up an OpenTelemetry SDK, whose exporter picks
 the backend: OTLP to Datadog, Honeycomb, Grafana, Langfuse and others.
 
 | Span | Attributes |
 | --- | --- |
-| `command` | `mirage.workspace.id`, `mirage.session.id`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr`, `mirage.vfs.dropped` |
+| `command` | `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.timestamp`, `mirage.duration_ms`, `mirage.stdout`, `mirage.stderr`, `mirage.vfs.dropped` |
 | `vfs.<call>` | `mirage.vfs.path`, `mirage.vfs.source`, `mirage.vfs.bytes`, `mirage.vfs.timestamp`, `mirage.vfs.duration_ms` |
+| `job` | `mirage.job.id`, `mirage.job.number`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `process.pid`, `mirage.command`, `mirage.cwd`, `mirage.exit_code`, `mirage.signal` |
+| `process` | `process.pid`, `process.parent_pid`, `process.group_leader.pid`, `mirage.line.id`, `mirage.workspace.id`, `mirage.session.id`, `host.id`, `process.command_line`, `mirage.cwd`, `mirage.runtime`, `mirage.machine.pid`, `process.exit.code`, `mirage.signal`, `mirage.error` |
+
+`host.id` is the machine a span's work ran on, such as `host:my-laptop` or
+`docker:tools`. Traces cover what runs on the workspace's machine and the
+runtimes it reaches; a program a runtime runs elsewhere starts no spans of its
+own there.
 
 `mirage.cwd` is where the line started. `mirage.stdout` and `mirage.stderr`
 are the start of its output, as UTF-8 text of at most 16 KiB each by

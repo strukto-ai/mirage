@@ -17,8 +17,13 @@ import threading
 
 import pytest
 
+from mirage.execution.constants import HISTORY_MAX_RECORDS, HISTORY_SECONDS
+from mirage.execution.line.types import Line, LineState
+from mirage.execution.process.types import Process
 from mirage.execution.ram import RAMExecutionStore
+from mirage.execution.types import LineId, MachineId, ProcessId
 from mirage.shell.console import Channel
+from mirage.types import PathSpec
 from mirage.workspace.record.types import generation_of
 
 
@@ -154,3 +159,75 @@ def test_lists_written_from_many_threads_lose_no_write():
     stored = asyncio.run(store.load("s"))
     assert stored is not None
     assert stored["count"] == 800
+
+
+def _line(n: int, session: str = "s", ended_at: float | None = None) -> Line:
+    return Line(
+        LineId(f"line_{n}"),
+        session,
+        f"echo {n}",
+        float(n),
+        LineState.EXITED if ended_at is not None else LineState.RUNNING,
+        ended_at,
+        0 if ended_at is not None else None,
+    )
+
+
+def _process(pid: int, session: str = "s") -> Process:
+    return Process(
+        id=ProcessId("w", pid),
+        session_id=session,
+        line=LineId("line_1"),
+        parent=None,
+        group=pid,
+        command="sleep 30",
+        cwd=PathSpec.from_str_path("/"),
+        machine=MachineId("host", "box"),
+        started_at=1.0,
+    )
+
+
+# A record noted again replaces the one before; lines list oldest first,
+# processes by pid, each a session's when one is named.
+@pytest.mark.asyncio
+async def test_noted_records_are_found_by_id_and_session():
+    store = RAMExecutionStore()
+    assert await store.sessions() == []
+    await store.cas_set("t", {"generation": 1}, 0)
+    assert await store.sessions() == ["t"]
+    store.note(_line(2))
+    store.note(_line(1, session="t"))
+    store.note(_line(2, ended_at=5.0))
+    store.note(_process(9))
+    store.note(_process(3, session="t"))
+    assert [(r.id.value, r.state) for r in await store.find_lines()] == [
+        ("line_1", LineState.RUNNING),
+        ("line_2", LineState.EXITED),
+    ]
+    assert [r.id.value for r in await store.find_lines("t")] == ["line_1"]
+    assert await store.get_line(LineId("line_2")) == _line(2, ended_at=5.0)
+    assert await store.get_line(LineId("nope")) is None
+    assert [r.pid for r in await store.find_processes()] == [3, 9]
+    assert [r.pid for r in await store.find_processes("s")] == [9]
+    assert await store.get_process(ProcessId("w", 9)) == _process(9)
+    await store.clear()
+    assert await store.find_lines() == []
+    assert await store.find_processes() == []
+
+
+# Ended records are kept to the history: the newest HISTORY_MAX_RECORDS of
+# a kind, ended within HISTORY_SECONDS of the newest; a running one stays.
+@pytest.mark.asyncio
+async def test_ended_records_are_kept_to_the_history():
+    store = RAMExecutionStore()
+    store.note(_line(0))
+    for n in range(1, HISTORY_MAX_RECORDS + 3):
+        store.note(_line(n, ended_at=float(n)))
+    kept = [r.id.value for r in await store.find_lines()]
+    assert len(kept) == HISTORY_MAX_RECORDS + 1
+    assert kept[:2] == ["line_0", "line_3"]
+    store.note(_line(5000, ended_at=HISTORY_SECONDS + 1000.5))
+    kept = [r.id.value for r in await store.find_lines()]
+    assert kept[:3] == ["line_0", "line_1001", "line_1002"]
+    assert kept[-1] == "line_5000"
+    assert len(kept) == 28

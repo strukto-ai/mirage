@@ -32,6 +32,8 @@ export class ProcessHandle {
    * runtime of its own, runs as this process (`take`).
    */
   oneCommand = false
+  /** Told the record each time it changes, as its table keeps it. */
+  noted: ((record: Process) => void) | null = null
   private current: Process
   private stopSignal: number | null = null
   private stopped = false
@@ -133,6 +135,7 @@ export class ProcessHandle {
       machine: machine ?? this.current.machine,
       runtime,
     })
+    this.tell()
     return true
   }
 
@@ -142,6 +145,7 @@ export class ProcessHandle {
    */
   setMachinePid(machinePid: MachinePid): void {
     this.current = Object.freeze({ ...this.current, machinePid })
+    this.tell()
   }
 
   /**
@@ -244,6 +248,7 @@ export class ProcessHandle {
       this.stopSignal = null
       throw error
     }
+    this.tell()
     return true
   }
 
@@ -265,8 +270,14 @@ export class ProcessHandle {
       signal,
       error,
     })
+    this.tell()
     finished(this.current.id.pid)
     return this.current
+  }
+
+  /** Tell whoever keeps the record that it changed. */
+  private tell(): void {
+    this.noted?.(this.current)
   }
 
   join(): Promise<Process> {

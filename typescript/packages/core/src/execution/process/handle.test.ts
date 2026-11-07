@@ -38,6 +38,7 @@ function info(): Process {
     exit: null,
     signal: null,
     error: null,
+    ancestors: [],
   }
 }
 

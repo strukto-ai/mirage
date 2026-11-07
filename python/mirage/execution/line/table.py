@@ -12,6 +12,8 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+from collections.abc import Callable
+
 from mirage.execution.constants import HISTORY_MAX_RECORDS, HISTORY_SECONDS
 from mirage.execution.line.handle import LineHandle
 from mirage.execution.line.types import Line
@@ -28,12 +30,20 @@ class LineTable:
     in turn (``$( )``, ``eval``, ``source``) runs within it.
     """
 
-    def __init__(self, clock: Clock | None = None) -> None:
+    def __init__(
+        self,
+        clock: Clock | None = None,
+        note: Callable[[Line], None] | None = None,
+    ) -> None:
         """Args:
         clock (Clock | None): the workspace clock ended lines age on;
             None is the system clock.
+        note (Callable[[Line], None] | None): told each line's record
+            as it is read and each time it changes, as the workspace's
+            store keeps it.
         """
         self.clock: Clock = clock if clock is not None else SystemClock()
+        self._note = note
         self._lines: dict[LineId, LineHandle] = {}
 
     def start(self, line: LineHandle) -> None:
@@ -44,6 +54,9 @@ class LineTable:
         """
         self._prune()
         self._lines[line.id] = line
+        if self._note is not None:
+            line.noted = self._note
+            self._note(line.record)
 
     def get(self, line_id: LineId) -> Line | None:
         """A line's record, while the table keeps it.

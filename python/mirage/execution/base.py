@@ -15,6 +15,9 @@
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 
+from mirage.execution.line.types import Line
+from mirage.execution.process.types import Process
+from mirage.execution.types import LineId, ProcessId
 from mirage.shell.console import ConsoleStore
 from mirage.workspace.record.types import RecordFields
 
@@ -45,6 +48,12 @@ class ExecutionStore(ABC):
     it handed out, so a daemon that takes the lease next numbers past it
     and no pid repeats in the workspace. A daemon that finds another's
     record left behind stops the native runs it lists.
+
+    Every line and process has a record here too (``note``), written as
+    it changes, so a daemon that does not hold the lease lists the same
+    lines and processes the holder runs; an ended one is kept among the
+    newest ``HISTORY_MAX_RECORDS`` of its kind, for ``HISTORY_SECONDS``
+    after the newest ended.
 
     Subclasses are infra adapters (RAM, Redis); everything above (job
     numbers, waits, kills, hangups) is the table's, mirroring the
@@ -100,6 +109,60 @@ class ExecutionStore(ABC):
 
         Returns:
             bool: True when the list is gone, False on conflict.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def sessions(self) -> list[str]:
+        """The sessions whose job list the store keeps, sorted."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def note(self, record: Line | Process) -> None:
+        """Keep a line's or a process's record as it reads now, in place
+        of the one before. It never waits: a store over the network
+        writes it in the background, the newest of each record winning.
+
+        Args:
+            record (Line | Process): the record.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_line(self, line_id: LineId) -> Line | None:
+        """One line's record, while the store keeps it.
+
+        Args:
+            line_id (LineId): the line.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def get_process(self, process_id: ProcessId) -> Process | None:
+        """One process's record, while the store keeps it.
+
+        Args:
+            process_id (ProcessId): the process.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def find_lines(self, session_id: str | None = None) -> list[Line]:
+        """The line records the store keeps, oldest first.
+
+        Args:
+            session_id (str | None): only this session's lines.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    async def find_processes(
+        self, session_id: str | None = None
+    ) -> list[Process]:
+        """The process records the store keeps, by pid.
+
+        Args:
+            session_id (str | None): only this session's processes.
         """
         raise NotImplementedError
 

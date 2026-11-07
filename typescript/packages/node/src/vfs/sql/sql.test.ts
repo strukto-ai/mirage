@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -29,6 +30,7 @@ import { Workspace } from '../../workspace.ts'
 import { SqliteDriver } from './driver.ts'
 import { PostgresSqlDriver } from './postgres.ts'
 import { SqlVFS } from './sql.ts'
+import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 
 const DIRECTORY = new PathSpec({ virtual: '/sql/scratch', directory: '/sql', vfsPath: 'scratch' })
 const POSTGRES_URL = process.env.POSTGRES_URL
@@ -472,5 +474,53 @@ describe('SqlVFS', () => {
     expect(() => new SqlVFS({ path: ':memory:', driver: new SqliteDriver() })).toThrow(
       'SqlVFS takes a path or a driver, not both',
     )
+  })
+})
+
+// A workspace on a Postgres state store keeps its execution plane there:
+// another daemon on the database lists the lines, jobs and processes the
+// holder runs, kills its job, and a workspace opened later lists the lines
+// that ended.
+describe.skipIf(POSTGRES_URL === undefined)('SqlWorkspaceStateStore over Postgres', () => {
+  it('keeps the execution plane in the database', async () => {
+    const scope = `test/${randomUUID()}/`
+    const open = (): Workspace =>
+      new Workspace(
+        { '/m': [new RAMVFS(), MountMode.WRITE] },
+        {
+          mode: MountMode.WRITE,
+          workspaceId: 'shared',
+          sessionId: 's',
+          store: new SqlWorkspaceStateStore(new PostgresSqlDriver(POSTGRES_URL ?? ''), {
+            scope,
+            ownsDriver: true,
+          }),
+          ownsStore: true,
+        },
+      )
+    const a = open()
+    const b = open()
+    try {
+      const pid = Number(
+        new TextDecoder().decode((await a.shell('sleep 30 & echo $!', { sessionId: 's' })).stdout),
+      )
+      const [line] = await b.lines()
+      expect([line?.command, line?.state]).toEqual(['sleep 30 & echo $!', 'exited'])
+      const [running] = await b.processes({ state: 'running' })
+      expect(running?.id.pid).toBe(pid)
+      const [job] = await b.jobs()
+      expect([job?.command, job?.state]).toEqual(['sleep 30', 'running'])
+      expect(await b.jobTable.kill(1, 's', 15)).toBe(true)
+      expect((await b.jobTable.wait(1, 's')).exitCode).toBe(143)
+    } finally {
+      await a.close()
+      await b.close()
+    }
+    const later = open()
+    try {
+      expect((await later.lines()).map((l) => l.command)).toEqual(['sleep 30 & echo $!'])
+    } finally {
+      await later.close()
+    }
   })
 })

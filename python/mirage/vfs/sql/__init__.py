@@ -19,12 +19,21 @@ from mirage.vfs.sql.types import SqlDialect, SqlDriver, SqlStatement
 
 if TYPE_CHECKING:
     from mirage.vfs.sql.driver import SqliteDriver
+    from mirage.vfs.sql.postgres import PostgresSqlDriver
     from mirage.vfs.sql.sql import SqlVFS
 
-__all__ = ["SqlDialect", "SqlDriver", "SqlStatement", "SqlVFS", "SqliteDriver"]
+__all__ = [
+    "PostgresSqlDriver",
+    "SqlDialect",
+    "SqlDriver",
+    "SqlStatement",
+    "SqlVFS",
+    "SqliteDriver",
+]
 
 _EXPORTS: dict[str, tuple[str, ...]] = {
     "mirage.vfs.sql.driver": ("SqliteDriver",),
+    "mirage.vfs.sql.postgres": ("PostgresSqlDriver",),
     "mirage.vfs.sql.sql": ("SqlVFS",),
 }
 
