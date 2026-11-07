@@ -30,9 +30,9 @@ export class Workspace extends CoreWorkspace {
     return build === null ? null : buildVfs(build.name, build.config)
   }
 
-  /** The page this workspace runs in, by its host. */
+  /** The page this workspace runs in, by its host; `page` outside one. */
   protected override hostMachine(): MachineId {
-    const host = globalThis.location.host
+    const host = typeof location === 'undefined' ? '' : location.host
     return new MachineId('browser', host === '' ? 'page' : host)
   }
 
