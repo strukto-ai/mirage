@@ -75,4 +75,4 @@ def test_unsupported_construct_is_graceful(shell):
     code, out, err = shell.mirage_result("case x")
     assert code == 2
     assert out == ""
-    assert err == "mirage: syntax error: unexpected end of file\n"
+    assert err == "bash: -c: line 2: syntax error: unexpected end of file\n"

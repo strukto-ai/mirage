@@ -167,17 +167,8 @@ export async function executeProgram(
     session.lineNode,
   ]
   session.parseCurrent = session.parseSeq
-  let start = session.parseFrom
-  let lineStart = start ?? 0
+  const [start, lineStart] = parseRows(session, inline)
   session.parseFrom = null
-  if (start === null) {
-    // A nested parse (`eval`, `$( )`) numbers on from the row the running
-    // command ends on, as bash's reader stands there.
-    const running = session.lineNode
-    const ends = inline && running !== null ? sourceRow(running, true) : null
-    start = ends === null ? 0 : session.parseRow + ends
-    lineStart = ends === null ? 0 : session.lineRow + ends
-  }
   session.parseRow = start
   session.lineRow = lineStart
   const root = !session.lineOpen
@@ -551,6 +542,22 @@ async function exitShell(
   const merged = await mergedIo.merge(new IOResult({ stderr: cleanup.stderr }))
   merged.exitCode = cleanup.exitCode
   return merged
+}
+
+/**
+ * Where the parse about to run starts: its row in the text that spelled it
+ * (`parseRow`) and the same row as `$LINENO` counts it (`lineRow`). A sourced
+ * file and the rest of an input read again start where `parseFrom` says; a
+ * nested parse (`eval`, `$( )`) numbers on from the row the running command
+ * ends on, as bash's reader stands there; any other at 0. Mirrors Python's
+ * parse_rows.
+ */
+export function parseRows(session: SessionState, inline: boolean): [number, number] {
+  if (session.parseFrom !== null) return [session.parseFrom, session.parseFrom]
+  const running = session.lineNode
+  if (!inline || running === null) return [0, 0]
+  const ends = sourceRow(running, true)
+  return [session.parseRow + ends, session.lineRow + ends]
 }
 
 /**

@@ -75,6 +75,16 @@ fn refused(source: &str) -> Refusal {
     parse(source.as_bytes()).error.expect("a refusal")
 }
 
+/// A refusal as `bash -c` prints it.
+fn words(refusal: &Refusal) -> String {
+    String::from_utf8_lossy(&refusal.worded(b"bash: -c: ", 1, true)).into_owned()
+}
+
+/// A tree's heredoc warnings as `bash -c` prints them.
+fn warned(tree: &Tree) -> String {
+    String::from_utf8_lossy(&tree.warnings(b"bash: ", 1)).into_owned()
+}
+
 #[test]
 fn a_redirect_wraps_everything_before_it() {
     assert_eq!(
@@ -179,11 +189,13 @@ fn a_redirect_takes_one_word() {
     ] {
         let refusal = refused(line);
         assert_eq!(
+            (words(&refusal), refusal.status),
             (
-                String::from_utf8_lossy(&refusal.message).into_owned(),
-                refusal.status
+                format!(
+                    "bash: -c: line 1: syntax error near unexpected token `{near}'\nbash: -c: line 1: `{line}'\n"
+                ),
+                2
             ),
-            (format!("mirage: syntax error near '{near}'\n"), 2),
             "{line}"
         );
     }
@@ -368,47 +380,196 @@ fn bash_parses_these_only_when_it_runs_them() {
 fn refusals_are_in_bash_words() {
     let said = |source: &str| {
         let refusal = refused(source);
-        (
-            String::from_utf8_lossy(&refusal.message).into_owned(),
-            refusal.status,
-        )
+        (words(&refusal), refusal.status)
     };
     assert_eq!(refused("if a; then").at, 10);
     assert_eq!(
         said("if a; then"),
-        ("mirage: syntax error: unexpected end of file\n".into(), 2)
+        (
+            "bash: -c: line 2: syntax error: unexpected end of file\n".into(),
+            2
+        )
     );
-    assert_eq!(said("echo a; fi").0, "mirage: syntax error near 'fi'\n");
+    assert_eq!(
+        said("echo a; fi").0,
+        "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `echo a; fi'\n"
+    );
     // A redirect with no word is refused at the newline bash supposes
     // at the end of the input.
-    assert_eq!(said("echo >").0, "mirage: syntax error near 'newline'\n");
+    assert_eq!(
+        said("echo >").0,
+        "bash: -c: line 1: syntax error near unexpected token `newline'\nbash: -c: line 1: `echo >'\n"
+    );
     // A substitution bash cannot parse is refused with 127, an array
     // with 1, and after an array's refusal bash reads on from the next
     // line.
     assert_eq!(
         said("echo $(fi)"),
-        ("mirage: syntax error near 'fi'\n".into(), 127)
+        (
+            "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `echo $(fi)'\n"
+                .into(),
+            127
+        )
     );
     assert_eq!(
         said("x=(1 ;)\necho ${a"),
         (
-            "mirage: syntax error near ';'\nmirage: unexpected EOF while looking for matching `}'\n"
+            "bash: -c: line 1: syntax error near unexpected token `;'\nbash: -c: line 1: `x=(1 ;)'\n\
+             bash: -c: line 2: unexpected EOF while looking for matching `}'\n"
                 .into(),
             1
         )
     );
-    assert_eq!(said("x=1 > f y=(b)").0, "mirage: syntax error near '('\n");
+    assert_eq!(
+        said("x=1 > f y=(b)").0,
+        "bash: -c: line 1: syntax error near unexpected token `('\nbash: -c: line 1: `x=1 > f y=(b)'\n"
+    );
     // `[[` words its own refusals before the text it stopped at.
     assert_eq!(
         said("[[ a -a b ]]").0,
-        "mirage: conditional binary operator expected\nmirage: syntax error near '-a'\n"
+        "bash: -c: line 1: conditional binary operator expected\nbash: -c: line 1: syntax error near `-a'\n\
+         bash: -c: line 1: `[[ a -a b ]]'\n"
     );
     assert_eq!(
         said("for ((a b)); do :; done").0,
-        "mirage: syntax error: arithmetic expression required\nmirage: syntax error: `((a b))'\n"
+        "bash: -c: line 1: syntax error: arithmetic expression required\n\
+         bash: -c: line 1: syntax error: `((a b))'\n"
     );
     refused("( ! )");
     refused("echo | ! a");
+}
+
+#[test]
+fn refusals_stand_on_the_lines_bash_names() {
+    // Pinned on bash -c: the end of the input is the line past the last,
+    // an unclosed quote or pair the line it opened on, and a token's line
+    // is quoted back as typed, from the line it ends on; a conditional
+    // names its `[[` and `(` lines, a `((` bash rereads is quoted from its
+    // second `(`, and where the line's list could end bash first reads
+    // the heredoc bodies the line opened.
+    for (source, said) in [
+        (
+            "(echo a\n",
+            "bash: -c: line 2: syntax error: unexpected end of file\n",
+        ),
+        (
+            "echo a\nif true; then\necho b",
+            "bash: -c: line 4: syntax error: unexpected end of file\n",
+        ),
+        (
+            "echo a\necho $(\necho b",
+            "bash: -c: line 4: unexpected EOF while looking for matching `)'\n",
+        ),
+        (
+            "echo a\necho 'x\ny\nz",
+            "bash: -c: line 2: unexpected EOF while looking for matching `''\n",
+        ),
+        (
+            "echo a\nx=(1\n2",
+            "bash: -c: line 2: unexpected EOF while looking for matching `)'\n",
+        ),
+        (
+            "echo a\nfor x in a; do\ndone",
+            "bash: -c: line 3: syntax error near unexpected token `done'\nbash: -c: line 3: `done'\n",
+        ),
+        (
+            "cat <<E\nx\nE\necho (",
+            "bash: -c: line 4: syntax error near unexpected token `newline'\nbash: -c: line 4: `echo ('\n",
+        ),
+        (
+            "echo a \\\nb; fi",
+            "bash: -c: line 2: syntax error near unexpected token `fi'\nbash: -c: line 2: `b; fi'\n",
+        ),
+        (
+            "echo a\n[[ a -bogus b ]]",
+            "bash: -c: line 2: conditional binary operator expected\nbash: -c: line 2: syntax error near `-bogus'\n\
+             bash: -c: line 2: `[[ a -bogus b ]]'\n",
+        ),
+        (
+            "[[ a =~ ^(a|b$ ]]",
+            "bash: -c: line 1: unexpected EOF while looking for matching `)'\n\
+             bash: -c: line 2: unexpected argument to conditional binary operator\n",
+        ),
+        (
+            "f\\\ni",
+            "bash: -c: line 2: syntax error near unexpected token `fi'\nbash: -c: line 2: `i'\n",
+        ),
+        (
+            "x\n[[ -f a",
+            "bash: -c: line 2: unexpected EOF while looking for `]]'\n\
+             bash: -c: line 3: syntax error: unexpected end of file\n",
+        ),
+        (
+            "[[ (\na\n-x b ]]",
+            "bash: -c: line 2: unexpected token `newline', conditional binary operator expected\n\
+             bash: -c: line 1: expected `)'\nbash: -c: line 2: syntax error near `a'\n\
+             bash: -c: line 2: `a'\n",
+        ),
+        (
+            "x; (( (a)b)",
+            "bash: -c: line 1: syntax error near unexpected token `b'\nbash: -c: line 1: `( (a)b)'\n",
+        ),
+        (
+            "((a)b)",
+            "bash: -c: line 1: syntax error near unexpected token `b'\nbash: -c: line 1: `((a)b)'\n",
+        ),
+        (
+            "cat <<A <<B; )\na\nA\nb\nB",
+            "bash: -c: line 5: syntax error near unexpected token `)'\n\
+             bash: -c: line 5: `cat <<A <<B; )'\n",
+        ),
+        (
+            "cat <<A <<\na\n",
+            "bash: -c: line 2: syntax error near unexpected token `newline'\n\
+             bash: -c: line 2: `cat <<A <<'\n",
+        ),
+        (
+            "cat <<A; if )\nx\nA",
+            "bash: -c: line 1: syntax error near unexpected token `)'\n\
+             bash: -c: line 1: `cat <<A; if )'\n",
+        ),
+        (
+            "echo $(cat <<A\nx\nA ;)",
+            "bash: -c: line 3: syntax error near unexpected token `;'\nbash: -c: line 3: ` ;)'\n",
+        ),
+    ] {
+        assert_eq!(words(&refused(source)), said, "{source:?}");
+    }
+    // `eval` numbers on from the line it runs on.
+    assert_eq!(
+        String::from_utf8_lossy(&refused("echo a\necho (").worded(b"bash: eval: ", 2, true)),
+        "bash: eval: line 3: syntax error near unexpected token `newline'\nbash: eval: line 3: `echo ('\n"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&parse(b"cat <<Q\ny").warnings(b"bash: ", 4)),
+        "bash: line 5: warning: here-document at line 4 delimited by end-of-file (wanted `Q')\n"
+    );
+}
+
+#[test]
+fn an_unexpected_token_is_named_as_bash_reads_it() {
+    // Pinned on bash -c under C.UTF-8 and C: a `$'...'` as its value in
+    // single quotes, a `$"..."` as `"..."`, a `\001` before each `\001`
+    // and `\177` no backslash escapes, and the whole in `$'...'` when it
+    // does not show as it is.
+    for (source, utf8, token) in [
+        ("echo ($'a'", true, "'a'"),
+        ("echo ($'a\\'b'", true, "'a'\\''b'"),
+        ("echo ($'\\''", true, "\\'"),
+        ("echo ($\"a$x\"", true, "\"a$x\""),
+        ("echo (\"$'a'\"", true, "\"$'a'\""),
+        ("echo (x$'a\\tb'y", true, "$'x\\'a\\tb\\'y'"),
+        ("echo ($'\\x01\\x7f'", true, "$'\\'\\001\\001\\001\\177\\''"),
+        ("echo (a\x01b", true, "$'a\\001\\001b'"),
+        ("echo (\\\x01", true, "$'\\\\\\001'"),
+        ("echo ($'\\0a'", true, "''"),
+        ("echo (é", true, "é"),
+        ("echo (é", false, "$'\\303\\251'"),
+    ] {
+        let said = String::from_utf8_lossy(&refused(source).worded(b"", 1, utf8)).into_owned();
+        let near = format!("line 1: syntax error near unexpected token `{token}'");
+        assert_eq!(said.lines().next(), Some(near.as_str()), "{source:?}");
+    }
 }
 
 #[test]
@@ -424,8 +585,8 @@ fn reserved_words_follow_a_compound_command_bare() {
 fn deep_nesting_is_refused_not_overflowed() {
     let deep = format!("{}a{}", "! ".repeat(5000), ")".repeat(5000));
     assert_eq!(
-        refused(&deep).message,
-        b"mirage: syntax error: nesting too deep\n"
+        words(&refused(&deep)),
+        "bash: -c: line 1: syntax error: nesting too deep\n"
     );
     let wide = format!("a{}", " && a".repeat(100_000));
     assert_eq!(parse(wide.as_bytes()).error, None);
@@ -563,8 +724,8 @@ fn a_heredoc_pending_across_an_array_is_read_again() {
     let tree = parse(b"cat <<EOF; x=(1\nbody\nEOF\n2)\nfi");
     assert_eq!(tree.source, b"cat <\"fi\n\"; x=(1\n2)\n");
     assert_eq!(
-        String::from_utf8_lossy(&tree.warnings()),
-        "mirage: line 5: warning: here-document at line 4 delimited by end-of-file (wanted `body\n')\n"
+        warned(&tree),
+        "bash: line 5: warning: here-document at line 4 delimited by end-of-file (wanted `body\n')\n"
     );
     // ...unless that body was empty.
     assert_eq!(
@@ -633,8 +794,8 @@ fn bash_readings_from_review() {
     refused("select i & do :; done");
     let bangs = format!("{}a", "! ".repeat(200));
     assert_eq!(
-        refused(&bangs).message,
-        b"mirage: syntax error: nesting too deep\n"
+        words(&refused(&bangs)),
+        "bash: -c: line 1: syntax error: nesting too deep\n"
     );
     // Too deep to read, a loop header is raw text bash reads when it runs.
     let chain = format!("for (({}1;;)); do :; done", "a=".repeat(200));
@@ -769,14 +930,14 @@ fn heredoc_warnings_name_the_lines_bash_names() {
     // The heredoc is named by the line its body starts after.
     let tree = parse(b"cat <<E \\\nx\nbody");
     assert_eq!(
-        String::from_utf8_lossy(&tree.warnings()),
-        "mirage: line 3: warning: here-document at line 2 delimited by end-of-file (wanted `E')\n"
+        warned(&tree),
+        "bash: line 3: warning: here-document at line 2 delimited by end-of-file (wanted `E')\n"
     );
     // A substitution closing with a body still to read.
     let tree = parse(b"echo $(cat <<E)\nx\nE\n");
     assert_eq!(
-        String::from_utf8_lossy(&tree.warnings()),
-        "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+        warned(&tree),
+        "bash: line 1: warning: command substitution: 1 unterminated here-document\n"
     );
     let substitution = (0..tree.nodes.len())
         .find(|index| KINDS[usize::from(tree.nodes[*index].kind)].0 == "command_substitution")
@@ -789,20 +950,20 @@ fn a_line_nested_past_the_reader_is_refused_at_the_next_opener() {
     let braces = |n: usize| format!("{}a; {}", "{ ".repeat(n), "} ".repeat(n));
     assert_eq!(parse(braces(64).as_bytes()).error, None);
     assert_eq!(
-        refused(&braces(65)).message,
-        b"mirage: syntax error near '{'\n"
+        refused(&braces(65)).lines[0].text,
+        b"syntax error near unexpected token `{'"
     );
     let substitutions = format!("echo {}x{}; fi", "$(echo ".repeat(4096), ")".repeat(4096));
     assert_eq!(
-        refused(&substitutions).message,
-        b"mirage: syntax error near '$('\n"
+        refused(&substitutions).lines[0].text,
+        b"syntax error near unexpected token `$('"
     );
     // A `!` chain or quotes nested past what the reader takes are refused,
     // not read on a stack they would overflow.
     let bangs = format!("[[ {}x ]]", "! ".repeat(5000));
     assert_eq!(
-        refused(&bangs).message,
-        b"mirage: syntax error: nesting too deep\n"
+        words(&refused(&bangs)),
+        "bash: -c: line 1: syntax error: nesting too deep\n"
     );
     let quotes = format!("echo \"{}", "$(\"".repeat(100_000));
     refused(&quotes);
@@ -869,7 +1030,11 @@ fn a_case_pattern_takes_an_extglob_group_only_with_extglob_on() {
         ..Options::default()
     };
     let refusal = parse_with(line, &off).error.expect("a refusal");
-    assert_eq!(refusal.message, b"mirage: syntax error near '('\n");
+    assert_eq!(
+        words(&refusal),
+        "bash: -c: line 1: syntax error near unexpected token `('\n\
+         bash: -c: line 1: `case a in @(a)) echo yes;; esac'\n"
+    );
     assert_eq!(parse(line).error, None);
     assert_eq!(parse_with(b"[[ a == @(a) ]]", &off).error, None);
 }

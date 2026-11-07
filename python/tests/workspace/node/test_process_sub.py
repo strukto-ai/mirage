@@ -161,7 +161,8 @@ async def test_cancel_joins_children_and_releases_descriptors(command):
             (
                 0,
                 "st:2\n",
-                "mirage: unsupported: exec onto a process substitution\n",
+                "bash: line 1: exec: a process substitution as a descriptor: "
+                "not supported\n",
             ),
         ),
     ],

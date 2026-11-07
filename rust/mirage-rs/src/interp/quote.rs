@@ -23,7 +23,7 @@ fn control(byte: u8) -> bool {
 
 /// Whether a value shows as it is: no control character, and under the
 /// C locale no byte past ASCII; under UTF-8 no byte that is no character.
-fn printable(value: &[u8], utf8: bool) -> bool {
+pub(crate) fn printable(value: &[u8], utf8: bool) -> bool {
     if value.iter().any(|&b| control(b)) {
         return false;
     }
@@ -36,7 +36,7 @@ fn printable(value: &[u8], utf8: bool) -> bool {
 
 /// `$'...'`: each control byte, and each byte that is no shown character,
 /// as its escape, and `'` and `\` escaped so the value reads back whole.
-fn ansi_c(value: &[u8], utf8: bool) -> Vec<u8> {
+pub(crate) fn ansi_c(value: &[u8], utf8: bool) -> Vec<u8> {
     let mut out = b"$'".to_vec();
     let shown: Vec<bool> = if utf8 {
         let mut shown = vec![false; value.len()];

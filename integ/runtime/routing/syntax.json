@@ -17,7 +17,7 @@
           "command": "echo (",
           "expect": {
             "exit": 2,
-            "stderr": "mirage: syntax error near 'newline'\n"
+            "stderr": "bash: -c: line 1: syntax error near unexpected token `newline'\nbash: -c: line 1: `echo ('\n"
           }
         }
       ]
@@ -39,7 +39,7 @@
           "command": "echo ( this-is-a-deliberately-long-unparsable-line-well-past-forty-chars",
           "expect": {
             "exit": 2,
-            "stderr": "mirage: syntax error near 'this-is-a-deliberately-long-unparsable-line-well-past-forty-chars'\n"
+            "stderr": "bash: -c: line 1: syntax error near unexpected token `this-is-a-deliberately-long-unparsable-line-well-past-forty-chars'\nbash: -c: line 1: `echo ( this-is-a-deliberately-long-unparsable-line-well-past-forty-chars'\n"
           }
         }
       ]

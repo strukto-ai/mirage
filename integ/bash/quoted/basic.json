@@ -102,7 +102,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error: unexpected end of file\n"
+        "stderr": "bash: -c: line 2: syntax error: unexpected end of file\n"
       }
     }
   ]

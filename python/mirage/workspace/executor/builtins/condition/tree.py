@@ -195,4 +195,4 @@ async def _eval_cond_binary(ctx: CondContext, node: CondBinary) -> bool:
         return compare(values[0], values[1])
     if node.op in FILE_PAIR_BINARY:
         return await apply_file_pair(ctx, node.op, node.left, node.right)
-    raise CondError("mirage: conditional binary operator expected")
+    raise CondError(f"{shell_voice()}conditional binary operator expected")

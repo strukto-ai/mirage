@@ -76,7 +76,9 @@ export async function handleSource(
   if (outerNames !== null) session.functionNames = cs.functionNames()
   // Its diagnostics name the file, as spelled, and count its own lines.
   const outerName = session.parseName
+  const outerHead = session.parseHead
   session.parseName = wordText(path)
+  session.parseHead = `${session.parseName}: `
   session.parseFrom = 0
   let io: IOResult
   let stdout: ByteSource | null
@@ -94,6 +96,7 @@ export async function handleSource(
     } finally {
       // The RETURN trap speaks as the caller, as bash's does.
       session.parseName = outerName
+      session.parseHead = outerHead
       session.parseFrom = null
     }
     ;[stdout, io] = await returning(executeFn, session, stdin, cs, io.stdout, io)

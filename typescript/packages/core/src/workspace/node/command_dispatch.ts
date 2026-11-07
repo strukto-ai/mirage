@@ -28,6 +28,7 @@ import {
   runWithCaller,
   runWithRedirectPaths,
   sessionAccess,
+  syntaxHead,
 } from '../../context/session_context.ts'
 import { ensureStream } from '../../io/stream.ts'
 import { type ByteSource, type OutputState, IOResult, materialize } from '../../io/types.ts'
@@ -46,7 +47,7 @@ import {
 } from '../../policy/index.ts'
 import type { EntryGate } from '../../policy/types.ts'
 import type { DispatchFn, OutputFn, RunResult } from '../../runtime/types.ts'
-import { decodeText, encodeText } from '../../shell/bytes.ts'
+import { decodeText, encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { CallStack } from '../../shell/call_stack.ts'
 import { Channel, JobConsole } from '../../shell/console/index.ts'
 import { CANNOT_EXECUTE_STATUS } from '../../shell/constants.ts'
@@ -112,7 +113,7 @@ import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
 import type { SessionState } from '../session/session.ts'
-import { ensureVarVisible, envIsReadonly, seedVar, setAttr } from '../session/state.ts'
+import { ensureVarVisible, envIsReadonly, seedVar, setAttr, visibleEnv } from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { admit, Admitted, classifiedWords } from './admission.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
@@ -228,7 +229,12 @@ export async function executeCommand(
           parserAliases(line, aliases, owners),
           session.shopts.extglob ?? false,
         )
-        const io = syntaxRefusal(ast)
+        const io = syntaxRefusal(
+          ast,
+          syntaxHead(session),
+          session.lineNumber,
+          utf8Locale(visibleEnv(session)),
+        )
         if (io !== null) {
           const bad = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
           return [
@@ -1053,13 +1059,16 @@ async function routeArgv(
 
   // Unsupported bash builtins. Constructs the parser accepts but the
   // executor cannot honor. Returning a clear error lets LLMs detect a
-  // capability gap instead of treating it as a missing binary.
+  // capability gap instead of treating it as a missing binary; `bg` says
+  // what bash -c says, which has no job control either.
   if (UNSUPPORTED_BUILTINS.has(name)) {
-    const err = encodeText(`mirage: unsupported builtin: ${name}\n`)
+    const code = name === 'bg' ? 1 : 2
+    const why = name === 'bg' ? 'no job control' : 'not supported'
+    const err = encodeText(`${shellVoice()}${name}: ${why}\n`)
     return [
       null,
-      new IOResult({ exitCode: 2, stderr: err }),
-      new ExecutionNode({ command: name, exitCode: 2, stderr: err }),
+      new IOResult({ exitCode: code, stderr: err }),
+      new ExecutionNode({ command: name, exitCode: code, stderr: err }),
     ]
   }
 

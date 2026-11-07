@@ -942,7 +942,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'fi'\n"
+        "stderr": "bash: eval: line 3: syntax error near unexpected token `fi'\nbash: eval: line 3: `echo F; fi'\n"
       }
     },
     {
@@ -1537,7 +1537,7 @@
       "expect": {
         "exit": 0,
         "stdout": "st=2\n",
-        "stderr": "mirage: syntax error: unexpected end of file\n"
+        "stderr": "bash: -c: line 4: syntax error: unexpected end of file\n"
       }
     },
     {

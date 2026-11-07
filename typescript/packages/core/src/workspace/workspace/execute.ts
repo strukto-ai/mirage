@@ -51,6 +51,8 @@ import {
   runWithSession,
   getCurrentEvaluation,
   runWithEvaluation,
+  syntaxHead,
+  voiceName,
 } from '../../context/session_context.ts'
 import { STOP_WAIT_SECONDS } from '../../shell/job_table/constants.ts'
 import { type JobTable, JobWaits } from '../../shell/job_table/index.ts'
@@ -100,7 +102,7 @@ import {
   type Judged,
   type Walked,
 } from '../node/explain.ts'
-import { refusedRow } from '../node/program.ts'
+import { parseRows, refusedRow } from '../node/program.ts'
 import { runCommandTree } from '../node/run_tree.ts'
 import type { DriftQueue } from '../snapshot/drift.ts'
 import type { SessionManager } from '../session/manager.ts'
@@ -122,9 +124,10 @@ import type { Router } from './routing.ts'
 import type { Runtimes } from './runtimes.ts'
 import { ExecuteResult, type ExecuteOptions } from './types.ts'
 import { commandName, forkForCall } from './utils.ts'
-import { encodeText } from '../../shell/bytes.ts'
+import { encodeText, utf8Locale } from '../../shell/bytes.ts'
 import { runWithSystemClock } from '../../utils/clock.ts'
 import { runWithEnvLimit } from '../session/budget.ts'
+import { visibleEnv } from '../session/state.ts'
 
 /**
  * Everything `executeLine` needs from the workspace, passed explicitly
@@ -542,7 +545,18 @@ async function runPreparedLine(
           // and the policy is never consulted about it. A refusal on a later
           // line leaves the lines before it to run first (`refusedRow`), as
           // bash reads its input a line at a time.
-          const io = argv === undefined && refusedRow(root) === null ? syntaxRefusal(root) : null
+          // The input's first row is the line its parse starts on, as bash
+          // numbers an `eval` on from the line it runs on.
+          const firstLine = parseRows(effectiveSession, options.callStack !== undefined)[1] + 1
+          const io =
+            argv === undefined && refusedRow(root) === null
+              ? syntaxRefusal(
+                  root,
+                  syntaxHead(effectiveSession),
+                  firstLine,
+                  utf8Locale(visibleEnv(effectiveSession)),
+                )
+              : null
           if (io !== null) {
             const callStack = options.callStack
             // A substitution bash cannot parse ends the shell, from `eval` and
@@ -776,6 +790,10 @@ async function runPreparedLine(
               innerContext = childContext(innerContext, opts.records ?? null)
               innerContext.frame.substitution = true
               session = innerContext.session
+              // A backtick's body is read as it runs, so a refusal in it names
+              // the substitution, as bash's does; a `$( )` was read with its
+              // line.
+              session.parseHead = `${voiceName(session)}: command substitution: `
               innerOpts.session = session
               innerOpts.evaluation = innerContext
             }
@@ -1018,6 +1036,7 @@ async function runParsedLine(
   history: LineHistory | null = null,
 ): Promise<ExecuteResult> {
   const effectiveSession = context.session
+  const firstLine = parseRows(effectiveSession, options.callStack !== undefined)[1] + 1
   const cacheFacts = env.dispatcher.captureCacheFacts()
   // An op a policy refuses inside a command prints the command's own GNU
   // line, so the dispatcher notes the record here, for the line to carry on its
@@ -1473,8 +1492,8 @@ async function runParsedLine(
   // The program loop stamped each statement; the line as a whole is a
   // wrapper around them, like a group.
   // A rejected invocation records its outcome without changing shell status.
-  if (rootNode.warnings)
-    io.stderr = concat([encodeText(rootNode.warnings), await io.materializeStderr()])
+  const warnings = rootNode.warnings?.(`${voiceName(effectiveSession)}: `, firstLine) ?? ''
+  if (warnings !== '') io.stderr = concat([encodeText(warnings), await io.materializeStderr()])
   if (!callerError) recordStatus(targetSession, io.exitCode, true)
   try {
     if (executionFailure === undefined) {

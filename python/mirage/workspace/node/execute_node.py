@@ -50,7 +50,7 @@ from mirage.process.handle import ProcessHandle
 from mirage.process.table import ProcessTable
 from mirage.runtime.types import DispatchFn
 from mirage.shell.barrier import BarrierPolicy, apply_barrier
-from mirage.shell.bytes import decode_text
+from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.constants import (
@@ -784,7 +784,10 @@ async def _run_redirected(
         ):
             # A substitution lives only as long as its command, so it
             # cannot back a descriptor `exec` keeps (`>(cat)""` too).
-            err = b"mirage: unsupported: exec onto a process substitution\n"
+            err = encode_text(
+                f"{shell_voice()}exec: a process substitution as a "
+                "descriptor: not supported\n"
+            )
             return (
                 None,
                 IOResult(exit_code=2, stderr=err),
@@ -1735,6 +1738,6 @@ async def _execute_node(
     # (future grammar additions).
     return fail(
         get_text(node),
-        f"mirage: unsupported shell construct: {node.type}\n",
+        f"{shell_voice()}{node.type}: not supported\n",
         2,
     )

@@ -32,7 +32,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near ';'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `;'\nbash: -c: line 1: `;s'\n"
       }
     },
     {
@@ -67,7 +67,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near '|'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `|'\nbash: -c: line 1: `| s'\n"
       }
     },
     {
@@ -102,7 +102,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near '&&'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `&&'\nbash: -c: line 1: `&& s'\n"
       }
     },
     {
@@ -137,7 +137,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near ';'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `;'\nbash: -c: line 1: `echo a ; ; echo b'\n"
       }
     },
     {
@@ -172,7 +172,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near ';'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `;'\nbash: -c: line 1: `echo a &; echo b'\n"
       }
     },
     {
@@ -207,7 +207,7 @@
       "expect": {
         "exit": 0,
         "stdout": "rc=2\n",
-        "stderr": "mirage: syntax error near ';;'\nmirage: syntax error near 'done'\nmirage: syntax error near 'fi'\nmirage: syntax error near '}'\nmirage: syntax error near 'done'\n"
+        "stderr": "sh: -c: line 1: syntax error near unexpected token `;;'\nsh: -c: line 1: `true;;s'\nsh: -c: line 1: syntax error near unexpected token `done'\nsh: -c: line 1: `for x in a; do done'\nsh: -c: line 1: syntax error near unexpected token `fi'\nsh: -c: line 1: `if true; then fi'\nsh: -c: line 1: syntax error near unexpected token `}'\nsh: -c: line 1: `{ }'\nsh: -c: line 2: syntax error near unexpected token `done'\nsh: -c: line 2: `done'\n"
       }
     },
     {
@@ -242,7 +242,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'fi'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `echo hi; fi'\n"
       }
     },
     {
@@ -277,7 +277,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'done'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `done'\nbash: -c: line 1: `echo a; done; echo b'\n"
       }
     },
     {
@@ -312,7 +312,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'then'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `then'\nbash: -c: line 1: `then'\n"
       }
     },
     {
@@ -347,7 +347,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'else'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `else'\nbash: -c: line 1: `else'\n"
       }
     },
     {
@@ -382,7 +382,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'elif'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `elif'\nbash: -c: line 1: `elif'\n"
       }
     },
     {
@@ -417,7 +417,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'esac'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `esac'\nbash: -c: line 1: `esac'\n"
       }
     },
     {
@@ -452,7 +452,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'do'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `do'\nbash: -c: line 1: `do'\n"
       }
     },
     {
@@ -487,7 +487,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near '}'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `}'\nbash: -c: line 1: `}'\n"
       }
     },
     {
@@ -522,7 +522,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near ']]'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `]]'\nbash: -c: line 1: `]]'\n"
       }
     },
     {
@@ -557,7 +557,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'in'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `in'\nbash: -c: line 1: `in'\n"
       }
     },
     {
@@ -592,7 +592,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'fi'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `! fi'\n"
       }
     },
     {
@@ -627,7 +627,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'fi'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `fi >/dev/null'\n"
       }
     },
     {
@@ -662,7 +662,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'fi'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `echo a | fi'\n"
       }
     },
     {
@@ -697,7 +697,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'fi'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `if fi; then :; fi'\n"
       }
     },
     {
@@ -732,7 +732,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'fi'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `echo a && fi'\n"
       }
     },
     {
@@ -767,7 +767,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'fi'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `fi; done'\n"
       }
     },
     {
@@ -802,7 +802,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'fi'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `fi; for a in b; do done'\n"
       }
     },
     {
@@ -837,7 +837,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'fi'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `if x; then fi; for a in b; do done'\n"
       }
     },
     {

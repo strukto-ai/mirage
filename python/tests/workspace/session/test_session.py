@@ -45,6 +45,7 @@ TRANSIENT_FIELDS = (
     "_parse_row",
     "_line_row",
     "_parse_name",
+    "_parse_head",
     "_line_node",
     "_parse_from",
     "_line_open",

@@ -15,6 +15,7 @@
 from mirage.commands.builtin.utils.strtol import bounded_decimal
 from mirage.shell.bytes import decode_text, encode_text
 from mirage.shell.constants import SIGNALS
+from mirage.shell.voice import shell_voice
 from mirage.workspace.executor.builtins.shared import (
     builtin_error,
     builtin_usage,
@@ -97,7 +98,9 @@ async def handle_trap(args: list[str], session: SessionState) -> Result:
                 return result(
                     "trap",
                     exit_code=2,
-                    stderr="mirage: trap: -l: not supported\n",
+                    stderr=decode_text(
+                        builtin_error("trap", "-l: not supported")
+                    ),
                 )
             else:
                 message = builtin_error("trap", f"-{flag}: invalid option")
@@ -150,7 +153,7 @@ async def handle_trap(args: list[str], session: SessionState) -> Result:
             setattr(session, field, None if action == "-" else action)
             setattr(session, scoped, False)
         elif action != "-":
-            errors.append(f"mirage: trap: {spec}: not supported\n")
+            errors.append(f"{shell_voice()}trap: {spec}: not supported\n")
     return result(
         "trap",
         exit_code=1 if errors else 0,

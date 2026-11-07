@@ -21,21 +21,17 @@ from mirage.workspace import Workspace
 
 
 @pytest.mark.parametrize(
-    "name",
+    ("name", "code", "stderr"),
     [
-        "bg",
-        "complete",
-        "compgen",
-        "ulimit",
+        ("bg", 1, b"bash: line 1: bg: no job control\n"),
+        ("complete", 2, b"bash: line 1: complete: not supported\n"),
+        ("compgen", 2, b"bash: line 1: compgen: not supported\n"),
+        ("ulimit", 2, b"bash: line 1: ulimit: not supported\n"),
     ],
 )
-def test_unsupported_builtin_returns_clear_error(name):
+def test_unsupported_builtin_returns_clear_error(name, code, stderr):
+    # `bg` words its refusal as bash -c does, which has no job control;
+    # the others say in bash's voice that mirage does not support them.
     ws = Workspace({"/data": RAMVFS()})
     io = asyncio.run(ws.shell(name))
-    assert io.exit_code == 2, (
-        f"expected exit 2 for {name!r}, got {io.exit_code}"
-    )
-    stderr = io.stderr or b""
-    assert f"unsupported builtin: {name}".encode() in stderr, (
-        f"expected 'unsupported builtin: {name}' in stderr, got {stderr!r}"
-    )
+    assert (io.exit_code, io.stderr) == (code, stderr)

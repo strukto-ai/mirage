@@ -1966,7 +1966,7 @@
       "expect": {
         "exit": 0,
         "stdout": "     1\tx\nin\n",
-        "stderr": "mirage: line 4: warning: command substitution: 1 unterminated here-document\n"
+        "stderr": "bash: line 4: warning: command substitution: 1 unterminated here-document\n"
       }
     },
     {
@@ -2032,7 +2032,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: syntax error near 'b'\n"
+        "stderr": "bash: -c: line 1: syntax error near unexpected token `b'\nbash: -c: line 1: `echo before; { echo a; } > /dev/null b'\n"
       }
     },
     {
@@ -2098,7 +2098,7 @@
       "expect": {
         "exit": 0,
         "stdout": "\nafter\n",
-        "stderr": "mirage: line 1: warning: command substitution: 1 unterminated here-document\n"
+        "stderr": "bash: line 1: warning: command substitution: 1 unterminated here-document\n"
       }
     },
     {

@@ -606,8 +606,33 @@ def session_voice(session: SessionState | None) -> str:
         return "bash: "
     if program_invocation(session):
         return ""
-    name = session._parse_name or session.script_name or "bash"
-    return f"{name}: line {session.line_number}: "
+    return f"{voice_name(session)}: line {session.line_number}: "
+
+
+def voice_name(session: SessionState) -> str:
+    """The name ``session``'s shell leads its diagnostics with: the file a
+    sourced script, or a function defined in one, came from;
+    ``environment`` for a function defined in the shell's own input; else
+    the nested shell's ``$0``, else ``bash``.
+
+    Args:
+        session (SessionState): the shell.
+    """
+    return session._parse_name or session.script_name or "bash"
+
+
+def syntax_head(session: SessionState) -> str:
+    """What a syntax error in ``session``'s running parse leads with, its
+    line after it: ``bash: -c: `` for the shell's own input, as bash -c
+    reads its command string; ``bash: eval: `` in ``eval``; ``name: `` in
+    a sourced file or a script.
+
+    Args:
+        session (SessionState): the shell.
+    """
+    if session._parse_head is not None:
+        return session._parse_head
+    return f"{session.script_name or 'bash'}: -c: "
 
 
 def _running_voice() -> str:

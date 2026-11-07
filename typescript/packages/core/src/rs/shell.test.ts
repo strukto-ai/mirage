@@ -50,24 +50,24 @@ describe('parseShell', () => {
   })
 
   it('reports a refused line in bash words', () => {
-    const tree = parseShell('if true; then')
-    expect(tree.error).toEqual({
-      index: 13,
-      message: 'mirage: syntax error: unexpected end of file\n',
-      status: 2,
-    })
-    expect(parseShell('echo a; fi').error).toEqual({
-      index: 8,
-      message: "mirage: syntax error near 'fi'\n",
-      status: 2,
-    })
+    const refusal = (line: string, extglob = true) => {
+      const tree = parseShell(line, [], extglob)
+      return [tree.error, tree.refusal('bash: -c: ', 1, true)]
+    }
+    expect(refusal('if true; then')).toEqual([
+      { index: 13, status: 2 },
+      'bash: -c: line 2: syntax error: unexpected end of file\n',
+    ])
+    expect(refusal('echo a; fi')).toEqual([
+      { index: 8, status: 2 },
+      "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `echo a; fi'\n",
+    ])
     // With extglob off a pattern group is no word.
     expect(parseShell('echo @(a)').error).toBeNull()
-    expect(parseShell('echo @(a)', [], false).error).toEqual({
-      index: 6,
-      message: "mirage: syntax error near '('\n",
-      status: 2,
-    })
+    expect(refusal('echo @(a)', false)).toEqual([
+      { index: 6, status: 2 },
+      "bash: -c: line 1: syntax error near unexpected token `('\nbash: -c: line 1: `echo @(a)'\n",
+    ])
   })
 
   it('links nodes to their family', () => {

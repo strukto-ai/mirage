@@ -207,7 +207,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: unexpected EOF while looking for matching ``'\n"
+        "stderr": "bash: -c: line 1: unexpected EOF while looking for matching ``'\n"
       }
     },
     {

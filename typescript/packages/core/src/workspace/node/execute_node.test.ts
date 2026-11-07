@@ -69,7 +69,7 @@ describe('executeNode dispatcher', () => {
     expect(stdout).toBeNull()
     expect(io.exitCode).toBe(2)
     expect(new TextDecoder().decode(await materialize(io.stderr))).toBe(
-      'mirage: unsupported shell construct: not_a_real_type\n',
+      'bash: not_a_real_type: not supported\n',
     )
   })
 

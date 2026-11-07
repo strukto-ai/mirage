@@ -872,7 +872,7 @@
       "expect": {
         "exit": 0,
         "stdout": "status:1\n",
-        "stderr": "mirage: trap: TERM: not supported\n"
+        "stderr": "bash: line 1: trap: TERM: not supported\n"
       }
     },
     {
@@ -942,7 +942,7 @@
       "expect": {
         "exit": 2,
         "stdout": "",
-        "stderr": "mirage: trap: -l: not supported\n"
+        "stderr": "bash: line 1: trap: -l: not supported\n"
       }
     },
     {

@@ -15,6 +15,7 @@
 from collections.abc import Callable
 from typing import Any
 
+from mirage.context.session_context import voice_name
 from mirage.io import IOResult
 from mirage.io.types import ByteSource
 from mirage.shell.call_stack import CallStack
@@ -52,6 +53,8 @@ async def handle_eval(
         if call_stack is not None
         else CallStack(session.shell_nesting)
     )
+    outer_head = session._parse_head
+    session._parse_head = f"{voice_name(session)}: eval: "
     try:
         with cs.nested("eval"):
             io = await execute_fn(
@@ -64,6 +67,8 @@ async def handle_eval(
     except ExitSignal as sig:
         sig.sourced = True
         raise
+    finally:
+        session._parse_head = outer_head
     return io.stdout, io, ExecutionNode(command="eval", exit_code=io.exit_code)
 
 

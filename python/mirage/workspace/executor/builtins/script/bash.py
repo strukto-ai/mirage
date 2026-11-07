@@ -258,6 +258,9 @@ async def handle_bash(
         # A script file names its diagnostics, and the functions it
         # defines, as a sourced one does.
         session._parse_name = parsed.path if parsed.script is None else None
+        session._parse_head = (
+            None if session._parse_name is None else f"{session._parse_name}: "
+        )
         for option, enable in parsed.settings:
             session.shell_options[option] = enable
         # A nested shell is a program of its own: the builtins it runs are

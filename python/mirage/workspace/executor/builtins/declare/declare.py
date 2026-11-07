@@ -1260,8 +1260,8 @@ def nameref_refusal(cmd: str, name: str, target: str) -> str | None:
     """
     if SUBSCRIPT_RE.fullmatch(target) is not None:
         return (
-            f"mirage: {cmd}: {target}: name reference to an array "
-            "element is not supported"
+            f"{shell_voice()}{cmd}: {target}: name reference to an array "
+            "element: not supported"
         )
     if not is_valid_name(target):
         return (

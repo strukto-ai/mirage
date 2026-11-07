@@ -1482,7 +1482,7 @@ async def handle_kill(
             )
         if number == SIGSTOP:
             return _job_result(
-                cmd_str, f"mirage: kill: {spec}: not supported\n", 1
+                cmd_str, f"{voice}kill: {spec}: not supported\n", 1
             )
         signal, saw_signal = number, True
     if not words:

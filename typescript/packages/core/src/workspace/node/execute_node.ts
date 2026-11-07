@@ -639,7 +639,9 @@ async function runRedirected(
     ) {
       // A substitution lives only as long as its command, so it cannot back
       // a descriptor `exec` keeps (`>(cat)""` too).
-      const err = encodeText('mirage: unsupported: exec onto a process substitution\n')
+      const err = encodeText(
+        `${shellVoice()}exec: a process substitution as a descriptor: not supported\n`,
+      )
       return [
         null,
         new IOResult({ exitCode: 2, stderr: err }),
@@ -1623,5 +1625,5 @@ async function executeNodeBody(
 
   // Constructs the parser accepts but the executor cannot honor
   // (future grammar additions).
-  return fail(node.text, `mirage: unsupported shell construct: ${node.type}\n`, 2)
+  return fail(node.text, `${shellVoice()}${node.type}: not supported\n`, 2)
 }

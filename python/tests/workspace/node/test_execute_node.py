@@ -499,7 +499,7 @@ def test_unsupported_node_raises():
     assert io.exit_code == 2
     assert (
         _run(materialize(io.stderr))
-        == b"mirage: unsupported shell construct: some_unknown_type_xyz\n"
+        == b"bash: some_unknown_type_xyz: not supported\n"
     )
 
 

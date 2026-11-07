@@ -62,6 +62,8 @@ from mirage.context.session_context import (
     set_refusal_sink,
     strongest_mode_under,
     strongest_under_session,
+    syntax_head,
+    voice_name,
 )
 
 __all__ = [
@@ -114,4 +116,6 @@ __all__ = [
     "set_refusal_sink",
     "strongest_mode_under",
     "strongest_under_session",
+    "syntax_head",
+    "voice_name",
 ]

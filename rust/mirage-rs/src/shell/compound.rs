@@ -1,5 +1,5 @@
 use super::lex::{blank_end, is_operator, is_space, name_end};
-use super::parser::{Close, Parser, R};
+use super::parser::{Close, Fail, Parser, R};
 use super::tree::Syn;
 
 impl Parser<'_> {
@@ -28,8 +28,9 @@ impl Parser<'_> {
 
     /// `((`: an arithmetic command, or, when what follows does not read as
     /// one, a subshell whose first command is a subshell, as bash rereads
-    /// it. One whose matched text ends its line bash rereads that way up
-    /// to there and refuses, unless something inside fails first.
+    /// it, quoting back from its second `(` what fails before that `(`
+    /// closes. One whose matched text ends its line bash rereads that way
+    /// up to there and refuses, unless something inside fails first.
     pub(super) fn double_paren(&mut self) -> R<Syn> {
         let at = self.i;
         let end = self.scan_matched(at + 2, at, b'(', b')')?;
@@ -46,11 +47,12 @@ impl Parser<'_> {
                 ..Parser::new(&self.s[..=end], self.budget, self.options)
             };
             return Err(match reread.statements(Close::Paren, None, true) {
-                Err(fail) if !fail.eof || fail.matching => fail,
+                Err(fail) if !fail.eof || fail.matching => reread_from(fail, at + 1, end),
                 _ => self.near(end + 1, true),
             });
         }
         self.subshell()
+            .map_err(|fail| reread_from(fail, at + 1, end))
     }
 
     pub(super) fn if_statement(&mut self) -> R<Syn> {
@@ -421,4 +423,11 @@ impl Parser<'_> {
         self.leave();
         Ok(Syn::node("function_definition", children))
     }
+}
+
+fn reread_from(mut fail: Fail, from: usize, close: usize) -> Fail {
+    if fail.at <= close {
+        fail.echo_from(from);
+    }
+    fail
 }

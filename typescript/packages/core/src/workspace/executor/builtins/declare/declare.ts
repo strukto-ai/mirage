@@ -989,7 +989,7 @@ export function noteLocalArray(session: SessionState, name: string): boolean {
  */
 export function namerefRefusal(cmd: string, name: string, target: string): string | null {
   if (SUBSCRIPT_RE.test(target)) {
-    return `mirage: ${cmd}: ${target}: name reference to an array element is not supported`
+    return `${shellVoice()}${cmd}: ${target}: name reference to an array element: not supported`
   }
   if (!isValidName(target)) {
     return `${shellVoice()}${cmd}: \`${target}': invalid variable name for name reference`

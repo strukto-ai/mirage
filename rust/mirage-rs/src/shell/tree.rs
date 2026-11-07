@@ -401,16 +401,134 @@ pub struct Node {
     pub child_count: u32,
 }
 
+/// One line of a refusal: the row of the input bash reports it on, 0 for
+/// the first, and its text; `quoted` for the input line bash quotes back
+/// after a `syntax error near`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Said {
+    pub row: usize,
+    pub text: Vec<u8>,
+    pub quoted: bool,
+}
+
 /// What bash reports of a line it refuses.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refusal {
     /// Where its first refusal stands in the line as typed.
     pub at: usize,
-    /// Its diagnostic lines as mirage prints them, each ended by a
-    /// newline, the line's own bytes in them as typed.
-    pub message: Vec<u8>,
+    /// Its diagnostic lines, the line's own bytes in them as typed.
+    pub lines: Vec<Said>,
     /// The status the line is refused with.
     pub status: u8,
+}
+
+const UNEXPECTED: &[u8] = b"syntax error near unexpected token `";
+
+impl Refusal {
+    /// The refusal as bash prints it: each line led by `head` (`bash: -c: `,
+    /// `bash: eval: `, a sourced file's `name: `) and the line it stands
+    /// on, the input's first row being line `first`; an unexpected token
+    /// named as bash names it under a UTF-8 locale or not (`utf8`).
+    pub fn worded(&self, head: &[u8], first: usize, utf8: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        for said in &self.lines {
+            out.extend_from_slice(head);
+            out.extend_from_slice(format!("line {}: ", first + said.row).as_bytes());
+            let token = said
+                .text
+                .strip_prefix(UNEXPECTED)
+                .and_then(|rest| rest.strip_suffix(b"'"))
+                .filter(|_| !said.quoted);
+            if said.quoted {
+                out.push(b'`');
+                out.extend_from_slice(&said.text);
+                out.push(b'\'');
+            } else if let Some(token) = token {
+                out.extend_from_slice(UNEXPECTED);
+                out.extend_from_slice(&named(token, utf8));
+                out.push(b'\'');
+            } else {
+                out.extend_from_slice(&said.text);
+            }
+            out.push(b'\n');
+        }
+        out
+    }
+}
+
+/// A token as bash's reader hands it to a syntax error: each `$'...'`
+/// outside double quotes as its value in single quotes, each `$"..."` as
+/// `"..."`, and a `\001` before each `\001` and `\177` no backslash
+/// escapes; the whole in `$'...'` when it does not show as it is.
+fn named(token: &[u8], utf8: bool) -> Vec<u8> {
+    let mut out = Vec::with_capacity(token.len());
+    let mut quote = 0u8;
+    let mut at = 0;
+    while at < token.len() {
+        let byte = token[at];
+        if quote != b'\'' && byte == b'\\' && at + 1 < token.len() {
+            out.extend_from_slice(&token[at..at + 2]);
+            at += 2;
+            continue;
+        }
+        if quote == 0 && byte == b'$' && token.get(at + 1) == Some(&b'\'') {
+            if let Some(end) = super::lex::ansi_c_end(token, at) {
+                let value = crate::interp::escapes::decode_ansi_c(&token[at + 2..end - 1], utf8);
+                single_quoted(&marked(&value), &mut out);
+                at = end;
+                continue;
+            }
+        }
+        if quote == 0 && byte == b'$' && token.get(at + 1) == Some(&b'"') {
+            at += 1;
+            continue;
+        }
+        if quote == 0 && matches!(byte, b'\'' | b'"') {
+            quote = byte;
+        } else if quote == byte {
+            quote = 0;
+        }
+        if matches!(byte, 0x01 | 0x7F) {
+            out.push(0x01);
+        }
+        out.push(byte);
+        at += 1;
+    }
+    if crate::interp::quote::printable(&out, utf8) {
+        out
+    } else {
+        crate::interp::quote::ansi_c(&out, utf8)
+    }
+}
+
+/// `text` with the `\001` bash's reader puts before each `\001` and
+/// `\177`.
+fn marked(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
+    for &byte in text {
+        if matches!(byte, 0x01 | 0x7F) {
+            out.push(0x01);
+        }
+        out.push(byte);
+    }
+    out
+}
+
+/// `value` in single quotes, `'` as `'\''`; a lone `'` as `\'`.
+fn single_quoted(value: &[u8], out: &mut Vec<u8>) {
+    if value == b"'" {
+        out.extend_from_slice(b"\\'");
+        return;
+    }
+    out.push(b'\'');
+    for &byte in value {
+        if byte == b'\'' {
+            out.extend_from_slice(b"'\\''");
+        } else {
+            out.push(byte);
+        }
+    }
+    out.push(b'\'');
 }
 
 /// A parsed program.
