@@ -20,6 +20,7 @@ import {
   du,
   duGeneric,
   excluded,
+  excludedStart,
   inodeCount,
   newestUnder,
   parseFlags,
@@ -156,6 +157,46 @@ describe('du', () => {
     expect(excluded(['x'], 'd/x/b')).toBe(false)
     expect(excluded(['B'], 'd/x/b')).toBe(false)
     expect(excluded([], 'd')).toBe(false)
+  })
+
+  it('starts no mount under an excluded directory', () => {
+    const operand = spec('/a', 'a')
+    expect(excludedStart(['skip'], operand, spec('/a/skip/inner', ''))).toBe(true)
+    expect(excludedStart(['inner'], operand, spec('/a/skip/inner', ''))).toBe(true)
+    expect(excludedStart(['skip'], operand, spec('/a/keep/in', ''))).toBe(false)
+    expect(excludedStart(['a'], operand, spec('/a/keep/in', ''))).toBe(false)
+    expect(excludedStart([], operand, spec('/a/skip/inner', ''))).toBe(false)
+    expect(excludedStart(['./sub'], spec('/data', 'data', '.'), spec('/data/sub/m', ''))).toBe(true)
+    expect(excludedStart(['sub'], spec('/', ''), spec('/sub/m', ''))).toBe(true)
+  })
+
+  it('keeps the stamp nanoseconds in a time format', async () => {
+    const [size, entries] = backend({ '/dir/f': 1 })
+    const parsed = parseFlags({ ...ctx({ time: true }), env: { TIME_STYLE: '+%s.%N' } })
+    if (parsed instanceof IOResult) throw new Error('du refused --time')
+    const out = await du(
+      [spec('/dir', 'dir')],
+      parsed,
+      size,
+      entries,
+      [],
+      undefined,
+      null,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => new Map([['/dir/f', '1970-01-01T00:00:01.123456789+00:00']]),
+    )
+    expect(DEC.decode(out.stdout)).toBe('1\t1.123456789\t/dir\n')
+  })
+
+  it('compares a threshold past 2^53 exactly', async () => {
+    const [size, entries] = backend({ '/dir/f': 9007199254740992 })
+    const parsed = parseFlags(ctx({ threshold: '9007199254740993' }))
+    if (parsed instanceof IOResult) throw new Error('du refused the threshold')
+    const out = await du([spec('/dir', 'dir')], parsed, size, entries)
+    expect(DEC.decode(out.stdout)).toBe('')
   })
 
   it('counts each directory under --inodes, and under -S its own files', () => {
@@ -388,4 +429,20 @@ it.each([
   expect(DEC.decode(out.stderr)).toBe('')
   expect(out.exitCode).toBe(0)
   expect(out.records?.map((record) => record.size ?? null)).toEqual([null, total])
+})
+
+it('du leaves no time of an earlier operand in a later one', async () => {
+  const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+  try {
+    await ws.shell(
+      "printf x > /d/skip; touch -d '2030-01-01' /d/skip; printf y > /d/keep; touch -d '2020-01-01' /d/keep",
+    )
+    const result = await ws.shell('cd /; du --time --time-style=+%Y --exclude=/d/skip d/skip /d')
+    const rows = DEC.decode(result.stdout).trimEnd().split('\n')
+    expect(rows[0]?.split('\t').slice(1)).toEqual(['2030', 'd/skip'])
+    expect(rows.at(-1)?.endsWith('\t/d')).toBe(true)
+    expect(rows.at(-1)).not.toContain('2030')
+  } finally {
+    await ws.close()
+  }
 })

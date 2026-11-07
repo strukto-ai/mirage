@@ -1,4 +1,5 @@
 import logging
+import math
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -14,6 +15,7 @@ from mirage.commands.builtin.utils.formatting import (
     BlockSize,
     block_size_of,
     full_iso_time,
+    nanoseconds_of,
     scaled_size,
 )
 from mirage.commands.builtin.utils.links import mounts_of
@@ -36,7 +38,7 @@ from mirage.types import FileStat, Follow, LineFacts, LsTimeKind, PathSpec
 from mirage.utils.dates import iso_timestamp
 from mirage.utils.fnmatch import fnmatch
 from mirage.utils.key_prefix import mount_prefix_of
-from mirage.utils.path import respell_raw
+from mirage.utils.path import respell_one, respell_raw
 from mirage.view.namespace_view import paths_scoped
 from mirage.view.types import MountView, StatPath
 
@@ -248,6 +250,36 @@ def excluded(patterns: Sequence[str], shown: str) -> bool:
     )
 
 
+def excluded_start(
+    patterns: Sequence[str], operand: PathSpec, start: PathSpec
+) -> bool:
+    """Whether a mount root below an operand is, or lies under, a path
+    ``--exclude`` or ``-X`` leaves out: the walk never reaches it, so it
+    is not measured.
+
+    Args:
+        patterns (Sequence[str]): the patterns.
+        operand (PathSpec): the operand.
+        start (PathSpec): a mount root below it.
+    """
+    base = operand.virtual.rstrip("/")
+    rest = start.virtual[len(base) :].strip("/")
+    if not patterns or not rest:
+        return False
+    steps = rest.split("/")
+    return any(
+        excluded(
+            patterns,
+            respell_one(
+                "/".join([base, *steps[: n + 1]]),
+                operand.virtual,
+                operand.raw_path,
+            ),
+        )
+        for n in range(len(steps))
+    )
+
+
 def cwd_spec(cwd: PathSpec | str) -> PathSpec:
     """Build the operand GNU ``du`` assumes when the line names none.
 
@@ -450,12 +482,13 @@ def _stamp(modified: str | None, style: str) -> str:
     """
     if style == "full-iso":
         return full_iso_time(modified)
-    seconds = iso_timestamp(modified) or 0.0
-    when = datetime.fromtimestamp(seconds, timezone.utc)
+    seconds = iso_timestamp(modified)
+    when = datetime.fromtimestamp(math.floor(seconds or 0), timezone.utc)
     fmt = {"long-iso": "%Y-%m-%d %H:%M", "iso": "%Y-%m-%d"}.get(
         style, style[1:]
     )
-    return gnu_strftime(when, fmt)
+    fraction = 0 if seconds is None else nanoseconds_of(modified)
+    return gnu_strftime(when, fmt, nanosecond=fraction)
 
 
 def _kept(size: int, flags: DuFlags) -> bool:

@@ -143,3 +143,45 @@ async def test_a_mount_below_a_failed_part_counts_where_the_walk_reaches(
         assert result.exit_code == 1
     finally:
         await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fn", [_measured, _unmeasured])
+async def test_a_mount_under_an_excluded_path_is_not_measured(fn):
+    ws = await _workspace(fn)
+    try:
+        result = await ws.shell("du --exclude=n /a")
+        assert (await result.materialize_stdout()).decode() == (
+            "5\t/a/d\n5\t/a\n"
+        )
+        assert result.exit_code == 0
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_the_one_walk_keeps_the_patterns_read_from_stdin():
+    ws = await _workspace(_unmeasured)
+    try:
+        result = await ws.shell("printf 'f\\n' | du -c -X - /a")
+        rows = (await result.materialize_stdout()).decode()
+        assert "777" not in rows
+        assert "0\t/a/d\n" in rows
+        assert rows.endswith("3\t/a\n3\ttotal\n")
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_time_style_reaches_a_line_across_mounts():
+    ws = await _workspace(_measured)
+    try:
+        result = await ws.shell("export TIME_STYLE=+%Y; du --time -s /a/d /b")
+        rows = (await result.materialize_stdout()).decode().splitlines()
+        assert [row.split("\t")[::2] for row in rows] == [
+            ["5", "/a/d"],
+            ["2", "/b"],
+        ]
+        assert all(len(row.split("\t")[1]) == 4 for row in rows)
+    finally:
+        await ws.close()

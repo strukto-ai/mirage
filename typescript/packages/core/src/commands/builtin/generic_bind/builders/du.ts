@@ -64,7 +64,8 @@ export class DuTally {
   // Under -L, each link that leads nowhere, with the strerror GNU adds for
   // a chain that loops.
   readonly inaccessible: [string, string | null][] = []
-  // Under --time, each entry's time by virtual path.
+  // Under --time, each entry's time by virtual path; like directories, one
+  // operand's walk.
   readonly times = new Map<string, string>()
 
   // The mount table the limits come from; the --exclude and -X patterns, an
@@ -287,6 +288,7 @@ async function walkOperand(
   entries: [string, number][] | null,
 ): Promise<number> {
   tally.directories.length = 0
+  tally.times.clear()
   const scan = new WalkBudget(path, tally.mounts)
   const state = follow === null ? null : follow.operand(path)
   const skip =

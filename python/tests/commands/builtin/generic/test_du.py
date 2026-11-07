@@ -6,6 +6,7 @@ from mirage.commands.builtin.generic.du import (
     du,
     du_generic,
     excluded,
+    excluded_start,
     inode_count,
     newest_under,
     parse_flags,
@@ -167,6 +168,35 @@ def test_an_exclude_matches_the_path_or_a_part_after_a_slash():
     assert not excluded(["x"], "d/x/b")
     assert not excluded(["B"], "d/x/b")
     assert not excluded([], "d")
+
+
+def test_a_mount_under_an_excluded_directory_is_no_start():
+    operand = _spec("/a", "a")
+    assert excluded_start(["skip"], operand, _spec("/a/skip/inner", ""))
+    assert excluded_start(["inner"], operand, _spec("/a/skip/inner", ""))
+    assert not excluded_start(["skip"], operand, _spec("/a/keep/in", ""))
+    assert not excluded_start(["a"], operand, _spec("/a/keep/in", ""))
+    assert not excluded_start([], operand, _spec("/a/skip/inner", ""))
+    dot = _spec("/data", "data", ".")
+    assert excluded_start(["./sub"], dot, _spec("/data/sub/m", ""))
+    assert excluded_start(["sub"], _spec("/", ""), _spec("/sub/m", ""))
+
+
+@pytest.mark.asyncio
+async def test_a_time_format_keeps_the_stamp_nanoseconds():
+    compute_size, compute_entries = _make_backend({"/dir/f": 1})
+    parsed = parse_flags(
+        Context(flags={"time": True}, env={"TIME_STYLE": "+%s.%N"})
+    )
+    assert isinstance(parsed, DuFlags)
+    out = await du(
+        [_spec("/dir", "dir")],
+        compute_size=compute_size,
+        compute_entries=compute_entries,
+        flags=parsed,
+        times=lambda: {"/dir/f": "1970-01-01T00:00:01.123456789+00:00"},
+    )
+    assert out.stdout.decode() == "1\t1.123456789\t/dir\n"
 
 
 def test_inodes_count_each_directory_and_under_s_its_own_files():
@@ -441,3 +471,22 @@ async def test_du_large_byte_totals_keep_exact_units(unit, expected):
     assert out.exit_code == 0
     assert out.records is not None
     assert [record.size for record in out.records] == [None, total]
+
+
+@pytest.mark.asyncio
+async def test_an_earlier_operand_leaves_no_time_in_a_later_one():
+    ws = Workspace({"/d": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell(
+            "printf x > /d/skip; touch -d '2030-01-01' /d/skip;"
+            " printf y > /d/keep; touch -d '2020-01-01' /d/keep"
+        )
+        result = await ws.shell(
+            "cd /; du --time --time-style=+%Y --exclude=/d/skip d/skip /d"
+        )
+        rows = (await result.stdout_str()).splitlines()
+        assert rows[0].split("\t")[1:] == ["2030", "d/skip"]
+        assert rows[-1].endswith("\t/d")
+        assert "2030" not in rows[-1]
+    finally:
+        await ws.close()

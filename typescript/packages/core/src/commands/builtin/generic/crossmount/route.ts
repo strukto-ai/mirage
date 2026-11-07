@@ -116,6 +116,7 @@ export async function handleCrossMount(
         undefined,
         false,
         follow,
+        sessionView?.snapshot(),
       )
     }
     const cmd = cmdName as Cmd

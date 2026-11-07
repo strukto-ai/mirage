@@ -83,7 +83,7 @@ class DuTally:
         clock (LsTimeKind | None): under ``--time``, the clock each
             entry's time is read from.
         times (dict[str, str]): each entry's time by virtual path, under
-            ``--time``.
+            ``--time``; like ``directories``, one operand's walk.
     """
 
     mounts: MountView | None = None
@@ -345,6 +345,7 @@ async def _walk_operand(
             size under its name; None for a total alone.
     """
     tally.directories.clear()
+    tally.times.clear()
     scan = WalkBudget(path, tally.mounts)
     state = follow.operand(path) if follow is not None else None
     skip = partial(_skipped, tally.excludes, path) if tally.excludes else None

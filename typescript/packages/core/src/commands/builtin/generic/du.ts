@@ -21,10 +21,16 @@ import { pathsScoped } from '../../../view/namespace_view.ts'
 import { ZERO_LENGTH_NAME } from '../../../errors/render.ts'
 import { fsStrerror, isDotWalkError, isMissingPath } from '../../../errors/fs.ts'
 import { mountPrefixOf } from '../../../utils/key_prefix.ts'
-import { respellRaw } from '../../../utils/path.ts'
+import { respellOne, respellRaw } from '../../../utils/path.ts'
 import { lstripSlash, rstripSlash, stripSlash } from '../../../utils/slash.ts'
 import { formatRecords } from '../utils/output.ts'
-import { fullIsoTime, scaledSize, blockSizeOf, type BlockSize } from '../utils/formatting.ts'
+import {
+  fullIsoTime,
+  nanosecondsOf,
+  scaledSize,
+  blockSizeOf,
+  type BlockSize,
+} from '../utils/formatting.ts'
 import { gnuStrftime } from '../utils/strftime.ts'
 import { isoTimestamp } from '../../../utils/dates.ts'
 import { fnmatch } from '../../../utils/fnmatch.ts'
@@ -74,9 +80,10 @@ export interface DuFlags {
   inodes?: boolean
   /**
    * -t/--threshold, print a row only at or above this size, or at or below its
-   * magnitude when negative; the `total` row always prints.
+   * magnitude when negative; the `total` row always prints. A bigint, so a
+   * limit past 2^53 compares exactly.
    */
-  threshold?: number | null
+  threshold?: bigint | null
   /** --time, the clock of the time column; each row shows its tree's newest. */
   time?: LsTimeKind | null
   /** --time-style or TIME_STYLE: full-iso, long-iso, iso or +FORMAT. */
@@ -120,10 +127,11 @@ function line(size: number, flags: DuFlags, label: string, newest?: Newest): str
 // epoch.
 function stamp(modified: string | null, style: string): string {
   if (style === 'full-iso') return fullIsoTime(modified)
-  const when = new Date((isoTimestamp(modified) ?? 0) * 1000)
+  const seconds = isoTimestamp(modified)
+  const when = new Date(Math.floor(seconds ?? 0) * 1000)
   const fmt =
     style === 'long-iso' ? '%Y-%m-%d %H:%M' : style === 'iso' ? '%Y-%m-%d' : style.slice(1)
-  return gnuStrftime(when, fmt, UTC_ZONE)
+  return gnuStrftime(when, fmt, UTC_ZONE, seconds === null ? 0 : nanosecondsOf(modified))
 }
 
 // Whether -t lets a row print; `size` is its bytes, or its count under
@@ -131,7 +139,7 @@ function stamp(modified: string | null, style: string): string {
 function kept(size: number, flags: DuFlags): boolean {
   const limit = flags.threshold ?? null
   if (limit === null) return true
-  return limit >= 0 ? size >= limit : size <= -limit
+  return limit >= 0n ? BigInt(size) >= limit : BigInt(size) <= -limit
 }
 
 // One row as -t lets it print: the line, or none.
@@ -198,6 +206,28 @@ export function excluded(patterns: readonly string[], shown: string): boolean {
 }
 
 /**
+ * Whether a mount root below an operand is, or lies under, a path --exclude
+ * or -X leaves out: the walk never reaches it, so it is not measured.
+ * Mirrors Python's `excluded_start`.
+ */
+export function excludedStart(
+  patterns: readonly string[],
+  operand: PathSpec,
+  start: PathSpec,
+): boolean {
+  const base = rstripSlash(operand.virtual)
+  const rest = stripSlash(start.virtual.slice(base.length))
+  if (patterns.length === 0 || rest === '') return false
+  const steps = rest.split('/')
+  return steps.some((_, n) =>
+    excluded(
+      patterns,
+      respellOne([base, ...steps.slice(0, n + 1)].join('/'), operand.virtual, operand.rawPath),
+    ),
+  )
+}
+
+/**
  * du's options, `--max-depth` and its conflicts with `-s` and `-a` read by
  * mirage-rs before any operand is resolved: the flags, or du's refusal. The
  * time style is read only under --time, as GNU reads it, from --time-style or
@@ -252,7 +282,7 @@ export function parseFlags(ctx: Context): DuFlags | IOResult {
     maxDepth: depth,
     ...(warning === null ? {} : { warning }),
     inodes: fl.asBool('inodes'),
-    threshold: threshold === null ? null : Number(threshold),
+    threshold: threshold === null ? null : BigInt(threshold),
     time: !timed ? null : time !== null ? (TIMES[time] ?? 'mtime') : 'mtime',
     timeStyle: shape ?? 'long-iso',
     null: fl.asBool('null'),

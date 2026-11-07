@@ -27,7 +27,12 @@ from mirage.commands.builtin.generic.crossmount.types import (
     RunSingle,
 )
 from mirage.commands.builtin.generic.crossmount.utils import file_stream_op
-from mirage.commands.builtin.generic.du import du, leaves_of, read_flags
+from mirage.commands.builtin.generic.du import (
+    du,
+    excluded_start,
+    leaves_of,
+    read_flags,
+)
 from mirage.commands.builtin.generic_bind.dispatch import run_dispatch
 from mirage.commands.builtin.utils.links import mount_view
 from mirage.commands.builtin.utils.paths import virtual_key
@@ -61,6 +66,7 @@ async def run_du(
     stdin: ByteSource | None = None,
     nested: bool = False,
     follow: FollowOperands | None = None,
+    env: dict[str, str] | None = None,
 ) -> CrossResult:
     """Render du over operands spanning mounts from each mount's own du.
 
@@ -73,7 +79,8 @@ async def run_du(
     that succeeds without a measurement (a du not built on
     ``du_generic``) leaves the line to the one dispatcher walk. The
     ``-X`` files are read here, once, and every mount is handed their
-    patterns as ``--exclude``, so a list read from stdin reaches them all.
+    patterns as ``--exclude``, so a list read from stdin reaches them all,
+    and a mount below a path they leave out is never measured.
 
     Args:
         paths (list[PathSpec]): Operands in command-line order.
@@ -90,20 +97,20 @@ async def run_du(
             operand's run composes its own.
         follow (FollowOperands | None): The line's operand resolution,
             which the one walk's globs take.
+        env (dict[str, str] | None): The command's environment, which
+            ``TIME_STYLE`` is read from.
     """
     rendering = await read_flags(
-        Context(flags=flags), stdin_stream(file_stream_op(dispatch), stdin)
+        Context(flags=flags, env=env),
+        stdin_stream(file_stream_op(dispatch), stdin),
     )
     if isinstance(rendering, IOResult):
         return None, rendering
     bounded = FlagView(flags, spec=SPECS["du"]).as_bool("one_file_system")
-    measuring = {
-        k: v
-        for k, v in flags.items()
-        if k not in RENDERING and k != "exclude_from"
-    }
+    resolved = {k: v for k, v in flags.items() if k != "exclude_from"}
     if rendering.excludes:
-        measuring["exclude"] = list(rendering.excludes)
+        resolved["exclude"] = list(rendering.excludes)
+    measuring = {k: v for k, v in resolved.items() if k not in RENDERING}
     # Each start is then one mount's own part, and keeps only what that
     # mount owns: a part walked through the dispatcher reaches the mounts
     # below it too, which measure themselves.
@@ -112,6 +119,7 @@ async def run_du(
         (index, start)
         for index, path in enumerate(paths)
         for start in (mount_starts(path, vfs) if mounts else [path])
+        if start is path or not excluded_start(rendering.excludes, path, start)
     ]
 
     async def measure(step: tuple[int, PathSpec]) -> IOResult:
@@ -127,12 +135,13 @@ async def run_du(
             DISPATCH_BUILDERS["du"],
             paths,
             texts,
-            flags,
+            resolved,
             dispatch,
             cwd,
             vfs,
             stdin,
             follow=follow,
+            env=env,
         )
     kept = await reached(
         paths, plan, [io.exit_code != 0 for io in ios], dispatch

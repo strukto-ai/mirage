@@ -222,6 +222,15 @@ function lsTimeString(modified: string | null | undefined, findRule = false): st
 const FRACTION = /\d\d:\d\d:\d\d\.(\d+)/
 
 /**
+ * The nanoseconds past the second a timestamp spells, 0 when it spells none:
+ * a `Date` keeps only milliseconds. Mirrors Python's `nanoseconds_of`.
+ */
+export function nanosecondsOf(modified: string | null | undefined): number {
+  const digits = FRACTION.exec(modified ?? '')?.[1]
+  return digits === undefined ? 0 : Number(digits.padEnd(9, '0').slice(0, 9))
+}
+
+/**
  * A timestamp in GNU's full-iso layout, `%Y-%m-%d %H:%M:%S.%N %z`. The nine
  * fraction digits are the ones the stamp spells, so both hosts print what the
  * backend recorded rather than what their clock type keeps (a Python

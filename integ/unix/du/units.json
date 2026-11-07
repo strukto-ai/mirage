@@ -240,7 +240,7 @@
       ]
     },
     {
-      "id": "du_exclude_remains_a_documented_divergence",
+      "id": "du_exclude_keeps_an_unmatched_operand",
       "seq": 110000017,
       "targets": [
         "ram",
@@ -269,9 +269,9 @@
       ],
       "command": "du --exclude=x /data/a.txt",
       "expect": {
-        "exit": 1,
-        "stdout": "",
-        "stderr": "du: unrecognized option '--exclude=x'\nTry 'du --help' for more information.\n"
+        "exit": 0,
+        "stdout": "24\t/data/a.txt\n",
+        "stderr": ""
       },
       "flags": [
         "exclude"

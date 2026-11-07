@@ -255,6 +255,17 @@ def _ls_time_string(modified: str | None, *, find_rule: bool = False) -> str:
     return f"{month} {day}  {dt.year}"
 
 
+def nanoseconds_of(modified: str | None) -> int:
+    """The nanoseconds past the second a timestamp spells, 0 when it
+    spells none: a ``datetime`` keeps only microseconds.
+
+    Args:
+        modified (str | None): the ISO timestamp.
+    """
+    match = _FRACTION.search(modified or "")
+    return int(match.group(1).ljust(9, "0")[:9]) if match else 0
+
+
 def full_iso_time(modified: str | None, zone: tzinfo | None = None) -> str:
     """A timestamp in GNU's full-iso layout, ``%Y-%m-%d %H:%M:%S.%N %z``.
 

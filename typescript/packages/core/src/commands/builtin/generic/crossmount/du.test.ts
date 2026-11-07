@@ -128,3 +128,44 @@ it.each([
     await ws.close()
   }
 })
+
+it.each([
+  ['measured', measured],
+  ['unmeasured', unmeasured],
+])('measures no mount under an excluded path: %s', async (_, fn) => {
+  const ws = workspace(fn)
+  try {
+    const result = await ws.shell('du --exclude=n /a')
+    expect(DEC.decode(result.stdout)).toBe('5\t/a/d\n5\t/a\n')
+    expect(result.exitCode).toBe(0)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('keeps the patterns read from stdin in the one walk', async () => {
+  const ws = workspace(unmeasured)
+  try {
+    const rows = DEC.decode((await ws.shell("printf 'f\\n' | du -c -X - /a")).stdout)
+    expect(rows).not.toContain('777')
+    expect(rows).toContain('0\t/a/d\n')
+    expect(rows.endsWith('3\t/a\n3\ttotal\n')).toBe(true)
+  } finally {
+    await ws.close()
+  }
+})
+
+it('reads TIME_STYLE on a line across mounts', async () => {
+  const ws = workspace(measured)
+  try {
+    const result = await ws.shell('export TIME_STYLE=+%Y; du --time -s /a/d /b')
+    const rows = DEC.decode(result.stdout).trimEnd().split('\n')
+    expect(rows.map((row) => row.split('\t').filter((_, i) => i !== 1))).toEqual([
+      ['5', '/a/d'],
+      ['2', '/b'],
+    ])
+    expect(rows.every((row) => row.split('\t')[1]?.length === 4)).toBe(true)
+  } finally {
+    await ws.close()
+  }
+})
