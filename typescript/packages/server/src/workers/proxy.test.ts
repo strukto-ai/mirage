@@ -189,12 +189,25 @@ describe('WorkerProxy', () => {
     const settle = d.pool.claim('x', building)
     expect((await call(`${d.url}/v1/workspaces/n/clone`, 'POST', { id: 'x' })).status).toBe(409)
     settle()
-    expect((await call(`${d.url}/v1/workspaces/n/close`, 'POST')).status).toBe(200)
+    expect((await call(`${d.url}/v1/workspaces/n/stop`, 'POST')).status).toBe(200)
     expect((await call(`${d.url}/v1/workspaces/a/clone`, 'POST', { id: 'n' })).status).toBe(409)
     expect((await call(`${d.url}/v1/workspaces`, 'POST', { id: 'n', config: CONFIG })).status).toBe(
       201,
     )
     expect(ids(d)[1]).toContain('n')
+  })
+
+  it('sends a start to the worker that held the id', async () => {
+    d = await daemon()
+    placeOn(1)
+    expect((await call(`${d.url}/v1/workspaces`, 'POST', { id: 'n', config: CONFIG })).status).toBe(
+      201,
+    )
+    expect((await call(`${d.url}/v1/workspaces/n/stop`, 'POST')).status).toBe(200)
+    expect((await call(`${d.url}/v1/health`, 'GET')).json).toMatchObject({ workspaces: 0 })
+    expect((await call(`${d.url}/v1/workspaces/n/start`, 'POST')).status).toBe(200)
+    expect(ids(d)).toEqual([[], ['n']])
+    expect((await call(`${d.url}/v1/health`, 'GET')).json).toMatchObject({ workspaces: 1 })
   })
 
   it('sends creates of one id racing each other to one worker', async () => {
@@ -220,7 +233,7 @@ describe('WorkerProxy', () => {
     expect(retry.status).toBe(200)
     expect((await call(`${d.url}/v1/ready`, 'GET')).json).toEqual({ status: 'full' })
     expect((await call(`${d.url}/v1/workspaces/${String(kept)}`, 'DELETE')).status).toBe(200)
-    expect((await call(`${d.url}/v1/workspaces/${String(other)}/close`, 'POST')).status).toBe(200)
+    expect((await call(`${d.url}/v1/workspaces/${String(other)}/stop`, 'POST')).status).toBe(200)
     expect((await call(`${d.url}/v1/health`, 'GET')).json).toMatchObject({ workspaces: 0 })
     expect((await call(`${d.url}/v1/ready`, 'GET')).json).toEqual({ status: 'ready' })
   })

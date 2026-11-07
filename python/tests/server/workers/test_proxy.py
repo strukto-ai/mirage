@@ -187,8 +187,8 @@ async def test_a_create_under_a_held_id_or_config_workspace_id_goes_to_its_worke
         )
         assert building.status_code == 409
         settle()
-        closed = await d.client.post("/v1/workspaces/n/close")
-        assert closed.status_code == 200
+        stopped = await d.client.post("/v1/workspaces/n/stop")
+        assert stopped.status_code == 200
         held = await d.client.post("/v1/workspaces/a/clone", json={"id": "n"})
         assert held.status_code == 409
         again = await d.client.post(
@@ -196,6 +196,24 @@ async def test_a_create_under_a_held_id_or_config_workspace_id_goes_to_its_worke
         )
         assert again.status_code == 201
         assert "n" in _ids(d)[1]
+
+
+@pytest.mark.asyncio
+async def test_a_start_goes_to_the_worker_that_held_the_id(monkeypatch):
+    _place_on(monkeypatch, 1)
+    async with _daemon() as d:
+        made = await d.client.post(
+            "/v1/workspaces", json={"id": "n", "config": CONFIG}
+        )
+        assert made.status_code == 201
+        assert (
+            await d.client.post("/v1/workspaces/n/stop")
+        ).status_code == 200
+        assert (await d.client.get("/v1/health")).json()["workspaces"] == 0
+        started = await d.client.post("/v1/workspaces/n/start")
+        assert started.status_code == 200, started.text
+        assert _ids(d) == [[], ["n"]]
+        assert (await d.client.get("/v1/health")).json()["workspaces"] == 1
 
 
 @pytest.mark.asyncio
@@ -239,8 +257,8 @@ async def test_max_workspaces_holds_across_workers_and_lets_a_retry_through():
         assert (
             await d.client.delete(f"/v1/workspaces/{kept}")
         ).status_code == 200
-        closed = await d.client.post(f"/v1/workspaces/{other}/close")
-        assert closed.status_code == 200
+        stopped = await d.client.post(f"/v1/workspaces/{other}/stop")
+        assert stopped.status_code == 200
         assert (await d.client.get("/v1/health")).json()["workspaces"] == 0
         assert (await d.client.get("/v1/ready")).json() == {"status": "ready"}
 

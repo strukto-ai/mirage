@@ -31,7 +31,7 @@ import { AUTH_PROBE, UNAVAILABLE } from './constants.ts'
 import { answered, discard, headersFor, passable, pathParts, sendAnswer, sendJson } from './http.ts'
 import { idOf, peek } from './peek.ts'
 import type { WorkerPool } from './pool.ts'
-import type { Answer } from './types.ts'
+import type { Answer, Peeked } from './types.ts'
 import type { Worker } from './worker.ts'
 
 export interface WorkerProxyOptions {
@@ -165,16 +165,19 @@ export class WorkerProxy {
       return this.pass(first, req, res)
     }
     if (id === 'load' && parts.length === 3 && method === 'POST') return this.create(req, res, null)
+    if (action === 'start' && parts.length === 4 && method === 'POST') {
+      return this.create(req, res, null, id)
+    }
     const home = pool.home(id)
     if (home === undefined || home.dead) return this.pass(first, req, res)
     if (action === 'clone' && parts.length === 4 && method === 'POST') {
       return this.create(req, res, home)
     }
     const deletes = action === undefined && method === 'DELETE'
-    const closes = action === 'close' && parts.length === 4 && method === 'POST'
-    if (deletes || closes) {
+    const stops = action === 'stop' && parts.length === 4 && method === 'POST'
+    if (deletes || stops) {
       const answer = await this.fetch(home, req, null, true)
-      // A close or delete that fails in the worker may still have removed
+      // A stop or delete that fails in the worker may still have removed
       // the workspace. A refusal (4xx) leaves it, and may hide it from this
       // caller, so only a 5xx is checked.
       const gone =
@@ -191,13 +194,15 @@ export class WorkerProxy {
   }
 
   /**
-   * A create, load or clone: to the worker holding or creating the id it
-   * names, else to `source`'s for a clone, else to a worker at random.
+   * A create, load, clone or start: to the worker holding or creating the id
+   * it names, else to `source`'s for a clone, else to a worker at random. A
+   * start names its id in the path, `started`, and sends no body.
    */
   private async create(
     req: IncomingMessage,
     res: ServerResponse,
     source: Worker | null,
+    started?: string,
   ): Promise<void> {
     const { pool } = this.options
     if (this.draining) {
@@ -211,7 +216,10 @@ export class WorkerProxy {
         sendAnswer(res, refused)
         return
       }
-      const peeked = await peek(req)
+      const peeked: Peeked =
+        started === undefined
+          ? await peek(req)
+          : { head: Buffer.alloc(0), more: false, id: started, lost: false, twice: false }
       if (peeked.lost) {
         sendJson(res, 413, {
           detail: `the workspace id must come in the body's first ${String(MAX_REQUEST_PART)} bytes`,
@@ -225,7 +233,7 @@ export class WorkerProxy {
       const home = peeked.id === undefined ? undefined : pool.home(peeked.id)
       const live = home?.live.has(peeked.id ?? '') === true
       // A retry of a live id goes to its worker even when full, but holds a
-      // slot too: the worker may close that id first and build it again.
+      // slot too: the worker may stop that id first and build it again.
       if (!live && !this.hasRoom(1)) {
         sendJson(res, 503, {
           detail: `server is at max_workspaces (${String(this.options.maxWorkspaces)})`,
@@ -238,7 +246,7 @@ export class WorkerProxy {
         return
       }
       // A clone builds on its source's worker, so an id another worker
-      // holds, even closed, stays there: a create reaches it.
+      // holds, even stopped, stays there: a create reaches it.
       if (source !== null && home?.dead === false && home !== source) {
         const detail = live
           ? `workspace id already exists: ${String(peeked.id)}`
@@ -259,7 +267,7 @@ export class WorkerProxy {
       this.cancelIdle()
       try {
         const answer = await this.fetch(worker, req, peeked.head, peeked.more, true)
-        if (answer.status === 201) {
+        if (answer.status === 201 || (started !== undefined && answer.status === 200)) {
           const made = idOf(answer.body)
           if (made !== undefined) pool.adopt(made, worker)
         }

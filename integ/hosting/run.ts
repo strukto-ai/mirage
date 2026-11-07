@@ -498,9 +498,9 @@ async function run(
     await sleeping.answer
     await request('POST', '/v1/workspaces/a/shell?session_id=other', { command: 'sleep 30 &' })
     assert.deepEqual(await request('POST', '/v1/workspaces/a/sessions/other/kill'), { killed: 1 })
-    await request('POST', '/v1/workspaces/loaded/close')
+    await request('POST', '/v1/workspaces/loaded/stop')
     await request('GET', '/v1/workspaces/loaded', undefined, 404)
-    console.log(`ok ${host}/lifecycle: session cancel, kill, close`)
+    console.log(`ok ${host}/lifecycle: session cancel, kill, stop`)
   } catch (error) {
     console.error(errors)
     throw error

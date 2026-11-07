@@ -370,43 +370,30 @@ export function registerWorkspaceCommands(program: Command): Command {
       emit(deleted, (d) => `Deleted workspace ${d.id}.`)
     })
 
-  ws.command('close')
-    .description('Stop a workspace and keep its state for the same id.')
-    .argument('<id>')
+  ws.command('stop')
+    .description('Stop a workspace and keep its state for start.')
+    .argument('<id>', 'Workspace id.')
     .action(async (id: string) => {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
-      const closed = (await handleResponse(
-        await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/close`),
+      const stopped = (await handleResponse(
+        await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/stop`),
       )) as { id: string }
-      header(`closed ${id}`)
-      emit(closed, (d) => `Closed workspace ${d.id}.`)
+      header(`stopped ${id}`)
+      emit(stopped, (d) => `Stopped workspace ${d.id}.`)
     })
 
-  ws.command('cancel')
-    .description('Cancel the running and queued commands of every session.')
-    .argument('<id>')
+  ws.command('start')
+    .description('Start a stopped workspace from the config it was created with.')
+    .argument('<id>', 'Workspace id.')
     .action(async (id: string) => {
       const c = makeClient()
       await c.ensureRunning({ allowSpawn: false })
-      emit(
-        await handleResponse(
-          await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/cancel`),
-        ),
-      )
-    })
-
-  ws.command('kill')
-    .description('Kill the background jobs of every session.')
-    .argument('<id>')
-    .action(async (id: string) => {
-      const c = makeClient()
-      await c.ensureRunning({ allowSpawn: false })
-      emit(
-        await handleResponse(
-          await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/kill`),
-        ),
-      )
+      const started = (await handleResponse(
+        await c.request('POST', `/v1/workspaces/${encodeURIComponent(id)}/start`),
+      )) as { id: string }
+      header(`started ${id}`)
+      emit(started, (d) => `Started workspace ${d.id}.`)
     })
 
   ws.command('set-profile')

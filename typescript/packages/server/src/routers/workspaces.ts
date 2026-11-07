@@ -386,6 +386,124 @@ async function withSaved(
   }
 }
 
+/**
+ * Build `cfg` as workspace `wid`, or answer the live one built from it, and
+ * keep the config for `start`; `status` is the answer for a build. Builds of
+ * one id run one at a time, so a second of the same config answers what the
+ * first built, and one of another config is refused at once. A held id is
+ * answered or refused before its secrets resolve or its mounts build, and
+ * before a second Workspace opens the live one's state; one being deleted or
+ * stopped is refused, since its state is about to go or is still being
+ * written. The server's policies judge the config as written before any of
+ * it is built. Mirrors Python's `_open_workspace`.
+ */
+function openWorkspace(
+  deps: WorkspaceRoutesDeps,
+  req: RouteRequest,
+  reply: RouteReply,
+  wid: string,
+  cfg: WorkspaceConfigRaw,
+  config: Record<string, JsonValue>,
+  status: number,
+): Promise<unknown> {
+  const digest = configDigest(config)
+  return deps.registry.creating(wid, digest, async (admitted) => {
+    if (!admitted) {
+      return answer(reply, 409, { detail: `workspace id already exists: ${wid}` })
+    }
+    if (deps.registry.has(wid) || deps.registry.removing(wid)) {
+      const held = deps.registry.visible(wid, req.account)
+      if (held === null || deps.registry.removing(wid) || held.configDigest !== digest) {
+        return answer(reply, 409, { detail: `workspace id already exists: ${wid}` })
+      }
+      return answer(reply, 200, await makeDetail(held))
+    }
+    const refusal = await admit(deps, req, reply, config)
+    if (refusal !== null) return refusal
+    const saved = await withSaved(deps, config, cfg)
+    if ('detail' in saved) return answer(reply, saved.status, { detail: saved.detail })
+    return claimed(deps, req, reply, wid, async () => {
+      let args: Awaited<ReturnType<ServerHost['workspaceArgs']>>
+      try {
+        // Mounts that answer as they are built, and the secrets the
+        // config names, go out under the network the workspace will be
+        // held to.
+        args = await runWithNetwork(deps.registry.ruleFor(cfg.network), () =>
+          deps.host.workspaceArgs(saved.cfg),
+        )
+      } catch (e) {
+        if (
+          e instanceof SecretsError ||
+          e instanceof z.ZodError ||
+          e instanceof VFSConfigError ||
+          e instanceof MCPToolsError
+        ) {
+          // A `secrets:` block the host cannot resolve is the caller's
+          // config, not a backend that would not answer. Resolution moved
+          // into configToWorkspaceArgs, so without this the same body that
+          // python's create route refuses with 400 got a 502 here.
+          return answer(reply, 400, { detail: e.message })
+        }
+        return answer(reply, 502, { detail: `VFS build failed: ${(e as Error).message}` })
+      }
+      // The Mounts ride through whole; see workspace_config.ts.
+      const vfsMap: Record<string, MountSpec> = { ...args.mounts }
+      let ws: Workspace
+      try {
+        // Every option the config produced rides through: enumerating
+        // them by hand silently dropped `clis` and `guards`, so a yaml
+        // clis block parsed, validated, and then installed nothing.
+        // Only identity and the store default are the daemon's to
+        // decide.
+        ws = new deps.host.Workspace(vfsMap, {
+          ...args.options,
+          workspaceId: wid,
+          // Daemon default is disk (a created workspace survives restart
+          // with zero infrastructure, like git init); the library default
+          // stays ram. An explicit store always wins.
+          store: args.options.store ?? deps.host.stateStore(),
+          ceilings: deps.registry.ceilings,
+          // Whichever of the two built it, no sibling workspace shares
+          // it, so this workspace is the one that closes it.
+          ownsStore: true,
+        })
+      } catch (e) {
+        return answer(reply, 400, { detail: (e as Error).message })
+      }
+      // Under max_sessions the sessions its store saved are loaded, and
+      // more than the cap refuse the create.
+      const cap = deps.registry.maxSessions
+      if (cap !== null) {
+        let past: string | null
+        try {
+          await ws.ensureSessionsLoaded()
+          past = pastSessionCap(ws, cap, 'the saved workspace')
+        } catch (e) {
+          await ws.close()
+          throw e
+        }
+        if (past !== null) {
+          await ws.close()
+          return answer(reply, 400, { detail: past })
+        }
+      }
+      let entry
+      try {
+        for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {
+          await deps.host.mountKernel(ws, prefix, mountpoint, backend)
+        }
+        await deps.registry.saveConfig(wid, config)
+        entry = deps.registry.add(ws, wid, req.account)
+        entry.configDigest = digest
+      } catch (e) {
+        await ws.close()
+        return answer(reply, 409, { detail: (e as Error).message })
+      }
+      return answer(reply, status, await makeDetail(entry))
+    })
+  })
+}
+
 export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDeps): void {
   app.post<{ Body: CreateWorkspaceRequest; Querystring: { explain?: string } }>(
     '/v1/workspaces',
@@ -410,112 +528,14 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       }
       // The registry id and the state-store scope must be the same identity,
       // so resolve it before construction: explicit REST id, then the
-      // config's workspaceId, then a fresh mint. A held id is answered or
-      // refused here, before its secrets resolve or its mounts build, and
-      // before a second Workspace opens the live one's state: creating is
-      // idempotent for one config, so an id held by a workspace created
-      // from an identical config answers it with 200, and an id held by
-      // anything else, or by one being deleted, is refused. Creates of one
-      // id run one at a time, so a second of the same config answers what
-      // the first built, and one of another config is refused at once.
+      // config's workspaceId, then a fresh mint. Creating is idempotent for
+      // one config, so an id held by a workspace created from an identical
+      // config answers it with 200, and an id held by anything else is
+      // refused.
       const wid = req.body.id ?? cfg.workspaceId ?? newWorkspaceId()
       const bad = refuseId(reply, wid, deps.host.reservedIds)
       if (bad !== null) return bad
-      const digest = configDigest(config)
-      return deps.registry.creating(wid, digest, async (admitted) => {
-        if (!admitted) {
-          return answer(reply, 409, { detail: `workspace id already exists: ${wid}` })
-        }
-        if (deps.registry.has(wid) || deps.registry.removing(wid)) {
-          const held = deps.registry.visible(wid, req.account)
-          if (held === null || deps.registry.removing(wid) || held.configDigest !== digest) {
-            return answer(reply, 409, { detail: `workspace id already exists: ${wid}` })
-          }
-          return answer(reply, 200, await makeDetail(held))
-        }
-        const refusal = await admit(deps, req, reply, config)
-        if (refusal !== null) return refusal
-        const saved = await withSaved(deps, config, cfg)
-        if ('detail' in saved) return answer(reply, saved.status, { detail: saved.detail })
-        return claimed(deps, req, reply, wid, async () => {
-          let args: Awaited<ReturnType<ServerHost['workspaceArgs']>>
-          try {
-            // Mounts that answer as they are built, and the secrets the
-            // config names, go out under the network the workspace will be
-            // held to.
-            args = await runWithNetwork(deps.registry.ruleFor(cfg.network), () =>
-              deps.host.workspaceArgs(saved.cfg),
-            )
-          } catch (e) {
-            if (
-              e instanceof SecretsError ||
-              e instanceof z.ZodError ||
-              e instanceof VFSConfigError ||
-              e instanceof MCPToolsError
-            ) {
-              // A `secrets:` block the host cannot resolve is the caller's
-              // config, not a backend that would not answer. Resolution moved
-              // into configToWorkspaceArgs, so without this the same body that
-              // python's create route refuses with 400 got a 502 here.
-              return answer(reply, 400, { detail: e.message })
-            }
-            return answer(reply, 502, { detail: `VFS build failed: ${(e as Error).message}` })
-          }
-          // The Mounts ride through whole; see workspace_config.ts.
-          const vfsMap: Record<string, MountSpec> = { ...args.mounts }
-          let ws: Workspace
-          try {
-            // Every option the config produced rides through: enumerating
-            // them by hand silently dropped `clis` and `guards`, so a yaml
-            // clis block parsed, validated, and then installed nothing.
-            // Only identity and the store default are the daemon's to
-            // decide.
-            ws = new deps.host.Workspace(vfsMap, {
-              ...args.options,
-              workspaceId: wid,
-              // Daemon default is disk (a created workspace survives restart
-              // with zero infrastructure, like git init); the library default
-              // stays ram. An explicit store always wins.
-              store: args.options.store ?? deps.host.stateStore(),
-              ceilings: deps.registry.ceilings,
-              // Whichever of the two built it, no sibling workspace shares
-              // it, so this workspace is the one that closes it.
-              ownsStore: true,
-            })
-          } catch (e) {
-            return answer(reply, 400, { detail: (e as Error).message })
-          }
-          // Under max_sessions the sessions its store saved are loaded, and
-          // more than the cap refuse the create.
-          const cap = deps.registry.maxSessions
-          if (cap !== null) {
-            let past: string | null
-            try {
-              await ws.ensureSessionsLoaded()
-              past = pastSessionCap(ws, cap, 'the saved workspace')
-            } catch (e) {
-              await ws.close()
-              throw e
-            }
-            if (past !== null) {
-              await ws.close()
-              return answer(reply, 400, { detail: past })
-            }
-          }
-          let entry
-          try {
-            for (const [prefix, [backend, mountpoint]] of Object.entries(args.kernelMounts)) {
-              await deps.host.mountKernel(ws, prefix, mountpoint, backend)
-            }
-            entry = deps.registry.add(ws, wid, req.account)
-            entry.configDigest = digest
-          } catch (e) {
-            await ws.close()
-            return answer(reply, 409, { detail: (e as Error).message })
-          }
-          return answer(reply, 201, await makeDetail(entry))
-        })
-      })
+      return openWorkspace(deps, req, reply, wid, cfg, config, 201)
     },
   )
 
@@ -682,14 +702,39 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
     return { id, closed_at: Date.now() / 1000 }
   })
 
-  /** Close the workspace and keep its state for the owner to reopen. */
-  app.post<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/close', async (req, reply) => {
+  /**
+   * Stop the workspace and keep its state and config for start. A stopped
+   * workspace answers as it is, so a stop can be repeated.
+   */
+  app.post<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/stop', async (req, reply) => {
     const { id } = req.params
-    if (deps.registry.visible(id, req.account) === null) {
+    const live = deps.registry.visible(id, req.account) !== null
+    if (!live && (await deps.registry.savedConfig(id, req.account)) === null) {
       return reply.status(404).send({ detail: 'workspace not found' })
     }
-    await deps.registry.close(id)
+    if (live || deps.registry.removing(id)) await deps.registry.stop(id)
     return { id, closed_at: Date.now() / 1000 }
+  })
+
+  /**
+   * Start a stopped workspace from the config it was created with, over the
+   * state it kept; a running one answers as it is. The server's policies
+   * judge the config again, and the secrets and saved entries it names are
+   * read again, so a rotated secret is picked up.
+   */
+  app.post<{ Params: WorkspaceIdParams }>('/v1/workspaces/:id/start', async (req, reply) => {
+    const { id } = req.params
+    const held = deps.registry.visible(id, req.account)
+    if (held !== null && !deps.registry.removing(id)) return await makeDetail(held)
+    const config = await deps.registry.savedConfig(id, req.account)
+    if (config === null) return reply.status(404).send({ detail: 'workspace not found' })
+    let cfg: WorkspaceConfigRaw
+    try {
+      cfg = checkConfig(config)
+    } catch (e) {
+      return reply.status(400).send({ detail: (e as Error).message })
+    }
+    return openWorkspace(deps, req, reply, id, cfg, config, 200)
   })
 
   /** Cancel every session's running and queued lines; all stay open. */

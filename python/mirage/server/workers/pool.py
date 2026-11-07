@@ -35,7 +35,7 @@ from mirage.server.workers.worker import (
 class WorkerPool:
     """The workers and which holds each workspace.
 
-    A workspace's worker outlives its close, so a create under its id
+    A workspace's worker outlives its stop, so a create or start of its id
     reaches the worker that has its state; a delete forgets it.
     Mirrors TypeScript's ``WorkerPool``.
 
@@ -150,7 +150,7 @@ class WorkerPool:
         worker.live.add(workspace_id)
 
     def release(self, workspace_id: str) -> None:
-        """Record ``workspace_id`` as closed: its worker stays its home.
+        """Record ``workspace_id`` as stopped: its worker stays its home.
 
         Args:
             workspace_id (str): the workspace.

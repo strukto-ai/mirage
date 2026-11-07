@@ -37,6 +37,7 @@ import { registerSecrets } from '@struktoai/mirage-core/secrets/registry'
 import { buildResourceStore, resolveResourceStore } from './resources/config.ts'
 import { StruktoSourceConfig, fetchStrukto } from './resources/strukto.ts'
 import {
+  CONFIGS_PREFIX,
   OWNERS_PREFIX,
   resolveCeilings,
   resolveGracefulTimeout,
@@ -209,6 +210,7 @@ export function buildApp(options: BuildAppOptions = {}) {
     onIdleExit: exitFn,
     accountsRequired: authConfig.mode === AuthMode.Jwt,
     owners: new DiskRecordClient(stateRoot, OWNERS_PREFIX),
+    configs: new DiskRecordClient(stateRoot, CONFIGS_PREFIX),
     watchNetwork,
     maxWorkspaces: resolveMaxWorkspaces(options.maxWorkspaces),
     policies: options.policies ?? [],

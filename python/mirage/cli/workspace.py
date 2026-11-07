@@ -349,39 +349,34 @@ def delete_cmd(workspace_id: str = typer.Argument(...)) -> None:
     emit(deleted, human=lambda d: f"Deleted workspace {d['id']}.")
 
 
-@app.command("close")
-def close_cmd(workspace_id: str = typer.Argument(...)) -> None:
-    """Stop a workspace and keep its state for the same id."""
+@app.command("stop")
+def stop_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+) -> None:
+    """Stop a workspace and keep its state for ``start``."""
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         r = client.request(
-            "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/close"
+            "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/stop"
         )
-    closed = handle_response(r)
-    header(f"closed {workspace_id}")
-    emit(closed, human=lambda d: f"Closed workspace {d['id']}.")
+    stopped = handle_response(r)
+    header(f"stopped {workspace_id}")
+    emit(stopped, human=lambda d: f"Stopped workspace {d['id']}.")
 
 
-@app.command("cancel")
-def cancel_cmd(workspace_id: str = typer.Argument(...)) -> None:
-    """Cancel the running and queued commands of every session."""
+@app.command("start")
+def start_cmd(
+    workspace_id: str = typer.Argument(..., help="Workspace id."),
+) -> None:
+    """Start a stopped workspace from the config it was created with."""
     with make_client() as client:
         client.ensure_running(allow_spawn=False)
         r = client.request(
-            "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/cancel"
+            "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/start"
         )
-    emit(handle_response(r))
-
-
-@app.command("kill")
-def kill_cmd(workspace_id: str = typer.Argument(...)) -> None:
-    """Kill the background jobs of every session."""
-    with make_client() as client:
-        client.ensure_running(allow_spawn=False)
-        r = client.request(
-            "POST", f"/v1/workspaces/{quote(workspace_id, safe='')}/kill"
-        )
-    emit(handle_response(r))
+    started = handle_response(r)
+    header(f"started {workspace_id}")
+    emit(started, human=lambda d: f"Started workspace {d['id']}.")
 
 
 @app.command("set-profile")

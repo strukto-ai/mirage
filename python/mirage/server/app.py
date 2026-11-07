@@ -62,6 +62,7 @@ from mirage.server.rate_limit import (
     resolve_rate_limits,
 )
 from mirage.server.registry import (
+    CONFIGS_PREFIX,
     OWNERS_PREFIX,
     WorkspaceRegistry,
     resolve_ceilings,
@@ -450,6 +451,7 @@ def build_app(
         exit_event=app.state.exit_event,
         accounts_required=auth.mode == AuthMode.JWT,
         owners=DiskRecordClient(str(app.state.state_root), OWNERS_PREFIX),
+        configs=DiskRecordClient(str(app.state.state_root), CONFIGS_PREFIX),
         max_workspaces=resolve_max_workspaces(max_workspaces),
         policies=policies,
         programs=resolve_policy_file(policy_file),

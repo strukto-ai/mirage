@@ -166,6 +166,7 @@ export function createApp(options: EdgeAppOptions = {}): EdgeApp {
     const registry = new WorkspaceRegistry({
       accountsRequired: auth.mode === AuthMode.Jwt,
       owners: new RAMRecordClient(),
+      configs: new RAMRecordClient(),
       watchNetwork,
       maxWorkspaces: resolveMaxWorkspaces(options.maxWorkspaces),
       maxSessions: resolveMaxSessions(options.maxSessions, process.env, EDGE_MAX_SESSIONS),

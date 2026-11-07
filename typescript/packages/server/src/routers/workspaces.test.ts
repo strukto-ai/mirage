@@ -250,8 +250,8 @@ describe('workspaces router', () => {
         })
         expect(r.statusCode).toBe(201)
       }
-      const closed = await free.inject({ method: 'POST', url: '/v1/workspaces/keep/close' })
-      expect(closed.statusCode).toBe(200)
+      const stopped = await free.inject({ method: 'POST', url: '/v1/workspaces/keep/stop' })
+      expect(stopped.statusCode).toBe(200)
       const r = await capped.inject({ method: 'POST', url: '/v1/workspaces', payload: body })
       expect(r.statusCode).toBe(400)
       expect(r.json()).toEqual({
@@ -1350,7 +1350,7 @@ describe('daemon disk-store default', () => {
   })
 })
 
-describe('workspace cancel, kill and close', () => {
+describe('workspace cancel, kill, stop and start', () => {
   const RAM = { config: { mounts: { '/': { vfs: 'ram', mode: 'write' } } } }
 
   it('cancel and kill reach every session', async () => {
@@ -1396,32 +1396,85 @@ describe('workspace cancel, kill and close', () => {
     }
   })
 
-  it('close keeps state for the same id', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'ws-close-'))
+  const post = (app: App, url: string, payload: object = {}) =>
+    app.inject({ method: 'POST', url, payload })
+
+  it('starts a stopped workspace with its files and cwd', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-start-'))
+    const data = join(root, 'data')
+    mkdirSync(data)
     const app = buildApp({ stateRoot: join(root, 'state') })
     try {
-      const body = { ...RAM, id: 'keep' }
+      const body = {
+        id: 'keep',
+        config: { mounts: { '/': { vfs: 'disk', mode: 'write', config: { root: data } } } },
+      }
+      expect((await post(app, '/v1/workspaces', body)).statusCode).toBe(201)
       expect(
-        (await app.inject({ method: 'POST', url: '/v1/workspaces', payload: body })).statusCode,
+        (await post(app, '/v1/workspaces/keep/sessions', { session_id: 's' })).statusCode,
       ).toBe(201)
-      await app.inject({
-        method: 'POST',
-        url: '/v1/workspaces/keep/shell',
-        payload: { command: 'echo kept' },
+      const made = await post(app, '/v1/workspaces/keep/shell?session_id=s', {
+        command: 'mkdir /d && echo kept > /d/f.txt && cd /d',
       })
-      expect(
-        (await app.inject({ method: 'POST', url: '/v1/workspaces/keep/close' })).statusCode,
-      ).toBe(200)
+      expect(made.json<{ exit_code: number }>().exit_code).toBe(0)
+      expect((await post(app, '/v1/workspaces/keep/stop')).statusCode).toBe(200)
       expect((await app.inject({ method: 'GET', url: '/v1/workspaces/keep' })).statusCode).toBe(404)
-      expect(
-        (await app.inject({ method: 'POST', url: '/v1/workspaces', payload: body })).statusCode,
-      ).toBe(201)
-      const r = await app.inject({
-        method: 'POST',
-        url: '/v1/workspaces/keep/shell',
-        payload: { command: 'history' },
+      const started = await post(app, '/v1/workspaces/keep/start')
+      expect(started.statusCode).toBe(200)
+      expect(started.json<{ id: string }>().id).toBe('keep')
+      const r = await post(app, '/v1/workspaces/keep/shell?session_id=s', {
+        command: 'pwd && cat f.txt',
       })
-      expect(r.json<{ stdout: string }>().stdout).toContain('echo kept')
+      expect(r.json<{ stdout: string }>().stdout).toBe('/d\nkept\n')
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('answers a second stop as the first', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-stop-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      expect((await post(app, '/v1/workspaces', { ...RAM, id: 'keep' })).statusCode).toBe(201)
+      for (let i = 0; i < 2; i++) {
+        const r = await post(app, '/v1/workspaces/keep/stop')
+        expect(r.statusCode).toBe(200)
+        expect(r.json<{ id: string }>().id).toBe('keep')
+      }
+      expect((await app.inject({ method: 'GET', url: '/v1/workspaces' })).json()).toEqual([])
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('answers a second start with the running workspace', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-start-twice-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      expect((await post(app, '/v1/workspaces', { ...RAM, id: 'keep' })).statusCode).toBe(201)
+      await post(app, '/v1/workspaces/keep/stop')
+      const first = await post(app, '/v1/workspaces/keep/start')
+      const second = await post(app, '/v1/workspaces/keep/start')
+      expect([first.statusCode, second.statusCode]).toEqual([200, 200])
+      const createdAt = (r: typeof first) => r.json<{ created_at: number }>().created_at
+      expect(createdAt(second)).toBe(createdAt(first))
+      expect(app.registry.size()).toBe(1)
+    } finally {
+      await app.close()
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('answers 404 for a start or stop of an unknown id', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ws-start-unknown-'))
+    const app = buildApp({ stateRoot: join(root, 'state') })
+    try {
+      const r = await post(app, '/v1/workspaces/nope/start')
+      expect(r.statusCode).toBe(404)
+      expect(r.json()).toEqual({ detail: 'workspace not found' })
+      expect((await post(app, '/v1/workspaces/nope/stop')).statusCode).toBe(404)
     } finally {
       await app.close()
       rmSync(root, { recursive: true, force: true })

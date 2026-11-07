@@ -313,3 +313,17 @@ def test_create_still_takes_id(fake, tmp_path):
     result = _invoke("create", str(config), "--id", "w2")
     assert result.exit_code == 0, result.output
     assert fake.calls[0][2]["json"]["id"] == "w2"
+
+
+@pytest.mark.parametrize("verb", ["stop", "start"])
+def test_stop_and_start_post_to_the_workspace(fake, verb):
+    fake.answer = _FakeResponse(200, b'{"id": "w", "closed_at": 0}')
+    result = _invoke(verb, "w")
+    assert result.exit_code == 0, result.output
+    assert fake.calls[0][:2] == ("POST", f"/v1/workspaces/w/{verb}")
+
+
+@pytest.mark.parametrize("gone", ["close", "cancel", "kill"])
+def test_close_cancel_and_kill_are_not_workspace_commands(fake, gone):
+    assert _invoke(gone, "w").exit_code == 2
+    assert fake.calls == []

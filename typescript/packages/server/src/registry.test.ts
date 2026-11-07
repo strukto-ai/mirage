@@ -235,7 +235,7 @@ describe('WorkspaceRegistry accounts', () => {
     }
   })
 
-  it('keeps a closing id reserved until the runner stops', async () => {
+  it('keeps a stopping id reserved until the runner stops', async () => {
     const r = new WorkspaceRegistry()
     const entry = r.add(ram(), 'w')
     let stopping = (): void => undefined
@@ -247,12 +247,12 @@ describe('WorkspaceRegistry accounts', () => {
       await held
       await stop(options)
     })
-    const closing = r.close('w')
+    const stopped = r.stop('w')
     expect(r.has('w')).toBe(false)
     expect(r.removing('w')).toBe(true)
     expect(() => r.add(ram(), 'w')).toThrow(/already exists/)
     stopping()
-    expect(await closing).toBe(entry)
+    expect(await stopped).toBe(entry)
     expect(r.removing('w')).toBe(false)
     r.add(ram(), 'w')
     await r.closeAll()
