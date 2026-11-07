@@ -1888,18 +1888,24 @@ async def test_a_close_gives_up_the_lease_a_pending_claim_takes():
     assert await store.holder() is None
 
 
+async def _unreached(record: dict, signum: int) -> bool:
+    """A reaper that reaches no program.
+
+    Args:
+        record (dict): the published process.
+        signum (int): the signal to stop it by.
+    """
+    return False
+
+
 # A program this daemon left before a restart that the reaper could not
 # reach stays in its record, so a later claim tries it again.
 @pytest.mark.asyncio
 async def test_a_claim_keeps_the_record_of_a_program_it_could_not_reach():
     store = RAMExecutionStore()
     await store.publish("d", {"7": _ran(7)}, 7)
-
-    async def reaper(record: dict, signum: int) -> bool:
-        return False
-
     a = JobTable(store, daemon="d")
-    a.reaper = reaper
+    a.reaper = _unreached
     await a.claim()
 
     async def kept() -> bool:

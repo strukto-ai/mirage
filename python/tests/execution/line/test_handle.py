@@ -67,12 +67,13 @@ async def test_a_stopped_line_ends_as_stopped_by_its_signal():
     assert line.record.signal == 2
 
 
+async def _refuse() -> None:
+    raise RuntimeError("cancelled before admission")
+
+
 @pytest.mark.asyncio
 async def test_an_admission_that_raises_keeps_the_line_waiting():
-    async def refuse():
-        raise RuntimeError("cancelled before admission")
-
-    line = LineHandle(LineId("l1"), "s", "true", on_start=refuse)
+    line = LineHandle(LineId("l1"), "s", "true", on_start=_refuse)
     with pytest.raises(RuntimeError):
         await line.start()
     assert line.record.state == LineState.WAITING
