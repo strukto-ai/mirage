@@ -1,0 +1,53 @@
+---
+title: Streaming and stdin
+description: Stream shell output and send input over HTTP.
+icon: arrows-left-right
+---
+
+Use [Run a shell line]({{API_PREFIX}}/operations/shell/run-a-shell-line) with an
+existing workspace. Set `MIRAGE_AUTH_TOKEN` to your access token. For an OSS Server,
+use its configured token, or omit the authorization header in local mode without a token.
+
+## Stream command output
+
+Cloud and OSS Server support streaming shell output. Set `stream=true` and use
+`curl --no-buffer` to display the response as it arrives:
+
+```bash
+curl --no-buffer --request POST \
+  --url '{{BASE_URL}}/v1/workspaces/demo/shell?stream=true' \
+  --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN" \
+  --header 'Content-Type: application/json' \
+  --data '{"command":"echo hello"}'
+```
+
+The response has content type `application/x-ndjson`. Each line is a JSON record.
+Output records identify `stdout` or `stderr` and carry base64-encoded `data`:
+
+```json
+{"stream":"stdout","data":"aGVsbG8K"}
+{"status":"done","result":{"kind":"io","exit_code":0,"stdout":"","stderr":"","refusal":null{{LINE_ID}}},"error":null}
+```
+
+Decode each output record's `data` to display the bytes. The output example decodes
+to `hello\n` on stdout. Records labeled `stderr` carry stderr bytes in the same format.
+Read through the final record:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `done`, `failed`, or `canceled`. |
+| `result` | The shell result when available. Check `exit_code` to determine whether the command succeeded. |
+| `error` | A request or execution error when available. |
+
+A stream without a final status record was interrupted. HTTP `200` alone does not
+mean the shell command succeeded. Closing the request cancels the running line.
+Streaming cannot be combined with `explain`.
+
+{{LINE_NOTE}}
+
+## Send stdin
+
+{{STDIN_SECTION}}
+
+See [Run a shell line]({{API_PREFIX}}/operations/shell/run-a-shell-line) for the complete
+request fields and response schemas.

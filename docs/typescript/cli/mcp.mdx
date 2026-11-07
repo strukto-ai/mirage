@@ -123,9 +123,9 @@ counts as a write.
 
 The [server](/typescript/access/server) takes `cli: mcp` entries in a
 workspace's create body.
-[`PUT /v1/workspaces/{id}/clis/{name}`](/home/access/http#install-an-mcp-cli)
+[`PUT /v1/workspaces/{id}/clis/{name}`](/api/server/operations/workspaces/install-an-mcp-cli)
 installs one on a live workspace, and
-[`DELETE`](/home/access/http#remove-an-mcp-cli) removes it. `${VAR}` is
+[`DELETE`](/api/server/operations/workspaces/remove-an-mcp-cli) removes it. `${VAR}` is
 expanded only in files; over HTTP, send the token or a pointer.
 
 ## Snapshots

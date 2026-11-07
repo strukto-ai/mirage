@@ -1,0 +1,2989 @@
+{
+  "hidden_tags": [
+    "Sessions",
+    "Snapshots",
+    "Tools",
+    "Auth"
+  ],
+  "components": [
+    {
+      "op": "remove",
+      "path": "/schemas/LogPage/title"
+    },
+    {
+      "op": "remove",
+      "path": "/schemas/WorkspaceBrief/title"
+    },
+    {
+      "op": "remove",
+      "path": "/schemas/WorkspaceDetail/title"
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudWorkspaceBrief",
+      "value": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The workspace name."
+          },
+          "uid": {
+            "type": "string",
+            "description": "The immutable workspace UID."
+          },
+          "mode": {
+            "type": "string"
+          },
+          "mount_count": {
+            "type": "integer"
+          },
+          "session_count": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "template": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "labels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "number",
+            "description": "Creation time in Unix seconds."
+          },
+          "updated_at": {
+            "type": "number",
+            "description": "Last update time in Unix seconds."
+          }
+        },
+        "required": [
+          "id",
+          "uid",
+          "mode",
+          "mount_count",
+          "session_count",
+          "status",
+          "type",
+          "template",
+          "labels",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudWorkspaceDetail",
+      "value": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The workspace name."
+          },
+          "uid": {
+            "type": "string",
+            "description": "The immutable workspace UID."
+          },
+          "mode": {
+            "type": "string"
+          },
+          "mount_count": {
+            "type": "integer"
+          },
+          "session_count": {
+            "type": "integer"
+          },
+          "status": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "template": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "labels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "number",
+            "description": "Creation time in Unix seconds."
+          },
+          "updated_at": {
+            "type": "number",
+            "description": "Last update time in Unix seconds."
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "mounts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "prefix": {
+                  "type": "string"
+                },
+                "vfs": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "prefix",
+                "vfs",
+                "mode"
+              ]
+            }
+          }
+        },
+        "required": [
+          "id",
+          "uid",
+          "mode",
+          "mount_count",
+          "session_count",
+          "status",
+          "type",
+          "template",
+          "labels",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "config",
+          "mounts"
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudSavedEntry",
+      "value": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The entry's id; the daemon uses its name."
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "vfs",
+              "cli",
+              "runtime"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "description": "The VFS, CLI or runtime type, such as s3."
+          },
+          "builtin": {
+            "type": "boolean"
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/FieldValue"
+            },
+            "description": "The plain fields. Sealed fields are never answered."
+          },
+          "captures": {
+            "type": "array",
+            "items": {},
+            "description": "A runtime's captures; runtimes only."
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "number",
+            "description": "Unix epoch seconds."
+          },
+          "updated_at": {
+            "type": "number",
+            "description": "Unix epoch seconds."
+          },
+          "used_by": {
+            "type": "integer",
+            "description": "References to the entry; for built-in runtimes, live workspaces."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "type",
+          "builtin",
+          "config"
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudSavedEntryDetail",
+      "value": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/CloudSavedEntry"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "sealed": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "sealed"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudSavedEntryList",
+      "value": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CloudSavedEntry"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudPolicy",
+      "value": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "number"
+          },
+          "updated_at": {
+            "type": "number"
+          },
+          "used_by": {
+            "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudPolicyList",
+      "value": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CloudPolicy"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudTemplate",
+      "value": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "builtin": {
+            "type": "boolean"
+          },
+          "secrets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "policies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "config": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "created_by": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "number"
+          },
+          "workspace_count": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "builtin",
+          "secrets",
+          "policies",
+          "config",
+          "created_by",
+          "created_at"
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudTemplateList",
+      "value": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CloudTemplate"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudCommandLog",
+      "value": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "command": {
+            "title": "Command",
+            "type": "string"
+          },
+          "cwd": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cwd"
+          },
+          "started_at": {
+            "description": "Unix epoch seconds (Cloud JSON).",
+            "title": "Started At",
+            "type": "number"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "number"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exit Code"
+          },
+          "stdout": {
+            "title": "Stdout",
+            "type": "string"
+          },
+          "stderr": {
+            "title": "Stderr",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          },
+          "api_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key Id"
+          },
+          "mounts": {
+            "items": {
+              "$ref": "#/components/schemas/CloudLogMount"
+            },
+            "title": "Mounts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "command",
+          "cwd",
+          "started_at",
+          "duration_ms",
+          "exit_code",
+          "stdout",
+          "stderr",
+          "user_id",
+          "api_key_id",
+          "mounts"
+        ],
+        "title": "CommandLog",
+        "type": "object"
+      }
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudLogMount",
+      "value": {
+        "properties": {
+          "op": {
+            "title": "Op",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bytes"
+          },
+          "started_at": {
+            "description": "Unix epoch seconds (Cloud JSON).",
+            "title": "Started At",
+            "type": "number"
+          },
+          "duration_ms": {
+            "title": "Duration Ms",
+            "type": "number"
+          }
+        },
+        "required": [
+          "op",
+          "path",
+          "source",
+          "bytes",
+          "started_at",
+          "duration_ms"
+        ],
+        "title": "LogMount",
+        "type": "object"
+      }
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudLogPage",
+      "value": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CloudCommandLog"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          }
+        },
+        "required": [
+          "items",
+          "next"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudError",
+      "value": {
+        "type": "object",
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "detail",
+          "request_id"
+        ]
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/securitySchemes/bearerAuth/description",
+      "value": "Cloud requires an account bearer token. OSS Server accepts its configured token or JWT; local mode without a token accepts unauthenticated requests."
+    },
+    {
+      "op": "add",
+      "path": "/securitySchemes/cloudBearerAuth",
+      "value": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A valid Cloud access token or API key, sent with the Bearer scheme."
+      }
+    },
+    {
+      "op": "replace",
+      "path": "/parameters/workspaceId/description",
+      "value": "The workspace identifier. Cloud accepts the UID or name; OSS Server uses the workspace ID."
+    },
+    {
+      "op": "add",
+      "path": "/schemas/CloudShellResult",
+      "value": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "exit_code": {
+            "type": "integer"
+          },
+          "stdout": {
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "exit_code",
+          "stdout",
+          "stderr"
+        ],
+        "title": "Shell result"
+      }
+    }
+  ],
+  "operations": {
+    "GET /v1/workspaces": {
+      "note": "Cloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example. Cloud paginates with `limit` (25, 50, or 100) and `after`; the next cursor is in the `X-Next-Cursor` response header. OSS Server returns all active workspaces.",
+      "update": [
+        {
+          "op": "remove",
+          "path": "/responses/200/content/application~1json/schema/title"
+        },
+        {
+          "op": "add",
+          "path": "/parameters",
+          "value": [
+            {
+              "name": "limit",
+              "in": "query",
+              "description": "Cloud only: page size. OSS Server ignores this parameter.",
+              "schema": {
+                "type": "integer",
+                "enum": [
+                  25,
+                  50,
+                  100
+                ],
+                "default": 25
+              }
+            },
+            {
+              "name": "after",
+              "in": "query",
+              "description": "Cloud only: cursor from X-Next-Cursor.",
+              "schema": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        {
+          "op": "add",
+          "path": "/description",
+          "value": ""
+        }
+      ]
+    },
+    "POST /v1/workspaces": {
+      "note": "Cloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example. Cloud creates with `201` and returns `409` for an existing name. OSS Server can return `200` for an identical retry or policy explanation. `explain=true` is supported only by OSS Server.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "/requestBody/content/application~1json/example",
+          "value": {
+            "id": "demo",
+            "config": {
+              "mounts": {
+                "/data": {
+                  "vfs": "ram",
+                  "mode": "write"
+                }
+              }
+            }
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "Create a workspace from a configuration or a saved template. Policies check the configuration before creation and return 403 on refusal."
+        },
+        {
+          "op": "replace",
+          "path": "/responses/200/content/application~1json/example",
+          "value": {
+            "id": "demo",
+            "mode": "write",
+            "created_at": 1794009600,
+            "fuse_mountpoints": {},
+            "system_time": null,
+            "sessions": [
+              {
+                "session_id": "01a1b425-ec80-7038-86e0-75b597344043",
+                "cwd": "/"
+              }
+            ],
+            "mounts": [
+              {
+                "prefix": "/data",
+                "vfs": "ram",
+                "mode": "write",
+                "description": ""
+              }
+            ],
+            "internals": null
+          }
+        },
+        {
+          "op": "replace",
+          "path": "/responses/201/content/application~1json/example",
+          "value": {
+            "id": "demo",
+            "mode": "write",
+            "created_at": 1794009600,
+            "fuse_mountpoints": {},
+            "system_time": null,
+            "sessions": [
+              {
+                "session_id": "01a1b425-ec80-7038-86e0-75b597344043",
+                "cwd": "/"
+              }
+            ],
+            "mounts": [
+              {
+                "prefix": "/data",
+                "vfs": "ram",
+                "mode": "write",
+                "description": ""
+              }
+            ],
+            "internals": null
+          }
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}": {
+      "note": "Cloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example. `verbose` applies only to OSS Server.",
+      "update": [
+        {
+          "op": "add",
+          "path": "/description",
+          "value": ""
+        }
+      ]
+    },
+    "DELETE /v1/workspaces/{workspace_id}": {
+      "note": "Cloud retains deleted workspace files for its restore window. OSS Server removes the workspace from the server.",
+      "update": [
+        {
+          "op": "add",
+          "path": "/description",
+          "value": ""
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/logs": {
+      "note": "JSON logs use Unix epoch **seconds** for `started_at` in Cloud and **milliseconds** in OSS Server. JSONL exports use Unix epoch milliseconds in both deployments. Cursors are opaque and must stay with the same deployment and filters.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/summary",
+          "value": "List workspace logs"
+        },
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "Return completed commands newest first by start time and ID, including mount calls. Durations are milliseconds in both deployments. JSONL exports all retained matching commands oldest first as command, vfs, and result records linked by parent IDs; it ignores limit and after. Empty JSON is `{\"items\": [], \"next\": null}`; empty JSONL has an empty body. Retention and cursors are deployment-specific; pagination is not a snapshot."
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/stop": {
+      "note": "Cloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example. On OSS Server, RAM files do not survive stopping and starting. Save them to persistent storage before stopping.",
+      "update": []
+    },
+    "POST /v1/workspaces/{workspace_id}/start": {
+      "note": "Cloud includes account metadata such as `uid`, `status`, and `labels`. OSS Server returns local workspace state. The top deployment filter selects the matching response schema and example. On OSS Server, RAM files do not survive stopping and starting. Save them to persistent storage before stopping.",
+      "update": []
+    },
+    "GET /v1/templates": {
+      "note": "Cloud adds template IDs, ownership, built-in status, references, and creation time. OSS Server returns the saved name, description, and config. Cloud can restore a retained deleted template; OSS Server also restores a deleted saved template.",
+      "update": []
+    },
+    "POST /v1/templates": {
+      "note": "Cloud adds template IDs, ownership, built-in status, references, and creation time. OSS Server returns the saved name, description, and config. Cloud can restore a retained deleted template; OSS Server also restores a deleted saved template.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/requestBody/content/application~1json/example",
+          "value": {
+            "name": "demo",
+            "config": {
+              "mounts": {
+                "/data": {
+                  "vfs": "ram",
+                  "mode": "write"
+                }
+              }
+            }
+          }
+        },
+        {
+          "op": "add",
+          "path": "/responses/201/content/application~1json/example",
+          "value": {
+            "name": "demo",
+            "description": null,
+            "config": {
+              "mounts": {
+                "/data": {
+                  "vfs": "ram",
+                  "mode": "write"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "GET /v1/templates/{ref}": {
+      "note": "Cloud adds template IDs, ownership, built-in status, references, and creation time. OSS Server returns the saved name, description, and config. Cloud can restore a retained deleted template; OSS Server also restores a deleted saved template.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "name": "ref",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The template ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        },
+        {
+          "op": "add",
+          "path": "/description",
+          "value": ""
+        }
+      ]
+    },
+    "DELETE /v1/templates/{ref}": {
+      "note": "Cloud adds template IDs, ownership, built-in status, references, and creation time. OSS Server returns the saved name, description, and config. Cloud can restore a retained deleted template; OSS Server also restores a deleted saved template.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "name": "ref",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The template ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/templates/{ref}/restore": {
+      "note": "Cloud adds template IDs, ownership, built-in status, references, and creation time. OSS Server returns the saved name, description, and config. Cloud can restore a retained deleted template; OSS Server also restores a deleted saved template.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "name": "ref",
+              "in": "path",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The template ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        },
+        {
+          "op": "add",
+          "path": "/description",
+          "value": ""
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/vfs-md": {
+      "note": "",
+      "update": [
+        {
+          "op": "add",
+          "path": "/description",
+          "value": ""
+        }
+      ]
+    },
+    "PUT /v1/workspaces/{workspace_id}/vfs-md": {
+      "note": "",
+      "update": [
+        {
+          "op": "add",
+          "path": "/description",
+          "value": ""
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/skill-md": {
+      "note": "",
+      "update": [
+        {
+          "op": "add",
+          "path": "/description",
+          "value": ""
+        }
+      ]
+    },
+    "PUT /v1/workspaces/{workspace_id}/skill-md": {
+      "note": "",
+      "update": [
+        {
+          "op": "add",
+          "path": "/description",
+          "value": ""
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/shell": {
+      "note": "The JSON request is shared. OSS Server includes `line_id` in the result; Cloud returns output and exit status without it. Cloud rejects `explain=true` and multipart stdin. Runtime selection is supported in both, but Cloud accepts only its built-in runtimes.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            {
+              "name": "stream",
+              "in": "query",
+              "description": "Stream stdout, stderr and the final status as NDJSON. Cannot be combined with explain.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "Run a shell line in a workspace. HTTP 200 means the request completed. Check exit_code to determine whether the command succeeded. Set stream=true for NDJSON output records. See [Streaming and stdin](/api/streaming#stream-command-output) for the record format."
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/read": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/write": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/append": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/pwrite": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/stat": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/readdir": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/exists": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/is_dir": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/is_file": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/list_files": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/mkdir": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/rmdir": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/unlink": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/create": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/rename": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/symlink": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/readlink": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/setattr": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/getxattr": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/listxattr": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/setxattr": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/removexattr": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "POST /v1/workspaces/{workspace_id}/vfs/truncate": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "$ref": "#/components/parameters/workspaceId"
+            },
+            {
+              "$ref": "#/components/parameters/sessionId"
+            },
+            {
+              "name": "explain",
+              "in": "query",
+              "description": "OSS Server only: preview policy decisions without running the call. Cloud rejects true.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "default": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "GET /v1/health": {
+      "note": "Cloud returns `status` only. OSS Server also returns its workspace count and process uptime.",
+      "update": [
+        {
+          "op": "add",
+          "path": "/description",
+          "value": ""
+        }
+      ]
+    },
+    "GET /v1/daemon/ready": {
+      "note": "",
+      "update": [
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/schema/type",
+          "value": "object"
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/schema/required",
+          "value": [
+            "status"
+          ]
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/schema/properties",
+          "value": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "ready"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "GET /v1/vfs": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration.",
+      "update": []
+    },
+    "POST /v1/vfs": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration.",
+      "update": []
+    },
+    "GET /v1/vfs/types": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration.",
+      "update": []
+    },
+    "GET /v1/vfs/{ref}": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "in": "path",
+              "name": "ref",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The VFS configuration ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        }
+      ]
+    },
+    "PUT /v1/vfs/{ref}": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "in": "path",
+              "name": "ref",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The VFS configuration ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "Change a VFS config's fields. Its name and type stay; a sealed field left out keeps its value.\n\nHTTP PUT replaces the plain fields with the supplied fields object."
+        }
+      ]
+    },
+    "DELETE /v1/vfs/{ref}": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "in": "path",
+              "name": "ref",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The VFS configuration ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        }
+      ]
+    },
+    "GET /v1/clis": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration.",
+      "update": []
+    },
+    "POST /v1/clis": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration.",
+      "update": []
+    },
+    "GET /v1/clis/types": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration.",
+      "update": []
+    },
+    "GET /v1/clis/{ref}": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "in": "path",
+              "name": "ref",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The CLI configuration ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        }
+      ]
+    },
+    "PUT /v1/clis/{ref}": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "in": "path",
+              "name": "ref",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The CLI configuration ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "Change a CLI config's fields. Its name and type stay; a sealed field left out keeps its value.\n\nHTTP PUT replaces the plain fields with the supplied fields object."
+        }
+      ]
+    },
+    "DELETE /v1/clis/{ref}": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "in": "path",
+              "name": "ref",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The CLI configuration ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        }
+      ]
+    },
+    "GET /v1/runtimes": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration. Cloud currently offers read-only built-in runtimes; its runtime types table is empty. Runtime creation, updates, and deletion are available only in OSS Server.",
+      "update": []
+    },
+    "GET /v1/runtimes/types": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration. Cloud currently offers read-only built-in runtimes; its runtime types table is empty. Runtime creation, updates, and deletion are available only in OSS Server.",
+      "update": []
+    },
+    "GET /v1/runtimes/{ref}": {
+      "note": "Cloud returns Unix epoch seconds for creation and update times; OSS Server returns nullable date strings. Secret values are write-only in both deployments. Available types depend on the deployment; call the types endpoint before constructing a configuration. Cloud currently offers read-only built-in runtimes; its runtime types table is empty. Runtime creation, updates, and deletion are available only in OSS Server.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "in": "path",
+              "name": "ref",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The runtime configuration ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        }
+      ]
+    },
+    "PUT /v1/runtimes/{ref}": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "in": "path",
+              "name": "ref",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The runtime configuration ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        },
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "Change a runtime config's fields. Its name and type stay; a sealed field left out keeps its value.\n\nHTTP PUT replaces the plain fields with the supplied fields object."
+        }
+      ]
+    },
+    "DELETE /v1/runtimes/{ref}": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "in": "path",
+              "name": "ref",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The runtime configuration ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        }
+      ]
+    },
+    "GET /v1/policies": {
+      "note": "Cloud includes policy IDs, ownership, and Unix epoch timestamps. OSS Server returns policy names and source. Cloud list items include ownership and timestamps; OSS Server list items contain only the policy name.",
+      "update": []
+    },
+    "POST /v1/policies": {
+      "note": "Cloud includes policy IDs, ownership, and Unix epoch timestamps. OSS Server returns policy names and source. Cloud list items include ownership and timestamps; OSS Server list items contain only the policy name.",
+      "update": []
+    },
+    "GET /v1/policies/{ref}": {
+      "note": "Cloud includes policy IDs, ownership, and Unix epoch timestamps. OSS Server returns policy names and source. Cloud list items include ownership and timestamps; OSS Server list items contain only the policy name.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "in": "path",
+              "name": "ref",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The policy ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        }
+      ]
+    },
+    "PUT /v1/policies/{ref}": {
+      "note": "Cloud includes policy IDs, ownership, and Unix epoch timestamps. OSS Server returns policy names and source. Cloud list items include ownership and timestamps; OSS Server list items contain only the policy name.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "in": "path",
+              "name": "ref",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The policy ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        }
+      ]
+    },
+    "DELETE /v1/policies/{ref}": {
+      "note": "Cloud includes policy IDs, ownership, and Unix epoch timestamps. OSS Server returns policy names and source. Cloud list items include ownership and timestamps; OSS Server list items contain only the policy name.",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/parameters",
+          "value": [
+            {
+              "in": "path",
+              "name": "ref",
+              "required": true,
+              "schema": {
+                "type": "string"
+              },
+              "description": "The policy ID or name. On OSS Server, the ID is the name."
+            }
+          ]
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/lines": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "The lines the workspace keeps, oldest first: every one not ended\nyet and the newest ended ones, a session's or those in a state when\nnamed.\n\nLines and processes remain available while running and, after completion, the newest 1,024 records are kept for up to an hour. Jobs are listed only while the session retains them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix epoch seconds."
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/example",
+          "value": [
+            {
+              "id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37",
+              "session_id": "default",
+              "command": "sleep 30 & wait",
+              "state": "running",
+              "started_at": 1794009600,
+              "ended_at": null,
+              "exit": null,
+              "signal": null,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/lines/{line_id}": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "One line, with the ids of the jobs it started, the pids of the\nprocesses it ran that the workspace still keeps and the machines\nthose ran on.\n\nLines and processes remain available while running and, after completion, the newest 1,024 records are kept for up to an hour. Jobs are listed only while the session retains them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix epoch seconds."
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/example",
+          "value": {
+            "id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37",
+            "session_id": "default",
+            "command": "sleep 30 & wait",
+            "state": "running",
+            "started_at": 1794009600,
+            "ended_at": null,
+            "exit": null,
+            "signal": null,
+            "error": null,
+            "jobs": [
+              "job_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38"
+            ],
+            "processes": [
+              42
+            ],
+            "machines": [
+              "host:my-laptop"
+            ]
+          }
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/jobs": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "The jobs the workspace's sessions list, as ``jobs`` does, a\nsession's, those in a state or those a line started when named.\n\nLines and processes remain available while running and, after completion, the newest 1,024 records are kept for up to an hour. Jobs are listed only while the session retains them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix epoch seconds."
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/example",
+          "value": [
+            {
+              "id": "job_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38",
+              "number": 1,
+              "session_id": "default",
+              "command": "sleep 30",
+              "cwd": "/",
+              "line_id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37",
+              "group": 42,
+              "pid": 42,
+              "state": "running",
+              "started_at": 1794009600,
+              "ended_at": null,
+              "exit": null,
+              "signal": null
+            }
+          ]
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/jobs/{job_id}": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "One job, named by the id its listing gives, with the pids of the\nprocesses it ran that the workspace still keeps: its own and every\none under it.\n\nLines and processes remain available while running and, after completion, the newest 1,024 records are kept for up to an hour. Jobs are listed only while the session retains them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix epoch seconds."
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/example",
+          "value": {
+            "id": "job_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c38",
+            "number": 1,
+            "session_id": "default",
+            "command": "sleep 30",
+            "cwd": "/",
+            "line_id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37",
+            "group": 42,
+            "pid": 42,
+            "state": "running",
+            "started_at": 1794009600,
+            "ended_at": null,
+            "exit": null,
+            "signal": null,
+            "processes": [
+              42
+            ]
+          }
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/processes": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "The processes the workspace keeps, by pid: every live one and the\nnewest ended ones, a session's, those in a state, those a line ran,\nthose a job ran or those run on a machine (``provider:name``) when\nnamed.\n\nLines and processes remain available while running and, after completion, the newest 1,024 records are kept for up to an hour. Jobs are listed only while the session retains them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix epoch seconds."
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/example",
+          "value": [
+            {
+              "pid": 42,
+              "session_id": "default",
+              "line_id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37",
+              "parent": null,
+              "group": 42,
+              "command": "sleep 30",
+              "cwd": "/",
+              "machine": "host:my-laptop",
+              "runtime": "process",
+              "machine_pid": {
+                "pid": 12345,
+                "started": 1794009600,
+                "exited": null
+              },
+              "state": "running",
+              "started_at": 1794009600,
+              "ended_at": null,
+              "exit": null,
+              "signal": null,
+              "error": null
+            }
+          ]
+        }
+      ]
+    },
+    "GET /v1/workspaces/{workspace_id}/processes/{pid}": {
+      "note": "",
+      "update": [
+        {
+          "op": "replace",
+          "path": "/description",
+          "value": "One process, by its pid.\n\nLines and processes remain available while running and, after completion, the newest 1,024 records are kept for up to an hour. Jobs are listed only while the session retains them; wait or jobs can remove completed jobs after reporting them. Timestamps are Unix epoch seconds."
+        },
+        {
+          "op": "add",
+          "path": "/responses/200/content/application~1json/example",
+          "value": {
+            "pid": 42,
+            "session_id": "default",
+            "line_id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37",
+            "parent": null,
+            "group": 42,
+            "command": "sleep 30",
+            "cwd": "/",
+            "machine": "host:my-laptop",
+            "runtime": "process",
+            "machine_pid": {
+              "pid": 12345,
+              "started": 1794009600,
+              "exited": null
+            },
+            "state": "running",
+            "started_at": 1794009600,
+            "ended_at": null,
+            "exit": null,
+            "signal": null,
+            "error": null
+          }
+        }
+      ]
+    }
+  },
+  "cloud_operations": {
+    "GET /v1/workspaces": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/items/$ref",
+        "value": "#/components/schemas/CloudWorkspaceBrief"
+      },
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/example",
+        "value": [
+          {
+            "id": "demo",
+            "uid": "ws_example",
+            "mode": "exec",
+            "mount_count": 3,
+            "session_count": 0,
+            "status": "stopped",
+            "type": "free",
+            "template": null,
+            "labels": {},
+            "created_by": "usr_example",
+            "created_at": 1794009600,
+            "updated_at": 1794009600
+          }
+        ]
+      }
+    ],
+    "POST /v1/workspaces": [
+      {
+        "op": "remove",
+        "path": "/responses/200"
+      },
+      {
+        "op": "replace",
+        "path": "/responses/201/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudWorkspaceDetail"
+      },
+      {
+        "op": "replace",
+        "path": "/responses/201/content/application~1json/example",
+        "value": {
+          "id": "demo",
+          "uid": "ws_example",
+          "mode": "exec",
+          "mount_count": 3,
+          "session_count": 0,
+          "status": "stopped",
+          "type": "free",
+          "template": null,
+          "labels": {},
+          "created_by": "usr_example",
+          "created_at": 1794009600,
+          "updated_at": 1794009600,
+          "config": {
+            "mounts": {
+              "/": {
+                "vfs": "sql",
+                "mode": "exec"
+              },
+              "/tmp": {
+                "vfs": "ram",
+                "mode": "exec"
+              },
+              "/data": {
+                "vfs": "ram",
+                "mode": "write"
+              }
+            },
+            "cache": {
+              "type": "ram",
+              "limit": 0
+            },
+            "runtimes": [
+              {
+                "name": "monty",
+                "captures": [
+                  "python3",
+                  "python"
+                ]
+              }
+            ]
+          },
+          "mounts": [
+            {
+              "prefix": "/",
+              "vfs": "sql",
+              "mode": "exec"
+            },
+            {
+              "prefix": "/tmp",
+              "vfs": "ram",
+              "mode": "exec"
+            },
+            {
+              "prefix": "/data",
+              "vfs": "ram",
+              "mode": "write"
+            }
+          ]
+        }
+      }
+    ],
+    "GET /v1/workspaces/{workspace_id}": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudWorkspaceDetail"
+      },
+      {
+        "op": "add",
+        "path": "/responses/200/content/application~1json/example",
+        "value": {
+          "id": "demo",
+          "uid": "ws_example",
+          "mode": "exec",
+          "mount_count": 3,
+          "session_count": 0,
+          "status": "stopped",
+          "type": "free",
+          "template": null,
+          "labels": {},
+          "created_by": "usr_example",
+          "created_at": 1794009600,
+          "updated_at": 1794009600,
+          "config": {
+            "mounts": {
+              "/": {
+                "vfs": "sql",
+                "mode": "exec"
+              },
+              "/tmp": {
+                "vfs": "ram",
+                "mode": "exec"
+              },
+              "/data": {
+                "vfs": "ram",
+                "mode": "write"
+              }
+            },
+            "cache": {
+              "type": "ram",
+              "limit": 0
+            },
+            "runtimes": [
+              {
+                "name": "monty",
+                "captures": [
+                  "python3",
+                  "python"
+                ]
+              }
+            ]
+          },
+          "mounts": [
+            {
+              "prefix": "/",
+              "vfs": "sql",
+              "mode": "exec"
+            },
+            {
+              "prefix": "/tmp",
+              "vfs": "ram",
+              "mode": "exec"
+            },
+            {
+              "prefix": "/data",
+              "vfs": "ram",
+              "mode": "write"
+            }
+          ]
+        }
+      }
+    ],
+    "DELETE /v1/workspaces/{workspace_id}": [],
+    "GET /v1/workspaces/{workspace_id}/logs": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudLogPage"
+      },
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/example",
+        "value": {
+          "items": [
+            {
+              "id": "cmd_01",
+              "command": "echo hello",
+              "cwd": "/",
+              "started_at": 1794009600,
+              "duration_ms": 8,
+              "exit_code": 0,
+              "stdout": "hello\n",
+              "stderr": "",
+              "user_id": "usr_example",
+              "api_key_id": null,
+              "mounts": []
+            }
+          ],
+          "next": null
+        }
+      }
+    ],
+    "POST /v1/workspaces/{workspace_id}/stop": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudWorkspaceDetail"
+      },
+      {
+        "op": "add",
+        "path": "/responses/200/content/application~1json/example",
+        "value": {
+          "id": "demo",
+          "uid": "ws_example",
+          "mode": "exec",
+          "mount_count": 3,
+          "session_count": 0,
+          "status": "stopped",
+          "type": "free",
+          "template": null,
+          "labels": {},
+          "created_by": "usr_example",
+          "created_at": 1794009600,
+          "updated_at": 1794009600,
+          "config": {
+            "mounts": {
+              "/": {
+                "vfs": "sql",
+                "mode": "exec"
+              },
+              "/tmp": {
+                "vfs": "ram",
+                "mode": "exec"
+              },
+              "/data": {
+                "vfs": "ram",
+                "mode": "write"
+              }
+            },
+            "cache": {
+              "type": "ram",
+              "limit": 0
+            },
+            "runtimes": [
+              {
+                "name": "monty",
+                "captures": [
+                  "python3",
+                  "python"
+                ]
+              }
+            ]
+          },
+          "mounts": [
+            {
+              "prefix": "/",
+              "vfs": "sql",
+              "mode": "exec"
+            },
+            {
+              "prefix": "/tmp",
+              "vfs": "ram",
+              "mode": "exec"
+            },
+            {
+              "prefix": "/data",
+              "vfs": "ram",
+              "mode": "write"
+            }
+          ]
+        }
+      }
+    ],
+    "POST /v1/workspaces/{workspace_id}/start": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudWorkspaceDetail"
+      },
+      {
+        "op": "add",
+        "path": "/responses/200/content/application~1json/example",
+        "value": {
+          "id": "demo",
+          "uid": "ws_example",
+          "mode": "exec",
+          "mount_count": 3,
+          "session_count": 0,
+          "status": "stopped",
+          "type": "free",
+          "template": null,
+          "labels": {},
+          "created_by": "usr_example",
+          "created_at": 1794009600,
+          "updated_at": 1794009600,
+          "config": {
+            "mounts": {
+              "/": {
+                "vfs": "sql",
+                "mode": "exec"
+              },
+              "/tmp": {
+                "vfs": "ram",
+                "mode": "exec"
+              },
+              "/data": {
+                "vfs": "ram",
+                "mode": "write"
+              }
+            },
+            "cache": {
+              "type": "ram",
+              "limit": 0
+            },
+            "runtimes": [
+              {
+                "name": "monty",
+                "captures": [
+                  "python3",
+                  "python"
+                ]
+              }
+            ]
+          },
+          "mounts": [
+            {
+              "prefix": "/",
+              "vfs": "sql",
+              "mode": "exec"
+            },
+            {
+              "prefix": "/tmp",
+              "vfs": "ram",
+              "mode": "exec"
+            },
+            {
+              "prefix": "/data",
+              "vfs": "ram",
+              "mode": "write"
+            }
+          ]
+        }
+      }
+    ],
+    "POST /v1/workspaces/{workspace_id}/cancel": [],
+    "GET /v1/templates": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudTemplateList"
+      }
+    ],
+    "POST /v1/templates": [
+      {
+        "op": "replace",
+        "path": "/responses/201/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudTemplate"
+      },
+      {
+        "op": "replace",
+        "path": "/responses/201/content/application~1json/example",
+        "value": {
+          "id": "tpl_example",
+          "name": "demo",
+          "description": null,
+          "builtin": false,
+          "secrets": [],
+          "policies": [],
+          "config": {
+            "mounts": {
+              "/": {
+                "vfs": "sql",
+                "mode": "exec"
+              },
+              "/tmp": {
+                "vfs": "ram",
+                "mode": "exec"
+              },
+              "/data": {
+                "vfs": "ram",
+                "mode": "write"
+              }
+            },
+            "cache": {
+              "type": "ram",
+              "limit": 0
+            },
+            "store": {
+              "type": "sql"
+            },
+            "runtimes": [
+              {
+                "name": "monty",
+                "captures": [
+                  "python3",
+                  "python"
+                ]
+              }
+            ]
+          },
+          "created_by": "usr_example",
+          "created_at": 1794009600
+        }
+      }
+    ],
+    "GET /v1/templates/{ref}": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudTemplate"
+      }
+    ],
+    "DELETE /v1/templates/{ref}": [],
+    "POST /v1/templates/{ref}/restore": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudTemplate"
+      }
+    ],
+    "POST /v1/workspaces/{workspace_id}/shell": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema",
+        "value": {
+          "$ref": "#/components/schemas/CloudShellResult"
+        }
+      },
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/example",
+        "value": {
+          "kind": "io",
+          "exit_code": 0,
+          "stdout": "hello\n",
+          "stderr": "",
+          "refusal": null
+        }
+      },
+      {
+        "op": "remove",
+        "path": "/requestBody/content/multipart~1form-data"
+      },
+      {
+        "op": "replace",
+        "path": "/responses/200/description",
+        "value": "The shell result, or an NDJSON stream ending in a status record when stream=true."
+      }
+    ],
+    "POST /v1/workspaces/{workspace_id}/vfs/read": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/write": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/append": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/pwrite": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/stat": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/readdir": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/exists": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/is_dir": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/is_file": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/list_files": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/mkdir": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/rmdir": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/unlink": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/create": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/rename": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/symlink": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/readlink": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/setattr": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/getxattr": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/listxattr": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/setxattr": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/removexattr": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/truncate": [],
+    "POST /v1/workspaces/{workspace_id}/glob": [],
+    "POST /v1/workspaces/{workspace_id}/vfs/{name}": [],
+    "GET /v1/health": [
+      {
+        "op": "remove",
+        "path": "/responses/200/content/application~1json/schema/$ref"
+      },
+      {
+        "op": "add",
+        "path": "/responses/200/content/application~1json/schema/type",
+        "value": "object"
+      },
+      {
+        "op": "add",
+        "path": "/responses/200/content/application~1json/schema/properties",
+        "value": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok"
+            ]
+          }
+        }
+      },
+      {
+        "op": "add",
+        "path": "/responses/200/content/application~1json/schema/required",
+        "value": [
+          "status"
+        ]
+      },
+      {
+        "op": "add",
+        "path": "/responses/200/content/application~1json/example",
+        "value": {
+          "status": "ok"
+        }
+      }
+    ],
+    "GET /v1/vfs": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudSavedEntryList"
+      }
+    ],
+    "POST /v1/vfs": [
+      {
+        "op": "replace",
+        "path": "/responses/201/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudSavedEntry"
+      }
+    ],
+    "GET /v1/vfs/types": [],
+    "GET /v1/vfs/{ref}": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudSavedEntryDetail"
+      }
+    ],
+    "PUT /v1/vfs/{ref}": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudSavedEntry"
+      }
+    ],
+    "DELETE /v1/vfs/{ref}": [],
+    "GET /v1/clis": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudSavedEntryList"
+      }
+    ],
+    "POST /v1/clis": [
+      {
+        "op": "replace",
+        "path": "/responses/201/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudSavedEntry"
+      }
+    ],
+    "GET /v1/clis/types": [],
+    "GET /v1/clis/{ref}": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudSavedEntryDetail"
+      }
+    ],
+    "PUT /v1/clis/{ref}": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudSavedEntry"
+      }
+    ],
+    "DELETE /v1/clis/{ref}": [],
+    "GET /v1/runtimes": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudSavedEntryList"
+      }
+    ],
+    "GET /v1/runtimes/types": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/example",
+        "value": {}
+      }
+    ],
+    "GET /v1/runtimes/{ref}": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudSavedEntryDetail"
+      }
+    ],
+    "GET /v1/policies": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudPolicyList"
+      }
+    ],
+    "POST /v1/policies": [
+      {
+        "op": "replace",
+        "path": "/responses/201/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudPolicy"
+      }
+    ],
+    "GET /v1/policies/{ref}": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudPolicy"
+      }
+    ],
+    "PUT /v1/policies/{ref}": [
+      {
+        "op": "replace",
+        "path": "/responses/200/content/application~1json/schema/$ref",
+        "value": "#/components/schemas/CloudPolicy"
+      }
+    ],
+    "DELETE /v1/policies/{ref}": [],
+    "GET /v1/me": [
+      {
+        "op": "add",
+        "path": "/summary",
+        "value": "Get current account"
+      },
+      {
+        "op": "add",
+        "path": "/operationId",
+        "value": "get_current_account"
+      },
+      {
+        "op": "add",
+        "path": "/tags",
+        "value": [
+          "Account"
+        ]
+      },
+      {
+        "op": "add",
+        "path": "/description",
+        "value": "Return the authenticated user, active team, role, authentication method, plan, and team memberships. An API key only sees its own team."
+      },
+      {
+        "op": "add",
+        "path": "/security",
+        "value": [
+          {
+            "cloudBearerAuth": []
+          }
+        ]
+      },
+      {
+        "op": "add",
+        "path": "/responses",
+        "value": {
+          "200": {
+            "description": "The authenticated account and its teams.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "user_id",
+                    "team_id",
+                    "role",
+                    "via",
+                    "plan",
+                    "teams"
+                  ],
+                  "properties": {
+                    "user_id": {
+                      "type": "string"
+                    },
+                    "team_id": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "via": {
+                      "type": "string",
+                      "enum": [
+                        "session",
+                        "oauth",
+                        "api_key"
+                      ]
+                    },
+                    "plan": {
+                      "type": "string"
+                    },
+                    "teams": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "kind",
+                          "name",
+                          "slug",
+                          "role"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "personal",
+                              "org"
+                            ]
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "slug": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "user_id": "usr_demo",
+                  "team_id": "team_demo",
+                  "role": "owner",
+                  "via": "oauth",
+                  "plan": "free",
+                  "teams": [
+                    {
+                      "id": "team_demo",
+                      "kind": "personal",
+                      "name": "Personal",
+                      "slug": "personal",
+                      "role": "owner"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The bearer token is missing, invalid, or expired."
+          },
+          "403": {
+            "description": "The account or active team is unavailable or access is denied."
+          },
+          "429": {
+            "description": "The request rate limit was reached."
+          }
+        }
+      }
+    ]
+  },
+  "planned_cloud_tags": [
+    "VFS"
+  ],
+  "$comment": "Generated views come from docs/openapi.yaml plus these explicit differences. Updates use JSON Patch with object paths; arrays and examples are replaced as values. Run python scripts/gen_api_reference.py after editing.",
+  "cloud_only_operations": [
+    "GET /v1/me"
+  ]
+}

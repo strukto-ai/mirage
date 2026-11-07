@@ -1,41 +1,84 @@
 ---
 title: Overview
-description: "The Mirage HTTP API: where it runs, how to authenticate, and how errors look."
+description: Connect to Mirage Cloud or an OSS Server over HTTP.
 icon: book-open
 ---
 
-The Mirage HTTP API creates workspaces, runs shell commands and reads or writes
-files. Routes are under `/v1`. The local daemon runs on Python or TypeScript.
-The hosted API serves the subset marked **Daemon and hosted** in the reference.
-Shared routes use the same request and response bodies on both hosts.
+Mirage has two HTTP APIs. **Cloud** runs on infrastructure managed by Strukto.
+**OSS Server** runs on infrastructure you operate, using Python or TypeScript.
+Both provide workspaces and shell execution.
+
+## Deployments
+
+| Deployment | Base URL | Authentication |
+| --- | --- | --- |
+| Cloud | `https://api.strukto.ai` | A bearer token for your account |
+| OSS Server | `http://127.0.0.1:8765` for a local server | A server token or JWT, depending on server configuration |
+
+For an OSS Server on another machine, use that server's URL. Local mode accepts
+requests without a bearer token when no token is configured.
+
+Cloud and OSS Server share workspace concepts, but endpoint availability,
+parameters, and response fields can differ. Use the contract for your deployment.
+
+## Make a request
+
+<Tabs>
+  <Tab title="Cloud" icon="cloud">
+    List the workspaces available to your account. Set `MIRAGE_AUTH_TOKEN`
+    to your Cloud access token.
+
+    ```bash cURL
+    curl --request GET \
+      --url 'https://api.strukto.ai/v1/workspaces' \
+      --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
+    ```
+
+    See [Authentication](/api/authentication) for credentials and
+    [Quickstart](/api/quickstart) to create a workspace and run a command.
+  </Tab>
+  <Tab title="OSS Server" icon="server">
+    [Launch a server](/home/access/http#launch-a-server), then list its
+    workspaces. Set `MIRAGE_AUTH_TOKEN` to the token configured on your server.
+
+    ```bash cURL
+    curl --request GET \
+      --url 'http://127.0.0.1:8765/v1/workspaces' \
+      --header "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
+    ```
+
+    Omit the authorization header if your local server has no token configured.
+    See [Server authentication](/home/access/http#configure-authentication)
+    for token and JWT settings.
+  </Tab>
+</Tabs>
+
+## Endpoint availability
 
 <Note>
-Embedding Mirage in a Python or TypeScript program? Use the library instead:
-it runs the same workspaces in process, with no server. See
-[Python](/python/quickstart) or [TypeScript](/typescript/quickstart).
+Workspace VFS endpoints describe the planned Cloud contract. They are available
+in OSS Server; the Cloud implementation is pending. Shell is already available in Cloud.
 </Note>
 
-## Where it runs
+Choose **Cloud** or **OSS Server** with the filter above the sidebar.
+Shared content is generated from one source. Deployment differences are called out
+on the endpoint page. cURL examples
+use the selected deployment's base URL.
 
-| Host | Base URL | Routes |
-| --- | --- | --- |
-| Hosted API | `https://api.strukto.ai` | Rows marked **Daemon and hosted** in the reference, plus the hosted API's own account routes |
-| Local daemon | `http://127.0.0.1:8765` by default | Every route in the [reference](/api/reference) |
-
-The `mirage` CLI starts a daemon on the first command that needs one. To run
-one from code, see [Launch a server](/home/access/http#launch-a-server).
+Server administration, such as readiness checks, metrics, and shutdown,
+belongs to OSS Server. See [HTTP](/home/access/http) for server setup and configuration.
 
 ## Start here
 
 <CardGroup cols={2}>
-  <Card title="Quickstart" icon="bolt" href="/api/quickstart">
-    Create a workspace and run a shell command.
+  <Card title="Cloud quickstart" icon="bolt" href="/api/quickstart">
+    Create a hosted workspace and run a shell command.
   </Card>
   <Card title="API reference" icon="list" href="/api/reference">
-    Search endpoints by resource, parameter or response field.
+    Find an endpoint by resource, parameter, or response field.
   </Card>
-  <Card title="Authentication" icon="key" href="/api/authentication">
-    Connect with a server token or JWT.
+  <Card title="OSS Server" icon="server" href="/home/access/http">
+    Run a server and configure authentication.
   </Card>
   <Card title="Errors" icon="triangle-exclamation" href="/api/errors">
     Handle HTTP failures and command exit codes.
@@ -44,18 +87,16 @@ one from code, see [Launch a server](/home/access/http#launch-a-server).
 
 ## Resource groups
 
-**Workspaces** contains lifecycle operations, shell execution, VFS file operations,
-documents and asks. These operations create workspaces or act within one.
+**Workspaces** contains workspace lifecycle operations, command execution, path
+matching, direct VFS operations, and [command logs](/api/operations/workspaces/list-workspace-logs).
 
-**Saved configurations** contains reusable VFS, CLI and runtime definitions. They
-exist independently of a workspace. For example, Workspaces → VFS reads and writes
-files; Saved configurations → VFS manages backend configurations to use in mounts.
-Templates describe whole workspace configurations. Policies manage reusable rules.
+**Saved configurations** contains reusable VFS, CLI, and runtime definitions.
+These configure workspace backends and commands. Templates describe workspace
+configurations. Policies manage reusable rules.
 
-## Contract
+## OpenAPI contracts
 
-- [API reference](/api/reference): endpoints, searchable and filterable
-  by resource.
-- [`openapi.yaml`](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml):
-  the OpenAPI document the reference is generated from. Both servers are
-  checked against it in CI.
+Download the [Cloud contract](/api/deployments/cloud.json) or the
+[OSS Server contract](/api/deployments/server.json) for schemas and all documented
+status codes. The right pane shows successful responses; errors appear in each
+endpoint's collapsed **Errors** section.

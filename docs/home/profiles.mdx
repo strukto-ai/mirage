@@ -129,8 +129,13 @@ workspace YAML is never rewritten.
 | --- | --- | --- |
 | Python | `ws.set_profile(name, doc)` | `await ws.set_session_profile(id, name)` |
 | TypeScript | `ws.setProfile(name, doc)` | `await ws.setSessionProfile(id, name)` |
-| [HTTP](/home/access/http#set-a-profile) | `PUT /v1/workspaces/{id}/profiles/{name}` | `PATCH /v1/workspaces/{id}/sessions/{session_id}` |
+| [HTTP](/api/server/operations/workspaces/set-a-profile) | `PUT /v1/workspaces/{id}/profiles/{name}` | `PATCH /v1/workspaces/{id}/sessions/{session_id}` |
 | [CLI](/home/access/cli#workspaces) | `mirage workspace set-profile ID NAME FILE` | `mirage workspace session update -w ID -s S -p NAME` |
+
+For HTTP, send a JSON body such as `{"profile":"researcher"}` to the session's
+`PATCH` route to select that profile. Session operations remain in the
+[complete OSS Server contract](/api/deployments/server.json), although they are
+hidden from API navigation.
 
 An agent cannot reach these: they are host operations, so no builtin, MCP tool
 or RPC method changes a profile.
