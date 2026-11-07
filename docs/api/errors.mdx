@@ -5,7 +5,7 @@ icon: triangle-exclamation
 ---
 
 A `200` from `POST /v1/workspaces/{workspace_id}/shell` means the server ran
-the line, not that the line succeeded: check `exit_code`. Other errors return
+the line, not that the line succeeded: check `exit_code`. Most API errors return
 JSON with a `detail` message, but an auth or `Host` refusal can be plain text,
 so check `Content-Type` before parsing. The full status table is in
 [Errors](/home/access/http#errors); requests past a limit answer `429` with
@@ -30,6 +30,10 @@ Each endpoint's **Errors** section lists its documented failures. The complete
 retains every response schema. JSON errors can
 include `errno` and `refusal` alongside `detail`. Those fields describe filesystem
 errors and policy refusals when available.
+
+The readiness endpoint uses a different body: HTTP `503` returns
+`{"status": "full"}` or `{"status": "shutting_down"}` when the server cannot
+accept new workspaces.
 
 ## Examples
 

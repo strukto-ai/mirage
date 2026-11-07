@@ -218,10 +218,25 @@ def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
         doc (dict[str, Any]): the OpenAPI document.
         op (dict[str, Any]): the operation object.
     """
-    responses = op.get("responses", {})
+    responses = {}
+    for code, response in op.get("responses", {}).items():
+        if "$ref" in response:
+            response = {
+                **doc["components"]["responses"][
+                    response["$ref"].split("/")[-1]
+                ],
+                **response,
+            }
+        responses[code] = response
     lines = []
     created = (
         responses.get("201", {}).get("content", {}).get("application/json", {})
+    )
+    markdown = (
+        responses.get("200", {}).get("content", {}).get("text/markdown", {})
+    )
+    generic = (
+        responses.get("200", {}).get("content", {}).get("application/json", {})
     )
     example = []
     if "200" in responses and "example" in created:
@@ -232,6 +247,17 @@ def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
         ]
     elif {code for code in responses if code.startswith("2")} == {"204"}:
         example = ["```http 204 No Content", "HTTP/1.1 204 No Content", "```"]
+    elif "example" in markdown:
+        text = markdown["example"]
+        longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+        fence = "`" * max(3, longest + 1)
+        example = [f"{fence}markdown 200", text, fence]
+    elif generic.get("schema") == {} and "example" not in generic:
+        example = [
+            "```http 200 Headers only",
+            "HTTP/1.1 200 OK\nContent-Type: application/json",
+            "```",
+        ]
     if example:
         lines += [
             '<div className="hidden">',
@@ -256,13 +282,6 @@ def response_content(doc: dict[str, Any], op: dict[str, Any]) -> str:
             "| --- | --- |",
         ]
         for code, response in errors:
-            if "$ref" in response:
-                response = {
-                    **doc["components"]["responses"][
-                        response["$ref"].split("/")[-1]
-                    ],
-                    **response,
-                }
             description = (
                 attr(response["description"])
                 .replace("\n", " ")
@@ -389,10 +408,12 @@ def selftest() -> None:
     doc["paths"] = {
         "/visible": {"get": op},
         "/hidden": {"post": {**op, "x-hidden": True}},
+        "/excluded": {"get": {**op, "x-excluded": True}},
     }
     page = render(doc)
     assert 'path="/visible"' in page
     assert 'path="/hidden"' not in page
+    assert 'path="/excluded"' not in page
 
     doc["components"]["responses"] = {
         "409": {"description": "Conflicting configuration"}
@@ -417,6 +438,31 @@ def selftest() -> None:
     )
     assert "204 No Content" in empty_response
     assert "```http" in empty_response and "```json" not in empty_response
+    markdown_text = "# Commands\n\n```sh\necho hello\n```\n"
+    doc["components"]["responses"]["Document"] = {
+        "description": "Generated document",
+        "content": {"text/markdown": {"example": markdown_text}},
+    }
+    markdown_response = response_content(
+        doc,
+        {"responses": {"200": {"$ref": "#/components/responses/Document"}}},
+    )
+    assert (
+        "````markdown 200" in markdown_response
+        and markdown_text in markdown_response
+    )
+    generic_response = response_content(
+        doc,
+        {
+            "responses": {
+                "200": {"content": {"application/json": {"schema": {}}}}
+            }
+        },
+    )
+    assert (
+        "200 Headers only" in generic_response
+        and "Content-Type: application/json" in generic_response
+    )
     print("API reference self-test passed")
 
 

@@ -490,6 +490,8 @@ paths:
           description: OK
           content:
             application/json:
+              example:
+                name: analyst
               schema:
                 type: object
                 additionalProperties:
@@ -546,6 +548,8 @@ paths:
           description: OK
           content:
             application/json:
+              example:
+                name: remote
               schema:
                 type: object
                 additionalProperties:
@@ -593,6 +597,8 @@ paths:
           description: OK
           content:
             application/json:
+              example:
+                name: remote
               schema:
                 type: object
                 additionalProperties:
@@ -967,11 +973,7 @@ paths:
               - type: 'null'
       responses:
         '200':
-          description: The document
-          content:
-            text/markdown:
-              schema:
-                type: string
+          $ref: '#/components/responses/VfsDocument'
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1014,10 +1016,7 @@ paths:
               path: /VFS.md
       responses:
         '200':
-          description: OK
-          content:
-            application/json:
-              schema: {}
+          $ref: '#/components/responses/VfsDocument'
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1059,11 +1058,7 @@ paths:
               - type: 'null'
       responses:
         '200':
-          description: The document
-          content:
-            text/markdown:
-              schema:
-                type: string
+          $ref: '#/components/responses/VfsDocument'
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1112,10 +1107,7 @@ paths:
               path: /VFS.md
       responses:
         '200':
-          description: OK
-          content:
-            application/json:
-              schema: {}
+          $ref: '#/components/responses/VfsDocument'
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1151,11 +1143,7 @@ paths:
               - type: 'null'
       responses:
         '200':
-          description: The document
-          content:
-            text/markdown:
-              schema:
-                type: string
+          $ref: '#/components/responses/SkillDocument'
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1198,10 +1186,7 @@ paths:
               path: /SKILL.md
       responses:
         '200':
-          description: OK
-          content:
-            application/json:
-              schema: {}
+          $ref: '#/components/responses/SkillDocument'
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1243,11 +1228,7 @@ paths:
               - type: 'null'
       responses:
         '200':
-          description: The document
-          content:
-            text/markdown:
-              schema:
-                type: string
+          $ref: '#/components/responses/SkillDocument'
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1296,10 +1277,7 @@ paths:
               path: /SKILL.md
       responses:
         '200':
-          description: OK
-          content:
-            application/json:
-              schema: {}
+          $ref: '#/components/responses/SkillDocument'
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -3671,6 +3649,8 @@ paths:
           content:
             application/json:
               schema: {}
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -3685,7 +3665,10 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: Call a declared VFS function using the ordinary session and policy gate.
+      description: >-
+        Call a declared VFS function using the ordinary session and policy gate.
+        The selected function defines the returned JSON value; there is no shared
+        response shape. The example shows response headers only.
       tags:
         - VFS
       x-hosts:
@@ -3739,7 +3722,22 @@ paths:
           description: OK
           content:
             application/json:
+              example:
+                status: ready
               schema: {}
+        '503':
+          description: The server is full or shutting down and cannot accept new workspaces.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [full, shutting_down]
+                required: [status]
+              example:
+                status: full
       description: 'Whether the server takes new workspaces: 503 while it drains for
 
         shutdown or holds `max_workspaces`, so a load balancer sends new
@@ -3908,6 +3906,58 @@ paths:
           description: OK
           content:
             application/json:
+              example:
+                s3:
+                  - name: timeout
+                    type: number
+                    secret: false
+                    required: false
+                    default: 30
+                  - name: region
+                    type: string
+                    secret: false
+                    required: false
+                  - name: aws_access_key_id
+                    type: string
+                    secret: true
+                    required: false
+                  - name: aws_secret_access_key
+                    type: string
+                    secret: true
+                    required: false
+                  - name: aws_session_token
+                    type: string
+                    secret: true
+                    required: false
+                  - name: aws_profile
+                    type: string
+                    secret: false
+                    required: false
+                  - name: bucket
+                    type: string
+                    secret: false
+                    required: true
+                  - name: endpoint_url
+                    type: string
+                    secret: false
+                    required: false
+                  - name: path_style
+                    type: boolean
+                    secret: false
+                    required: false
+                    default: false
+                  - name: proxy
+                    type: string
+                    secret: true
+                    required: false
+                  - name: key_prefix
+                    type: string
+                    secret: false
+                    required: false
+                  - name: default_content_type
+                    type: string
+                    secret: false
+                    required: false
               schema:
                 $ref: '#/components/schemas/TypeTable'
         '401':
@@ -3917,7 +3967,7 @@ paths:
         '501':
           $ref: '#/components/responses/501'
       summary: List VFS config types
-      description: Every type a VFS config can be, with the fields its config takes.
+      description: Every type a VFS config can be, with the fields its config takes. The example shows one registered type; the response includes all types available on the server.
       tags:
         - Saved VFS
       x-hosts: *id002
@@ -4127,6 +4177,29 @@ paths:
           description: OK
           content:
             application/json:
+              example:
+                gh:
+                  - name: timeout
+                    type: number
+                    secret: false
+                    required: false
+                    default: 30
+                  - name: token
+                    type: string
+                    secret: true
+                    required: true
+                  - name: base_url
+                    type: string
+                    secret: false
+                    required: false
+                  - name: repo
+                    type: string
+                    secret: false
+                    required: false
+                  - name: branch
+                    type: string
+                    secret: false
+                    required: false
               schema:
                 $ref: '#/components/schemas/TypeTable'
         '401':
@@ -4136,7 +4209,7 @@ paths:
         '501':
           $ref: '#/components/responses/501'
       summary: List CLI config types
-      description: Every type a CLI config can be, with the fields its config takes.
+      description: Every type a CLI config can be, with the fields its config takes. The example shows one registered type; the response includes all types available on the server.
       tags:
         - Saved CLIs
       x-hosts: *id002
@@ -4344,6 +4417,12 @@ paths:
           description: OK
           content:
             application/json:
+              example:
+                monty:
+                  - name: max_memory
+                    type: string
+                    secret: false
+                    required: false
               schema:
                 $ref: '#/components/schemas/TypeTable'
         '401':
@@ -4353,7 +4432,7 @@ paths:
         '501':
           $ref: '#/components/responses/501'
       summary: List runtime config types
-      description: Every type a runtime config can be, with the fields its config takes.
+      description: Every type a runtime config can be, with the fields its config takes. The example shows one registered type; the response includes all types available on the server.
       tags:
         - Saved runtimes
       x-hosts: *id002
@@ -6958,6 +7037,61 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    VfsDocument:
+      description: Generated VFS.md document.
+      content:
+        text/markdown:
+          schema:
+            type: string
+          example: |+
+            ---
+            name: workspace-filesystem
+            description: The virtual filesystem layout of this workspace.
+            ---
+
+            # Virtual Filesystem
+
+            You work in a terminal over a virtual filesystem. Read files with shell commands; access is checked for each operation.
+
+            | Path | Description |
+            | --- | --- |
+            | `/` | `ram`, write |
+            | `/dev` | `ram`, write |
+
+            ## Supported Unix Commands for VFS
+
+            Unix commands work on each path as on a local filesystem, as far as the path supports them:
+
+            | Path | Supported |
+            | --- | --- |
+            | `/` | Almost all Unix commands. |
+            | `/dev` | Almost all Unix commands. |
+
+            ## Limitations of Unix Commands for VFS
+
+            Where a path differs from a local filesystem:
+
+            | Path | Limitations |
+            | --- | --- |
+            | `/` | `grep -r`, `find` and `du` stop after 10000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+            | `/dev` | `grep -r`, `find` and `du` stop after 10000 files; a glob matching more, `tar -c`, `cp -r` and `rm -r` are refused. |
+
+            Run `man <cmd>` or `<cmd> --help` for one command's usage.
+    SkillDocument:
+      description: Generated SKILL.md document.
+      content:
+        text/markdown:
+          schema:
+            type: string
+          example: |+
+            ---
+            name: workspace-commands
+            description: The CLIs registered in this workspace and how to call them.
+            ---
+
+            # Available commands
+
+            No CLIs are registered.
   parameters:
     workspaceId:
       name: workspace_id
