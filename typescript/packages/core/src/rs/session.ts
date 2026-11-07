@@ -29,7 +29,11 @@ export function varOf(record: ShellRecord): ShellVar {
   let value: ShellValue | null = null
   if (typeof raw === 'string') value = raw
   else if (raw !== null && cluster.startsWith('A')) {
-    value = Object.fromEntries(raw as ReadonlyMap<string, string>)
+    // No prototype: a key such as `constructor` or `__proto__` is the map's
+    // own, never an inherited property.
+    const map = Object.create(null) as Record<string, string>
+    for (const [key, element] of raw as ReadonlyMap<string, string>) map[key] = element
+    value = map
   } else if (raw !== null) value = new ShellArray(raw as ReadonlyMap<bigint, string>)
   const out: ShellVar = { value, attrs: attrsFromLetters(cluster) }
   if (managed === null) return out

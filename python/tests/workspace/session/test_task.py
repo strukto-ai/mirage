@@ -16,8 +16,10 @@ import asyncio
 
 import pytest
 
+from mirage.types import HiddenVars, Visibility
 from mirage.workspace import Workspace
 from mirage.workspace.session import task as task_module
+from mirage.workspace.session.state import seed_var
 
 
 @pytest.mark.asyncio
@@ -60,5 +62,26 @@ async def test_a_short_value_operator_never_pauses(monkeypatch):
         result = await ws.shell('x=hello; echo "${x//l/L} ${x^^[lo]}"')
         assert await result.stdout_str() == "heLLo heLLO\n"
         assert pauses == []
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_profile_changed_mid_task_hides_its_names(monkeypatch):
+    ws = Workspace({}, max_env=None)
+    session = ws.get_session(ws.default_session_id)
+    hidden = Visibility(vars=HiddenVars(names=("TOKEN",)))
+
+    async def turn() -> None:
+        session.visibility = hidden
+        await asyncio.sleep(0)
+
+    try:
+        await ws.shell("shopt -s extglob; TOKEN=t")
+        seed_var(session, "X", "a" * 2_000_000)
+        monkeypatch.setattr(task_module, "task_turn", turn)
+        result = await ws.shell('x=${X//+(?)/x}; echo "${TOKEN-unset}"')
+        assert session.visibility is hidden
+        assert await result.stdout_str() == "unset\n"
     finally:
         await ws.close()

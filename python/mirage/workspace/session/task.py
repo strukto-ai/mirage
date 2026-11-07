@@ -224,6 +224,7 @@ async def drive(
     refusals: dict[int, BaseException] = {}
     failure: BaseException | None = None
     records = host.session.vars
+    shown = host.session.visibility
     while (ask := task.step()) is not None:
         held = records.shell
         records.shell = (
@@ -256,6 +257,10 @@ async def drive(
         finally:
             records.shell = held
     result, said = task.finish()
+    # A profile changed while the host answered hid its names on a copy
+    # lent meanwhile; the shell, back with its owner, takes them now.
+    if host.session.visibility is not shown:
+        host.session.hide_vars()
     diagnostics.extend(said)
     if failure is not None:
         raise failure

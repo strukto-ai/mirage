@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable, Iterator, Mapping
 from typing import ParamSpec
 
 from mirage._rs import ShellTask
-from mirage.context.session_context import session_access
+from mirage.context.session_context import session_access, session_voice
 from mirage.io.memory import memory_room
 from mirage.policy.errors import PolicyDenied
 from mirage.policy.policies import Policies, pre_session_gate
@@ -29,7 +29,6 @@ from mirage.shell.array import ShellArray, array_get
 from mirage.shell.bytes import join_bytes
 from mirage.shell.call_stack import CallStack
 from mirage.shell.variable import ShellValue, VarAttr
-from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
 from mirage.workspace.session.budget import (
     args_bytes,
@@ -86,7 +85,7 @@ def frame(session: SessionState, call_stack: CallStack | None = None) -> None:
         memory_room=memory_room(),
         line=session.line_number,
         bash_pid=session.bash_pid,
-        voice=shell_voice(),
+        voice=session_voice(session),
     )
 
 

@@ -16,12 +16,17 @@ import asyncio
 
 import pytest
 
+from mirage.context.session_context import (
+    reset_current_session,
+    set_current_session,
+)
 from mirage.policy import Action, Deny, Policies, Policy, PolicyDenied
 from mirage.policy.types import SessionContext
 from mirage.rs.session import ShellVars
 from mirage.shell.array import ShellArray, make_array
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ArithError, ReadonlyVariableError
+from mirage.shell.parse.parse import parse_program
 from mirage.shell.variable import ManagedRef, ShellVar, VarAttr
 from mirage.types import HiddenVars, Visibility
 from mirage.view.types import SessionView
@@ -627,3 +632,25 @@ def test_outlive_call_keeps_a_temporary_environment_name():
     shell.leave(outer)
     shell.close_temp(temp)
     assert session.env["A"] == "t"
+
+
+@pytest.mark.asyncio
+async def test_a_frame_voices_its_own_session_while_another_runs():
+    _, session = _view()
+    _, other = _view()
+    held = parse_program("true\necho here")
+    session._line_node = held.root.named_children[1]
+    gone = parse_program("echo there")
+    other._line_node = gone.root.named_children[0]
+    gone.release()
+    set_attr(session, "r", VarAttr.NAMEREF)
+    notes: list[str | bytes] = []
+    token = set_current_session(other)
+    try:
+        await set_var(session, None, "r", make_array(["x"]), diagnostics=notes)
+    finally:
+        reset_current_session(token)
+    held.release()
+    assert [
+        note if isinstance(note, str) else note.decode() for note in notes
+    ] == ["bash: line 2: warning: r: removing nameref attribute\n"]

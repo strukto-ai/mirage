@@ -987,6 +987,10 @@ class SessionState:
                 value, None if ids is None else ids.random_u32
             )
         object.__setattr__(self, name, value)
+        # The shell draws a first `$RANDOM` seed from the session's ids, so
+        # a new source, or a new shell, binds as it lands.
+        if name in ("ids", "vars") and {"ids", "vars"} <= self.__dict__.keys():
+            self.vars.shell.use_ids(self.ids.random_u32)
         # The shell holds the hidden names itself, so a new visibility,
         # or a new shell, takes them as it lands, wherever it is set.
         if (
@@ -997,15 +1001,18 @@ class SessionState:
             }
             <= self.__dict__.keys()
         ):
-            hidden = self.visibility.vars
-            self.vars.shell.hide(
-                [] if hidden is None else list(hidden.names),
-                [] if hidden is None else list(hidden.patterns),
-            )
+            self.hide_vars()
+
+    def hide_vars(self) -> None:
+        """Hand the shell the names the session's visibility hides."""
+        hidden = self.visibility.vars
+        self.vars.shell.hide(
+            [] if hidden is None else list(hidden.names),
+            [] if hidden is None else list(hidden.patterns),
+        )
 
     def __post_init__(self) -> None:
         self.functions = function_sources(self.functions)
-        self.vars.shell.use_ids(self.ids.random_u32)
         # bash exports `$PWD` from startup, so a session that has never
         # run `cd` still has one. Seeding here rather than at lookup time
         # is what makes it an ordinary variable: assignable, unsettable,

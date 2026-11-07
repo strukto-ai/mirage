@@ -21,6 +21,7 @@ import { ScriptSource } from '../../runtime/types.ts'
 import { MountMode, type Visibility } from '../../types.ts'
 import { SessionManager } from './manager.ts'
 import { ManualClock } from '../../utils/clock.ts'
+import { SeededIdSource } from '../../utils/ids.ts'
 import { compileProfile } from './resolve.ts'
 import { RAMNamespaceStore } from '../mount/namespace/ram.ts'
 import { SessionState, varsFromEntries } from './session.ts'
@@ -740,6 +741,7 @@ it.each([false, true])(
       },
     )
     manager.defaultProfile = original
+    seedVar(manager.get('default'), 'TOKEN', 't')
     await manager.flush()
     const session = manager.get('default')
     const before = session.toDict()
@@ -767,6 +769,7 @@ it.each([false, true])(
     try {
       await entered
       expect(session.toDict()).toEqual(before)
+      expect(session.vars.shell.hidden('TOKEN')).toBe(true)
       expect(manager.commandsOf('')).toEqual(original.policies.commands)
       expect(manager.scriptsOf('')).toEqual(original.policies.scripts)
       session.cwd = '/changed-during-write'
@@ -775,12 +778,14 @@ it.each([false, true])(
         expect(await updating).toEqual(new Error('store unavailable'))
         expect(session.toDict()).toEqual({ ...before, cwd: session.cwd })
         expect(await store.load()).toEqual(persisted)
+        expect(session.vars.shell.hidden('TOKEN')).toBe(true)
         expect(manager.commandsOf('')).toEqual(original.policies.commands)
         expect(manager.scriptsOf('')).toEqual(original.policies.scripts)
       } else {
         expect(await updating).toBe(session)
         expect(session.mountModes).toBeNull()
         expect(session.visibility.paths).toBeNull()
+        expect(session.vars.shell.hidden('TOKEN')).toBe(false)
         expect(manager.commandsOf('')).toBeNull()
         expect(manager.scriptsOf('')).toEqual({})
       }
@@ -851,4 +856,28 @@ it('a final flush after session deletion does not recreate it', async () => {
   await manager.close('gone')
   await manager.flush('gone')
   expect((await store.load()).has('gone')).toBe(false)
+})
+
+async function loadedDraws(store: RAMNamespaceStore, seed: number): Promise<unknown[]> {
+  const manager = new SessionManager(
+    'default',
+    store,
+    undefined,
+    undefined,
+    new SeededIdSource(seed),
+  )
+  await manager.ensureLoaded()
+  return ['default', 'agent'].map((sid) => manager.get(sid).vars.shell.nextRandom())
+}
+
+it("draws a loaded session's $RANDOM from the manager's ids", async () => {
+  const store = new RAMNamespaceStore()
+  const first = new SessionManager('default', store, undefined, undefined, new SeededIdSource(5))
+  first.create('agent')
+  seedVar(first.get('default'), 'K', 'v')
+  seedVar(first.get('agent'), 'K', 'v')
+  await first.flush()
+  const draws = await loadedDraws(store, 5)
+  expect(await loadedDraws(store, 5)).toEqual(draws)
+  expect(await loadedDraws(store, 6)).not.toEqual(draws)
 })

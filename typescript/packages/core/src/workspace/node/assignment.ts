@@ -310,8 +310,9 @@ export async function executeAssignment(
     if (heldMap !== undefined) {
       // The subscript is the key: no arithmetic, `m[1+1]` writes the
       // key "1+1".
-      const newMap = { ...heldMap }
-      const [slot, added] = append ? appended(heldMap[subText] ?? '', val, integer) : [val, null]
+      const newMap = Object.assign(Object.create(null) as Record<string, string>, heldMap)
+      const held = Object.hasOwn(heldMap, subText) ? heldMap[subText] : ''
+      const [slot, added] = append ? appended(held ?? '', val, integer) : [val, null]
       newMap[subText] = slot
       await assignVar(view, key, newMap, new Set([subText]), added)
       return result(text, { exitCode: assignmentStatus(context.frame, subSeq) })

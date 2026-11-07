@@ -179,7 +179,10 @@ export function buildAssocLiteral(
   words: readonly string[],
   append: boolean,
 ): { map: Record<string, string>; badWords: string[] } {
-  const map: Record<string, string> = append && base !== null ? { ...base } : {}
+  const map = Object.assign(
+    Object.create(null) as Record<string, string>,
+    append && base !== null ? base : {},
+  )
   const first = words[0]
   if (first === undefined) return { map, badWords: [] }
   if (keyedWord(first) === null) {

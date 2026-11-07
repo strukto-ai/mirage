@@ -44,6 +44,8 @@ import {
 import { RANDOM } from '../../shell/constants.ts'
 import { makeVar } from '../../shell/variable.ts'
 import { makeArray, ShellArray } from '../../shell/array.ts'
+import { parseProgram } from '../../shell/parse/parse.ts'
+import { runWithSession } from '../../context/session_context.ts'
 
 class DenySecrets {
   preSession(ctx: SessionContext): Action | null {
@@ -564,5 +566,24 @@ describe('scopes on the call path', () => {
     shell.leave(outer)
     shell.closeTemp(temp)
     expect(session.env.A).toBe('t')
+  })
+})
+
+describe('the frame a task reads', () => {
+  it('voices the session it frames while another runs', async () => {
+    const [, session] = makeView()
+    const [, other] = makeView()
+    const held = parseProgram('true\necho here')
+    session.lineNode = held.root.namedChildren[1] ?? null
+    const gone = parseProgram('echo there')
+    other.lineNode = gone.root.namedChildren[0] ?? null
+    gone.release()
+    setAttr(session, 'r', VarAttr.Nameref)
+    const notes: (string | Uint8Array)[] = []
+    await runWithSession(other, () => sessionView(session, null, notes).set('r', makeArray(['x'])))
+    held.release()
+    expect(
+      notes.map((note) => (typeof note === 'string' ? note : new TextDecoder().decode(note))),
+    ).toEqual(['bash: line 2: warning: r: removing nameref attribute\n'])
   })
 })

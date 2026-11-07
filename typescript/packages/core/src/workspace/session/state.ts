@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { sessionAccess } from '../../context/session_context.ts'
+import { sessionAccess, sessionVoice } from '../../context/session_context.ts'
 import { memoryRoom } from '../../io/memory.ts'
 import { PolicyDenied, preSessionGate, type Policies } from '../../policy/index.ts'
 import type { ShellVars } from '../../rs/session.ts'
@@ -23,7 +23,6 @@ import { arrayGet, ShellArray } from '../../shell/array.ts'
 import { joinBytes } from '../../shell/bytes.ts'
 import type { CallStack } from '../../shell/call_stack.ts'
 import type { ShellValue, VarAttr } from '../../shell/variable.ts'
-import { shellVoice } from '../../shell/voice.ts'
 import { asyncContextIsolatesTasks } from '../../utils/async_context.ts'
 import type { SessionView } from '../../view/types.ts'
 import { argsBytes, checkEnv, entryBytes, envLimit, framesBytes, outsideBytes } from './budget.ts'
@@ -58,7 +57,7 @@ export function frame(session: SessionState, callStack: CallStack | null = null)
     memoryRoom: memoryRoom(),
     line: session.lineNumber,
     bashPid: session.bashPid,
-    voice: shellVoice(),
+    voice: sessionVoice(session),
   })
 }
 

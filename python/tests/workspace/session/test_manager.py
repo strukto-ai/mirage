@@ -41,6 +41,7 @@ from mirage.types import (
     Visibility,
 )
 from mirage.utils.clock import ManualClock
+from mirage.utils.ids import SeededIdSource
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
 from mirage.workspace.mount.namespace.ram import RAMNamespaceStore
@@ -835,6 +836,7 @@ async def test_profile_changes_publish_only_after_persistence(
         ),
     )
     mgr.default_profile = original
+    seed_var(mgr.get("default"), "TOKEN", "t")
     await mgr.flush()
     session = mgr.get("default")
     before = session.to_dict()
@@ -855,6 +857,7 @@ async def test_profile_changes_publish_only_after_persistence(
     try:
         await asyncio.wait_for(entered.wait(), 5)
         assert session.to_dict() == before
+        assert session.vars.shell.hidden("TOKEN")
         assert mgr.commands_of("") == original.policies.commands
         assert mgr.scripts_of("") == original.policies.scripts
         session.cwd = "/changed-during-write"
@@ -865,12 +868,14 @@ async def test_profile_changes_publish_only_after_persistence(
             before["cwd"] = session.cwd
             assert session.to_dict() == before
             assert await store.load() == persisted
+            assert session.vars.shell.hidden("TOKEN")
             assert mgr.commands_of("") == original.policies.commands
             assert mgr.scripts_of("") == original.policies.scripts
         else:
             assert await updating is session
             assert session.mount_modes is None
             assert session.visibility.paths is None
+            assert not session.vars.shell.hidden("TOKEN")
             assert mgr.commands_of("") is None
             assert mgr.scripts_of("") == {}
         assert session.cwd == "/changed-during-write"
@@ -1011,3 +1016,25 @@ async def test_flush_of_closed_session_does_not_recreate_it():
     await manager.close("gone")
     await manager.flush("gone")
     assert "gone" not in await manager.store.load()
+
+
+async def _loaded_draws(store: RAMNamespaceStore, seed: int) -> list[object]:
+    manager = SessionManager("default", store=store, ids=SeededIdSource(seed))
+    await manager.ensure_loaded()
+    return [
+        manager.get(sid).vars.shell.next_random()
+        for sid in ("default", "agent")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_loaded_sessions_draw_random_from_the_manager_ids():
+    store = RAMNamespaceStore()
+    first = SessionManager("default", store=store, ids=SeededIdSource(5))
+    first.create("agent")
+    seed_var(first.get("default"), "K", "v")
+    seed_var(first.get("agent"), "K", "v")
+    await first.flush()
+    draws = await _loaded_draws(store, 5)
+    assert draws == await _loaded_draws(store, 5)
+    assert draws != await _loaded_draws(store, 6)

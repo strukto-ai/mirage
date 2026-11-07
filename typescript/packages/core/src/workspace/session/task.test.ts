@@ -14,7 +14,9 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ShellTask } from '../../rs/shell.ts'
+import { DEFAULT_VISIBILITY } from '../../types.ts'
 import { Workspace } from '../workspace/workspace.ts'
+import { seedVar } from './state.ts'
 
 const DEC = new TextDecoder()
 
@@ -45,6 +47,27 @@ describe('drive', () => {
       expect(pauses).toBeLessThan(20)
       vi.restoreAllMocks()
       const result = await ws.shell('printf "%s\\n" "${touched-unset}"')
+      expect(DEC.decode(result.stdout)).toBe('unset\n')
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('hides the names of a profile changed while it ran', async () => {
+    const ws = new Workspace({}, { maxEnv: null })
+    const session = ws.getSession(ws.defaultSessionId)
+    const hidden = { ...DEFAULT_VISIBILITY, vars: { names: ['TOKEN'], patterns: [] } }
+    try {
+      await ws.shell('shopt -s extglob; TOKEN=t')
+      seedVar(session, 'X', 'a'.repeat(2_000_000))
+      // eslint-disable-next-line @typescript-eslint/unbound-method
+      const resumed = ShellTask.prototype.answerResumed
+      vi.spyOn(ShellTask.prototype, 'answerResumed').mockImplementation(function (this: ShellTask) {
+        session.visibility = hidden
+        resumed.call(this)
+      })
+      const result = await ws.shell('x=${X//+(?)/x}; echo "${TOKEN-unset}"')
+      expect(session.visibility).toBe(hidden)
       expect(DEC.decode(result.stdout)).toBe('unset\n')
     } finally {
       await ws.close()

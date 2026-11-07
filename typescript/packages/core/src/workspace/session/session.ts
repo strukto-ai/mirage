@@ -589,7 +589,6 @@ export class SessionState {
     this.cwd = init.cwd ?? '/'
     this.logicalCwd = init.logicalCwd
     this.vars = init.vars ?? {}
-    this.records.shell.useIds(drawFrom(this.idSource))
     this.createdAt = init.createdAt ?? Date.now() / 1000
     this.functions = functionSources(init.functions)
     this.readonlyFunctions = new Set(init.readonlyFunctions ?? [])
@@ -643,7 +642,10 @@ export class SessionState {
   }
 
   set vars(value: ShellVars | Readonly<Record<string, ShellVar>>) {
-    this.records = value instanceof ShellVars ? value : ShellVars.of(value, drawFrom(this.idSource))
+    this.records = value instanceof ShellVars ? value : ShellVars.of(value)
+    // The shell draws a first `$RANDOM` seed from the session's ids, so a new
+    // shell binds as it lands, as a new source does.
+    this.records.shell.useIds(drawFrom(this.idSource))
     this.hideVars()
   }
 
@@ -666,9 +668,12 @@ export class SessionState {
     this.hideVars()
   }
 
-  // The shell holds the hidden names itself, so a new visibility, or a new
-  // shell, takes them as it lands, wherever it is set.
-  private hideVars(): void {
+  /**
+   * Hand the shell the names the session's visibility hides. The shell holds
+   * them itself, so a new visibility, or a new shell, takes them as it lands,
+   * wherever it is set. Mirrors Python's hide_vars.
+   */
+  hideVars(): void {
     if (this.vis === undefined) return
     const hidden = this.vis.vars
     this.records.shell.hide(

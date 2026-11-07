@@ -171,6 +171,7 @@ export async function drive(
   let failed = false
   let budget: YieldBudget | undefined
   const records = host.session.vars
+  const shown = host.session.visibility
   for (let ask = task.step(); ask !== null; ask = task.step()) {
     const held = records.shell
     const lent = ask[0] === 'gate' ? ask[6] : ask[0] === 'pause' ? ask[1] : ask[1].fork()
@@ -220,6 +221,9 @@ export async function drive(
     }
   }
   const [result, said] = task.finish()
+  // A profile changed while the host answered hid its names on a copy lent
+  // meanwhile; the shell, back with its owner, takes them now.
+  if (host.session.visibility !== shown) host.session.hideVars()
   diagnostics.push(...said)
   if (failed) throw failure
   if (result[0] !== 'ok') throw faultError(result, refusals)

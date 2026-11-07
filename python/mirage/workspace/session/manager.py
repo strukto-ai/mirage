@@ -625,6 +625,10 @@ class SessionManager(SessionOwner):
         async with self._locks[session_id]:
             session = self.get(session_id)
             candidate = copy.copy(session)
+            # The copy hides names on a shell of its own: narrowing the
+            # live one before the write lands would show what the old
+            # profile hid, and keep showing it if the write failed.
+            candidate.vars = session.vars.fork()
             narrow(candidate, compiled)
             await self._flush_one(candidate)
             narrow(session, compiled)
