@@ -12,6 +12,7 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import json
 from dataclasses import replace
 from typing import Any
 
@@ -19,11 +20,12 @@ from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.accessor import (
     body_value,
     camel,
+    current_branch,
     gh_bool,
     json_fields,
     list_limit,
+    numbered_subject,
     repo_for,
-    repo_number,
     text_out,
     typed_out,
 )
@@ -55,21 +57,25 @@ from mirage.commands.cli.builtin.gh.shape import (
     struct,
 )
 from mirage.commands.config import Context
+from mirage.commands.errors import UsageError
 from mirage.commands.spec.flag_view import FlagView
 from mirage.core.github.pull import (
+    BranchFilter,
     PullListFilter,
     comment_pull,
     create_pull,
     diff_pull,
     edit_pull,
     get_pull,
+    head_branch,
     list_pull_request_fields,
     list_pulls,
     merge_pull,
     pull_checks,
+    pull_for_branch,
     pull_request_fields,
 )
-from mirage.core.github.repo import RepoRef
+from mirage.core.github.repo import RepoRef, view_repo
 from mirage.io.types import ByteSource, IOResult
 from mirage.types import JsonValue, PathSpec
 
@@ -426,12 +432,40 @@ def _view_text(row: dict[str, Any]) -> str:
     )
 
 
-def _target(
+async def _target(
     accessor: GitHubAccount, texts: list[str], fl: FlagView
 ) -> tuple[RepoRef, int]:
-    return repo_number(
-        accessor, fl, texts[0] if texts else None, "pull request", "pull"
-    )
+    """The pull request a line names, found as gh's finder finds it: a
+    number (``#`` optional) or a URL names it outright, and anything else
+    is a branch whose pull request is looked up. With none, the branch is
+    the current one, which the install's ``branch`` stands in for.
+    """
+    _at_most_one(texts)
+    selector = texts[0] if texts else ""
+    named = numbered_subject(accessor, fl, selector, "pull")
+    if named is not None:
+        return named
+    ref = repo_for(accessor, fl)
+    head = selector or current_branch(accessor)
+    if head is None:
+        raise ValueError(
+            "could not determine current branch: no `branch` on the install"
+        )
+    found = await pull_for_branch(accessor, ref, head)
+    if found is None:
+        raise ValueError(
+            "no pull requests found for branch "
+            f"{json.dumps(head, ensure_ascii=False)}"
+        )
+    return ref, found["number"]
+
+
+def _at_most_one(texts: list[str]) -> None:
+    """Refuse a second selector as cobra's MaximumNArgs(1) refuses it for
+    gh's.
+    """
+    if len(texts) > 1:
+        raise ValueError(f"accepts at most 1 arg(s), received {len(texts)}")
 
 
 async def list_cmd(
@@ -516,7 +550,7 @@ async def view_cmd(
         ctx (Context): the parsed flags and context.
     """
     fl = FlagView(ctx.flags)
-    ref, number = _target(accessor, texts, fl)
+    ref, number = await _target(accessor, texts, fl)
     fields = json_fields(fl, PR_FIELDS)
     if fields is not None:
         node = await _viewed_pull(accessor, ref, number, fields)
@@ -547,22 +581,54 @@ async def create_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    required = {name: fl.as_str(name) for name in ("title", "head", "base")}
-    missing = next(
-        (name for name, value in required.items() if not value), None
-    )
-    if missing:
-        raise ValueError(f"--{missing} is required in noninteractive mode")
+    title = fl.as_str("title")
+    if not title:
+        raise ValueError("--title is required in noninteractive mode")
     body_text = await body_value(ctx, fl, required=True)
+    ref = repo_for(accessor, fl)
+    # gh opens it from the current branch unless --head names one, and
+    # into the repository's default branch unless --base names one.
+    head = fl.as_nonempty("head") or current_branch(accessor)
+    if head is None:
+        raise ValueError(
+            "could not determine the current branch: no `branch` on the "
+            "install"
+        )
+    head_branch(head)
+    base = fl.as_nonempty("base")
+    if base is None:
+        repository = await view_repo(accessor, ref)
+        default = (
+            repository.get("default_branch")
+            if isinstance(repository, dict)
+            else None
+        )
+        base = default if isinstance(default, str) else ""
+    # gh refuses a second open pull request from the same head into the
+    # same base before it asks for one.
+    try:
+        existing = await pull_for_branch(
+            accessor, ref, head, BranchFilter(states=("OPEN",), base=base)
+        )
+    except Exception as exc:
+        raise ValueError(
+            f"error checking for existing pull request: {exc}"
+        ) from exc
+    if existing is not None:
+        raise ValueError(
+            f"a pull request for branch {json.dumps(head, ensure_ascii=False)} "
+            f"into branch {json.dumps(base, ensure_ascii=False)} already "
+            f"exists:\n{existing.get('url', '')}"
+        )
     body: dict[str, JsonValue] = {
-        "title": required["title"] or "",
-        "head": required["head"] or "",
-        "base": required["base"] or "",
+        "title": title,
+        "head": head,
+        "base": base,
         "body": body_text or "",
         "draft": gh_bool(fl, "draft"),
         "maintainer_can_modify": not gh_bool(fl, "no_maintainer_edit"),
     }
-    created = _pull(await create_pull(accessor, repo_for(accessor, fl), body))
+    created = _pull(await create_pull(accessor, ref, body))
     return text_out(f"{created.get('url', '')}\n")
 
 
@@ -573,6 +639,7 @@ async def edit_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
+    _at_most_one(texts)
     body: dict[str, JsonValue] = {}
     for name in ("title", "base"):
         value = fl.as_str(name)
@@ -582,8 +649,12 @@ async def edit_cmd(
     if text is not None:
         body["body"] = text
     if not body:
-        raise ValueError("no pull request fields to edit")
-    ref, number = _target(accessor, texts, fl)
+        raise UsageError(
+            "--title, --body, --reviewer, --assignee, --label, --project, or "
+            "--milestone required when not running interactively",
+            1,
+        )
+    ref, number = await _target(accessor, texts, fl)
     edited = _pull(await edit_pull(accessor, ref, number, body))
     return text_out(f"{edited.get('url', '')}\n")
 
@@ -595,6 +666,7 @@ async def merge_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
+    _at_most_one(texts)
     methods = [
         name for name in ("merge", "rebase", "squash") if gh_bool(fl, name)
     ]
@@ -610,7 +682,7 @@ async def merge_cmd(
         body["commit_message"] = message
     if fl.as_str("match_head_commit") is not None:
         body["sha"] = fl.as_str("match_head_commit") or ""
-    ref, number = _target(accessor, texts, fl)
+    ref, number = await _target(accessor, texts, fl)
     await merge_pull(accessor, ref, number, body)
     return text_out(f"✓ Merged pull request {ref.owner}/{ref.repo}#{number}\n")
 
@@ -622,7 +694,13 @@ async def close_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    ref, number = _target(accessor, texts, fl)
+    if len(texts) > 1:
+        raise UsageError("too many arguments", 1)
+    if not texts:
+        raise UsageError(
+            "cannot close pull request: number, url, or branch required", 1
+        )
+    ref, number = await _target(accessor, texts, fl)
     edited = _pull(await edit_pull(accessor, ref, number, {"state": "closed"}))
     return text_out(
         f"✓ Closed pull request {ref.owner}/{ref.repo}#{number} "
@@ -637,7 +715,9 @@ async def reopen_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    ref, number = _target(accessor, texts, fl)
+    if len(texts) != 1:
+        raise ValueError(f"accepts 1 arg(s), received {len(texts)}")
+    ref, number = await _target(accessor, texts, fl)
     row = _pull(await get_pull(accessor, ref, number))
     name = f"{ref.owner}/{ref.repo}#{number} ({row.get('title', '')})"
     if row.get("merged"):
@@ -666,8 +746,8 @@ async def comment_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
+    ref, number = await _target(accessor, texts, fl)
     body = await body_value(ctx, fl, required=True)
-    ref, number = _target(accessor, texts, fl)
     comment = _pull(await comment_pull(accessor, ref, number, body or ""))
     return text_out(f"{comment.get('url', '')}\n")
 
@@ -679,7 +759,7 @@ async def diff_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    ref, number = _target(accessor, texts, fl)
+    ref, number = await _target(accessor, texts, fl)
     value = await diff_pull(accessor, ref, number)
     if gh_bool(fl, "name_only"):
         return text_out("".join(f"{name}\n" for name in _changed_names(value)))
@@ -723,7 +803,7 @@ async def checks_cmd(
     ctx: Context,
 ) -> tuple[ByteSource | None, IOResult]:
     fl = FlagView(ctx.flags)
-    ref, number = _target(accessor, texts, fl)
+    ref, number = await _target(accessor, texts, fl)
     rows = list(map(_check, await pull_checks(accessor, ref, number)))
     human = "".join(
         f"{row.get('name', '')}\t{row.get('state', '')}\t"

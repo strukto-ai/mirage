@@ -22,23 +22,27 @@ import {
   getPull,
   listPullRequestFields,
   listPulls,
+  headBranch,
   mergePull,
   pullChecks,
+  pullForBranch,
   pullRequestFields,
 } from '../../../../core/github/pull.ts'
-import type { RepoRef } from '../../../../core/github/repo.ts'
+import { viewRepo, type RepoRef } from '../../../../core/github/repo.ts'
 import type { JsonObject, PathSpec } from '../../../../types.ts'
 import type { CommandFnResult, Context } from '../../../config.ts'
 import { IOResult } from '../../../../io/types.ts'
+import { UsageError } from '../../../errors.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import {
   bodyValue,
   camel,
+  currentBranch,
   ghBool,
   jsonFields,
   listLimit,
+  numberedSubject,
   repoFor,
-  repoNumber,
   textOut,
   textValue,
   typedOut,
@@ -338,8 +342,36 @@ function viewText(row: Record<string, unknown>): string {
   return `title:\t${textValue(row.title)}\nstate:\t${textValue(row.state).toUpperCase()}\nauthor:\t${textValue(author?.login)}\nbase:\t${textValue(row.baseRefName)}\nhead:\t${textValue(row.headRefName)}\n--\n${textValue(row.body)}\n`
 }
 
-function target(accessor: GitHubAccount, texts: string[], fl: FlagView) {
-  return repoNumber(accessor, fl, texts[0], 'pull request', 'pull')
+/**
+ * The pull request a line names, found as gh's finder finds it: a number
+ * (`#` optional) or a URL names it outright, and anything else is a branch
+ * whose pull request is looked up. With none, the branch is the current
+ * one, which the install's `branch` stands in for.
+ */
+async function target(
+  accessor: GitHubAccount,
+  texts: string[],
+  fl: FlagView,
+): Promise<[RepoRef, number]> {
+  atMostOne(texts)
+  const selector = texts[0] ?? ''
+  const named = numberedSubject(accessor, fl, selector, 'pull')
+  if (named !== null) return named
+  const ref = repoFor(accessor, fl)
+  const head = selector === '' ? currentBranch(accessor) : selector
+  if (head === null) {
+    throw new Error('could not determine current branch: no `branch` on the install')
+  }
+  const found = await pullForBranch(accessor.transport, ref, head)
+  if (found === null) throw new Error(`no pull requests found for branch ${JSON.stringify(head)}`)
+  return [ref, Number(found.number)]
+}
+
+/** Refuse a second selector as cobra's MaximumNArgs(1) refuses it for gh's. */
+function atMostOne(texts: string[]): void {
+  if (texts.length > 1) {
+    throw new Error(`accepts at most 1 arg(s), received ${String(texts.length)}`)
+  }
 }
 
 /**
@@ -402,7 +434,7 @@ export async function viewCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(accessor, texts, fl)
+  const [ref, number] = await target(accessor, texts, fl)
   const fields = jsonFields(fl, PR_FIELDS)
   if (fields !== null) {
     const node = await viewedPull(accessor.transport, ref, number, fields)
@@ -427,24 +459,46 @@ export async function createCmd(
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
   const title = fl.asStr('title')
-  const head = fl.asStr('head')
-  const base = fl.asStr('base')
-  const missing = [
-    ['title', title],
-    ['head', head],
-    ['base', base],
-  ].find(([, value]) => value === undefined || value === '')
-  if (missing !== undefined)
-    throw new Error(`--${String(missing[0])} is required in noninteractive mode`)
+  if (title === undefined || title === '') {
+    throw new Error('--title is required in noninteractive mode')
+  }
+  const text = (await bodyValue(ctx, fl, { required: true })) ?? ''
+  const ref = repoFor(accessor, fl)
+  // gh opens it from the current branch unless --head names one, and into
+  // the repository's default branch unless --base names one.
+  const head = fl.asNonEmpty('head') ?? currentBranch(accessor)
+  if (head === null) {
+    throw new Error('could not determine the current branch: no `branch` on the install')
+  }
+  headBranch(head)
+  let base = fl.asNonEmpty('base')
+  if (base === undefined) {
+    const repository = (await viewRepo(accessor.transport, ref)) as { default_branch?: unknown }
+    base = typeof repository.default_branch === 'string' ? repository.default_branch : ''
+  }
+  // gh refuses a second open pull request from the same head into the same
+  // base before it asks for one.
+  let existing: Record<string, unknown> | null
+  try {
+    existing = await pullForBranch(accessor.transport, ref, head, { states: ['OPEN'], base })
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err)
+    throw new Error(`error checking for existing pull request: ${reason}`, { cause: err })
+  }
+  if (existing !== null) {
+    throw new Error(
+      `a pull request for branch ${JSON.stringify(head)} into branch ${JSON.stringify(base)} already exists:\n${textValue(existing.url)}`,
+    )
+  }
   const body = {
-    title: title ?? '',
-    head: head ?? '',
-    base: base ?? '',
-    body: (await bodyValue(ctx, fl, { required: true })) ?? '',
+    title,
+    head,
+    base,
+    body: text,
     draft: ghBool(fl, 'draft'),
     maintainer_can_modify: !ghBool(fl, 'no_maintainer_edit'),
   }
-  const created = pull(await createPull(accessor.transport, repoFor(accessor, fl), body))
+  const created = pull(await createPull(accessor.transport, ref, body))
   return textOut(`${textValue(created.url)}\n`)
 }
 
@@ -455,6 +509,7 @@ export async function editCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
+  atMostOne(texts)
   const body: Record<string, unknown> = {}
   const title = fl.asStr('title')
   const base = fl.asStr('base')
@@ -462,8 +517,13 @@ export async function editCmd(
   if (title !== undefined) body.title = title
   if (base !== undefined) body.base = base
   if (text !== undefined) body.body = text
-  if (Object.keys(body).length === 0) throw new Error('no pull request fields to edit')
-  const [ref, number] = target(accessor, texts, fl)
+  if (Object.keys(body).length === 0) {
+    throw new UsageError(
+      '--title, --body, --reviewer, --assignee, --label, --project, or --milestone required when not running interactively',
+      1,
+    )
+  }
+  const [ref, number] = await target(accessor, texts, fl)
   const edited = pull(await editPull(accessor.transport, ref, number, body))
   return textOut(`${textValue(edited.url)}\n`)
 }
@@ -475,6 +535,7 @@ export async function mergeCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
+  atMostOne(texts)
   const methods = ['merge', 'rebase', 'squash'].filter((name) => ghBool(fl, name))
   if (methods.length > 1) throw new Error('choose only one merge strategy')
   const body: Record<string, unknown> = { merge_method: methods[0] ?? 'merge' }
@@ -484,7 +545,7 @@ export async function mergeCmd(
   if (subject !== undefined) body.commit_title = subject
   if (message !== undefined) body.commit_message = message
   if (sha !== undefined) body.sha = sha
-  const [ref, number] = target(accessor, texts, fl)
+  const [ref, number] = await target(accessor, texts, fl)
   await mergePull(accessor.transport, ref, number, body)
   return textOut(`✓ Merged pull request ${ref.owner}/${ref.repo}#${String(number)}\n`)
 }
@@ -496,7 +557,11 @@ export async function closeCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(accessor, texts, fl)
+  if (texts.length > 1) throw new UsageError('too many arguments', 1)
+  if (texts.length === 0) {
+    throw new UsageError('cannot close pull request: number, url, or branch required', 1)
+  }
+  const [ref, number] = await target(accessor, texts, fl)
   const edited = pull(await editPull(accessor.transport, ref, number, { state: 'closed' }))
   return textOut(
     `✓ Closed pull request ${ref.owner}/${ref.repo}#${String(number)} (${textValue(edited.title)})\n`,
@@ -510,7 +575,10 @@ export async function reopenCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(accessor, texts, fl)
+  if (texts.length !== 1) {
+    throw new Error(`accepts 1 arg(s), received ${String(texts.length)}`)
+  }
+  const [ref, number] = await target(accessor, texts, fl)
   const transport = accessor.transport
   const row = pull(await getPull(transport, ref, number))
   const name = `${ref.owner}/${ref.repo}#${String(number)} (${textValue(row.title)})`
@@ -546,7 +614,7 @@ export async function commentCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(accessor, texts, fl)
+  const [ref, number] = await target(accessor, texts, fl)
   const comment = pull(
     await commentPull(
       accessor.transport,
@@ -565,7 +633,7 @@ export async function diffCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(accessor, texts, fl)
+  const [ref, number] = await target(accessor, texts, fl)
   const value = await diffPull(accessor.transport, ref, number)
   if (ghBool(fl, 'name_only')) {
     return textOut(
@@ -606,7 +674,7 @@ export async function checksCmd(
   ctx: Context,
 ): Promise<CommandFnResult> {
   const fl = new FlagView(ctx.flags)
-  const [ref, number] = target(accessor, texts, fl)
+  const [ref, number] = await target(accessor, texts, fl)
   const rows = (await pullChecks(accessor.transport, ref, number)).map(check)
   const human = rows
     .map((row) => `${textValue(row.name)}\t${textValue(row.state)}\t${textValue(row.link)}\n`)

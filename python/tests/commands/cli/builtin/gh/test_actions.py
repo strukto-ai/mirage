@@ -21,6 +21,7 @@ import pytest
 from mirage.accessor.github import GitHubAccount
 from mirage.commands.cli.builtin.gh.actions import (
     run_view_cmd,
+    workflow_run_cmd,
     workflow_view_cmd,
 )
 from mirage.commands.config import Context
@@ -305,3 +306,30 @@ async def test_workflow_yaml_names_a_file_the_ref_lacks(
 
 async def _fake_workflow(config, ref, workflow):
     return _WORKFLOW
+
+
+async def _view_main(accessor, ref):
+    return {"default_branch": "main"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "flags,branch", [({}, "main"), ({"ref": "dev"}, "dev")]
+)
+async def test_workflow_run_dispatches_on_ref_else_the_default_branch(
+    monkeypatch, flags, branch
+):
+    # gh never reads the checkout's branch here, so the install's `branch`
+    # leaves the dispatch on the repository's default branch.
+    sent: list[dict] = []
+
+    async def _dispatch(accessor, ref, workflow, body):
+        sent.append(body)
+
+    monkeypatch.setitem(workflow_run_cmd.__globals__, "view_repo", _view_main)
+    monkeypatch.setitem(
+        workflow_run_cmd.__globals__, "dispatch_workflow", _dispatch
+    )
+    account = GitHubAccount(GhConfig(token="t", repo="o/r", branch="feature"))
+    await workflow_run_cmd(account, [], ["ci.yml"], Context(flags=flags))
+    assert sent == [{"ref": branch, "inputs": {}}]

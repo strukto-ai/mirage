@@ -537,7 +537,9 @@ async def workflow_run_cmd(
     if not workflow:
         raise ValueError("a workflow ID, name, or filename is required")
     ref = repo_for(accessor, fl)
-    branch = fl.as_nonempty("ref") or accessor.config.branch
+    # gh dispatches on --ref, else on the repository's default branch; the
+    # install's `branch` stands in for a checkout, which gh does not read here.
+    branch = fl.as_nonempty("ref")
     if not branch:
         repo = await view_repo(accessor, ref)
         candidate = (

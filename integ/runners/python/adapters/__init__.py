@@ -1569,7 +1569,9 @@ class GitHubService:
                     "token": "ghp-integ",
                     "base_url": self.url,
                     "repo": GH_CLI_REPO,
-                    "branch": "main",
+                    # Not the default branch, so a line that falls back on
+                    # it shows which of the two gh read.
+                    "branch": "dev",
                 },
             ),
         }

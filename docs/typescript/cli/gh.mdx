@@ -18,8 +18,10 @@ const ws = new Workspace({})
 ws.registerCli('gh', GH, { token: 'ghp_...', repo: 'acme/tools' })
 ```
 
-`repo` is the default repository and `branch` supplies the API's `{branch}`
-placeholder. `base_url` (`baseUrl` in TypeScript) selects an API host. An
+`repo` is the default repository and `branch` the current branch, as a
+checkout would give them to a host `gh`: `branch` fills the API's `{branch}`
+placeholder, names the pull request a `pr` command acts on when given none,
+and is the head `pr create` opens from. `base_url` (`baseUrl` in TypeScript) selects an API host. An
 Enterprise REST base ending in `/api/v3` uses `/api/graphql` for GraphQL;
 other bases use `/graphql` beneath that base.
 
@@ -190,7 +192,7 @@ invalidate mounted caches; read API methods leave them intact.
 | --- | --- |
 | Authentication | `auth status` checks the token; `auth token` refuses to print it. No login/logout flow. |
 | Interactive tools | No editor, browser, extension manager, codespace or host-checkout workflow. |
-| Pull-request creation | Requires explicit title, head, base and body/body-file. |
+| Pull-request creation | Requires a title and a body or body file. `--head` defaults to `branch` and `--base` to the repository's default branch. |
 | Forks | `--clone` is refused; `--remote` without a repository is refused. |
 | Repository operations | No archive, unarchive, sync, deploy-key, autolink, gitignore, license or set-default verbs. |
 | Release assets and live runs | Asset upload and `run watch` are absent. |

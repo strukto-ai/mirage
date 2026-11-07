@@ -2108,7 +2108,9 @@ async function openGitHub(target: Target, options?: OpenOptions): Promise<Open> 
       token: 'ghp-integ',
       base_url: base,
       repo: GH_CLI_REPO,
-      branch: 'main',
+      // Not the default branch, so a line that falls back on it shows which
+      // of the two gh read.
+      branch: 'dev',
     })
   }
   if (options === undefined) {
