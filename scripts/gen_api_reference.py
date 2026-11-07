@@ -120,6 +120,26 @@ def slug(text: str) -> str:
     return re.sub(r"\s+", "-", kept.strip())
 
 
+def resource_name(doc: dict[str, Any], tag: str) -> str:
+    """The navigation hierarchy used to label an operation in search.
+
+    Args:
+        doc (dict[str, Any]): the OpenAPI document.
+        tag (str): the operation's resource tag.
+    """
+    tags = {item["name"]: item for item in doc.get("tags", [])}
+    labels = []
+    seen: set[str] = set()
+    while tag:
+        if tag in seen:
+            raise ValueError(f"circular navigation tag: {tag}")
+        seen.add(tag)
+        item = tags.get(tag, {})
+        labels.append(item.get("x-group", item.get("summary", tag)))
+        tag = item.get("parent", "")
+    return " / ".join(reversed(labels))
+
+
 def operation(
     doc: dict[str, Any], path: str, method: str, op: dict[str, Any]
 ) -> list[str]:
@@ -136,7 +156,7 @@ def operation(
     anchor = re.sub(r"[^a-z0-9]+", "-", f"{method} {path}".lower()).strip("-")
     search = " ".join(sorted(search_terms(doc, op, set())))
     return [
-        f'<Operation resource="{attr(op["tags"][0])}" '
+        f'<Operation resource="{attr(resource_name(doc, op["tags"][0]))}" '
         f'method="{method.upper()}" path="{attr(path)}" '
         f'summary="{attr(op["summary"])}" hosts="{attr(hosts)}" '
         f'href="{page}" anchor="{anchor}" search="{attr(search)}" />',
@@ -183,6 +203,10 @@ def selftest() -> None:
     shared = {"$ref": "#/components/schemas/Shared"}
     node = {"$ref": "#/components/schemas/Node"}
     doc = {
+        "tags": [
+            {"name": "Workspace operations", "x-group": "Workspaces"},
+            {"name": "VFS", "parent": "Workspace operations"},
+        ],
         "components": {
             "schemas": {
                 "Shared": {"properties": {"filename": {"type": "string"}}},
@@ -193,7 +217,7 @@ def selftest() -> None:
                     ]
                 },
             }
-        }
+        },
     }
     op = {
         "summary": "Read files",
@@ -231,6 +255,7 @@ def selftest() -> None:
 
     output = "\n".join(operation(doc, "/v1/files/{path}", "post", op))
     assert 'href="/api/operations/vfs/read-files"' in output
+    assert 'resource="Workspaces / VFS"' in output
     assert 'anchor="post-v1-files-path"' in output
     assert "filename" in output and "stream" in output
     assert "&quot;file&quot;" in output and "&#123;path&#125;" in output

@@ -42,9 +42,19 @@ one from code, see [Launch a server](/home/access/http#launch-a-server).
   </Card>
 </CardGroup>
 
+## Resource groups
+
+**Workspaces** contains lifecycle operations, shell execution, VFS file operations,
+documents and asks. These operations create workspaces or act within one.
+
+**Saved configurations** contains reusable VFS, CLI and runtime definitions. They
+exist independently of a workspace. For example, Workspaces → VFS reads and writes
+files; Saved configurations → VFS manages backend configurations to use in mounts.
+Templates describe whole workspace configurations. Policies manage reusable rules.
+
 ## Contract
 
-- [API reference](/api/reference): every operation, searchable and filterable
+- [API reference](/api/reference): endpoints, searchable and filterable
   by resource.
 - [`openapi.yaml`](https://github.com/strukto-ai/mirage/blob/main/docs/openapi.yaml):
   the OpenAPI document the reference is generated from. Both servers are
