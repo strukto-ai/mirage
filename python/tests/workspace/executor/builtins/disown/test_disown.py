@@ -22,15 +22,15 @@ from mirage.workspace.executor.builtins.disown.disown import handle_disown
 from mirage.workspace.types import ExecutionNode
 
 
+async def _brief(job):
+    await asyncio.sleep(0.05)
+    return IOResult(), ExecutionNode(command="j", exit_code=0)
+
+
 @pytest.mark.asyncio
 async def test_disown_drops_a_job_from_the_table():
     table = JobTable()
-
-    async def _run(job):
-        await asyncio.sleep(0.05)
-        return IOResult(), ExecutionNode(command="j", exit_code=0)
-
-    await table.submit("sleep", _run, cwd="/")
+    await table.submit("sleep", _brief, cwd="/")
     _, io, _ = await handle_disown(table, ["disown"])
     assert io.exit_code == 0
     assert table.list_jobs() == []

@@ -61,24 +61,24 @@ async def _run_bg(cmd: str, job_id: int = 1) -> tuple[bytes, bytes]:
 # ── streaming: output lands while the job is still running ──────────
 
 
-def test_loop_body_streams_each_iteration_instead_of_batching():
+@pytest.mark.asyncio
+async def test_loop_body_streams_each_iteration_instead_of_batching():
     """A reader sees earlier iterations before the loop finishes.
 
     Without the sink the whole construct is materialized and pumped at
     completion, so a mid-run snapshot is empty.
     """
-
-    async def _do():
-        ws = _workspace()
+    ws = _workspace()
+    try:
         await ws.shell("for i in 1 2 3; do echo $i; sleep 0.25; done &")
         job = ws.job_table.get(1, ws.default_session_id)
         assert job is not None
         await asyncio.sleep(0.35)
         mid = await job.console.snapshot(Channel.STDOUT)
         await ws.job_table.wait(1, ws.default_session_id)
-        return mid, await job.console.snapshot(Channel.STDOUT)
-
-    mid, end = asyncio.run(_do())
+        end = await job.console.snapshot(Channel.STDOUT)
+    finally:
+        await ws.close()
     assert end == b"1\n2\n3\n"
     assert mid, "loop produced nothing until it finished"
     assert end.startswith(mid) and mid != end
@@ -122,17 +122,18 @@ def test_pipe_stages_do_not_leak_into_the_console():
     assert out == b"b\n"
 
 
-def test_redirected_output_goes_to_the_file_not_the_console():
-    async def _do():
-        ws = _workspace()
+@pytest.mark.asyncio
+async def test_redirected_output_goes_to_the_file_not_the_console():
+    ws = _workspace()
+    try:
         await ws.shell("echo hi > /m/f.txt &")
         await ws.job_table.wait(1, ws.default_session_id)
         job = ws.job_table.get(1, ws.default_session_id)
         assert job is not None
         written = await (await ws.shell("cat /m/f.txt")).stdout_str()
-        return await job.console.snapshot(Channel.STDOUT), written
-
-    out, written = asyncio.run(_do())
+        out = await job.console.snapshot(Channel.STDOUT)
+    finally:
+        await ws.close()
     assert out == b""
     assert written == "hi\n"
 

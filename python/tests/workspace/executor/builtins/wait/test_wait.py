@@ -12,7 +12,6 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import asyncio
 
 import pytest
 
@@ -32,15 +31,15 @@ def _workspace() -> Workspace:
     return Workspace({"/m": (RAMVFS(), MountMode.WRITE)}, mode=MountMode.WRITE)
 
 
-def test_bare_wait_with_no_jobs_returns_nothing():
-    async def _do():
-        ws = _workspace()
+@pytest.mark.asyncio
+async def test_bare_wait_with_no_jobs_returns_nothing():
+    ws = _workspace()
+    try:
         result = await ws.shell("wait")
-        return await result.stdout_str(), result.exit_code
-
-    out, code = asyncio.run(_do())
-    assert out == ""
-    assert code == 0
+        assert await result.stdout_str() == ""
+        assert result.exit_code == 0
+    finally:
+        await ws.close()
 
 
 @pytest.mark.asyncio
@@ -90,14 +89,14 @@ async def test_wait_accepts_the_percent_job_id_spelling():
     assert io.exit_code == 0
 
 
+async def _exits_3(job):
+    return IOResult(exit_code=3), ExecutionNode(command="q", exit_code=3)
+
+
 @pytest.mark.asyncio
 async def test_wait_n_returns_first_finisher():
     table = JobTable()
-
-    async def _quick(job):
-        return IOResult(exit_code=3), ExecutionNode(command="q", exit_code=3)
-
-    await table.submit("q", _quick, cwd="/")
+    await table.submit("q", _exits_3, cwd="/")
     _, io, _ = await handle_wait(table, ["wait", "-n"])
     assert io.exit_code == 3
 

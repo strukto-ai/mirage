@@ -125,10 +125,10 @@ function elapsed(seconds: number): string {
   const hours = Math.floor((seconds % 86400) / 3600)
   const minutes = Math.floor((seconds % 3600) / 60)
   const secs = seconds % 60
-  const two = (n: number): string => String(n).padStart(2, '0')
-  if (days > 0) return `${String(days)}-${two(hours)}:${two(minutes)}:${two(secs)}`
-  if (hours > 0) return `${two(hours)}:${two(minutes)}:${two(secs)}`
-  return `${two(minutes)}:${two(secs)}`
+  const clock = (days > 0 || hours > 0 ? [hours, minutes, secs] : [minutes, secs])
+    .map((n) => String(n).padStart(2, '0'))
+    .join(':')
+  return days > 0 ? `${String(days)}-${clock}` : clock
 }
 
 /**
