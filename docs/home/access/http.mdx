@@ -322,14 +322,15 @@ Returns an array of workspace summaries:
 
 Returns the workspace object.
 
-### Read a workspace's history
+### Read a workspace's logs
 
-<Badge color="blue">GET</Badge> `/v1/workspaces/{id}/history`
+<Badge color="blue">GET</Badge> `/v1/workspaces/{id}/logs`
 
 <ParamField query="session_id" type="string">Only this session's entries.</ParamField>
 <ParamField query="since" type="integer">Only entries at or after this time, in epoch milliseconds.</ParamField>
 <ParamField query="last" type="integer">Only the newest this many entries.</ParamField>
 <ParamField query="vfs" type="boolean" default="false">Add a `vfs` entry for each call a line made to a mount.</ParamField>
+<ParamField query="format" type="string" default="json">Use `jsonl` to download the filtered records as newline-delimited JSON.</ParamField>
 
 Returns what the workspace ran, oldest first. A line is a `command` entry
 when it starts and a `result` entry when it ends, which names the line as its
@@ -345,6 +346,9 @@ line made to a mount is a `vfs` entry between them.
 ```
 
 `stdout` and `stderr` keep their first 4096 characters.
+The Cloud endpoint returns paginated command objects instead of this array of
+records. Its JSON timestamps are in seconds, while its JSONL timestamps are in
+milliseconds.
 
 ### Delete a workspace
 

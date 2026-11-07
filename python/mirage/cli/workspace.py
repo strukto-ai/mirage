@@ -184,9 +184,9 @@ def _format_workspace_explanation(data: dict[str, Any]) -> str:
     return "\n".join(out)
 
 
-def _format_history(items: list[dict[str, Any]]) -> str:
+def _format_logs(items: list[dict[str, Any]]) -> str:
     if not items:
-        return "No history."
+        return "No logs."
     rows = [
         [
             datetime.fromtimestamp(item["timestamp"] / 1000, UTC).strftime(
@@ -195,14 +195,14 @@ def _format_history(items: list[dict[str, Any]]) -> str:
             item["session"],
             item["type"],
             str(item.get("exit_code", "")),
-            _history_entry(item),
+            _log_entry(item),
         ]
         for item in items
     ]
     return format_table(["TIME", "SESSION", "TYPE", "EXIT", "ENTRY"], rows)
 
 
-def _history_entry(item: dict[str, Any]) -> str:
+def _log_entry(item: dict[str, Any]) -> str:
     """A history entry's text on one row: the line, the vfs call, or the
     start of what the line wrote, its newlines escaped.
 
@@ -536,8 +536,8 @@ def load_cmd(
     emit(handle_response(r), human=_format_workspace_detail)
 
 
-@app.command("history")
-def history_cmd(
+@app.command("logs")
+def logs_cmd(
     workspace_id: str = typer.Argument(..., help="Workspace id."),
     session: str = typer.Option(
         "", "--session", help="Only this session's entries."
@@ -566,10 +566,10 @@ def history_cmd(
         client.ensure_running(allow_spawn=False)
         r = client.request(
             "GET",
-            f"/v1/workspaces/{quote(workspace_id, safe='')}/history",
+            f"/v1/workspaces/{quote(workspace_id, safe='')}/logs",
             params=params,
         )
-    emit(handle_response(r), human=_format_history)
+    emit(handle_response(r), human=_format_logs)
 
 
 @app.command("list-asks")

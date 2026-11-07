@@ -550,7 +550,7 @@
     "_document_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "skill_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
     "vfs_md_cmd": "Python uses decorated Typer/FastAPI handlers and request models; TypeScript registers matching routes and commands as closures with typed inputs. Cross-host document and session behavior is covered by integ/access.",
-    "history_cmd": "Typer commands are module functions; commander registers the same action inline in registerWorkspaceCommands.",
+    "logs_cmd": "Typer commands are module functions; commander registers the same action inline in registerWorkspaceCommands.",
     "use_cmd": "Typer registers each verb as a named module function; commander registers the same verb inline in its register function."
    }
   },
@@ -579,12 +579,12 @@
     "kill_workspace_jobs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
     "run_capture": "Python runs a capture on the workspace runner and turns EBUSY into a 409 in one helper; TypeScript awaits the capture inline and asks isBusy.",
     "set_cli": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes.",
-    "workspace_history": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes."
+    "workspace_logs": "FastAPI routes are module functions; Fastify registers the same handler inline in registerWorkspacesRoutes."
    },
    "typescript_only": {
     "answer": "Fastify sends a reply when send is called, so code holding a workspace id sets the status and returns the body, for Fastify to send once the id is released; FastAPI answers only after a route returns or raises, past its async with blocks.",
     "isBusy": "TypeScript awaits a capture inline and asks isBusy for the EBUSY that answers 409; Python's run_capture does both.",
-    "WorkspaceHistoryQuery": "Fastify types a route's query string with an interface; FastAPI reads each parameter from the route function's signature."
+    "WorkspaceLogsQuery": "Fastify types a route's query string with an interface; FastAPI reads each parameter from the route function's signature."
    }
   },
   "server/schemas": {

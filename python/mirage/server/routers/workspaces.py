@@ -19,7 +19,7 @@ import json
 import time
 from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -598,15 +598,16 @@ async def get_workspace(
     return await make_detail(entry, verbose=verbose)
 
 
-@router.get("/{workspace_id}/history")
-async def workspace_history(
+@router.get("/{workspace_id}/logs", response_model=None)
+async def workspace_logs(
     workspace_id: str,
     request: Request,
     session_id: str | None = Query(None),
     since: int | None = Query(None, ge=0),
     last: int | None = Query(None, ge=0),
     vfs: bool = Query(False),
-) -> list[dict[str, Any]]:
+    format: Literal["json", "jsonl"] = Query("json"),
+) -> list[dict[str, Any]] | Response:
     """The workspace's recorded history, oldest first: a ``command``
     entry for every line its sessions ran, and with ``vfs`` a ``vfs``
     entry for every call a line made to a mount. Read on the workspace's
@@ -620,6 +621,7 @@ async def workspace_history(
             millisecond.
         last (int | None): only the newest this many entries.
         vfs (bool): include the ``vfs`` entries.
+        format (Literal["json", "jsonl"]): response encoding.
     """
     entry = require_entry(request, workspace_id)
     if request.app.state.registry.removing(workspace_id):
@@ -627,7 +629,19 @@ async def workspace_history(
     history = entry.runner.ws.history(
         session_id=session_id, since=since, last=last, vfs=vfs
     )
-    return await entry.runner.call(history)
+    records = await entry.runner.call(history)
+    if format == "jsonl":
+        return Response(
+            "".join(
+                json.dumps(record, ensure_ascii=False) + "\n"
+                for record in records
+            ),
+            media_type="application/x-ndjson",
+            headers={
+                "Content-Disposition": 'attachment; filename="logs.jsonl"'
+            },
+        )
+    return records
 
 
 @router.delete("/{workspace_id}", response_model=DeleteWorkspaceResponse)

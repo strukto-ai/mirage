@@ -21,7 +21,7 @@ from typer.testing import CliRunner
 
 from mirage.cli import workspace as workspace_cli
 from mirage.cli.workspace import (
-    _format_history,
+    _format_logs,
     _format_workspace_explanation,
     _load_config_argument,
 )
@@ -208,7 +208,7 @@ def test_an_explained_create_reads_as_its_verdict_and_answers():
 def test_history_asks_for_what_its_options_name(fake):
     fake.answer = _FakeResponse(200, b"[]")
     result = _invoke(
-        "history",
+        "logs",
         "w",
         "--session",
         "s1",
@@ -222,13 +222,23 @@ def test_history_asks_for_what_its_options_name(fake):
     method, path, kwargs = fake.calls[0]
     assert (method, path, kwargs["params"]) == (
         "GET",
-        "/v1/workspaces/w/history",
+        "/v1/workspaces/w/logs",
         {"session_id": "s1", "since": "5", "last": "2", "vfs": "true"},
     )
 
 
+def test_logs_help_and_removed_history_command():
+    help_result = _invoke("logs", "--help")
+    assert help_result.exit_code == 0
+    assert "--session" in help_result.output
+    assert "--since" in help_result.output
+    assert "--last" in help_result.output
+    assert "--vfs" in help_result.output
+    assert _invoke("history", "w").exit_code != 0
+
+
 def test_history_reads_as_one_row_per_entry():
-    lines = _format_history(
+    lines = _format_logs(
         [
             {
                 "type": "command",
@@ -270,11 +280,11 @@ def test_history_reads_as_one_row_per_entry():
             "file\\n",
         ],
     ]
-    assert _format_history([]) == "No history."
+    assert _format_logs([]) == "No logs."
 
 
 def test_a_multiline_command_stays_on_its_row():
-    table = _format_history(
+    table = _format_logs(
         [
             {
                 "type": "command",

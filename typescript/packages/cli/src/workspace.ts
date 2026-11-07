@@ -179,7 +179,7 @@ interface AskRecord {
   note: string
 }
 
-interface HistoryEntry {
+interface LogEntry {
   type: string
   session: string
   timestamp: number
@@ -191,8 +191,8 @@ interface HistoryEntry {
   path?: string
 }
 
-function formatHistory(items: HistoryEntry[]): string {
-  if (items.length === 0) return 'No history.'
+function formatLogs(items: LogEntry[]): string {
+  if (items.length === 0) return 'No logs.'
   return formatTable(
     ['TIME', 'SESSION', 'TYPE', 'EXIT', 'ENTRY'],
     items.map((e) => [
@@ -200,7 +200,7 @@ function formatHistory(items: HistoryEntry[]): string {
       e.session,
       e.type,
       e.exit_code === undefined ? '' : String(e.exit_code),
-      historyEntry(e),
+      logEntry(e),
     ]),
   )
 }
@@ -208,9 +208,9 @@ function formatHistory(items: HistoryEntry[]): string {
 /**
  * A history entry's text on one row: the line, the vfs call, or the start
  * of what the line wrote, its newlines escaped. Mirrors Python's
- * `_history_entry`.
+ * `_log_entry`.
  */
-function historyEntry(e: HistoryEntry): string {
+function logEntry(e: LogEntry): string {
   const text = (
     e.type === 'command'
       ? (e.command ?? '')
@@ -435,7 +435,7 @@ export function registerWorkspaceCommands(program: Command): Command {
       emit((await handleResponse(r)) as WorkspaceDetail, formatWorkspaceDetail)
     })
 
-  ws.command('history')
+  ws.command('logs')
     .description('Show what the workspace ran, oldest first.')
     .argument('<id>')
     .option('--session <sessionId>', "Only this session's entries")
@@ -457,9 +457,9 @@ export function registerWorkspaceCommands(program: Command): Command {
         const qs = params.toString()
         const r = await c.request(
           'GET',
-          `/v1/workspaces/${encodeURIComponent(id)}/history${qs === '' ? '' : `?${qs}`}`,
+          `/v1/workspaces/${encodeURIComponent(id)}/logs${qs === '' ? '' : `?${qs}`}`,
         )
-        emit((await handleResponse(r)) as HistoryEntry[], formatHistory)
+        emit((await handleResponse(r)) as LogEntry[], formatLogs)
       },
     )
   ws.command('list-asks')

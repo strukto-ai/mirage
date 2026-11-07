@@ -820,7 +820,7 @@ class HttpSteps:
         if last is not None:
             params["last"] = str(last)
         return await self._ok(
-            "GET", f"/v1/workspaces/{wid}/history", params=params
+            "GET", f"/v1/workspaces/{wid}/logs", params=params
         )
 
     async def asks(self, wid: str) -> list[tuple[str, str]]:
@@ -1048,7 +1048,7 @@ class CliSteps:
     async def history(
         self, wid: str, vfs: bool, last: int | None
     ) -> list[dict[str, Any]]:
-        args = ["workspace", "history", wid]
+        args = ["workspace", "logs", wid]
         if vfs:
             args.append("--vfs")
         if last is not None:

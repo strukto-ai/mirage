@@ -196,9 +196,9 @@ describe('mirage api', () => {
         (await api(url, dir, '/v1/vfs', '--q', 'gh', '-X', 'get', '--type=github', '--live')).code,
       ).toBe(0)
       expect(seen[0]?.url).toBe('/v1/vfs?q=gh&type=github&live=true')
-      const kept = await api(url, dir, '/v1/w/history?session_id=s1', '--last=1', '-X', 'GET')
+      const kept = await api(url, dir, '/v1/w/logs?session_id=s1', '--last=1', '-X', 'GET')
       expect(kept.code).toBe(0)
-      expect(seen.at(-1)?.url).toBe('/v1/w/history?session_id=s1&last=1')
+      expect(seen.at(-1)?.url).toBe('/v1/w/logs?session_id=s1&last=1')
       const gone = await api(url, dir, '/v1/vfs/gh', '-X', 'DELETE')
       expect(gone).toMatchObject({ code: 0, stdout: '' })
       expect(seen.at(-1)).toMatchObject({ method: 'DELETE', url: '/v1/vfs/gh' })

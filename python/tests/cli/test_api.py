@@ -154,11 +154,11 @@ def test_a_get_puts_its_fields_in_the_query_and_a_204_prints_nothing(client):
         "json": None,
     }
     kept = _run(
-        "/v1/workspaces/w/history?session_id=s1", "--last=1", "-X", "GET"
+        "/v1/workspaces/w/logs?session_id=s1", "--last=1", "-X", "GET"
     )
     assert kept.exit_code == 0
     assert client.calls[1]["path"] == (
-        "/v1/workspaces/w/history?session_id=s1&last=1"
+        "/v1/workspaces/w/logs?session_id=s1&last=1"
     )
     gone = _run("/v1/vfs/gh", "-X", "DELETE")
     assert (gone.exit_code, gone.output) == (0, "")

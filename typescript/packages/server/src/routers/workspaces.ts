@@ -120,11 +120,12 @@ interface WorkspaceGetQuery {
   verbose?: string
 }
 
-interface WorkspaceHistoryQuery {
+interface WorkspaceLogsQuery {
   session_id?: string
   since?: string
   last?: string
   vfs?: string
+  format?: string
 }
 
 const LoadBodySchema = z
@@ -679,14 +680,17 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
   // The workspace's recorded history, oldest first: a `command` entry for
   // every line its sessions ran, and with `vfs` a `vfs` entry for every
   // call a line made to a mount.
-  app.get<{ Params: WorkspaceIdParams; Querystring: WorkspaceHistoryQuery }>(
-    '/v1/workspaces/:id/history',
+  app.get<{ Params: WorkspaceIdParams; Querystring: WorkspaceLogsQuery }>(
+    '/v1/workspaces/:id/logs',
     async (req, reply) => {
       const entry = deps.registry.visible(req.params.id, req.account)
       if (entry === null || deps.registry.removing(req.params.id)) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
       const options: NonNullable<Parameters<Workspace['history']>[0]> = {}
+      if (req.query.format !== undefined && !['json', 'jsonl'].includes(req.query.format)) {
+        return reply.status(400).send({ detail: 'format must be json or jsonl' })
+      }
       if (req.query.session_id !== undefined) options.sessionId = req.query.session_id
       for (const name of ['since', 'last'] as const) {
         const value = req.query[name]
@@ -701,7 +705,14 @@ export function registerWorkspacesRoutes(app: RouteApp, deps: WorkspaceRoutesDep
       } catch (e) {
         return reply.status(400).send({ detail: (e as Error).message })
       }
-      return await entry.runner.ws.history(options)
+      const records = await entry.runner.ws.history(options)
+      if (req.query.format === 'jsonl') {
+        return reply
+          .header('content-type', 'application/x-ndjson')
+          .header('content-disposition', 'attachment; filename="logs.jsonl"')
+          .send(records.map((record) => `${JSON.stringify(record)}\n`).join(''))
+      }
+      return records
     },
   )
 

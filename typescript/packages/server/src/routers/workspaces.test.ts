@@ -156,9 +156,23 @@ describe('workspaces router', () => {
         expect(r.statusCode).toBe(200)
       }
       const read = async (qs: string) =>
-        await app.inject({ method: 'GET', url: `/v1/workspaces/h/history${qs}` })
+        await app.inject({ method: 'GET', url: `/v1/workspaces/h/logs${qs}` })
       const all = await read('')
       expect(all.statusCode).toBe(200)
+      const exported = await read('?format=jsonl')
+      expect(exported.headers['content-type']).toContain('application/x-ndjson')
+      expect(exported.body.endsWith('\n')).toBe(true)
+      expect((await read('?last=0&format=jsonl')).body).toBe('')
+      expect(
+        exported.body
+          .trim()
+          .split('\n')
+          .map((line): unknown => JSON.parse(line)),
+      ).toEqual(all.json())
+      expect((await read('?format=bad')).statusCode).toBe(400)
+      expect(
+        (await app.inject({ method: 'GET', url: '/v1/workspaces/h/history' })).statusCode,
+      ).toBe(404)
       interface Entry {
         type: string
         command?: string
@@ -187,7 +201,7 @@ describe('workspaces router', () => {
       ])
       expect((await read('?last=-1')).statusCode).toBe(400)
       expect(
-        (await app.inject({ method: 'GET', url: '/v1/workspaces/nope/history' })).statusCode,
+        (await app.inject({ method: 'GET', url: '/v1/workspaces/nope/logs' })).statusCode,
       ).toBe(404)
     } finally {
       await app.close()

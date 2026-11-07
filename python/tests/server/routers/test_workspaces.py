@@ -1884,7 +1884,7 @@ async def test_history_reads_what_the_workspace_ran():
                 f"/v1/workspaces/{wid}/shell", json={"command": line}
             )
             assert r.status_code == 200, r.text
-        url = f"/v1/workspaces/{wid}/history"
+        url = f"/v1/workspaces/{wid}/logs"
         r = await client.get(url)
         assert r.status_code == 200, r.text
         assert [
@@ -1896,6 +1896,25 @@ async def test_history_reads_what_the_workspace_ran():
             ("result", 0),
         ]
         r = await client.get(url, params={"vfs": "true"})
+        exported = await client.get(
+            url, params={"vfs": "true", "format": "jsonl"}
+        )
+        assert exported.headers["content-type"].startswith(
+            "application/x-ndjson"
+        )
+        assert [
+            json.loads(line) for line in exported.text.splitlines()
+        ] == r.json()
+        assert exported.text.endswith("\n")
+        assert (
+            await client.get(url, params={"last": 0, "format": "jsonl"})
+        ).text == ""
+        assert (
+            await client.get(url, params={"format": "bad"})
+        ).status_code == 422
+        assert (
+            await client.get(f"/v1/workspaces/{wid}/history")
+        ).status_code == 404
         assert [(e["type"], e.get("vfs")) for e in r.json()] == [
             ("command", None),
             ("vfs", "write"),
@@ -1910,7 +1929,7 @@ async def test_history_reads_what_the_workspace_ran():
         ]
         assert (await client.get(url, params={"last": -1})).status_code == 422
         assert (
-            await client.get("/v1/workspaces/nope/history")
+            await client.get("/v1/workspaces/nope/logs")
         ).status_code == 404
     await app.state.registry.close_all()
 

@@ -232,10 +232,10 @@ paths:
       x-hosts:
         - daemon
         - hosted
-  /v1/workspaces/{workspace_id}/history:
+  /v1/workspaces/{workspace_id}/logs:
     get:
-      summary: Read a workspace's history
-      operationId: workspace_history_v1_workspaces__workspace_id__history_get
+      summary: Read a workspace's logs
+      operationId: workspace_logs_v1_workspaces__workspace_id__logs_get
       parameters:
         - $ref: '#/components/parameters/workspaceId'
         - name: session_id
@@ -269,6 +269,14 @@ paths:
           schema:
             type: boolean
             default: false
+        - name: format
+          in: query
+          required: false
+          description: Return JSON or download the same records as JSON Lines.
+          schema:
+            type: string
+            enum: [json, jsonl]
+            default: json
       responses:
         '200':
           description: OK
@@ -279,7 +287,7 @@ paths:
                 items:
                   type: object
                   additionalProperties: true
-                title: Response Workspace History V1 Workspaces  Workspace Id  History Get
+                title: Response Workspace Logs V1 Workspaces  Workspace Id  Logs Get
               example:
                 - type: command
                   session: 01a1b425-ec80-7038-86e0-75b597344043
@@ -296,6 +304,14 @@ paths:
                   exit_code: 0
                   stdout: "hello\n"
                   stderr: ''
+            application/x-ndjson:
+              schema:
+                type: string
+              example: |
+                {"type":"command","session":"s1","timestamp":1700000000000,"id":"c1","command":"echo hi"}
+                {"type":"result","session":"s1","timestamp":1700000000008,"parent":"c1","duration_ms":8,"exit_code":0,"stdout":"hi\n","stderr":""}
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -313,7 +329,9 @@ paths:
         the shell line; its result links back through parent and includes stdout,
         stderr, exit_code and duration_ms. The timestamp field and the since filter
         use Unix milliseconds. Set vfs=true to include filesystem operation records.
-        An empty history returns [].
+        An empty JSON response is []. With format=jsonl, the same records are
+        returned oldest first as newline-delimited JSON, with an attachment
+        filename of logs.jsonl. See the logs contract for Cloud differences.
       tags:
         - Workspaces
       x-hosts:
