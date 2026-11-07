@@ -22,3 +22,8 @@ export const KILLED_OUTCOME = 'killed'
 // A cursor past any console's end: reading from it returns no chunks and
 // the console's length as the next cursor. Exact on both hosts.
 export const END_OF_CONSOLE = Number.MAX_SAFE_INTEGER
+
+// How often a reader waiting on a console in a SQL database looks again: a
+// database has no blocking read, and an append through the same store wakes
+// its readers at once.
+export const SQL_POLL_SECONDS = 0.25

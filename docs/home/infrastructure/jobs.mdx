@@ -20,6 +20,12 @@ The group key is `store.execution`. A job's output is a stream other
 processes follow, so `disk` is refused here, and a `disk` store keeps its
 jobs in memory.
 
+In code, `SqlWorkspaceStateStore` keeps them in a SQL database, SQLite or
+Postgres, in two tables it makes on first use, so every process on the
+database lists the same jobs, lines and processes, and a restart on it keeps
+them. A reader following a job on another process there sees new output
+within a quarter of a second.
+
 ## On Redis
 
 <Tabs>
