@@ -931,9 +931,8 @@ impl Parser<'_> {
         // and all, as bash reads an assignment's.
         let name = super::lex::name_end(self.s, at);
         if name > at && self.s.get(name) == Some(&b'[') {
-            if let Ok(close) = self.scan_bracket(name + 1, name) {
-                end = end.max(self.scan_word(close)?);
-            }
+            let close = self.scan_bracket(name + 1, name)?;
+            end = end.max(self.scan_word(close)?);
         }
         let mut word = Vec::with_capacity(end - at);
         let mut from = at;

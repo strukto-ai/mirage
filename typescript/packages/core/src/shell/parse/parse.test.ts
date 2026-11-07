@@ -39,7 +39,7 @@ const HEAD = 'bash: -c: '
 
 // Rows of the bash_syntax fixtures, pinned with `bash -c`, that mirage reads
 // otherwise. Mirrors Python's DIVERGES.
-const DIVERGES = new Set(['declare a[x y]=(1)', 'f() x=({\necho\n}', '{fd}>f x=(a[)'])
+const DIVERGES = new Set(['f() x=({\necho\n}', '{fd}>f x=(a[)'])
 
 const refusal = (line: string, aliases: ReadonlySet<string> = new Set()): [number, string] => {
   const io = syntaxRefusal(parse(line, aliases, false), HEAD, 1, false)

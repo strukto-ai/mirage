@@ -51,11 +51,10 @@ SIDE_EFFECT_COMMANDS = [
 
 
 # Rows of the bash_syntax fixtures, pinned with `bash -c`, that mirage reads
-# otherwise: three lines the parser refuses at an earlier token than the
-# one bash names.
+# otherwise: an array left open after a function's `()`, and a `{name}`
+# redirect, which mirage reads as a word.
 DIVERGES = frozenset(
     {
-        "declare a[x y]=(1)",
         "f() x=({\necho\n}",
         "{fd}>f x=(a[)",
     }

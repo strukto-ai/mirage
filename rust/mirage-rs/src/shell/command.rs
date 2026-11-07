@@ -697,7 +697,8 @@ impl Parser<'_> {
             }
             if kind == "declaration_command" && self.at_declared_assignment() {
                 if self.subscripted_array() {
-                    return self.fail(self.i);
+                    let open = self.s[self.i..].iter().position(|byte| *byte == b'(').unwrap_or(0);
+                    return self.fail(self.i + open);
                 }
                 // bash refuses an array value after a redirect among the
                 // words, though not after one before the builtin.

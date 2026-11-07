@@ -20,6 +20,8 @@
   {"line": "cat <( (a) b)", "status": 127, "stderr": "bash: -c: line 1: syntax error near unexpected token `b'\nbash: -c: line 1: `cat <( (a) b)'\n"},
   {"line": "cat <(echo $(fi))", "status": 127, "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `cat <(echo $(fi))'\n"},
   {"line": "cat <(fi", "status": 127, "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `cat <(fi'\n"},
+  {"line": "cat <<'EOF'$(fi)\nEOF", "status": 127, "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `cat <<'EOF'$(fi)'\n"},
+  {"line": "cat <<EOF$(fi)\nEOF", "status": 127, "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `cat <<EOF$(fi)'\n"},
   {"line": "cat <<EOF; echo $(fi)\nx\nEOF", "status": 127, "stderr": "bash: -c: line 1: syntax error near unexpected token `fi'\nbash: -c: line 1: `cat <<EOF; echo $(fi)'\n"},
   {"line": "echo $( ( )", "status": 127, "stderr": "bash: -c: line 1: syntax error near unexpected token `)'\nbash: -c: line 1: `echo $( ( )'\n"},
   {"line": "echo $( [[ if)", "status": 127, "stderr": "bash: -c: line 1: syntax error in conditional expression: unexpected token `)'\nbash: -c: line 1: syntax error near `if)'\nbash: -c: line 1: `echo $( [[ if)'\n"},
