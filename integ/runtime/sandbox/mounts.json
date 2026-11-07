@@ -7,7 +7,7 @@
       "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
       "world": {
         "mounts": {
-          "/served": { "vfs": "ram", "config": { "capacity": 100 } }
+          "/capped": { "vfs": "ram", "config": { "capacity": 100 } }
         }
       },
       "entry": {
@@ -16,20 +16,20 @@
       },
       "steps": [
         {
-          "command": "dash -c 'head -c 500 /dev/zero > /served/big.bin; echo rc=$?'",
+          "command": "dash -c 'head -c 500 /dev/zero > /capped/big.bin; echo rc=$?'",
           "expect": {
             "exit": 1,
             "stdout": "rc=0\n",
-            "stderr_contains": ": /served/big.bin: Disk quota exceeded\n"
+            "stderr_contains": ": /capped/big.bin: Disk quota exceeded\n"
           }
         },
         {
-          "command": "dash -c 'head -c 50 /dev/zero > /served/small.bin; echo rc=$?'",
+          "command": "dash -c 'head -c 50 /dev/zero > /capped/small.bin; echo rc=$?'",
           "expect": { "exit": 0, "stdout": "rc=0\n", "stderr": "" }
         },
         {
-          "command": "wc -c /served/small.bin",
-          "expect": { "exit": 0, "stdout": "50 /served/small.bin\n" }
+          "command": "wc -c /capped/small.bin",
+          "expect": { "exit": 0, "stdout": "50 /capped/small.bin\n" }
         }
       ]
     },
