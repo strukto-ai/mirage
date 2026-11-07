@@ -40,6 +40,7 @@ from mirage.shell.parse.constants import PARSED_WORDS
 from mirage.shell.types import NodeType as NT
 from mirage.shell.types import TSNodeLike
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.background import handle_background, run_program
 from mirage.workspace.executor.builtins.alias.alias import expanding_aliases
 from mirage.workspace.executor.builtins.exec import (
     divert_statement,
@@ -50,7 +51,6 @@ from mirage.workspace.executor.control import (
     LoopSignal,
     carried,
 )
-from mirage.workspace.executor.jobs import handle_background, run_program
 from mirage.workspace.executor.statement import (
     as_written,
     errexit_acts,

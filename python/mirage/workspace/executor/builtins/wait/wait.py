@@ -1,0 +1,256 @@
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
+
+import asyncio
+
+from mirage.context import get_current_evaluation
+from mirage.execution.job import JobHandle, JobState, JobTable
+from mirage.io import IOResult
+from mirage.io.types import ByteSource
+from mirage.shell.bytes import encode_text
+from mirage.shell.constants import NOT_FOUND_STATUS
+from mirage.shell.voice import shell_voice
+from mirage.view.types import SessionView
+from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.background import report_jobs
+from mirage.workspace.executor.builtins.constants import IDENTIFIER_RE
+from mirage.workspace.executor.builtins.jobspec import (
+    job_result,
+    resolve_spec,
+    session_of,
+)
+from mirage.workspace.executor.builtins.shared import builtin_usage
+from mirage.workspace.session import SessionState
+from mirage.workspace.types import ExecutionNode
+
+
+async def _wait_first(job_table: JobTable, jobs: list[JobHandle]) -> JobHandle:
+    """Block until the first of several jobs ends, and return it.
+
+    Args:
+        job_table (JobTable): the session's jobs.
+        jobs (list[JobHandle]): the candidates, all present in the table.
+    """
+    for job in jobs:
+        if job.state != JobState.RUNNING:
+            return await job_table.wait(job.id, job.session_id)
+    tasks = {
+        asyncio.ensure_future(job_table.wait(job.id, job.session_id)): job
+        for job in jobs
+    }
+    done, pending = await asyncio.wait(
+        tasks, return_when=asyncio.FIRST_COMPLETED
+    )
+    for task in pending:
+        task.cancel()
+    first = min(done, key=lambda t: tasks[t].id)
+    return tasks[first]
+
+
+async def _reaped(
+    job_table: JobTable, job: JobHandle, cmd_str: str
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Report one finished job's status, and reap it.
+
+    Its output already went where its shell writes as it was written.
+
+    Args:
+        job_table (JobTable): the session's jobs.
+        job (JobHandle): the job, already finished.
+        cmd_str (str): the command line, for the node.
+    """
+    # Reaped like GNU bash reaps a job waited on by id, so a later bare
+    # `wait` does not answer for it again.
+    await job_table.reap(job.id, job.session_id)
+    return (
+        None,
+        IOResult(exit_code=job.exit_code),
+        ExecutionNode(command=cmd_str, exit_code=job.exit_code),
+    )
+
+
+async def handle_wait(
+    job_table: JobTable,
+    parts: list[str],
+    session: SessionState | None = None,
+    view: SessionView | None = None,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """Wait for background jobs, with bash's option surface.
+
+    A job's output went where its shell writes as it was written, so
+    `wait` prints none, as bash's does. Bare `wait` joins every job;
+    `wait ID...` joins those and answers the last one's status; `-n`
+    joins the first of the given jobs (or of all) to finish and answers
+    its status, 127 when there is nothing to wait for; `-p VAR` stores
+    the id of the job whose status is answered, and unsets VAR when
+    none is (which is the bare form, since it reports no one job);
+    `-f` is accepted, since a mirage job cannot stop, only end.
+
+    `-p` stores the managed PID, matching `$!` and `jobs -p`.
+    A spec naming no job is bash's own message and 127; a word that is
+    neither is `not a pid or valid job spec` and 1.
+
+    Args:
+        job_table (JobTable): the session's jobs.
+        parts (list[str]): the command words, `wait` first.
+        session (SessionState | None): shell session state, for `-p`.
+        view (SessionView | None): the gated session view.
+    """
+    cmd_str = " ".join(parts)
+    sid = session_of(session)
+    next_job = False
+    var: str | None = None
+    specs: list[str] = []
+    i = 1
+    while i < len(parts):
+        word = parts[i]
+        if specs or not word.startswith("-") or word == "-":
+            specs.append(word)
+            i += 1
+            continue
+        if word == "--":
+            specs.extend(parts[i + 1 :])
+            break
+        j = 1
+        while j < len(word):
+            ch = word[j]
+            if ch == "n":
+                next_job = True
+            elif ch == "f":
+                pass
+            elif ch == "p":
+                rest = word[j + 1 :]
+                if rest:
+                    var = rest
+                elif i + 1 < len(parts):
+                    i += 1
+                    var = parts[i]
+                else:
+                    return job_result(
+                        cmd_str,
+                        f"{shell_voice()}wait: -p: option requires an "
+                        f"argument\n{builtin_usage('wait')}",
+                        2,
+                    )
+                break
+            else:
+                return job_result(
+                    cmd_str,
+                    f"{shell_voice()}wait: -{ch}: invalid option\n"
+                    f"{builtin_usage('wait')}",
+                    2,
+                )
+            j += 1
+        i += 1
+    if var is not None:
+        if IDENTIFIER_RE.fullmatch(var) is None:
+            return job_result(
+                cmd_str,
+                f"{shell_voice()}wait: `{var}': not a valid identifier\n",
+                1,
+            )
+        if view is not None and view.is_readonly(var):
+            return job_result(
+                cmd_str,
+                f"{shell_voice()}wait: {var}: cannot unset: readonly variable\n",
+                1,
+            )
+        if view is not None:
+            await view.unset(var)
+    errors: list[str] = []
+    picked: list[JobHandle] = []
+    await job_table.sync(sid)
+    visible = job_table.list_jobs(sid)
+    for spec in specs:
+        job, refusal = resolve_spec(visible, spec)
+        if job is None:
+            errors.append(f"{shell_voice()}wait: {refusal}")
+            continue
+        picked.append(job)
+    err_text = ("\n".join(errors) + "\n") if errors else ""
+    if next_job:
+        candidates = picked if specs else visible
+        if not candidates:
+            # Nothing to wait for: the specs were all bad, or there are
+            # no jobs. bash reports any bad spec and answers 127.
+            code = NOT_FOUND_STATUS
+            return (
+                None,
+                IOResult(exit_code=code, stderr=encode_text(err_text) or None),
+                ExecutionNode(command=cmd_str, exit_code=code),
+            )
+        job = await _wait_first(job_table, candidates)
+        if var is not None and view is not None:
+            await view.set(var, str(job.pid))
+        told = _wait_reports(session, job_table)
+        stdout, io, node = await _reaped(job_table, job, cmd_str)
+        if err_text or told:
+            io.stderr = encode_text(err_text) + told
+        return stdout, io, node
+    if not specs:
+        await job_table.wait_all(sid)
+        told = _wait_reports(session, job_table)
+        await job_table.pop_completed(sid)
+        return (
+            None,
+            IOResult(stderr=told or None),
+            ExecutionNode(command=cmd_str, exit_code=0),
+        )
+    if not picked:
+        # Every spec was refused: bash answers 127 for a job it cannot
+        # find and 1 for a word that is not a spec at all, the last
+        # refusal deciding.
+        last = errors[-1]
+        code = (
+            1
+            if last.endswith("not a pid or valid job spec")
+            else NOT_FOUND_STATUS
+        )
+        return job_result(cmd_str, err_text, code)
+    finished = [await job_table.wait(job.id, sid) for job in picked]
+    told = _wait_reports(session, job_table)
+    last_code = 0
+    last_job: JobHandle | None = None
+    for job in finished:
+        _, io, _ = await _reaped(job_table, job, cmd_str)
+        last_code = io.exit_code
+        last_job = job
+    # `wait id1 id2` answers with the last id's status, so `-p` names
+    # that same job however many were waited for. Only the no-operand
+    # form leaves the variable unset, since it reports no one job.
+    if var is not None and view is not None and last_job is not None:
+        await view.set(var, str(last_job.pid))
+    return (
+        None,
+        IOResult(
+            exit_code=last_code, stderr=encode_text(err_text) + told or None
+        ),
+        ExecutionNode(command=cmd_str, exit_code=last_code),
+    )
+
+
+def _wait_reports(session: SessionState | None, job_table: JobTable) -> bytes:
+    """What ``wait`` tells of the jobs a signal ended once it waited
+    (``report_jobs``), before it reaps them.
+
+    Args:
+        session (SessionState | None): the shell, None for a bare table.
+        job_table (JobTable): its jobs.
+    """
+    if session is None:
+        return b""
+    context = get_current_evaluation()
+    if context is None or context.session is not session:
+        context = EvaluationContext(session)
+    return report_jobs(context, job_table)

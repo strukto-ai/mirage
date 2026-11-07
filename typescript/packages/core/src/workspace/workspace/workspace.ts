@@ -42,12 +42,13 @@ import { eacces, enoent } from '../../errors/fs.ts'
 import type { EventRuntime } from '../../events/base.ts'
 import { newLineId } from '../../execution/context.ts'
 import { LineTable } from '../../execution/line/table.ts'
+import type { Line, LineState } from '../../execution/line/types.ts'
 import { IOConfig } from '../../io/config.ts'
 import { MAX_BODY_BYTES, MAX_MEMORY, MemoryBudget } from '../../io/memory.ts'
 import { networkRule, type NetworkSetting, runWithNetwork, sameNetwork } from '../../io/network.ts'
 import { HISTFILESIZE } from '../../core/history/constants.ts'
 import { EVENT_COMMAND, EVENT_RESULT, EVENT_VFS } from '../../observe/log_entry.ts'
-import { Observer } from '../../observe/observer.ts'
+import { Observer, traceJob, traceProcess } from '../../observe/observer.ts'
 import type { OpRecord } from '../../observe/record.ts'
 import { checkCommandLimits } from '../../policy/builtin/output_cap.ts'
 import { PermissionsPolicy } from '../../policy/builtin/permissions.ts'
@@ -67,9 +68,15 @@ import { ChildProcess } from '../../execution/process/child.ts'
 import { statedProcesses, type ProcessPermissions } from '../../execution/process/config.ts'
 import { ProcessInput, ProcessOutput } from '../../execution/process/stdio.ts'
 import { ProcessTable } from '../../execution/process/table.ts'
-import type { SpawnRequest } from '../../execution/process/types.ts'
-import { LOCAL_MACHINE } from '../../execution/constants.ts'
-import { type MachineId, type MachinePid, ProcessId } from '../../execution/types.ts'
+import type { Process, ProcessState, SpawnRequest } from '../../execution/process/types.ts'
+import { LINE_STOP_SIGNAL, LOCAL_MACHINE } from '../../execution/constants.ts'
+import {
+  type JobId,
+  type LineId,
+  type MachineId,
+  type MachinePid,
+  ProcessId,
+} from '../../execution/types.ts'
 import type { RecordFields } from '../record/types.ts'
 import type { ProcessView } from '../../execution/process/view.ts'
 import { DiffPool } from '../../rs/diff_pool.ts'
@@ -91,7 +98,7 @@ import { resolveSources } from '../../secrets/sources.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
 import { Terminal } from '../../shell/console/terminal.ts'
 import { BIN_PREFIX } from '../../shell/constants.ts'
-import { JobTable } from '../../execution/job/index.ts'
+import { type Job, type JobState, JobTable } from '../../execution/job/index.ts'
 import { shellJoin } from '../../shell/join.ts'
 import { literalTree } from '../../shell/literal.ts'
 import { ParseScope } from '../../shell/parse/scope.ts'
@@ -218,7 +225,7 @@ export class Workspace {
   private readonly readDefault: ReadSpec
   /** The write policy a mount added without one takes. */
   readonly writeDefault: WritePolicy
-  readonly processes: ProcessTable
+  readonly processTable: ProcessTable
   readonly jobTable: JobTable
   readonly lineTable: LineTable
   readonly cache: FileCacheMixin & BaseVFS
@@ -236,7 +243,7 @@ export class Workspace {
   private closed = false
   readonly documents: Documents
   private readonly lineLock = new KeyLock()
-  private readonly lines = new Map<
+  private readonly lineStops = new Map<
     AbortController,
     { sessionId: string | undefined; ended: Promise<void> }
   >()
@@ -316,7 +323,7 @@ export class Workspace {
     this.wsId = options.workspaceId ?? this.ids.uuid7()
     const sessionId = options.sessionId ?? this.ids.uuid7()
     // A line binds the system clock only once its process has started.
-    this.processes = new ProcessTable(
+    this.processTable = new ProcessTable(
       this.wsId,
       this.hostMachine(),
       runAsProcess,
@@ -324,6 +331,7 @@ export class Workspace {
         this.jobTable.processesChanged()
       },
       () => this.registry.systemClock?.now() ?? systemNow(),
+      traceProcess,
     )
     this.cache = buildFileCache(options.cache, options.cacheLimit, this.clock, this.wsId)
     const normalized = normalizeMounts(mounts, this.readDefault, index, {
@@ -356,12 +364,13 @@ export class Workspace {
     const stores = resolveControlStores(this.wsId, options)
     this.jobTable = new JobTable(
       stores.execution,
-      this.processes,
+      this.processTable,
       null,
       this.clock,
       options.daemonId ?? null,
     )
     this.jobTable.reaper = (record, signum) => this.reapProcess(record, signum)
+    this.jobTable.ended = traceJob
     this.lineTable = new LineTable(this.clock)
     this.ownsStateStore = stores.owned
     this.stateStoreInternal = stores.stateStore
@@ -432,7 +441,7 @@ export class Workspace {
     // included: a session's processes.max as a process starts, max_memory
     // and max_env below, a line's time limit as the line starts.
     this.registry.ceilings = options.ceilings ?? {}
-    this.processes.ceiling = this.registry.ceilings.maxProcesses ?? null
+    this.processTable.ceiling = this.registry.ceilings.maxProcesses ?? null
     for (const [name, profile] of Object.entries(options.profiles ?? {})) {
       this.setProfile(name, profile)
     }
@@ -675,7 +684,7 @@ export class Workspace {
       (sessionId) => this.getSession(sessionId),
       () => this.sandboxMounts(),
       null,
-      this.processes,
+      this.processTable,
     )
     this.runtimeWorld = new Runtimes({
       registry: this.registry,
@@ -749,14 +758,14 @@ export class Workspace {
     const found = record.machine_pid as MachinePid | null | undefined
     const seen = record.seen_at
     if (typeof pid !== 'number') return false
-    if (machine === this.processes.machine.toString() && found != null)
+    if (machine === this.processTable.machine.toString() && found != null)
       return this.reapHostRun(found, typeof seen === 'number' ? seen : null, signum)
     const tag = new ProcessId(this.workspaceId, pid).toString()
     let reached = false
     for (const runtime of this.runtimes()) {
       if (!(runtime instanceof RemoteSandbox)) continue
       try {
-        if ((runtime.machine ?? this.processes.machine).toString() !== machine) continue
+        if ((runtime.machine ?? this.processTable.machine).toString() !== machine) continue
         reached = (await runtime.reap(tag, signum)) || reached
       } catch (err) {
         console.debug(`${runtime.name}: run not reaped:`, err)
@@ -898,7 +907,7 @@ export class Workspace {
 
   private processView(session: SessionState): ProcessView {
     const parentPid = session.processId
-    const view = this.processes.view(session.sessionId, () => session.processes)
+    const view = this.processTable.view(session.sessionId, () => session.processes)
     return Object.freeze({
       ...view,
       depth: session.processDepth,
@@ -947,8 +956,8 @@ export class Workspace {
       abort = new AbortController()
     const env = request.env === undefined ? undefined : { ...request.env }
     const owner = this.sessionManager.get(session.sessionId)
-    const admission = this.processes.view(session.sessionId, () => owner.processes)
-    const process = this.processes.start({
+    const admission = this.processTable.view(session.sessionId, () => owner.processes)
+    const process = this.processTable.start({
       sessionId: session.sessionId,
       command: shellJoin(argv),
       cwd,
@@ -1317,12 +1326,97 @@ export class Workspace {
     if (this.isShuttingDown()) throw new Error('Workspace is closed')
     if (wasDefault) sessionId = this.defaultSessionId
     const session = await this.sessionManager.setProfile(sessionId, compiled)
-    this.processes.revokeSession(sessionId)
+    this.processTable.revokeSession(sessionId)
     return session
   }
 
   listSessions(): SessionState[] {
     return this.sessionManager.list()
+  }
+
+  /**
+   * The lines the workspace keeps, oldest first: every one not ended yet,
+   * and the newest ended ones; a session's or those in a state when named.
+   */
+  lines(filter: { sessionId?: string; state?: LineState } = {}): Line[] {
+    return this.lineTable
+      .lines(filter.sessionId)
+      .filter((line) => filter.state === undefined || line.state === filter.state)
+  }
+
+  /** One line's record, while the workspace keeps it. */
+  line(id: LineId): Line | null {
+    return this.lineTable.get(id)
+  }
+
+  /**
+   * The jobs the workspace's sessions list, as `jobs` does: each until its
+   * ending is reported; a session's or those in a state when named.
+   */
+  jobs(filter: { sessionId?: string; state?: JobState; lineId?: LineId } = {}): Job[] {
+    const handles =
+      filter.sessionId === undefined
+        ? this.jobTable.allJobs()
+        : this.jobTable.listJobs(filter.sessionId)
+    return handles
+      .filter((job) => !job.reported)
+      .map((job) => job.record)
+      .filter(
+        (job) =>
+          (filter.state === undefined || job.state === filter.state) &&
+          (filter.lineId === undefined || job.line?.value === filter.lineId.value),
+      )
+  }
+
+  /** One job's record, while a session lists it. */
+  job(id: JobId): Job | null {
+    return (
+      this.jobs().find(
+        (job) => job.id.workspaceId === id.workspaceId && job.id.console === id.console,
+      ) ?? null
+    )
+  }
+
+  /**
+   * The processes the workspace keeps, by pid: every live one, and the
+   * newest ended ones; a session's, those in a state, those a line ran,
+   * those a job ran (its own and every one under it, while a session lists
+   * it) or those run on a machine when named.
+   */
+  processes(
+    filter: {
+      sessionId?: string
+      state?: ProcessState
+      lineId?: LineId
+      jobId?: JobId
+      machine?: MachineId
+    } = {},
+  ): Process[] {
+    const records = this.processTable.records()
+    let tree: Set<number> | null = null
+    if (filter.jobId !== undefined) {
+      const pid = this.job(filter.jobId)?.pid ?? null
+      tree = pid === null ? new Set() : this.processTable.tree(pid)
+    }
+    return records.filter(
+      (process) =>
+        (filter.sessionId === undefined || process.sessionId === filter.sessionId) &&
+        (filter.state === undefined || process.state === filter.state) &&
+        (filter.lineId === undefined || process.line?.value === filter.lineId.value) &&
+        (tree === null || tree.has(process.id.pid)) &&
+        (filter.machine === undefined || process.machine.toString() === filter.machine.toString()),
+    )
+  }
+
+  /** One process's record, while the workspace keeps it. */
+  process(id: ProcessId): Process | null {
+    return (
+      this.processTable
+        .records()
+        .find(
+          (process) => process.id.workspaceId === id.workspaceId && process.id.pid === id.pid,
+        ) ?? null
+    )
   }
 
   async closeSession(sessionId: string): Promise<void> {
@@ -1988,7 +2082,7 @@ export class Workspace {
     const ended = new Promise<void>((resolve) => {
       settle = resolve
     })
-    this.lines.set(stop, { sessionId: options.sessionId, ended })
+    this.lineStops.set(stop, { sessionId: options.sessionId, ended })
     const signal =
       options.signal === undefined ? stop.signal : AbortSignal.any([options.signal, stop.signal])
     try {
@@ -1998,7 +2092,7 @@ export class Workspace {
         this.executeInternal(command, { ...options, signal }),
       )
     } finally {
-      this.lines.delete(stop)
+      this.lineStops.delete(stop)
       this.admitted.delete(stop)
       settle()
     }
@@ -2015,7 +2109,7 @@ export class Workspace {
    */
   async cancel(sessionId?: string): Promise<number> {
     const own = currentCaller().stop
-    const hit = [...this.lines].filter(
+    const hit = [...this.lineStops].filter(
       ([, line]) =>
         sessionId === undefined || (line.sessionId ?? this.defaultSessionId) === sessionId,
     )
@@ -2049,7 +2143,7 @@ export class Workspace {
       const own = currentCaller().stop
       const waited = ([stop]: [AbortController, unknown]): boolean =>
         stop !== own && this.admitted.has(stop)
-      const running = [...this.lines].filter(waited).map(([, line]) => line.ended)
+      const running = [...this.lineStops].filter(waited).map(([, line]) => line.ended)
       if (this.writes > 0) running.push(this.writesIdle)
       if (running.length > 0) {
         let timer: ReturnType<typeof setTimeout> | undefined
@@ -2061,7 +2155,7 @@ export class Workspace {
         const busy = await Promise.race([Promise.all(running).then(() => false), late])
         clearTimeout(timer)
         if (busy) {
-          const pending = [...this.lines].filter(waited).length + (this.writes > 0 ? 1 : 0)
+          const pending = [...this.lineStops].filter(waited).length + (this.writes > 0 ? 1 : 0)
           throw Object.assign(
             new Error(`workspace busy: ${String(pending)} line(s) or write(s) still running`),
             { code: 'EBUSY' },
@@ -2122,7 +2216,7 @@ export class Workspace {
     for (const job of jobs) {
       if (await this.jobTable.kill(job.id, job.sessionId)) killed += 1
     }
-    for (const runner of this.processes.live()) {
+    for (const runner of this.processTable.live()) {
       if (sessionId !== undefined && runner.record.sessionId !== sessionId) continue
       if (runner.terminate()) killed += 1
     }
@@ -2145,6 +2239,7 @@ export class Workspace {
       options.signal,
       () => executeLine(this.executeEnv(), command, options),
       options.session,
+      options.lineHandle,
     )
   }
 
@@ -2239,6 +2334,7 @@ export class Workspace {
     signal: AbortSignal | undefined,
     run: () => Promise<T>,
     session?: SessionState,
+    line?: LineHandle,
   ): Promise<T> {
     if (session !== undefined) return run()
     const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(this.sessionManager) : null
@@ -2250,14 +2346,30 @@ export class Workspace {
     // later line would wait on.
     await abortable(this.ensureSessionsLoaded(), signal)
     const key = sessionId ?? this.sessionManager.defaultId
-    return this.lineLock.withLock(
-      key,
-      async () => {
-        if (this.isShuttingDown()) throw new Error('Workspace is closed')
-        return run()
-      },
-      signal,
-    )
+    // The line is listed as waiting from here, and ended as stopped, or
+    // with the error, should it fail before it ends, as a line refused the
+    // workspace's lease does.
+    if (line !== undefined) this.lineTable.start(line)
+    try {
+      return await this.lineLock.withLock(
+        key,
+        async () => {
+          if (this.isShuttingDown()) throw new Error('Workspace is closed')
+          return run()
+        },
+        signal,
+      )
+    } catch (err) {
+      if (line !== undefined) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          line.stop(LINE_STOP_SIGNAL)
+          line.end(128 + LINE_STOP_SIGNAL)
+        } else {
+          line.end(null, err instanceof Error ? `${err.name}: ${err.message}` : String(err))
+        }
+      }
+      throw err
+    }
   }
 
   /**

@@ -40,6 +40,7 @@ from mirage.shell.errors import ExitSignal
 from mirage.shell.escapes import ends_escaped
 from mirage.shell.options import parse_option_word
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.background import report_reaped, start_shell
 from mirage.workspace.executor.builtins.script.constants import (
     BASH_LONG_OPTIONS,
     BASH_START_FLAGS,
@@ -52,7 +53,6 @@ from mirage.workspace.executor.builtins.script.script import (
 from mirage.workspace.executor.builtins.script.types import BashArgs
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.control import ended
-from mirage.workspace.executor.jobs import report_reaped, start_shell
 from mirage.workspace.executor.traps import clear_traps, finish_shell
 from mirage.workspace.session.state import set_positional_params
 from mirage.workspace.types import ExecutionNode

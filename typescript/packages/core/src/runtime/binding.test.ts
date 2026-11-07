@@ -310,7 +310,7 @@ it('does not share process views by profile or follow reused session IDs', async
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    const process = ws.processes.start({
+    const process = ws.processTable.start({
       sessionId: 'one',
       command: 'private work',
       cwd: PathSpec.fromStrPath('/'),

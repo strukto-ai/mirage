@@ -688,3 +688,38 @@ def test_bash_history_lists_lines_in_the_order_they_ended():
         ("quick", 1000),
         ("slow", 3000),
     ]
+
+
+# A job and each process a line ran are spans of their own once they end,
+# named by their line, session and workspace.
+@pytest.mark.asyncio
+async def test_an_ended_job_and_process_are_spans(monkeypatch):
+    exporter = _exported(monkeypatch)
+    ws = Workspace({"/data": RAMVFS()}, mode=MountMode.WRITE)
+    try:
+        await ws.shell("sleep 30 & kill %1; wait")
+        [line] = ws.lines()
+    finally:
+        await ws.close()
+    spans = exporter.get_finished_spans()
+    [job] = [s for s in spans if s.name == "job"]
+    assert {
+        k: v
+        for k, v in (job.attributes or {}).items()
+        if k in ("mirage.job.number", "mirage.command", "mirage.line.id")
+    } == {
+        "mirage.job.number": 1,
+        "mirage.command": "sleep 30",
+        "mirage.line.id": str(line.id),
+    }
+    [sleep] = [
+        s
+        for s in spans
+        if s.name == "process"
+        and (s.attributes or {})["process.command_line"] == "sleep 30"
+    ]
+    attributes = sleep.attributes or {}
+    assert attributes["process.exit.code"] == 143
+    assert attributes["mirage.line.id"] == str(line.id)
+    assert attributes["mirage.session.id"] == line.session_id
+    assert str(attributes["host.id"]).startswith("host:")

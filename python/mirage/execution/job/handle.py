@@ -111,6 +111,7 @@ class JobHandle:
     now: Callable[[], float] = field(
         default_factory=lambda: SystemClock().now, repr=False
     )
+    ended: Callable[[Job], None] | None = field(default=None, repr=False)
 
     @property
     def record(self) -> Job:
@@ -125,6 +126,9 @@ class JobHandle:
             started_at=self.created_at,
             line=self.line,
             group=self.group,
+            pid=(
+                self.process.record.pid if self.process is not None else None
+            ),
             state=self.state,
             ended_at=self.ended_at,
             exit=self.exit_code if ended else None,
@@ -163,6 +167,17 @@ class JobHandle:
         """Mark the job ended, now, unless it already was."""
         if self.state != JobState.EXITED:
             self.state, self.ended_at = JobState.EXITED, self.now()
+
+    def _tell_ended(self) -> None:
+        """Tell ``ended`` the job's record once, as it ended; a hook
+        that fails is logged, so the job still ends."""
+        ended, self.ended = self.ended, None
+        if ended is None:
+            return
+        try:
+            ended(self.record)
+        except Exception as exc:
+            logger.debug("job %d: ended hook failed: %s", self.id, exc)
 
     def cancel(self, signal: int = 9) -> None:
         """Ask the job's runner to stop, from any thread, without
@@ -215,7 +230,8 @@ class JobHandle:
         stop, may have ended the console first; the store keeps the first
         ending, and every workspace answers that one. The job's fields
         are set before the console is finished, so a reader released by
-        the ending chunk always sees them settled.
+        the ending chunk always sees them settled, and ``ended`` is told
+        the ending the job took.
 
         Args:
             exit_code (int): the status it answers.
@@ -228,11 +244,11 @@ class JobHandle:
             await mark_killed(self.console, exit_code, signal)
         else:
             await self.console.finish(exit_outcome(exit_code))
-        if self.console.store.closed:
-            return
-        outcome = await self.console.outcome()
-        if outcome is not None:
-            self.take(outcome)
+        if not self.console.store.closed:
+            outcome = await self.console.outcome()
+            if outcome is not None:
+                self.take(outcome)
+        self._tell_ended()
 
     def _stopped(self) -> tuple[int, int]:
         """The status and signal a stopped job answers: the status its

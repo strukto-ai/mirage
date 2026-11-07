@@ -118,7 +118,7 @@ login or token, so neither needs a header:
 The shell call returns:
 
 ```json
-{"kind": "io", "exit_code": 0, "stdout": "hello\n", "stderr": "", "refusal": null}
+{"kind": "io", "exit_code": 0, "stdout": "hello\n", "stderr": "", "refusal": null, "line_id": "line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"}
 ```
 
 ## Errors
@@ -654,7 +654,8 @@ Each call acts as the session `?session_id=` names, the default one when absent.
 <ParamField query="explain" type="boolean" default="false">Return the line's explanation without executing it.</ParamField>
 <ParamField query="stream" type="boolean" default="false">Stream stdout, stderr and final status as NDJSON. Cannot be combined with explain.</ParamField>
 
-Returns `{kind, exit_code, stdout, stderr, refusal}` when the line ends.
+Returns `{kind, exit_code, stdout, stderr, refusal, line_id}` when the line ends;
+`line_id` finds the line under [lines, jobs and processes](#lines-jobs-and-processes).
 Closing the request cancels the line. To run a line in the background, end it
 with `&` and use the session's `jobs`, `wait` and `kill`. With `explain`, send only `command`.
 
@@ -710,7 +711,7 @@ chunk, with base64 `data`, then a final record whose `status` is `done`,
 ```json
 {"stream":"stdout","data":"aGVsbG8K"}
 {"stream":"stderr","data":"b29wcwo="}
-{"status":"done","result":{"kind":"io","exit_code":0,"stdout":"","stderr":"","refusal":null},"error":null}
+{"status":"done","result":{"kind":"io","exit_code":0,"stdout":"","stderr":"","refusal":null,"line_id":"line_019a5e2c-7b41-7c3e-9f20-4d8e1a6b5c37"},"error":null}
 ```
 
 ### Call the VFS
@@ -849,6 +850,27 @@ Returns a list of asks.
 <ParamField body="scope" type="string" default="once">`once`, or `session` to allow every matching line in the session.</ParamField>
 
 Returns the updated ask object with its `outcome` set.
+
+## Lines, jobs and processes
+
+Every line a session runs, every `&` job and every process has a record. Lines
+and processes are kept while they run and, once ended, the newest 1,024 for up
+to an hour. A job is listed only while its session's `jobs` would show it: once
+`wait` or `jobs` reports how it ended, it is gone. Each list takes `session_id`
+and `state`. Jobs also take `line_id`. Processes take `line_id`, `job_id` (the
+job's own process and every one under it) and `machine`, written
+`provider:name` as in `host:my-laptop` or `docker:tools`.
+
+| Route | Returns |
+| --- | --- |
+| <Badge color="blue">GET</Badge> `/v1/workspaces/{id}/lines` | Lines, oldest first: `id`, `session_id`, `command`, `state` (`waiting`, `running`, `stopping`, `exited`), `started_at`, `ended_at`, `exit`, `signal`, `error`. |
+| <Badge color="blue">GET</Badge> `/v1/workspaces/{id}/lines/{line_id}` | One line, plus the ids of the `jobs` it started, the pids of the `processes` it ran, as far as they are still kept, and the `machines` those ran on. |
+| <Badge color="blue">GET</Badge> `/v1/workspaces/{id}/jobs` | The jobs the sessions list, as `jobs` shows them: `id`, `number` (its `%N`), `session_id`, `command`, `cwd`, `line_id`, `group`, `pid` (its `$!`), `state`, `started_at`, `ended_at`, `exit`, `signal`. |
+| <Badge color="blue">GET</Badge> `/v1/workspaces/{id}/jobs/{job_id}` | One job, plus the pids of the `processes` it ran. |
+| <Badge color="blue">GET</Badge> `/v1/workspaces/{id}/processes` | Processes by pid: `pid`, `session_id`, `line_id`, `parent`, `group`, `command`, `cwd`, `machine`, `runtime`, `machine_pid` (`pid`, `started`, `exited` on that machine, or `null`), `state`, `started_at`, `ended_at`, `exit`, `signal`, `error`. |
+| <Badge color="blue">GET</Badge> `/v1/workspaces/{id}/processes/{pid}` | One process. |
+
+Times are epoch seconds. `exit` and `ended_at` stay `null` until the record ends.
 
 ## Configure authentication
 

@@ -24,7 +24,9 @@ from typer.testing import CliRunner
 
 from mirage.cli import workspace as workspace_cli
 from mirage.cli.workspace import (
+    _format_jobs,
     _format_logs,
+    _format_processes,
     _format_workspace_explanation,
     _load_config_argument,
 )
@@ -309,3 +311,106 @@ def test_stop_and_start_post_to_the_workspace(fake, verb):
 def test_close_cancel_and_kill_are_not_workspace_commands(fake, gone):
     assert _invoke(gone, "w").exit_code == 2
     assert fake.calls == []
+
+
+# Each record list asks its route for the filters its options name, and
+# leaves out the ones not given.
+@pytest.mark.parametrize(
+    ("args", "path", "params"),
+    [
+        (
+            ("list-lines", "w", "--state", "running"),
+            "/v1/workspaces/w/lines",
+            {"state": "running"},
+        ),
+        (
+            ("list-jobs", "w", "--session", "s1"),
+            "/v1/workspaces/w/jobs",
+            {"session_id": "s1"},
+        ),
+        (
+            ("list-jobs", "w", "--line", "line_1"),
+            "/v1/workspaces/w/jobs",
+            {"line_id": "line_1"},
+        ),
+        (
+            ("list-processes", "w", "--line", "line_1", "--state", "exited"),
+            "/v1/workspaces/w/processes",
+            {"state": "exited", "line_id": "line_1"},
+        ),
+        (
+            ("list-processes", "w", "--job", "j1", "--machine", "docker:t"),
+            "/v1/workspaces/w/processes",
+            {"job_id": "j1", "machine": "docker:t"},
+        ),
+    ],
+)
+def test_a_record_list_asks_for_what_its_options_name(
+    fake, args, path, params
+):
+    fake.answer = _FakeResponse(200, b"[]")
+    result = _invoke(*args)
+    assert result.exit_code == 0, result.output
+    method, called, kwargs = fake.calls[0]
+    assert (method, called, kwargs["params"]) == ("GET", path, params)
+
+
+def test_processes_read_as_one_row_per_process():
+    lines = _format_processes(
+        [
+            {
+                "pid": 2,
+                "parent": None,
+                "machine": "host:box",
+                "session_id": "s1",
+                "state": "running",
+                "exit": None,
+                "command": "sleep 30",
+            },
+            {
+                "pid": 3,
+                "parent": 2,
+                "machine": "docker:tools",
+                "session_id": "s1",
+                "state": "exited",
+                "exit": 143,
+                "command": "cat",
+            },
+        ]
+    ).splitlines()
+    assert [line.split() for line in lines] == [
+        ["PID", "PPID", "MACHINE", "SESSION", "STATE", "EXIT", "COMMAND"],
+        ["2", "0", "host:box", "s1", "running", "-", "sleep", "30"],
+        ["3", "2", "docker:tools", "s1", "exited", "143", "cat"],
+    ]
+    assert _format_processes([]) == "No processes."
+
+
+def test_jobs_read_with_the_pid_each_runs_as():
+    lines = _format_jobs(
+        [
+            {
+                "id": "j1",
+                "number": 1,
+                "pid": 7,
+                "session_id": "s1",
+                "state": "running",
+                "exit": None,
+                "command": "sleep 30",
+            },
+            {
+                "id": "j2",
+                "number": 2,
+                "pid": None,
+                "session_id": "s1",
+                "state": "exited",
+                "exit": 0,
+                "command": "true",
+            },
+        ]
+    ).splitlines()
+    assert [line.split() for line in lines] == [
+        ["ID", "JOB", "PID", "SESSION", "STATE", "EXIT", "COMMAND"],
+        ["j1", "%1", "7", "s1", "running", "-", "sleep", "30"],
+        ["j2", "%2", "-", "s1", "exited", "0", "true"],
+    ]

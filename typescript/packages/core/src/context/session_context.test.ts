@@ -182,7 +182,7 @@ describe('a binding belongs to the workspace that published it', () => {
 
   it('node isolates concurrent tasks', () => {
     // What lets a background job bind its fork without the foreground
-    // seeing it; the browser fallback storage cannot, and jobs.ts
+    // seeing it; the browser fallback storage cannot, and background.ts
     // reads this to decide.
     expect(asyncContextIsolatesTasks).toBe(true)
   })

@@ -78,6 +78,7 @@ from mirage.shell.voice import shell_voice
 from mirage.types import FileStat, FileType, PathSpec
 from mirage.utils.path import CycleError, ends_at_dot, owner_prefix
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.background import drained, pump
 from mirage.workspace.executor.builtins import _to_scope
 from mirage.workspace.executor.builtins.exec import route_rebound
 from mirage.workspace.executor.builtins.exec.constants import (
@@ -100,7 +101,6 @@ from mirage.workspace.executor.create import (
     sole_stream,
     write_description,
 )
-from mirage.workspace.executor.jobs import drained, pump
 from mirage.workspace.executor.statement import write_error_line
 from mirage.workspace.mount.registry import DEV_PREFIX
 from mirage.workspace.session.session import SessionState

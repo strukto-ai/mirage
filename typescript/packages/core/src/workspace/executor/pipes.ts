@@ -46,7 +46,14 @@ import { divertStatement, divertedFile } from './builtins/exec/index.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
 import { carried, ended, isUnwinding } from './control.ts'
-import { handleBackground, oneProgram, pump, reportReaped, runProgram, startShell } from './jobs.ts'
+import {
+  handleBackground,
+  oneProgram,
+  pump,
+  reportReaped,
+  runProgram,
+  startShell,
+} from './background.ts'
 import {
   answerClosed,
   asWritten,

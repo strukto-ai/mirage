@@ -316,13 +316,20 @@ export function registerShellRoutes(app: RouteApp, deps: ShellRoutesDeps): void 
             ...(stdin !== undefined ? { stdin } : {}),
             signal,
           }
-          if (!streaming) return ioResultToDict(await entry.runner.ws.shell(body.command, options))
+          const lineId = lineHandle.id.value
+          if (!streaming)
+            return Object.assign(
+              ioResultToDict(await entry.runner.ws.shell(body.command, options)),
+              {
+                line_id: lineId,
+              },
+            )
           // The response reads the events and closes the execution; the job
           // waits for its status, and a cancelled job's signal stops it.
           try {
             const shell = await entry.runner.ws.shell(body.command, { ...options, stream: true })
             opened(shell)
-            return ioResultToDict(await shell.wait())
+            return Object.assign(ioResultToDict(await shell.wait()), { line_id: lineId })
           } finally {
             opened(null)
           }

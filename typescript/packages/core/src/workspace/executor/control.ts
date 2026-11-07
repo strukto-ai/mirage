@@ -41,7 +41,7 @@ import { ExecutionNode } from '../types.ts'
 import { readReply } from './builtins/read/index.ts'
 import type { ExecuteStringFn } from './builtins/types.ts'
 import type { ExecuteNodeFn } from './command/types.ts'
-import { runProgram, runStatement } from './jobs.ts'
+import { runProgram, runStatement } from './background.ts'
 import {
   errexitActs,
   fd0Binding,

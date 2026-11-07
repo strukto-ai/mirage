@@ -56,7 +56,7 @@ describe('LocalRuntime', () => {
     try {
       const child = ws.spawn({ argv: ['uname'] })
       expect(await child.wait()).toMatchObject({ exit: 0 })
-      expect(ws.processes.live()).toHaveLength(0)
+      expect(ws.processTable.live()).toHaveLength(0)
     } finally {
       await ws.close()
     }

@@ -87,6 +87,7 @@ export class JobHandle {
   line: LineId | null
   group: number | null
   private readonly now: () => number
+  private ended: ((record: Job) => void) | null
 
   state: JobState = 'running'
   exitCode = 0
@@ -113,6 +114,7 @@ export class JobHandle {
     line?: LineId | null
     group?: number | null
     now?: () => number
+    ended?: ((record: Job) => void) | null
   }) {
     this.id = init.id
     this.command = init.command
@@ -129,6 +131,7 @@ export class JobHandle {
     this.group = init.group ?? null
     const clock = new SystemClock()
     this.now = init.now ?? (() => clock.now())
+    this.ended = init.ended ?? null
     if (init.state !== undefined) this.state = init.state
     if (init.exitCode !== undefined) this.exitCode = init.exitCode
     if (init.signal !== undefined) this.signal = init.signal
@@ -146,6 +149,7 @@ export class JobHandle {
       startedAt: this.createdAt,
       line: this.line,
       group: this.group,
+      pid: this.process?.record.id.pid ?? null,
       state: this.state,
       endedAt: this.endedAt,
       exit: this.state === 'exited' ? this.exitCode : null,
@@ -181,6 +185,21 @@ export class JobHandle {
     if (this.state === 'exited') return
     this.state = 'exited'
     this.endedAt = this.now()
+  }
+
+  /**
+   * Tell `ended` the job's record once, as it ended; a hook that fails is
+   * logged, so the job still ends. Mirrors Python's `_tell_ended`.
+   */
+  private tellEnded(): void {
+    const ended = this.ended
+    this.ended = null
+    if (ended === null) return
+    try {
+      ended(this.record)
+    } catch (err) {
+      console.debug('job ended hook failed:', err)
+    }
   }
 
   /** Ask the job's runner to stop with `signal`, without waiting for it. */
@@ -220,9 +239,11 @@ export class JobHandle {
     this.markEnded()
     if (signal !== null) await markKilled(this.console, exitCode, signal)
     else await this.console.finish(exitOutcome(exitCode))
-    if (this.console.store.closed) return
-    const outcome = await this.console.outcome()
-    if (outcome !== null) this.take(outcome)
+    if (!this.console.store.closed) {
+      const outcome = await this.console.outcome()
+      if (outcome !== null) this.take(outcome)
+    }
+    this.tellEnded()
   }
 
   /**

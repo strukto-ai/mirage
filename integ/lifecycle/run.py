@@ -511,7 +511,7 @@ async def action(
         row = await ws.vfs.stat(step["path"], fresh=step.get("fresh", False))
         return {"type": row.type.value, "size": row.size}
     elif op == "drain_processes":
-        await ws.processes.drain()
+        await ws.process_table.drain()
     elif op == "spawn":
         child = ws.spawn(
             SpawnRequest(tuple(step["argv"])), step.get("session")

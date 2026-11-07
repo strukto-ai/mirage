@@ -381,6 +381,10 @@
     {"id": "lists_each_line_and_its_result", "input": {"step": "history", "id": "w"}, "expect": {"text": "echo hi > /f\nexit 0: \ncat /f\nexit 0: hi\n\ncat /nope\nexit 1: cat: /nope: No such file or directory\n"}},
     {"id": "lists_the_vfs_calls_too", "input": {"step": "history", "id": "w", "vfs": true}, "expect": {"text": "echo hi > /f\nwrite /f\nexit 0: \ncat /f\nread /f\nexit 0: hi\n\ncat /nope\nexit 1: cat: /nope: No such file or directory\n"}},
     {"id": "lists_the_newest", "input": {"step": "history", "id": "w", "last": 2}, "expect": {"text": "cat /nope\nexit 1: cat: /nope: No such file or directory\n"}},
+    {"id": "starts_a_job", "input": {"step": "shell", "id": "w", "command": "sleep 30 &"}, "expect": {"text": "", "is_error": false}},
+    {"id": "lists_each_line_with_how_it_ended", "input": {"step": "records", "id": "w", "kind": "lines"}, "expect": {"text": "echo hi > /f exited 0\ncat /f exited 0\ncat /nope exited 1\nsleep 30 & exited 0"}},
+    {"id": "lists_the_running_job", "input": {"step": "records", "id": "w", "kind": "jobs", "state": "running"}, "expect": {"text": "%1 sleep 30 running"}},
+    {"id": "lists_its_running_process", "input": {"step": "records", "id": "w", "kind": "processes", "state": "running"}, "expect": {"text": "sleep 30 running"}},
     {"id": "deletes_the_workspace", "input": {"step": "delete", "id": "w"}, "expect": {"text": "deleted"}}
    ]
   },

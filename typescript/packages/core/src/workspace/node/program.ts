@@ -39,7 +39,7 @@ import { expandingAliases } from '../executor/builtins/alias/alias.ts'
 import { divertStatement, divertedFile } from '../executor/builtins/exec/index.ts'
 import type { ExecuteNodeFn } from '../executor/command/types.ts'
 import { carried, isUnwinding, LoopSignal, type Unwinding } from '../executor/control.ts'
-import { handleBackground, runProgram as runForked } from '../executor/jobs.ts'
+import { handleBackground, runProgram as runForked } from '../executor/background.ts'
 import {
   asWritten,
   errexitActs,
