@@ -664,6 +664,39 @@ def test_declaration_array_assignment_fires_the_gate():
     assert "SECRET_D" not in sess.arrays
 
 
+def test_bare_declare_a_fires_the_gate():
+    # `declare -a NAME` with no value stores an empty array (or converts
+    # the scalar it holds), a write the gate has to see like any other.
+    ws = _two_mounts(policies=[DenySecretEnv()])
+
+    async def run():
+        return await ws.shell("declare -a SECRET_B; declare -A SECRET_M")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert io.refusal and "refused by policy" in io.refusal.reason
+    sess = ws._session_mgr.get(ws._session_mgr.default_id)
+    assert "SECRET_B" not in sess.arrays
+    assert "SECRET_M" not in sess.assocs
+
+
+def test_bare_declare_a_of_a_readonly_name_fires_the_gate():
+    # bash converts a readonly scalar all the same, past the readonly
+    # refusal a gated write makes, so the rule is asked on its own.
+    ws = _two_mounts(policies=[DenySecretEnv()])
+    sess = ws._session_mgr.get(ws._session_mgr.default_id)
+    seed_var(sess, "SECRET_R", "v")
+    set_attr(sess, "SECRET_R", VarAttr.READONLY)
+
+    async def run():
+        return await ws.shell("declare -a SECRET_R")
+
+    io = asyncio.run(run())
+    assert io.exit_code != 0
+    assert "SECRET_R" not in sess.arrays
+    assert sess.env["SECRET_R"] == "v"
+
+
 def test_a_prefix_assignment_clears_the_gate():
     # `SECRET=leak cmd` is a session write like any other, and the form
     # puts it in the command's environment, so a deployment refusing

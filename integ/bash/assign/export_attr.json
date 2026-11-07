@@ -378,11 +378,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "QEO=good; declare -p QEO QENOPE",
+      "command": "QEO=good; declare -p QEO QENOPE; typeset -p QENOPE QEO",
       "expect": {
         "exit": 1,
-        "stdout": "declare -- QEO=\"good\"\n",
-        "stderr": "bash: line 1: declare: QENOPE: not found\n"
+        "stdout": "declare -- QEO=\"good\"\ndeclare -- QEO=\"good\"\n",
+        "stderr": "bash: line 1: declare: QENOPE: not found\nbash: line 1: typeset: QENOPE: not found\n"
       }
     },
     {
@@ -1111,10 +1111,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "QTK=x printenv QTK; QTK=x env | grep '^QTK='; QTK=x true; echo \"[${QTK-unset}]\"; (QTK=old; QTK=new echo $QTK; QTK=new printf '[%s]\\n' \"$QTK\" $(echo $QTK); QTK=a,b; IFS=, printf '[%s]\\n' $QTK; QTK=new bash -c \"echo [$QTK]\")",
+      "command": "QTK=x printenv QTK; QTK=x env | grep '^QTK='; QTK=x true; echo \"[${QTK-unset}]\"; (QTK=old; QTK=new echo $QTK; QTK=new printf '[%s]\\n' \"$QTK\" $(echo $QTK); QTK=a,b; IFS=, printf '[%s]\\n' $QTK; QTK=new bash -c \"echo [$QTK]\"); ( QTN=1+2 declare -p QTN; echo rc=$?; QTN=1 typeset -p QTN; QTN=5 declare QTM=$QTN; echo \"[$QTM] [${QTN-unset}]\"; d=declare; $d QTO=1; r=readonly; $r QTP=2; 'typeset' -p QTO QTP ); ( shopt -s expand_aliases; alias declare='echo HI'; d=declare; $d QTQ=3; echo \"[$QTQ]\" )",
       "expect": {
         "exit": 0,
-        "stdout": "x\nQTK=x\n[unset]\nold\n[old]\n[old]\n[a,b]\n[a,b]\n",
+        "stdout": "x\nQTK=x\n[unset]\nold\n[old]\n[old]\n[a,b]\n[a,b]\ndeclare -x QTN=\"1+2\"\nrc=0\ndeclare -x QTN=\"1\"\n[] [unset]\ndeclare -- QTO=\"1\"\ndeclare -r QTP=\"2\"\n[3]\n",
         "stderr": ""
       }
     },

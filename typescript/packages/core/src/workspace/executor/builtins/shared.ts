@@ -27,12 +27,15 @@ import { PathSpec, wordText } from '../../../types.ts'
 import { resolvePath } from '../../../utils/path.ts'
 import type { SessionView } from '../../../view/types.ts'
 import { expandGlob } from '../../expand/globs.ts'
+import { expandSubscript } from '../../expand/node.ts'
+import type { SubscriptFn } from '../../expand/types.ts'
 import type { Namespace } from '../../mount/namespace/namespace.ts'
 import { ExecutionNode } from '../../types.ts'
 import { optionError, parseFlags } from '../command/flags.ts'
 import type { ParsedCommand } from '../command/types.ts'
 import { COUNT_WORD_RE, IDENTIFIER_RE } from './constants.ts'
 import { scopePath } from './scope.ts'
+import type { BuiltinCall } from './types.ts'
 
 /**
  * Build the (stream, IOResult, ExecutionNode) triple builtins return.
@@ -333,4 +336,13 @@ export function statusOf(word: string): number {
 export function recordDelimiter(text: string | null): number {
   if (text === null) return 10
   return encodeText(text)[0] ?? 0
+}
+
+/**
+ * How the call's builtin expands a subscript it was given as text
+ * (`unset 'a[$i]'`), in the call's session and frame.
+ */
+export function subscriptExpansion(call: BuiltinCall): SubscriptFn {
+  return (text) =>
+    expandSubscript(text, call.context, call.executeFn, call.callStack, call.registry.policies)
 }

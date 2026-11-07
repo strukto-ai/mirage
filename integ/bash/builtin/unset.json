@@ -98,10 +98,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "unset UA; declare -a UA=(1 2 3); unset 'UA[1]'; echo [${UA[0]}][${UA[1]}][${UA[2]}]",
+      "command": "unset UA; declare -a UA=(1 2 3); unset 'UA[1]'; echo [${UA[0]}][${UA[1]}][${UA[2]}]; UA=(0 1 2 3); ui=1; unset 'UA[$ui + 1]'; declare -A UM=([a]=1 [b]=2); uk=a; unset 'UM[$uk]'; declare -p UA UM",
       "expect": {
         "exit": 0,
-        "stdout": "[1][][3]\n",
+        "stdout": "[1][][3]\ndeclare -a UA=([0]=\"0\" [1]=\"1\" [3]=\"3\")\ndeclare -A UM=([b]=\"2\" )\n",
         "stderr": ""
       }
     },
@@ -168,11 +168,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "readonly -a UC=(x y); unset 'UC[1]'; echo rc=$?; echo [${UC[@]}]",
+      "command": "readonly -a UC=(x y); unset 'UC[1]'; echo rc=$?; echo [${UC[@]}]; ( declare -n UR=UC; x=1; unset UR x 'UC[0]'; echo rc=$? ${x-gone}; g() { :; }; readonly -f g; h() { :; }; unset -f g h; echo rc=$?; type -t h || echo none )",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\n[x y]\n",
-        "stderr": "bash: line 1: unset: UC: cannot unset: readonly variable\n"
+        "stdout": "rc=1\n[x y]\nrc=1 gone\nrc=1\nnone\n",
+        "stderr": "bash: line 1: unset: UC: cannot unset: readonly variable\nbash: line 1: unset: UC: cannot unset: readonly variable\nbash: line 1: unset: UC: cannot unset: readonly variable\nbash: line 1: unset: g: cannot unset: readonly function\n"
       }
     },
     {

@@ -15,6 +15,7 @@
 import type { EntryGate } from '../../../../policy/types.ts'
 import type { DispatchFn } from '../../../../runtime/types.ts'
 import type { LinkView } from '../../../../view/types.ts'
+import type { SubscriptFn } from '../../../expand/types.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
 import type { SessionState } from '../../../session/session.ts'
 
@@ -136,4 +137,7 @@ export interface CondContext {
   admit?: AdmitTest
   // The line's abort, which a long `=~` search stops at.
   signal?: AbortSignal
+  // Expands a `-v` operand's subscript given as text, as `test` does and
+  // `[[` does not; absent keeps it as typed.
+  subscripts?: SubscriptFn
 }

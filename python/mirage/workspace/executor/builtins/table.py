@@ -28,6 +28,9 @@ from mirage.workspace.executor.builtins.control.control import (
     return_builtin,
     true_builtin,
 )
+from mirage.workspace.executor.builtins.declare.declare import (
+    declaration_builtin,
+)
 from mirage.workspace.executor.builtins.declare.export import export_builtin
 from mirage.workspace.executor.builtins.declare.local import local_builtin
 from mirage.workspace.executor.builtins.dirs.cd import cd_builtin
@@ -80,6 +83,9 @@ BUILTINS: dict[str, BuiltinFn] = {
     SB.EXPORT: export_builtin,
     SB.UNSET: unset_builtin,
     SB.LOCAL: local_builtin,
+    SB.DECLARE: declaration_builtin,
+    SB.TYPESET: declaration_builtin,
+    SB.READONLY: declaration_builtin,
     SB.SET: set_builtin,
     SB.READ: read_builtin,
     SB.MAPFILE: mapfile_builtin,

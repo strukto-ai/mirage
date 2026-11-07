@@ -658,10 +658,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "ai2=1; ar19=(x y z); echo ${ar19[ai2+1]}",
+      "command": "ai2=1; ar19=(x y z); echo ${ar19[ai2+1]}; echo ${ar19[$ai2 + 1]} ${ar19[ $ai2 ]} ${ar19[$((ai2 + 1))]}; an=(5 6 7); echo $(( an[$ai2 + 1] )); read 'an[$ai2]' <<< 9; echo ${an[@]}",
       "expect": {
         "exit": 0,
-        "stdout": "z\n",
+        "stdout": "z\nz y z\n7\n5 9 7\n",
         "stderr": ""
       }
     },
@@ -1078,11 +1078,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "(ar28=(1); ar28[-5]=x); echo rc=$?",
+      "command": "(ar28=(1); ar28[-5]=x); echo rc=$?; (ar28[k=-5]=x); echo rc=$?; (ar28[k=-3]+=z); ar29[ ]=1; ar29[j=2]=y; declare -p ar29 j; (ar29[]=1); echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\n",
-        "stderr": "bash: line 1: ar28[-5]: bad array subscript\n"
+        "stdout": "rc=1\nrc=1\ndeclare -a ar29=([0]=\"1\" [2]=\"y\")\ndeclare -- j=\"2\"\nrc=1\n",
+        "stderr": "bash: line 1: ar28[-5]: bad array subscript\nbash: line 1: ar28[k=-5]: bad array subscript\nbash: line 1: ar28[k=-3]: bad array subscript\nbash: line 1: ar29[]: bad array subscript\n"
       }
     },
     {

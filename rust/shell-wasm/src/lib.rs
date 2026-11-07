@@ -180,7 +180,9 @@ pub extern "C" fn mirage_rs_shell_drop_tree(handle: u32) {
 /// each UTF-16 unit of the source came from in the line as typed, and its
 /// end; then per heredoc its `<` in the source, its `<<`, word end, body
 /// start and end in the line as typed, flags (1 quoted, 2 terminated, 4
-/// `<<-`) and the byte lengths of its word, delimiter and body; then per
+/// `<<-`), the byte lengths of its word, delimiter and body, and where in
+/// its body expanding it fails and the row the body starts on (`u32::MAX`
+/// when it does not); then per
 /// such node its index and the byte length of its text. `text` holds the
 /// source, each heredoc's word, delimiter and body and each inlined text,
 /// in that order.
@@ -223,6 +225,12 @@ fn extras(tree: &mirage_rs::shell::Tree, utf16: &[u32], typed: &[u32], parsed: &
             count(heredoc.word.len()),
             count(heredoc.delimiter.len()),
             count(heredoc.body.len()),
+            heredoc
+                .deferred
+                .map_or(u32::MAX, |deferred| count(deferred.at)),
+            heredoc
+                .deferred
+                .map_or(u32::MAX, |deferred| count(deferred.row)),
         ]);
         text.extend_from_slice(&heredoc.word);
         text.extend_from_slice(&heredoc.delimiter);

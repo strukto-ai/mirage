@@ -110,7 +110,8 @@ export async function handleCd(
   physical = false,
 ): Promise<RedirectResult> {
   const raw = scopePath(path)
-  const named = typedPath(path)
+  // bash's refusals quote an operand that does not show as it is.
+  const named = session.vars.shell.shown(typedPath(path))
   // -L joins a relative operand to the name the shell is *spelling*, -P
   // to the one it resolves to: from a logical /data/lk whose target is
   // /data/deep/real, bash sends `cd -L ..` to /data and `cd -P ..` to

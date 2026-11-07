@@ -48,6 +48,8 @@ interface Exports {
 
 /** The `u32`s one node takes in a parse's table: kind | field << 16 | flags << 24, then spans and links. */
 const WORDS = 10
+/** `u32::MAX`: the extras' word for no value. */
+const NONE = 0xffffffff
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -391,21 +393,32 @@ export function readExtras(wasm: Exports) {
   let word = 3
   const offsets = words.subarray(word, (word += source.length + 1))
   const heredocs: Heredoc[] = []
-  for (let index = 0; index < heredocCount; index += 1, word += 9) {
+  for (let index = 0; index < heredocCount; index += 1, word += 11) {
     const [atSource = 0, operatorStart = 0, wordEnd = 0, bodyStart = 0, end = 0, flags = 0] =
       words.subarray(word, word + 6)
+    const heredocWord = next(words[word + 6] ?? 0)
+    const delimiter = next(words[word + 7] ?? 0)
+    const bodyBytes = text.subarray(at, (at += words[word + 8] ?? 0))
+    const failsAt = words[word + 9] ?? NONE
     heredocs.push({
       at: atSource,
       operatorStart,
       wordEnd,
       bodyStart,
       end,
-      word: next(words[word + 6] ?? 0),
-      delimiter: next(words[word + 7] ?? 0),
-      body: next(words[word + 8] ?? 0),
+      word: heredocWord,
+      delimiter,
+      body: decodeText(bodyBytes),
       quoted: (flags & 1) !== 0,
       terminated: (flags & 2) !== 0,
       dash: (flags & 4) !== 0,
+      deferred:
+        failsAt === NONE
+          ? null
+          : {
+              at: decodeText(bodyBytes.subarray(0, failsAt)).length,
+              row: words[word + 10] ?? 0,
+            },
     })
   }
   const inlined = new Map<number, string>()
@@ -778,6 +791,14 @@ export class Shell {
     return this.call('deref', name) as string
   }
 
+  /**
+   * A name as a diagnostic names it, under the shell's locale: as it is, or
+   * `$'...'` when it does not show as it is.
+   */
+  shown(value: string): string {
+    return this.call('shown', value) as string
+  }
+
   /** Where a write to a name lands, references followed. */
   target(name: string): string {
     return this.call('target', name) as string
@@ -822,6 +843,11 @@ export class Shell {
 
   isLocal(name: string): boolean {
     return this.call('is_local', name) as boolean
+  }
+
+  /** The names the running function made local, sorted. */
+  locals(): string[] {
+    return this.call('locals') as string[]
   }
 
   /**
@@ -993,8 +1019,8 @@ export class Shell {
   }
 
   /** Whether a `name` / `name[sub]` reference is set, as `test -v` asks; 1 or 0. */
-  isSet(reference: string, options: Heard = {}): ShellTask {
-    return this.task('is_set', null, reference, options.listens ?? false)
+  isSet(reference: string, options: Heard & { expanded?: boolean } = {}): ShellTask {
+    return this.task('is_set', null, reference, options.expanded ?? false, options.listens ?? false)
   }
 
   /** Write one element a builtin names: 0 landed, 1 hidden, 2 readonly, 3 no element. */

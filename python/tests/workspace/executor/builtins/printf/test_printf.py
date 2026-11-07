@@ -455,6 +455,6 @@ async def test_printf_keeps_its_status_when_its_reader_stops_early():
             "printf '%d' bad | head -c 1; echo \" ${PIPESTATUS[*]}\""
         )
         assert io.stdout == b"0 1 0\n"
-        assert io.stderr == b"bash: printf: bad: invalid number\n"
+        assert io.stderr == b"bash: line 1: printf: bad: invalid number\n"
     finally:
         await ws.close()

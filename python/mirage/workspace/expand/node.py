@@ -24,6 +24,7 @@ from mirage.shell.bytes import decode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.console import JobConsole
 from mirage.shell.literal import LiteralNode
+from mirage.shell.parse import parse
 from mirage.shell.parse.program import ProgramNode, shell_node
 from mirage.shell.types import TSNodeLike
 from mirage.utils.glob_walk import mark_globs
@@ -296,5 +297,35 @@ async def expand_arith(
     return str(
         await expand(
             ts_node, "arith", context, execute_fn, call_stack, policies
+        )
+    )
+
+
+async def expand_subscript(
+    text: str,
+    context: EvaluationContext,
+    execute_fn: ExecuteFn,
+    call_stack: CallStack | None = None,
+    policies: Policies | None = None,
+) -> str:
+    """A subscript a builtin was given as text (``unset 'a[$i]'``,
+    ``read 'm[$k]'``), expanded as one typed in ``${a[...]}`` is: an
+    associative key with its quoting removed, an indexed one the text
+    its arithmetic reads. One with no expansion, quote or escape stays
+    as typed.
+
+    Args:
+        text (str): the text between the brackets.
+        context (EvaluationContext): the evaluation's session and frame.
+        execute_fn (ExecuteFn): evaluator for command substitutions.
+        call_stack (CallStack | None): shell call stack.
+        policies (Policies | None): the policies its writes clear.
+    """
+    if not any(ch in "$`'\"\\" for ch in text):
+        return text
+    word = parse("${x[" + text + "]}")
+    return str(
+        await expand(
+            word, "subscript", context, execute_fn, call_stack, policies
         )
     )

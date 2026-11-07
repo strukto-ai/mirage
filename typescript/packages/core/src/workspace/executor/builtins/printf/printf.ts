@@ -26,7 +26,8 @@ import type { SessionState } from '../../../session/session.ts'
 import { assignElement, envSnapshot } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { TARGET_RE } from '../constants.ts'
-import { builtinUsage, fail, result } from '../shared.ts'
+import type { SubscriptFn } from '../../../expand/types.ts'
+import { builtinUsage, fail, result, subscriptExpansion } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 import { printfOutput, runPrintf } from './format.ts'
 
@@ -60,6 +61,7 @@ export async function handlePrintf(
   session: SessionState,
   policies: Policies | null = null,
   signal?: AbortSignal,
+  subscripts: SubscriptFn | null = null,
 ): Promise<RedirectResult> {
   const program = isProgramInvocation(session)
   let target: string | null = null
@@ -125,10 +127,12 @@ export async function handlePrintf(
   )
   const errors = decodeText(stderr)
   const base = parsed[1] ?? ''
+  let subscript = parsed[2] ?? null
+  if (subscript !== null && subscripts !== null) subscript = await subscripts(subscript)
   const text = decodeText(output).split('\0', 1)[0] ?? ''
   let status: 'ok' | 'denied' | 'readonly' | 'subscript'
   try {
-    status = await assignElement(session, policies, base, parsed[2] ?? null, text)
+    status = await assignElement(session, policies, base, subscript, text)
   } catch (err) {
     if (err instanceof ArithError) {
       // The target carries `-i` and the formatted text does not
@@ -163,9 +167,10 @@ function printed(
 ): RedirectResult {
   const io = new IOResult()
   const node = new ExecutionNode({ command: 'printf' })
+  const voice = shellVoice()
   async function* output(): AsyncGenerator<Uint8Array> {
     try {
-      yield* printfOutput(fmt, args, io, program, posix, utf8, signal)
+      yield* printfOutput(fmt, args, io, program, posix, utf8, voice, signal)
     } finally {
       node.exitCode = io.exitCode
       node.stderr = io.stderr instanceof Uint8Array ? io.stderr : new Uint8Array()
@@ -181,5 +186,6 @@ export async function printfBuiltin(call: BuiltinCall): Promise<RedirectResult> 
     call.context.session,
     call.registry.policies,
     call.signal,
+    subscriptExpansion(call),
   )
 }

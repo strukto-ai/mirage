@@ -34,6 +34,21 @@ pub struct Heredoc {
     pub line: usize,
     /// The line bash's reader stands on when the input ends inside it.
     pub eof_line: usize,
+    /// Where expanding the body fails, if it does.
+    pub deferred: Option<Deferred>,
+}
+
+/// Where expanding a heredoc's body fails: bash reads a `$( )` there that
+/// does not parse, or a `$( )` or `${` or backtick it leaves open, only as
+/// it expands the body.
+#[derive(Debug, Clone, Copy)]
+pub struct Deferred {
+    /// Where in the body the construct opens; the rest is folded in as
+    /// text.
+    pub at: usize,
+    /// The row the body starts on in the line as typed, which bash counts
+    /// a substitution's lines in it from.
+    pub row: usize,
 }
 
 /// A span of the line, the text that takes its place with where each of
@@ -76,6 +91,7 @@ pub(super) fn lower(data: &[u8], bodies: &[Body]) -> Lowered {
                 terminated: body.terminated,
                 line,
                 eof_line: body.eof_line.max(line),
+                deferred: None,
             },
             &body.offsets,
         ));
@@ -97,7 +113,7 @@ pub(super) fn lower(data: &[u8], bodies: &[Body]) -> Lowered {
         {
             continue;
         }
-        let (word, mut places) = quoted_body(heredoc, offsets);
+        let (word, mut places, deferred) = quoted_body(data, heredoc, offsets);
         let mut replacement = vec![b'<'];
         replacement.extend(word);
         places.insert(0, heredoc.operator);
@@ -106,7 +122,10 @@ pub(super) fn lower(data: &[u8], bodies: &[Body]) -> Lowered {
             heredoc.word_end,
             replacement,
             places,
-            Some(heredoc.clone()),
+            Some(Heredoc {
+                deferred,
+                ..heredoc.clone()
+            }),
         ));
     }
     edits.sort_by_key(|edit| edit.0);
@@ -145,16 +164,22 @@ pub(super) fn newlines(text: &[u8]) -> usize {
 
 /// A body as one double-quoted word: the expansions an unquoted body
 /// holds kept whole, every other `"` and `\`, and in a quoted body every
-/// `$` and backtick too, escaped. With where each byte came from.
-fn quoted_body(heredoc: &Heredoc, offsets: &[usize]) -> (Vec<u8>, Vec<usize>) {
+/// `$` and backtick too, escaped. With where each byte came from in
+/// `data`, and where expanding the body fails, the rest of it escaped.
+fn quoted_body(
+    data: &[u8],
+    heredoc: &Heredoc,
+    offsets: &[usize],
+) -> (Vec<u8>, Vec<usize>, Option<Deferred>) {
     let body = &heredoc.body;
     let mut out = vec![b'"'];
     let mut places = vec![heredoc.body_start];
+    let mut deferred = None;
     let mut index = 0;
     while index < body.len() {
         let byte = body[index];
         let mut end = None;
-        if !heredoc.quoted {
+        if !heredoc.quoted && deferred.is_none() {
             let closer = if byte == b'$' {
                 construct_closer(body, index, false)
             } else {
@@ -167,6 +192,13 @@ fn quoted_body(heredoc: &Heredoc, offsets: &[usize]) -> (Vec<u8>, Vec<usize>) {
             } else if byte == b'\\' && matches!(body.get(index + 1), Some(b'$' | b'`' | b'\\')) {
                 end = Some(index + 2);
             }
+            if fails(body, index, end) {
+                deferred = Some(Deferred {
+                    at: index,
+                    row: newlines(&data[..heredoc.body_start.min(data.len())]),
+                });
+                end = None;
+            }
         }
         if let Some(end) = end {
             out.extend_from_slice(&body[index..end]);
@@ -174,7 +206,8 @@ fn quoted_body(heredoc: &Heredoc, offsets: &[usize]) -> (Vec<u8>, Vec<usize>) {
             index = end;
             continue;
         }
-        if matches!(byte, b'"' | b'\\') || heredoc.quoted && matches!(byte, b'$' | b'`') {
+        let literal = heredoc.quoted || deferred.is_some();
+        if matches!(byte, b'"' | b'\\') || literal && matches!(byte, b'$' | b'`') {
             out.push(b'\\');
             places.push(offsets[index]);
         }
@@ -184,7 +217,21 @@ fn quoted_body(heredoc: &Heredoc, offsets: &[usize]) -> (Vec<u8>, Vec<usize>) {
     }
     out.push(b'"');
     places.push(heredoc.end);
-    (out, places)
+    (out, places, deferred)
+}
+
+/// Whether expanding the construct that opens at `at` in an unquoted body,
+/// and closes at `end`, fails: a `$( )`, `${` or backtick left open, or a
+/// `$( )` whose commands do not parse.
+fn fails(body: &[u8], at: usize, end: Option<usize>) -> bool {
+    let substitution =
+        body[at] == b'$' && body.get(at + 1) == Some(&b'(') && body.get(at + 2) != Some(&b'(');
+    let opened =
+        substitution || body[at] == b'`' || body[at] == b'$' && body.get(at + 1) == Some(&b'{');
+    match end {
+        None => opened,
+        Some(end) => substitution && super::parse(&body[at..end]).error.is_some(),
+    }
 }
 
 /// Bytes after which a `#` opens a comment.

@@ -24,11 +24,12 @@ from mirage.workspace.executor.builtins.help import flag_help
 from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
     fail,
-    ok,
-    refusal,
+    finish,
     require_view,
+    subscript_expansion,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.expand.types import SubscriptFn
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     deref,
@@ -148,11 +149,22 @@ async def _unset_element(
     return "ok"
 
 
+def _readonly(name: str, kind: str) -> str:
+    """bash's refusal to unset a readonly variable or function.
+
+    Args:
+        name (str): the name the refusal reports.
+        kind (str): ``variable`` or ``function``.
+    """
+    return f"{shell_voice()}unset: {name}: cannot unset: readonly {kind}\n"
+
+
 async def handle_unset(
     args: list[str],
     session: SessionState,
     state: SessionView | None = None,
     policies: Policies | None = None,
+    subscripts: SubscriptFn | None = None,
 ) -> Result:
     """Unset shell variables, arrays, or functions, with bash's flags.
 
@@ -161,13 +173,17 @@ async def handle_unset(
     operand clears one element; the readonly guard resolves it to the
     base name first, since that is what ``readonly`` records. ``-n``
     unsets a name reference itself, where a bare name unsets what the
-    reference points at.
+    reference points at. A name it cannot unset is reported and the rest
+    still go, for status 1.
 
     Args:
         args (list[str]): option words followed by names to unset.
         session (SessionState): shell session state.
         policies (Policies | None): the policies an indexed subscript's
             assignments clear.
+        subscripts (SubscriptFn | None): expands an operand's subscript,
+            which bash expands as one typed in ``${a[...]}``; None keeps
+            it as typed.
     """
     if args[:1] == ["--help"]:
         answered = flag_help("unset")
@@ -195,43 +211,39 @@ async def handle_unset(
             + builtin_usage("unset"),
             2,
         )
+    errors: list[str] = []
     for name in args[i:]:
+        view = require_view(state)
         if mode == "n":
             # `unset -n` drops the reference itself rather than what it
             # points at; on a name that is not a reference bash unsets
             # the variable, and both are one ungated-by-target unset. A
             # frozen reference refuses, writable target or not.
-            view = require_view(state)
             if view.is_readonly(name, False):
-                return fail(
-                    "unset",
-                    f"{shell_voice()}unset: {name}: cannot unset: readonly variable\n",
-                )
+                errors.append(_readonly(name, "variable"))
+                continue
             try:
                 await view.unset(name, follow_ref=False)
             except PolicyDenied as exc:
-                return refusal("unset", exc)
+                errors.append(f"{exc.strerror}\n")
             continue
         if mode == "f":
             if name in session.readonly_functions:
-                return fail(
-                    "unset",
-                    f"{shell_voice()}unset: {name}: cannot unset: readonly function\n",
-                )
+                errors.append(_readonly(name, "function"))
+                continue
             session.remove_function(name)
             continue
         target = TARGET_RE.match(name)
         subscript = target.group(2) if target is not None else None
         is_element = subscript is not None
         # `readonly arr` records the base name, so an `arr[i]` operand has
-        # to be resolved before the guard, as bash does (which also names
-        # the base, not the element, in the error).
+        # to be resolved before the guard, as bash does, and a reference
+        # to the variable it reaches: bash names that variable, not the
+        # element or the reference, in the error.
         base = target.group(1) if target is not None else name
-        if base in session.readonly_vars:
-            return fail(
-                "unset",
-                f"{shell_voice()}unset: {base}: cannot unset: readonly variable\n",
-            )
+        if view.is_readonly(base):
+            errors.append(_readonly(deref(session, base), "variable"))
+            continue
         existed = (
             is_element
             or name in session.env
@@ -244,15 +256,18 @@ async def handle_unset(
         # sidestep a policy that vetoes `unset X`.
         try:
             if subscript is not None:
+                if subscripts is not None:
+                    subscript = await subscripts(subscript)
                 status = await _unset_element(
-                    session, require_view(state), base, subscript, policies
+                    session, view, base, subscript, policies
                 )
             else:
-                await require_view(state).unset(name)
+                await view.unset(name)
                 _unset_variable(session, deref(session, name))
                 status = "ok"
         except PolicyDenied as exc:
-            return refusal("unset", exc)
+            errors.append(f"{exc.strerror}\n")
+            continue
         if status != "ok":
             # bash names the base for "not an array variable" but prints
             # only the bracketed part for a bad subscript.
@@ -261,15 +276,14 @@ async def handle_unset(
                 if status == "notarray"
                 else f"unset: {name[len(base) :]}: bad array subscript"
             )
-            return fail("unset", f"{shell_voice()}{detail}\n")
+            errors.append(f"{shell_voice()}{detail}\n")
+            continue
         if mode == "auto" and not existed and name in session.functions:
             if name in session.readonly_functions:
-                return fail(
-                    "unset",
-                    f"{shell_voice()}unset: {name}: cannot unset: readonly function\n",
-                )
+                errors.append(_readonly(name, "function"))
+                continue
             session.remove_function(name)
-    return ok("unset")
+    return finish("unset", errors)
 
 
 async def unset_builtin(call: BuiltinCall) -> Result:
@@ -287,4 +301,5 @@ async def unset_builtin(call: BuiltinCall) -> Result:
             diagnostics=call.context.frame.diagnostics,
         ),
         call.namespace.registry.policies,
+        subscript_expansion(call),
     )

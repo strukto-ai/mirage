@@ -138,7 +138,7 @@ from mirage.workspace.expand import (
     expand_redirect,
 )
 from mirage.workspace.expand.globs import glob_options, resolve_globs
-from mirage.workspace.expand.node import expand_arith
+from mirage.workspace.expand.node import expand_arith, expand_subscript
 from mirage.workspace.expand.pattern import expand_pattern
 from mirage.workspace.expand.types import ExecuteFn
 from mirage.workspace.mount import MountRegistry
@@ -159,6 +159,7 @@ from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session.budget import check_env, entry_bytes
 from mirage.workspace.session.functions import FunctionSite
 from mirage.workspace.session.state import (
+    bind_last_word,
     positional_params,
     session_arith,
     session_view,
@@ -1300,6 +1301,7 @@ async def _execute_node(
         merged_io.exit_code = opened.exit_code or assignment_status(
             context.frame, sub_seq
         )
+        bind_last_word(session, ())
         ran: RedirectResult = (
             None,
             merged_io,
@@ -1397,20 +1399,26 @@ async def _execute_node(
 
     if kind == NodeKind.REDIRECT:
         command, redirects = get_redirects(node)
-        ran = await _run_redirected(
-            recurse,
-            dispatch,
-            execute_fn,
-            registry,
-            namespace,
-            command,
-            redirects,
-            job_table.processes if job_table is not None else None,
-            context,
-            stdin,
-            cs,
-            sink=sink,
-        )
+        try:
+            ran = await _run_redirected(
+                recurse,
+                dispatch,
+                execute_fn,
+                registry,
+                namespace,
+                command,
+                redirects,
+                job_table.processes if job_table is not None else None,
+                context,
+                stdin,
+                cs,
+                sink=sink,
+            )
+        finally:
+            # A line of redirects alone clears `$_` once they are
+            # opened, so a target may still name it (`>"$_"`).
+            if command is None:
+                bind_last_word(session, ())
         return ran if sink is None else await drained(sink, *ran)
 
     if kind == NodeKind.SUBSHELL:
@@ -1642,8 +1650,9 @@ async def _execute_node(
         return result(f"function {name}")
 
     if kind == NodeKind.DECLARATION:
+        declared = ExpandedWords()
         async with command_scope():
-            return await execute_declaration(
+            ran = await execute_declaration(
                 node,
                 context,
                 execute_fn,
@@ -1655,11 +1664,14 @@ async def _execute_node(
                     registry.policies,
                     diagnostics=context.frame.diagnostics,
                 ),
+                declared,
             )
+        bind_last_word(session, declared.words or ())
+        return ran
 
     if kind == NodeKind.UNSET:
         args = get_unset_args(node)
-        return await handle_unset(
+        unset = await handle_unset(
             args,
             session,
             session_view(
@@ -1668,7 +1680,16 @@ async def _execute_node(
                 diagnostics=context.frame.diagnostics,
             ),
             namespace.registry.policies,
+            partial(
+                expand_subscript,
+                context=context,
+                execute_fn=execute_fn,
+                call_stack=cs,
+                policies=namespace.registry.policies,
+            ),
         )
+        bind_last_word(session, ["unset", *args])
+        return unset
 
     if kind == NodeKind.TEST:
         # The shell's own `[[`, which no command gate admits: it is
@@ -1710,9 +1731,11 @@ async def _execute_node(
         return await _negated(stdout, io, exec_node, context, inner)
 
     if kind == NodeKind.VAR_ASSIGN:
-        return await execute_assignment(
+        assigned = await execute_assignment(
             node, context, execute_fn, registry, namespace, cs
         )
+        bind_last_word(session, ())
+        return assigned
 
     if kind == NodeKind.VAR_ASSIGNS:
         sub_seq = context.frame.cmdsub_seq

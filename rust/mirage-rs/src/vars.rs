@@ -553,6 +553,20 @@ impl Store {
         (!self.hidden(&name)).then_some(array)
     }
 
+    /// The names set now whose value the shell computes at each read, which
+    /// `${!prefix@}` lists beside the stored ones: `PIPESTATUS` once a
+    /// command has run, `FUNCNAME` inside a function, and `RANDOM`,
+    /// `LINENO` and `BASHPID` until each is no longer special.
+    pub fn computed(&self) -> impl Iterator<Item = &'static str> + '_ {
+        [RANDOM, LINENO, BASHPID, "PIPESTATUS", "FUNCNAME"]
+            .into_iter()
+            .filter(|&name| {
+                self.random_special(name)
+                    || self.dynamic(name).is_some()
+                    || self.special(name).is_some_and(|array| !array.is_empty())
+            })
+    }
+
     /// Whether this store saves as `other` does, record for record. A
     /// fork that has written nothing shares the records outright, and a
     /// write undone (`TMP=x true`) puts back the record it replaced, so a
@@ -726,6 +740,30 @@ impl Store {
             return None;
         }
         self.record(&name)
+    }
+
+    /// Whether characters are UTF-8 here, as setlocale reads it: the
+    /// first of `LC_ALL`, `LC_CTYPE` and `LANG` that is set and not empty
+    /// names a `language[_territory][.codeset][@modifier]` whose codeset,
+    /// case and punctuation dropped, is `utf8`. Otherwise a character is a
+    /// byte, as in the C locale.
+    pub fn utf8(&self) -> bool {
+        ["LC_ALL", "LC_CTYPE", "LANG"]
+            .iter()
+            .find_map(|name| self.scalar(name).filter(|value| !value.is_empty()))
+            .is_some_and(|locale| {
+                let name = locale.split(|&b| b == b'@').next().unwrap_or_default();
+                let codeset = name
+                    .iter()
+                    .position(|&b| b == b'.')
+                    .map_or(&[][..], |dot| &name[dot + 1..]);
+                let folded: Vec<u8> = codeset
+                    .iter()
+                    .filter(|b| b.is_ascii_alphanumeric())
+                    .map(u8::to_ascii_lowercase)
+                    .collect();
+                folded == b"utf8"
+            })
     }
 
     /// A scalar's value, None when unset, hidden or an array: `$X`.
@@ -956,6 +994,17 @@ impl Store {
     /// Whether a function is running.
     pub fn in_function(&self) -> bool {
         self.local.is_some()
+    }
+
+    /// The names the running function made local, sorted; none at top
+    /// level.
+    pub fn locals(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .local
+            .map(|index| self.frames[index].saved.keys().cloned().collect())
+            .unwrap_or_default();
+        names.sort();
+        names
     }
 
     /// Whether the running function made `name` local already.
@@ -1277,7 +1326,8 @@ impl Store {
     }
 
     /// Shape one scalar as its name's attributes say, at the write, as
-    /// bash does: integer first, then case.
+    /// bash does: integer first, then case, which in the C locale changes
+    /// only ASCII letters.
     fn coerce_text(
         &mut self,
         coercion: &mut Coercion,
@@ -1290,12 +1340,13 @@ impl Store {
         } else {
             text
         };
-        Ok(if attrs & LOWER != 0 {
-            recase(&text, str::to_lowercase)
-        } else if attrs & UPPER != 0 {
-            recase(&text, str::to_uppercase)
-        } else {
-            text
+        let utf8 = self.utf8();
+        Ok(match (attrs & LOWER != 0, attrs & UPPER != 0) {
+            (true, _) if utf8 => recase(&text, str::to_lowercase),
+            (true, _) => text.to_ascii_lowercase(),
+            (_, true) if utf8 => recase(&text, str::to_uppercase),
+            (_, true) => text.to_ascii_uppercase(),
+            _ => text,
         })
     }
 
@@ -1923,16 +1974,20 @@ mod tests {
         assert_eq!(value, Value::Scalar(b"9".to_vec()));
         assert_eq!(coercion.writes.len(), 1);
         assert_eq!(coercion.writes[0].name, "y");
-        let lower = store
-            .coerce(
-                &mut coercion,
-                Value::Scalar("ÀBC\u{3A3}".into()),
-                LOWER,
-                None,
-                None,
-            )
-            .unwrap();
-        assert_eq!(lower, Value::Scalar("àbcς".into()));
+        let mut lower = |store: &mut Store| {
+            store
+                .coerce(
+                    &mut coercion,
+                    Value::Scalar("ÀBC\u{3A3}".into()),
+                    LOWER,
+                    None,
+                    None,
+                )
+                .unwrap()
+        };
+        assert_eq!(lower(&mut store), Value::Scalar("Àbc\u{3A3}".into()));
+        store.seed("LC_ALL", Value::Scalar(b"C.UTF-8".to_vec()));
+        assert_eq!(lower(&mut store), Value::Scalar("àbcς".into()));
     }
 
     #[test]

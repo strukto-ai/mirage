@@ -133,10 +133,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'echo \\377\\n' > /data/raw.sh; source /data/raw.sh | od -An -tx1; bash /data/raw.sh | od -An -tx1; printf 'echo \\376\\n' | bash | od -An -tx1; rm /data/raw.sh",
+      "command": "printf 'echo \\377\\n' > /data/raw.sh; source /data/raw.sh | od -An -tx1; bash /data/raw.sh | od -An -tx1; printf 'echo \\376\\n' | bash | od -An -tx1; rm /data/raw.sh; printf 'echo fb\\\\' | bash; printf \"cat <<'END\\\\\\\\'\\\\nbody\\\\nEND\\\\\\\\\" | bash; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": " ff 0a\n ff 0a\n fe 0a\n",
+        "stdout": " ff 0a\n ff 0a\n fe 0a\nfb\nbody\nrc=0\n",
         "stderr": ""
       }
     }

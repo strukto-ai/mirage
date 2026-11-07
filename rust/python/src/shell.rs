@@ -142,6 +142,16 @@ impl ShellHeredoc {
     fn at(&self) -> usize {
         self.heredoc.at
     }
+
+    /// Where expanding the body fails, bash reading what opens there only
+    /// as it expands the body: the byte offset in `body` and the row the
+    /// body starts on in the line as typed; None when it does not.
+    #[getter]
+    fn deferred(&self) -> Option<(usize, usize)> {
+        self.heredoc
+            .deferred
+            .map(|deferred| (deferred.at, deferred.row))
+    }
 }
 
 /// One node of a `ShellTree`, read through the tree it keeps alive.

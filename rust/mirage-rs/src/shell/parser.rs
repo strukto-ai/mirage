@@ -78,6 +78,9 @@ pub(super) struct Placed {
     /// a heredoc's delimiter that ended mid-line, or at the second `(` of
     /// a `((` it rereads as subshells.
     pub echo_from: Option<usize>,
+    /// The last byte bash quotes when it quotes its reread copy of a `((`:
+    /// the one past the `)` closing its second `(`.
+    pub echo_last: Option<usize>,
 }
 
 impl Fail {
@@ -280,6 +283,10 @@ fn joined(
     source: &[u8],
 ) -> Tree {
     let mut dropped = continuations(&text, &pass);
+    // bash -c keeps a backslash ending the input unless it continues a
+    // line that started in single quotes.
+    let kept = super::heredoc::ends_escaped(source)
+        && !(super::heredoc::ends_escaped(&text) && dropped.last() == Some(&(text.len() - 1)));
     let text = if dropped.is_empty() {
         text
     } else {
@@ -325,6 +332,10 @@ fn joined(
                 heredoc.word_end = end(heredoc.word_end);
                 heredoc.body_start = start(heredoc.body_start);
                 heredoc.end = end(heredoc.end);
+                if let Some(deferred) = &mut heredoc.deferred {
+                    deferred.row =
+                        super::lower::newlines(&source[..heredoc.body_start.min(source.len())]);
+                }
                 heredoc.line =
                     super::lower::newlines(&source[..heredoc.body_start.saturating_sub(1)]) + 1;
                 heredoc.eof_line = lines.max(heredoc.line);
@@ -357,6 +368,7 @@ fn joined(
                     .map(|&(index, from)| (index, to_source(from)))
                     .collect(),
                 echo_from: placed.echo_from.map(to_source),
+                echo_last: placed.echo_last.map(to_source),
             })
         });
         let mut first = Fail {
@@ -368,7 +380,7 @@ fn joined(
         if let Some(from) = resumed(source, &heredocs, at) {
             first.echo_from(from);
         }
-        refusals(source, options, ended, first)
+        refusals(source, options, ended, kept, first)
     });
     place_comments(&mut root, &comments);
     root.start = root
@@ -455,7 +467,13 @@ fn parse_pass(source: &[u8], options: &super::Options, ended: bool) -> Pass {
 /// line, and bash reads on from the next, where a later refusal's status
 /// wins, but for one that ends inside a quote or pair after an earlier
 /// one.
-fn refusals(source: &[u8], options: &super::Options, ended: bool, first: Fail) -> Refusal {
+fn refusals(
+    source: &[u8],
+    options: &super::Options,
+    ended: bool,
+    kept: bool,
+    first: Fail,
+) -> Refusal {
     let mut found = vec![first];
     while let Some(last) = found.last().filter(|last| last.status == 1 && !last.eof) {
         let Some(newline) = memchr::memchr(b'\n', &source[last.end.min(source.len())..]) else {
@@ -485,7 +503,7 @@ fn refusals(source: &[u8], options: &super::Options, ended: bool, first: Fail) -
         at: found[0].at,
         lines: found
             .iter()
-            .flat_map(|fail| said(source, &newlines, fail))
+            .flat_map(|fail| said(source, &newlines, kept, fail))
             .collect(),
         status: found.last().map_or(2, |last| last.status),
     }
@@ -498,17 +516,68 @@ fn refusals(source: &[u8], options: &super::Options, ended: bool, first: Fail) -
 /// text's; the rest of what the end of the input brings on the row past
 /// the last, as bash -c reads a newline after the input. `newlines` holds
 /// the offset of each newline in `source`.
-fn said(source: &[u8], newlines: &[usize], fail: &Fail) -> Vec<Said> {
+fn said(source: &[u8], newlines: &[usize], kept: bool, fail: &Fail) -> Vec<Said> {
     let rows = |to: usize| newlines.partition_point(|&at| at < to);
     let at = fail.at.min(source.len());
-    let last = fail.end.min(source.len()).saturating_sub(1).max(at);
-    let past = newlines.len() + usize::from(source.last().is_some_and(|&b| b != b'\n'));
+    let end = fail.end.min(source.len());
+    let mut last = end.saturating_sub(1).max(at);
+    // bash reads on past the line continuations right after a token (the
+    // first may already lie inside its span), so it reports the token on
+    // the line they lead to.
+    let mut ahead = end;
+    while source
+        .get(ahead..)
+        .is_some_and(|rest| rest.starts_with(b"\\\n"))
+    {
+        ahead += 2;
+    }
+    if ahead > end || end > at && source[..end].ends_with(b"\\\n") {
+        last = ahead;
+    }
+    // bash -c reads a line after a backslash ending the input, and after a
+    // line continuation ending a word there.
+    let glued = |text: &[u8]| {
+        super::heredoc::ends_escaped(text)
+            && text
+                .iter()
+                .rev()
+                .find(|&&b| b != b'\\')
+                .is_some_and(|&b| !is_blank(b))
+    };
+    let continued = source.strip_suffix(b"\n").is_some_and(glued) || !kept && glued(source);
+    let past = newlines.len()
+        + usize::from(source.last().is_some_and(|&b| b != b'\n'))
+        + usize::from(kept || continued);
+    // A refusal of the word the kept backslash ends stands on the line past
+    // it, where bash -c has nothing to quote back, and a conditional names
+    // no token there.
+    let ending = kept
+        && end == source.len()
+        && fail
+            .lines
+            .iter()
+            .any(|text| text.starts_with(b"syntax error near"));
     let mut out = Vec::new();
     for (index, text) in fail.lines.iter().enumerate() {
         let near = text.starts_with(b"syntax error near");
+        let bare = near && !text.starts_with(b"syntax error near unexpected");
+        let line_start = memchr::memrchr(b'\n', &source[..last]).map_or(0, |i| i + 1);
+        let clipped;
+        let text = if ending && bare {
+            &b"syntax error".to_vec()
+        } else if bare && at < line_start && end > line_start {
+            // A text that a line continuation splits is named from the line
+            // bash's reader stands on.
+            clipped = line(&[b"syntax error near `", &source[line_start..end], b"'"]);
+            &clipped
+        } else {
+            text
+        };
+        let near = near && text.starts_with(b"syntax error near");
         let opened = index == 0 && fail.matching;
         let row = match fail.anchored(index) {
             Some(from) => rows(from.min(source.len())),
+            None if ending => newlines.len() + 1,
             None if near => rows(last),
             None if fail.eof && !opened => past,
             None => rows(at),
@@ -520,16 +589,31 @@ fn said(source: &[u8], newlines: &[usize], fail: &Fail) -> Vec<Said> {
         });
         if near {
             let start = memchr::memrchr(b'\n', &source[..last]).map_or(0, |i| i + 1);
+            let end = memchr::memchr(b'\n', &source[last..]).map_or(source.len(), |i| last + i);
             let start = fail
                 .placed
                 .as_deref()
                 .and_then(|placed| placed.echo_from)
-                .filter(|&from| (start..=at).contains(&from))
+                .filter(|&from| (start..=end).contains(&from))
                 .unwrap_or(start);
-            let end = memchr::memchr(b'\n', &source[last..]).map_or(source.len(), |i| last + i);
+            let end = fail
+                .placed
+                .as_deref()
+                .and_then(|placed| placed.echo_last)
+                .filter(|&to| to >= start)
+                .map_or(end, |to| end.min(to + 1));
+            // bash -c doubles the backslash it keeps in its own copy.
+            let mut text = if ending {
+                Vec::new()
+            } else {
+                source[start..end].to_vec()
+            };
+            if kept && !ending && end == source.len() {
+                text.push(b'\\');
+            }
             out.push(Said {
                 row,
-                text: source[start..end].to_vec(),
+                text,
                 quoted: true,
             });
         }
@@ -543,10 +627,12 @@ pub(super) fn line(pieces: &[&[u8]]) -> Vec<u8> {
 }
 
 /// The bytes bash's reader deletes as line continuations: a backslash
-/// that an odd run ends, before a newline or the end of the input, and
-/// that newline. Single-quoted and ANSI-C text and a comment keep theirs.
+/// that an odd run ends before a newline, and that newline; bash -c keeps
+/// one that ends the input, unless the input's last line started inside
+/// single-quoted or ANSI-C text. That text and a comment keep theirs.
 fn continuations(source: &[u8], pass: &Pass) -> Vec<usize> {
-    if memchr::memmem::find(source, b"\\\n").is_none() && !source.ends_with(b"\\") {
+    let ending = source.ends_with(b"\\") && memchr::memchr(b'\n', source).is_some();
+    if memchr::memmem::find(source, b"\\\n").is_none() && !ending {
         return Vec::new();
     }
     let mut verbatim = pass.comments.clone();
@@ -560,6 +646,11 @@ fn continuations(source: &[u8], pass: &Pass) -> Vec<usize> {
         scan_verbatim(source, error.start, &mut verbatim);
     }
     verbatim.sort_unstable();
+    let quoted_end = memchr::memrchr(b'\n', source).is_some_and(|newline| {
+        verbatim
+            .iter()
+            .any(|&(from, to)| from <= newline && newline < to)
+    });
     // The candidates come in order: a sweep finds the spans holding each.
     let mut spans = verbatim.iter().peekable();
     let mut covered = 0;
@@ -575,10 +666,12 @@ fn continuations(source: &[u8], pass: &Pass) -> Vec<usize> {
         while let Some(&(_, to)) = spans.next_if(|span| span.0 <= last) {
             covered = covered.max(to);
         }
-        let live = (end - start) % 2 == 1
-            && matches!(source.get(end), None | Some(b'\n'))
-            && covered <= last;
-        if live {
+        let continues = match source.get(end) {
+            Some(b'\n') => true,
+            None => quoted_end,
+            Some(_) => false,
+        };
+        if (end - start) % 2 == 1 && continues && covered <= last {
             dropped.push(last);
             if end < source.len() {
                 dropped.push(end);
@@ -813,11 +906,14 @@ impl Parser<'_> {
             }
             return self.refusal(at, at, vec![self.eof_line().into()], true);
         }
-        let token = match self.token_text(at) {
+        let (mut token, end) = match self.token_text(at) {
             Ok(token) => token,
             Err(fail) => return fail,
         };
-        let end = at + token.len().max(1);
+        // bash -c names the backslash it keeps at the end doubled.
+        if end == self.s.len() && super::heredoc::ends_escaped(self.s) {
+            token.push(b'\\');
+        }
         let newline = token == b"\n";
         let token = if newline { b"newline".to_vec() } else { token };
         let fail = self.refusal(
@@ -838,7 +934,7 @@ impl Parser<'_> {
 
     /// The token at `at` as bash names it; bash's lexer reads a word
     /// whole first, refusing one that the input ends inside.
-    fn token_text(&self, at: usize) -> R<Vec<u8>> {
+    fn token_text(&self, at: usize) -> R<(Vec<u8>, usize)> {
         let rest = &self.s[at..];
         let ops: &[&[u8]] = &[
             b";;&", b";;", b";&", b"&&", b"||", b"|&", b">>", b"<<", b"&>", b">&", b"<&", b">|",
@@ -847,10 +943,20 @@ impl Parser<'_> {
         let procsub = rest.starts_with(b"<(") || rest.starts_with(b">(");
         for op in ops.iter().filter(|_| !procsub) {
             if rest.starts_with(op) {
-                return Ok(op.to_vec());
+                return Ok((op.to_vec(), at + op.len()));
             }
         }
-        let end = self.scan_word(at)?.max(at + 1);
+        if let Some(token) = self.array_token(at) {
+            return Ok(token);
+        }
+        let mut end = self.scan_word(at)?.max(at + 1);
+        // A word that starts `name[` holds its subscript to the `]`, blanks
+        // and all, as bash reads an assignment's.
+        let name = super::lex::name_end(self.s, at);
+        if name > at && self.s.get(name) == Some(&b'[') {
+            let close = self.scan_bracket(name + 1, name)?;
+            end = end.max(self.scan_word(close)?);
+        }
         let mut word = Vec::with_capacity(end - at);
         let mut from = at;
         while from < end {
@@ -861,7 +967,34 @@ impl Parser<'_> {
             word.push(self.s[from]);
             from += 1;
         }
-        Ok(word)
+        Ok((word, end))
+    }
+
+    /// An array assignment at `at` as the one token bash reads it as, and
+    /// where it ends: named with its elements a blank apart, comments and
+    /// newlines dropped, and the word glued after its `)`.
+    fn array_token(&self, at: usize) -> Option<(Vec<u8>, usize)> {
+        let mut probe = self.probe(at);
+        if !probe.at_assignment() {
+            return None;
+        }
+        let node = probe.assignment(false).ok()?;
+        let array = node.children.iter().find(|child| child.kind == "array")?;
+        let elements: Vec<&[u8]> = array
+            .children
+            .iter()
+            .filter(|child| child.named && !child.hidden && child.kind != "comment")
+            .map(|child| &self.s[child.start..child.end])
+            .collect();
+        let end = probe.scan_word(probe.i).ok()?;
+        let token = [
+            &self.s[at..=array.start],
+            &elements.join(&b' '),
+            b")",
+            &self.s[probe.i..end],
+        ]
+        .concat();
+        Some((token, end))
     }
 
     /// Where the next token after `at` starts, blanks and newlines skipped.
@@ -1309,7 +1442,13 @@ impl Parser<'_> {
                 return self.fail(at);
             }
         }
-        if let Some((word, kind)) = self.at_declaration() {
+        // A declaration builtin's name and `(` start a function definition,
+        // as any name's do.
+        if let Some((word, kind)) = self.at_declaration().filter(|(word, _)| {
+            self.s
+                .get(super::lex::blank_end(self.s, self.i + word.len()))
+                != Some(&b'(')
+        }) {
             return self.declaration(Vec::new(), word, kind);
         }
         if !self.at_assignment() {

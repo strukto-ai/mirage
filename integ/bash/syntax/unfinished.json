@@ -322,10 +322,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "x=\\\n(1 2); echo \"${x[1]}\" $\\\n(echo a) $\\\n((1+2)); cat <\\\n(echo b)",
+      "command": "x=\\\n(1 2); echo \"${x[1]}\" $\\\n(echo a) $\\\n((1+2)); cat <\\\n(echo b); echo a\\",
       "expect": {
         "exit": 0,
-        "stdout": "2 a 3\nb\n",
+        "stdout": "2 a 3\nb\na\\\n",
         "stderr": ""
       },
       "flags": []

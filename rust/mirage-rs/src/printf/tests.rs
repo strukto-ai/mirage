@@ -1,7 +1,11 @@
 use super::*;
 
 fn request(format: &[u8], args: &[&[u8]], program: bool, split: usize) -> Box<dyn Stream> {
-    let config = serde_json::json!({ "mode": if program { "program" } else { "builtin" }, "argument_count": args.len() });
+    let config = serde_json::json!({
+        "mode": if program { "program" } else { "builtin" },
+        "argument_count": args.len(),
+        "voice": "bash: ",
+    });
     let mut stream = open(&serde_json::to_vec(&config).unwrap()).unwrap();
     let mut out = Vec::new();
     for (index, input) in std::iter::once(format)

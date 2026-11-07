@@ -247,6 +247,9 @@ class Redirect:
         clobber (bool): whether the operator was `>|`, which overrides
             `set -C` for this one redirect and nothing else.
         expand_vars (bool): whether the target undergoes expansion.
+        deferred (tuple[int, int] | None): for a heredoc, where expanding
+            its body fails (an index into the body and the row the body
+            starts on), bash reading what opens there only as it expands it.
     """
 
     fd: int
@@ -256,6 +259,7 @@ class Redirect:
     append: bool = False
     clobber: bool = False
     expand_vars: bool = True
+    deferred: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True, slots=True)

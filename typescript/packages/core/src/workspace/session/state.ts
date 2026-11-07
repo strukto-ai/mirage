@@ -335,9 +335,14 @@ export async function elementIsSet(
   session: SessionState,
   ref: string,
   policies: Policies | null = null,
+  expanded = false,
 ): Promise<boolean> {
   const shell = session.vars.shell
-  return (await runWrite(session, policies, (heard) => shell.isSet(ref, { listens: heard }))) !== 0n
+  return (
+    (await runWrite(session, policies, (heard) =>
+      shell.isSet(ref, { expanded, listens: heard }),
+    )) !== 0n
+  )
 }
 
 /**
@@ -533,6 +538,16 @@ export function shadowLocal(session: SessionState, name: string, inherit = false
 export function seedVar(session: SessionState, name: string, value: ShellValue): void {
   const [raw, assoc] = rawValue(value)
   session.vars.shell.seed(name, raw, assoc)
+}
+
+/**
+ * Set `$_` as bash does once a simple command has run in the shell: its last
+ * word after expansion, which is its name when it took no argument, and empty
+ * for a line that only assigned or redirected. Mirrors Python's
+ * bind_last_word.
+ */
+export function bindLastWord(session: SessionState, words: readonly string[]): void {
+  seedVar(session, '_', words[words.length - 1] ?? '')
 }
 
 /**

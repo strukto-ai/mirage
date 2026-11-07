@@ -25,6 +25,7 @@ import {
   returnBuiltin,
   trueBuiltin,
 } from './control/control.ts'
+import { declarationBuiltin } from './declare/declare.ts'
 import { exportBuiltin } from './declare/export.ts'
 import { localBuiltin } from './declare/local.ts'
 import { cdBuiltin } from './dirs/cd.ts'
@@ -71,6 +72,9 @@ export const BUILTINS: ReadonlyMap<string, BuiltinFn> = new Map<string, BuiltinF
   [SB.EXPORT, exportBuiltin],
   [SB.UNSET, unsetBuiltin],
   [SB.LOCAL, localBuiltin],
+  [SB.DECLARE, declarationBuiltin],
+  [SB.TYPESET, declarationBuiltin],
+  [SB.READONLY, declarationBuiltin],
   [SB.SET, setBuiltin],
   [SB.READ, readBuiltin],
   [SB.MAPFILE, mapfileBuiltin],

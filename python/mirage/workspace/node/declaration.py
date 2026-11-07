@@ -16,13 +16,15 @@ from typing import Any, Callable
 
 from mirage.io import IOResult
 from mirage.policy import PolicyDenied
+from mirage.policy.policies import pre_session_gate
+from mirage.policy.types import SessionContext
 from mirage.shell.array import ShellArray, make_array
 from mirage.shell.bytes import encode_text
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import DiscardSignal
 from mirage.shell.helpers import get_declaration_keyword, get_text
 from mirage.shell.types import NodeType as NT
-from mirage.shell.variable import VarAttr, VarKind
+from mirage.shell.variable import ShellValue, VarAttr, VarKind
 from mirage.shell.voice import shell_voice
 from mirage.shell.xtrace import trace_array, trace_command
 from mirage.view.types import SessionView
@@ -55,6 +57,7 @@ from mirage.workspace.expand import expand_node
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.node.assignment import expand_array_items
+from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session.state import (
     conversion_scalar,
     ensure_var_visible,
@@ -177,6 +180,7 @@ async def execute_declaration(
     namespace: Namespace,
     cs: CallStack | None,
     view: SessionView,
+    declared: ExpandedWords | None = None,
 ) -> tuple[Any, IOResult, ExecutionNode]:
     """Execute one declaration statement (export/local/declare/readonly).
 
@@ -197,6 +201,8 @@ async def execute_declaration(
         view (SessionView): the gated session view, bound once
             for the line so a pre_session rule governs an
             expansion-time write exactly as it governs `X=d`.
+        declared (ExpandedWords | None): filled with the words the
+            statement expanded to, its keyword first.
     """
     session = context.session
     keyword = get_declaration_keyword(node)
@@ -289,6 +295,8 @@ async def execute_declaration(
                 operands.append(expanded)
     cmd_word = "local" if keyword == NT.LOCAL else str(keyword)
     words = [operand for operand in operands if isinstance(operand, str)]
+    if declared is not None:
+        declared.words = (cmd_word, *traced)
     if session.shell_options.get("xtrace"):
         # Traced once expanded, before the builtin runs and outside its
         # redirects: each array operand, then the command naming them.
@@ -335,7 +343,7 @@ async def execute_declaration(
         or "p" in plus_chars
         or (listing and flag_chars & (LISTED_ATTRIBUTES | {"a", "A"}))
     ) and keyword in ("declare", "typeset"):
-        return await handle_declare_print(words, session, flag_chars)
+        return await handle_declare_print(words, session, flag_chars, keyword)
     conversion_errors: list[str] = []
     kind = declared_kind(flag_chars)
     if kind is not None:
@@ -348,10 +356,10 @@ async def execute_declaration(
         for bare in words:
             if "=" in bare:
                 continue
-            # Both branches below write array storage raw (the
-            # top-level one migrates an existing scalar), so a
-            # hidden name refuses like any assignment spelling
-            # before either lands.
+            # A hidden name refuses like any assignment spelling
+            # before anything lands, and the array both branches below
+            # write (the top-level one migrates an existing scalar)
+            # goes through the gate as any write does.
             try:
                 ensure_var_visible(session, bare)
             except PolicyDenied as exc:
@@ -389,16 +397,35 @@ async def execute_declaration(
             # literal key "0" (GNU allows scalar-to-associative
             # conversion, unlike indexed).
             scalar = None if local else conversion_scalar(session, bare)
-            if want_assoc:
-                seed_var(
-                    session, bare, {} if scalar is None else {"0": scalar}
-                )
-            else:
-                seed_var(
-                    session,
-                    bare,
-                    make_array([] if scalar is None else [scalar]),
-                )
+            fill: ShellValue = (
+                ({} if scalar is None else {"0": scalar})
+                if want_assoc
+                else make_array([] if scalar is None else [scalar])
+            )
+            if view.is_readonly(bare, False):
+                # bash converts a readonly name all the same, which a
+                # gated write refuses, so the rule is asked on its own
+                # before the ungated one lands it.
+                try:
+                    await pre_session_gate(
+                        registry.policies,
+                        SessionContext(
+                            verb="set",
+                            key=bare,
+                            value=scalar or "",
+                            session_id=session.session_id,
+                        ),
+                    )
+                except PolicyDenied as exc:
+                    raise DiscardSignal(
+                        encode_text(f"{exc.strerror}\n")
+                    ) from exc
+                seed_var(session, bare, fill)
+                continue
+            try:
+                await view.set(bare, fill, follow_ref=False)
+            except PolicyDenied as exc:
+                raise DiscardSignal(encode_text(f"{exc.strerror}\n")) from exc
     # declare/typeset scope like `local` inside a function (bash
     # semantics) and assign globally at top level, which is exactly
     # handle_local's fallback when no function scope is active. `-r`

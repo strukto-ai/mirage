@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "unset PA; printf -v 'PA[2]' hi; echo [${PA[2]}]",
+      "command": "unset PA; printf -v 'PA[2]' hi; echo [${PA[2]}]; pi=1; printf -v 'PA[$pi]' %s y; printf -v 'PA[pi+2]' %s z; declare -A PM; pk=key; printf -v 'PM[$pk]' %s v; declare -p PA PM",
       "expect": {
         "exit": 0,
-        "stdout": "[hi]\n",
+        "stdout": "[hi]\ndeclare -a PA=([1]=\"y\" [2]=\"hi\" [3]=\"z\")\ndeclare -A PM=([key]=\"v\" )\n",
         "stderr": ""
       }
     },

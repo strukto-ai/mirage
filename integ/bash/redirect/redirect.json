@@ -444,10 +444,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "{ echo out; echo err >&2; } > FM 2>&1 && cat FM",
+      "command": "{ echo out; echo err >&2; } > FM 2>&1 && cat FM; { echo out2; echo err2 >&2; } 2>&1</dev/null",
       "expect": {
         "exit": 0,
-        "stdout": "out\nerr\n",
+        "stdout": "out\nerr\nout2\nerr2\n",
         "stderr": ""
       }
     },

@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf '  a   b  \\n' | { read rw1 rw2; echo \"[$rw1][$rw2]\"; }; (read <<< '  a\\ b  '; echo \"[$REPLY]\")",
+      "command": "printf '  a   b  \\n' | { read rw1 rw2; echo \"[$rw1][$rw2]\"; }; (read <<< '  a\\ b  '; echo \"[$REPLY]\"); read rw3 rw4 <<< 'x\\ y z'; read rw5 <<< '  lead\\  '; echo \"[$rw3][$rw4][$rw5]\"; printf 'x\\\\' | { read rw6; echo \"[$rw6]\"; }",
       "expect": {
         "exit": 0,
-        "stdout": "[a][b]\n[  a b  ]\n",
+        "stdout": "[a][b]\n[  a b  ]\n[x y][z][lead ]\n[x]\n",
         "stderr": ""
       }
     },

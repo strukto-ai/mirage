@@ -23,6 +23,29 @@ const ARITH_PLAIN: [&str; 10] = [
     "subscript",
 ];
 
+/// The parts of a subscript that expand as a word does.
+const SUBSCRIPT_EXPANDED: [&str; 9] = [
+    "simple_expansion",
+    "expansion",
+    "command_substitution",
+    "arithmetic_expansion",
+    "string",
+    "raw_string",
+    "ansi_c_string",
+    "translated_string",
+    "concatenation",
+];
+
+/// The parts of a subscript whose own parts expand.
+const SUBSCRIPT_NESTED: [&str; 6] = [
+    "binary_expression",
+    "unary_expression",
+    "parenthesized_expression",
+    "ternary_expression",
+    "postfix_expression",
+    "subscript",
+];
+
 impl<H: Host> Expander<'_, H> {
     pub(super) fn atoms(&self, node: usize, out: &mut Vec<usize>) {
         if self.kind(node) == "concatenation" {
@@ -139,26 +162,66 @@ impl<H: Host> Expander<'_, H> {
         if !raw.iter().any(|b| b"$'\"`".contains(b)) {
             out.extend(raw);
         } else {
-            for child in inner {
-                if matches!(
-                    self.kind(child),
-                    "simple_expansion"
-                        | "expansion"
-                        | "command_substitution"
-                        | "string"
-                        | "raw_string"
-                        | "ansi_c_string"
-                        | "translated_string"
-                        | "concatenation"
-                ) {
-                    out.extend(join(&self.chunks(child, false).await?));
-                } else {
-                    out.extend_from_slice(self.text(child));
-                }
-            }
+            let start = self.tree.nodes[node].start as usize + name.len() + 1;
+            let stop = self.tree.nodes[node].end as usize - 1;
+            out.extend(self.substituted(start, stop, inner).await?);
         }
         out.push(b']');
         Ok(out)
+    }
+
+    /// The source from `start` to `stop` with each expansion, quoted
+    /// string and escaped word among `nodes` expanded where it stands
+    /// and the rest as typed, spaces included; an expression's parts
+    /// expand in turn (`$i + 1`).
+    pub(super) async fn substituted(
+        &mut self,
+        start: usize,
+        stop: usize,
+        nodes: Vec<usize>,
+    ) -> Result<Vec<u8>, Fault> {
+        let mut out = Vec::new();
+        let mut end = start;
+        for node in nodes {
+            let (from, to) = (
+                self.tree.nodes[node].start as usize,
+                self.tree.nodes[node].end as usize,
+            );
+            out.extend_from_slice(&self.tree.source[end..from]);
+            end = to;
+            let kind = self.kind(node);
+            let text = self.text(node);
+            let word = |bytes: &[u8]| kind == "word" && text.iter().any(|b| bytes.contains(b));
+            let (live, escaped) = (word(b"$`") && !word(b"'\""), word(b"\\'\""));
+            if live {
+                let text = text.to_vec();
+                out.extend(Box::pin(self.reread_quoted(&text)).await?);
+            } else if escaped || SUBSCRIPT_EXPANDED.contains(&kind) {
+                out.extend(join(&self.chunks(node, false).await?));
+            } else if SUBSCRIPT_NESTED.contains(&kind) {
+                let children = self.tree.children(node).collect();
+                out.extend(Box::pin(self.substituted(from, to, children)).await?);
+            } else {
+                out.extend_from_slice(self.text(node));
+            }
+        }
+        out.extend_from_slice(&self.tree.source[end..stop]);
+        Ok(out)
+    }
+
+    /// A word the parser left whole because it reads as no expression
+    /// (`m[$k  $k]`), read as the double-quoted text it stands for: its
+    /// expansions expand and its spaces stay.
+    async fn reread_quoted(&mut self, text: &[u8]) -> Result<Vec<u8>, Fault> {
+        let mut source = b"\"".to_vec();
+        source.extend_from_slice(text);
+        source.push(b'"');
+        let tree = crate::shell::parse(&source);
+        let mut inner = self.over(&tree);
+        match (0..tree.nodes.len()).find(|&n| inner.kind(n) == "string") {
+            Some(string) => Ok(join(&inner.chunks(string, false).await?)),
+            None => Ok(text.to_vec()),
+        }
     }
 
     /// A `$((...))`'s value: evaluated, its writes landed through the gate

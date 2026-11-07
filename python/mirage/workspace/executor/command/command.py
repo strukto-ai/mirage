@@ -458,7 +458,8 @@ async def handle_command(
     # dispatch chokepoint) stay ahead of this so protective refusals
     # keep their specific messages.
     if lookup(typed, session, registry) is Consumer.UNKNOWN:
-        err = encode_text(f"{shell_voice()}{typed}: command not found\n")
+        shown = session.vars.shell.shown(typed)
+        err = encode_text(f"{shell_voice()}{shown}: command not found\n")
         return (
             None,
             IOResult(exit_code=NOT_FOUND_STATUS, stderr=err),

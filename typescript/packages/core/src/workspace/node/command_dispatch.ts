@@ -113,7 +113,14 @@ import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { checkEnv, entryBytes } from '../session/budget.ts'
 import type { SessionState } from '../session/session.ts'
-import { ensureVarVisible, envIsReadonly, seedVar, setAttr, visibleEnv } from '../session/state.ts'
+import {
+  bindLastWord,
+  ensureVarVisible,
+  envIsReadonly,
+  seedVar,
+  setAttr,
+  visibleEnv,
+} from '../session/state.ts'
 import { ExecutionNode } from '../types.ts'
 import { admit, Admitted, classifiedWords } from './admission.ts'
 import { claimantFor, evaluatedFrom } from './occurrence.ts'
@@ -625,6 +632,7 @@ async function runCommandBody(
     seedPrefix,
     assigned,
   )
+  bindLastWord(session, argv.name !== '' ? [argv.name, ...argv.args] : [])
   let stdout = ranStdout
   if (io.producer === null && argv.name !== '') {
     // Builtins and other non-mount routes return no rider; stamp the

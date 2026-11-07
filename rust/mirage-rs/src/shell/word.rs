@@ -561,9 +561,11 @@ impl Parser<'_> {
     /// so a body that does not parse to there is one raw word.
     pub(super) fn arithmetic_or_substitution(&mut self) -> R<Syn> {
         let start = self.i;
-        let end = self.scan_matched(self.joined(start + 2) + 1, start, b'(', b')')?;
+        // Left open, `$((` stands on the row of its last `(`.
+        let inner = self.joined(start + 2);
+        let end = self.scan_matched(inner + 1, inner, b'(', b')')?;
         if self.s.get(end + 1) != Some(&b')') {
-            self.scan_matched(start + 2, start, b'(', b')')?;
+            self.scan_matched(start + 2, inner, b'(', b')')?;
         }
         if self.double_paren_end(self.i + 1).is_some() {
             return self.arithmetic_expansion();

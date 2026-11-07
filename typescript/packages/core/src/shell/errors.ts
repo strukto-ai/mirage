@@ -127,6 +127,9 @@ export class ExitSignal extends Error {
   // job reports its contained status even for a simple command
   // (`eval ': ${U?}' | cat` is 1, `: ${U?} | cat` 127).
   sourced = false
+  // Whether it ends a line whose substitution bash cannot parse, which an
+  // EXIT action ends without changing the status the shell leaves with.
+  refused = false
 
   constructor(
     exitCode = 0,

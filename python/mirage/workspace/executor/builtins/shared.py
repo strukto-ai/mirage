@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 from collections.abc import Sequence
+from functools import partial
 
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
@@ -32,10 +33,12 @@ from mirage.workspace.executor.builtins.constants import (
     IDENTIFIER_RE,
 )
 from mirage.workspace.executor.builtins.scope import _scope_path
-from mirage.workspace.executor.builtins.types import Result
+from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.executor.command.flags import option_error, parse_flags
 from mirage.workspace.executor.command.types import ParsedCommand
 from mirage.workspace.expand.globs import expand_glob
+from mirage.workspace.expand.node import expand_subscript
+from mirage.workspace.expand.types import SubscriptFn
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.types import ExecutionNode
 
@@ -381,3 +384,19 @@ def numeric_operands(args: list[str]) -> list[str]:
         args (list[str]): words after the builtin name.
     """
     return args[1:] if args[:1] == ["--"] else args
+
+
+def subscript_expansion(call: BuiltinCall) -> SubscriptFn:
+    """How the call's builtin expands a subscript it was given as text
+    (``unset 'a[$i]'``), in the call's session and frame.
+
+    Args:
+        call (BuiltinCall): the invocation.
+    """
+    return partial(
+        expand_subscript,
+        context=call.context,
+        execute_fn=call.execute_fn,
+        call_stack=call.call_stack,
+        policies=call.namespace.registry.policies,
+    )

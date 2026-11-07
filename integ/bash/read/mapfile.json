@@ -203,10 +203,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "mfcb(){ echo \"argc=$# [$2]\"; }; printf 'x; touch mfran\\nb c\\n' | { mapfile -c 1 -C mfcb -t MFA; }; test -e mfran && echo RAN || echo clean",
+      "command": "mfcb(){ echo \"argc=$# [$2]\"; }; printf 'x; touch mfran\\nb c\\n' | { mapfile -c 1 -C mfcb -t MFA; }; test -e mfran && echo RAN || echo clean; mfcc() { echo \"cb $1 [$2] ${#MFB[@]}\"; MFB[9]=z; }; mapfile -t -C mfcc -c 2 MFB <<< $'a\\nb\\nc\\nd'; declare -p MFB",
       "expect": {
         "exit": 0,
-        "stdout": "argc=2 [x; touch mfran]\nargc=2 [b c]\nclean\n",
+        "stdout": "argc=2 [x; touch mfran]\nargc=2 [b c]\nclean\ncb 1 [b] 1\ncb 3 [d] 4\ndeclare -a MFB=([0]=\"a\" [1]=\"b\" [2]=\"c\" [3]=\"d\" [9]=\"z\")\n",
         "stderr": ""
       }
     },

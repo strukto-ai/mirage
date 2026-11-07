@@ -868,11 +868,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "\"fi\"; echo $?",
+      "command": "\"fi\"; echo $?; $'f\\ni'; echo $?; 'a b'; echo $?",
       "expect": {
         "exit": 0,
-        "stdout": "127\n",
-        "stderr": "bash: line 1: fi: command not found\n"
+        "stdout": "127\n127\n127\n",
+        "stderr": "bash: line 1: fi: command not found\nbash: line 1: $'f\\ni': command not found\nbash: line 1: a b: command not found\n"
       }
     },
     {

@@ -27,7 +27,7 @@ fn control(byte: u8) -> bool {
 
 /// Whether a UTF-8 locale prints `c`: `[[:print:]]`, which leaves out the
 /// controls, the line and paragraph separators and unassigned code points.
-fn prints(c: char) -> bool {
+pub(crate) fn prints(c: char) -> bool {
     let c = u32::from(c);
     PRINT
         .binary_search_by(|&(low, high)| {
@@ -85,6 +85,16 @@ pub(crate) fn ansi_c(value: &[u8], utf8: bool) -> Vec<u8> {
     }
     out.push(b'\'');
     out
+}
+
+/// A name as a diagnostic names it (`cd`, `command not found`): as it is
+/// when it shows as it is, else `$'...'`.
+pub fn shown(value: &[u8], utf8: bool) -> Vec<u8> {
+    if printable(value, utf8) {
+        value.to_vec()
+    } else {
+        ansi_c(value, utf8)
+    }
 }
 
 /// `${v@Q}`: single quotes, `'` as `'\''`, or `$'...'` for a value that

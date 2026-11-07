@@ -591,10 +591,32 @@ async function runPreparedLine(
               : null
           if (io !== null) {
             const callStack = options.callStack
+            if (
+              effectiveSession.shellOptions.errexit === true &&
+              !effectiveSession.errexitImmune &&
+              !effectiveSession.errexitIgnored
+            ) {
+              // Where `set -e` acts, bash prints a refusal's first line alone
+              // and ends the shell with 2.
+              const message = await materialize(io.stderr)
+              const first = message.subarray(0, message.indexOf(10) + 1)
+              if (callStack !== undefined) throw new ExitSignal(2, first)
+              return await answerLine(
+                env,
+                command,
+                options,
+                targetSession,
+                new ExecuteResult(new Uint8Array(), first, 2),
+                history,
+              )
+            }
             // A substitution bash cannot parse ends the shell, from `eval` and
             // `source` too: 127, or 1 out of a child.
-            if (callStack !== undefined && io.exitCode === 127)
-              throw new ExitSignal(127, await materialize(io.stderr), null, 1)
+            if (callStack !== undefined && io.exitCode === 127) {
+              const ended = new ExitSignal(127, await materialize(io.stderr), null, 1)
+              ended.refused = true
+              throw ended
+            }
             // An array bash cannot read discards its line: `eval` and `source`
             // return 1, and a child shell ends there.
             if (callStack?.subshell === true && io.exitCode === 1)

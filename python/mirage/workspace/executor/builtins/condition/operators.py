@@ -38,6 +38,7 @@ from mirage.workspace.executor.builtins.condition.constants import (
 )
 from mirage.workspace.executor.builtins.condition.errors import CondError
 from mirage.workspace.executor.builtins.condition.types import CondContext
+from mirage.workspace.executor.builtins.constants import TARGET_RE
 from mirage.workspace.executor.builtins.links import follow_paths
 from mirage.workspace.executor.builtins.scope import _scope_path, _to_scope
 from mirage.workspace.executor.builtins.shared import abs_path
@@ -144,9 +145,20 @@ async def apply_unary(ctx: CondContext, op: str, val: str | PathSpec) -> bool:
     if op == "-z":
         return text == ""
     if op == "-v":
+        target = TARGET_RE.match(text)
+        if (
+            target is not None
+            and target.group(2) is not None
+            and ctx.subscripts is not None
+        ):
+            subscript = await ctx.subscripts(target.group(2))
+            text = f"{target.group(1)}[{subscript}]"
+            expanded = True
+        else:
+            expanded = False
         try:
             return await element_is_set(
-                ctx.session, text, ctx.namespace.registry.policies
+                ctx.session, text, ctx.namespace.registry.policies, expanded
             )
         except ArithError as exc:
             # bash aborts the line on `[[ -v a[1/0] ]]` with `1/0:

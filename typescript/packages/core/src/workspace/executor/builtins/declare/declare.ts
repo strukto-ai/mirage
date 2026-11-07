@@ -24,6 +24,7 @@ import {
   ShellArray,
 } from '../../../../shell/array.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
+import { shellJoin } from '../../../../shell/join.ts'
 import { ArithError, DiscardSignal } from '../../../../shell/errors.ts'
 import type { ParseScope } from '../../../../shell/parse/scope.ts'
 import { storedFunctionText } from '../../../../shell/printer.ts'
@@ -50,6 +51,7 @@ import {
   shadowLocal,
   subscriptIndex,
 } from '../../../session/state.ts'
+import { ExecutionNode } from '../../../types.ts'
 import { bodyAliasValues } from '../alias/alias.ts'
 import {
   builtinUsage,
@@ -71,6 +73,7 @@ import {
   SUBSCRIPT_RE,
   VISIBLE_SCOPE_BUILTINS,
 } from './constants.ts'
+import type { BuiltinCall } from '../types.ts'
 import type { AttrMarks, DeclarationOperand } from './types.ts'
 
 /**
@@ -560,6 +563,16 @@ export function declarationResult(
 }
 
 /**
+ * The `=(...)` an indexed array's `declare -p` line ends with:
+ * `a=([0]="x" [2]="z")`. Mirrors Python's array_body.
+ */
+export function arrayBody(arr: ShellArray): string {
+  const parts: string[] = []
+  for (const [i, el] of arr.elements) parts.push(`[${String(i)}]=${bashDeclareQuote(el)}`)
+  return `=(${parts.join(' ')})`
+}
+
+/**
  * The `declare -p` line for one name, or null when it has none.
  *
  * The attribute cluster is `attrLetters`, which is why this renders
@@ -578,11 +591,7 @@ export function declareLine(session: SessionState, name: string): string | null 
   const letters = attrLetters(v)
   const head = letters ? `declare -${letters}` : 'declare --'
   if (v.value === null) return `${head} ${name}`
-  if (v.value instanceof ShellArray) {
-    const parts: string[] = []
-    for (const [i, el] of v.value.elements) parts.push(`[${String(i)}]=${bashDeclareQuote(el)}`)
-    return `${head} ${name}=(${parts.join(' ')})`
-  }
+  if (v.value instanceof ShellArray) return `${head} ${name}${arrayBody(v.value)}`
   if (typeof v.value !== 'string') return `${head} ${name}${assocBody(v.value)}`
   return `${head} ${name}=${bashDeclareQuote(v.value)}`
 }
@@ -612,6 +621,7 @@ export function handleDeclarePrint(
   names: string[],
   session: SessionState,
   flags: ReadonlySet<string> = new Set(),
+  cmd = 'declare',
 ): RedirectResult {
   const targets =
     names.length > 0
@@ -624,10 +634,10 @@ export function handleDeclarePrint(
   const errors: string[] = []
   for (const name of targets) {
     const line = declareLine(session, name)
-    if (line === null) errors.push(`${shellVoice()}declare: ${name}: not found`)
+    if (line === null) errors.push(`${shellVoice()}${cmd}: ${name}: not found`)
     else lines.push(line)
   }
-  return result('declare', {
+  return result(cmd, {
     out: encodeText(lines.map((line) => `${line}\n`).join('')),
     exitCode: errors.length > 0 ? 1 : 0,
     stderr: errors.map((error) => `${error}\n`).join(''),
@@ -1027,4 +1037,29 @@ export function referenceRefusal(
     return null
   }
   return namerefRefusal(cmd, name, own.value)
+}
+
+/**
+ * The `declare`, `typeset` and `readonly` arm, for a name the parser did not
+ * read as a declaration: after an assignment (`n=1 declare -p n`) or from an
+ * expansion (`$d -p n`). The words run again as the declaration they spell,
+ * as `command` runs them, the name's alias masked: bash expands none in a
+ * word that came from an expansion. Mirrors Python's declaration_builtin.
+ */
+export async function declarationBuiltin(call: BuiltinCall): Promise<RedirectResult> {
+  const session = call.context.session
+  const name = call.argv.name
+  const savedAlias = session.aliases[name]
+  // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+  delete session.aliases[name]
+  try {
+    const io = await call.executeFn(shellJoin([name, ...call.argv.args]), {
+      sessionId: session.sessionId,
+      stdin: call.stdin,
+      ...(call.callStack !== null ? { callStack: call.callStack } : {}),
+    })
+    return [io.stdout, io, new ExecutionNode({ command: name, exitCode: io.exitCode })]
+  } finally {
+    if (savedAlias !== undefined) session.aliases[name] = savedAlias
+  }
 }

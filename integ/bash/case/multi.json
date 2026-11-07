@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "case y in x) echo one;; *) echo fall; echo through;; esac",
+      "command": "case y in x) echo one;; *) echo fall; echo through;; esac; case z in *)echo glued;; esac; case z in ?)echo q; esac; case z in z)echo; esac; echo end",
       "expect": {
         "exit": 0,
-        "stdout": "fall\nthrough\n",
+        "stdout": "fall\nthrough\nglued\nq\n\nend\n",
         "stderr": ""
       }
     }

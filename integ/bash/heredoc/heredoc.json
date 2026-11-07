@@ -89,11 +89,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "cat <<END\nsub=$(echo inner)\nEND",
+      "command": "cat <<END\nsub=$(echo inner)\nEND\necho pre; cat <<END; echo same\nx $(fi) y\nEND\necho \"rc=$?\"; cat <<END\n${a\nEND\necho \"rc=$?\"; cat <<END\n`b\nEND\necho \"rc=$?\"",
       "expect": {
         "exit": 0,
-        "stdout": "sub=inner\n",
-        "stderr": ""
+        "stdout": "sub=inner\npre\nsame\nrc=0\nrc=1\nrc=1\n",
+        "stderr": "bash: command substitution: line 5: syntax error near unexpected token `fi'\nbash: command substitution: line 5: `fi) y'\nbash: line 7: ${a\n: bad substitution\nbash: line 10: bad substitution: no closing \"`\" in `b\n\n"
       }
     },
     {

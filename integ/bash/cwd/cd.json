@@ -98,10 +98,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(cd /data/sub && cd .. && pwd); (cd /data/nope/.. 2>&1; cd /data/a.txt/.. 2>&1; pwd); (cd /data && cd sub/../nope/.. 2>&1; cd a.txt/.. 2>&1; pwd)",
+      "command": "(cd /data/sub && cd .. && pwd); (cd /data/nope/.. 2>&1; cd /data/a.txt/.. 2>&1; pwd); (cd /data && cd sub/../nope/.. 2>&1; cd a.txt/.. 2>&1; pwd); (cd $'/data/no\\npe' 2>&1; cd $'/data/no\\tpe' 2>&1; cd '/data/a b' 2>&1; ! cd '/data/nope\ny' 2>&1)",
       "expect": {
         "exit": 0,
-        "stdout": "/data\nbash: line 1: cd: /data/nope/..: No such file or directory\nbash: line 1: cd: /data/a.txt/..: Not a directory\n/\nbash: line 1: cd: sub/../nope/..: No such file or directory\nbash: line 1: cd: a.txt/..: Not a directory\n/data\n",
+        "stdout": "/data\nbash: line 1: cd: /data/nope/..: No such file or directory\nbash: line 1: cd: /data/a.txt/..: Not a directory\n/\nbash: line 1: cd: sub/../nope/..: No such file or directory\nbash: line 1: cd: a.txt/..: Not a directory\n/data\nbash: line 1: cd: $'/data/no\\npe': No such file or directory\nbash: line 1: cd: $'/data/no\\tpe': No such file or directory\nbash: line 1: cd: /data/a b: No such file or directory\nbash: line 2: cd: $'/data/nope\\ny': No such file or directory\n",
         "stderr": ""
       }
     },

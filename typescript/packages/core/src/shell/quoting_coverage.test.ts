@@ -320,12 +320,12 @@ describe('shell quoting coverage (port of tests/shell/test_quoting_coverage.py)'
   })
   describe('line continuation and unterminated backticks', () => {
     it.each([
-      // A trailing backslash continues the line; with nothing to
-      // continue onto, bash drops it and runs the command.
-      ['echo a\\', 'a\n'],
-      ['echo \\', '\n'],
+      // bash -c keeps a backslash ending the input, as it keeps one
+      // ending a backtick's body.
+      ['echo a\\', 'a\\\n'],
+      ['echo \\', '\\\n'],
       ['echo a\\\\', 'a\\\n'],
-      ['echo `echo a\\\\`', 'a\n'],
+      ['echo `echo a\\\\`', 'a\\\n'],
     ])('%j -> %j', async (line, expected) => {
       const ws = makeQuotingWs()
       const r = await run(ws, line)

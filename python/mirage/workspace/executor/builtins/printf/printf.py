@@ -34,8 +34,10 @@ from mirage.workspace.executor.builtins.shared import (
     builtin_usage,
     fail,
     result,
+    subscript_expansion,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.expand.types import SubscriptFn
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import assign_element, env_snapshot
 from mirage.workspace.types import ExecutionNode
@@ -48,6 +50,7 @@ async def handle_printf(
     args: list[str],
     session: SessionState,
     policies: Policies | None = None,
+    subscripts: SubscriptFn | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Print formatted output, honoring GNU printf's format-reuse rules.
 
@@ -81,6 +84,8 @@ async def handle_printf(
         policies (Policies | None): the policies the ``-v`` write clears,
             so a ``pre_session`` refusal is reported in the rule's own
             words.
+        subscripts (SubscriptFn | None): expands the ``-v`` target's
+            subscript given as text; None keeps it as typed.
     """
     program = program_invocation(session)
     target: str | None = None
@@ -146,6 +151,8 @@ async def handle_printf(
     )
     errors = decode_text(stderr)
     base, subscript = parsed.group(1), parsed.group(2)
+    if subscript is not None and subscripts is not None:
+        subscript = await subscripts(subscript)
     text = decode_text(output).partition("\0")[0]
     try:
         status = await assign_element(session, policies, base, subscript, text)
@@ -188,11 +195,12 @@ def _printed(
     """
     io = IOResult()
     node = ExecutionNode(command="printf")
+    voice = shell_voice()
 
     async def output() -> AsyncIterator[bytes]:
         try:
             async with aclosing(
-                printf_output(fmt, args, io, program, posix, utf8)
+                printf_output(fmt, args, io, program, posix, utf8, voice)
             ) as parts:
                 async for part in parts:
                     yield part
@@ -213,4 +221,5 @@ async def printf_builtin(call: BuiltinCall) -> Result:
         list(call.argv.args),
         call.context.session,
         call.namespace.registry.policies,
+        subscript_expansion(call),
     )

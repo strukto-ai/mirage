@@ -29,8 +29,10 @@ import type { PathSpec } from '../../../../types.ts'
 import { wordText } from '../../../../types.ts'
 import { Files } from '../../../files.ts'
 import type { Namespace } from '../../../mount/namespace/namespace.ts'
+import type { SubscriptFn } from '../../../expand/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
+import { subscriptExpansion } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 import { CondError, CondRefused } from './errors.ts'
 import { evalFlat } from './flat.ts'
@@ -56,6 +58,7 @@ export async function handleTest(
   name = 'test',
   admit?: AdmitTest,
   signal?: AbortSignal,
+  subscripts?: SubscriptFn,
 ): Promise<RedirectResult> {
   const links = linkView(
     new Files(
@@ -75,6 +78,7 @@ export async function handleTest(
     ...(links !== undefined ? { links } : {}),
     ...(admit !== undefined ? { admit } : {}),
     ...(signal !== undefined ? { signal } : {}),
+    ...(subscripts !== undefined ? { subscripts } : {}),
   }
   let code: number
   try {
@@ -157,5 +161,14 @@ export async function testBuiltin(call: BuiltinCall): Promise<RedirectResult> {
       ]
     }
   }
-  return handleTest(call.dispatch, call.namespace, testArgs, call.context.session, testName)
+  return handleTest(
+    call.dispatch,
+    call.namespace,
+    testArgs,
+    call.context.session,
+    testName,
+    undefined,
+    undefined,
+    subscriptExpansion(call),
+  )
 }

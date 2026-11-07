@@ -109,10 +109,12 @@ def test_ids_differ_across_trees() -> None:
 @pytest.mark.parametrize(
     "command,expected",
     [
-        # An odd-length trailing run ends in a live continuation.
-        ("echo a\\", "echo a"),
-        ("echo a\\\\\\", "echo a\\\\"),
-        ("echo \\", "echo "),
+        # bash -c keeps a backslash ending the input; one before a last
+        # newline continues onto nothing.
+        ("echo a\\", "echo a\\"),
+        ("echo a\\\\\\", "echo a\\\\\\"),
+        ("echo \\", "echo \\"),
+        ("echo a\\\n", "echo a"),
         # An even-length run is all escaped backslashes, so nothing goes.
         ("echo a\\\\", "echo a\\\\"),
         ("echo a\\\\\\\\", "echo a\\\\\\\\"),

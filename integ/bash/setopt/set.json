@@ -98,10 +98,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "zqv7=1; set | grep -c '^zqv7='; (zqv8='a b'; zqv9=\"it's\"; zqv10='~x'; zqv11=a,b; set | grep -E '^(zqv8|zqv9|zqv10|zqv11|IFS)=')",
+      "command": "zqv7=1; set | grep -c '^zqv7='; (zqv8='a b'; zqv9=\"it's\"; zqv10='~x'; zqv11=a,b; set | grep -E '^(zqv8|zqv9|zqv10|zqv11|IFS)='); (zqa=(1 'b c'); declare -A zqm=([k]='x y'); zqe=(); zqf() { echo hi; }; set | grep -E '^zq(a|m|e)='; set | sed -n '/^zqf ()/,/^}/p'; set -o posix; set | grep -c '^zqf ')",
       "expect": {
-        "exit": 0,
-        "stdout": "1\nIFS=$' \\t\\n'\nzqv10='~x'\nzqv11=a,b\nzqv8='a b'\nzqv9='it'\\''s'\n",
+        "exit": 1,
+        "stdout": "1\nIFS=$' \\t\\n'\nzqv10='~x'\nzqv11=a,b\nzqv8='a b'\nzqv9='it'\\''s'\nzqa=([0]=\"1\" [1]=\"b c\")\nzqe=()\nzqm=([k]=\"x y\" )\nzqf () \n{ \n    echo hi\n}\n0\n",
         "stderr": ""
       }
     },

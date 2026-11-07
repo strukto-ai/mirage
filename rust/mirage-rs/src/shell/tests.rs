@@ -359,8 +359,10 @@ fn a_continuation_joins_the_halves_of_a_word() {
         read("echo 'a\\\nb' # c\\\n"),
         "(program (command name: (command_name (word=echo)) argument: (raw_string='a\\\nb')) (comment=# c\\))"
     );
-    // A backslash ending the input continues onto nothing.
-    assert_eq!(parse(b"echo a\\").source, b"echo a");
+    // bash -c keeps a backslash ending the input; one before a last
+    // newline continues onto nothing.
+    assert_eq!(parse(b"echo a\\").source, b"echo a\\");
+    assert_eq!(parse(b"echo a\\\n").source, b"echo a");
 }
 
 #[test]

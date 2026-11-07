@@ -700,3 +700,33 @@ fn what_bash_spells_differently() {
         ]
     );
 }
+
+#[test]
+fn a_subscript_expands_where_it_stands() {
+    let mut sh = shell();
+    sh.vars.seed("i", Value::Scalar(b"1".to_vec()));
+    sh.vars.seed("k", Value::Scalar(b"a".to_vec()));
+    sh.vars.seed("r", Value::Scalar(b"m[$k  $k]".to_vec()));
+    sh.vars.seed(
+        "a",
+        Value::Indexed(Indexed::dense([
+            b"0".to_vec(),
+            b"1".to_vec(),
+            b"2".to_vec(),
+        ])),
+    );
+    let map: Assoc = [
+        (b"a  a".to_vec(), b"5".to_vec()),
+        (b"$k".to_vec(), b"6".to_vec()),
+    ]
+    .into_iter()
+    .collect();
+    sh.vars.seed("m", Value::Assoc(Box::new(map)));
+    assert_eq!(
+        ok(
+            &mut sh,
+            r#"echo ${a[$i + 1]} $(( a[ $i ] )) ${m[$k  $k]} ${m[\$k]} ${!r}"#
+        ),
+        ["2", "1", "5", "6", "5"]
+    );
+}

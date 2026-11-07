@@ -1689,11 +1689,11 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf '%d\n' abc",
+      "command": "printf '%d\n' abc; printf 'a%zb\\n' x; printf '%k|' 1; echo \" rc=$?\"; printf '%5'; echo \" rc=$?\"; printf 'x%l%d' 3; echo \" rc=$?\"; env printf '%zb' x; echo \" rc=$?\"; env printf '%ld|' 4; echo; echo 'a\nb' $LINENO; f() { printf '%d' y; }; f; echo",
       "expect": {
-        "exit": 1,
-        "stdout": "0\n",
-        "stderr": "bash: printf: abc: invalid number\n"
+        "exit": 0,
+        "stdout": "0\nax\n rc=1\n rc=1\nx rc=1\n rc=1\n4|\na\nb 3\n0\n",
+        "stderr": "bash: line 2: printf: abc: invalid number\nbash: line 2: printf: `k': invalid format character\nbash: line 2: printf: `%5': missing format character\nbash: line 2: printf: `%': invalid format character\nprintf: %zb: invalid conversion specification\nenvironment: line 3: printf: y: invalid number\n"
       }
     },
     {
@@ -1945,10 +1945,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "printf -v x '\\xff'; printf '%q\\n' \"$x\"",
+      "command": "printf -v x '\\xff'; printf '%q\\n' \"$x\"; (export LC_ALL=C.UTF-8; printf '[%q]\\n' $'a \\303\\251' $'\\303\\251\\342\\200\\250' $'\\377')",
       "expect": {
         "exit": 0,
-        "stdout": "$'\\377'\n",
+        "stdout": "$'\\377'\n[a\\ é]\n[$'é\\342\\200\\250']\n[$'\\377']\n",
         "stderr": ""
       }
     },
@@ -2750,7 +2750,7 @@
       "expect": {
         "exit": 0,
         "stdout": "[12][1][0][9223372036854775807][0][97] 1\n[18446744073709551615] 0\n[1.000000][inf] 1\n[5] 1\n",
-        "stderr": "bash: printf: 12 : invalid number\nbash: printf: 0x1g: invalid hex number\nbash: printf: 08: invalid octal number\nbash: printf: warning: 99999999999999999999: Numerical result out of range\nbash: printf: warning: 18446744073709551616: Numerical result out of range\nbash: printf: 1x: invalid number\nbash: printf: warning: 1e99999: Numerical result out of range\nbash: printf: x: invalid number\n"
+        "stderr": "bash: line 1: printf: 12 : invalid number\nbash: line 1: printf: 0x1g: invalid hex number\nbash: line 1: printf: 08: invalid octal number\nbash: line 1: printf: warning: 99999999999999999999: Numerical result out of range\nbash: line 1: printf: warning: 18446744073709551616: Numerical result out of range\nbash: line 1: printf: 1x: invalid number\nbash: line 1: printf: warning: 1e99999: Numerical result out of range\nbash: line 1: printf: x: invalid number\n"
       }
     },
     {
@@ -2814,7 +2814,7 @@
       "expect": {
         "exit": 0,
         "stdout": "3000001\nx|\n___\n0 1 0\n",
-        "stderr": "bash: printf: bad: invalid number\n"
+        "stderr": "bash: line 1: printf: bad: invalid number\n"
       }
     }
   ]

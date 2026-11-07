@@ -17,19 +17,43 @@ import type { RedirectResult } from '../../../../context/session_context.ts'
 import { IOResult } from '../../../../io/types.ts'
 import { encodeText } from '../../../../shell/bytes.ts'
 import type { CallStack } from '../../../../shell/call_stack.ts'
+import type { ParseScope } from '../../../../shell/parse/scope.ts'
 import { SET_OPTION_DEFAULTS, SET_OPTION_NAMES } from '../../../../shell/constants.ts'
 import { parseOptionWord } from '../../../../shell/options.ts'
 import { concat } from '../../../../utils/bytes.ts'
 import { singleQuote } from '../../../../utils/quote.ts'
 import { compareCodePoints } from '../../../../utils/sort.ts'
 import type { SessionState } from '../../../session/session.ts'
-import { setPositionalParams, visibleEnv } from '../../../session/state.ts'
+import {
+  setPositionalParams,
+  visibleArrays,
+  visibleAssocs,
+  visibleEnv,
+} from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { SET_QUOTED_CHARS } from '../constants.ts'
 import { CONTROL_RE } from '../declare/constants.ts'
-import { bashDeclareQuote } from '../declare/declare.ts'
+import { arrayBody, assocBody, bashDeclareQuote, functionLines } from '../declare/declare.ts'
 import { builtinError, builtinUsage } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
+
+/**
+ * What a bare `set` prints: every visible variable by name, an array's value
+ * as `declare -p` writes it, then each function as `declare -f` prints it,
+ * which posix mode leaves out. Mirrors Python's _listing.
+ */
+function listing(session: SessionState, parser?: ParseScope): string[] {
+  const values = new Map<string, string>()
+  for (const [k, v] of Object.entries(visibleEnv(session))) values.set(k, `${k}=${listedValue(v)}`)
+  for (const [k, v] of Object.entries(visibleArrays(session))) values.set(k, k + arrayBody(v))
+  for (const [k, v] of Object.entries(visibleAssocs(session))) values.set(k, k + assocBody(v))
+  const lines = [...values.keys()].sort(compareCodePoints).map((name) => values.get(name) ?? '')
+  if (session.shellOptions.posix !== true) {
+    const names = Object.keys(session.functions).sort(compareCodePoints)
+    lines.push(...functionLines(session, names, true, false, parser))
+  }
+  return lines
+}
 
 /**
  * A value as bash's bare `set` prints it.
@@ -72,12 +96,14 @@ export function handleSet(
   args: string[],
   session: SessionState,
   callStack: CallStack | null = null,
+  parser?: ParseScope,
 ): RedirectResult {
   if (args.length === 0) {
-    const entries = Object.entries(visibleEnv(session))
-    entries.sort(([a], [b]) => compareCodePoints(a, b))
-    const lines = entries.map(([k, v]) => `${k}=${listedValue(v)}`)
-    const out = encodeText(`${lines.join('\n')}\n`)
+    const out = encodeText(
+      listing(session, parser)
+        .map((line) => `${line}\n`)
+        .join(''),
+    )
     return [out, new IOResult(), new ExecutionNode({ command: 'set', exitCode: 0 })]
   }
   const bad = unknownLetter(args)
@@ -163,5 +189,7 @@ function optionListing(session: SessionState, plus: boolean): Uint8Array {
 
 /** The `set` arm. */
 export function setBuiltin(call: BuiltinCall): Promise<RedirectResult> {
-  return Promise.resolve(handleSet([...call.argv.args], call.context.session, call.callStack))
+  return Promise.resolve(
+    handleSet([...call.argv.args], call.context.session, call.callStack, call.parser),
+  )
 }

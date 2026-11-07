@@ -623,10 +623,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "declare -l QBC=HeLLo; QBC=WORLD; declare -u QBD=hello; QBD+=xyz; declare -lu QBE=aBc; declare -p QBC QBD QBE",
+      "command": "declare -l QBC=HeLLo; QBC=WORLD; declare -u QBD=hello; QBD+=xyz; declare -lu QBE=aBc; declare -p QBC QBD QBE; (export LC_ALL=C; declare -u QBF=$'\\303\\251a'; declare -l QBG=$'\\303\\211A'; printf '%s %s\\n' \"$QBF\" \"$QBG\" | od -An -c; export LC_ALL=C.UTF-8; QBF=$'\\303\\251b'; printf '%s\\n' \"$QBF\" | od -An -c)",
       "expect": {
         "exit": 0,
-        "stdout": "declare -l QBC=\"world\"\ndeclare -u QBD=\"HELLOXYZ\"\ndeclare -- QBE=\"aBc\"\n",
+        "stdout": "declare -l QBC=\"world\"\ndeclare -u QBD=\"HELLOXYZ\"\ndeclare -- QBE=\"aBc\"\n 303 251   A     303 211   a  \\n\n 303 211   B  \\n\n",
         "stderr": ""
       }
     },
@@ -1008,10 +1008,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "declare -A qcgm=([x]=1); test -v 'qcgm[\"x\"]' && echo yes || echo no; [[ -v \"qcgm['x']\" ]] && echo yes || echo no",
+      "command": "declare -A qcgm=([x]=1); test -v 'qcgm[\"x\"]' && echo yes || echo no; [[ -v \"qcgm['x']\" ]] && echo yes || echo no; qk=x; test -v 'qcgm[$qk]' && echo yes || echo no; [[ -v qcgm[\\$qk] ]] && echo yes || echo no; read 'qcgm[$qk$qk]' <<< 2; echo \"${qcgm[xx]}\"; ( declare -A qh=([\"a  a\"]=5 [\"\\$k\"]=6); k=a; echo \"${qh[$k  $k]}|${qh[\\$k]}\"; r='qh[$k  $k]'; echo \"${!r}\" ); ( qtx=1; test -v qtx; echo \"bare=$?\"; [ -v qtx ]; echo \"bare=$?\"; qq='\"x\"'; test -v 'qcgm[$qq]'; echo \"quoted=$?\" )",
       "expect": {
         "exit": 0,
-        "stdout": "yes\nyes\n",
+        "stdout": "yes\nyes\nyes\nno\n2\n5|6\n5\nbare=0\nbare=0\nquoted=1\n",
         "stderr": ""
       }
     },

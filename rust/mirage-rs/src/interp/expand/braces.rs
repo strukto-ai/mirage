@@ -71,6 +71,9 @@ impl<H: Host> Expander<'_, H> {
                     if let Some(name) = &braces.name {
                         let text = self.text(child);
                         braces.subscript = Some(text[name.len() + 1..text.len() - 1].to_vec());
+                        let node = &self.tree.nodes[child];
+                        braces.subscript_span =
+                            (node.start as usize + name.len() + 1, node.end as usize - 1);
                     }
                     seen = true;
                     continue;
@@ -338,21 +341,19 @@ impl<H: Host> Expander<'_, H> {
     }
 
     /// `${!prefix@}` and `${!prefix*}`: the names of the set variables that
-    /// start with the prefix, sorted.
+    /// start with the prefix, the ones the shell computes too, sorted.
     fn prefixed(&self, p: &Braces, quoted: bool) -> Vec<Chunk> {
         let prefix = p.name.as_deref().unwrap_or_default();
-        let mut names: Vec<Vec<u8>> = self
-            .shell
-            .vars
+        let vars = &self.shell.vars;
+        let mut names: Vec<Vec<u8>> = vars
             .records()
-            .filter(|(name, var)| {
-                name.as_bytes().starts_with(prefix)
-                    && var.value.is_some()
-                    && !self.shell.vars.hidden(name)
-            })
+            .filter(|(name, var)| var.value.is_some() && !vars.hidden(name))
             .map(|(name, _)| name.as_bytes().to_vec())
+            .chain(vars.computed().map(|name| name.as_bytes().to_vec()))
+            .filter(|name| name.starts_with(prefix))
             .collect();
         names.sort();
+        names.dedup();
         let star = p.star;
         let joiner = if star {
             ifs_joiner(self.shell.ifs(), self.shell.utf8())

@@ -90,8 +90,9 @@ def test_set_and_unset_write_the_session():
 
 
 def test_set_is_general_over_variable_shapes():
-    # One entry point for every write: a string stores a scalar, a list stores
-    # a whole array, and the two storages stay exclusive.
+    # One entry point for every write: a string stores a scalar, or element
+    # 0 of an array it lands on as bash's `A=s` does, a list stores a whole
+    # array, and the two storages stay exclusive.
 
     async def run():
         view, session = _view()
@@ -99,8 +100,11 @@ def test_set_is_general_over_variable_shapes():
         assert session.arrays["A"] == make_array(["x", "y"])
         assert "A" not in session.env
         await view.set("A", "s")
-        assert session.env["A"] == "s"
-        assert "A" not in session.arrays
+        assert session.arrays["A"] == make_array(["s", "y"])
+        assert "A" not in session.env
+        await view.set("S", "s")
+        assert session.env["S"] == "s"
+        assert "S" not in session.arrays
 
     asyncio.run(run())
 

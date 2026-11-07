@@ -298,14 +298,15 @@ export async function executeAssignment(
     )
     const heldMap = session.assocs[key]
     const rawSub = subscriptNode.text.slice(spelled.length + 1, -1)
-    if (rawSub.trim() === '' || (heldMap !== undefined && subText === '')) {
+    if (rawSub === '' || (heldMap !== undefined && subText === '')) {
       // bash discards the rest of the line on a bad assignment subscript
       // (status 1), naming the raw spelling (`m[$e]: bad array
-      // subscript`). An indexed subscript that merely *expands*
-      // empty stays legal (arithmetic on nothing is 0), so only the
-      // associative kind checks the expanded text.
-      const nameText = text.slice(0, eq).replace(/\+$/, '')
-      throw new DiscardSignal(encodeText(`${shellVoice()}${nameText}: bad array subscript\n`))
+      // subscript`). An indexed subscript that is blank or merely
+      // *expands* empty stays legal (arithmetic on nothing is 0), so
+      // only the associative kind checks the expanded text.
+      throw new DiscardSignal(
+        encodeText(`${shellVoice()}${subscriptNode.text}: bad array subscript\n`),
+      )
     }
     if (heldMap !== undefined) {
       // The subscript is the key: no arithmetic, `m[1+1]` writes the
@@ -326,8 +327,9 @@ export async function executeAssignment(
     if (idx < 0n) idx += arrayExtent(arr)
     if (idx < 0n) {
       // Same fatal shape as the empty subscript above.
-      const nameText = text.slice(0, eq).replace(/\+$/, '')
-      throw new DiscardSignal(encodeText(`${shellVoice()}${nameText}: bad array subscript\n`))
+      throw new DiscardSignal(
+        encodeText(`${shellVoice()}${subscriptNode.text}: bad array subscript\n`),
+      )
     }
     refuseReadonly(view, key)
     const [slot, added] = append ? appended(arrayGet(arr, idx), val, integer) : [val, null]

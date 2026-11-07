@@ -398,7 +398,8 @@ export async function handleCommand(
   // dispatch chokepoint) stay ahead of this so
   // protective refusals keep their specific messages.
   if (lookup(typed, session, registry) === Consumer.UNKNOWN) {
-    const errBytes = encodeText(`${shellVoice()}${typed}: command not found\n`)
+    const shown = session.vars.shell.shown(typed)
+    const errBytes = encodeText(`${shellVoice()}${shown}: command not found\n`)
     return [
       null,
       new IOResult({ exitCode: NOT_FOUND_STATUS, stderr: errBytes }),

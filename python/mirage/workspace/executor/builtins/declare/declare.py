@@ -25,6 +25,7 @@ from mirage.shell.array import (
 )
 from mirage.shell.bytes import encode_text
 from mirage.shell.errors import ArithError, DiscardSignal
+from mirage.shell.join import shell_join
 from mirage.shell.printer import stored_function_text
 from mirage.shell.variable import (
     ShellValue,
@@ -62,7 +63,7 @@ from mirage.workspace.executor.builtins.shared import (
     require_view,
     result,
 )
-from mirage.workspace.executor.builtins.types import Result
+from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     appended,
@@ -74,6 +75,7 @@ from mirage.workspace.session.state import (
     shadow_local,
     subscript_index,
 )
+from mirage.workspace.types import ExecutionNode
 
 
 async def premark(
@@ -711,6 +713,17 @@ def assoc_body(amap: dict[str, str]) -> str:
     return f"=({parts} )"
 
 
+def array_body(arr: ShellArray) -> str:
+    """The ``=(...)`` an indexed array's ``declare -p`` line ends with:
+    ``a=([0]="x" [2]="z")``.
+
+    Args:
+        arr (ShellArray): the indexed array.
+    """
+    parts = [f"[{i}]={bash_declare_quote(v)}" for i, v in arr.elements.items()]
+    return f"=({' '.join(parts)})"
+
+
 def declare_line(session: SessionState, name: str) -> str | None:
     """The ``declare -p`` line for one name, or None when it has none.
 
@@ -741,11 +754,7 @@ def declare_line(session: SessionState, name: str) -> str | None:
     if var.value is None:
         return f"{head} {name}"
     if isinstance(var.value, ShellArray):
-        parts = [
-            f"[{i}]={bash_declare_quote(v)}"
-            for i, v in var.value.elements.items()
-        ]
-        return f"{head} {name}=({' '.join(parts)})"
+        return f"{head} {name}{array_body(var.value)}"
     if isinstance(var.value, dict):
         return f"{head} {name}{assoc_body(var.value)}"
     return f"{head} {name}={bash_declare_quote(var.value)}"
@@ -774,6 +783,7 @@ async def handle_declare_print(
     names: list[str],
     session: SessionState,
     flags: set[str] | None = None,
+    cmd: str = "declare",
 ) -> Result:
     """Run ``declare -p``: render declarations for names, or for all.
 
@@ -787,6 +797,7 @@ async def handle_declare_print(
         names (list[str]): the names to render, empty for all.
         session (SessionState): shell session state.
         flags (set[str] | None): the declaration's option letters.
+        cmd (str): ``declare`` or ``typeset``, which a refusal names.
     """
     targets = names or sorted(
         name
@@ -798,11 +809,11 @@ async def handle_declare_print(
     for name in targets:
         line = declare_line(session, name)
         if line is None:
-            errors.append(f"{shell_voice()}declare: {name}: not found")
+            errors.append(f"{shell_voice()}{cmd}: {name}: not found")
         else:
             lines.append(line)
     return result(
-        "declare",
+        cmd,
         encode_text("".join(f"{line}\n" for line in lines)),
         1 if errors else 0,
         "".join(f"{error}\n" for error in errors),
@@ -1305,3 +1316,33 @@ def reference_refusal(
     ):
         return None
     return nameref_refusal(cmd, name, own.value)
+
+
+async def declaration_builtin(call: BuiltinCall) -> Result:
+    """The ``declare``, ``typeset`` and ``readonly`` arm, for a name the
+    parser did not read as a declaration: after an assignment
+    (``n=1 declare -p n``) or from an expansion (``$d -p n``). The words
+    run again as the declaration they spell, as ``command`` runs them,
+    the name's alias masked: bash expands none in a word that came from
+    an expansion.
+
+    Args:
+        call (BuiltinCall): the invocation.
+    """
+    session = call.context.session
+    saved_alias = session.aliases.pop(call.argv.name, None)
+    try:
+        io = await call.execute_fn(
+            shell_join([call.argv.name, *call.argv.args]),
+            session_id=session.session_id,
+            stdin=call.stdin,
+            call_stack=call.call_stack,
+        )
+    finally:
+        if saved_alias is not None:
+            session.aliases[call.argv.name] = saved_alias
+    return (
+        io.stdout,
+        io,
+        ExecutionNode(command=call.argv.name, exit_code=io.exit_code),
+    )

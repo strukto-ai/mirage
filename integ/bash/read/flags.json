@@ -28,10 +28,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo 'p q r' | { read -a rfa; declare -p rfa; }",
+      "command": "echo 'p q r' | { read -a rfa; declare -p rfa; }; ( rfz=(1 2 3); read rfz <<< x; declare -A rfm=([k]=v); read rfm <<< w; for rfz in y; do :; done; declare -p rfz rfm; OPTARG=(1 2); OPTIND=1; set -- -b v; getopts b: rfo; declare -p OPTARG )",
       "expect": {
         "exit": 0,
-        "stdout": "declare -a rfa=([0]=\"p\" [1]=\"q\" [2]=\"r\")\n",
+        "stdout": "declare -a rfa=([0]=\"p\" [1]=\"q\" [2]=\"r\")\ndeclare -a rfz=([0]=\"y\" [1]=\"2\" [2]=\"3\")\ndeclare -A rfm=([0]=\"w\" [k]=\"v\" )\ndeclare -a OPTARG=([0]=\"v\" [1]=\"2\")\n",
         "stderr": ""
       }
     },

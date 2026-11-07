@@ -23,7 +23,10 @@ from mirage.utils.quote import single_quote
 from mirage.workspace.executor.builtins.constants import SET_QUOTED_CHARS
 from mirage.workspace.executor.builtins.declare.constants import CONTROL_RE
 from mirage.workspace.executor.builtins.declare.declare import (
+    array_body,
+    assoc_body,
     bash_declare_quote,
+    function_lines,
 )
 from mirage.workspace.executor.builtins.shared import (
     builtin_error,
@@ -31,7 +34,12 @@ from mirage.workspace.executor.builtins.shared import (
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
 from mirage.workspace.session import SessionState
-from mirage.workspace.session.state import set_positional_params, visible_env
+from mirage.workspace.session.state import (
+    set_positional_params,
+    visible_arrays,
+    visible_assocs,
+    visible_env,
+)
 from mirage.workspace.types import ExecutionNode
 
 
@@ -63,11 +71,7 @@ async def handle_set(
     call_stack: CallStack | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     if not args:
-        lines = [
-            f"{k}={_listed_value(v)}"
-            for k, v in sorted(visible_env(session).items())
-        ]
-        out = encode_text("\n".join(lines) + "\n")
+        out = encode_text("".join(f"{line}\n" for line in _listing(session)))
         return out, IOResult(), ExecutionNode(command="set", exit_code=0)
     bad = _unknown_letter(args)
     if bad is not None:
@@ -121,6 +125,31 @@ async def handle_set(
         # differently, which is why the grammar hands it back.
         i += word.consumed
     return None, IOResult(), ExecutionNode(command="set", exit_code=0)
+
+
+def _listing(session: SessionState) -> list[str]:
+    """What a bare ``set`` prints: every visible variable by name, an
+    array's value as ``declare -p`` writes it, then each function as
+    ``declare -f`` prints it, which posix mode leaves out.
+
+    Args:
+        session (SessionState): shell session state.
+    """
+    values = {
+        k: f"{k}={_listed_value(v)}" for k, v in visible_env(session).items()
+    }
+    values.update(
+        (k, k + array_body(v)) for k, v in visible_arrays(session).items()
+    )
+    values.update(
+        (k, k + assoc_body(v)) for k, v in visible_assocs(session).items()
+    )
+    lines = [values[name] for name in sorted(values)]
+    if not session.shell_options.get("posix"):
+        lines += function_lines(
+            session, sorted(session.functions), True, False
+        )
+    return lines
 
 
 def _listed_value(value: str) -> str:

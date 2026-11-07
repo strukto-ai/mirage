@@ -18,7 +18,6 @@ from pathlib import Path
 import pytest
 
 from mirage.shell.bytes import decode_text, encode_text
-from mirage.shell.escapes import ends_escaped
 from mirage.shell.helpers import (
     get_command_name,
     get_for_parts,
@@ -52,19 +51,10 @@ SIDE_EFFECT_COMMANDS = [
 
 
 # Rows of the bash_syntax fixtures, pinned with `bash -c`, that mirage reads
-# otherwise: a heredoc body whose substitution or expansion does not
-# close, which bash refuses only when it expands the body and mirage with
-# the line; and three lines the parser refuses at an earlier token than
-# the one bash names. A line that ends in a backslash is read as a script
-# reads it, the backslash continuing onto nothing, where `bash -c` keeps
-# it.
+# otherwise: an array left open after a function's `()`, and a `{name}`
+# redirect, which mirage reads as a word.
 DIVERGES = frozenset(
     {
-        "cat <<EOF\n$(\nEOF",
-        "cat <<EOF\n$(fi)\nEOF",
-        "cat <<EOF\n${a\nEOF",
-        "cat <<EOF\n`\nEOF",
-        "declare a[x y]=(1)",
         "f() x=({\necho\n}",
         "{fd}>f x=(a[)",
     }
@@ -702,7 +692,6 @@ def test_every_line_reads_as_bash_reads_it(kind):
         row["line"]
         for row in CORPUS[kind]
         if row["line"] not in DIVERGES
-        and not ends_escaped(row["line"])
         and _refusal(row["line"])
         != (row["status"], encode_text(row["stderr"]))
     ] == []

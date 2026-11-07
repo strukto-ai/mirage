@@ -921,14 +921,29 @@ async def run_prepared_line(
             else None
         )
         if unreadable is not None:
+            if (
+                effective_session.shell_options.get("errexit")
+                and not effective_session.errexit_immune
+                and not effective_session.errexit_ignored
+            ):
+                # Where `set -e` acts, bash prints a refusal's first line
+                # alone and ends the shell with 2.
+                message = await unreadable.materialize_stderr()
+                first = message[: message.find(b"\n") + 1]
+                if call_stack is not None:
+                    raise ExitSignal(2, first)
+                record_status(session, 2)
+                return IOResult(exit_code=2, stderr=first)
             if call_stack is not None and unreadable.exit_code == 127:
                 # A substitution bash cannot parse ends the shell, from
                 # `eval` and `source` too: 127, or 1 out of a child.
-                raise ExitSignal(
+                ended = ExitSignal(
                     127,
                     await unreadable.materialize_stderr(),
                     contained_code=1,
                 )
+                ended.refused = True
+                raise ended
             if (
                 call_stack is not None
                 and call_stack.subshell

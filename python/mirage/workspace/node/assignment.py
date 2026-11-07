@@ -374,17 +374,17 @@ async def execute_assignment(
         )
         amap = session.assocs.get(key)
         raw_sub = get_text(subscript_node)[len(spelled) + 1 : -1]
-        if not raw_sub.strip() or (amap is not None and sub_text == ""):
+        if not raw_sub or (amap is not None and sub_text == ""):
             # bash discards the rest of the line on a bad assignment
             # subscript (status 1), naming the raw spelling
             # (`m[$e]: bad array subscript`). An indexed subscript
-            # that merely *expands* empty stays legal (arithmetic
-            # on nothing is 0), so only the associative kind checks
-            # the expanded text.
-            name_text = text.partition("=")[0].removesuffix("+")
+            # that is blank or merely *expands* empty stays legal
+            # (arithmetic on nothing is 0), so only the associative
+            # kind checks the expanded text.
             raise DiscardSignal(
                 encode_text(
-                    f"{shell_voice()}{name_text}: bad array subscript\n"
+                    f"{shell_voice()}{get_text(subscript_node)}: "
+                    "bad array subscript\n"
                 )
             )
         if amap is not None:
@@ -409,10 +409,10 @@ async def execute_assignment(
             idx += array_extent(arr)
         if idx < 0:
             # Same fatal shape as the empty subscript above.
-            name_text = text.partition("=")[0].removesuffix("+")
             raise DiscardSignal(
                 encode_text(
-                    f"{shell_voice()}{name_text}: bad array subscript\n"
+                    f"{shell_voice()}{get_text(subscript_node)}: "
+                    "bad array subscript\n"
                 )
             )
         _refuse_readonly(view, key)

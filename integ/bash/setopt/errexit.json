@@ -28,11 +28,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(set -e; false; echo unreached); echo rc=$?",
+      "command": "(set -e; false; echo unreached); echo rc=$?; (set -e; eval fi; echo no); echo rc=$?; (set -e; eval '[[ a b ]]'); echo rc=$?; (set -e; eval fi || echo or); echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "rc=1\n",
-        "stderr": ""
+        "stdout": "rc=1\nrc=2\nrc=2\nor\nrc=0\n",
+        "stderr": "bash: eval: line 1: syntax error near unexpected token `fi'\nbash: eval: line 1: conditional binary operator expected\nbash: eval: line 1: syntax error near unexpected token `fi'\nbash: eval: line 1: `fi'\n"
       }
     },
     {

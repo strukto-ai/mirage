@@ -157,6 +157,10 @@ impl Parser<'_> {
         }
         self.skip_blank();
         let at = self.i;
+        // bash reads `;;`, `;&` and `;;&` whole, and none ends the list.
+        if self.starts(b";;") || self.starts(b";&") {
+            return self.fail(at);
+        }
         let separated = matches!(self.peek(), b';' | b'\n');
         match self.peek() {
             b';' => {
@@ -285,14 +289,20 @@ impl Parser<'_> {
             }
         }
         let mark = self.mark();
-        if let Some((word, group)) = self.pattern_word()? {
+        let word = self.pattern_word()?;
+        let word_end = word.is_some().then_some(self.i);
+        if let Some((word, group)) = word {
             if group || !word.is("extglob_pattern") {
                 return Ok(vec![word]);
             }
         }
         self.reset(mark);
+        // The grammar's scanner can run on past the `)` ending the pattern
+        // (`*)echo`); bash ends it there, where the word does.
         let nodes = self.grammar_case_pattern()?;
-        if self.eof() || is_space(self.peek()) || matches!(self.peek(), b'|' | b')') {
+        if word_end.is_none_or(|end| end == self.i)
+            && (self.eof() || is_space(self.peek()) || matches!(self.peek(), b'|' | b')'))
+        {
             return Ok(nodes);
         }
         self.reset(mark);
@@ -335,7 +345,8 @@ impl Parser<'_> {
         let mut children = vec![self.keyword("function")?];
         self.skip_blank();
         let at = self.i;
-        let end = super::lex::word_end(self.s, at);
+        // Any word names it, braces and all (`function f{`, `function {`).
+        let end = self.scan_word(at)?;
         if end == at {
             return self.fail(at);
         }
@@ -355,6 +366,10 @@ impl Parser<'_> {
     pub(super) fn try_function(&mut self) -> R<Option<Syn>> {
         let at = self.i;
         let end = super::lex::word_end(self.s, at);
+        // `coproc ()` runs an empty subshell, which bash refuses.
+        if &self.s[at..end] == b"coproc" {
+            return Ok(None);
+        }
         if end == at || matches!(self.s.get(end), Some(b'\'' | b'"' | b'$' | b'`')) {
             return self.try_quoted_function();
         }
@@ -425,9 +440,13 @@ impl Parser<'_> {
     }
 }
 
-fn reread_from(mut fail: Fail, from: usize, close: usize) -> Fail {
+/// `fail` from inside a `((` bash rereads as subshells, whose second `(`
+/// is at `from` and closes at `close`: bash quotes its reread copy, from
+/// that `(` to the byte past its `)`.
+pub(super) fn reread_from(mut fail: Fail, from: usize, close: usize) -> Fail {
     if fail.at <= close {
         fail.echo_from(from);
+        fail.placed.get_or_insert_default().echo_last = Some(close + 1);
     }
     fail
 }

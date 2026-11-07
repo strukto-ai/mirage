@@ -10,7 +10,7 @@ use streams::interp::job::{Job, Output, Running, Step};
 use streams::interp::shell::Shell as Inner;
 use streams::interp::task::{self, Answer, Ask, Expanded, Mode, Write};
 use streams::interp::write::{Denied, Fault, Verb};
-use streams::interp::{Diagnostic, Signal};
+use streams::interp::{Diagnostic, Signal, quote};
 use streams::shell::Tree;
 use streams::vars::{self, Assigned, Indexed, Kind, Managed, Store, Value, Var};
 
@@ -408,6 +408,13 @@ impl Shell {
         Ok(self.store()?.nameref_target(name).map(str::to_owned))
     }
 
+    /// A name as a diagnostic names it, under the shell's locale: as it is,
+    /// or `$'...'` when it does not show as it is.
+    fn shown<'py>(&self, py: Python<'py>, value: Bound<'_, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+        let utf8 = self.shell()?.utf8();
+        text_of(py, &quote::shown(&bytes_of(&value)?, utf8))
+    }
+
     /// The variable a name stands for, references followed.
     fn deref(&self, name: &str) -> PyResult<String> {
         Ok(self.store()?.deref(name))
@@ -470,6 +477,11 @@ impl Shell {
 
     fn is_local(&self, name: &str) -> PyResult<bool> {
         Ok(self.store()?.is_local(name))
+    }
+
+    /// The names the running function made local, sorted.
+    fn locals(&self) -> PyResult<Vec<String>> {
+        Ok(self.store()?.locals())
     }
 
     /// Set the caller's record aside before a `local` shadows it; with
@@ -655,6 +667,7 @@ impl Shell {
             "pattern" => Mode::Pattern,
             "regex" => Mode::Regex,
             "arith" => Mode::Arith,
+            "subscript" => Mode::Subscript,
             other => {
                 return Err(PyRuntimeError::new_err(format!(
                     "no expansion mode {other}"
@@ -753,14 +766,21 @@ impl Shell {
 
     /// Whether a `name` / `name[sub]` reference is set, as `test -v`
     /// asks; what its subscript assigns landed. The result is 1 or 0.
-    #[pyo3(signature = (reference, *, listens = false))]
+    /// `expanded` for a subscript already expanded, an associative key
+    /// then taken verbatim.
+    #[pyo3(signature = (reference, *, expanded = false, listens = false))]
     fn is_set(
         slf: &Bound<'_, Self>,
         reference: Bound<'_, PyAny>,
+        expanded: bool,
         listens: bool,
     ) -> PyResult<ShellTask> {
         let reference = bytes_of(&reference)?;
-        Self::write_task(slf, Write::IsSet { reference }, listens, true)
+        let write = Write::IsSet {
+            reference,
+            expanded,
+        };
+        Self::write_task(slf, write, listens, true)
     }
 
     /// Write one element a builtin names, or a bare name as element 0;

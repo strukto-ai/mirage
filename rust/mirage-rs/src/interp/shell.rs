@@ -168,27 +168,8 @@ impl Shell {
         self.vars.scalar("HOME").filter(|home| !home.is_empty())
     }
 
-    /// Whether characters are UTF-8 here, as setlocale reads it: the
-    /// first of `LC_ALL`, `LC_CTYPE` and `LANG` that is set and not empty
-    /// names a `language[_territory][.codeset][@modifier]` whose codeset,
-    /// case and punctuation dropped, is `utf8`. Otherwise a character is a
-    /// byte, as in the C locale.
+    /// Whether characters are UTF-8 here (`Store::utf8`).
     pub fn utf8(&self) -> bool {
-        ["LC_ALL", "LC_CTYPE", "LANG"]
-            .iter()
-            .find_map(|name| self.vars.scalar(name).filter(|value| !value.is_empty()))
-            .is_some_and(|locale| {
-                let name = locale.split(|&b| b == b'@').next().unwrap_or_default();
-                let codeset = name
-                    .iter()
-                    .position(|&b| b == b'.')
-                    .map_or(&[][..], |dot| &name[dot + 1..]);
-                let folded: Vec<u8> = codeset
-                    .iter()
-                    .filter(|b| b.is_ascii_alphanumeric())
-                    .map(u8::to_ascii_lowercase)
-                    .collect();
-                folded == b"utf8"
-            })
+        self.vars.utf8()
     }
 }

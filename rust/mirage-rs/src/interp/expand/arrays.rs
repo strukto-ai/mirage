@@ -3,7 +3,7 @@
 
 use super::braces::{bad_transformation, write_refusal};
 use super::{
-    Braces, Chunk, Expander, Host, Operands, PATTERN_OPS, bad_subscript, discard, ifs_joiner, join,
+    Braces, Chunk, Expander, Host, Operands, PATTERN_OPS, bad_subscript, discard, ifs_joiner,
     splat, trim_start, within,
 };
 
@@ -252,26 +252,64 @@ impl<H: Host> Expander<'_, H> {
         out
     }
 
-    /// The key a subscript spells: a purely literal one as typed, spaces
-    /// included (`m[ k ]`), anything carrying an expansion or quoting
-    /// expanded node by node.
+    /// The key a subscript spells, or the text its index evaluates: one
+    /// with no expansion, quote or escape as typed, spaces included
+    /// (`m[ k ]`); any other expanded where it stands, the text between
+    /// its parts kept (`m[$k  $k]`, `a[$i + 1]`). A subscript a reference
+    /// named (`r='m[$k]'; ${!r}`) reads as typed in `${x[...]}`.
     pub(super) async fn subscript_key(&mut self, p: &Braces) -> Result<Vec<u8>, Fault> {
-        let literal = p
-            .subscript_nodes
-            .iter()
-            .all(|&n| matches!(self.kind(n), "word" | "number"));
-        if p.subscript_nodes.is_empty() || literal {
-            return Ok(p.subscript.clone().unwrap_or_default());
-        }
-        let mut key = Vec::new();
         let subscript = p.subscript.clone().unwrap_or_default();
-        for &n in &p.subscript_nodes {
-            match self.chunks(n, false).await {
-                Ok(chunks) => key.extend(join(&chunks)),
-                Err(fault) => return Err(within(fault, &subscript, true)),
+        if !subscript.iter().any(|b| b"$`'\"\\".contains(b)) {
+            return Ok(subscript);
+        }
+        let expanded = if p.subscript_nodes.is_empty() {
+            Box::pin(self.subscript_text(&subscript)).await
+        } else {
+            let (start, stop) = p.subscript_span;
+            self.substituted(start, stop, p.subscript_nodes.clone())
+                .await
+        };
+        expanded.map_err(|fault| within(fault, &subscript, true))
+    }
+
+    /// A subscript given as text (`unset 'a[$i]'`, `r='m[$k]'`),
+    /// expanded as one typed in `${x[...]}` is.
+    async fn subscript_text(&mut self, text: &[u8]) -> Result<Vec<u8>, Fault> {
+        let mut source = b"${x[".to_vec();
+        source.extend_from_slice(text);
+        source.extend_from_slice(b"]}");
+        let tree = crate::shell::parse(&source);
+        self.over(&tree).subscript(0).await
+    }
+
+    /// An expander over another tree with this one's shell, host and
+    /// diagnostics, for a text read anew as the line runs.
+    pub(super) fn over<'t>(&'t mut self, tree: &'t crate::shell::Tree) -> Expander<'t, H> {
+        Expander {
+            shell: &mut *self.shell,
+            host: &mut *self.host,
+            tree,
+            diagnostics: &mut *self.diagnostics,
+            room: self.room,
+        }
+    }
+
+    /// The subscript of the first `${x[...]}` at or under `node`, expanded
+    /// as its key or index text is; a source that reads as none, or reads
+    /// it with no parts, is the text between `${x[` and `]}` as typed.
+    pub async fn subscript(&mut self, node: usize) -> Result<Vec<u8>, Fault> {
+        let found = (node..self.tree.nodes.len()).find(|&n| self.kind(n) == "expansion");
+        if let Some(p) = found.map(|n| self.parse_braces(n)) {
+            if p.name.as_deref() == Some(b"x") && !p.subscript_nodes.is_empty() {
+                let (start, stop) = p.subscript_span;
+                return self.substituted(start, stop, p.subscript_nodes).await;
             }
         }
-        Ok(key)
+        let source = &self.tree.source;
+        Ok(source
+            .get(4..source.len().saturating_sub(2))
+            .unwrap_or_default()
+            .to_vec())
     }
 
     /// An index in the expansion's voice: what it assigns lands first.

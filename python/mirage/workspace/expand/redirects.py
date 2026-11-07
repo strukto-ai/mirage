@@ -14,10 +14,14 @@
 
 from typing import Any, Callable
 
+from mirage.context import voice_name
 from mirage.policy.policies import Policies
+from mirage.shell.bytes import encode_text, utf8_locale
 from mirage.shell.call_stack import CallStack
 from mirage.shell.errors import ExitSignal
+from mirage.shell.parse import parse, syntax_refusal
 from mirage.shell.types import Redirect, RedirectKind
+from mirage.shell.voice import shell_voice
 from mirage.view.types import NamespaceLinks
 from mirage.workspace.evaluation import EvaluationContext
 from mirage.workspace.expand.classify import classify_bare_path
@@ -25,6 +29,8 @@ from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.expand.node import expand_node
 from mirage.workspace.expand.parts import expand_words
 from mirage.workspace.mount import MountRegistry
+from mirage.workspace.session import SessionState
+from mirage.workspace.session.state import visible_env
 
 
 async def expand_redirect(
@@ -96,6 +102,14 @@ async def _expand_target(
             None expands them here.
     """
     session = context.session
+    if r.kind == RedirectKind.HEREDOC and r.expand_vars and r.deferred:
+        return Redirect(
+            fd=r.fd,
+            target=ExitSignal(
+                1, stderr=_failed_body(r.target, *r.deferred, session)
+            ),
+            kind=RedirectKind.UNEXPANDED,
+        )
     if r.kind in (RedirectKind.HEREDOC, RedirectKind.HERESTRING):
         body = r.target
         if r.target_node is not None and r.expand_vars:
@@ -144,4 +158,36 @@ async def _expand_target(
         kind=r.kind,
         append=r.append,
         clobber=r.clobber,
+    )
+
+
+def _failed_body(body: str, at: int, row: int, session: SessionState) -> bytes:
+    """What bash reports as expanding a heredoc's body fails where what it
+    reads only then opens: a ``$( )`` whose commands do not parse or that
+    is left open, its lines counted from the body's, or a ``${`` (named by
+    the whole body) or backtick left open.
+
+    Args:
+        body (str): the heredoc's body.
+        at (int): where in it expanding fails.
+        row (int): the row the body starts on in the line as typed.
+        session (SessionState): the shell expanding it.
+    """
+    rest = body[at:]
+    if rest.startswith("$("):
+        text = rest[2:]
+        head = f"{voice_name(session)}: command substitution: "
+        utf8 = utf8_locale(visible_env(session))
+        refused = syntax_refusal(parse(text), head, row + 1, utf8)
+        if refused is not None:
+            assert isinstance(refused.stderr, bytes)
+            return refused.stderr
+        line = row + 1 + text.count("\n") + (0 if text.endswith("\n") else 1)
+        return encode_text(
+            f"{head}line {line}: unexpected EOF while looking for matching `)'\n"
+        )
+    if rest.startswith("${"):
+        return encode_text(f"{shell_voice()}{body}: bad substitution\n")
+    return encode_text(
+        f'{shell_voice()}bad substitution: no closing "`" in {rest}\n'
     )

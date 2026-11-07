@@ -65,6 +65,9 @@ struct Config {
     argument_count: usize,
     #[serde(default)]
     utf8: bool,
+    /// How the builtin leads a diagnostic (`bash: line 3: `).
+    #[serde(default)]
+    voice: String,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -108,12 +111,15 @@ enum ParseField {
     Width,
     Dot,
     Precision,
+    Length,
     Kind,
 }
 struct Parse {
     start: usize,
     spec: Spec,
     field: ParseField,
+    /// A length modifier (`%ld`) came before the conversion.
+    modified: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -178,10 +184,13 @@ enum Segment {
         byte: u8,
         left: u64,
     },
+    /// `input` quoted from `at`; under a UTF-8 locale (`utf8`) a character
+    /// it prints goes out as it is.
     Quote {
         input: Arc<Input>,
         at: usize,
         style: QuoteStyle,
+        utf8: bool,
     },
 }
 
@@ -238,13 +247,23 @@ impl Segment {
                 *left -= n as u64;
                 *left == 0
             }
-            Self::Quote { input, at, style } => {
+            Self::Quote {
+                input,
+                at,
+                style,
+                utf8,
+            } => {
                 let mut used = 0;
                 while *at < input.len && used + 4 <= budget {
-                    let byte = input.get(*at).expect("quote byte");
                     let before = out.len();
-                    quote_byte(byte, *at, *style, out);
-                    *at += 1;
+                    if let Some(end) = printed(input, *at, *utf8) {
+                        out.extend((*at..end).filter_map(|i| input.get(i)));
+                        *at = end;
+                    } else {
+                        let byte = input.get(*at).expect("quote byte");
+                        quote_byte(byte, *at, *style, out);
+                        *at += 1;
+                    }
                     used += out.len() - before;
                 }
                 *at == input.len
@@ -299,13 +318,49 @@ impl Printf {
         if self.config.mode == Mode::Builtin {
             self.pending.push_back(Event {
                 stderr: true,
-                segment: Segment::bytes(b"bash: ".to_vec()),
+                segment: Segment::bytes(self.config.voice.clone().into_bytes()),
             });
         }
         self.pending.extend(parts.into_iter().map(|segment| Event {
             stderr: true,
             segment,
         }));
+    }
+
+    /// Refuse the directive at `start` whose conversion is `byte`, None at
+    /// the format's end, and stop: the builtin names the byte, or the
+    /// directive when the format ends inside it, and the program the
+    /// directive through the byte.
+    fn bad_conversion(&mut self, start: usize, byte: Option<u8>) -> Work {
+        let format = self.inputs[&0].clone();
+        let end = if byte.is_some() {
+            self.format_at + 1
+        } else {
+            format.len
+        };
+        let directive = Segment::Raw {
+            input: format,
+            at: start,
+            end,
+        };
+        let parts = match (self.config.mode, byte) {
+            (Mode::Program, _) => vec![
+                Segment::bytes(b"printf: ".to_vec()),
+                directive,
+                Segment::bytes(b": invalid conversion specification\n".to_vec()),
+            ],
+            (Mode::Builtin, Some(b)) => vec![Segment::bytes(
+                [&b"printf: `"[..], &[b], b"': invalid format character\n"].concat(),
+            )],
+            (Mode::Builtin, None) => vec![
+                Segment::bytes(b"printf: `".to_vec()),
+                directive,
+                Segment::bytes(b"': missing format character\n".to_vec()),
+            ],
+        };
+        self.diagnostic(parts);
+        self.failed = true;
+        Work::End(End::Refusal)
     }
 
     fn warning(&mut self, text: impl Into<Vec<u8>>) {
@@ -335,6 +390,7 @@ impl Printf {
                     input: raw,
                     at: 0,
                     style: QuoteStyle::Diagnostic,
+                    utf8: false,
                 },
                 Segment::bytes(format!("': {problem}\n").into_bytes()),
             ]);
@@ -484,6 +540,7 @@ impl Printf {
                                 input: raw.expect("present star argument"),
                                 at: 0,
                                 style: QuoteStyle::Diagnostic,
+                                utf8: false,
                             },
                             Segment::bytes(b"'\n".to_vec()),
                         ]);
@@ -639,6 +696,7 @@ impl Printf {
                                     input: raw,
                                     at: 0,
                                     style: QuoteStyle::Diagnostic,
+                                    utf8: false,
                                 },
                                 Segment::bytes(b"'\n".to_vec()),
                             ]);
@@ -653,6 +711,7 @@ impl Printf {
                         start,
                         spec: Spec::default(),
                         field: ParseField::Flags,
+                        modified: false,
                     })
                 } else if byte == b'\\' {
                     let (bytes, next, stop, warning) = escape(&format, self.format_at, false);
@@ -710,11 +769,11 @@ impl Printf {
                         parse.spec.precision = Field::Count(0);
                         parse.field = ParseField::Precision;
                     }
-                    ParseField::Dot => parse.field = ParseField::Kind,
+                    ParseField::Dot => parse.field = ParseField::Length,
                     ParseField::Precision if byte == Some(b'*') => {
                         parse.spec.precision = Field::Argument;
                         self.format_at += 1;
-                        parse.field = ParseField::Kind;
+                        parse.field = ParseField::Length;
                     }
                     ParseField::Precision if byte.is_some_and(|b| b.is_ascii_digit()) => {
                         let n = parse.spec.precision().unwrap_or(0);
@@ -724,9 +783,23 @@ impl Printf {
                         );
                         self.format_at += 1;
                     }
-                    ParseField::Precision => parse.field = ParseField::Kind,
+                    ParseField::Precision => parse.field = ParseField::Length,
+                    ParseField::Length if byte.is_some_and(|b| b"hlLjtz".contains(&b)) => {
+                        parse.modified = true;
+                        self.format_at += 1;
+                    }
+                    ParseField::Length => parse.field = ParseField::Kind,
                     ParseField::Kind => {
-                        if let Some(b) = byte.filter(|b| b"sdiouxXeEfFgGaAcbq%".contains(b)) {
+                        // Only a `%` right after the one it closes is a
+                        // literal; the program takes no length on `%b` or
+                        // `%q`, where the builtin ignores one anywhere.
+                        let literal = byte == Some(b'%') && self.format_at == parse.start + 1;
+                        let sized = self.config.mode == Mode::Program && parse.modified;
+                        if let Some(b) = byte.filter(|b| {
+                            literal
+                                || (b"sdiouxXeEfFgGaAcbq".contains(b)
+                                    && !(sized && b"bq".contains(b)))
+                        }) {
                             self.format_at += 1;
                             parse.spec.kind = b;
                             if b == b'%' {
@@ -735,9 +808,7 @@ impl Printf {
                             }
                             return Work::Evaluate(parse.spec);
                         }
-                        self.format_at = parse.start + 1;
-                        self.output(Segment::bytes(b"%".to_vec()));
-                        return Work::Format;
+                        return self.bad_conversion(parse.start, byte);
                     }
                 }
                 Work::Parse(parse)
@@ -799,6 +870,7 @@ impl Printf {
                                 } else {
                                     QuoteStyle::Shell
                                 },
+                                utf8: self.config.utf8,
                             });
                             if ansi {
                                 self.output(Segment::bytes(b"'".to_vec()));
@@ -814,7 +886,12 @@ impl Printf {
                     }
                     return self.escaped_output(&spec, raw, at, expanded_len, false);
                 }
-                if spec.kind == b'q' {
+                if let Some(end) = printed(&raw, at, self.config.utf8).filter(|_| spec.kind == b'q')
+                {
+                    plain_len += (end - at) as u64;
+                    ansi_len += (end - at) as u64;
+                    at = end;
+                } else if spec.kind == b'q' {
                     let b = raw.get(at).expect("text");
                     ansi |= !(0x20..0x7f).contains(&b);
                     let mut bytes = Vec::new();
@@ -942,6 +1019,16 @@ impl Stream for Printf {
     fn take_stderr(&mut self, err: &mut Vec<u8>) {
         err.append(&mut self.stderr);
     }
+}
+
+/// Past the character past ASCII at `at` that a UTF-8 locale (`utf8`)
+/// prints, which `%q` leaves as it is; None for any other byte.
+fn printed(raw: &Input, at: usize, utf8: bool) -> Option<usize> {
+    if !utf8 || raw.get(at)? < 0x80 {
+        return None;
+    }
+    let (code, end) = character(raw, at, true);
+    (end > at + 1 && char::from_u32(code).is_some_and(crate::interp::quote::prints)).then_some(end)
 }
 
 fn character(raw: &Input, at: usize, utf8: bool) -> (u32, usize) {

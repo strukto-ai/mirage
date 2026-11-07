@@ -56,6 +56,27 @@ export function sourceRow(node: TSNodeLike, end = false): number {
 }
 
 /**
+ * The row bash numbers `node` by, `$LINENO` and a diagnostic's `line N`: a
+ * simple command's is where the token after its first element ends, which
+ * bash has read by the time it makes the command (a redirect's operator, the
+ * element itself when none follows); any other node's is the row it starts
+ * on. Mirrors Python's line_row.
+ */
+export function lineRow(node: TSNodeLike): number {
+  const [first, second] = node.children
+  if (node.type !== NT.COMMAND || first === undefined) return sourceRow(node)
+  let after = second ?? first
+  if (
+    after.type === NT.FILE_REDIRECT ||
+    after.type === NT.HEREDOC_REDIRECT ||
+    after.type === NT.HERESTRING_REDIRECT
+  ) {
+    after = after.children[0] ?? after
+  }
+  return sourceRow(after, true)
+}
+
+/**
  * The row the shell began reading `node`'s command on. bash reads a whole
  * line before running any of it, and a complete command spanning lines
  * whole, with the rest of the line it ends on: a command after a `;`, or
@@ -521,6 +542,7 @@ function parseFileRedirect(child: TSNodeLike): Redirect {
       targetNode,
       kind: RedirectKind.HEREDOC,
       expandVars: !child.heredoc.quoted,
+      deferred: child.heredoc.deferred,
     })
   }
   // `>&word` with a word rather than a number is bash's other spelling

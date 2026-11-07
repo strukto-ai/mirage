@@ -12,6 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
+import { encodeText } from '../../../../shell/bytes.ts'
 import { shellVoice } from '../../../../shell/voice.ts'
 import type { RedirectResult } from '../../../../context/session_context.ts'
 import { PolicyDenied } from '../../../../policy/errors.ts'
@@ -32,11 +33,12 @@ import {
   visibleArrays,
   visibleAssocs,
 } from '../../../session/state.ts'
-import { fail, isValidName, readonlyLine, refusal, requireView } from '../shared.ts'
+import { fail, isValidName, ok, readonlyLine, refusal, requireView } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 import { SUBSCRIPT_RE } from './constants.ts'
 import {
   declarationResult,
+  declareLine,
   dropReference,
   heldValue,
   identifierRefusal,
@@ -93,6 +95,15 @@ export async function handleLocal(
     // globally and exited 0, which is the silent-accept this whole tier
     // exists to remove.
     return fail('local', `${shellVoice()}local: can only be used in a function\n`)
+  }
+  if (decl.cmd === 'local' && assignments.length === 0) {
+    // A bare `local`, whatever its letters, lists the running function's
+    // locals as `declare -p` prints them.
+    const listed = session.vars.shell.locals().map((name) => declareLine(session, name))
+    return ok(
+      'local',
+      encodeText(listed.map((line) => (line === null ? '' : `${line}\n`)).join('')),
+    )
   }
   const view = requireView(state)
   const restore = decl.globalScope

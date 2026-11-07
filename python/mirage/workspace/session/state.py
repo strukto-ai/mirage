@@ -14,7 +14,7 @@
 
 import errno
 import functools
-from collections.abc import Awaitable, Callable, Iterator, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from typing import ParamSpec
 
 from mirage._rs import ShellTask
@@ -448,7 +448,10 @@ _ELEMENT_STATUS = ("ok", "denied", "readonly", "subscript")
 
 
 async def element_is_set(
-    session: SessionState, ref: str, policies: Policies | None = None
+    session: SessionState,
+    ref: str,
+    policies: Policies | None = None,
+    expanded: bool = False,
 ) -> bool:
     """Whether a ``name`` / ``name[sub]`` reference names a set value,
     what ``test -v`` asks: a bare name over an array checks element 0,
@@ -460,6 +463,8 @@ async def element_is_set(
         ref (str): the reference as the operand spelled it.
         policies (Policies | None): the policies the subscript's
             assignments clear; None outside a workspace.
+        expanded (bool): the subscript was expanded already, so an
+            associative key is taken verbatim, its quotes its own.
 
     Raises:
         ArithError: the subscript does not evaluate.
@@ -467,7 +472,9 @@ async def element_is_set(
     shell = session.vars.shell
     return bool(
         await run_write(
-            session, policies, lambda heard: shell.is_set(ref, listens=heard)
+            session,
+            policies,
+            lambda heard: shell.is_set(ref, expanded=expanded, listens=heard),
         )
     )
 
@@ -767,6 +774,18 @@ def seed_var(session: SessionState, name: str, value: ShellValue) -> None:
     """
     raw, assoc = raw_value(value)
     session.vars.shell.seed(name, raw, assoc)
+
+
+def bind_last_word(session: SessionState, words: Sequence[str]) -> None:
+    """Set ``$_`` as bash does once a simple command has run in the
+    shell: its last word after expansion, which is its name when it took
+    no argument, and empty for a line that only assigned or redirected.
+
+    Args:
+        session (SessionState): the session the command ran in.
+        words (Sequence[str]): the command's expanded words, name first.
+    """
+    seed_var(session, "_", words[-1] if words else "")
 
 
 def set_attr(
