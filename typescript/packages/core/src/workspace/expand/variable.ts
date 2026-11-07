@@ -188,8 +188,6 @@ export function lookupVar(
     const drawn = nextRandom(session, env[RANDOM])
     if (drawn !== null) return String(drawn)
   }
-  const dynamic = session.dynamicValue(name)
-  if (dynamic !== null) return dynamic
   // A name reference resolves to its target before the store is read.
   name = deref(session, name) || name
   const fromArray = visibleArrays(session)[name]
@@ -201,6 +199,8 @@ export function lookupVar(
     // `$m` on an associative array is `${m["0"]}`, the literal key.
     return fromAssoc['0'] ?? ''
   }
+  const dynamic = session.dynamicValue(name)
+  if (dynamic !== null) return dynamic
   // $PWD is deliberately absent here: `cd` writes it into the env like any
   // exported variable, so it can be assigned, unset and printed by `env`,
   // exactly as bash allows. Resolving it here instead would make `PWD=/x`

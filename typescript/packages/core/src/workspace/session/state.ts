@@ -1117,6 +1117,9 @@ export function shadowLocal(
   if (name === RANDOM) {
     session.localRandom.push(session.randomSeed)
     session.randomSeed = RANDOM_UNSET
+  } else if (name === LINENO || name === BASHPID) {
+    session.localPlain.push(session.plainSpecials)
+    session.plainSpecials = new Set([...session.plainSpecials, name])
   }
 }
 
@@ -1138,6 +1141,9 @@ export function restoreLocals(session: SessionState, locals: Map<string, ShellVa
     }
   }
   if (locals.has(RANDOM)) session.randomSeed = session.localRandom.pop() ?? null
+  for (const name of [LINENO, BASHPID]) {
+    if (locals.has(name)) session.plainSpecials = session.localPlain.pop() ?? new Set()
+  }
 }
 
 /**

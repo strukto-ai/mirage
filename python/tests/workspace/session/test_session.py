@@ -42,6 +42,7 @@ TRANSIENT_FIELDS = (
     "_local_vars",
     "_local_frames",
     "_local_random",
+    "_local_plain",
     "_reached",
     "_prefix_saves",
     "_trap_status",

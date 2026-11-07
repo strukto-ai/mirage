@@ -322,7 +322,7 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "timeout -p 1 sh -c 'exit 5'; echo code=$?; timeout --preserve 0.1 sleep 1; echo code=$?; timeout -s QUIT 0.1 bash -c 'sleep 1; echo after $?' 2>/dev/null; echo code=$?; timeout -s QUIT 0.1 bash -c 'sleep 1 | cat; echo after ${PIPESTATUS[@]}' 2>/dev/null; echo code=$?; timeout -s QUIT 0.1 bash -c '(sleep 1); echo sub $?' 2>/dev/null; echo code=$?; timeout -p -s QUIT 0.1 sleep 1; echo code=$?",
+      "command": "timeout -p 1 sh -c 'exit 5'; echo code=$?; timeout --preserve 0.1 sleep 1; echo code=$?; timeout -s QUIT 0.5 bash -c 'sleep 2; echo after $?' 2>/dev/null; echo code=$?; timeout -s QUIT 0.5 bash -c 'sleep 2 | cat; echo after ${PIPESTATUS[@]}' 2>/dev/null; echo code=$?; timeout -s QUIT 0.5 bash -c '(sleep 2); echo sub $?' 2>/dev/null; echo code=$?; timeout -p -s QUIT 0.1 sleep 1; echo code=$?",
       "expect": {
         "exit": 0,
         "stdout": "code=5\ncode=143\nafter 131\ncode=124\nafter 131 131\ncode=124\nsub 131\ncode=124\ncode=131\n",

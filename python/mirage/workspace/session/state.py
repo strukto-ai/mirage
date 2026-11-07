@@ -1482,7 +1482,9 @@ def shadow_local(
     ``RANDOM`` parks its generator marker too: a local ``RANDOM`` is an
     ordinary variable for the function's extent (``local RANDOM=5; echo
     $RANDOM`` prints 5, and ``local RANDOM=(7)`` leaves the caller's
-    generator alone), and ``restore_locals`` hands the marker back.
+    generator alone), and ``restore_locals`` hands the marker back. A
+    local ``LINENO`` or ``BASHPID`` is ordinary the same way, its
+    ``unset`` the function's own.
 
     Args:
         session (SessionState): the session the function runs in.
@@ -1495,6 +1497,9 @@ def shadow_local(
     if name == RANDOM:
         session._local_random.append(session._random_seed)
         session._random_seed = RANDOM_UNSET
+    elif name in (LINENO, BASHPID):
+        session._local_plain.append(session._plain_specials)
+        session._plain_specials = session._plain_specials | {name}
 
 
 def restore_locals(
@@ -1518,6 +1523,8 @@ def restore_locals(
             session.vars[key] = old
     if RANDOM in local_vars:
         session._random_seed = session._local_random.pop()
+    for _ in (name for name in (LINENO, BASHPID) if name in local_vars):
+        session._plain_specials = session._local_plain.pop()
 
 
 def seed_var(session: SessionState, name: str, value: ShellValue) -> None:

@@ -262,9 +262,12 @@ export async function handleBash(
   let io: IOResult
   if (shell === null || jobTable === undefined) {
     // Run in place of the program bash replaces (`bash -c ... &`), its pid
-    // the shell's `$$`.
+    // the shell's `$$`, whose own subshells and programs it forks.
     const runner = currentCaller().process
-    if (runner !== null) session.shellPid = runner.info.pid
+    if (runner !== null) {
+      session.shellPid = runner.info.pid
+      if (jobTable !== undefined) context.frame.shell = runner
+    }
     io = await run()
   } else {
     io = await inProcess(jobTable, context, caller, parentPid, label, run)

@@ -444,6 +444,11 @@ class SessionState:
     # name, innermost last: a local `RANDOM` is an ordinary variable for
     # the function's extent, and the generator resumes when it returns.
     _local_random: list[str | None] = field(default_factory=list, repr=False)
+    # The caller's `_plain_specials` for every frame that makes `LINENO`
+    # or `BASHPID` local, innermost last.
+    _local_plain: list[frozenset[str]] = field(
+        default_factory=list, repr=False
+    )
     # The names a running `declare -g` has put at global scope
     # (`reach_global`), each with its frame and the function's local it
     # set aside: arithmetic in the declaration still reads that local.
@@ -1067,6 +1072,7 @@ class SessionState:
             for frame in self._local_frames
         ]
         child._local_random = list(self._local_random)
+        child._local_plain = list(self._local_plain)
         if child._random_seed != RANDOM_UNSET:
             child._draw_afresh()
         return child

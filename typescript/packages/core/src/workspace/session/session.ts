@@ -556,6 +556,9 @@ export class SessionState {
   // innermost last: a local `RANDOM` is an ordinary variable for the
   // function's extent, and the generator resumes when it returns.
   localRandom: (string | null)[] = []
+  // The caller's `plainSpecials` for every frame that makes `LINENO` or
+  // `BASHPID` local, innermost last.
+  localPlain: ReadonlySet<string>[] = []
   mountModes: ReadonlyMap<string, MountMode> | null
   visibility: Visibility
   hideReasons: readonly HideReason[]
@@ -749,6 +752,7 @@ export class SessionState {
       frame === this.localVars && child.localVars !== null ? child.localVars : copyLocals(frame),
     )
     child.localRandom = [...this.localRandom]
+    child.localPlain = [...this.localPlain]
     if (child.randomSeed !== RANDOM_UNSET) child.drawAfresh()
     return child
   }

@@ -278,10 +278,12 @@ async def handle_bash(
 
     if shell is None or job_table is None:
         # Run in place of the program bash replaces (`bash -c ... &`), its
-        # pid the shell's `$$`.
+        # pid the shell's `$$`, whose own subshells and programs it forks.
         runner = current_caller().process
         if runner is not None:
             session.shell_pid = runner.info.pid
+            if job_table is not None:
+                context.frame.shell = runner
         io = await run()
     else:
         io = await _in_process(

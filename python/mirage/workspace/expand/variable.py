@@ -69,6 +69,7 @@ from mirage.workspace.session.elements import assign_element, landed_arith
 from mirage.workspace.session.shell_dirs import home_dir
 from mirage.workspace.session.state import (
     RandomReader,
+    deref,
     nameref_target,
     next_random,
     positional_params,
@@ -333,9 +334,6 @@ def _lookup_var(
         drawn = next_random(session, env.get(RANDOM))
         if drawn is not None:
             return str(drawn)
-    dynamic = session.dynamic_value(var)
-    if dynamic is not None:
-        return dynamic
     arrays = visible_arrays(session)
     if var in arrays:
         return array_get(arrays[var], 0)
@@ -343,6 +341,9 @@ def _lookup_var(
     if var in assocs:
         # `$m` on an associative array is `${m["0"]}`, the literal key.
         return assocs[var].get("0", "")
+    dynamic = session.dynamic_value(deref(session, var) or var)
+    if dynamic is not None:
+        return dynamic
     # `$PWD` is deliberately absent here: `cd` writes it into the env like
     # any exported variable, so it can be assigned, unset and printed by
     # `env`, exactly as bash allows. Resolving it here instead would make
