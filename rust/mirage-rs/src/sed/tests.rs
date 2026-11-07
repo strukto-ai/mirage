@@ -1318,6 +1318,11 @@ fn an_edit_replaces_a_link_unless_it_follows_it() {
     );
     assert_eq!(run.links["/l"], "f");
     assert!(!run.files.contains_key("/l"));
+    // An edit that fails leaves the link it would have replaced.
+    let run = edit("s//X/", &["/l"], host(), json!({"suffix": ".bak"}));
+    assert_eq!(run.status, 1);
+    assert_eq!(run.links["/l"], "f");
+    assert!(!run.files.contains_key("/l") && !run.links.contains_key("/l.bak"));
 }
 
 fn follow(script: &str, operands: &[&str], host: Host) -> Run {

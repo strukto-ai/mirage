@@ -187,6 +187,9 @@ pub(super) struct Machine {
     edit_link: Option<bool>,
     /// Where the file -i edits now is kept before the edit lands.
     edit_backup: Option<Vec<u8>>,
+    /// The spool an edit that replaces a link fills: the link stays until
+    /// the edit is done, so an edit that fails leaves it be.
+    edit_spool: Option<u32>,
     edited: HashSet<Vec<u8>>,
     main_missing: bool,
     stdout_missing: bool,
@@ -602,6 +605,7 @@ impl Machine {
             edit_reader: None,
             edit_link: None,
             edit_backup: None,
+            edit_spool: None,
             edited: HashSet::new(),
             main_missing: false,
             stdout_missing: false,
@@ -997,24 +1001,13 @@ impl Machine {
                 self.edit_path = Some(path.clone());
                 self.edit_started = false;
                 self.edit.clear();
-                let backup = self
+                self.edit_backup = self
                     .opts
                     .suffix
                     .as_deref()
                     .map(|suffix| backup_name(&name, suffix))
                     .filter(|backup| resolve(backup, &self.opts.cwd) != path);
-                // A link the edit replaces moves to its backup as itself,
-                // or goes, so the edit lands in a file of its own name.
-                let replaced = linked && !self.opts.follow;
-                self.edit_backup = backup.clone().filter(|_| !replaced);
-                match backup.filter(|_| replaced) {
-                    Some(to) => self.io.push(Request::Rename {
-                        from: path.clone(),
-                        to,
-                    }),
-                    None if replaced => self.io.push(Request::Unlink { path: path.clone() }),
-                    None => {}
-                }
+                self.edit_spool = (linked && !self.opts.follow).then(|| self.io.fd());
                 // The replacement opens before the edit reads on, so a
                 // refused one is reported first.
                 self.send_edit();
@@ -1032,12 +1025,15 @@ impl Machine {
     #[cold]
     fn end_of_input(&mut self) {
         if self.quit.is_some() && !self.opts.in_place && self.feed.on_stdin() {
-            if let Some(reader) = &mut self.feed.reader {
-                let data = reader.rest();
-                if !data.is_empty() {
-                    self.io.push(Request::Unread { data });
-                }
-            }
+            // Sent even when nothing is left here: the host may hold more
+            // of the chunk it served.
+            let data = self
+                .feed
+                .reader
+                .as_mut()
+                .map(LineReader::rest)
+                .unwrap_or_default();
+            self.io.push(Request::Unread { data });
         }
         self.phase = match &self.edit_path {
             Some(_) => Phase::EditDone {
@@ -1052,6 +1048,13 @@ impl Machine {
         let Some(path) = &self.edit_path else {
             return;
         };
+        if let Some(fd) = self.edit_spool {
+            if !self.edit.is_empty() {
+                let data = std::mem::take(&mut self.edit);
+                self.io.push(Request::Spool { fd, data });
+            }
+            return;
+        }
         let mode = if std::mem::replace(&mut self.edit_started, true) {
             WriteMode::Append
         } else {
@@ -1069,6 +1072,27 @@ impl Machine {
         if !sent {
             if !self.edit.is_empty() || !self.edit_started {
                 self.send_edit();
+            }
+            if let (Some(fd), Some(path)) = (self.edit_spool.take(), self.edit_path.clone()) {
+                // The link moves to its backup as itself, or goes, and the
+                // edit lands in a file of its own name.
+                self.io.push(match self.edit_backup.take() {
+                    Some(to) => Request::Rename {
+                        from: path.clone(),
+                        to,
+                    },
+                    None => Request::Unlink { path: path.clone() },
+                });
+                self.io.push(Request::Write {
+                    path: path.clone(),
+                    mode: WriteMode::Replace,
+                    data: Vec::new(),
+                });
+                self.io.push(Request::Write {
+                    path,
+                    mode: WriteMode::Spool { fd, skip: 0 },
+                    data: Vec::new(),
+                });
             }
             if let (Some(to), Some(from)) = (self.edit_backup.take(), self.edit_path.clone()) {
                 self.io.push(Request::Copy { from, to });

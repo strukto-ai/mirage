@@ -149,15 +149,16 @@ describe('StreamHost', () => {
   })
 
   it.each([
-    [true, false, 'left|tail'],
-    [false, true, 'left|tail'],
-    [false, false, ''],
+    [true, false, 'left', 'left|tail'],
+    [false, true, 'left', 'left|tail'],
+    [false, false, 'left', ''],
+    [true, false, '', '|tail'],
   ])(
-    'gives stdin back what the stream left (unbuffered %s, seekable %s)',
-    async (unbuffered, seekable, rest) => {
+    'gives stdin back what the stream left (unbuffered %s, seekable %s, left %j)',
+    async (unbuffered, seekable, left, rest) => {
       // A buffer an earlier reader left comes whole, longer than a piece:
       // the piece goes to the stream, and what it hands back comes before
-      // the rest of that buffer.
+      // the rest of that buffer, even when the stream itself left nothing.
       const shared = new SharedInput(parts(), null, seekable)
       shared.lines.unread(ENC.encode('x'.repeat(CHUNK_SIZE) + '|tail'))
       const ctx = { stdin: shared, flags: {}, cwd: PathSpec.fromStrPath('/') } as unknown as Context
@@ -172,7 +173,7 @@ describe('StreamHost', () => {
       )
       const first = await h.serve({ op: 'read', fd: 1, path: '-' }, new Uint8Array())
       expect(first.data).toEqual(ENC.encode('x'.repeat(CHUNK_SIZE)))
-      expect((await h.serve({ op: 'unread' }, ENC.encode('left'))).reply).toEqual({})
+      expect((await h.serve({ op: 'unread' }, ENC.encode(left))).reply).toEqual({})
       expect(new TextDecoder().decode(await materialize(shared))).toBe(rest)
     },
   )

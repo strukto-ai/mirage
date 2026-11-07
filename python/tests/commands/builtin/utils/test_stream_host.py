@@ -217,22 +217,23 @@ async def test_an_error_reply_carries_its_words_as_bytes() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("unbuffered", "seekable", "rest"),
+    ("unbuffered", "seekable", "left", "rest"),
     [
-        (True, False, b"left|tail"),
-        (False, True, b"left|tail"),
-        (False, False, b""),
+        (True, False, b"left", b"left|tail"),
+        (False, True, b"left", b"left|tail"),
+        (False, False, b"left", b""),
+        (True, False, b"", b"|tail"),
     ],
 )
 async def test_standard_input_gets_back_what_the_stream_left(
-    unbuffered: bool, seekable: bool, rest: bytes
+    unbuffered: bool, seekable: bool, left: bytes, rest: bytes
 ) -> None:
     async def stream(path: PathSpec) -> AsyncIterator[bytes]:
         yield b""
 
     # A buffer an earlier reader left comes whole, longer than a piece: the
     # piece goes to the stream, and what it hands back comes before the
-    # rest of that buffer.
+    # rest of that buffer, even when the stream itself left nothing.
     shared = SharedInput(_chunks(), seekable=seekable)
     shared.lines.unread(b"x" * CHUNK_SIZE + b"|tail")
     host = StreamHost(
@@ -240,7 +241,7 @@ async def test_standard_input_gets_back_what_the_stream_left(
     )
     first = await host.serve({"op": "read", "fd": 1, "path": "-"}, b"")
     assert first.data == b"x" * CHUNK_SIZE
-    assert (await host.serve({"op": "unread"}, b"left")).reply == {}
+    assert (await host.serve({"op": "unread"}, left)).reply == {}
     assert await materialize(shared) == rest
 
 

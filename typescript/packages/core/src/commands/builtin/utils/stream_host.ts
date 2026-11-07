@@ -15,7 +15,7 @@
 import type { util } from 'zod'
 import { currentCaller } from '../../../context/session_context.ts'
 import { classify } from '../../../errors/classify.ts'
-import { eisdir, enoent, exdev, isWalkError, strerrorOf } from '../../../errors/fs.ts'
+import { eisdir, eloop, enoent, exdev, isWalkError, strerrorOf } from '../../../errors/fs.ts'
 import { fsErrorLine } from '../../../errors/render.ts'
 import { SharedInput } from '../../../io/async_line_iterator.ts'
 import { CHUNK_SIZE, chunks } from '../../../io/cooperative.ts'
@@ -28,11 +28,12 @@ import { byteView, textView } from '../../../shell/bytes.ts'
 import { shellJoin } from '../../../shell/join.ts'
 import { FileType, LINK_TARGET_KEY, PathSpec, type FileStat } from '../../../types.ts'
 import { concat } from '../../../utils/bytes.ts'
+import { CycleError } from '../../../utils/path.ts'
 import type { Context } from '../../config.ts'
 import { quoteText } from '../../quote.ts'
 import { callerStream } from '../generic_bind/dispatch.ts'
 import type { DispatchFn } from '../../../runtime/types.ts'
-import { dispatchOf, linksOf, mountsOf } from './links.ts'
+import { dispatchOf, linkLocation, linksOf, mountsOf } from './links.ts'
 import { isStdin, resolveSource } from './stream.ts'
 
 const STDIN_NAMES: ReadonlySet<string> = new Set(['-', '/dev/stdin'])
@@ -457,16 +458,31 @@ export class StreamHost {
   }
 
   /**
+   * Where a name stands as lstat reaches it: every link above its final name
+   * followed, the name itself kept.
+   */
+  private where(path: PathSpec): string {
+    const links = linksOf(this.ctx)
+    if (links === undefined) return path.virtual
+    try {
+      return linkLocation(links, path.virtual)
+    } catch (error) {
+      if (error instanceof CycleError) throw eloop(path)
+      throw error
+    }
+  }
+
+  /**
    * What a link holds, or that the name is no link; a name nothing stands at
-   * answers why. The name itself is never followed.
+   * answers why. The name itself is never followed, the links above it are.
    */
   private async readlink(name: string): Promise<Served> {
     const dispatch = dispatchOf(this.ctx)
     if (dispatch === undefined) return { reply: { fatal: 'file output requires a workspace' } }
     const path = PathSpec.fromStrPath(textView(name), undefined, this.ctx.cwd)
-    const target = linksOf(this.ctx)?.statAt(path.virtual)?.extra[LINK_TARGET_KEY]
-    if (typeof target === 'string') return { reply: { target: byteView(target) } }
     try {
+      const target = linksOf(this.ctx)?.statAt(this.where(path))?.extra[LINK_TARGET_KEY]
+      if (typeof target === 'string') return { reply: { target: byteView(target) } }
       const [found] = await dispatch('stat', path)
       if (found === null || found === undefined) throw enoent(path)
     } catch (error) {
@@ -497,18 +513,20 @@ export class StreamHost {
 
   /**
    * Keep file `src` under `dst` as rename(2) would move it there: in place of
-   * a file standing at `dst`, refused onto a directory or another mount, its
-   * permission bits kept. The store copies the bytes where it can; otherwise
-   * they stream through.
+   * a file or link standing at `dst`, refused onto a directory or another
+   * mount, its permission bits kept, and not at all where `dst` names `src`
+   * itself. The store copies the bytes where it can; otherwise they stream
+   * through.
    */
   private async keep(dispatch: DispatchFn, src: PathSpec, dst: PathSpec): Promise<void> {
     const mounts = mountsOf(this.ctx)
     if (mounts !== undefined && mounts.rootOf(src.virtual) !== mounts.rootOf(dst.virtual)) {
       throw exdev(src)
     }
+    if (this.where(src) === this.where(dst)) return
     let standing: unknown
     try {
-      ;[standing] = await dispatch('stat', dst)
+      ;[standing] = await dispatch('stat', dst, [], { nofollow: true })
     } catch (error) {
       if (classify(error) !== 'ENOENT') throw error
       standing = null
@@ -542,8 +560,9 @@ export class StreamHost {
   private unread(data: Uint8Array): void {
     const shared = this.shared
     if (shared === undefined || !(this.unbuffered || shared.seekable)) return
-    shared.lines.unread(concat([data, this.left]))
+    const rest = concat([data, this.left])
     this.left = new Uint8Array()
+    if (rest.length > 0) shared.lines.unread(rest)
   }
 
   /**

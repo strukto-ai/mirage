@@ -18,12 +18,13 @@ from contextlib import aclosing
 from functools import partial
 
 from mirage.commands.builtin.generic_bind.dispatch import caller_stream
+from mirage.commands.builtin.utils.links import link_location
 from mirage.commands.builtin.utils.stream import is_stdin, resolve_source
 from mirage.commands.quote import quote_text
 from mirage.context.session_context import current_caller
 from mirage.errors.classify import classify
 from mirage.errors.constants import FS_ERRORS, WALK_ERRORS
-from mirage.errors.fs import eisdir, enoent, exdev, strerror_of
+from mirage.errors.fs import eisdir, eloop, enoent, exdev, strerror_of
 from mirage.errors.posix import posix_phrase
 from mirage.errors.render import fs_error_line
 from mirage.errors.types import FsCondition, OperationNotSupportedError
@@ -45,6 +46,7 @@ from mirage.types import (
     PathSpec,
     ReadStreamFn,
 )
+from mirage.utils.path import CycleError
 from mirage.view.types import LinkView, MountView
 
 logger = logging.getLogger(__name__)
@@ -410,17 +412,29 @@ class StreamHost:
         kind = "dir" if found.type == FileType.DIRECTORY else "file"
         return Served({"kind": kind})
 
+    def _where(self, path: PathSpec) -> str:
+        """Where a name stands as lstat reaches it: every link above its
+        final name followed, the name itself kept."""
+        if self.links is None:
+            return path.virtual
+        try:
+            return link_location(self.links, path.virtual)
+        except CycleError:
+            raise eloop(path) from None
+
     async def _readlink(self, name: str) -> Served:
         """What a link holds, or that the name is no link; a name nothing
-        stands at answers why. The name itself is never followed."""
+        stands at answers why. The name itself is never followed, the
+        links above it are."""
         if self.dispatch is None:
             return Served({"fatal": "file output requires a workspace"})
         path = PathSpec.from_str_path(text_view(name), cwd=self.cwd.virtual)
-        link = None if self.links is None else self.links.stat_at(path.virtual)
-        target = None if link is None else link.extra.get(LINK_TARGET_KEY)
-        if isinstance(target, str):
-            return Served({"target": byte_view(target)})
         try:
+            where = self._where(path)
+            link = None if self.links is None else self.links.stat_at(where)
+            target = None if link is None else link.extra.get(LINK_TARGET_KEY)
+            if isinstance(target, str):
+                return Served({"target": byte_view(target)})
             found, _ = await self.dispatch("stat", path)
             if found is None:
                 raise enoent(path)
@@ -446,16 +460,19 @@ class StreamHost:
 
     async def _keep(self, src: PathSpec, dst: PathSpec) -> None:
         """Keep file ``src`` under ``dst`` as rename(2) would move it
-        there: in place of a file standing at ``dst``, refused onto a
-        directory or another mount, its permission bits kept. The store
-        copies the bytes where it can; otherwise they stream through."""
+        there: in place of a file or link standing at ``dst``, refused onto
+        a directory or another mount, its permission bits kept, and not at
+        all where ``dst`` names ``src`` itself. The store copies the bytes
+        where it can; otherwise they stream through."""
         assert self.dispatch is not None
         if self.mounts is not None and self.mounts.root_of(
             src.virtual
         ) != self.mounts.root_of(dst.virtual):
             raise exdev(src)
+        if self._where(src) == self._where(dst):
+            return
         try:
-            standing, _ = await self.dispatch("stat", dst)
+            standing, _ = await self.dispatch("stat", dst, nofollow=True)
         except FileNotFoundError as exc:
             logger.debug("no file stands at %s: %s", dst.virtual, exc)
             standing = None
@@ -488,8 +505,9 @@ class StreamHost:
         ):
             return
         chunk, offset = self.left
-        self.shared.lines.unread(data + chunk[offset:])
         self.left = (b"", 0)
+        if rest := data + chunk[offset:]:
+            self.shared.lines.unread(rest)
 
     async def _write(
         self, request: Mapping[str, JsonValue], data: bytes
