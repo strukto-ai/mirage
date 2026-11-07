@@ -412,6 +412,11 @@ pub struct Store {
     hidden: Option<Arc<VisibilityMatcher>>,
     ids: Ids,
     held: usize,
+    /// `${PIPESTATUS[@]}`: each stage's status in the last pipeline.
+    pipe_status: Vec<i32>,
+    /// `${FUNCNAME[@]}`: the running functions, innermost first; None
+    /// once `unset FUNCNAME` made it an ordinary name.
+    function_names: Option<Vec<Vec<u8>>>,
 }
 
 impl std::fmt::Debug for Store {
@@ -448,7 +453,32 @@ impl Store {
             hidden: None,
             ids,
             held: 0,
+            pipe_status: Vec::new(),
+            function_names: Some(Vec::new()),
         }
+    }
+
+    /// Set the arrays the shell keeps of its own: each stage's status in
+    /// the last pipeline, and the running functions, innermost first.
+    pub fn set_specials(&mut self, pipe_status: Vec<i32>, function_names: Option<Vec<Vec<u8>>>) {
+        self.pipe_status = pipe_status;
+        self.function_names = function_names;
+    }
+
+    /// `PIPESTATUS`, and `FUNCNAME` until `unset FUNCNAME`, from the shell's
+    /// own bookkeeping, which a lookup and arithmetic answer and an
+    /// assignment never reaches; None for every other name, or a hidden one.
+    pub fn special(&self, name: &str) -> Option<Indexed> {
+        let array = match (name, &self.function_names) {
+            ("PIPESTATUS", _) => Indexed::dense(
+                self.pipe_status
+                    .iter()
+                    .map(|status| status.to_string().into_bytes()),
+            ),
+            ("FUNCNAME", Some(names)) => Indexed::dense(names.iter().cloned()),
+            _ => return None,
+        };
+        (!self.hidden(name)).then_some(array)
     }
 
     /// Whether this store saves as `other` does, record for record. A
@@ -972,6 +1002,8 @@ impl Store {
         forked.vars = self.vars.clone();
         forked.held = self.held;
         forked.hidden = self.hidden.clone();
+        forked.pipe_status = self.pipe_status.clone();
+        forked.function_names = self.function_names.clone();
         if self.random_seed == Seed::Off {
             forked.random_seed = Seed::Off;
         }
@@ -1352,7 +1384,9 @@ impl Vars for Reading<'_> {
     }
 
     fn holds_array(&mut self, name: &str) -> Result<bool, Halt> {
-        Ok(self.store.indexed(name).is_some() || self.store.assoc(name).is_some())
+        Ok(self.store.special(name).is_some()
+            || self.store.indexed(name).is_some()
+            || self.store.assoc(name).is_some())
     }
 
     fn assoc(&mut self, name: &str) -> Result<bool, Halt> {
@@ -1368,7 +1402,9 @@ impl Vars for Reading<'_> {
             .and_then(|text| text.parse().ok())
             .unwrap_or(0);
         if index < 0 {
-            if let Some(array) = self.store.indexed(name) {
+            if let Some(array) = self.store.special(name) {
+                index += array.extent();
+            } else if let Some(array) = self.store.indexed(name) {
                 index += array.extent();
             } else if self.store.scalar(name).is_some() {
                 index += 1;
@@ -1390,13 +1426,16 @@ impl Vars for Reading<'_> {
     }
 
     fn element(&mut self, name: &str, key: &[u8]) -> Result<Option<Vec<u8>>, Halt> {
-        if let Some(map) = self.store.assoc(name) {
-            return Ok(map.get(key).map(<[u8]>::to_vec));
-        }
         let index: i64 = std::str::from_utf8(key)
             .ok()
             .and_then(|text| text.parse().ok())
             .unwrap_or(0);
+        if let Some(array) = self.store.special(name) {
+            return Ok(array.get(index).map(<[u8]>::to_vec));
+        }
+        if let Some(map) = self.store.assoc(name) {
+            return Ok(map.get(key).map(<[u8]>::to_vec));
+        }
         if let Some(array) = self.store.indexed(name) {
             return Ok(array.get(index).map(<[u8]>::to_vec));
         }
@@ -1770,6 +1809,25 @@ mod tests {
             )
             .unwrap();
         assert_eq!(lower, Value::Scalar("àbcς".into()));
+    }
+
+    #[test]
+    fn arithmetic_reads_the_shell_s_own_arrays() {
+        let mut store = store();
+        store.set_specials(vec![1, 0], Some(vec![b"f".to_vec(), b"main".to_vec()]));
+        let mut draws = Draws::default();
+        let outcome = store.arith(
+            &mut draws,
+            b"PIPESTATUS[0] * 10 + PIPESTATUS[1] + PIPESTATUS + PIPESTATUS[-2]",
+            None,
+            false,
+        );
+        assert_eq!(outcome.value.unwrap(), 12);
+        store.set_specials(vec![3], None);
+        let outcome = store.arith(&mut draws, b"PIPESTATUS[0] + FUNCNAME[0]", None, false);
+        assert_eq!(outcome.value.unwrap(), 3);
+        store.hide_vars(&["PIPESTATUS".to_owned()], &[]);
+        assert_eq!(store.special("PIPESTATUS"), None);
     }
 
     #[test]

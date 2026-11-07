@@ -718,8 +718,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
             inner.shopts = shopts;
             inner.env_limit = env_limit;
             inner.outside = outside;
-            inner.pipe_status = pipe_status;
-            inner.function_names = function_names;
+            inner.vars.set_specials(pipe_status, function_names);
             inner.paren = paren;
             inner.memory_room = memory_room;
             Item::Nil
@@ -751,7 +750,9 @@ fn ask_out(engine: &mut Engine, ask: Ask) -> Item {
             Item::opt(span, |(start, end)| {
                 Item::list([Item::int(start), Item::int(end)])
             }),
-            Item::opt(read, |field| Item::Text(marked(&field.0))),
+            Item::opt(read, |fields| {
+                Item::list(fields.iter().map(|field| Item::Text(marked(&field.0))))
+            }),
         ]),
         Ask::ProcessSubstitution { shell, node } => Item::list([
             Item::text("process"),

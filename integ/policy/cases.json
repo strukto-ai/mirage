@@ -94,7 +94,7 @@
     {"op": "vfs", "session": "agent", "call": "readdir", "args": {"path": "/data"}, "expect": {"value": ["/data/open", "/data/private"]}},
     {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/private/pub/q", "data": "eA=="}, "expect": {"errno": "EROFS"}},
     {"op": "vfs", "session": "agent", "call": "write", "args": {"path": "/data/private/new", "data": "eA=="}, "expect": {"errno": "EACCES"}},
-    {"op": "exec", "session": "agent", "command": "echo ${SECRET_TOKEN:-unset} $OPEN", "expect": {"value": {"exit_code": 0, "stdout": "unset yes\n", "stderr": "", "refusal": null}}},
+    {"op": "exec", "session": "agent", "command": "echo ${SECRET_TOKEN:-unset} $OPEN [${SECRET_TOKEN@a}] [${SECRET_TOKEN@A}]", "expect": {"value": {"exit_code": 0, "stdout": "unset yes [] []\n", "stderr": "", "refusal": null}}},
     {"op": "exec", "session": "agent", "command": "SECRET_KEY=1", "expect": {"value": {"exit_code": 1, "stdout": "", "stderr": "SECRET_KEY: permission denied\n", "refusal": null}}}
    ]
   },

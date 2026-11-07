@@ -43,15 +43,15 @@ export interface TaskHost {
   /**
    * Run a command substitution's body in the child `shell`, a copy of the
    * task's; `span` is the body's span within the node, for a backtick region
-   * holding several, and `read` the file of `$(< file)` as the task's shell
-   * expanded its name, glob marks kept.
+   * holding several, and `read` the words the task's shell expanded the file
+   * of `$(< file)` to, glob marks kept; any but one is an ambiguous redirect.
    */
   substitute(
     shell: Shell,
     body: string,
     node: ShellTreeNode,
     span: readonly [number, number] | null,
-    read: string | null,
+    read: readonly string[] | null,
   ): Promise<[Uint8Array, Uint8Array, number]>
   /** Start a process substitution in `shell` and name its pipe. */
   process(shell: Shell, node: ShellTreeNode): Promise<string>

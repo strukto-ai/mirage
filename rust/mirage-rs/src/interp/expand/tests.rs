@@ -41,12 +41,15 @@ impl Host for Fake {
         body: &[u8],
         _: usize,
         _: Option<(usize, usize)>,
-        read: Option<&Field>,
+        read: Option<&[Field]>,
     ) -> Result<Substitution, Fault> {
         let mut stdout = body.to_vec();
-        for (text, quoted) in read.map(|field| field.0.as_slice()).unwrap_or_default() {
-            stdout.extend_from_slice(if *quoted { b" q:" } else { b" u:" });
-            stdout.extend_from_slice(text);
+        for field in read.unwrap_or_default() {
+            stdout.extend_from_slice(b" |");
+            for (text, quoted) in &field.0 {
+                stdout.extend_from_slice(if *quoted { b" q:" } else { b" u:" });
+                stdout.extend_from_slice(text);
+            }
         }
         Ok(Substitution {
             stdout: [stdout.as_slice(), b"\n\n"].concat(),
@@ -152,8 +155,13 @@ fn an_input_substitution_expands_its_file_in_this_shell() {
     let out = words(&mut shell, r#"echo "$(< ${f:=a\'b}*)" "$(<"$x")""#).unwrap();
     // The body goes as typed, beside the name this shell expanded: the
     // `*` live, the quoted text quoted.
-    assert_eq!(out, [r"< ${f:=a\'b}* u:a'b*", "<\"$x\" q:a b"]);
+    assert_eq!(out, [r"< ${f:=a\'b}* | u:a'b*", "<\"$x\" | q:a b"]);
     assert_eq!(shell.vars.scalar("f"), Some(&b"a'b"[..]));
+    // A name that expands to no field or several goes as those fields,
+    // which the host refuses as an ambiguous redirect without expanding
+    // the name again.
+    let out = words(&mut shell, r#"echo "$(< $x)" "$(< $nothing)""#).unwrap();
+    assert_eq!(out, ["< $x | u:a | u:b", "< $nothing"]);
     // A here-string folds into a `<` too, and stays the body it is.
     let out = words(&mut shell, r#"echo "$(<<<'body')""#).unwrap();
     assert_eq!(out, ["<<<'body'"]);
@@ -368,6 +376,13 @@ fn an_expansion_fits_in_the_memory_left() {
         words(&mut sh, "echo ${v//a/0123456789abcdefg}"),
         Err("Memory".to_owned())
     );
+    assert_eq!(
+        words(
+            &mut sh,
+            "echo ${big/*/&&&&&&&&&&} ${v/#/&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&a}"
+        ),
+        Err("Memory".to_owned())
+    );
     sh.memory_room = None;
     assert_eq!(ok(&mut sh, "echo ${#big}"), ["100"]);
 }
@@ -483,6 +498,14 @@ fn transformations() {
             "echo \"${w@E}\" ${x@U} ${x@u} ${q@L} \"${a[@]@U}\""
         ),
         ["a\tb", "AB", "Ab", "it's", "1", "B C"]
+    );
+    sh.vars.hide_vars(&["x".to_owned(), "a".to_owned()], &[]);
+    assert_eq!(
+        ok(
+            &mut sh,
+            "echo [${x@a}] [${x@A}] [${x@Q}] [${a@a}] [${a[@]@A}] [${a[*]@A}]"
+        ),
+        ["[]", "[]", "[]", "[]", "[]", "[]"]
     );
 }
 

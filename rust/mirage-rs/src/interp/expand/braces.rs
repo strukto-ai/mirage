@@ -295,7 +295,8 @@ impl<H: Host> Expander<'_, H> {
     /// which yields nothing, but `@a`, the variable's attributes, answers
     /// whenever the variable exists (`${m@a}` is `A` for a map with no
     /// key `0`), and so does `@A` once it has attributes to declare
-    /// (`declare -A m`). `@A` names a reference's target.
+    /// (`declare -A m`). `@A` names a reference's target. A hidden name
+    /// does not exist, attributes and all.
     pub(super) fn transform(
         &self,
         letter: u8,
@@ -305,7 +306,7 @@ impl<H: Host> Expander<'_, H> {
     ) -> Option<Vec<u8>> {
         let utf8 = self.shell.utf8();
         let name = self.shell.vars.deref(name);
-        let record = self.shell.vars.record(&name);
+        let record = self.shell.vars.visible(&name);
         if letter == b'a' {
             return record.map(|var| var.cluster().into_bytes());
         }

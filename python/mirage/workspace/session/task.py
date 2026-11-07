@@ -51,7 +51,7 @@ class TaskHost(Protocol):
         body: str,
         node: ShellNode,
         span: tuple[int, int] | None,
-        read: str | None,
+        read: list[str] | None,
     ) -> tuple[bytes, bytes, int]:
         """Run a command substitution's body in the child ``shell``.
 
@@ -61,8 +61,9 @@ class TaskHost(Protocol):
             node (ShellNode): the substitution's node.
             span (tuple[int, int] | None): the body's span within the
                 node, for a backtick region holding several.
-            read (str | None): for ``$(< file)``, the file's name as the
-                task's shell expanded it, glob marks kept.
+            read (list[str] | None): for ``$(< file)``, the words the
+                task's shell expanded the file's name to, glob marks kept;
+                any but one is an ambiguous redirect.
         """
         ...
 
@@ -131,7 +132,7 @@ class SessionGate:
         body: str,
         node: ShellNode,
         span: tuple[int, int] | None,
-        read: str | None,
+        read: list[str] | None,
     ) -> tuple[bytes, bytes, int]:
         raise RuntimeError("a write runs no substitution")
 

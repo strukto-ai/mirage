@@ -41,11 +41,6 @@ pub struct Shell {
     /// The status of the last command substitution a statement ran, which
     /// an assignment-only statement reports as its own.
     pub substituted: Option<i32>,
-    /// `${PIPESTATUS[@]}`: each stage's status in the last pipeline.
-    pub pipe_status: Vec<i32>,
-    /// `${FUNCNAME[@]}`: the running functions, innermost first; None
-    /// once `unset FUNCNAME` made it an ordinary name.
-    pub function_names: Option<Vec<Vec<u8>>>,
     /// The shell is a `( )` subshell, a compound command forked as a stage
     /// or job, or a fork of one, which a refused `${var:=word}` ends with 2.
     pub paren: bool,
@@ -67,8 +62,6 @@ impl Shell {
             memory_room: None,
             outside: 0,
             substituted: None,
-            pipe_status: Vec::new(),
-            function_names: Some(Vec::new()),
             paren: false,
         }
     }
@@ -158,14 +151,9 @@ impl Shell {
         if self.vars.hidden(name) {
             return None;
         }
-        match (name, &self.function_names) {
-            ("PIPESTATUS", _) => Some(Cow::Owned(Indexed::dense(
-                self.pipe_status
-                    .iter()
-                    .map(|status| status.to_string().into_bytes()),
-            ))),
-            ("FUNCNAME", Some(names)) => Some(Cow::Owned(Indexed::dense(names.iter().cloned()))),
-            _ => self.vars.indexed(name).map(Cow::Borrowed),
+        match self.vars.special(name) {
+            Some(array) => Some(Cow::Owned(array)),
+            None => self.vars.indexed(name).map(Cow::Borrowed),
         }
     }
 

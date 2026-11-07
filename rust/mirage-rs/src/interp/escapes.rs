@@ -1,6 +1,8 @@
 //! The escapes a word's quoting names: `$'...'`'s ANSI-C table, the four
 //! a double-quoted string keeps, and an unquoted word's backslashes.
 
+use crate::utf8::{Char, char_at};
+
 /// Decode the body of a `$'...'` word, as bash 5.2 builds it, in bytes:
 /// the simple escapes, 1-3 octal digits masked to a byte, `\xHH` bytes,
 /// `\u` and `\U` values UTF-8-encoded under a UTF-8 locale (surrogates
@@ -190,9 +192,9 @@ pub fn unescape_dquoted(text: &[u8]) -> Vec<u8> {
 }
 
 /// An unquoted word's text as runs, each live or quoted: a backslash
-/// quotes the byte after it, which stands for itself (`\*` matches only a
-/// star, `\~` is no tilde), and a backslash ending the word stands as
-/// typed.
+/// quotes the character after it, which stands for itself (`\*` matches
+/// only a star, `\~` is no tilde, `\é` keeps its bytes together), and a
+/// backslash ending the word stands as typed.
 pub fn unquoted_runs(text: &[u8]) -> Vec<(Vec<u8>, bool)> {
     let mut runs: Vec<(Vec<u8>, bool)> = Vec::new();
     let mut push = |byte: u8, quoted: bool| match runs.last_mut() {
@@ -202,8 +204,14 @@ pub fn unquoted_runs(text: &[u8]) -> Vec<(Vec<u8>, bool)> {
     let mut i = 0;
     while i < text.len() {
         if text[i] == b'\\' && i + 1 < text.len() {
-            push(text[i + 1], true);
-            i += 2;
+            let width = match char_at(&text[i + 1..]) {
+                Char::Whole(width, _) => width,
+                _ => 1,
+            };
+            for &byte in &text[i + 1..i + 1 + width] {
+                push(byte, true);
+            }
+            i += 1 + width;
         } else {
             push(text[i], false);
             i += 1;
@@ -252,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn unquoted_backslashes_quote_one_byte() {
+    fn unquoted_backslashes_quote_one_character() {
         assert_eq!(
             unquoted_runs(br"a\*b*\\"),
             vec![
@@ -263,5 +271,13 @@ mod tests {
             ]
         );
         assert_eq!(unquoted_runs(b"x\\"), vec![(b"x\\".to_vec(), false)]);
+        assert_eq!(
+            unquoted_runs(b"a\\\xc3\xa9\\\\\\\xffb"),
+            vec![
+                (b"a".to_vec(), false),
+                (b"\xc3\xa9\\\xff".to_vec(), true),
+                (b"b".to_vec(), false),
+            ]
+        );
     }
 }

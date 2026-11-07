@@ -48,7 +48,7 @@ class ExecuteFn(Protocol):
         handed: HandOff | None = None,
         substitution: bool = False,
         records: ShellVars | None = None,
-        read: str | None = None,
+        read: list[str] | None = None,
         sink: JobConsole | None = None,
         call_stack: CallStack | None = None,
         job_table: JobTable | None = None,

@@ -35,9 +35,8 @@ fn printable(value: &[u8], utf8: bool) -> bool {
 }
 
 /// `$'...'`: each control byte, and each byte that is no shown character,
-/// as its escape; `quote_escapes` adds `\'` and `\\`, which `${v@Q}` needs
-/// and `declare -p` leaves.
-fn ansi_c(value: &[u8], utf8: bool, quote_escapes: bool) -> Vec<u8> {
+/// as its escape, and `'` and `\` escaped so the value reads back whole.
+fn ansi_c(value: &[u8], utf8: bool) -> Vec<u8> {
     let mut out = b"$'".to_vec();
     let shown: Vec<bool> = if utf8 {
         let mut shown = vec![false; value.len()];
@@ -55,7 +54,7 @@ fn ansi_c(value: &[u8], utf8: bool, quote_escapes: bool) -> Vec<u8> {
             out.extend_from_slice(escape);
         } else if control(byte) || !shown {
             out.extend_from_slice(format!("\\{byte:03o}").as_bytes());
-        } else if quote_escapes && matches!(byte, b'\'' | b'\\') {
+        } else if matches!(byte, b'\'' | b'\\') {
             out.extend_from_slice(&[b'\\', byte]);
         } else {
             out.push(byte);
@@ -69,7 +68,7 @@ fn ansi_c(value: &[u8], utf8: bool, quote_escapes: bool) -> Vec<u8> {
 /// does not show as it is.
 pub fn single(value: &[u8], utf8: bool) -> Vec<u8> {
     if !printable(value, utf8) {
-        return ansi_c(value, utf8, true);
+        return ansi_c(value, utf8);
     }
     let mut out = vec![b'\''];
     for &byte in value {
@@ -88,7 +87,7 @@ pub fn single(value: &[u8], utf8: bool) -> Vec<u8> {
 /// escaped. Text past ASCII stays as it is.
 pub fn declare(value: &[u8]) -> Vec<u8> {
     if value.iter().any(|&b| control(b)) {
-        return ansi_c(value, true, false);
+        return ansi_c(value, true);
     }
     let mut out = vec![b'"'];
     for &byte in value {
@@ -133,6 +132,7 @@ mod tests {
         assert_eq!(declare(b"b c"), b"\"b c\"");
         assert_eq!(declare(b"$x\"`"), b"\"\\$x\\\"\\`\"");
         assert_eq!(declare(b"a\nb"), b"$'a\\nb'");
+        assert_eq!(declare(b"\x01'y\\z"), b"$'\\001\\'y\\\\z'");
         assert_eq!(key(b"k.1"), b"k.1");
         assert_eq!(key(b"a b"), b"\"a b\"");
         assert_eq!(key(b"@"), b"\"@\"");

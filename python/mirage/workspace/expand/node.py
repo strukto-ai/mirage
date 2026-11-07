@@ -43,7 +43,7 @@ async def child_line(
     span: tuple[int, int] | None = None,
     *,
     records: ShellVars | None = None,
-    read: str | None = None,
+    read: list[str] | None = None,
     stdin: ByteSource | None = None,
     sink: JobConsole | None = None,
 ) -> IOResult:
@@ -67,9 +67,9 @@ async def child_line(
             node, for a backtick region holding several.
         records (ShellVars | None): the child shell's variables, the
             copy the expansion made where the substitution stood.
-        read (str | None): for ``$(< file)``, the file's name as the
-            expanding shell expanded it, which the read uses instead of
-            expanding the line's own a second time.
+        read (list[str] | None): for ``$(< file)``, the words the
+            expanding shell expanded the file's name to, which the read
+            uses instead of expanding the line's own a second time.
         stdin (ByteSource | None): the line's stdin, a process
             substitution's pipe for ``>(...)``.
         sink (JobConsole | None): where the line writes as it runs.
@@ -130,7 +130,7 @@ class ExpandHost:
         body: str,
         node: ShellNode,
         span: tuple[int, int] | None,
-        read: str | None,
+        read: list[str] | None,
     ) -> tuple[bytes, bytes, int]:
         context = self.context
         io = await child_line(

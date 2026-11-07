@@ -37,13 +37,12 @@ impl<H: Host> Expander<'_, H> {
         if inner.iter().all(u8::is_ascii_whitespace) {
             return Ok(Vec::new());
         }
-        if let Some(target) = self.input_redirect(node) {
-            let fields = self.fields(target).await?;
-            if let [field] = fields.as_slice() {
-                return self.run_substitution(inner, node, None, Some(field)).await;
-            }
-        }
-        self.run_substitution(inner, node, None, None).await
+        let read = match self.input_redirect(node) {
+            Some(target) => Some(self.fields(target).await?),
+            None => None,
+        };
+        self.run_substitution(inner, node, None, read.as_deref())
+            .await
     }
 
     /// The file of bash's `$(< file)`, a lone foreground `<` (or `0<`)
@@ -87,7 +86,7 @@ impl<H: Host> Expander<'_, H> {
         body: &[u8],
         node: usize,
         span: Option<(usize, usize)>,
-        read: Option<&Field>,
+        read: Option<&[Field]>,
     ) -> Result<Vec<u8>, Fault> {
         let ran = self
             .host

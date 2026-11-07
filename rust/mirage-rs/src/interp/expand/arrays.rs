@@ -196,7 +196,7 @@ impl<H: Host> Expander<'_, H> {
     fn array_assignment(&self, name: &str) -> Vec<u8> {
         let vars = &self.shell.vars;
         let cluster = vars
-            .record(&vars.deref(name))
+            .visible(name)
             .map(|var| var.cluster())
             .unwrap_or_default();
         let mut out = format!(

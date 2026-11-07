@@ -13,9 +13,15 @@ pub enum Tok {
     Nothing,
 }
 
-/// A template's words would hold more than the bytes left to build them.
+/// A template's words would hold more than the bytes left to build them,
+/// or its groups nest deeper than `NESTING`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Exhausted;
+
+/// The deepest a group may sit inside another's alternatives: each level
+/// expands on the stack, which a word nesting thousands deep would
+/// overflow.
+const NESTING: usize = 256;
 
 /// The words a template expands to, None when nothing in it expands. Their
 /// bytes, one more each, come out of `room`, the bytes left to build them
@@ -24,7 +30,7 @@ pub fn expand_template(
     template: &[Tok],
     room: &mut Option<usize>,
 ) -> Result<Option<Vec<Vec<Tok>>>, Exhausted> {
-    let words = expand(template, room)?;
+    let words = expand(template, room, 0)?;
     if words.len() == 1 && words[0] == template {
         return Ok(None);
     }
@@ -43,7 +49,20 @@ fn is(tok: Tok, byte: u8) -> bool {
     tok == Tok::Byte(byte)
 }
 
-fn expand(template: &[Tok], room: &mut Option<usize>) -> Result<Vec<Vec<Tok>>, Exhausted> {
+/// The words `template` expands to, group by group from the left, each
+/// word charged to `room` before it is built: a word holding thousands of
+/// groups builds no deeper than its groups nest, and stops at the first
+/// that does not fit.
+fn expand(
+    template: &[Tok],
+    room: &mut Option<usize>,
+    depth: usize,
+) -> Result<Vec<Vec<Tok>>, Exhausted> {
+    if depth > NESTING {
+        return Err(Exhausted);
+    }
+    let mut words: Vec<Vec<Tok>> = vec![Vec::new()];
+    let mut literal = 0;
     let mut i = 0;
     while i < template.len() {
         if is(template[i], b'\\') {
@@ -59,33 +78,43 @@ fn expand(template: &[Tok], room: &mut Option<usize>) -> Result<Vec<Vec<Tok>>, E
             continue;
         };
         let body = &template[i + 1..close];
-        let groups: Vec<Vec<Vec<Tok>>> = match sequence(body, room)? {
-            Some(words) => vec![words],
+        let alternatives = match sequence(body, room)? {
+            Some(words) => words,
             None => match split_alternatives(body) {
-                Some(alternatives) => alternatives
-                    .iter()
-                    .map(|alt| expand(alt, room))
-                    .collect::<Result<_, _>>()?,
+                Some(alternatives) => {
+                    let mut expanded = Vec::new();
+                    for alternative in &alternatives {
+                        expanded.extend(expand(alternative, room, depth + 1)?);
+                    }
+                    expanded
+                }
                 None => {
                     i += 1;
                     continue;
                 }
             },
         };
-        let prefix = &template[..i];
-        let suffixes = expand(&template[close + 1..], room)?;
-        let mut out = Vec::new();
-        for group in groups {
-            for alternative in group {
-                for suffix in &suffixes {
-                    spend(room, prefix.len() + alternative.len() + suffix.len() + 1)?;
-                    out.push([prefix, &alternative, suffix].concat());
-                }
+        let text = &template[literal..i];
+        let mut next = Vec::new();
+        for word in &words {
+            for alternative in &alternatives {
+                spend(room, word.len() + text.len() + alternative.len() + 1)?;
+                next.push([word.as_slice(), text, alternative].concat());
             }
         }
-        return Ok(out);
+        words = next;
+        i = close + 1;
+        literal = i;
     }
-    Ok(vec![template.to_vec()])
+    if literal == 0 {
+        return Ok(vec![template.to_vec()]);
+    }
+    let tail = &template[literal..];
+    spend(room, tail.len() * words.len())?;
+    for word in &mut words {
+        word.extend_from_slice(tail);
+    }
+    Ok(words)
 }
 
 fn match_close(template: &[Tok], open: usize) -> Option<usize> {
@@ -325,6 +354,26 @@ mod tests {
         assert_eq!(words("{abc}"), None);
         assert_eq!(words("\\{a,b}"), None);
         assert_eq!(words("{a}{b,c}").unwrap(), ["{a}b", "{a}c"]);
+        assert_eq!(words("{x{a,b}}").unwrap(), ["{xa}", "{xb}"]);
+        assert_eq!(
+            words("p{a,b}q{1,2}r").unwrap(),
+            ["paq1r", "paq2r", "pbq1r", "pbq2r"]
+        );
+    }
+
+    #[test]
+    fn thousands_of_groups_stop_at_the_room_left() {
+        let flat: Vec<Tok> = "{a,}".repeat(50_000).bytes().map(Tok::Byte).collect();
+        assert_eq!(expand_template(&flat, &mut Some(1 << 20)), Err(Exhausted));
+        let deep = format!("{}x{}", "{a,".repeat(5_000), "}".repeat(5_000));
+        let deep: Vec<Tok> = deep.bytes().map(Tok::Byte).collect();
+        assert_eq!(expand_template(&deep, &mut None), Err(Exhausted));
+        let nested = format!("{}x{}", "{a,".repeat(NESTING), "}".repeat(NESTING));
+        let nested: Vec<Tok> = nested.bytes().map(Tok::Byte).collect();
+        assert_eq!(
+            expand_template(&nested, &mut None).unwrap().unwrap().len(),
+            NESTING + 1
+        );
     }
 
     #[test]

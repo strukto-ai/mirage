@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "x=global; f() { local x=local; (unset x; echo \"${x-unset}\"); v=$(unset x; echo \"${x-unset}\"); echo \"$v:$x\"; }; f; echo \"$x\"",
+      "command": "x=global; f() { local x=local; (unset x; echo \"${x-unset}\"); v=$(unset x; echo \"${x-unset}\"); echo \"$v:$x\"; w=$(local z=ok; echo \"${z-unset}\"); echo \"w=$w\"; }; f; echo \"$x\"",
       "expect": {
         "exit": 0,
-        "stdout": "unset\nunset:local\nglobal\n",
+        "stdout": "unset\nunset:local\nw=ok\nglobal\n",
         "stderr": ""
       }
     },

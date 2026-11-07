@@ -1436,6 +1436,22 @@
           }
         },
         {
+          "command": "z=$(printf %0100d 0); y=${z/*/&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&}; echo \"len=${#y}\"",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "line: memory exhausted\n"
+          }
+        },
+        {
+          "command": "echo {a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,}{a,} | wc -c",
+          "expect": {
+            "exit": 1,
+            "stdout": "",
+            "stderr": "line: memory exhausted\n"
+          }
+        },
+        {
           "command": "seq 1 2000 | jq -Rs length; echo \"jq=$?\"",
           "expect": {
             "exit": 0,

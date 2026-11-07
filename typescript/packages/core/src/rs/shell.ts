@@ -583,7 +583,7 @@ export type Ask =
       string,
       ShellTreeNode,
       readonly [number, number] | null,
-      string | null,
+      readonly string[] | null,
     ]
   | readonly ['process', Shell, ShellTreeNode]
   | readonly ['gate', boolean, 'set' | 'unset', string, string | null, string | null, Shell]
@@ -1060,7 +1060,7 @@ export class ShellTask {
           asked[2] as string,
           this.node(asked[3] ?? null),
           (asked[4] ?? null) as readonly [number, number] | null,
-          (asked[5] ?? null) as string | null,
+          (asked[5] ?? null) as readonly string[] | null,
         ]
       case 'process':
         return ['process', Shell.adopt(asked[1] as number), this.node(asked[2] ?? null)]

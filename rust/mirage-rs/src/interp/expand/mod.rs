@@ -271,15 +271,16 @@ pub trait Host: Gate {
     /// Run `body` in a child shell of `shell`, its output captured: the
     /// substitution `node` holds, or with `span` one backtick pair of it,
     /// its bytes within the node's text. `read` is the file of bash's
-    /// `$(< file)` as this shell expanded its name, which the host reads
-    /// instead of expanding the body's name a second time.
+    /// `$(< file)` as the fields this shell expanded its name to, which
+    /// the host reads, or refuses as an ambiguous redirect when they are
+    /// not one, instead of expanding the body's name a second time.
     fn substitute(
         &mut self,
         shell: &mut Shell,
         body: &[u8],
         node: usize,
         span: Option<(usize, usize)>,
-        read: Option<&Field>,
+        read: Option<&[Field]>,
     ) -> impl Future<Output = Result<Substitution, Fault>>;
 
     /// Start the process substitution `node` holds (`<(...)`, `>(...)`)

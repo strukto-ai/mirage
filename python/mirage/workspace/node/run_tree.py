@@ -63,7 +63,7 @@ async def run_command_tree(
     handed: HandOff | None = None,
     sink: JobConsole | None = None,
     command_substitution: bool = False,
-    read: str | None = None,
+    read: list[str] | None = None,
     call_stack: CallStack | None = None,
     execution_scope: ExecutionScope | None = None,
     route: RouteContext | None = None,
@@ -93,9 +93,9 @@ async def run_command_tree(
             command's gate.
         command_substitution (bool): capture a lone input redirect's data
             using the same expansion, dispatcher and output gates.
-        read (str | None): the lone input redirect's file name as the
-            shell expanding the substitution expanded it, glob marks
-            kept; None expands the redirect's own.
+        read (list[str] | None): the words the shell expanding the
+            substitution expanded the lone input redirect's file name to,
+            glob marks kept; None expands the redirect's own.
         call_stack (CallStack | None): the frames of the caller the tree
             runs in place of (``eval``), None for a line of its own.
         route (RouteContext | None): what ``pre_execute`` saw of the
@@ -134,7 +134,7 @@ async def run_command_tree(
             registry,
             links=namespace.session_links(session),
             policies=registry.policies,
-            words=None if read is None else [read],
+            words=read,
         )
         # Bash's implicit file read has cat's policy identity, without
         # invoking a function/alias or expanding the filename a second time.

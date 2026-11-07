@@ -583,8 +583,7 @@ impl Shell {
         shell.shopts = shopts;
         shell.env_limit = env_limit;
         shell.outside = outside;
-        shell.pipe_status = pipe_status;
-        shell.function_names = function_names;
+        shell.vars.set_specials(pipe_status, function_names);
         shell.paren = paren;
         shell.memory_room = memory_room;
         Ok(())
@@ -870,8 +869,13 @@ impl ShellTask {
                 text_of(py, &body)?,
                 self.node(node)?,
                 span,
-                read.map(|field| text_of(py, &marked(&field.0)))
-                    .transpose()?,
+                read.map(|fields| {
+                    fields
+                        .iter()
+                        .map(|field| text_of(py, &marked(&field.0)))
+                        .collect::<PyResult<Vec<_>>>()
+                })
+                .transpose()?,
             )
                 .into_pyobject(py)?
                 .into_any(),

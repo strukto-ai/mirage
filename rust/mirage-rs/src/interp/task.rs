@@ -23,13 +23,14 @@ use crate::vars::{Assigned, Store, Value};
 /// What a running operation asks its host.
 pub enum Ask {
     /// Run `body` in `shell`, a child shell, and capture its output;
-    /// for `$(< file)` read the file `read` names, expanded already.
+    /// for `$(< file)` read the file `read` names, the fields its name
+    /// expanded to already (any but one is an ambiguous redirect).
     Substitute {
         shell: Shell,
         body: Vec<u8>,
         node: usize,
         span: Option<(usize, usize)>,
-        read: Option<Field>,
+        read: Option<Vec<Field>>,
     },
     /// Start `node`'s process substitution in `shell` and name its pipe.
     ProcessSubstitution { shell: Shell, node: usize },
@@ -156,14 +157,14 @@ impl Host for Line {
         body: &[u8],
         node: usize,
         span: Option<(usize, usize)>,
-        read: Option<&Field>,
+        read: Option<&[Field]>,
     ) -> Result<Substitution, Fault> {
         let ask = Ask::Substitute {
             shell: shell.subshell(),
             body: body.to_vec(),
             node,
             span,
-            read: read.cloned(),
+            read: read.map(<[Field]>::to_vec),
         };
         match self.ask(ask).await {
             Answer::Substituted(ran) => Ok(ran),

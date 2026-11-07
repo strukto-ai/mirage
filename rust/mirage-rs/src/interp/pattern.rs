@@ -182,20 +182,26 @@ pub struct Replacement {
 }
 
 impl Replacement {
-    fn render(&self, matched: &[u8], out: &mut Vec<u8>) {
+    /// Append the replacement for `matched` to `out`; false, `out` left
+    /// short, at the first piece that would take it past `room` bytes.
+    fn render(&self, matched: &[u8], out: &mut Vec<u8>, room: Option<usize>) -> bool {
+        let fits = |out: &Vec<u8>, more: usize| room.is_none_or(|room| out.len() + more <= room);
         for (run, quoted) in &self.runs {
-            if *quoted || !self.amp {
-                out.extend_from_slice(run);
-                continue;
-            }
-            for &byte in run {
-                if byte == b'&' {
+            let live = !*quoted && self.amp;
+            for (n, piece) in run.split(|&byte| live && byte == b'&').enumerate() {
+                if n > 0 {
+                    if !fits(out, matched.len()) {
+                        return false;
+                    }
                     out.extend_from_slice(matched);
-                } else {
-                    out.push(byte);
                 }
+                if !fits(out, piece.len()) {
+                    return false;
+                }
+                out.extend_from_slice(piece);
             }
         }
+        true
     }
 }
 
@@ -217,18 +223,22 @@ pub async fn replace(
 ) -> Result<Option<Vec<u8>>, Fault> {
     if pattern.is_empty() {
         let mut out = Vec::with_capacity(value.len());
-        match anchor {
+        let fits = match anchor {
             Some("#") => {
-                replacement.render(b"", &mut out);
+                let fits = replacement.render(b"", &mut out, room);
                 out.extend_from_slice(value);
+                fits
             }
             Some("%") => {
                 out.extend_from_slice(value);
-                replacement.render(b"", &mut out);
+                replacement.render(b"", &mut out, room)
             }
-            _ => out.extend_from_slice(value),
-        }
-        return Ok(room.is_none_or(|room| out.len() <= room).then_some(out));
+            _ => {
+                out.extend_from_slice(value);
+                true
+            }
+        };
+        return Ok((fits && room.is_none_or(|room| out.len() <= room)).then_some(out));
     }
     let (subject, offsets) = units(value, utf8);
     let spans = ask(
@@ -247,14 +257,13 @@ pub async fn replace(
         };
         let (start, end) = (offsets[start as usize], offsets[end as usize]);
         out.extend_from_slice(&value[cursor..start]);
-        replacement.render(&value[start..end], &mut out);
-        if room.is_some_and(|room| out.len() > room) {
+        if !replacement.render(&value[start..end], &mut out, room) {
             return Ok(None);
         }
         cursor = end;
     }
     out.extend_from_slice(&value[cursor..]);
-    Ok(Some(out))
+    Ok(room.is_none_or(|room| out.len() <= room).then_some(out))
 }
 
 /// Which way a recase turns a letter.
