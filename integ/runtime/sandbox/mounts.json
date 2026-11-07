@@ -1,6 +1,39 @@
 {
   "cases": [
     {
+      "id": "mount_type_ssh_fails_a_line_whose_write_cannot_land",
+      "note": "sshfs lands a file's writes after close(2) told the program they were done, so the line reports the landing that failed.",
+      "runtimes": ["docker", "e2b", "microsandbox"],
+      "requires": ["env:MIRAGE_INTEG_BOX_MOUNTS"],
+      "world": {
+        "mounts": {
+          "/capped": { "vfs": "ram", "config": { "capacity": 100 } }
+        }
+      },
+      "entry": {
+        "captures": ["dash"],
+        "config": { "mount_type": "ssh" }
+      },
+      "steps": [
+        {
+          "command": "dash -c 'head -c 500 /dev/zero > /capped/big.bin; echo rc=$?'",
+          "expect": {
+            "exit": 1,
+            "stdout": "rc=0\n",
+            "stderr_contains": ": /capped/big.bin: Disk quota exceeded\n"
+          }
+        },
+        {
+          "command": "dash -c 'head -c 50 /dev/zero > /capped/small.bin; echo rc=$?'",
+          "expect": { "exit": 0, "stdout": "rc=0\n", "stderr": "" }
+        },
+        {
+          "command": "wc -c /capped/small.bin",
+          "expect": { "exit": 0, "stdout": "50 /capped/small.bin\n" }
+        }
+      ]
+    },
+    {
       "id": "mount_type_ssh_serves_the_sessions_view",
       "runtimes": [
         "docker",

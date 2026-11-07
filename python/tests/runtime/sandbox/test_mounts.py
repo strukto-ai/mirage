@@ -14,6 +14,7 @@
 
 import asyncio
 import contextlib
+import errno
 import io
 import os
 import re
@@ -32,6 +33,7 @@ from mirage.context import (
     get_current_session,
     line_running,
 )
+from mirage.errors.types import QuotaExceededError
 from mirage.io.types import materialize
 from mirage.runtime.sandbox import mounts
 from mirage.runtime.sandbox.base import RemoteSandbox
@@ -74,7 +76,7 @@ class Drain:
         await reader.read()
 
     async def sync(self):
-        return None
+        return []
 
 
 class FakeSandbox(RemoteSandbox, PipeTransportMixin):
@@ -137,6 +139,8 @@ class FakeSandbox(RemoteSandbox, PipeTransportMixin):
             )
         if line == "python3 slow.py":
             await asyncio.Event().wait()
+        if line == "python3 fails.py":
+            return RunResult(stdout=b"", stderr=b"boom\n", exit_code=3)
         if line.startswith("fusermount3 -uz "):
             if self.fail_unmount:
                 raise RuntimeError("the sandbox went away")
@@ -224,6 +228,12 @@ def workspace(runtime, hide=(), modes=None, **options):
         runtimes=[runtime, "workspace"],
         **options,
     )
+
+
+LOST = (
+    "fake: /data/a.bin: Disk quota exceeded\n"
+    "fake: /my notes/b.txt: Disk quota exceeded\n"
+)
 
 
 def served(sandbox):
@@ -703,17 +713,20 @@ async def test_a_line_returns_once_every_server_has_landed(monkeypatch):
     # the line but with its write admission: a capture waiting for the
     # line lets those writes through. Served requests run on that
     # admission until the line has landed them, the line waits out the
-    # ones still running, and none run on it after.
+    # ones still running, and none run on it after. It lands at its
+    # program's exit (held here), and again as it ends.
     held = asyncio.Queue()
     landed = []
 
     class Server(Drain):
         async def sync(self):
-            go = asyncio.Event()
-            await held.put((go, self))
-            await go.wait()
+            if len(landed) < 2:
+                go = asyncio.Event()
+                await held.put((go, self))
+                await go.wait()
             await self.files.write("/data/landed.txt", b"x")
             landed.append((line_running(), await self.run(lent_a_line())))
+            return []
 
     monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     ws = workspace(FakeSandbox("ssh"))
@@ -736,18 +749,57 @@ async def test_a_line_returns_once_every_server_has_landed(monkeypatch):
     assert (await asyncio.wait_for(line, 5)).exit_code == 0
     await asyncio.wait_for(capture, 5)
     await borrowed
-    assert landed == [(False, True), (False, True)]
+    assert landed == [(False, True)] * 4
     assert not await server.run(lent_a_line())
     await ws.close()
 
 
 @pytest.mark.asyncio
-async def test_a_line_that_times_out_still_lands_its_writes(monkeypatch):
+@pytest.mark.parametrize(
+    ("line", "lost", "status", "stderr"),
+    [
+        ("python3 job.py", True, 1, LOST),
+        ("python3 fails.py", True, 3, "boom\n" + LOST),
+        ("python3 job.py", False, 0, ""),
+    ],
+)
+async def test_a_landing_that_fails_fails_the_line_with_its_error(
+    monkeypatch, line, lost, status, stderr
+):
+    # sshfs lands a file's writes after close(2) told the program they
+    # were done, so the line reports each landing that failed, on every
+    # served prefix, keeping a failing program's own status.
+    failures = [
+        [("/my notes/b.txt", QuotaExceededError(errno.EDQUOT, ""))],
+        [("/data/a.bin", QuotaExceededError(errno.EDQUOT, ""))],
+    ]
+
+    class Server(Drain):
+        async def sync(self):
+            return failures.pop() if lost and failures else []
+
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
+    ws = workspace(FakeSandbox("ssh"))
+    agent = await ws.session("agent", profile="agent")
+    result = await agent.shell(line)
+    assert (result.exit_code, await result.stderr_str()) == (status, stderr)
+    assert (await agent.shell("python3 job.py")).exit_code == 0
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_line_that_times_out_still_lands_its_writes(
+    monkeypatch, caplog
+):
+    # Its status stays the timeout's; a landing that fails is logged.
     synced = []
 
     class Server(Drain):
         async def sync(self):
             synced.append(line_running())
+            if len(synced) > 1:
+                return []
+            return [("/data/a.bin", QuotaExceededError(errno.EDQUOT, ""))]
 
     monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
     ws = workspace(
@@ -755,8 +807,88 @@ async def test_a_line_that_times_out_still_lands_its_writes(monkeypatch):
         command_limits={"@line": Limit(timeout_seconds=0.05)},
     )
     agent = await ws.session("agent", profile="agent")
-    assert (await agent.shell("python3 slow.py")).exit_code == 124
+    with caplog.at_level("WARNING"):
+        result = await agent.shell("python3 slow.py")
+    assert result.exit_code == 124
+    assert "Disk quota exceeded" not in await result.stderr_str()
     assert synced == [False, False]
+    assert "fake: /data/a.bin: Disk quota exceeded" in caplog.text
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_landing_the_deadline_stops_logs_what_failed_before_it(
+    monkeypatch, caplog
+):
+    # One prefix's landing failed and the next one ran out the deadline:
+    # the line hears of neither, so the failure that came back is logged.
+    calls = []
+
+    class Server(Drain):
+        async def sync(self):
+            calls.append(self)
+            if len(calls) == 1:
+                return [("/data/a.bin", QuotaExceededError(errno.EDQUOT, ""))]
+            if len(calls) == 2:
+                await asyncio.sleep(5)
+            return []
+
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
+    ws = workspace(
+        FakeSandbox("ssh"),
+        command_limits={"@line": Limit(timeout_seconds=0.05)},
+    )
+    agent = await ws.session("agent", profile="agent")
+    with caplog.at_level("WARNING"):
+        assert (await agent.shell("python3 job.py")).exit_code == 124
+    assert "fake: /data/a.bin: Disk quota exceeded" in caplog.text
+    await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_landing_stopped_as_a_sync_returns_logs_its_failure(caplog):
+    # The stop arrives once the sync has finished, so its failure comes
+    # back with the stop instead of the result, and is logged.
+    landing: list[asyncio.Task[list[str]]] = []
+
+    class Server(Drain):
+        async def sync(self):
+            asyncio.get_running_loop().call_soon(landing[0].cancel)
+            return [("/data/a.bin", QuotaExceededError(errno.EDQUOT, ""))]
+
+    held = mounts.SandboxMounts("fake", "ssh", None, None)
+    held._served["/data"] = (None, None, Server(None, None, None))
+    landing.append(asyncio.create_task(held.land()))
+    with caplog.at_level("WARNING"):
+        await asyncio.wait(landing)
+    assert landing[0].cancelled()
+    assert "fake: /data/a.bin: Disk quota exceeded" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_a_line_whose_deadline_stops_its_landing_still_lands(
+    monkeypatch,
+):
+    # The landing at the program's exit counts against the line's
+    # deadline; one the deadline stops is landed again before the line
+    # returns.
+    synced = []
+
+    class Server(Drain):
+        async def sync(self):
+            synced.append(line_running())
+            if len(synced) == 1:
+                await asyncio.sleep(5)
+            return []
+
+    monkeypatch.setattr(mounts, "pipe_server", lambda: Server)
+    ws = workspace(
+        FakeSandbox("ssh"),
+        command_limits={"@line": Limit(timeout_seconds=0.05)},
+    )
+    agent = await ws.session("agent", profile="agent")
+    assert (await agent.shell("python3 job.py")).exit_code == 124
+    assert synced == [False, False, False]
     await ws.close()
 
 

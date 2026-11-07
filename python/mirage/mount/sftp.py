@@ -276,6 +276,9 @@ class MirageSFTPServer(asyncssh.SFTPServer):
             exit ends.
         passive_sshfs (bool): decode sshfs's reversed symlink arguments
             on a pipe without SSH peer identification.
+        on_lost (Callable[[int, str, Exception], None] | None): told the
+            handle, path and error of a close whose writes failed to
+            land, before the client gets the status.
     """
 
     def __init__(
@@ -287,12 +290,14 @@ class MirageSFTPServer(asyncssh.SFTPServer):
         on_exit: Callable[[], Awaitable[None]] | None = None,
         *,
         passive_sshfs: bool = False,
+        on_lost: Callable[[int, str, Exception], None] | None = None,
     ) -> None:
         super().__init__(cast(asyncssh.SSHServerChannel[bytes], chan))
         self._make_core = make_core
         self._run = run
         self._on_exit = on_exit
         self._passive_sshfs = passive_sshfs
+        self._on_lost = on_lost
         self._core: MountCore | None = None
         self._lock = asyncio.Lock()
 
@@ -403,7 +408,17 @@ class MirageSFTPServer(asyncssh.SFTPServer):
 
     async def close(self, file_obj: Any) -> None:
         f = opened(file_obj)
-        await self._call(lambda core: core.release(f.fh))
+
+        async def release(core: MountCore) -> None:
+            ctx = core.handles.get(f.fh)
+            try:
+                await core.release(f.fh)
+            except Exception as err:
+                if self._on_lost is not None:
+                    self._on_lost(f.fh, ctx.path if ctx else f.path, err)
+                raise
+
+        await self._call(release)
 
     async def remove(self, path: bytes) -> None:
         p = self._path(path)
@@ -504,9 +519,15 @@ class PipeServer:
     ) -> None:
         self._core = MountCore(files, session=session)
         self._run = run
+        # Each released handle whose writes failed to land, until a sync.
+        self._lost: dict[int, tuple[str, Exception]] = {}
+        # Handles whose failure a sync handed back, never handed back again.
+        self._told: set[int] = set()
 
     async def serve(self, reader: ByteReader, writer: PipeWriter) -> None:
-        """Answer the client's requests until it closes the pipe.
+        """Answer the client's requests until it closes the pipe, then
+        release each handle it left open, past one that fails: asyncssh
+        stops at the first close that raises.
 
         Args:
             reader (ByteReader): the client's requests.
@@ -519,7 +540,11 @@ class PipeServer:
         try:
             await run_sftp_server(
                 MirageSFTPServer(
-                    None, make_core, self._run, passive_sshfs=True
+                    None,
+                    make_core,
+                    self._run,
+                    passive_sshfs=True,
+                    on_lost=self._lose,
                 ),
                 cast("asyncssh.SSHReader[bytes]", PipeReader(reader)),
                 cast("asyncssh.SSHWriter[bytes]", writer),
@@ -529,7 +554,44 @@ class PipeServer:
             logger.debug(
                 "sftp: the pipe closed before its first request: %r", exc
             )
+        finally:
+            for fh, ctx in list(self._core.handles.items()):
+                release = self._core.release(fh)
+                try:
+                    await (
+                        release if self._run is None else self._run(release)
+                    )
+                except Exception as err:
+                    self._lose(fh, ctx.path, err)
 
-    async def sync(self) -> None:
-        """Land every write the client has been told is done."""
-        await self._core.sync()
+    def _lose(self, fh: int, path: str, err: Exception) -> None:
+        """Keep a release's failure for the next sync, unless a sync
+        already reported its handle.
+
+        Args:
+            fh (int): the released handle.
+            path (str): its file's path.
+            err (Exception): why its writes did not land.
+        """
+        if fh not in self._told:
+            self._lost[fh] = (path, err)
+
+    async def sync(self) -> list[tuple[str, Exception]]:
+        """Land every write the client has been told is done.
+
+        shortcut: a handle reports its first failure only, and lines
+        running at once in one sandbox share the failures; key them by
+        line if a sandbox runs concurrent lines that write.
+
+        Returns:
+            list[tuple[str, Exception]]: the path and error of each
+            landing that failed since the last sync, at a release or here.
+        """
+        failed = await self._core.sync()
+        lost, self._lost = self._lost, {}
+        for fh, path, err in failed:
+            if fh not in self._told:
+                self._told.add(fh)
+                # Keyed by handle: a close that raced this sync counts once.
+                lost[fh] = (path, err)
+        return list(lost.values())

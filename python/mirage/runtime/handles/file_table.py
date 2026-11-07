@@ -77,5 +77,9 @@ class FileTable(Generic[T]):
         """Every tracked entry."""
         return self._entries.values()
 
+    def items(self) -> Iterable[tuple[int, T]]:
+        """Every tracked entry with its id."""
+        return self._entries.items()
+
     def __contains__(self, fd: int) -> bool:
         return fd in self._entries

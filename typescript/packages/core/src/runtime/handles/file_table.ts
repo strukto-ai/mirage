@@ -58,6 +58,11 @@ export class FileTable<T> {
     return this.entries.values()
   }
 
+  /** Every tracked entry with its id. */
+  items(): IterableIterator<[number, T]> {
+    return this.entries.entries()
+  }
+
   /** Whether an entry sits under `fd`. */
   has(fd: number): boolean {
     return this.entries.has(fd)

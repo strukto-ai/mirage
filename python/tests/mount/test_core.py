@@ -26,6 +26,7 @@ import pytest
 import pytest_asyncio
 
 from mirage.errors import FsCondition, posix_errno
+from mirage.errors.fs import strerror_of
 from mirage.errors.types import OperationNotSupportedError, ReadOnlyError
 from mirage.io.spool import MEMORY_LIMIT, ByteSlice, ByteSpool
 from mirage.mount import core as core_module
@@ -138,6 +139,30 @@ async def test_two_handles_writes_land_in_the_order_they_were_made(
         await seeded.release(first)
         await seeded.release(second)
     assert await seeded.read("/a.txt", 100, 0, None) == b"olnewdworld"
+
+
+@pytest.mark.asyncio
+async def test_a_sync_hands_back_each_landing_that_failed():
+    # Its caller reports them: an sshfs client's close(2) has returned
+    # before they land. The other handles still land, and the failed one
+    # keeps its bytes for its release, which fails the same way.
+    ws = Workspace({"/": RAMVFS(capacity=20)}, mode=MountMode.WRITE)
+    core = MountCore(ws.vfs)
+    creating = open_mode(os.O_WRONLY | os.O_CREAT)
+    big = await core.open("/big.bin", creating)
+    small = await core.open("/small.txt", creating)
+    await core.write("/big.bin", b"x" * 50, 0, big)
+    await core.write("/small.txt", b"ok", 0, small)
+    ((fh, path, err),) = await core.sync()
+    assert (fh, path, strerror_of(err)) == (
+        big,
+        "/big.bin",
+        "Disk quota exceeded",
+    )
+    assert await ws.vfs.read("/small.txt") == b"ok"
+    with pytest.raises(OSError):
+        await core.release(big)
+    assert await core.sync() == []
 
 
 @pytest.mark.asyncio

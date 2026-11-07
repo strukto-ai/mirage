@@ -13,6 +13,8 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import { currentCaller, runWithCaller } from '@struktoai/mirage-core/context/session_context'
+import { strerrorOf } from '@struktoai/mirage-core/errors/fs'
+import type { MountCore } from '@struktoai/mirage-core/mount/core'
 import { MountMode } from '@struktoai/mirage-core/types'
 import { RAMVFS } from '@struktoai/mirage-core/vfs/ram/ram'
 import { describe, expect, it } from 'vitest'
@@ -95,6 +97,27 @@ async function writeNew(
     Buffer.concat([uint32(2), uint32(STATUS.OK)]),
   )
   return handle
+}
+
+/** A pipe server over a 20-byte `/notes`, past its init. */
+async function cappedPipe(run?: (op: () => Promise<void>) => Promise<void>): Promise<{
+  ws: Workspace
+  server: PipeServer
+  end: ReturnType<typeof client>
+  served: Promise<void>
+}> {
+  const ws = new Workspace({ '/notes': new RAMVFS({ capacity: 20 }) }, { mode: MountMode.WRITE })
+  await ws.session('agent')
+  const server = new PipeServer(ws.vfs, ws.getSession('agent'), run)
+  const end = client()
+  const served = server.serve(end.reader, end.writer)
+  end.send(packet(FXP_INIT, uint32(3)))
+  await end.answer()
+  return { ws, server, end, served }
+}
+
+function said(lost: [string, unknown][]): [string, string][] {
+  return lost.map(([path, err]) => [path, strerrorOf(err)])
 }
 
 /** A client end: requests go in, answers come back one packet at a time. */
@@ -299,6 +322,138 @@ describe('PipeServer', () => {
         Buffer.concat([uint32(3), uint32(STATUS.OK)]),
       )
       expect(await read()).toBe('made\n')
+    } finally {
+      end.close()
+      await served
+      await ws.close()
+    }
+  })
+
+  it('hands back a landing its sync could not make, once', async () => {
+    // sshfs answers close(2) before the landing, so the sync's failure is
+    // the program's only report; the close sshfs sends later fails the
+    // same way, and no later sync reports it again.
+    const { ws, server, end, served } = await cappedPipe()
+    try {
+      const handle = await writeNew(end, '/notes/big.bin', 'x'.repeat(50))
+      expect(said(await server.sync())).toEqual([['/notes/big.bin', 'Disk quota exceeded']])
+      expect(await server.sync()).toEqual([])
+      end.send(packet(FXP_CLOSE, Buffer.concat([uint32(3), handle])))
+      expect((await end.answer())[1].subarray(0, 8)).not.toEqual(
+        Buffer.concat([uint32(3), uint32(STATUS.OK)]),
+      )
+      expect(await server.sync()).toEqual([])
+    } finally {
+      end.close()
+      await served
+      await ws.close()
+    }
+  })
+
+  it('hands a close that could not land to the next sync', async () => {
+    // The close lands the writes after close(2) returned: its failure,
+    // with the error the store raised, waits for the line's sync.
+    const { ws, server, end, served } = await cappedPipe()
+    try {
+      const handle = await writeNew(end, '/notes/big.bin', 'x'.repeat(50))
+      end.send(packet(FXP_CLOSE, Buffer.concat([uint32(3), handle])))
+      await end.answer()
+      expect(said(await server.sync())).toEqual([['/notes/big.bin', 'Disk quota exceeded']])
+      expect(await server.sync()).toEqual([])
+    } finally {
+      end.close()
+      await served
+      await ws.close()
+    }
+  })
+
+  it('reports a close racing a sync once', async () => {
+    // sshfs may send the close while the line's sync is still landing:
+    // both fail on the one handle, and the line hears of it once.
+    const { ws, server, end, served } = await cappedPipe()
+    const core = (server as unknown as { core: MountCore }).core
+    const coreSync = core.sync.bind(core)
+    try {
+      const handle = await writeNew(end, '/notes/big.bin', 'x'.repeat(50))
+      core.sync = async () => {
+        const failed = await coreSync()
+        end.send(packet(FXP_CLOSE, Buffer.concat([uint32(3), handle])))
+        await end.answer()
+        return failed
+      }
+      expect(said(await server.sync())).toEqual([['/notes/big.bin', 'Disk quota exceeded']])
+    } finally {
+      end.close()
+      await served
+      await ws.close()
+    }
+  })
+
+  it('lands every handle a closed pipe left open, past one that fails', async () => {
+    // Each through its run as any request, so it keeps a line's admission.
+    let ran = 0
+    const { ws, server, end, served } = await cappedPipe((op) => {
+      ran += 1
+      return op()
+    })
+    try {
+      await writeNew(end, '/notes/big.bin', 'x'.repeat(50))
+      await writeNew(end, '/notes/small.txt', 'ok')
+      const before = ran
+      end.close()
+      await expect(served).rejects.toThrow()
+      expect(ran - before).toBe(2)
+      expect(new TextDecoder().decode(await ws.vfs.read('/notes/small.txt'))).toBe('ok')
+      expect(said(await server.sync())).toEqual([['/notes/big.bin', 'Disk quota exceeded']])
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('waits on sync for a close still letting its handle go', async () => {
+    // The close has let the handle go and is still closing its spool: the
+    // sync waits for it, so its failure is not missed.
+    const { ws, server, end, served } = await cappedPipe()
+    const core = (server as unknown as { core: MountCore }).core
+    try {
+      const handle = await writeNew(end, '/notes/big.bin', 'x'.repeat(50))
+      const [[fd, ctx] = [0, undefined]] = [...core.handles.items()]
+      let closed = (): void => undefined
+      const closing = new Promise<void>((resolve) => {
+        closed = resolve
+      })
+      if (ctx !== undefined)
+        ctx.spool = { close: () => closing } as unknown as NonNullable<typeof ctx.spool>
+      end.send(packet(FXP_CLOSE, Buffer.concat([uint32(3), handle])))
+      await until(() => core.handles.get(fd) === undefined)
+      const syncing = server.sync()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      closed()
+      expect(said(await syncing)).toEqual([['/notes/big.bin', 'Disk quota exceeded']])
+      await end.answer()
+    } finally {
+      end.close()
+      await served
+      await ws.close()
+    }
+  })
+
+  it('reports nothing again on a sync that took a handle before its close', async () => {
+    // A later sync took the handle before its close let it go: the close
+    // fails as the first sync did, and neither reports it again.
+    const { ws, server, end, served } = await cappedPipe()
+    const core = (server as unknown as { core: MountCore }).core
+    const coreSync = core.sync.bind(core)
+    try {
+      const handle = await writeNew(end, '/notes/big.bin', 'x'.repeat(50))
+      expect(said(await server.sync())).toEqual([['/notes/big.bin', 'Disk quota exceeded']])
+      core.sync = async () => {
+        const failed = await coreSync()
+        end.send(packet(FXP_CLOSE, Buffer.concat([uint32(3), handle])))
+        await end.answer()
+        return failed
+      }
+      expect(await server.sync()).toEqual([])
     } finally {
       end.close()
       await served

@@ -119,6 +119,8 @@ export class MountCore {
   private readonly pending = new Map<string, Promise<void>>()
   private readonly removals = new Map<string, Promise<void>>()
   private readonly opening = new Map<string, Set<Promise<void>>>()
+  // The releases still letting their handle go, which a sync waits out.
+  private readonly releasing = new Set<Promise<void>>()
   private readonly uid: number
   private readonly gid: number
   // The mounts that refused an append, which land one as a write.
@@ -1662,9 +1664,19 @@ export class MountCore {
    * Land a handle's buffered writes and let it go. The handle goes even
    * when the landing fails, as close(2) releases its descriptor: no
    * adapter retries a release, so a kept handle would never close. The
-   * failure still reaches the caller.
+   * failure still reaches the caller, before a sync waiting it out goes on.
    */
-  async release(fd: number): Promise<void> {
+  release(fd: number): Promise<void> {
+    const released = this.letGo(fd)
+    this.releasing.add(released)
+    const done = (): void => {
+      this.releasing.delete(released)
+    }
+    released.then(done, done)
+    return released
+  }
+
+  private async letGo(fd: number): Promise<void> {
     const ctx = this.handles.get(fd)
     try {
       // The FSKit shim sends RELEASE with no FLUSH before it.
@@ -1683,16 +1695,24 @@ export class MountCore {
   /**
    * Land what every open handle holds, as sync(2) does, for a client whose
    * close(2) returns before it releases the handle (sshfs). A landing that
-   * fails is logged, and its bytes stay on the handle for its own flush to
-   * retry and report.
+   * fails does not stop the rest, and its bytes stay on the handle for its
+   * own flush to retry. It then waits out the releases still letting their
+   * handle go, each of which hands its own failure to its caller before
+   * this returns.
+   *
+   * @returns each handle whose landing failed, with its path and the
+   *   error, for the caller to report.
    */
-  async sync(): Promise<void> {
-    for (const ctx of [...this.handles.values()]) {
+  async sync(): Promise<[number, string, unknown][]> {
+    const failed: [number, string, unknown][] = []
+    for (const [fd, ctx] of [...this.handles.items()]) {
       try {
         await this.settle(ctx)
       } catch (err) {
-        console.warn(`fuse: landing ${ctx.path} failed: ${String(err)}`)
+        failed.push([fd, ctx.path, err])
       }
     }
+    await Promise.allSettled([...this.releasing])
+    return failed
   }
 }

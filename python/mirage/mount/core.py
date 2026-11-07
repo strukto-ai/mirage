@@ -137,6 +137,8 @@ class MountCore:
         self._pending: dict[str, asyncio.Future[None]] = {}
         self._removals: dict[str, asyncio.Future[None]] = {}
         self._opening: dict[str, set[asyncio.Future[None]]] = {}
+        # The releases still letting their handle go, which a sync waits out.
+        self._releasing: set[asyncio.Future[None]] = set()
         self._uid, self._gid = OWNER
 
     @property
@@ -1532,18 +1534,28 @@ class MountCore:
         if ctx is not None:
             await self._settle(ctx)
 
-    async def sync(self) -> None:
+    async def sync(self) -> list[tuple[int, str, Exception]]:
         """Land what every open handle holds, as sync(2) does.
 
         For a client whose close(2) returns before it releases the handle
-        (sshfs). A landing that fails is logged, and its bytes stay on the
-        handle for its own flush to retry and report.
+        (sshfs). A landing that fails does not stop the rest, and its
+        bytes stay on the handle for its own flush to retry. It then waits
+        out the releases still letting their handle go, each of which
+        hands its own failure to its caller before this returns.
+
+        Returns:
+            list[tuple[int, str, Exception]]: each handle whose landing
+            failed, with its path and the error, for the caller to report.
         """
-        for ctx in list(self._handles.values()):
+        failed: list[tuple[int, str, Exception]] = []
+        for fh, ctx in list(self._handles.items()):
             try:
                 await self._settle(ctx)
             except Exception as err:
-                logger.warning("fuse: landing %s failed: %r", ctx.path, err)
+                failed.append((fh, ctx.path, err))
+        if self._releasing:
+            await asyncio.wait(set(self._releasing))
+        return failed
 
     async def _settle(self, ctx: Handle) -> None:
         """Land a handle's buffered writes in its file's turn.
@@ -1899,14 +1911,20 @@ class MountCore:
             fh (int): the handle to release.
         """
         ctx = self._handles.get(fh)
+        released = asyncio.get_running_loop().create_future()
+        self._releasing.add(released)
         try:
             if ctx is not None:
                 # The FSKit shim sends RELEASE with no FLUSH before it.
                 await self.flush(ctx.path, fh)
         finally:
             self._handles.pop(fh)
-            if ctx is not None and ctx.spool is not None:
-                await ctx.spool.close()
+            try:
+                if ctx is not None and ctx.spool is not None:
+                    await ctx.spool.close()
+            finally:
+                self._releasing.discard(released)
+                released.set_result(None)
 
     def _mount_path(self, key: str, spelled: str) -> str:
         """The mount path the file ``key`` names, or ``spelled`` where it
