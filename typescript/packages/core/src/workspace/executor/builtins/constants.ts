@@ -27,3 +27,7 @@ export const TARGET_RE = /^([A-Za-z_][A-Za-z0-9_]*)(?:\[(.+)\])?$/
 // the expansion introducers (`$` and a backquote). A `~` counts at
 // the start or after `=` or `:`, and a `#` only at the start.
 export const SET_QUOTED_CHARS: ReadonlySet<string> = new Set(' \t\n\'"\\|&;()<>!{}*[?]^$`')
+
+// The largest PID operand kill and ps read as a number: the bound both hosts
+// hold exactly (bash's own is intmax_t).
+export const MAX_PID_OPERAND = Number.MAX_SAFE_INTEGER

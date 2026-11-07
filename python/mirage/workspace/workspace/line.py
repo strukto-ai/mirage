@@ -40,7 +40,7 @@ from mirage.runtime.mixin import LineExecutorMixin
 from mirage.runtime.types import OutputFn, RunResult
 from mirage.shell.console import Channel, JobConsole
 from mirage.types import Limit, PathSpec, Producer
-from mirage.workspace.executor.jobs import pump
+from mirage.workspace.executor.background import pump
 from mirage.workspace.mount import MountRegistry
 from mirage.workspace.session import SessionState, env_snapshot
 from mirage.workspace.types import ExecutionNode

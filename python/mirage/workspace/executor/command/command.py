@@ -57,7 +57,13 @@ from mirage.shell.voice import shell_voice
 from mirage.types import Follow, PathSpec, Producer
 from mirage.view.types import StatPath
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.builtins.disown.disown import handle_disown
+from mirage.workspace.executor.builtins.fg.fg import handle_fg
+from mirage.workspace.executor.builtins.jobs.jobs import handle_jobs
+from mirage.workspace.executor.builtins.kill.kill import handle_kill
 from mirage.workspace.executor.builtins.links.links import operand_follow
+from mirage.workspace.executor.builtins.ps.ps import handle_ps
+from mirage.workspace.executor.builtins.wait.wait import handle_wait
 from mirage.workspace.executor.command.cli import (
     CLIContext,
     LeafCall,
@@ -96,14 +102,6 @@ from mirage.workspace.executor.fanout import (
 )
 from mirage.workspace.executor.find_action_dispatch import _apply_find_actions
 from mirage.workspace.executor.find_refs import resolve_newer_refs
-from mirage.workspace.executor.jobs import (
-    handle_disown,
-    handle_fg,
-    handle_jobs,
-    handle_kill,
-    handle_ps,
-    handle_wait,
-)
 from mirage.workspace.expand.globs import glob_options, resolve_globs
 from mirage.workspace.files import Files
 from mirage.workspace.lookup import (

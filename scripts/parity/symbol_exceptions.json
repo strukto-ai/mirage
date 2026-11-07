@@ -513,7 +513,7 @@
     "UNRESERVED": "TypeScript percent-encodes --data-urlencode by hand against RFC 3986's unreserved set, since encodeURIComponent also keeps !'()*; Python's quote(safe=\"\") keeps exactly that set already."
    }
   },
-  "workspace/executor/jobs": {
+  "workspace/executor/background": {
    "typescript_only": {
     "JobCopy": "A JS promise cannot be cancelled, so a TypeScript job races each write it passes on against its kill signal; Python's cancelled job task unwinds at the same await on its own."
    }

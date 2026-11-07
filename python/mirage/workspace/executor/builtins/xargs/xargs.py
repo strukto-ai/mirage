@@ -65,9 +65,9 @@ from mirage.shell.join import shell_join
 from mirage.shell.variable import ShellVar, VarAttr
 from mirage.utils.quote import shell_quote
 from mirage.workspace.evaluation import EvaluationContext
+from mirage.workspace.executor.background import pump
 from mirage.workspace.executor.builtins.script.script import read_script_bytes
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
-from mirage.workspace.executor.jobs import pump
 from mirage.workspace.lookup.lookup import execs
 from mirage.workspace.mount.registry import MountRegistry
 from mirage.workspace.session.state import env_snapshot

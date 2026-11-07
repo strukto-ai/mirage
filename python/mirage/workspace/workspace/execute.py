@@ -75,9 +75,9 @@ from mirage.utils.clock import run_with_system_clock
 from mirage.workspace.abort import line_status_writer, set_line_writer
 from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import EvaluationContext, child_context
+from mirage.workspace.executor.background import start_shell
 from mirage.workspace.executor.builtins.alias import expanding_aliases
 from mirage.workspace.executor.control import UNWINDING, ended
-from mirage.workspace.executor.jobs import start_shell
 from mirage.workspace.executor.statement import (
     StatusSnapshot,
     record_status,

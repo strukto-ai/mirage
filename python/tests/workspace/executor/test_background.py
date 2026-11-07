@@ -13,39 +13,26 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
-from functools import partial
 from typing import Any
 
 import pytest
 
 from mirage.bridge.sync import handed
 from mirage.execution.errors import WorkspaceHeldError
-from mirage.execution.job import JobHandle, JobState, JobTable
-from mirage.execution.process.types import ProcessState
-from mirage.execution.types import MachineId, MachinePid
+from mirage.execution.job import JobState
 from mirage.io import IOResult
 from mirage.io.async_line_iterator import (
     AsyncLineIterator,
     SharedInput,
     hold_inputs,
 )
-from mirage.policy.profile import SessionProfile
 from mirage.shell.console import Channel, JobConsole
 from mirage.types import Limit, MountMode, PathSpec
 from mirage.utils.abort import MirageAbortError
 from mirage.vfs.ram import RAMVFS
 from mirage.workspace import Workspace
-from mirage.workspace.executor import jobs as jobs_executor
-from mirage.workspace.executor.jobs import (
-    handle_disown,
-    handle_fg,
-    handle_jobs,
-    handle_kill,
-    handle_ps,
-    handle_wait,
-)
+from mirage.workspace.executor import background
 from mirage.workspace.store import RAMWorkspaceStateStore
-from mirage.workspace.types import ExecutionNode
 
 
 def _workspace() -> Workspace:
@@ -416,486 +403,10 @@ async def test_a_job_writes_the_file_after_its_redirect_is_canceled():
     assert await result.stdout_str() == "late\n"
 
 
-def test_bare_wait_with_no_jobs_returns_nothing():
-    async def _do():
-        ws = _workspace()
-        result = await ws.shell("wait")
-        return await result.stdout_str(), result.exit_code
-
-    out, code = asyncio.run(_do())
-    assert out == ""
-    assert code == 0
-
-
 def test_stderr_is_routed_to_its_own_channel():
     out, err = asyncio.run(_run_bg("echo err >&2 &"))
     assert out == b""
     assert err == b"err\n"
-
-
-# ── the shell builtins over a job table ─────────────────────────────
-
-
-async def _emit_and_settle(
-    job: JobHandle,
-    stdout: bytes = b"",
-    stderr: bytes = b"",
-    exit_code: int = 0,
-) -> tuple[IOResult, ExecutionNode]:
-    """A runner that prints to its console and ends with a status.
-
-    Args:
-        job (JobHandle): the job being run.
-        stdout (bytes): what the job prints on stdout.
-        stderr (bytes): what the job prints on stderr.
-        exit_code (int): the job's exit status.
-    """
-    if stdout:
-        await job.console.emit(Channel.STDOUT, stdout)
-    if stderr:
-        await job.console.emit(Channel.STDERR, stderr)
-    return IOResult(exit_code=exit_code), ExecutionNode()
-
-
-async def _run_forever(job: JobHandle) -> tuple[IOResult, ExecutionNode]:
-    """A runner that never finishes on its own.
-
-    Args:
-        job (JobHandle): the job being run.
-    """
-    await asyncio.Event().wait()
-    return IOResult(), ExecutionNode()
-
-
-async def _emit_after(
-    job: JobHandle, gate: asyncio.Event
-) -> tuple[IOResult, ExecutionNode]:
-    """A runner that prints only once the test opens ``gate``, so it is
-    still running while ``fg`` picks a job.
-
-    Args:
-        job (JobHandle): the job being run.
-        gate (asyncio.Event): what the runner waits on before printing.
-    """
-    await gate.wait()
-    return await _emit_and_settle(job, stdout=b"late")
-
-
-async def _submit_settled(
-    table: JobTable,
-    command: str = "foo",
-    stdout: bytes = b"",
-    stderr: bytes = b"",
-    exit_code: int = 0,
-) -> JobHandle:
-    return await table.submit(
-        command=command,
-        run=partial(
-            _emit_and_settle, stdout=stdout, stderr=stderr, exit_code=exit_code
-        ),
-        cwd="/",
-    )
-
-
-async def _submit_pending(
-    table: JobTable, command: str = "sleep"
-) -> JobHandle:
-    return await table.submit(command=command, run=_run_forever, cwd="/")
-
-
-@pytest.mark.asyncio
-async def test_wait_without_an_id_waits_for_every_job():
-    table = JobTable()
-    job = await _submit_settled(table)
-    _, io, node = await handle_wait(table, ["wait"])
-    assert io.exit_code == 0
-    assert node.command == "wait"
-    # Bare `wait` adopts and reaps, so the table entry is gone but the
-    # job object itself has settled.
-    assert table.get(job.id) is None
-    assert (job.state, job.signal) == (JobState.EXITED, None)
-
-
-@pytest.mark.asyncio
-async def test_wait_rejects_a_non_numeric_job_id():
-    _, io, _ = await handle_wait(JobTable(), ["wait", "abc"])
-    assert io.exit_code == 1
-    assert b"not a pid or valid job spec" in io.stderr
-
-
-@pytest.mark.asyncio
-async def test_wait_rejects_an_unknown_job_id():
-    _, io, _ = await handle_wait(JobTable(), ["wait", "999"])
-    assert io.exit_code == 127
-    assert b"not a child of this shell" in io.stderr
-
-
-@pytest.mark.asyncio
-async def test_wait_answers_the_awaited_jobs_status_and_prints_nothing():
-    table = JobTable()
-    job = await _submit_settled(
-        table, stdout=b"out", stderr=b"done", exit_code=3
-    )
-    stdout, io, _ = await handle_wait(table, ["wait", str(job.id)])
-    assert stdout is None
-    assert io.exit_code == 3
-    assert io.stderr is None
-
-
-@pytest.mark.asyncio
-async def test_wait_accepts_the_percent_job_id_spelling():
-    table = JobTable()
-    job = await _submit_settled(table)
-    _, io, _ = await handle_wait(table, ["wait", f"%{job.id}"])
-    assert io.exit_code == 0
-
-
-_KILL_USAGE = (
-    b"kill: usage: kill [-s sigspec | -n signum | -sigspec] pid"
-    b" | jobspec ... or kill -l [sigspec]\n"
-)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "args,code,stderr",
-    [
-        ([], 2, _KILL_USAGE),
-        (["-9"], 2, _KILL_USAGE),
-        (["--"], 2, _KILL_USAGE),
-        (["-?"], 2, _KILL_USAGE),
-        (["-s"], 1, b"bash: kill: -s: option requires an argument\n"),
-        (["-n"], 1, b"bash: kill: -n: option requires an argument\n"),
-        (["-FOO"], 1, b"bash: kill: FOO: invalid signal specification\n"),
-        (
-            ["-s", "FOO", "1"],
-            1,
-            b"bash: kill: FOO: invalid signal specification\n",
-        ),
-        (["-65", "1"], 1, b"bash: kill: 65: invalid signal specification\n"),
-        (
-            ["abc"],
-            1,
-            b"bash: kill: abc: arguments must be process or job IDs\n",
-        ),
-        (
-            ["0x1"],
-            1,
-            b"bash: kill: 0x1: arguments must be process or job IDs\n",
-        ),
-        (
-            ["--", "-"],
-            1,
-            b"bash: kill: -: arguments must be process or job IDs\n",
-        ),
-        ([""], 1, b"bash: kill: `': not a pid or valid job spec\n"),
-        (["999"], 1, b"bash: kill: (999) - No such process\n"),
-        (["-0", "999"], 1, b"bash: kill: (999) - No such process\n"),
-        (["%3"], 1, b"bash: kill: %3: no such job\n"),
-        (["%abc"], 1, b"bash: kill: %abc: no such job\n"),
-        (
-            ["999", "998"],
-            1,
-            b"bash: kill: (999) - No such process\n"
-            b"bash: kill: (998) - No such process\n",
-        ),
-    ],
-)
-async def test_kill_refuses_in_bash_words(args, code, stderr):
-    _, io, _ = await handle_kill(JobTable(), ["kill", *args])
-    assert (io.exit_code, io.stderr) == (code, stderr)
-
-
-@pytest.mark.asyncio
-async def test_kill_marks_a_known_job_killed():
-    table = JobTable()
-    job = await _submit_pending(table)
-    _, io, _ = await handle_kill(table, ["kill", str(job.id)])
-    assert io.exit_code == 0
-    assert table.get(job.id).signal is not None
-
-
-# bash starts a job ignoring INT and QUIT, so kill -INT or -QUIT reaches
-# it and the job runs on; TERM still ends it. Pinned on bash 5.2, once
-# the job has started (a kill right after `&` races bash's own setup).
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line,out",
-    [
-        ("sleep 0.5 & sleep 0.1; kill -INT $!; wait $!; echo $?", "0\n"),
-        ("sleep 0.5 & sleep 0.1; kill -s QUIT %1; wait %1; echo $?", "0\n"),
-        (
-            "(sleep 0.5; echo x $?) & sleep 0.1; kill -2 $!; wait $!; echo $?",
-            "x 0\n0\n",
-        ),
-        (
-            "f() { sleep 0.5; echo f; }; f & sleep 0.1; kill -INT $!; "
-            "wait $!; echo $?",
-            "f\n0\n",
-        ),
-        (
-            "bash -c 'sleep 0.5; echo y' & sleep 0.1; kill -INT $!; wait; "
-            "echo $?",
-            "y\n0\n",
-        ),
-        ("sleep 5 & sleep 0.1; kill -TERM $!; wait $!; echo $?", "143\n"),
-    ],
-)
-async def test_int_and_quit_from_kill_leave_a_job_running(line, out):
-    ws = _workspace()
-    try:
-        io = await ws.shell(line)
-        assert (await io.stdout_str(), io.exit_code) == (out, 0)
-    finally:
-        await ws.close()
-
-
-# Every line of a session runs under one pid, its $$: a signal to it ends
-# the line with 128 plus it, the next line's $?, and leaves its jobs
-# running; a QUIT, which every shell ignores, does nothing. A nested shell
-# is a process of its own, with a $$ of its own.
-@pytest.mark.asyncio
-async def test_dollar_dollar_names_the_sessions_shell():
-    ws = _workspace()
-    try:
-        pid = (await (await ws.shell("echo $$")).stdout_str()).strip()
-        io = await ws.shell("sleep 0.3 & echo before; kill $$; echo after")
-        assert (await io.stdout_str(), io.exit_code) == ("before\n", 143)
-        io = await ws.shell(
-            "echo $? $$; kill -QUIT $$; echo quit=$?; wait; echo job=$?; "
-            "[ \"$(bash -c 'echo $$')\" != $$ ] && echo own; "
-            "bash -c 'kill $$; echo no'; echo nested=$?"
-        )
-        assert await io.stdout_str() == (
-            f"143 {pid}\nquit=0\njob=0\nown\nnested=143\n"
-        )
-    finally:
-        await ws.close()
-
-
-# kill -SIG -- -PGID signals every process of a group, as killpg(2) does:
-# the session's shell leads one, which its jobs and nested shells are in. A
-# shell hands a QUIT to the program it runs right now; a job ignores an INT
-# too, which ends the line's own shell.
-@pytest.mark.asyncio
-async def test_kill_signals_a_process_group():
-    ws = _workspace()
-    try:
-        io = await ws.shell(
-            '{ sleep 1; echo "q $?"; } & sleep 0.1; kill -QUIT -- -$$; '
-            "wait $!; echo after=$?; kill -0 -- -$$; echo grp=$?; "
-            "bash -c 'kill -0 -- -$$' 2>/dev/null; echo nested=$?; "
-            "kill -s TERM -- -999999; echo missing=$?"
-        )
-        assert await io.stdout_str() == (
-            "q 131\nafter=0\ngrp=0\nnested=1\nmissing=1\n"
-        )
-        assert await io.stderr_str() == (
-            "bash: line 1: kill: (-999999) - No such process\n"
-        )
-        io = await ws.shell(
-            '{ sleep 1; echo "a $?" > /m/a; } & sleep 0.1; '
-            "kill -INT -- -$$; echo no"
-        )
-        assert (await io.stdout_str(), io.exit_code) == ("", 130)
-        io = await ws.shell("wait; cat /m/a")
-        assert await io.stdout_str() == "a 130\n"
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_jobs_prints_nothing_when_the_table_is_empty():
-    out, io, _ = await handle_jobs(JobTable(), ["jobs"])
-    assert out == b""
-    assert io.exit_code == 0
-
-
-@pytest.mark.asyncio
-async def test_jobs_lists_id_status_and_command():
-    table = JobTable()
-    done = await _submit_settled(table, command="foo")
-    pending = await _submit_pending(table, command="bar")
-    await table.wait(done.id)
-    out, _, _ = await handle_jobs(table, ["jobs"])
-    assert b"[1] completed foo" in out
-    assert b"[2] running bar" in out
-    await table.kill(pending.id)
-
-
-@pytest.mark.asyncio
-async def test_jobs_reaps_the_completed_entries_it_reported():
-    table = JobTable()
-    job = await _submit_settled(table)
-    await table.wait(job.id)
-    await handle_jobs(table, ["jobs"])
-    assert table.list_jobs() == []
-
-
-@pytest.mark.asyncio
-async def test_ps_lists_only_the_running_jobs():
-    table = JobTable()
-    job = await _submit_pending(table)
-    done = await _submit_settled(table, command="foo")
-    await table.wait(done.id)
-    out, _, _ = await handle_ps(table, ["ps"])
-    assert out == b"1\tsleep\n"
-    await table.kill(job.id)
-
-
-@pytest.mark.asyncio
-async def test_ps_prints_nothing_when_no_job_is_running():
-    out, _, _ = await handle_ps(JobTable(), ["ps"])
-    assert out == b""
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "line",
-    [
-        "true && ps < /m/f | cat",
-        "ps | cat 2>/dev/null",
-        "true && ps | cat 2>/dev/null",
-    ],
-)
-async def test_ps_lists_the_stages_of_a_pipeline_under_a_redirect(line):
-    ws = _workspace()
-    try:
-        await ws.shell("echo x > /m/f")
-        out = (await ws.shell(line)).stdout
-        commands = {row.split(b"\t", 1)[1] for row in out.splitlines()}
-        assert {b"ps", b"cat"} <= commands
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_fg_without_an_operand_reports_when_there_is_no_job():
-    _, io, _ = await handle_fg(JobTable(), ["fg"])
-    assert io.exit_code == 1
-    assert io.stderr == b"bash: fg: current: no such job\n"
-
-
-@pytest.mark.asyncio
-async def test_fg_without_an_operand_takes_a_job_that_already_finished():
-    # A background job can end before `fg` runs; it is still the current
-    # job, as `fg %N` would find it.
-    table = JobTable()
-    job = await _submit_settled(
-        table, command="quick", stdout=b"body", exit_code=3
-    )
-    await table.wait(job.id)
-    stdout, io, _ = await handle_fg(table, ["fg"])
-    assert stdout == b"quick\n"
-    assert io.exit_code == 3
-
-
-@pytest.mark.asyncio
-async def test_fg_without_an_operand_prefers_a_running_job_to_a_finished_one():
-    # bash's current job is the newest one still running; a finished job
-    # answers only when nothing runs. The older job holds until fg has
-    # picked, which it has done by the next turn.
-    table = JobTable()
-    gate = asyncio.Event()
-    await table.submit("older", partial(_emit_after, gate=gate), cwd="/")
-    done = await _submit_settled(table, command="newer", stdout=b"early")
-    await table.wait(done.id)
-    fg = asyncio.create_task(handle_fg(table, ["fg"]))
-    await asyncio.sleep(0)
-    gate.set()
-    stdout, _, _ = await fg
-    assert stdout == b"older\n"
-
-
-@pytest.mark.asyncio
-async def test_fg_rejects_an_unknown_job_id_with_the_operand_as_typed():
-    _, io, _ = await handle_fg(JobTable(), ["fg", "%9"])
-    assert io.exit_code == 1
-    assert io.stderr == b"bash: fg: %9: no such job\n"
-
-
-@pytest.mark.asyncio
-async def test_fg_echoes_the_command_line_then_answers_the_jobs_status():
-    table = JobTable()
-    job = await _submit_settled(
-        table, command="slow", stdout=b"body", exit_code=7
-    )
-    stdout, io, _ = await handle_fg(table, ["fg", str(job.id)])
-    assert stdout == b"slow\n"
-    assert io.exit_code == 7
-
-
-@pytest.mark.asyncio
-async def test_fg_writes_the_command_line_before_it_blocks():
-    table = JobTable()
-    gate = asyncio.Event()
-    await table.submit("held", partial(_emit_after, gate=gate), cwd="/")
-    sink = JobConsole()
-    fg = asyncio.create_task(handle_fg(table, ["fg"], sink=sink))
-    await asyncio.sleep(0)
-    assert await sink.snapshot(Channel.STDOUT) == b"held\n"
-    gate.set()
-    stdout, _, _ = await fg
-    assert stdout is None
-
-
-@pytest.mark.asyncio
-async def test_disown_drops_a_job_from_the_table():
-    table = JobTable()
-
-    async def _run(job):
-        await asyncio.sleep(0.05)
-        return IOResult(), ExecutionNode(command="j", exit_code=0)
-
-    await table.submit("sleep", _run, cwd="/")
-    _, io, _ = await handle_disown(table, ["disown"])
-    assert io.exit_code == 0
-    assert table.list_jobs() == []
-    await table.kill_all()
-
-
-@pytest.mark.asyncio
-async def test_disown_unknown_job_and_bad_option():
-    _, io, _ = await handle_disown(JobTable(), ["disown", "%9"])
-    assert io.exit_code == 1
-    assert b"no such job" in io.stderr
-    _, io, _ = await handle_disown(JobTable(), ["disown", "-x"])
-    assert io.exit_code == 2
-
-
-@pytest.mark.asyncio
-async def test_wait_n_returns_first_finisher():
-    table = JobTable()
-
-    async def _quick(job):
-        return IOResult(exit_code=3), ExecutionNode(command="q", exit_code=3)
-
-    await table.submit("q", _quick, cwd="/")
-    _, io, _ = await handle_wait(table, ["wait", "-n"])
-    assert io.exit_code == 3
-
-
-@pytest.mark.asyncio
-async def test_wait_n_with_no_jobs_is_127():
-    _, io, _ = await handle_wait(JobTable(), ["wait", "-n"])
-    assert io.exit_code == 127
-
-
-@pytest.mark.asyncio
-async def test_wait_bad_option():
-    _, io, _ = await handle_wait(JobTable(), ["wait", "-x"])
-    assert io.exit_code == 2
-    assert b"invalid option" in io.stderr
-
-
-@pytest.mark.asyncio
-async def test_wait_p_with_no_operand_leaves_the_variable_unset():
-    """The no-operand form waits for everything and reports no one job,
-    so bash leaves the variable unset (having cleared it first)."""
-    ws = Workspace({"data": RAMVFS()}, mode=MountMode.WRITE)
-    io = await ws.shell('(exit 0) & V=stale; wait -p V; echo "V=[${V-UNSET}]"')
-    assert (await io.stdout_str()) == "V=[UNSET]\n"
-    await ws.close()
 
 
 # ── `&` inside a compound body launches a job, as it does at top level ──
@@ -1155,29 +666,6 @@ async def test_a_job_evaluating_a_nested_line_survives_the_line_cancel():
 
 
 @pytest.mark.asyncio
-async def test_ps_and_kill_reach_other_sessions_as_far_as_the_profile_says():
-    ws = _workspace()
-    ws.create_session("a")
-    ws.create_session("b")
-    ws.create_session("audit", profile={"processes": {"list": "workspace"}})
-    ws.create_session("ops", profile={"processes": "workspace"})
-    count = "ps | grep -c 'sleep 30$'"
-    stop = "kill $(ps | grep 'sleep 30$' | cut -f1); echo rc=$?"
-    try:
-        pid = (await ws.shell("sleep 30 & echo $!", session_id="a")).stdout
-        assert (await ws.shell(count, session_id="b")).stdout == b"0\n"
-        assert (await ws.shell(count, session_id="audit")).stdout == b"1\n"
-        io = await ws.shell(stop, session_id="audit")
-        assert (await io.stdout_str(), await io.stderr_str()) == (
-            "rc=1\n",
-            f"bash: line 1: kill: ({pid.decode().strip()}) - Operation not permitted\n",
-        )
-        assert (await ws.shell(stop, session_id="ops")).stdout == b"rc=0\n"
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
 async def test_a_session_at_its_process_cap_cannot_fork():
     ws = _workspace()
     ws.create_session("capped", profile={"processes": {"max": 2}})
@@ -1227,202 +715,6 @@ async def test_a_runaway_loop_stops_at_the_process_cap():
         )
     finally:
         await ws.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "selector", ["-TERM", "-15", "-s TERM", "-n 15", "-SIGTERM", "-9"]
-)
-async def test_ps_columns_and_signal_probes_share_managed_processes(selector):
-    ws = Workspace({"/": RAMVFS()}, mode="exec")
-    try:
-        started = await ws.shell("sleep 30 & echo $!")
-        pid = int(started.stdout)
-        result = await ws.shell(
-            f"kill -0 {pid}; echo alive=$?; ps -p{pid} -o pid=,ppid=,comm="
-        )
-        lines = result.stdout.decode().splitlines()
-        assert lines[0] == "alive=0"
-        assert lines[1].split()[0] == str(pid)
-        assert lines[1].split()[-1] == "sleep"
-        assert not result.stderr
-        result = await ws.shell(f"ps --pid={pid} --format=pid= -o args=")
-        assert result.stdout.decode().split() == [str(pid), "sleep", "30"]
-        result = await ws.shell("ps -eo pid,cmd")
-        assert result.stdout.decode().splitlines()[0].split() == ["PID", "CMD"]
-        assert f"{pid}" in result.stdout.decode()
-        assert (await ws.shell(f"kill {selector} {pid}")).exit_code == 0
-        await ws.processes.drain()
-        result = await ws.shell(f"ps -p {pid} -o pid=; echo absent=$?")
-        assert result.stdout == b"absent=1\n"
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_kill_zero_respects_signal_permissions_without_cancelling():
-    ws = Workspace({"/": RAMVFS()}, mode="exec")
-    ws.create_session("owner")
-    ws.create_session("audit", profile={"processes": {"list": "workspace"}})
-    try:
-        pid = int(
-            (await ws.shell("sleep 30 & echo $!", session_id="owner")).stdout
-        )
-        result = await ws.shell(f"kill -0 {pid}", session_id="audit")
-        assert result.exit_code == 1
-        assert b"Operation not permitted" in result.stderr
-        assert (
-            await ws.shell(f"kill -0 {pid}", session_id="owner")
-        ).exit_code == 0
-        [info] = [i for i in ws.processes.view("owner").list() if i.pid == pid]
-        assert info.state == ProcessState.RUNNING
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "spelling", ["-kill", "-SIGkill", "-s kill", "-n KILL", "-s 9"]
-)
-async def test_kill_reads_signal_names_in_any_case(spelling):
-    ws = Workspace({"/": RAMVFS()}, mode="exec")
-    try:
-        pid = int((await ws.shell("sleep 30 & echo $!")).stdout)
-        result = await ws.shell(f"kill {spelling} {pid}")
-        assert (result.exit_code, result.stderr or b"") == (0, b"")
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_kill_succeeds_when_any_operand_was_signalled():
-    ws = Workspace({"/": RAMVFS()}, mode="exec")
-    try:
-        pid = int((await ws.shell("sleep 30 & echo $!")).stdout)
-        result = await ws.shell(f"kill 999999 %9 abc {pid}; echo rc=$?")
-        assert result.stdout == b"rc=0\n"
-        assert result.stderr == (
-            b"bash: line 1: "
-            b"kill: (999999) - No such process\nbash: line 1: kill: %9: no such job\n"
-            b"bash: line 1: kill: abc: arguments must be process or job IDs\n"
-        )
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_ps_lays_columns_out_as_procps_does():
-    ws = Workspace({"/": RAMVFS()}, mode="exec")
-    try:
-        pid = int((await ws.shell("sleep 30 & echo $!")).stdout)
-        cases = {
-            f"ps -o pid,ppid,cmd -p {pid}": (
-                f"    PID    PPID CMD\n{pid:>7}       1 sleep 30\n"
-            ),
-            f"ps -o cmd,pid -p {pid}": (
-                f"CMD{' ' * 25}    PID\nsleep 30{' ' * 20}{pid:>7}\n"
-            ),
-            f"ps -o comm,args -p {pid}": (
-                "COMMAND         COMMAND\nsleep           sleep 30\n"
-            ),
-            f"ps -o pid,cmd= -p {pid}": f"    PID \n{pid:>7} sleep 30\n",
-            f"ps -o pid=,cmd -p {pid}": f"        CMD\n{pid:>7} sleep 30\n",
-            f"ps -o pid=X,cmd=Y -p {pid}": f"      X Y\n{pid:>7} sleep 30\n",
-            f'ps -o "pid cmd" -p {pid},{pid}': f"    PID CMD\n{pid:>7} sleep 30\n",
-            f"ps ax -o pid= -p {pid} | grep -c .": None,
-        }
-        for line, out in cases.items():
-            result = await ws.shell(line)
-            if out is not None:
-                assert result.stdout.decode() == out, line
-            assert (result.exit_code, result.stderr or b"") == (0, b""), line
-    finally:
-        await ws.close()
-
-
-# The issue's line: `$$` is the session's first line, which ps lists
-# while it runs as the session leader procps marks with `s`; the owner
-# is the workspace user and the group the session's profile.
-@pytest.mark.asyncio
-async def test_ps_lists_the_session_leader_with_its_owner():
-    ws = Workspace(
-        {"/": RAMVFS()},
-        mode="exec",
-        profiles={"admin": SessionProfile()},
-        profile="admin",
-    )
-    try:
-        line = "ps -o pid,ppid,pgid,sid,stat,user,uid,group,gid,cmd -p $$"
-        result = await ws.shell(line)
-        assert result.stdout.decode() == (
-            "    PID    PPID    PGID     SID STAT USER       UID GROUP      "
-            "GID CMD\n"
-            f"      1       0       1       1 Rs   admin    admin admin    "
-            f"admin {line}\n"
-        )
-    finally:
-        await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_ps_does_not_name_another_sessions_group():
-    ws = Workspace(
-        {"/": RAMVFS()},
-        mode="exec",
-        profiles={
-            "admin": SessionProfile(processes="workspace"),
-            "reader": SessionProfile(),
-        },
-        profile="admin",
-    )
-    ws.create_session("r", profile="reader")
-    try:
-        pid = int(
-            (await ws.shell("sleep 30 & echo $!", session_id="r")).stdout
-        )
-        result = await ws.shell(f"ps -o pid=,group= -p {pid},$$")
-        words = result.stdout.decode().split()
-        rows = dict(zip(words[::2], words[1::2], strict=True))
-        assert (rows.pop(str(pid)), list(rows.values())) == ("-", ["admin"])
-    finally:
-        await ws.close()
-
-
-_PS_USAGE = (
-    b"\nUsage:\n ps [options]\n\n"
-    b" Try 'ps --help <simple|list|output|threads|misc|all>'\n"
-    b"  or 'ps --help <s|l|o|t|m|a>'\n for additional help text.\n\n"
-    b"For more details see ps(1).\n"
-)
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "args,message",
-    [
-        (["-p"], b"list of process IDs must follow -p"),
-        (["-p", ""], b"list of process IDs must follow -p"),
-        (["--pid"], b"list of process IDs must follow --pid"),
-        (["-p", "1,x"], b"process ID list syntax error"),
-        (["-p", "0"], b"process ID out of range"),
-        (["-p", "-1"], b"process ID out of range"),
-        (["-o"], b"format specification must follow -o"),
-        (["--format"], b"format specification must follow --format"),
-        (["-o", "pid,,cmd"], b"improper format list"),
-        (["-o", "foo"], b'unknown user-defined format specifier "foo"'),
-        (["-o", "="], b'unknown user-defined format specifier ""'),
-        (["-K"], b"unsupported SysV option"),
-        (["--bogus"], b"unknown gnu long option"),
-        (["bogus"], b"unsupported option (BSD syntax)"),
-    ],
-)
-async def test_ps_refuses_in_procps_words(args, message):
-    out, io, _ = await handle_ps(JobTable(), ["ps", *args])
-    assert out is None
-    assert (io.exit_code, io.stderr) == (
-        1,
-        b"error: " + message + b"\n" + _PS_USAGE,
-    )
 
 
 # A job is one program only when bash would run it as the program itself:
@@ -1517,52 +809,6 @@ async def test_a_workspace_runs_on_another_daemon_once_its_own_closes():
         await b.close()
 
 
-# ps lists this daemon's runners, one that is a program a runtime runs
-# followed by where it runs: a sandbox's machine, a host program's pid.
-@pytest.mark.asyncio
-@pytest.mark.parametrize("host", [False, True])
-async def test_ps_shows_where_a_program_runs(host):
-    ws = Workspace({}, session_id="s")
-    try:
-        await ws.shell("sleep 30 &", session_id="s")
-        job = ws.job_table.get(1, "s")
-        assert job is not None and job.process is not None
-        job.process.one_command = True
-        if host:
-            assert job.process.take(None, "local")
-            job.process.set_machine_pid(MachinePid(4242, 1.0))
-        else:
-            assert job.process.take(MachineId("docker", "tools"), "docker")
-        where = "host 4242" if host else "docker:tools"
-        own = (await ws.shell("ps", session_id="s")).stdout.decode()
-        assert own.splitlines()[:2] == [
-            f"{job.pid}\tsleep 30",
-            f"-\t└ {where}",
-        ]
-        await ws.shell("kill %1", session_id="s")
-    finally:
-        await ws.close()
-
-
-# A pid is a number: kill and ps refuse any other operand in bash's and
-# procps's words.
-@pytest.mark.asyncio
-async def test_kill_and_ps_refuse_a_pid_that_is_no_number():
-    ws = Workspace({}, session_id="s")
-    try:
-        killed = await ws.shell("kill ab12:3 :3", session_id="s")
-        assert killed.exit_code == 1
-        assert killed.stderr.decode().splitlines() == [
-            "bash: line 1: kill: ab12:3: arguments must be process or job IDs",
-            "bash: line 1: kill: :3: arguments must be process or job IDs",
-        ]
-        listed = await ws.shell("ps -p ab12:3", session_id="s")
-        assert listed.exit_code == 1
-        assert b"process ID list syntax error" in listed.stderr
-    finally:
-        await ws.close()
-
-
 class _Held(JobConsole):
     async def emit(self, channel: Channel, data: bytes) -> None:
         await asyncio.Event().wait()
@@ -1572,7 +818,7 @@ class _Held(JobConsole):
 async def test_a_job_past_its_limit_ends_while_a_reader_holds_its_output(
     monkeypatch,
 ):
-    monkeypatch.setattr(jobs_executor, "STOP_WAIT_SECONDS", 0.2)
+    monkeypatch.setattr(background, "STOP_WAIT_SECONDS", 0.2)
     ws = Workspace(
         {"/data": RAMVFS()},
         mode=MountMode.WRITE,
@@ -1587,22 +833,6 @@ async def test_a_job_past_its_limit_ends_while_a_reader_holds_its_output(
     assert (
         await job.console.snapshot(Channel.STDERR)
     ) == b"line: timed out after 0.2s\n"
-    await ws.close()
-
-
-@pytest.mark.asyncio
-async def test_kill_reaches_a_grandchild_past_the_job_between_them():
-    ws = _workspace()
-    await ws.shell(
-        "{ { sleep 30 & } & wait $!; echo > /m/ready; sleep 30; } &"
-    )
-    async with asyncio.timeout(5):
-        while (await ws.shell("test -e /m/ready")).exit_code != 0:
-            await asyncio.sleep(0.02)
-    await ws.shell("kill %1")
-    async with asyncio.timeout(5):
-        while ws.processes.live():
-            await asyncio.sleep(0.02)
     await ws.close()
 
 
@@ -1631,7 +861,7 @@ async def test_a_background_job_lets_go_of_its_readers_once(monkeypatch, line):
         discarded.append(self)
         await discard(self)
 
-    monkeypatch.setattr(jobs_executor, "hold_inputs", hold)
+    monkeypatch.setattr(background, "hold_inputs", hold)
     monkeypatch.setattr(AsyncLineIterator, "discard", record)
     ws = _workspace()
     try:
@@ -1667,7 +897,7 @@ async def test_a_failed_release_still_lets_go_of_the_other_readers(
             raise ValueError("unhold failed")
         await unhold(self)
 
-    monkeypatch.setattr(jobs_executor, "hold_inputs", hold)
+    monkeypatch.setattr(background, "hold_inputs", hold)
     monkeypatch.setattr(AsyncLineIterator, "unhold", fail_first)
     ws = _workspace()
     try:
