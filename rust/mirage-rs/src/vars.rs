@@ -93,9 +93,22 @@ impl Indexed {
     }
 
     /// One past the highest assigned index, which a negative subscript
-    /// counts back from.
-    pub fn extent(&self) -> i64 {
-        self.0.last_key_value().map_or(0, |(index, _)| index + 1)
+    /// counts back from: wider than an index, as bash keeps it, so an
+    /// element at `i64::MAX` still counts.
+    pub fn extent(&self) -> i128 {
+        self.0
+            .last_key_value()
+            .map_or(0, |(index, _)| i128::from(*index) + 1)
+    }
+
+    /// A subscript as it lands: a negative one counted back from the
+    /// extent, still negative when it reaches before index 0; any other
+    /// as given.
+    pub fn back(&self, index: i64) -> i64 {
+        match self.0.last_key_value() {
+            Some((last, _)) if index < 0 => index + 1 + last,
+            _ => index,
+        }
     }
 
     pub fn count(&self) -> usize {
@@ -130,15 +143,10 @@ impl Indexed {
     /// counts back from the extent; `length` caps the count, a negative
     /// one dropping that many from the end.
     pub fn slice(&self, offset: i64, length: Option<i64>) -> Vec<&[u8]> {
-        let offset = if offset < 0 {
-            let back = offset + self.extent();
-            if back < 0 {
-                return Vec::new();
-            }
-            back
-        } else {
-            offset
-        };
+        let offset = self.back(offset);
+        if offset < 0 {
+            return Vec::new();
+        }
         let picked: Vec<&[u8]> = self.0.range(offset..).map(|(_, v)| v.as_slice()).collect();
         match length {
             None => picked,
@@ -528,10 +536,12 @@ impl Store {
     }
 
     /// `PIPESTATUS`, and `FUNCNAME` until `unset FUNCNAME`, from the shell's
-    /// own bookkeeping, which a lookup and arithmetic answer and an
-    /// assignment never reaches; None for every other name, or a hidden one.
+    /// own bookkeeping, which a lookup and arithmetic answer, through a
+    /// reference too, and an assignment never reaches; None for every other
+    /// name, or a hidden one.
     pub fn special(&self, name: &str) -> Option<Indexed> {
-        let array = match (name, &self.function_names) {
+        let name = self.target(name);
+        let array = match (name.as_str(), &self.function_names) {
             ("PIPESTATUS", _) => Indexed::dense(
                 self.pipe_status
                     .iter()
@@ -540,7 +550,7 @@ impl Store {
             ("FUNCNAME", Some(names)) => Indexed::dense(names.iter().cloned()),
             _ => return None,
         };
-        (!self.hidden(name)).then_some(array)
+        (!self.hidden(&name)).then_some(array)
     }
 
     /// Whether this store saves as `other` does, record for record. A
@@ -1509,9 +1519,9 @@ impl Vars for Reading<'_> {
             .unwrap_or(0);
         if index < 0 {
             if let Some(array) = self.store.special(name) {
-                index += array.extent();
+                index = array.back(index);
             } else if let Some(array) = self.store.indexed(name) {
-                index += array.extent();
+                index = array.back(index);
             } else if self.store.scalar(name).is_some() {
                 index += 1;
             }
@@ -1663,6 +1673,14 @@ mod tests {
         assert_eq!(array.slice(-11, None), Vec::<&[u8]>::new());
         array.unset(9);
         assert_eq!(array.extent(), 4);
+        assert_eq!(array.back(-4), 0);
+        assert_eq!(array.back(-5), -1);
+        array.set(i64::MAX, b"x".to_vec());
+        assert_eq!(array.extent(), i128::from(i64::MAX) + 1);
+        assert_eq!(array.back(-1), i64::MAX);
+        assert_eq!(array.back(i64::MIN), 0);
+        assert_eq!(array.slice(-1, None), vec![&b"x"[..]]);
+        assert_eq!(array.slice(0, None), vec![&b"b"[..], b"d", b"x"]);
     }
 
     #[test]
@@ -1938,8 +1956,14 @@ mod tests {
         store.set_specials(vec![3], None, 0, 0, Vec::new());
         let outcome = store.arith(&mut draws, b"PIPESTATUS[0] + FUNCNAME[0]", None, false);
         assert_eq!(outcome.value.unwrap(), 3);
+        store.seed("r", Value::Scalar(b"PIPESTATUS".to_vec()));
+        store.set_attr("r", Some(NAMEREF), true);
+        assert_eq!(store.special("r"), Some(Indexed::dense([b"3".to_vec()])));
+        let outcome = store.arith(&mut draws, b"r[-1] + r", None, false);
+        assert_eq!(outcome.value.unwrap(), 6);
         store.hide_vars(&["PIPESTATUS".to_owned()], &[]);
         assert_eq!(store.special("PIPESTATUS"), None);
+        assert_eq!(store.special("r"), None);
     }
 
     #[test]

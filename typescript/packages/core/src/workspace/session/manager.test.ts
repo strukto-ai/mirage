@@ -858,7 +858,7 @@ it('a final flush after session deletion does not recreate it', async () => {
   expect((await store.load()).has('gone')).toBe(false)
 })
 
-async function loadedDraws(store: RAMNamespaceStore, seed: number): Promise<unknown[]> {
+async function loadedDraws(store: RAMNamespaceStore, seed: number): Promise<number[]> {
   const manager = new SessionManager(
     'default',
     store,
@@ -867,7 +867,11 @@ async function loadedDraws(store: RAMNamespaceStore, seed: number): Promise<unkn
     new SeededIdSource(seed),
   )
   await manager.ensureLoaded()
-  return ['default', 'agent'].map((sid) => manager.get(sid).vars.shell.nextRandom())
+  return ['default', 'agent'].map((sid) => {
+    const draw = manager.get(sid).vars.shell.nextRandom()
+    if (typeof draw !== 'number') throw new Error('no draw')
+    return draw
+  })
 }
 
 it("draws a loaded session's $RANDOM from the manager's ids", async () => {

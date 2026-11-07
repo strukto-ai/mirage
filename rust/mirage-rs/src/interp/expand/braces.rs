@@ -415,7 +415,7 @@ impl<H: Host> Expander<'_, H> {
                 let key = self.subscript_key(&p).await?;
                 let mut index = self.expansion_index(&key).await?;
                 if index < 0 {
-                    index += array.extent();
+                    index = array.back(index);
                     let assigns = matches!(p.op, Some("=" | ":="));
                     if index < 0 && !assigns {
                         self.diagnostics.push(Diagnostic::Bytes(voiced(
@@ -515,7 +515,7 @@ impl<H: Host> Expander<'_, H> {
                     return Ok(vec![Chunk::value(Vec::new(), quoted)]);
                 }
                 let utf8 = self.shell.utf8();
-                let extent = pattern::length(&value, utf8) as i64;
+                let extent = pattern::length(&value, utf8) as i128;
                 let Some((offset, length)) = self.slice_bounds(&p, extent, true).await? else {
                     return Ok(vec![Chunk::value(Vec::new(), quoted)]);
                 };

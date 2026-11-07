@@ -1018,13 +1018,15 @@ async def test_flush_of_closed_session_does_not_recreate_it():
     assert "gone" not in await manager.store.load()
 
 
-async def _loaded_draws(store: RAMNamespaceStore, seed: int) -> list[object]:
+async def _loaded_draws(store: RAMNamespaceStore, seed: int) -> list[int]:
     manager = SessionManager("default", store=store, ids=SeededIdSource(seed))
     await manager.ensure_loaded()
-    return [
-        manager.get(sid).vars.shell.next_random()
-        for sid in ("default", "agent")
-    ]
+    draws: list[int] = []
+    for sid in ("default", "agent"):
+        draw = manager.get(sid).vars.shell.next_random()
+        assert isinstance(draw, int)
+        draws.append(draw)
+    return draws
 
 
 @pytest.mark.asyncio

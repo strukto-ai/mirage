@@ -1060,17 +1060,32 @@ export class ShellTask {
     tasks.unregister(this)
   }
 
+  /**
+   * A span the engine counts in bytes of `node`'s text, in the code units
+   * the host's strings count, as `segmentFrames` places a backtick pair.
+   */
+  private units(node: ShellTreeNode, span: readonly [number, number]): readonly [number, number] {
+    const bytes = encodeText(node.text)
+    return [
+      decodeText(bytes.subarray(0, span[0])).length,
+      decodeText(bytes.subarray(0, span[1])).length,
+    ]
+  }
+
   private ask(asked: readonly Item[]): Ask {
     switch (asked[0]) {
-      case 'substitute':
+      case 'substitute': {
+        const node = this.node(asked[3] ?? null)
+        const span = (asked[4] ?? null) as readonly [number, number] | null
         return [
           'substitute',
           Shell.adopt(asked[1] as number),
           asked[2] as string,
-          this.node(asked[3] ?? null),
-          (asked[4] ?? null) as readonly [number, number] | null,
+          node,
+          span === null ? null : this.units(node, span),
           (asked[5] ?? null) as readonly string[] | null,
         ]
+      }
       case 'process':
         return ['process', Shell.adopt(asked[1] as number), this.node(asked[2] ?? null)]
       case 'gate':

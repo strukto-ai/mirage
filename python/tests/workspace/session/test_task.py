@@ -78,7 +78,7 @@ async def test_a_profile_changed_mid_task_hides_its_names(monkeypatch):
 
     try:
         await ws.shell("shopt -s extglob; TOKEN=t")
-        seed_var(session, "X", "a" * 2_000_000)
+        seed_var(session, "X", "a" * 50_000)
         monkeypatch.setattr(task_module, "task_turn", turn)
         result = await ws.shell('x=${X//+(?)/x}; echo "${TOKEN-unset}"')
         assert session.visibility is hidden

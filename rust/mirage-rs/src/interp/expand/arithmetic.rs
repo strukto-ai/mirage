@@ -34,18 +34,14 @@ impl<H: Host> Expander<'_, H> {
         }
     }
 
-    /// Evaluate one arithmetic text, landing what it assigns; an error
-    /// names `lead`, the reference it belongs to.
+    /// Evaluate one arithmetic text, landing what it assigns, an unset
+    /// name under `set -u` included; an error names `lead`, the reference
+    /// it belongs to.
     pub(super) async fn evaluate(&mut self, text: &[u8], lead: &str) -> Result<i64, Fault> {
         let mut draws = Draws::default();
         let nounset = self.shell.option("nounset");
         let outcome = self.shell.vars.arith(&mut draws, text, None, nounset);
-        let value = match outcome.value {
-            Err(arith::Error::Unbound(name)) => {
-                return Err(Signal::unbound(self.shell.vars.voice(), &name).into());
-            }
-            other => other,
-        };
+        let value = outcome.value;
         for write in outcome.writes {
             let (name, key) = (write.name.clone(), write.key.clone());
             self.expansion_write(&name, key, write.value.into_bytes())
@@ -54,6 +50,9 @@ impl<H: Host> Expander<'_, H> {
         self.shell.vars.settle(&mut draws).map_err(Fault::Arith)?;
         match value {
             Ok(value) => Ok(value),
+            Err(arith::Error::Unbound(name)) => {
+                Err(Signal::unbound(self.shell.vars.voice(), &name).into())
+            }
             Err(arith::Error::Readonly { name, subscript }) => {
                 Err(Signal::readonly(self.shell.vars.voice(), &name, subscript).into())
             }
@@ -175,12 +174,7 @@ impl<H: Host> Expander<'_, H> {
         let mut draws = Draws::default();
         let nounset = self.shell.option("nounset");
         let outcome = self.shell.vars.arith(&mut draws, &text, None, nounset);
-        let value = match outcome.value {
-            Err(arith::Error::Unbound(name)) => {
-                return Err(Signal::unbound(self.shell.vars.voice(), &name).into());
-            }
-            other => other,
-        };
+        let value = outcome.value;
         for write in outcome.writes {
             let key = write.key.clone();
             let name = write.name.clone();
@@ -190,6 +184,9 @@ impl<H: Host> Expander<'_, H> {
         self.shell.vars.settle(&mut draws).map_err(Fault::Arith)?;
         match value {
             Ok(value) => Ok(value.to_string().into_bytes()),
+            Err(arith::Error::Unbound(name)) => {
+                Err(Signal::unbound(self.shell.vars.voice(), &name).into())
+            }
             Err(arith::Error::Readonly { name, subscript }) => {
                 Err(Signal::readonly(self.shell.vars.voice(), &name, subscript).into())
             }

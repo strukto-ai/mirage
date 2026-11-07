@@ -491,9 +491,6 @@ impl<G: Gate> Writer<'_, G> {
         let outcome = self.store.arith(&mut draws, subscript, None, self.nounset);
         let (index, error) = match outcome.value {
             Ok(index) => (index, None),
-            Err(arith::Error::Unbound(name)) => {
-                return Err(Signal::unbound(self.store.voice(), &name).into());
-            }
             Err(error) => (0, Some(error)),
         };
         self.land_writes(outcome.writes).await?;
@@ -544,10 +541,7 @@ impl<G: Gate> Writer<'_, G> {
             None if scalar => Indexed::dense([Vec::new()]),
             None => return Ok(false),
         };
-        let mut index = self.subscript_index(subscript.unwrap_or_default()).await?;
-        if index < 0 {
-            index += held.extent();
-        }
+        let index = held.back(self.subscript_index(subscript.unwrap_or_default()).await?);
         Ok(held.get(index).is_some())
     }
 
@@ -608,13 +602,10 @@ impl<G: Gate> Writer<'_, G> {
                         Indexed::dense(scalar)
                     }
                 };
-                let mut index = match subscript {
+                let index = array.back(match subscript {
                     Some(subscript) => self.subscript_index(subscript).await?,
                     None => 0,
-                };
-                if index < 0 {
-                    index += array.extent();
-                }
+                });
                 if index < 0 {
                     return Ok(Element::Subscript);
                 }
@@ -635,16 +626,13 @@ impl<G: Gate> Writer<'_, G> {
     /// its writes landed in order, a hidden name refusing and the writes
     /// after it never landing, as a readonly name stops the evaluation
     /// itself (`let 'X=5, R=3'` leaves X at 5). The draws settle either
-    /// way. An error comes back unworded, for the command to voice.
+    /// way, and an unset name under `set -u` stops the line only after the
+    /// writes before it. An error comes back unworded, for the command to
+    /// voice.
     pub async fn arith(&mut self, text: &[u8]) -> Result<i64, Fault> {
         let mut draws = Draws::default();
         let outcome = self.store.arith(&mut draws, text, None, self.nounset);
-        let value = match outcome.value {
-            Err(arith::Error::Unbound(name)) => {
-                return Err(Signal::unbound(self.store.voice(), &name).into());
-            }
-            other => other,
-        };
+        let value = outcome.value;
         let mut landed = Ok(());
         for write in outcome.writes {
             if self.store.hidden(&self.store.target(&write.name)) {
@@ -667,6 +655,7 @@ impl<G: Gate> Writer<'_, G> {
             .map_err(|error| fatal(self.store.voice(), error))?;
         landed?;
         value.map_err(|error| match error {
+            arith::Error::Unbound(name) => Signal::unbound(self.store.voice(), &name).into(),
             arith::Error::Readonly { name, subscript } => Fault::Readonly { name, subscript },
             error => Fault::Arith(error),
         })
@@ -867,6 +856,16 @@ mod tests {
         let failed = run(writer(&mut store, &mut gate).subscript_index(b"y=2, 1/0"));
         assert!(matches!(failed, Err(Fault::Arith(_))));
         assert_eq!(text(&store, "y").as_deref(), Some("2"));
+        let mut strict = writer(&mut store, &mut gate);
+        strict.nounset = true;
+        let failed = run(strict.subscript_index(b"z=4, nope"));
+        assert!(matches!(failed, Err(Fault::Signal(_))));
+        let mut strict = writer(&mut store, &mut gate);
+        strict.nounset = true;
+        let failed = run(strict.arith(b"w=5, nope"));
+        assert!(matches!(failed, Err(Fault::Signal(_))));
+        assert_eq!(text(&store, "z").as_deref(), Some("4"));
+        assert_eq!(text(&store, "w").as_deref(), Some("5"));
     }
 
     #[test]

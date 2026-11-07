@@ -17,7 +17,7 @@ impl<H: Host> Expander<'_, H> {
     pub(super) async fn slice_bounds(
         &mut self,
         p: &Braces,
-        extent: i64,
+        extent: i128,
         scalar: bool,
     ) -> Result<Option<(i64, Option<i64>)>, Fault> {
         let bounds = self.substring_operands(p.node);
@@ -28,19 +28,20 @@ impl<H: Host> Expander<'_, H> {
             let text = self.operand_text(&bounds, span).await?;
             let mut value = self.evaluate(&text, &lead).await?;
             if values.is_empty() {
-                if value < 0 {
-                    value += extent;
-                }
-                if value < 0 || value > extent || (value == extent && !scalar) {
+                let at = i128::from(value) + if value < 0 { extent } else { 0 };
+                if at < 0 || at > extent || (at == extent && !scalar) {
                     return Ok(None);
                 }
+                value = at as i64;
             }
             texts.push(text);
             values.push(value);
         }
         let offset = values.first().copied().unwrap_or(0);
         let length = values.get(1).copied();
-        if length.is_some_and(|length| length < 0 && (!scalar || extent + length < offset)) {
+        if length.is_some_and(|length| {
+            length < 0 && (!scalar || extent + i128::from(length) < i128::from(offset))
+        }) {
             let text = String::from_utf8_lossy(&texts[1]);
             return Err(discard(
                 self.shell.vars.voice(),

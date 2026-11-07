@@ -1388,6 +1388,22 @@ describe('prejudge scope', () => {
     expect(w.decisions.list('s')).toEqual([])
   })
 
+  it('runs a held pair holding a multibyte character on its grant', async () => {
+    // The engine places a pair in bytes of its region and the pass in the
+    // line's units; counted apart, the grant is hidden from the gate and
+    // the line asks again.
+    const w = await ws()
+    await w.shell('echo s > /data/secrét')
+    const line = 'echo x && echo `cat /data/secrét`'
+    const first = await w.shell(line, { sessionId: 's' })
+    expect(first.refusal?.kind).toBe('pending')
+    await w.decisions.answer(first.refusal?.askId ?? '', Outcome.ALLOW)
+    const ran = await w.shell(line, { sessionId: 's' })
+    expect(ran.exitCode).toBe(0)
+    expect(DEC.decode(ran.stdout)).toBe('x\ns\n')
+    expect(w.decisions.list('s')).toEqual([])
+  })
+
   it.each([
     'for i in 1 2; do touch /data/mark.txt; cat /data/secret.txt; done',
     'for i in 1 2; do cat /data/secret.txt; done',

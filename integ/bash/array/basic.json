@@ -518,10 +518,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "ar15=(1 2 3 4); echo ${ar15[@]:1:2}",
+      "command": "ar15=(1 2 3 4); echo ${ar15[@]:1:2}; ar15[9223372036854775807]=x; echo \"${ar15[@]:3} ${ar15[-1]} ${ar15[@]: -1}\"; unset 'ar15[-1]'; echo \"${!ar15[@]}\"",
       "expect": {
         "exit": 0,
-        "stdout": "2 3\n",
+        "stdout": "2 3\n4 x x x\n0 1 2 3\n",
         "stderr": ""
       }
     },

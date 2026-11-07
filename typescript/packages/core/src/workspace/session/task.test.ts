@@ -59,7 +59,7 @@ describe('drive', () => {
     const hidden = { ...DEFAULT_VISIBILITY, vars: { names: ['TOKEN'], patterns: [] } }
     try {
       await ws.shell('shopt -s extglob; TOKEN=t')
-      seedVar(session, 'X', 'a'.repeat(2_000_000))
+      seedVar(session, 'X', 'a'.repeat(50_000))
       // eslint-disable-next-line @typescript-eslint/unbound-method
       const resumed = ShellTask.prototype.answerResumed
       vi.spyOn(ShellTask.prototype, 'answerResumed').mockImplementation(function (this: ShellTask) {
