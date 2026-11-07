@@ -159,7 +159,8 @@ async def _seen(line: str, reach: str = "remote") -> tuple[Process, str]:
 # A program a runtime runs past the workspace is a process of its own on
 # the runtime's machine: the line's when it is the line's one command,
 # a pipeline stage's when it is the stage's, a job's when it is the job's,
-# as bash execs it there; a child of its shell otherwise.
+# or the shell's when ``exec`` replaces it, as bash execs it there; a
+# child of its shell otherwise, and of ``find``, which forks each one.
 @pytest.mark.asyncio
 async def test_a_program_past_the_workspace_is_a_process_of_its_own():
     alone, _ = await _seen("probe")
@@ -176,6 +177,12 @@ async def test_a_program_past_the_workspace_is_a_process_of_its_own():
     )
     job, pid = await _seen("probe & echo $!; wait")
     assert (job.pid, job.runtime) == (int(pid), "seen")
+    replaced, _ = await _seen("exec probe")
+    assert (replaced.parent, replaced.runtime) == (None, "seen")
+    forked, pid = await _seen(
+        "find /data -maxdepth 0 -exec probe {} \\; & echo $!; wait"
+    )
+    assert (forked.parent, forked.runtime) == (int(pid), "seen")
 
 
 # A runtime the workspace reaches runs its program in its shell's process.

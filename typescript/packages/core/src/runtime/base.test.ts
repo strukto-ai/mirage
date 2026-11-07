@@ -138,8 +138,9 @@ async function until(done: () => boolean): Promise<void> {
 describe('Runtime.execute', () => {
   // A program a runtime runs past the workspace is a process of its own on
   // the runtime's machine: the line's when it is the line's one command, a
-  // pipeline stage's when it is the stage's, a job's when it is the job's, as
-  // bash execs it there; a child of its shell otherwise.
+  // pipeline stage's when it is the stage's, a job's when it is the job's, or
+  // the shell's when `exec` replaces it, as bash execs it there; a child of its
+  // shell otherwise, and of `find`, which forks each one.
   it('runs a program past the workspace as a process of its own', async () => {
     const box = new MachineId('box', 'b1')
     const [alone] = await seen('probe')
@@ -160,6 +161,10 @@ describe('Runtime.execute', () => {
     expect([stage.parent, stage.command, stage.runtime]).toEqual([Number(shell), 'probe', 'seen'])
     const [job, pid] = await seen('probe & echo $!; wait')
     expect([job.id.pid, job.runtime]).toEqual([Number(pid), 'seen'])
+    const [replaced] = await seen('exec probe')
+    expect([replaced.parent, replaced.runtime]).toEqual([null, 'seen'])
+    const [forked, job2] = await seen('find /data -maxdepth 0 -exec probe {} \\; & echo $!; wait')
+    expect([forked.parent, forked.runtime]).toEqual([Number(job2), 'seen'])
   })
 
   // A runtime the workspace reaches runs its program in its shell's process.

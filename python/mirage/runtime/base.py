@@ -24,7 +24,6 @@ from mirage.commands.config import Context
 from mirage.context.session_context import (
     bind_caller,
     current_caller,
-    program_invocation,
     reset_caller,
 )
 from mirage.execution.types import MachineId
@@ -289,9 +288,7 @@ class Runtime(ABC, Generic[E]):
             or session is None
         ):
             return await run()
-        if not program_invocation(session) and shell.take(
-            self.machine, self.name
-        ):
+        if shell.take(self.machine, self.name):
             return await run()
         line = ctx.flags.get("c")
         if kind == "line" and isinstance(line, str):

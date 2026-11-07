@@ -26,6 +26,7 @@ from mirage.commands.builtin.utils.formatting import format_find_ls
 from mirage.commands.builtin.utils.identity import Identity
 from mirage.commands.builtin.utils.links import link_view
 from mirage.context import (
+    current_caller,
     get_current_session,
     reset_program_invocation,
     set_program_invocation,
@@ -185,6 +186,10 @@ async def _run_exec(
     # marked a program run for the session, so a builtin that doubles
     # as a program answers as the program (`printf -v` is a format).
     line = ("command " if shadowed else "") + shell_join(words)
+    # find stays its process and forks each program as a child of it.
+    process = current_caller().process
+    if process is not None:
+        process.one_command = False
     sess = get_current_session()
     token = set_program_invocation(sess) if sess is not None else None
     try:

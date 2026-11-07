@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Context } from '../commands/config.ts'
-import { currentCaller, isProgramInvocation, runWithCaller } from '../context/session_context.ts'
+import { currentCaller, runWithCaller } from '../context/session_context.ts'
 import { isAborting } from '../errors/fs.ts'
 import type { ProcessHandle } from '../execution/process/handle.ts'
 import type { MachineId } from '../execution/types.ts'
@@ -219,7 +219,7 @@ export abstract class Runtime<E = unknown> {
     const { process: shell, session } = currentCaller()
     if (this.reach === 'workspace' || processes === null || shell == null || session == null)
       return run(ctx)
-    if (!isProgramInvocation(session) && shell.take(this.machine, this.name)) return run(ctx)
+    if (shell.take(this.machine, this.name)) return run(ctx)
     const line = ctx.flags.c
     const command =
       kind === 'line' && typeof line === 'string'
