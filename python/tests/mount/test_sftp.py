@@ -284,7 +284,9 @@ async def test_a_sync_lands_what_a_pipe_acknowledged_before_its_close():
         await ws.close()
 
 
-async def capped_pipe() -> tuple[
+async def capped_pipe(
+    run=None,
+) -> tuple[
     Workspace,
     PipeServer,
     asyncio.StreamReader,
@@ -294,7 +296,7 @@ async def capped_pipe() -> tuple[
     """A pipe server over a 20-byte ``/notes``, past its init."""
     ws = Workspace({"/notes": RAMVFS(capacity=20)}, mode=MountMode.WRITE)
     await ws.session("agent")
-    server = PipeServer(ws.vfs, ws.get_session("agent"))
+    server = PipeServer(ws.vfs, ws.get_session("agent"), run)
     requests, answers = asyncio.StreamReader(), asyncio.StreamReader()
     served = asyncio.create_task(server.serve(requests, Feed(answers)))
     requests.feed_data(packet(FXP_INIT, struct.pack(">I", 3)))
@@ -380,19 +382,92 @@ async def test_a_close_racing_a_sync_reports_its_failure_once(monkeypatch):
 @pytest.mark.asyncio
 async def test_a_pipe_that_ends_lands_every_handle_past_one_that_fails():
     # asyncssh closes the handles a client left open and stops at the
-    # first close that raises; the server still releases the rest.
-    ws, server, requests, answers, served = await capped_pipe()
+    # first close that raises; the server still releases the rest, each
+    # through its run as any request, so it keeps a line's admission.
+    ran = []
+
+    async def run(op):
+        ran.append(op)
+        return await op
+
+    ws, server, requests, answers, served = await capped_pipe(run)
     try:
         await write_new(requests, answers, b"/notes/big.bin", b"x" * 50)
         await write_new(requests, answers, b"/notes/small.txt", b"ok")
+        before = len(ran)
         requests.feed_eof()
         with pytest.raises(OSError):
             await asyncio.wait_for(served, 5)
+        assert len(ran) - before == 2
         assert await ws.vfs.read("/notes/small.txt") == b"ok"
         assert said(await server.sync()) == [
             ("/notes/big.bin", "Disk quota exceeded")
         ]
     finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_sync_waits_for_a_close_still_letting_its_handle_go():
+    # The close has let the handle go and is still closing its spool: the
+    # sync waits for it, so its failure is not missed.
+    ws, server, requests, answers, served = await capped_pipe()
+    try:
+        handle = await write_new(
+            requests, answers, b"/notes/big.bin", b"x" * 50
+        )
+        ((fh, ctx),) = server._core.handles.items()
+        closing = asyncio.Event()
+
+        class Spool:
+            async def close(self):
+                await closing.wait()
+
+        ctx.spool = Spool()
+        requests.feed_data(
+            packet(FXP_CLOSE, struct.pack(">I", 3) + string(handle))
+        )
+        while server._core.handles.get(fh) is not None:
+            await asyncio.sleep(0)
+        syncing = asyncio.create_task(server.sync())
+        await asyncio.sleep(0.05)
+        closing.set()
+        assert said(await syncing) == [
+            ("/notes/big.bin", "Disk quota exceeded")
+        ]
+        await answer(answers)
+    finally:
+        requests.feed_eof()
+        await asyncio.wait_for(served, 5)
+        await ws.close()
+
+
+@pytest.mark.asyncio
+async def test_a_sync_that_took_a_handle_before_its_close_reports_nothing_again(
+    monkeypatch,
+):
+    # A later sync took the handle before its close let it go: the close
+    # fails as the first sync did, and neither reports it again.
+    ws, server, requests, answers, served = await capped_pipe()
+    try:
+        handle = await write_new(
+            requests, answers, b"/notes/big.bin", b"x" * 50
+        )
+        assert said(await server.sync()) == [
+            ("/notes/big.bin", "Disk quota exceeded")
+        ]
+        core_sync = server._core.sync
+
+        async def took_it_first():
+            failed = await core_sync()
+            await request(requests, answers, FXP_CLOSE, 3, string(handle))
+            return failed
+
+        monkeypatch.setattr(server._core, "sync", took_it_first)
+        assert await server.sync() == []
+    finally:
+        requests.feed_eof()
+        await asyncio.wait_for(served, 5)
         await ws.close()
 
 

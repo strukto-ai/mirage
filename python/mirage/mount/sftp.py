@@ -556,8 +556,11 @@ class PipeServer:
             )
         finally:
             for fh, ctx in list(self._core.handles.items()):
+                release = self._core.release(fh)
                 try:
-                    await self._core.release(fh)
+                    await (
+                        release if self._run is None else self._run(release)
+                    )
                 except Exception as err:
                     self._lose(fh, ctx.path, err)
 
@@ -570,10 +573,8 @@ class PipeServer:
             path (str): its file's path.
             err (Exception): why its writes did not land.
         """
-        if fh in self._told:
-            self._told.discard(fh)
-            return
-        self._lost[fh] = (path, err)
+        if fh not in self._told:
+            self._lost[fh] = (path, err)
 
     async def sync(self) -> list[tuple[str, Exception]]:
         """Land every write the client has been told is done.

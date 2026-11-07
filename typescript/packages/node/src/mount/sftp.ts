@@ -425,7 +425,7 @@ export class MirageSFTPServer {
         for (const handle of this.handles.values()) {
           if (handle.kind !== 'file') continue
           try {
-            await this.release(core, handle)
+            await this.run(() => this.release(core, handle))
           } catch (err) {
             failed ??= { err }
           }
@@ -526,8 +526,7 @@ export class PipeServer {
 
   /** Keep a release's failure for the next sync, unless a sync already reported its handle. */
   private lose(fd: number, path: string, err: unknown): void {
-    if (this.told.delete(fd)) return
-    this.lost.set(fd, [path, err])
+    if (!this.told.has(fd)) this.lost.set(fd, [path, err])
   }
 
   /**
