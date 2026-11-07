@@ -2,6 +2,22 @@ openapi: 3.1.0
 info:
   title: Mirage API
   version: '0.1'
+tags:
+  - name: Workspaces
+  - name: Sessions
+  - name: Shell
+  - name: VFS
+  - name: Tools
+  - name: Documents
+  - name: Snapshots
+  - name: Templates
+  - name: Saved VFS
+  - name: Saved CLIs
+  - name: Saved runtimes
+  - name: Policies
+  - name: Asks
+  - name: Server
+  - name: Auth
 servers:
   - url: http://127.0.0.1:8765
     description: A local daemon on its default port
@@ -26,6 +42,13 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateWorkspaceRequest'
+            example:
+              id: demo
+              config:
+                mounts:
+                  /:
+                    vfs: ram
+                    mode: write
       responses:
         '200':
           description: An identical retry answers the existing workspace; with explain=true,
@@ -36,12 +59,43 @@ paths:
                 anyOf:
                   - $ref: '#/components/schemas/WorkspaceDetail'
                   - type: object
+                    title: Policy explanation
+              example:
+                id: demo
+                mode: write
+                created_at: 1794023746.7
+                fuse_mountpoints: {}
+                system_time: null
+                sessions:
+                  - session_id: 01a1b425-ec80-7038-86e0-75b597344043
+                    cwd: /
+                mounts:
+                  - prefix: /
+                    vfs: ram
+                    mode: write
+                    description: ''
+                internals: null
         '201':
           description: Created
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/WorkspaceDetail'
+              example:
+                id: demo
+                mode: write
+                created_at: 1794023746.7
+                fuse_mountpoints: {}
+                system_time: null
+                sessions:
+                  - session_id: 01a1b425-ec80-7038-86e0-75b597344043
+                    cwd: /
+                mounts:
+                  - prefix: /
+                    vfs: ram
+                    mode: write
+                    description: ''
+                internals: null
         '401':
           $ref: '#/components/responses/401'
         '403':
@@ -58,22 +112,12 @@ paths:
           $ref: '#/components/responses/429'
         '503':
           $ref: '#/components/responses/503'
-      description: 'Create a workspace, or answer the live one created from this config.
+      description: 'Create a workspace from a configuration or a saved template.
 
 
-        Creating is idempotent for one config: an id already held by a
-
-        workspace created from an identical config answers that workspace
-
-        with 200, so a client that names its workspace can run again and
-
-        reach it; an id held by anything else is refused with 409. The
-
-        server''s policies judge the config as written (`pre_workspace`)
-
-        before any of it is built: a refusal is 403 with its reason, and
-
-        `explain` answers what they say without creating anything.'
+        An identical configuration retried with the same id returns the existing workspace with 200.
+        A conflicting id returns 409. Policies check the configuration before creation and return
+        403 on refusal. Set explain=true to inspect those decisions without creating a workspace.'
       tags:
         - Workspaces
       x-hosts:
@@ -92,6 +136,12 @@ paths:
                 items:
                   $ref: '#/components/schemas/WorkspaceBrief'
                 title: Response List Workspaces V1 Workspaces Get
+              example:
+                - id: demo
+                  mode: write
+                  mount_count: 1
+                  session_count: 1
+                  created_at: 1794023746.7
         '401':
           $ref: '#/components/responses/401'
         '429':
@@ -387,6 +437,8 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/SessionProfile'
+            example:
+              cwd: /
       responses:
         '200':
           description: OK
@@ -436,6 +488,10 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CLIBlock'
+            example:
+              cli: mcp
+              config:
+                url: https://mcp.example.com/mcp
       responses:
         '200':
           description: OK
@@ -519,6 +575,8 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CloneWorkspaceRequest'
+            example:
+              id: demo-copy
       responses:
         '201':
           description: Created
@@ -585,6 +643,8 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/SnapshotWorkspaceRequest'
+            example:
+              key: demo
       responses:
         '200':
           description: OK
@@ -635,6 +695,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/LoadRequest'
+            example:
+              key: demo
+              id: restored
           multipart/form-data:
             schema:
               type: object
@@ -678,6 +741,13 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateTemplateRequest'
+            example:
+              name: demo
+              config:
+                mounts:
+                  /:
+                    vfs: ram
+                    mode: write
         required: true
       responses:
         '201':
@@ -866,6 +936,8 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/DocumentPath'
+            example:
+              path: /VFS.md
       responses:
         '200':
           description: OK
@@ -956,6 +1028,8 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/DocumentPath'
+            example:
+              path: /VFS.md
       responses:
         '200':
           description: OK
@@ -1034,6 +1108,8 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/DocumentPath'
+            example:
+              path: /SKILL.md
       responses:
         '200':
           description: OK
@@ -1124,6 +1200,8 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/DocumentPath'
+            example:
+              path: /SKILL.md
       responses:
         '200':
           description: OK
@@ -1158,6 +1236,8 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateSessionRequest'
+            example:
+              session_id: analysis
       responses:
         '201':
           description: Created
@@ -1264,6 +1344,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdateSessionRequest'
+            example:
+              profile:
+                cwd: /
       responses:
         '200':
           description: OK
@@ -1427,6 +1510,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AnswerAskRequest'
+            example:
+              answer: allow
+              scope: once
       responses:
         '200':
           description: OK
@@ -1489,6 +1575,12 @@ paths:
                 anyOf:
                   - $ref: '#/components/schemas/ShellResult'
                   - $ref: '#/components/schemas/ShellExplanation'
+              example:
+                kind: io
+                exit_code: 0
+                stdout: "hello\n"
+                stderr: ''
+                refusal: null
             application/x-ndjson:
               schema:
                 type: string
@@ -1517,6 +1609,8 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ShellRequest'
+            example:
+              command: echo hello
           multipart/form-data:
             schema:
               type: object
@@ -1529,6 +1623,9 @@ paths:
                   description: Up to 64 MiB, read as it arrives.
               required:
                 - request
+      description: Run a shell line in a workspace. HTTP 200 means the request completed. Check exit_code
+        to determine whether the command succeeded. Set stream=true for NDJSON output records. See
+        [Streaming](/home/access/http#run-a-shell-line) for the record format.
   /v1/workspaces/{workspace_id}/tools/shell:
     post:
       summary: Shell tool
@@ -1573,6 +1670,8 @@ paths:
                   description: The command line to run.
               required:
                 - command
+            example:
+              command: echo hello
   /v1/workspaces/{workspace_id}/tools/read:
     post:
       summary: Read tool
@@ -1625,6 +1724,8 @@ paths:
                   description: Maximum number of lines to return (default 2000).
               required:
                 - path
+            example:
+              path: /hello.txt
   /v1/workspaces/{workspace_id}/tools/write:
     post:
       summary: Write tool
@@ -1673,6 +1774,9 @@ paths:
               required:
                 - path
                 - content
+            example:
+              path: /hello.txt
+              content: "hello\n"
   /v1/workspaces/{workspace_id}/tools/edit:
     post:
       summary: Edit tool
@@ -1728,6 +1832,10 @@ paths:
                 - path
                 - old_string
                 - new_string
+            example:
+              path: /hello.txt
+              old_string: hello
+              new_string: goodbye
   /v1/workspaces/{workspace_id}/tools/ls:
     post:
       summary: Ls tool
@@ -1772,6 +1880,8 @@ paths:
                   description: Absolute path of the directory to list.
               required:
                 - path
+            example:
+              path: /
   /v1/workspaces/{workspace_id}/tools/grep:
     post:
       summary: Grep tool
@@ -1844,6 +1954,9 @@ paths:
               required:
                 - pattern
                 - path
+            example:
+              pattern: hello
+              path: /
   /v1/workspaces/{workspace_id}/tools/glob:
     post:
       summary: Glob tool
@@ -1893,6 +2006,9 @@ paths:
                     under (default /).
               required:
                 - pattern
+            example:
+              pattern: '**/*.txt'
+              path: /
   /v1/workspaces/{workspace_id}/vfs/read:
     post:
       summary: VFS read
@@ -1917,6 +2033,7 @@ paths:
                   - type: string
                     description: The bytes, base64.
                   - $ref: '#/components/schemas/VfsExplanation'
+              example: aGVsbG8K
             application/octet-stream:
               schema:
                 type: string
@@ -1961,6 +2078,8 @@ paths:
                   description: Answer the bytes themselves as application/octet-stream.
               required:
                 - path
+            example:
+              path: /hello.txt
       description: Read a file's bytes, from an offset.
   /v1/workspaces/{workspace_id}/vfs/write:
     post:
@@ -2019,6 +2138,9 @@ paths:
               required:
                 - path
                 - data
+            example:
+              path: /hello.txt
+              data: aGVsbG8K
       description: Write a file's bytes, replacing what it held.
   /v1/workspaces/{workspace_id}/vfs/append:
     post:
@@ -2077,6 +2199,9 @@ paths:
               required:
                 - path
                 - data
+            example:
+              path: /hello.txt
+              data: aGVsbG8K
       description: Append bytes to a file.
   /v1/workspaces/{workspace_id}/vfs/pwrite:
     post:
@@ -2138,6 +2263,10 @@ paths:
                 - path
                 - data
                 - offset
+            example:
+              path: /hello.txt
+              data: aGVsbG8K
+              offset: 0
       description: Write bytes into a file at an offset.
   /v1/workspaces/{workspace_id}/vfs/stat:
     post:
@@ -2194,6 +2323,8 @@ paths:
                   type: boolean
               required:
                 - path
+            example:
+              path: /hello.txt
       description: A path's metadata.
   /v1/workspaces/{workspace_id}/vfs/readdir:
     post:
@@ -2250,6 +2381,8 @@ paths:
                   type: string
               required:
                 - path
+            example:
+              path: /
       description: A directory's entries.
   /v1/workspaces/{workspace_id}/vfs/exists:
     post:
@@ -2303,6 +2436,8 @@ paths:
                   type: string
               required:
                 - path
+            example:
+              path: /hello.txt
       description: Whether a path exists.
   /v1/workspaces/{workspace_id}/vfs/is_dir:
     post:
@@ -2356,6 +2491,8 @@ paths:
                   type: string
               required:
                 - path
+            example:
+              path: /
       description: Whether a path is a directory.
   /v1/workspaces/{workspace_id}/vfs/is_file:
     post:
@@ -2409,6 +2546,8 @@ paths:
                   type: string
               required:
                 - path
+            example:
+              path: /hello.txt
       description: Whether a path is a file.
   /v1/workspaces/{workspace_id}/vfs/list_files:
     post:
@@ -2465,6 +2604,8 @@ paths:
                   type: string
               required:
                 - path
+            example:
+              path: /
       description: The names of a directory's files.
   /v1/workspaces/{workspace_id}/vfs/mkdir:
     post:
@@ -2518,6 +2659,8 @@ paths:
                   type: string
               required:
                 - path
+            example:
+              path: /notes
       description: Make a directory.
   /v1/workspaces/{workspace_id}/vfs/rmdir:
     post:
@@ -2571,6 +2714,8 @@ paths:
                   type: string
               required:
                 - path
+            example:
+              path: /notes
       description: Remove an empty directory.
   /v1/workspaces/{workspace_id}/vfs/unlink:
     post:
@@ -2624,6 +2769,8 @@ paths:
                   type: string
               required:
                 - path
+            example:
+              path: /hello.txt
       description: Remove a file.
   /v1/workspaces/{workspace_id}/vfs/create:
     post:
@@ -2677,6 +2824,8 @@ paths:
                   type: string
               required:
                 - path
+            example:
+              path: /hello.txt
       description: Create an empty file.
   /v1/workspaces/{workspace_id}/vfs/rename:
     post:
@@ -2733,6 +2882,9 @@ paths:
               required:
                 - src
                 - dst
+            example:
+              src: /hello.txt
+              dst: /goodbye.txt
       description: Rename a path within its mount.
   /v1/workspaces/{workspace_id}/vfs/symlink:
     post:
@@ -2789,6 +2941,9 @@ paths:
               required:
                 - path
                 - target
+            example:
+              path: /hello-link.txt
+              target: /hello.txt
       description: Make a symbolic link at a path.
   /v1/workspaces/{workspace_id}/vfs/readlink:
     post:
@@ -2843,6 +2998,8 @@ paths:
                   type: string
               required:
                 - path
+            example:
+              path: /hello-link.txt
       description: Where a symbolic link points.
   /v1/workspaces/{workspace_id}/vfs/setattr:
     post:
@@ -2912,6 +3069,9 @@ paths:
                   type: boolean
               required:
                 - path
+            example:
+              path: /hello.txt
+              mode: 420
       description: Change a path's mode, owner or times.
   /v1/workspaces/{workspace_id}/vfs/getxattr:
     post:
@@ -2971,6 +3131,9 @@ paths:
               required:
                 - path
                 - name
+            example:
+              path: /hello.txt
+              name: user.note
       description: One extended attribute's value.
   /v1/workspaces/{workspace_id}/vfs/listxattr:
     post:
@@ -3028,6 +3191,8 @@ paths:
                   type: boolean
               required:
                 - path
+            example:
+              path: /hello.txt
       description: A path's extended attribute names.
   /v1/workspaces/{workspace_id}/vfs/setxattr:
     post:
@@ -3095,6 +3260,10 @@ paths:
                 - path
                 - name
                 - value
+            example:
+              path: /hello.txt
+              name: user.note
+              value: aGVsbG8K
       description: Set an extended attribute.
   /v1/workspaces/{workspace_id}/vfs/removexattr:
     post:
@@ -3153,6 +3322,9 @@ paths:
               required:
                 - path
                 - name
+            example:
+              path: /hello.txt
+              name: user.note
       description: Remove an extended attribute.
   /v1/workspaces/{workspace_id}/vfs/truncate:
     post:
@@ -3209,6 +3381,9 @@ paths:
               required:
                 - path
                 - length
+            example:
+              path: /hello.txt
+              length: 0
       description: Cut or extend a file to a length.
   /v1/workspaces/{workspace_id}/glob:
     post:
@@ -3260,6 +3435,8 @@ paths:
                   description: A pathname pattern, such as /src/**/*.py.
               required:
                 - pattern
+            example:
+              pattern: /**/*.txt
   /v1/workspaces/{workspace_id}/vfs/{name}:
     post:
       summary: Call any VFS function
@@ -3312,6 +3489,9 @@ paths:
                   description: The function's keyword arguments, Python only.
               required:
                 - path
+            example:
+              path: /hello.txt
+              kwargs: {}
   /v1/health:
     get:
       summary: Check health
@@ -3476,6 +3656,12 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateSavedEntryRequest'
+            example:
+              name: assets
+              type: s3
+              fields:
+                bucket: example-bucket
+                region: us-east-1
       description: Save a VFS config. Its fields are checked against the type's; secret fields
         are sealed, and a string field may point at a saved store's secret instead. A name
         already saved is a 409.
@@ -3578,6 +3764,10 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdateSavedEntryRequest'
+            example:
+              fields:
+                bucket: example-bucket
+                region: us-east-1
       description: Change a VFS config's fields. Its name and type stay; a sealed field left
         out keeps its value.
       tags:
@@ -3685,6 +3875,12 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateSavedEntryRequest'
+            example:
+              name: github
+              type: gh
+              fields:
+                token: <github-token>
+                repo: owner/repository
       description: Save a CLI config. Its fields are checked against the type's; secret fields
         are sealed, and a string field may point at a saved store's secret instead. A name
         already saved is a 409.
@@ -3787,6 +3983,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdateSavedEntryRequest'
+            example:
+              fields:
+                repo: owner/another-repository
       description: Change a CLI config's fields. Its name and type stay; a sealed field left
         out keeps its value.
       tags:
@@ -3894,6 +4093,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateSavedEntryRequest'
+            example:
+              name: python
+              type: monty
+              fields:
+                max_memory: 128MB
       description: Save a runtime config. Its fields are checked against the type's; secret
         fields are sealed, and a string field may point at a saved store's secret instead.
         A name already saved is a 409.
@@ -3996,6 +4200,9 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdateSavedEntryRequest'
+            example:
+              fields:
+                max_memory: 256MB
       description: Change a runtime config's fields. Its name and type stay; a sealed field
         left out keeps its value.
       tags:
@@ -4060,6 +4267,12 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/CreatePolicyRequest'
+            example:
+              name: guard.py
+              source: |
+                def pre_command(ctx):
+                    if ctx["command"] == "rm":
+                        return {"kind": "deny", "reason": "Deletes are disabled"}
         required: true
       responses:
         '201':
@@ -4136,6 +4349,11 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/UpdatePolicyRequest'
+            example:
+              source: |
+                def pre_command(ctx):
+                    if ctx["command"] == "rm":
+                        return {"kind": "deny", "reason": "Deletes are disabled"}
         required: true
       responses:
         '200': *id004
@@ -4466,16 +4684,19 @@ components:
           anyOf:
             - $ref: '#/components/schemas/WorkspaceConfig'
             - type: 'null'
+          description: Workspace configuration. Supply config or template, never both.
         template:
           anyOf:
             - type: string
             - type: 'null'
           title: Template
+          description: Name of a saved template. Supply template or config, never both.
         id:
           anyOf:
             - type: string
             - type: 'null'
           title: Id
+          description: Workspace identifier. Use the same identifier to retry an identical configuration.
       additionalProperties: false
       type: object
       title: CreateWorkspaceRequest
@@ -6086,6 +6307,7 @@ components:
         - exit_code
         - stdout
         - stderr
+      title: Shell result
     ShellRequest:
       type: object
       properties:
@@ -6162,6 +6384,7 @@ components:
             node:
               type: object
               description: The parsed line and each command's explanation.
+      title: Shell explanation
     VfsExplanation:
       allOf:
         - $ref: '#/components/schemas/Explanation'
@@ -6176,6 +6399,7 @@ components:
             error:
               type: string
               description: The errno name the call would raise, empty when it runs.
+      title: VFS explanation
     SecretPointer:
       type: object
       properties:
@@ -6489,6 +6713,7 @@ components:
       description: The workspace's id.
       schema:
         type: string
+      example: demo
     sessionId:
       name: session_id
       in: query
@@ -6496,3 +6721,4 @@ components:
       description: The session the call acts as; the default session when absent.
       schema:
         type: string
+      example: analysis

@@ -1,0 +1,32 @@
+---
+title: Authentication
+description: Authenticate requests to a local daemon or hosted deployment.
+icon: key
+---
+
+Send the server's token on every request:
+
+```bash
+curl http://127.0.0.1:8765/v1/workspaces \
+  -H "Authorization: Bearer $MIRAGE_AUTH_TOKEN"
+```
+
+`GET /v1/health` needs no token. A daemon with no token set accepts every
+request, so set one before anyone else can reach it. Tokens, JWTs and
+per-account workspaces are covered in [Auth](/home/access/http#auth) and
+[Configure authentication](/home/access/http#configure-authentication).
+
+## Local token mode
+
+Set `MIRAGE_AUTH_MODE=token` and `MIRAGE_AUTH_TOKEN` in the server's environment
+before starting it. Clients send the token in the `Authorization` header.
+A missing or incorrect token returns `401`.
+
+## Hosted deployments
+
+Use the API URL and token from your deployment. A hosted deployment can require
+a JWT rather than the local daemon's token. The same bearer header carries either.
+The account associated with the token determines which workspaces are visible.
+
+See [Configure authentication](/home/access/http#configure-authentication)
+for JWT issuers, audiences and account isolation.

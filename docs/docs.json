@@ -15,7 +15,12 @@
   "favicon": "/favicon.svg",
   "api": {
     "playground": {
-      "display": "none"
+      "display": "simple"
+    },
+    "examples": {
+      "languages": ["curl", "python", "javascript"],
+      "defaults": "all",
+      "prefill": true
     }
   },
   "contextual": {
@@ -724,13 +729,14 @@
             "group": "HTTP API",
             "pages": [
               "api/overview",
+              "api/quickstart",
+              "api/authentication",
+              "api/errors",
               "api/reference"
             ]
           },
           {
-            "group": "Operations",
-            "hidden": true,
-            "searchable": true,
+            "group": "Resources",
             "openapi": {
               "source": "openapi.yaml",
               "directory": "api/operations"

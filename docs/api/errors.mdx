@@ -1,0 +1,37 @@
+---
+title: Errors
+description: HTTP errors, command exit codes and retry behavior.
+icon: triangle-exclamation
+---
+
+A `200` from `POST /v1/workspaces/{workspace_id}/shell` means the server ran
+the line, not that the line succeeded: check `exit_code`. Other errors return
+JSON with a `detail` message, but an auth or `Host` refusal can be plain text,
+so check `Content-Type` before parsing. The full status table is in
+[Errors](/home/access/http#errors); requests past a limit answer `429` with
+`Retry-After` ([rate limits](/home/access/http#rate-limits)).
+
+## HTTP status codes
+
+| Status | Meaning |
+| --- | --- |
+| `400` | Malformed request, disallowed host or disallowed browser origin. |
+| `401` | Missing or incorrect token. |
+| `403` | A policy or mount mode refused the call. |
+| `404` | The workspace, session, job or file does not exist. |
+| `409` | An identifier is taken, the workspace is busy or a file changed since it was read. |
+| `422` | Request fields failed validation. |
+| `429` | A rate limit or session limit was reached. Check `Retry-After` before retrying. |
+| `501` | A saved-config operation requires a server configured for one account. |
+| `503` | The server reached its workspace limit or is shutting down. |
+
+Each endpoint lists its documented responses and their schemas. JSON errors can
+include `errno` and `refusal` alongside `detail`. Those fields describe filesystem
+errors and policy refusals when available.
+
+## Shell exit codes
+
+A completed shell request can return HTTP `200` with a nonzero `exit_code`.
+Inspect `exit_code`, `stdout`, `stderr` and `refusal` before treating the command
+as successful. The response's HTTP status describes the request, while
+`exit_code` describes the shell command.
