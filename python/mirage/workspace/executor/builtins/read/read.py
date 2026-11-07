@@ -37,8 +37,10 @@ from mirage.workspace.executor.builtins.shared import (
     record_delimiter,
     refusal,
     require_view,
+    subscript_expansion,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.expand.types import SubscriptFn
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     assign_element,
@@ -54,6 +56,7 @@ async def _read_store(
     var: str,
     value: str,
     policies: Policies | None = None,
+    subscripts: SubscriptFn | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode] | None:
     """Store one ``read`` target, scalar or ``name[sub]`` element.
 
@@ -69,6 +72,8 @@ async def _read_store(
             assignments clear.
         var (str): the target as the operand spelled it.
         value (str): the split word to store.
+        subscripts (SubscriptFn | None): expands a subscript given as
+            text; None keeps it as typed.
 
     Returns:
         The refusal result, or None when the write landed.
@@ -84,6 +89,8 @@ async def _read_store(
         except PolicyDenied as exc:
             return refusal("read", exc)
         return None
+    if subscripts is not None:
+        subscript = await subscripts(subscript)
     try:
         status = await assign_element(
             session, policies, base, subscript, value
@@ -107,6 +114,19 @@ async def _read_store(
             ExecutionNode(command="read", exit_code=1, stderr=err),
         )
     return None
+
+
+def _invalid_name(
+    name: str,
+) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
+    """bash's refusal of a name ``read`` cannot assign.
+
+    Args:
+        name (str): the operand as spelled.
+    """
+    return _read_refusal(
+        f"{shell_voice()}read: `{name}': not a valid identifier\n"
+    )
 
 
 def _read_refusal(
@@ -159,62 +179,108 @@ def _read_timeout(text: str) -> float | None:
     return value if value >= 0 else None
 
 
-def _split_read_line(line: str, ifs: str, slots: int) -> list[str]:
-    """Split one `read` line into at most ``slots`` fields on IFS.
+def _read_chars(text: str, raw: bool) -> list[tuple[str, bool]]:
+    """The characters ``read`` splits, each with whether a backslash
+    quoted it.
 
-    GNU trims IFS whitespace from both ends first, then splits on IFS
-    characters, with the last field taking the remainder of the line
-    unsplit. A zero slot count (`read -a`) means every field.
+    Without ``-r`` a backslash quotes the next character (``\\x`` reads
+    as a quoted ``x``), a backslash-newline pair is a line continuation
+    and a backslash at the end goes.
 
     Args:
-        line (str): the line, delimiter already removed.
-        ifs (str): the session's IFS.
-        slots (int): how many variables are waiting, 0 for unbounded.
+        text (str): the raw text read.
+        raw (bool): ``-r``, no backslash processing.
     """
-    if ifs == " \t\n":
-        line = line.strip(" \t\n")
-        return line.split(None, slots - 1) if slots else line.split()
-    if not ifs:
-        return [line]
-    ifs_ws = "".join(ch for ch in ifs if ch in " \t\n")
-    if ifs_ws:
-        line = line.strip(ifs_ws)
-    n_splits = max(0, slots - 1) if slots else len(line)
-    chars = set(ifs)
-    out: list[str] = []
-    cur: list[str] = []
-    for ch in line:
-        if ch in chars and len(out) < n_splits:
-            out.append("".join(cur))
-            cur = []
+    out: list[tuple[str, bool]] = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and not raw:
+            if i + 1 < len(text) and text[i + 1] != "\n":
+                out.append((text[i + 1], True))
+            i += 2
             continue
-        cur.append(ch)
-    out.append("".join(cur))
+        out.append((ch, False))
+        i += 1
     return out
 
 
 def _unescape_read(text: str) -> str:
-    """Apply `read`'s default backslash handling.
-
-    Without `-r`, a backslash quotes the next character (`\\x` reads
-    as `x`) and a backslash-newline pair is a line continuation.
+    """Apply ``read``'s default backslash handling (``_read_chars``).
 
     Args:
         text (str): the raw text read.
     """
-    out: list[str] = []
-    i = 0
-    while i < len(text):
-        ch = text[i]
-        if ch == "\\" and i + 1 < len(text):
-            nxt = text[i + 1]
-            if nxt != "\n":
-                out.append(nxt)
-            i += 2
-            continue
-        out.append(ch)
-        i += 1
-    return "".join(out)
+    return "".join(ch for ch, _ in _read_chars(text, False))
+
+
+def _read_fields(text: str, ifs: str, slots: int, raw: bool) -> list[str]:
+    """Split one ``read`` line into at most ``slots`` fields on IFS, as
+    bash does.
+
+    Leading IFS whitespace goes; a delimiter is one other IFS character
+    with the IFS whitespace around it, or a run of IFS whitespace, and a
+    quoted character never splits. The last field takes the rest of the
+    line, its trailing IFS whitespace dropped, and the delimiter ending
+    it too when it holds one field only (``x:y:`` reads ``y`` into the
+    second of two). A zero slot count (``read -a``) means every field,
+    a delimiter at the end opening none.
+
+    Args:
+        text (str): the line, delimiter already removed.
+        ifs (str): the session's IFS.
+        slots (int): how many variables are waiting, 0 for unbounded.
+        raw (bool): ``-r``, no backslash processing.
+    """
+    chars = _read_chars(text, raw)
+    n = len(chars)
+
+    def white(k: int) -> bool:
+        return (
+            not chars[k][1] and chars[k][0] in " \t\n" and chars[k][0] in ifs
+        )
+
+    def splits(k: int) -> bool:
+        return not chars[k][1] and chars[k][0] in ifs
+
+    def joined(a: int, b: int) -> str:
+        return "".join(ch for ch, _ in chars[a:b])
+
+    def past_delimiter(k: int) -> int:
+        other = not white(k)
+        k += 1
+        while k < n and white(k):
+            k += 1
+        if not other and k < n and splits(k):
+            k += 1
+            while k < n and white(k):
+                k += 1
+        return k
+
+    k = 0
+    while k < n and white(k):
+        k += 1
+    fields: list[str] = []
+    while k < n and (not slots or len(fields) < slots - 1):
+        start = k
+        while k < n and not splits(k):
+            k += 1
+        fields.append(joined(start, k))
+        if k < n:
+            k = past_delimiter(k)
+    if not slots or k >= n:
+        return fields
+    end = n
+    while end > k and white(end - 1):
+        end -= 1
+    if splits(end - 1):
+        cut = end - 1
+        while cut > k and white(cut - 1):
+            cut -= 1
+        if not any(splits(i) for i in range(k, cut)):
+            end = cut
+    fields.append(joined(k, end))
+    return fields
 
 
 async def _read_raw(
@@ -285,6 +351,7 @@ async def handle_read(
     stdin: ByteSource | None = None,
     state: SessionView | None = None,
     policies: Policies | None = None,
+    subscripts: SubscriptFn | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Read one line (or delimited record, or character count) into
     variables, with bash's option surface.
@@ -309,6 +376,8 @@ async def handle_read(
         state (SessionView | None): the gated session view.
         policies (Policies | None): the policies a subscript's
             assignments clear.
+        subscripts (SubscriptFn | None): expands a target's subscript
+            given as text; None keeps it as typed.
     """
     parse = parse_shell_options(SHELL_SPECS["read"], args)
     if parse.invalid is not None:
@@ -376,6 +445,9 @@ async def handle_read(
             f"{shell_voice()}read: `{array_name}': not a valid identifier\n"
         )
     variables = parse.operands or ["REPLY"]
+    if TARGET_RE.match(variables[0]) is None:
+        # A first name it cannot assign refuses before anything is read.
+        return _invalid_name(variables[0])
     view = require_view(state)
     buffer = line_buffer(stdin) if stdin is not None else None
     if timeout == 0:
@@ -399,13 +471,12 @@ async def handle_read(
             return _read_refusal(
                 f"{shell_voice()}read: read error: 0: Bad file descriptor\n"
             )
-    if not raw:
-        line = _unescape_read(line)
     ifs = visible_env(session).get("IFS", " \t\n")
+    whole = "".join(ch for ch, _ in _read_chars(line, raw))
     if array_name is not None:
-        parts = [] if exact is not None else _split_read_line(line, ifs, 0)
-        if exact is not None and line:
-            parts = [line]
+        parts = [] if exact is not None else _read_fields(line, ifs, 0, raw)
+        if exact is not None and whole:
+            parts = [whole]
         if view.is_readonly(array_name):
             return readonly_refusal("read", array_name)
         try:
@@ -420,12 +491,21 @@ async def handle_read(
         )
     # With no name the line goes to REPLY whole, its blanks kept.
     if exact is not None or not parse.operands:
-        parts = [line]
+        parts = [whole]
     else:
-        parts = _split_read_line(line, ifs, len(variables))
+        parts = _read_fields(line, ifs, len(variables), raw)
     for i, var in enumerate(variables):
+        if TARGET_RE.match(var) is None:
+            # bash stops at the first name it cannot assign, the ones
+            # before it assigned.
+            return _invalid_name(var)
         refused = await _read_store(
-            session, view, var, parts[i] if i < len(parts) else "", policies
+            session,
+            view,
+            var,
+            parts[i] if i < len(parts) else "",
+            policies,
+            subscripts,
         )
         if refused is not None:
             return refused
@@ -453,4 +533,5 @@ async def read_builtin(call: BuiltinCall) -> Result:
             diagnostics=call.context.frame.diagnostics,
         ),
         call.namespace.registry.policies,
+        subscript_expansion(call),
     )

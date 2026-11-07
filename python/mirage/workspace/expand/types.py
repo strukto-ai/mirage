@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from asyncio import Event
+from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
@@ -53,3 +54,8 @@ class ExecuteFn(Protocol):
         call_stack: CallStack | None = None,
         job_table: JobTable | None = None,
     ) -> IOResult: ...
+
+
+SubscriptFn = Callable[[str], Awaitable[str]]
+"""A builtin's subscript given as text, expanded as one typed in
+``${a[...]}`` is."""

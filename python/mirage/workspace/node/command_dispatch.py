@@ -156,6 +156,7 @@ from mirage.workspace.node.types import ExpandedWords
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.budget import check_env, entry_bytes
 from mirage.workspace.session.state import (
+    bind_last_word,
     ensure_var_visible,
     env_is_readonly,
     seed_var,
@@ -741,6 +742,7 @@ async def _run_command_body(
         await sink.emit(Channel.STDERR, trace_command([argv.name, *argv.args]))
         xtrace = False
     stdout, io, exec_node = await body
+    bind_last_word(session, (argv.name, *argv.args) if argv.name else ())
     if io.producer is None and argv.name:
         # Builtins and other non-mount routes return no rider; stamp the
         # expanded name here so post_execute policies keyed on a command

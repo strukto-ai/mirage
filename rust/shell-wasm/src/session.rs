@@ -434,6 +434,7 @@ fn shell_call(engine: &mut Engine, op: &str, args: &mut Args) -> Reply {
                 "pattern" => Mode::Pattern,
                 "regex" => Mode::Regex,
                 "arith" => Mode::Arith,
+                "subscript" => Mode::Subscript,
                 other => return Err(format!("no expansion mode {other}")),
             };
             let listens = args.flag()?;

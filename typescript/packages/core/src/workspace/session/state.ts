@@ -536,6 +536,16 @@ export function seedVar(session: SessionState, name: string, value: ShellValue):
 }
 
 /**
+ * Set `$_` as bash does once a simple command has run in the shell: its last
+ * word after expansion, which is its name when it took no argument, and empty
+ * for a line that only assigned or redirected. Mirrors Python's
+ * bind_last_word.
+ */
+export function bindLastWord(session: SessionState, words: readonly string[]): void {
+  seedVar(session, '_', words[words.length - 1] ?? '')
+}
+
+/**
  * Turn one attribute on or off without the gate, creating the name unset if
  * needed, as `readonly NAME` on a fresh name does; a null attribute only
  * declares the name.

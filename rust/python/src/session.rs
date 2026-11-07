@@ -667,6 +667,7 @@ impl Shell {
             "pattern" => Mode::Pattern,
             "regex" => Mode::Regex,
             "arith" => Mode::Arith,
+            "subscript" => Mode::Subscript,
             other => {
                 return Err(PyRuntimeError::new_err(format!(
                     "no expansion mode {other}"

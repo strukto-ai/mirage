@@ -23,7 +23,7 @@ import { DiscardSignal } from '../../shell/errors.ts'
 import { getDeclarationKeyword, getText } from '../../shell/helpers.ts'
 import type { ParseScope } from '../../shell/parse/scope.ts'
 import { NodeType as NT, type TSNodeLike } from '../../shell/types.ts'
-import { VarAttr, VarKind } from '../../shell/variable.ts'
+import { type ShellValue, VarAttr, VarKind } from '../../shell/variable.ts'
 import { traceArray, traceCommand } from '../../shell/xtrace.ts'
 import { concat } from '../../utils/bytes.ts'
 import { compareCodePoints } from '../../utils/sort.ts'
@@ -53,6 +53,7 @@ import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { conversionScalar, ensureVarVisible, seedVar, sessionView } from '../session/state.ts'
+import type { ExpandedWords } from './types.ts'
 import { ExecutionNode } from '../types.ts'
 import { expandArrayItems } from './assignment.ts'
 
@@ -168,6 +169,7 @@ export async function executeDeclaration(
   namespace: Namespace,
   callStack: CallStack | null,
   parser?: ParseScope,
+  declared?: ExpandedWords,
 ): Promise<RedirectResult> {
   const session = context.session
   const keyword = getDeclarationKeyword(node)
@@ -259,6 +261,7 @@ export async function executeDeclaration(
   }
   const cmdWord = keyword === NT.LOCAL ? 'local' : keyword
   const words = operands.filter((operand) => typeof operand === 'string')
+  if (declared !== undefined) declared.words = [cmdWord, ...traced]
   if (session.shellOptions.xtrace === true) {
     // Traced once expanded, before the builtin runs and outside its
     // redirects: each array operand, then the command naming them.
@@ -326,9 +329,10 @@ export async function executeDeclaration(
     const wantAssoc = kind === VarKind.Assoc
     for (const bare of words) {
       if (bare.includes('=')) continue
-      // Both branches below write array storage raw (the top-level
-      // one migrates an existing scalar), so a hidden name refuses
-      // like any assignment spelling before either lands.
+      // A hidden name refuses like any assignment spelling before
+      // anything lands, and the array both branches below write (the
+      // top-level one migrates an existing scalar) goes through the gate
+      // as any write does.
       try {
         ensureVarVisible(session, bare)
       } catch (err) {
@@ -357,8 +361,23 @@ export async function executeDeclaration(
       // scalar becomes element 0, or the value at the literal key "0" (GNU
       // allows scalar-to-associative conversion, unlike indexed).
       const scalar = local ? null : conversionScalar(session, bare)
-      if (wantAssoc) seedVar(session, bare, scalar === null ? {} : { '0': scalar })
-      else seedVar(session, bare, makeArray(scalar === null ? [] : [scalar]))
+      const fill: ShellValue = wantAssoc
+        ? scalar === null
+          ? {}
+          : { '0': scalar }
+        : makeArray(scalar === null ? [] : [scalar])
+      if (view.isReadonly(bare, false)) {
+        // bash converts a readonly name all the same, which a gated write
+        // refuses.
+        seedVar(session, bare, fill)
+        continue
+      }
+      try {
+        await view.set(bare, fill, false)
+      } catch (err) {
+        if (!(err instanceof PolicyDenied)) throw err
+        throw new DiscardSignal(encodeText(`${err.message}\n`))
+      }
     }
   }
   // declare/typeset scope like `local` inside a function (bash

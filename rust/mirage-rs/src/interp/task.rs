@@ -284,6 +284,9 @@ pub enum Mode {
     /// An arithmetic command's expression text, names left for the
     /// evaluator.
     Arith,
+    /// The subscript of a `${x[...]}`, its key or index text, as a
+    /// builtin's subscript given as text expands.
+    Subscript,
 }
 
 /// What an expansion produced.
@@ -340,6 +343,7 @@ pub fn expand(
                 Mode::Pattern => expander.pattern_runs(node).await.map(Expanded::Runs),
                 Mode::Regex => expander.regex(node).await.map(Expanded::Text),
                 Mode::Arith => expander.arith(node).await.map(Expanded::Text),
+                Mode::Subscript => expander.subscript(node).await.map(Expanded::Text),
             }
         };
         Ended {

@@ -14,7 +14,7 @@
 
 import errno
 import functools
-from collections.abc import Awaitable, Callable, Iterator, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from typing import ParamSpec
 
 from mirage._rs import ShellTask
@@ -767,6 +767,18 @@ def seed_var(session: SessionState, name: str, value: ShellValue) -> None:
     """
     raw, assoc = raw_value(value)
     session.vars.shell.seed(name, raw, assoc)
+
+
+def bind_last_word(session: SessionState, words: Sequence[str]) -> None:
+    """Set ``$_`` as bash does once a simple command has run in the
+    shell: its last word after expansion, which is its name when it took
+    no argument, and empty for a line that only assigned or redirected.
+
+    Args:
+        session (SessionState): the session the command ran in.
+        words (Sequence[str]): the command's expanded words, name first.
+    """
+    seed_var(session, "_", words[-1] if words else "")
 
 
 def set_attr(

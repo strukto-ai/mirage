@@ -71,6 +71,9 @@ impl<H: Host> Expander<'_, H> {
                     if let Some(name) = &braces.name {
                         let text = self.text(child);
                         braces.subscript = Some(text[name.len() + 1..text.len() - 1].to_vec());
+                        let node = &self.tree.nodes[child];
+                        braces.subscript_span =
+                            (node.start as usize + name.len() + 1, node.end as usize - 1);
                     }
                     seen = true;
                     continue;

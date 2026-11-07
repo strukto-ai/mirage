@@ -93,15 +93,19 @@ describe('sessionView', () => {
   })
 
   it('set is general over variable shapes', async () => {
-    // One entry point for every write: a string stores a scalar, a list stores
-    // a whole array, and the two storages stay exclusive.
+    // One entry point for every write: a string stores a scalar, or element
+    // 0 of an array it lands on as bash's `A=s` does, a list stores a whole
+    // array, and the two storages stay exclusive.
     const [view, session] = makeView()
     await view.set('A', makeArray(['x', 'y']))
     expect(session.arrays.A).toEqual(makeArray(['x', 'y']))
     expect('A' in session.env).toBe(false)
     await view.set('A', 's')
-    expect(session.env.A).toBe('s')
-    expect('A' in session.arrays).toBe(false)
+    expect(session.arrays.A).toEqual(makeArray(['s', 'y']))
+    expect('A' in session.env).toBe(false)
+    await view.set('S', 's')
+    expect(session.env.S).toBe('s')
+    expect('S' in session.arrays).toBe(false)
   })
 
   it('an array write renders the gate value as words', async () => {

@@ -101,7 +101,7 @@ import {
 } from '../executor/statement.ts'
 import { endShell } from '../executor/traps.ts'
 import { globOptions, resolveGlobs } from '../expand/globs.ts'
-import { expandArith, expandNode } from '../expand/node.ts'
+import { expandArith, expandNode, expandSubscript } from '../expand/node.ts'
 import { expandAndClassify } from '../expand/parts.ts'
 import { expandPattern } from '../expand/pattern.ts'
 import { expandRedirect } from '../expand/redirects.ts'
@@ -109,7 +109,7 @@ import type { ExecuteFn } from '../expand/types.ts'
 import type { Namespace } from '../mount/namespace/namespace.ts'
 import type { MountRegistry } from '../mount/registry.ts'
 import { sessionEntry } from '../session/session.ts'
-import { positionalParams, sessionArith, sessionView } from '../session/state.ts'
+import { bindLastWord, positionalParams, sessionArith, sessionView } from '../session/state.ts'
 import type { Policies } from '../../policy/index.ts'
 import { ExecutionNode } from '../types.ts'
 import { type Admitted, admitTest } from './admission.ts'
@@ -1205,6 +1205,7 @@ async function executeNodeBody(
     mergedIo = await mergedIo.merge(opened)
     mergedIo.exitCode =
       opened.exitCode !== 0 ? opened.exitCode : assignmentStatus(context.frame, subSeq)
+    bindLastWord(session, [])
     const ran: RedirectResult = [
       null,
       mergedIo,
@@ -1305,6 +1306,7 @@ async function executeNodeBody(
 
   if (kind === NodeKind.REDIRECT) {
     const [command, redirects] = getRedirects(node)
+    if (command === null) bindLastWord(session, [])
     const ran = await runRedirected(
       recurse,
       dispatch,
@@ -1555,7 +1557,8 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.DECLARATION) {
-    return await runInCommandScope(() =>
+    const declared: ExpandedWords = { words: null }
+    const ran = await runInCommandScope(() =>
       executeDeclaration(
         node,
         context,
@@ -1564,17 +1567,24 @@ async function executeNodeBody(
         deps.namespace,
         callStack,
         deps.parser,
+        declared,
       ),
     )
+    bindLastWord(session, declared.words ?? [])
+    return ran
   }
 
   if (kind === NodeKind.UNSET) {
-    return handleUnset(
-      getUnsetArgs(node),
+    const args = getUnsetArgs(node)
+    const unset = await handleUnset(
+      args,
       session,
       sessionView(session, registry.policies, context.frame.diagnostics),
       registry.policies,
+      (text) => expandSubscript(text, context, executeFn, callStack, registry.policies),
     )
+    bindLastWord(session, ['unset', ...args])
+    return unset
   }
 
   if (kind === NodeKind.TEST) {
@@ -1606,7 +1616,16 @@ async function executeNodeBody(
   }
 
   if (kind === NodeKind.VAR_ASSIGN) {
-    return await executeAssignment(node, context, executeFn, registry, deps.namespace, callStack)
+    const assigned = await executeAssignment(
+      node,
+      context,
+      executeFn,
+      registry,
+      deps.namespace,
+      callStack,
+    )
+    bindLastWord(session, [])
+    return assigned
   }
 
   if (kind === NodeKind.VAR_ASSIGNS) {

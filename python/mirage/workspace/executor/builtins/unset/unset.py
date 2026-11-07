@@ -26,8 +26,10 @@ from mirage.workspace.executor.builtins.shared import (
     fail,
     finish,
     require_view,
+    subscript_expansion,
 )
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.expand.types import SubscriptFn
 from mirage.workspace.session import SessionState
 from mirage.workspace.session.state import (
     deref,
@@ -162,6 +164,7 @@ async def handle_unset(
     session: SessionState,
     state: SessionView | None = None,
     policies: Policies | None = None,
+    subscripts: SubscriptFn | None = None,
 ) -> Result:
     """Unset shell variables, arrays, or functions, with bash's flags.
 
@@ -178,6 +181,9 @@ async def handle_unset(
         session (SessionState): shell session state.
         policies (Policies | None): the policies an indexed subscript's
             assignments clear.
+        subscripts (SubscriptFn | None): expands an operand's subscript,
+            which bash expands as one typed in ``${a[...]}``; None keeps
+            it as typed.
     """
     if args[:1] == ["--help"]:
         answered = flag_help("unset")
@@ -250,6 +256,8 @@ async def handle_unset(
         # sidestep a policy that vetoes `unset X`.
         try:
             if subscript is not None:
+                if subscripts is not None:
+                    subscript = await subscripts(subscript)
                 status = await _unset_element(
                     session, view, base, subscript, policies
                 )
@@ -293,4 +301,5 @@ async def unset_builtin(call: BuiltinCall) -> Result:
             diagnostics=call.context.frame.diagnostics,
         ),
         call.namespace.registry.policies,
+        subscript_expansion(call),
     )

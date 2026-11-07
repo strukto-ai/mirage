@@ -31,6 +31,7 @@ import { compareCodePoints } from '../../../../utils/sort.ts'
 import { elementIsSet, namerefTarget } from '../../../session/state.ts'
 import { followPaths } from '../links/links.ts'
 import { scopePath, toScope } from '../scope.ts'
+import { TARGET_RE } from '../constants.ts'
 import { absPath } from '../shared.ts'
 import { FILE_PAIR_BINARY, FILE_UNARY, INT_COMPARATORS } from './constants.ts'
 import { CondError } from './errors.ts'
@@ -113,8 +114,12 @@ export async function applyUnary(
   if (op === '-n') return text !== ''
   if (op === '-z') return text === ''
   if (op === '-v') {
+    const target = TARGET_RE.exec(text)
+    let ref = text
+    if (target !== null && ctx.subscripts !== undefined)
+      ref = `${target[1] ?? ''}[${await ctx.subscripts(target[2] ?? '')}]`
     try {
-      return await elementIsSet(ctx.session, text, ctx.namespace.registry.policies)
+      return await elementIsSet(ctx.session, ref, ctx.namespace.registry.policies)
     } catch (err) {
       // bash aborts the line on `[[ -v a[1/0] ]]` with `1/0: division by
       // 0`, a test's grammar error being the only other thing that ends it.

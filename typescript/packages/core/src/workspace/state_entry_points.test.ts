@@ -507,6 +507,18 @@ describe('the remaining session writers clear the same gate', () => {
     expect('SECRET_D' in sess.arrays).toBe(false)
   })
 
+  it('a bare declare -a fires the gate', async () => {
+    // `declare -a NAME` with no value stores an empty array (or converts
+    // the scalar it holds), a write the gate has to see like any other.
+    const ws = makeWs([new DenySecretEnv()])
+    const io = await ws.shell('declare -a SECRET_B; declare -A SECRET_M')
+    expect(io.exitCode).not.toBe(0)
+    expect(voicedStderr(io)).toContain('refused by policy')
+    const sess = ws.sessionManager.get(ws.sessionManager.defaultId)
+    expect('SECRET_B' in sess.arrays).toBe(false)
+    expect('SECRET_M' in sess.assocs).toBe(false)
+  })
+
   it('a readonly name refuses a declaration array store', async () => {
     // The staged-array store is the builtin's own; the shell's readonly
     // rule is pre-checked there, before the session view is asked.

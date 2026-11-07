@@ -1008,10 +1008,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "declare -A qcgm=([x]=1); test -v 'qcgm[\"x\"]' && echo yes || echo no; [[ -v \"qcgm['x']\" ]] && echo yes || echo no",
+      "command": "declare -A qcgm=([x]=1); test -v 'qcgm[\"x\"]' && echo yes || echo no; [[ -v \"qcgm['x']\" ]] && echo yes || echo no; qk=x; test -v 'qcgm[$qk]' && echo yes || echo no; [[ -v qcgm[\\$qk] ]] && echo yes || echo no; read 'qcgm[$qk$qk]' <<< 2; echo \"${qcgm[xx]}\"; declare -A qh=([\"a  a\"]=5 [\"\\$k\"]=6); k=a; echo \"${qh[$k  $k]}|${qh[\\$k]}\"; r='qh[$k  $k]'; echo \"${!r}\"",
       "expect": {
         "exit": 0,
-        "stdout": "yes\nyes\n",
+        "stdout": "yes\nyes\nyes\nno\n2\n5|6\n5\n",
         "stderr": ""
       }
     },

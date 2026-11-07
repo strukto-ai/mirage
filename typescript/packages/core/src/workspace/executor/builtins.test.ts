@@ -1625,13 +1625,13 @@ describe('handleRead', () => {
     expect(s.env.Q).toBe('b')
   })
 
-  it('a scalar read replaces an array of the same name', async () => {
+  it('a scalar read lands at element 0 of an array of the same name', async () => {
     const s = new SessionState({ sessionId: 'test' })
     seedVar(s, 'A', makeArray(['x', 'y']))
     const stdin = new TextEncoder().encode('one\n')
     await handleRead(['A'], s, stdin, sessionView(s))
-    expect(s.env.A).toBe('one')
-    expect(s.arrays.A).toBeUndefined()
+    expect(s.arrays.A).toEqual(makeArray(['one', 'y']))
+    expect(s.env.A).toBeUndefined()
   })
 })
 

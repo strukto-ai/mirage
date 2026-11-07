@@ -19,6 +19,7 @@ from typing import Union
 from mirage.policy.types import EntryGate
 from mirage.runtime.types import DispatchFn
 from mirage.view.types import LinkView
+from mirage.workspace.expand.types import SubscriptFn
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
 
@@ -146,3 +147,6 @@ class CondContext:
     # branches expanding only then; None where the words were admitted
     # whole before the test ran (``test``, ``[``).
     admit: AdmitTest | None = None
+    # Expands a ``-v`` operand's subscript given as text, as ``test``
+    # does and ``[[`` does not; None keeps it as typed.
+    subscripts: SubscriptFn | None = None

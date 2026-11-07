@@ -31,7 +31,8 @@ import {
 } from '../../../session/state.ts'
 import { TARGET_RE } from '../constants.ts'
 import { flagHelp } from '../help/help.ts'
-import { builtinUsage, fail, finish, requireView } from '../shared.ts'
+import type { SubscriptFn } from '../../../expand/types.ts'
+import { builtinUsage, fail, finish, requireView, subscriptExpansion } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 
 /**
@@ -143,6 +144,7 @@ export async function handleUnset(
   session: SessionState,
   state: SessionView | null = null,
   policies: Policies | null = null,
+  subscripts: SubscriptFn | null = null,
 ): Promise<RedirectResult> {
   if (args[0] === '--help') {
     const answered = flagHelp('unset')
@@ -197,7 +199,7 @@ export async function handleUnset(
       continue
     }
     const match = TARGET_RE.exec(name)
-    const subscript = match?.[2]
+    let subscript = match?.[2]
     const isElement = subscript !== undefined
     // `readonly arr` records the base name, so an `arr[i]` operand has to
     // be resolved before the guard, as bash does, and a reference to the
@@ -217,6 +219,7 @@ export async function handleUnset(
     let status: 'ok' | 'notarray' | 'subscript'
     try {
       if (subscript !== undefined) {
+        if (subscripts !== null) subscript = await subscripts(subscript)
         status = await unsetElement(session, view, base, subscript, policies)
       } else {
         await view.unset(name)
@@ -256,5 +259,6 @@ export async function unsetBuiltin(call: BuiltinCall): Promise<RedirectResult> {
     call.context.session,
     sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
     call.registry.policies,
+    subscriptExpansion(call),
   )
 }

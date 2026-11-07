@@ -26,6 +26,7 @@ import { makeArray } from '../../../../shell/array.ts'
 import { decodeText, encodeText } from '../../../../shell/bytes.ts'
 import { endsEscaped } from '../../../../shell/escapes.ts'
 import type { SessionView } from '../../../../view/types.ts'
+import type { SubscriptFn } from '../../../expand/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { assignElement, sessionView, visibleEnv } from '../../../session/state.ts'
 import { ExecutionNode } from '../../../types.ts'
@@ -38,27 +39,14 @@ import {
   recordDelimiter,
   refusal,
   requireView,
+  subscriptExpansion,
 } from '../shared.ts'
 import type { BuiltinCall } from '../types.ts'
 import { READ_VALUE_LETTERS } from './constants.ts'
 
-/** Split on whitespace runs with a maxsplit, like Python's split(None, n). */
-function splitOnWhitespace(text: string, maxsplit: number): string[] {
-  const out: string[] = []
-  let i = 0
-  while (i < text.length) {
-    while (i < text.length && /[ \t\n]/.test(text[i] ?? '')) i++
-    if (i >= text.length) break
-    if (out.length === maxsplit) {
-      out.push(text.slice(i))
-      return out
-    }
-    let j = i
-    while (j < text.length && !/[ \t\n]/.test(text[j] ?? '')) j++
-    out.push(text.slice(i, j))
-    i = j
-  }
-  return out
+/** bash's refusal of a name `read` cannot assign. */
+function invalidName(name: string): RedirectResult {
+  return readRefusal(`${shellVoice()}read: \`${name}': not a valid identifier\n`)
 }
 
 function readRefusal(msg: string): RedirectResult {
@@ -97,52 +85,89 @@ function lastCountFlag(args: string[]): string | null {
   return which
 }
 
-function splitReadLine(line: string, ifs: string, slots: number): string[] {
-  if (ifs === ' \t\n') {
-    const trimmed = line.replace(/^[ \t\n]+|[ \t\n]+$/g, '')
-    if (slots === 0) return trimmed === '' ? [] : trimmed.split(/[ \t\n]+/)
-    return splitOnWhitespace(trimmed, slots - 1)
-  }
-  if (ifs === '') return [line]
-  const ifsWs = new Set<string>(ifs.split('').filter((c) => c === ' ' || c === '\t' || c === '\n'))
-  let start = 0
-  let end = line.length
-  while (start < end && ifsWs.has(line[start] ?? '')) start++
-  while (end > start && ifsWs.has(line[end - 1] ?? '')) end--
-  const work = line.slice(start, end)
-  const nSplits = slots === 0 ? work.length : Math.max(0, slots - 1)
-  const chars = new Set(ifs.split(''))
-  const out: string[] = []
-  let cur = ''
-  for (const ch of work) {
-    if (chars.has(ch) && out.length < nSplits) {
-      out.push(cur)
-      cur = ''
-      continue
-    }
-    cur += ch
-  }
-  out.push(cur)
-  return out
-}
-
-/** read's default backslash handling: a backslash quotes the next
- * character and a backslash-newline pair is a line continuation. */
-function unescapeRead(text: string): string {
-  let out = ''
+/**
+ * The characters `read` splits, each with whether a backslash quoted it.
+ * Without `-r` a backslash quotes the next character, a backslash-newline
+ * pair is a line continuation and a backslash at the end goes. Mirrors
+ * Python's _read_chars.
+ */
+function readChars(text: string, raw: boolean): (readonly [string, boolean])[] {
+  const out: (readonly [string, boolean])[] = []
   let i = 0
   while (i < text.length) {
     const ch = text.charAt(i)
-    if (ch === '\\' && i + 1 < text.length) {
-      const nxt = text.charAt(i + 1)
-      if (nxt !== '\n') out += nxt
+    if (ch === '\\' && !raw) {
+      if (i + 1 < text.length && text.charAt(i + 1) !== '\n') out.push([text.charAt(i + 1), true])
       i += 2
       continue
     }
-    out += ch
+    out.push([ch, false])
     i++
   }
   return out
+}
+
+/** read's default backslash handling (`readChars`). */
+function unescapeRead(text: string): string {
+  return readChars(text, false)
+    .map(([ch]) => ch)
+    .join('')
+}
+
+/**
+ * Split one `read` line into at most `slots` fields on IFS, as bash does.
+ * Leading IFS whitespace goes; a delimiter is one other IFS character with
+ * the IFS whitespace around it, or a run of IFS whitespace, and a quoted
+ * character never splits. The last field takes the rest of the line, its
+ * trailing IFS whitespace dropped, and the delimiter ending it too when it
+ * holds one field only (`x:y:` reads `y` into the second of two). A zero
+ * slot count (`read -a`) means every field, a delimiter at the end opening
+ * none. Mirrors Python's _read_fields.
+ */
+function readFields(text: string, ifs: string, slots: number, raw: boolean): string[] {
+  const chars = readChars(text, raw)
+  const n = chars.length
+  const splits = (k: number): boolean => {
+    const [ch, quoted] = chars[k] ?? ['', true]
+    return !quoted && ifs.includes(ch)
+  }
+  const white = (k: number): boolean => splits(k) && ' \t\n'.includes(chars[k]?.[0] ?? '')
+  const joined = (a: number, b: number): string =>
+    chars
+      .slice(a, b)
+      .map(([ch]) => ch)
+      .join('')
+  const pastDelimiter = (start: number): number => {
+    const other = !white(start)
+    let k = start + 1
+    while (k < n && white(k)) k++
+    if (!other && k < n && splits(k)) {
+      k++
+      while (k < n && white(k)) k++
+    }
+    return k
+  }
+  let k = 0
+  while (k < n && white(k)) k++
+  const fields: string[] = []
+  while (k < n && (slots === 0 || fields.length < slots - 1)) {
+    const start = k
+    while (k < n && !splits(k)) k++
+    fields.push(joined(start, k))
+    if (k < n) k = pastDelimiter(k)
+  }
+  if (slots === 0 || k >= n) return fields
+  let end = n
+  while (end > k && white(end - 1)) end--
+  if (splits(end - 1)) {
+    let cut = end - 1
+    while (cut > k && white(cut - 1)) cut--
+    let single = true
+    for (let i = k; i < cut; i++) if (splits(i)) single = false
+    if (single) end = cut
+  }
+  fields.push(joined(k, end))
+  return fields
 }
 
 async function readRaw(
@@ -210,6 +235,7 @@ export async function handleRead(
   state: SessionView | null = null,
   policies: Policies | null = null,
   signal?: AbortSignal,
+  subscripts: SubscriptFn | null = null,
 ): Promise<RedirectResult> {
   const parse = parseShellOptions(SHELL_SPECS.read, args)
   if (parse.invalid !== null) {
@@ -264,6 +290,8 @@ export async function handleRead(
     return readRefusal(`${shellVoice()}read: \`${arrayName}': not a valid identifier\n`)
   }
   const variables = parse.operands.length > 0 ? parse.operands : ['REPLY']
+  // A first name it cannot assign refuses before anything is read.
+  if (!TARGET_RE.test(variables[0] ?? '')) return invalidName(variables[0] ?? '')
   const view = requireView(state)
   const buffer = stdin !== null ? lineBuffer(stdin) : null
   if (timeout === 0) {
@@ -285,10 +313,12 @@ export async function handleRead(
       return readRefusal(`${shellVoice()}read: read error: 0: Bad file descriptor\n`)
     }
   }
-  if (!raw) line = unescapeRead(line)
   const ifs = visibleEnv(session).IFS ?? ' \t\n'
+  const whole = readChars(line, raw)
+    .map(([ch]) => ch)
+    .join('')
   if (arrayName !== null) {
-    const parts = exact !== null ? (line !== '' ? [line] : []) : splitReadLine(line, ifs, 0)
+    const parts = exact !== null ? (whole !== '' ? [whole] : []) : readFields(line, ifs, 0, raw)
     if (view.isReadonly(arrayName)) return readonlyRefusal('read', arrayName)
     try {
       await view.set(arrayName, makeArray(parts))
@@ -306,12 +336,15 @@ export async function handleRead(
   // With no name the line goes to REPLY whole, its blanks kept.
   const parts =
     exact !== null || parse.operands.length === 0
-      ? [line]
-      : splitReadLine(line, ifs, variables.length)
+      ? [whole]
+      : readFields(line, ifs, variables.length, raw)
   for (let i = 0; i < variables.length; i++) {
     const name = variables[i]
     if (name === undefined) continue
-    const refused = await readStore(session, view, name, parts[i] ?? '', policies)
+    // bash stops at the first name it cannot assign, the ones before it
+    // assigned.
+    if (!TARGET_RE.test(name)) return invalidName(name)
+    const refused = await readStore(session, view, name, parts[i] ?? '', policies, subscripts)
     if (refused !== null) return refused
   }
   const code = complete ? 0 : 1
@@ -337,10 +370,11 @@ async function readStore(
   varName: string,
   value: string,
   policies: Policies | null = null,
+  subscripts: SubscriptFn | null = null,
 ): Promise<RedirectResult | null> {
   const match = TARGET_RE.exec(varName)
   const base = match?.[1] ?? varName
-  const subscript = match?.[2] ?? null
+  let subscript = match?.[2] ?? null
   if (view.isReadonly(base)) return readonlyRefusal('read', base)
   if (subscript === null) {
     try {
@@ -351,6 +385,7 @@ async function readStore(
     }
     return null
   }
+  if (subscripts !== null) subscript = await subscripts(subscript)
   let status: 'ok' | 'denied' | 'readonly' | 'subscript'
   try {
     status = await assignElement(session, policies, base, subscript, value)
@@ -387,5 +422,6 @@ export async function readBuiltin(call: BuiltinCall): Promise<RedirectResult> {
     sessionView(call.context.session, call.registry.policies, call.context.frame.diagnostics),
     call.registry.policies,
     call.signal,
+    subscriptExpansion(call),
   )
 }

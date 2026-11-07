@@ -205,8 +205,26 @@ impl<G: Gate> Writer<'_, G> {
             });
         }
         let existing = self.store.share(&name);
+        // A scalar landing on an array is its element 0, the key `0` in an
+        // associative one, as bash binds `read a` or `for a in x` there.
+        let zero;
+        let (mut value, assigned) =
+            match (value, existing.as_ref().and_then(|var| var.value.as_ref())) {
+                (Value::Scalar(text), Some(Value::Indexed(array))) => {
+                    let mut array = array.clone();
+                    array.set(0, text);
+                    zero = Assigned::Indexes(HashSet::from([0]));
+                    (Value::Indexed(array), Some(&zero))
+                }
+                (Value::Scalar(text), Some(Value::Assoc(map))) => {
+                    let mut map = map.clone();
+                    map.set(b"0".to_vec(), text);
+                    zero = Assigned::Keys(HashSet::from([b"0".to_vec()]));
+                    (Value::Assoc(map), Some(&zero))
+                }
+                (value, _) => (value, assigned),
+            };
         let mut coercion = Coercion::default();
-        let mut value = value;
         if let Some(attrs) = existing.as_ref().map(|var| var.attrs).filter(|&a| a != 0) {
             match self
                 .store

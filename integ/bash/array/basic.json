@@ -658,10 +658,10 @@
         "gdrive",
         "gdrive-folder"
       ],
-      "command": "ai2=1; ar19=(x y z); echo ${ar19[ai2+1]}",
+      "command": "ai2=1; ar19=(x y z); echo ${ar19[ai2+1]}; echo ${ar19[$ai2 + 1]} ${ar19[ $ai2 ]} ${ar19[$((ai2 + 1))]}; an=(5 6 7); echo $(( an[$ai2 + 1] )); read 'an[$ai2]' <<< 9; echo ${an[@]}",
       "expect": {
         "exit": 0,
-        "stdout": "z\n",
+        "stdout": "z\nz y z\n7\n5 9 7\n",
         "stderr": ""
       }
     },

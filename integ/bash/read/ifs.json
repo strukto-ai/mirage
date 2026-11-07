@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "IFS=: read rp rq <<< 'a:b:c:d'; echo \"$rp,$rq\"",
+      "command": "IFS=: read rp rq <<< 'a:b:c:d'; echo \"$rp,$rq\"; IFS=: read rp1 <<< 'x:'; IFS=: read rp2 <<< 'x:y:'; IFS=: read rp3 rp4 <<< 'x:y:'; IFS=: read rp5 rp6 <<< 'x:y::'; IFS=: read rp7 rp8 <<< 'x\\:y:z'; IFS=': ' read rp9 rp10 <<< 'x: y:  '; printf '[%s]' \"$rp1\" \"$rp2\" \"$rp3\" \"$rp4\" \"$rp5\" \"$rp6\" \"$rp7\" \"$rp8\" \"$rp9\" \"$rp10\"; echo",
       "expect": {
         "exit": 0,
-        "stdout": "a,b:c:d\n",
+        "stdout": "a,b:c:d\n[x][x:y:][x][y][x][y::][x:y][z][x][y]\n",
         "stderr": ""
       }
     },
@@ -98,10 +98,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "IFS=: read re1 re2 re3 <<< 'a::c'; echo \"[$re1][$re2][$re3]\"",
+      "command": "IFS=: read re1 re2 re3 <<< 'a::c'; echo \"[$re1][$re2][$re3]\"; IFS=: read re4 re5 re6 <<< 'x::y:z:'; IFS=': ' read re7 re8 re9 <<< ' x : : y '; IFS=' :' read re10 re11 <<< ': x'; printf '[%s]' \"$re4\" \"$re5\" \"$re6\" \"$re7\" \"$re8\" \"$re9\" \"$re10\" \"$re11\"; echo; IFS=: read -a rea <<< 'x::y::'; IFS=': ' read -a reb <<< ' x : y :: z '; IFS=: read -a rec <<< '\\:a:b\\'; declare -p rea reb rec",
       "expect": {
         "exit": 0,
-        "stdout": "[a][][c]\n",
+        "stdout": "[a][][c]\n[x][][y:z:][x][][y][][x]\ndeclare -a rea=([0]=\"x\" [1]=\"\" [2]=\"y\" [3]=\"\")\ndeclare -a reb=([0]=\"x\" [1]=\"y\" [2]=\"\" [3]=\"z\")\ndeclare -a rec=([0]=\":a\" [1]=\"b\")\n",
         "stderr": ""
       }
     },

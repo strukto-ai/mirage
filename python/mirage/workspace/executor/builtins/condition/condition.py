@@ -38,7 +38,9 @@ from mirage.workspace.executor.builtins.condition.types import (
     CondContext,
     CondNode,
 )
+from mirage.workspace.executor.builtins.shared import subscript_expansion
 from mirage.workspace.executor.builtins.types import BuiltinCall, Result
+from mirage.workspace.expand.types import SubscriptFn
 from mirage.workspace.files import Files
 from mirage.workspace.mount.namespace import Namespace
 from mirage.workspace.session import SessionState
@@ -52,6 +54,7 @@ async def handle_test(
     session: SessionState,
     name: str = "test",
     admit: AdmitTest | None = None,
+    subscripts: SubscriptFn | None = None,
 ) -> tuple[ByteSource | None, IOResult, ExecutionNode]:
     """Evaluate test/[ (flat argv) or [[ (condition tree).
 
@@ -70,6 +73,8 @@ async def handle_test(
         name (str): invocation name for diagnostics: "test", "[", "[[".
         admit (AdmitTest | None): admits the words of a test by its
             own name; None where the command was admitted already.
+        subscripts (SubscriptFn | None): expands a ``-v`` operand's
+            subscript; None keeps it as typed.
     """
     ctx = CondContext(
         dispatch=dispatch,
@@ -77,6 +82,7 @@ async def handle_test(
         session=session,
         name=name,
         admit=admit,
+        subscripts=subscripts,
         links=link_view(
             Files(
                 dispatch,
@@ -181,4 +187,5 @@ async def test_builtin(call: BuiltinCall) -> Result:
         test_args,
         call.context.session,
         name=test_name,
+        subscripts=subscript_expansion(call),
     )

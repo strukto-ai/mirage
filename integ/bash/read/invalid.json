@@ -28,11 +28,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "read -q v 2>&1; echo code=$?",
+      "command": "read -q v 2>&1; echo code=$?; read 1z <<< x; echo rc=$?; printf 'a\\nb\\n' | { read 1z; read rix; echo \"[$rix]\"; }; read riq 1z riw <<< 'u v w'; echo \"rc=$? [$riq] [$riw]\"; read 'rib[1]' <<< q; declare -p rib; read 'ric[' <<< q; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "bash: line 1: read: -q: invalid option\nread: usage: read [-ers] [-a array] [-d delim] [-i text] [-n nchars] [-N nchars] [-p prompt] [-t timeout] [-u fd] [name ...]\ncode=2\n",
-        "stderr": ""
+        "stdout": "bash: line 1: read: -q: invalid option\nread: usage: read [-ers] [-a array] [-d delim] [-i text] [-n nchars] [-N nchars] [-p prompt] [-t timeout] [-u fd] [name ...]\ncode=2\nrc=1\n[a]\nrc=1 [u] []\ndeclare -a rib=([1]=\"q\")\nrc=1\n",
+        "stderr": "bash: line 1: read: `1z': not a valid identifier\nbash: line 1: read: `1z': not a valid identifier\nbash: line 1: read: `1z': not a valid identifier\nbash: line 1: read: `ric[': not a valid identifier\n"
       }
     }
   ]

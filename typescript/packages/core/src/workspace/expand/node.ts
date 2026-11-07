@@ -17,6 +17,7 @@ import type { Policies } from '../../policy/index.ts'
 import { ShellVars } from '../../rs/session.ts'
 import type { Item, Shell, ShellTreeNode } from '../../rs/shell.ts'
 import { CallStack } from '../../shell/call_stack.ts'
+import { parse } from '../../shell/parse/parse.ts'
 import { ProgramNode, type ParsedProgram, shellNode } from '../../shell/parse/program.ts'
 import type { TSNodeLike } from '../../shell/types.ts'
 import { markGlobs } from '../../utils/glob_walk.ts'
@@ -221,4 +222,22 @@ export async function expandArith(
   policies: Policies | null = null,
 ): Promise<string> {
   return (await expand(tsNode, 'arith', context, executeFn, callStack, policies)) as string
+}
+
+/**
+ * A subscript a builtin was given as text (`unset 'a[$i]'`, `read 'm[$k]'`),
+ * expanded as one typed in `${a[...]}` is: an associative key with its
+ * quoting removed, an indexed one the text its arithmetic reads. One with no
+ * expansion, quote or escape stays as typed.
+ */
+export async function expandSubscript(
+  text: string,
+  context: EvaluationContext,
+  executeFn: ExecuteFn,
+  callStack: CallStack | null = null,
+  policies: Policies | null = null,
+): Promise<string> {
+  if (!/[$`'"\\]/.test(text)) return text
+  const word = parse('${x[' + text + ']}')
+  return (await expand(word, 'subscript', context, executeFn, callStack, policies)) as string
 }

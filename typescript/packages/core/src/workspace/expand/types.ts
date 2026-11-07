@@ -54,3 +54,6 @@ export type ExecuteFn = (
     jobTable?: JobTable
   },
 ) => Promise<IOResult>
+
+/** A builtin's subscript given as text, expanded as one typed in `${a[...]}` is. */
+export type SubscriptFn = (text: string) => Promise<string>

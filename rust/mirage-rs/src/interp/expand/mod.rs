@@ -336,6 +336,9 @@ struct Braces {
     /// arithmetic path; its parsed nodes, for an associative key.
     subscript: Option<Vec<u8>>,
     subscript_nodes: Vec<usize>,
+    /// Where the subscript's text sits in the source, between its
+    /// brackets.
+    subscript_span: (usize, usize),
     length: bool,
     indirect: bool,
     /// `${!prefix@}` or `${!prefix*}`: the names starting with it; `star`
