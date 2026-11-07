@@ -623,7 +623,7 @@ fn a_second_random_source_must_be_the_same_word() {
             .collect()
     };
     assert!(scan(&typed(&["a", "a"])).is_ok());
-    let refused = scan(&typed(&["a", "b"])).err().expect("refused");
+    let refused = scan(&typed(&["a", "b"])).expect_err("refused");
     assert_eq!(refused.status, 2);
     assert_eq!(
         String::from_utf8_lossy(&refused.stderr()),

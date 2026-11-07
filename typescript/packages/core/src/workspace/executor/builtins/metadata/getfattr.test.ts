@@ -116,6 +116,11 @@ describe('getfattr', () => {
     expect((await run(ws, 'getfattr -n user.a --absolute-names /r/d/f'))[1]).toMatch(
       /^# file: \/r\/d\/f\n/,
     )
+    expect(await run(ws, 'getfattr -n user.a --only-values /r/d/f')).toEqual([
+      0,
+      'one',
+      "getfattr: Removing leading '/' from absolute path names\n",
+    ])
     expect(await run(ws, 'getfattr -n user.zz /r/d/f')).toEqual([
       1,
       '',

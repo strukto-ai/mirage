@@ -117,6 +117,11 @@ async def test_an_absolute_path_loses_its_leading_slash_in_the_header():
     assert err == "getfattr: Removing leading '/' from absolute path names\n"
     _, kept, _ = await _run(ws, "getfattr -n user.a --absolute-names /r/d/f")
     assert kept.startswith(b"# file: /r/d/f\n")
+    assert await _run(ws, "getfattr -n user.a --only-values /r/d/f") == (
+        0,
+        b"one",
+        "getfattr: Removing leading '/' from absolute path names\n",
+    )
 
 
 @pytest.mark.asyncio

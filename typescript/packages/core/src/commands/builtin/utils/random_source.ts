@@ -44,7 +44,9 @@ export class RandomSource {
   async take(count: number): Promise<Uint8Array> {
     this.cursor ??= this.stream(this.path)[Symbol.asyncIterator]()
     const label = this.path.rawPath
-    while (this.held.length < count) {
+    const parts = [this.held]
+    let size = this.held.length
+    while (size < count) {
       let step: IteratorResult<Uint8Array>
       try {
         step = await this.cursor.next()
@@ -63,11 +65,12 @@ export class RandomSource {
       if (step.done === true) {
         throw new RandomSourceError(`${this.cmd}: ${shellQuoteAlways(label)}: end of file`)
       }
-      this.held = concat([this.held, step.value])
+      parts.push(step.value)
+      size += step.value.length
     }
-    const taken = this.held.slice(0, count)
-    this.held = this.held.slice(count)
-    return taken
+    const held = parts.length === 1 ? this.held : concat(parts)
+    this.held = held.subarray(count)
+    return held.slice(0, count)
   }
 
   async close(): Promise<void> {

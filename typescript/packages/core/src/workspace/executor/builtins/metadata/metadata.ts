@@ -307,13 +307,17 @@ export async function walkStats(
       )
   const entries: WalkEntry[] = []
   // An explicit stack, so a deep tree costs no recursion: a directory's
-  // children go on in reverse and come off in listing order. Each item carries
-  // the directories its branch has entered, which -L will not enter again.
-  const stack: [PathSpec, FileStat, ReadonlySet<string>][] = [
-    [root, rootStat, new Set([root.virtual])],
-  ]
+  // children go on in reverse and come off in listing order, after the mark
+  // that leaves it. `branch` holds the directories entered and not yet left,
+  // which -L will not enter again.
+  const branch = new Set<string>()
+  const stack: [PathSpec, FileStat, string, boolean][] = [[root, rootStat, root.virtual, false]]
   for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
-    const [path, stat, branch] = top
+    const [path, stat, entered, leaving] = top
+    if (leaving) {
+      branch.delete(entered)
+      continue
+    }
     if (stat.type !== FileType.DIRECTORY) {
       entries.push([path, stat, null])
       continue
@@ -327,7 +331,9 @@ export async function walkStats(
       continue
     }
     entries.push([path, stat, null])
-    const found: [PathSpec, FileStat, ReadonlySet<string>][] = []
+    branch.add(entered)
+    stack.push([path, stat, entered, true])
+    const found: [PathSpec, FileStat, string, boolean][] = []
     for (const listed of children) {
       // A folder-backed readdir spells a directory child with its slash; a
       // child is named below the path walked, which under -L may be a link's
@@ -337,12 +343,12 @@ export async function walkStats(
       const child = PathSpec.fromStrPath(`${rstripSlash(path.virtual)}/${name}`)
       if (!links.isLink(bare) && !(follow && links.isLink(child.virtual))) {
         const real = follow ? links.follow(child.virtual) : child.virtual
-        found.push([child, await statOf(child), new Set([...branch, real])])
+        found.push([child, await statOf(child), real, false])
         continue
       }
       if (!follow) {
         const [own] = (await dispatch('stat', child, [], { nofollow: true })) as [FileStat, unknown]
-        found.push([child, own, branch])
+        found.push([child, own, child.virtual, false])
         continue
       }
       let real: string
@@ -354,7 +360,7 @@ export async function walkStats(
         if (err instanceof CycleError || isEnoent(err) || isEnotdir(err)) continue
         throw err
       }
-      if (!branch.has(real)) found.push([child, target, new Set([...branch, real])])
+      if (!branch.has(real)) found.push([child, target, real, false])
     }
     for (const entry of found.reverse()) stack.push(entry)
   }

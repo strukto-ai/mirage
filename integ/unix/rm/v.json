@@ -56,10 +56,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "(cd /data && echo r > r10rv.txt && mkdir -p r10rvd/s && echo q > r10rvd/s/f && rm -v r10rv.txt && rm -rv r10rvd)",
+      "command": "(cd /data && echo r > r10rv.txt && mkdir -p r10rvd/s && echo q > r10rvd/s/f && rm -v r10rv.txt && rm -rv r10rvd); (cd /data && mkdir -p fl1_rmd/s && echo q > fl1_rmd/s/f && rm --recursive --verbose fl1_rmd); rm --force /data/fl1_nope; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "removed 'r10rv.txt'\nremoved 'r10rvd/s/f'\nremoved directory 'r10rvd/s'\nremoved directory 'r10rvd'\n",
+        "stdout": "removed 'r10rv.txt'\nremoved 'r10rvd/s/f'\nremoved directory 'r10rvd/s'\nremoved directory 'r10rvd'\nremoved 'fl1_rmd/s/f'\nremoved directory 'fl1_rmd/s'\nremoved directory 'fl1_rmd'\nrc=0\n",
         "stderr": ""
       }
     }

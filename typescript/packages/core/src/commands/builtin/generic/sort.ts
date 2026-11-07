@@ -288,7 +288,7 @@ async function salted(
 ): Promise<Record<string, JsonValue> | IOResult> {
   let salt: Uint8Array
   if (source === null) {
-    salt = ids.randomWords(4)
+    salt = ids.randomWords(4).subarray(0, 16)
   } else {
     const random = new RandomSource('sort', source, stream, OPEN_FAILED)
     try {

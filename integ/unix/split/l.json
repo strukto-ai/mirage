@@ -15,14 +15,17 @@
         "ssh",
         "tidb-filesystem"
       ],
-      "command": "(cd /data && printf 'old\\n' > xaa && cat xaa && printf 'new\\n' | split -l 1 && cat xaa && rm xaa)",
+      "command": "(cd /data && printf 'old\\n' > xaa && cat xaa && printf 'new\\n' | split -l 1 && cat xaa && rm xaa); (cd /data && seq 10 > fl1n && split -C 7 fl1n fl1p && head -c 100 fl1p*; split --verbose -l 4 fl1n fl1q; seq 3 > fl1s; split -e -n 5 fl1s fl1r; ls fl1r*; split -l 1 -b 2 fl1s fl1z; echo rc=$?; rm -f fl1n fl1s fl1p* fl1q* fl1r*)",
       "expect": {
         "exit": 0,
-        "stdout": "old\nnew\n",
-        "stderr": ""
+        "stdout": "old\nnew\n==> fl1paa <==\n1\n2\n3\n\n==> fl1pab <==\n4\n5\n6\n\n==> fl1pac <==\n7\n8\n9\n\n==> fl1pad <==\n10\ncreating file 'fl1qaa'\ncreating file 'fl1qab'\ncreating file 'fl1qac'\nfl1raa\nfl1rab\nfl1rac\nfl1rad\nfl1rae\nrc=1\n",
+        "stderr": "split: cannot split in more than one way\nTry 'split --help' for more information.\n"
       },
       "flags": [
-        "l"
+        "l",
+        "C",
+        "verbose",
+        "e"
       ]
     },
     {

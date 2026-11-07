@@ -28,17 +28,22 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf x > /data/fc0m.txt; chmod -v 644 /data/fc0m.txt; chmod --verbose 755 /data/fc0m.txt; chmod -c 755 /data/fc0m.txt; chmod --changes 640 /data/fc0m.txt; chmod 600 /data/fc0m.txt -v; chmod -c -v 600 /data/fc0m.txt; chmod -v -c 600 /data/fc0m.txt; rm -f /data/fc0m.txt",
+      "command": "printf x > /data/fc0m.txt; chmod -v 644 /data/fc0m.txt; chmod --verbose 755 /data/fc0m.txt; chmod -c 755 /data/fc0m.txt; chmod --changes 640 /data/fc0m.txt; chmod 600 /data/fc0m.txt -v; chmod -c -v 600 /data/fc0m.txt; chmod -v -c 600 /data/fc0m.txt; rm -f /data/fc0m.txt; printf x > /data/fc0m2.txt; chmod 644 /data/fc0m2.txt; printf y > /data/fc0mr.txt; chmod 600 /data/fc0mr.txt; chmod --reference=/data/fc0mr.txt -v /data/fc0m2.txt; chmod -R --preserve-root 644 /; echo rc=$?; mkdir -p /data/fc0L/d && printf z > /data/fc0L/d/f && ln -s d /data/fc0L/l; chmod -R -H -c 700 /data/fc0L/l; chmod -R -L -c 750 /data/fc0L/l; chmod -R -P -c 755 /data/fc0L; rm -rf /data/fc0L /data/fc0m2.txt /data/fc0mr.txt",
       "expect": {
         "exit": 0,
-        "stdout": "mode of '/data/fc0m.txt' retained as 0644 (rw-r--r--)\nmode of '/data/fc0m.txt' changed from 0644 (rw-r--r--) to 0755 (rwxr-xr-x)\nmode of '/data/fc0m.txt' changed from 0755 (rwxr-xr-x) to 0640 (rw-r-----)\nmode of '/data/fc0m.txt' changed from 0640 (rw-r-----) to 0600 (rw-------)\nmode of '/data/fc0m.txt' retained as 0600 (rw-------)\n",
-        "stderr": ""
+        "stdout": "mode of '/data/fc0m.txt' retained as 0644 (rw-r--r--)\nmode of '/data/fc0m.txt' changed from 0644 (rw-r--r--) to 0755 (rwxr-xr-x)\nmode of '/data/fc0m.txt' changed from 0755 (rwxr-xr-x) to 0640 (rw-r-----)\nmode of '/data/fc0m.txt' changed from 0640 (rw-r-----) to 0600 (rw-------)\nmode of '/data/fc0m.txt' retained as 0600 (rw-------)\nmode of '/data/fc0m2.txt' changed from 0644 (rw-r--r--) to 0600 (rw-------)\nrc=1\nmode of '/data/fc0L/l' changed from 0755 (rwxr-xr-x) to 0700 (rwx------)\nmode of '/data/fc0L/l/f' changed from 0644 (rw-r--r--) to 0700 (rwx------)\nmode of '/data/fc0L/l' changed from 0700 (rwx------) to 0750 (rwxr-x---)\nmode of '/data/fc0L/l/f' changed from 0700 (rwx------) to 0750 (rwxr-x---)\nmode of '/data/fc0L/d' changed from 0750 (rwxr-x---) to 0755 (rwxr-xr-x)\nmode of '/data/fc0L/d/f' changed from 0750 (rwxr-x---) to 0755 (rwxr-xr-x)\n",
+        "stderr": "chmod: it is dangerous to operate recursively on '/'\nchmod: use --no-preserve-root to override this failsafe\n"
       },
       "flags": [
         "v",
         "verbose",
         "c",
-        "changes"
+        "changes",
+        "reference",
+        "preserve-root",
+        "H",
+        "L",
+        "P"
       ]
     },
     {

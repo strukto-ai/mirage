@@ -29,7 +29,7 @@
       "expect": {
         "exit": 0,
         "stdout": "bluered",
-        "stderr": ""
+        "stderr": "getfattr: Removing leading '/' from absolute path names\n"
       }
     },
     {
@@ -61,7 +61,7 @@
       "expect": {
         "exit": 1,
         "stdout": "green",
-        "stderr": "getfattr: /data/xm_attr_missing: No such file or directory\n"
+        "stderr": "getfattr: /data/xm_attr_missing: No such file or directory\ngetfattr: Removing leading '/' from absolute path names\n"
       }
     }
   ]

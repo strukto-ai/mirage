@@ -260,7 +260,7 @@ async def handle_getfattr(
                 errors.append(f"getfattr: {label}: {attr_error(exc)}\n")
                 failed = True
                 continue
-            if block and header != label and not only_values and not warned:
+            if block and header != label and not warned:
                 errors.append(
                     "getfattr: Removing leading '/' from absolute path names\n"
                 )

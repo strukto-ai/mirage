@@ -326,7 +326,7 @@ async def _salted(
         ids (IdSource): the randomness without one.
     """
     if source is None:
-        salt = ids.random_words(4)
+        salt = ids.random_words(4)[:16]
     else:
         random = RandomSource("sort", source, stream, opening=OPEN_FAILED)
         try:

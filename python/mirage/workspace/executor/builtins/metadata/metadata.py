@@ -452,12 +452,16 @@ async def walk_stats(
     )
     entries: list[WalkEntry] = []
     # An explicit stack, so a deep tree costs no recursion: a directory's
-    # children go on in reverse and come off in listing order. Each item
-    # carries the directories its branch has entered, which ``-L`` will
-    # not enter again.
-    stack = [(root, root_stat, frozenset({root.virtual}))]
+    # children go on in reverse and come off in listing order, after the
+    # mark that leaves it. ``branch`` holds the directories entered and not
+    # yet left, which ``-L`` will not enter again.
+    branch: set[str] = set()
+    stack = [(root, root_stat, root.virtual, False)]
     while stack:
-        path, stat, branch = stack.pop()
+        path, stat, real, leaving = stack.pop()
+        if leaving:
+            branch.discard(real)
+            continue
         if stat.type != FileType.DIRECTORY:
             entries.append((path, stat, None))
             continue
@@ -467,7 +471,9 @@ async def walk_stats(
             entries.append((path, stat, exc))
             continue
         entries.append((path, stat, None))
-        found: list[tuple[PathSpec, FileStat, frozenset[str]]] = []
+        branch.add(real)
+        stack.append((path, stat, real, True))
+        found: list[tuple[PathSpec, FileStat, str, bool]] = []
         for listed in children:
             # A folder-backed readdir spells a directory child with its
             # slash; a child is named below the path walked, which under
@@ -480,11 +486,11 @@ async def walk_stats(
                 follow and links.is_link(child.virtual)
             ):
                 real = links.follow(child.virtual) if follow else child.virtual
-                found.append((child, await stat_of(child), branch | {real}))
+                found.append((child, await stat_of(child), real, False))
                 continue
             if not follow:
                 own, _ = await dispatch("stat", child, nofollow=True)
-                found.append((child, own, branch))
+                found.append((child, own, child.virtual, False))
                 continue
             try:
                 real = links.follow(child.virtual)
@@ -492,7 +498,7 @@ async def walk_stats(
             except (CycleError, FileNotFoundError, NotADirectoryError):
                 continue
             if real not in branch:
-                found.append((child, target, branch | {real}))
+                found.append((child, target, real, False))
         stack.extend(reversed(found))
     return entries
 

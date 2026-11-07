@@ -57,11 +57,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf 'a\\nb\\nc\\n' | shuf | sort | tr -d '\\n'",
+      "command": "printf 'a\\nb\\nc\\n' | shuf | sort | tr -d '\\n'; printf 'a\\nb\\nc\\n' | shuf --random-source=/data/a.txt | sort | tr -d '\\n'; echo; shuf -i 1-5 --random-source=/data/empty.txt; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "abc",
-        "stderr": ""
+        "stdout": "abcabc\nrc=1\n",
+        "stderr": "shuf: '/data/empty.txt': end of file\n"
       }
     },
     {

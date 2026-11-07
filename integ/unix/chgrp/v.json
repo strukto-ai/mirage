@@ -28,17 +28,18 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "printf x > /data/fc0g.txt; chgrp 1000 /data/fc0g.txt; chgrp -v 1000 /data/fc0g.txt; chgrp --verbose 2000 /data/fc0g.txt; chgrp -c 2000 /data/fc0g.txt; chgrp 3000 /data/fc0g.txt --changes; chgrp -v 4000 /data/fc0nope; echo rc=$?; rm -f /data/fc0g.txt",
+      "command": "printf x > /data/fc0g.txt; chgrp 1000 /data/fc0g.txt; chgrp -v 1000 /data/fc0g.txt; chgrp --verbose 2000 /data/fc0g.txt; chgrp -c 2000 /data/fc0g.txt; chgrp 3000 /data/fc0g.txt --changes; chgrp -v 4000 /data/fc0nope; echo rc=$?; rm -f /data/fc0g.txt; printf x > /data/fc0g2.txt; chgrp 1000 /data/fc0g2.txt; printf y > /data/fc0gr.txt; chgrp 4545 /data/fc0gr.txt; chgrp --reference=/data/fc0gr.txt -c /data/fc0g2.txt; rm -f /data/fc0g2.txt /data/fc0gr.txt",
       "expect": {
         "exit": 0,
-        "stdout": "group of '/data/fc0g.txt' retained as 1000\nchanged group of '/data/fc0g.txt' from 1000 to 2000\nchanged group of '/data/fc0g.txt' from 2000 to 3000\nfailed to change group of '/data/fc0nope' to 4000\nrc=1\n",
+        "stdout": "group of '/data/fc0g.txt' retained as 1000\nchanged group of '/data/fc0g.txt' from 1000 to 2000\nchanged group of '/data/fc0g.txt' from 2000 to 3000\nfailed to change group of '/data/fc0nope' to 4000\nrc=1\nchanged group of '/data/fc0g2.txt' from 1000 to 4545\n",
         "stderr": "chgrp: cannot access '/data/fc0nope': No such file or directory\n"
       },
       "flags": [
         "v",
         "verbose",
         "c",
-        "changes"
+        "changes",
+        "reference"
       ]
     }
   ]

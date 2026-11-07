@@ -287,7 +287,7 @@ export async function handleGetfattr(
         failed = true
         continue
       }
-      if (block.length > 0 && header !== label && !want.onlyValues && !warned) {
+      if (block.length > 0 && header !== label && !warned) {
         errors.push("getfattr: Removing leading '/' from absolute path names\n")
         warned = true
       }

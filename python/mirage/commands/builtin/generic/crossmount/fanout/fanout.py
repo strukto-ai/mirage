@@ -51,14 +51,15 @@ async def run_fanout(
         run_single (RunSingle): Executor-injected single-mount runner.
     """
     flags: dict[str, FlagValue] = FlagBag(flag_kwargs)
-    # head pairs -q/--quiet and -v/--verbose (canonical dests), tail
-    # declares them short-only.
-    quiet_key = "quiet" if cmd_name == Cmd.HEAD else "q"
-    verbose_key = "verbose" if cmd_name == Cmd.HEAD else "v"
-    if cmd_name in (Cmd.HEAD, Cmd.TAIL) and not FlagView(
-        flags, spec=SPECS[cmd_name]
-    ).as_bool(quiet_key):
-        flags[verbose_key] = True
+    # head and tail name every operand unless -q (or tail's --silent)
+    # says otherwise.
+    if cmd_name in (Cmd.HEAD, Cmd.TAIL):
+        view = FlagView(flags, spec=SPECS[cmd_name])
+        if not (
+            view.as_bool("quiet")
+            or (cmd_name == Cmd.TAIL and view.as_bool("silent"))
+        ):
+            flags["verbose"] = True
 
     if cmd_name not in (
         Cmd.FIND,
@@ -71,7 +72,7 @@ async def run_fanout(
         separator = (
             b"\n"
             if cmd_name in (Cmd.HEAD, Cmd.TAIL)
-            and FlagView(flags, spec=SPECS[cmd_name]).as_bool(verbose_key)
+            and FlagView(flags, spec=SPECS[cmd_name]).as_bool("verbose")
             else b""
         )
         return await stream_operands(

@@ -102,7 +102,7 @@
       "expect": {
         "exit": 0,
         "stdout": "blue",
-        "stderr": ""
+        "stderr": "getfattr: Removing leading '/' from absolute path names\n"
       }
     },
     {

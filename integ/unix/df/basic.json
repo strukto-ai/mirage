@@ -6,11 +6,11 @@
       "targets": [
         "ram"
       ],
-      "command": "df /data",
+      "command": "df /data; df --block-size=x /data; echo rc=$?; df -Q; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "Filesystem     1K-blocks Used Available Use% Mounted on\nram                    -    -         -    - /data\n",
-        "stderr": ""
+        "stdout": "Filesystem     1K-blocks Used Available Use% Mounted on\nram                    -    -         -    - /data\nrc=1\nrc=1\n",
+        "stderr": "df: invalid --block-size argument 'x'\ndf: invalid option -- 'Q'\nTry 'df --help' for more information.\n"
       }
     },
     {
@@ -69,8 +69,8 @@
       ],
       "command": "df -z /data 2>&1",
       "expect": {
-        "exit": 2,
-        "stdout": "df: invalid option -- 'z'\n",
+        "exit": 1,
+        "stdout": "df: invalid option -- 'z'\nTry 'df --help' for more information.\n",
         "stderr": ""
       }
     },

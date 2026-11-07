@@ -63,11 +63,11 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "sort /data/dup.txt | uniq",
+      "command": "sort /data/dup.txt | uniq; sort -R /data/dup.txt | uniq | wc -l; sort --random-sort --random-source=/data/a.txt /data/b.txt | sort; printf '/data/b.txt\\0/data/dup.txt\\0' | sort --files0-from=- | tr -d '\\n'; echo; sort -R --random-source=/data/empty.txt /data/b.txt; echo rc=$?",
       "expect": {
         "exit": 0,
-        "stdout": "a\nb\nc\n",
-        "stderr": ""
+        "stdout": "a\nb\nc\n3\n1\n2\n3\n123aabbc\nrc=2\n",
+        "stderr": "sort: '/data/empty.txt': end of file\n"
       }
     },
     {
