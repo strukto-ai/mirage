@@ -26,14 +26,18 @@
         "ssh",
         "tidb-filesystem"
       ],
-      "command": "mkdir -p /data/pcp3/at/sub && printf 'a' > /data/pcp3/at/f.txt && cp -a /data/pcp3/at /data/pcp3/atcopy && cat /data/pcp3/atcopy/f.txt",
+      "command": "mkdir -p /data/pcp3/at/sub && printf 'a' > /data/pcp3/at/f.txt && cp -a /data/pcp3/at /data/pcp3/atcopy && cat /data/pcp3/atcopy/f.txt; (cd /data/pcp3 && printf abc > pf && chmod 640 pf && touch -d '2020-01-02 03:04:05' pf && cp -p pf pg && stat -c '%a %y' pg; cp --preserve=timestamps --no-preserve=mode pf ph && stat -c '%y' ph; cp --preserve=context pf pi; echo rc=$?; cp --preserve=bogus pf pi; echo rc=$?; printf zz > pj && cp --attributes-only pf pj && cat pj && cp --attributes-only pf pk && stat -c '%s %a' pk)",
       "expect": {
         "exit": 0,
-        "stdout": "a",
-        "stderr": ""
+        "stdout": "a640 2020-01-02 03:04:05.000000000 +0000\n2020-01-02 03:04:05.000000000 +0000\nrc=1\nrc=1\nzz0 640\n",
+        "stderr": "cp: cannot preserve security context without an SELinux-enabled kernel\ncp: invalid argument 'bogus' for '--preserve'\nValid arguments are:\n  - 'mode'\n  - 'timestamps'\n  - 'ownership'\n  - 'links'\n  - 'context'\n  - 'xattr'\n  - 'all'\nTry 'cp --help' for more information.\n"
       },
       "flags": [
-        "a"
+        "a",
+        "p",
+        "preserve",
+        "no-preserve",
+        "attributes-only"
       ]
     }
   ]

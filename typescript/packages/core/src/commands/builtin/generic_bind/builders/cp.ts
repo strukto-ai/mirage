@@ -25,6 +25,7 @@ import { commandFiles } from '../files.ts'
 import { FlagView } from '../../../spec/flag_view.ts'
 import { pathsScoped } from '../../../../view/namespace_view.ts'
 import { specOf } from '../../../spec/builtins.ts'
+import { sessionUmask } from '../../../../context/session_context.ts'
 
 export const BUILDER: GenericCommand = {
   name: 'cp',
@@ -114,6 +115,7 @@ export const BUILDER: GenericCommand = {
           ),
       ctx.stdin,
       dispatchOf(ctx),
+      sessionUmask(ctx.session?.access()),
     )
   },
 }

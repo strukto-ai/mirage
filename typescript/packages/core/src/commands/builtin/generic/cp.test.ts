@@ -1075,3 +1075,90 @@ it('copies through a mount without write while a hide sits in the target directo
     await ws.close()
   }
 })
+
+describe('the preserve, link, parent and attribute options', () => {
+  function flagsOf(...argv: string[]): CpFlags {
+    const spec = SPECS.cp
+    if (spec === undefined) throw new Error('no cp spec')
+    const words = [...argv, '/data/a', '/data/b']
+    return parseFlags(new FlagView(parseToKwargs(parseCommand(spec, words, '/', 'cp')), spec))
+  }
+
+  it.each([
+    [['-p'], ['mode', 'ownership', 'timestamps']],
+    [['--preserve'], ['mode', 'ownership', 'timestamps']],
+    [['--preserve=mode,time'], ['mode', 'timestamps']],
+    [
+      ['-p', '--no-preserve=mode'],
+      ['ownership', 'timestamps'],
+    ],
+    [
+      ['--no-preserve=mode', '-p'],
+      ['mode', 'ownership', 'timestamps'],
+    ],
+    [['--preserve=context', '--no-preserve=context'], []],
+  ])('reads %j in the order typed', (argv, keep) => {
+    expect([...flagsOf(...argv).preserve].sort()).toEqual(keep)
+  })
+
+  // Pinned on debian:stable-slim, which has no SELinux.
+  it.each([
+    [
+      ['--preserve=context'],
+      'cp: cannot preserve security context without an SELinux-enabled kernel',
+    ],
+    [['-l', '-s'], 'cp: cannot make both hard and symbolic links\n'],
+  ])('refuses %j', (argv, message) => {
+    expect(() => flagsOf(...argv)).toThrow(message)
+  })
+
+  const SETUP =
+    "cd /d && printf abc > f && chmod 640 f && touch -d '2020-01-02 03:04:05' f && mkdir -p a/b dest && printf x > a/b/f; "
+
+  // Each line pinned on debian:stable-slim (coreutils 9.7). Mirrors test_cp.py.
+  it.each([
+    ['cp --parents a/b/f dest; find dest | sort', 'dest\ndest/a\ndest/a/b\ndest/a/b/f\n', '', 0],
+    [
+      'cp --parents a/b/f g',
+      '',
+      "cp: with --parents, the destination must be a directory\nTry 'cp --help' for more information.\n",
+      1,
+    ],
+    ['cp -s f g; readlink g', 'f\n', '', 0],
+    ['cp -s f a/g', '', 'cp: a/g: can make relative symbolic links only in current directory\n', 1],
+    [
+      'ln -s t lnk; printf T > t; cp --remove-destination f lnk; test ! -L lnk && cat t lnk',
+      'Tabc',
+      '',
+      0,
+    ],
+    ["printf zz > g; cp --attributes-only f g; cat g; stat -c '%s' g", 'zz2\n', '', 0],
+    ["cp --attributes-only f h; stat -c '%s %a' h", '0 640\n', '', 0],
+    ['printf zz > g; cp --attributes-only -b f g; cat g~; echo; cat g', 'zz\n', '', 0],
+    ['cp -l f h; cat h', 'abc', '', 0],
+    ['ln -s f l; cp --remove-destination f l; test ! -L l && cat l', 'abc', '', 0],
+    ['ln -s f l; cp -b f l; echo rc=$?; test -L l~ && cat l', 'rc=0\nabc', '', 0],
+  ])('%s', async (line, out, err, code) => {
+    const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const result = await ws.shell(SETUP + line)
+      expect(stdoutStr(result)).toBe(out)
+      expect(stderrStr(result)).toBe(err)
+      expect(result.exitCode).toBe(code)
+    } finally {
+      await ws.close()
+    }
+  })
+
+  it('cp -p keeps the mode and times', async () => {
+    const ws = new Workspace({ '/d': new RAMVFS() }, { mode: MountMode.WRITE })
+    try {
+      const result = await ws.shell(SETUP + "cp -p f g; stat -c '%a %Y' f g")
+      const [source, copy] = stdoutStr(result).split('\n')
+      expect(copy).toBe(source)
+      expect(source?.startsWith('640 ')).toBe(true)
+    } finally {
+      await ws.close()
+    }
+  })
+})

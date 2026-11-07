@@ -37,6 +37,7 @@ from mirage.commands.builtin.utils.tree import tree_walk
 from mirage.commands.config import Context
 from mirage.commands.spec import SPECS
 from mirage.commands.spec.flag_view import FlagView
+from mirage.context import session_umask
 from mirage.core.generic.find import walk_find
 from mirage.errors.fs import enotsup
 from mirage.io.types import ByteSource, IOResult
@@ -171,6 +172,9 @@ async def cp(
         ),
         stdin=ctx.stdin,
         dispatch=dispatch_of(ctx),
+        umask=session_umask(
+            ctx.session.access() if ctx.session is not None else None
+        ),
     )
 
 

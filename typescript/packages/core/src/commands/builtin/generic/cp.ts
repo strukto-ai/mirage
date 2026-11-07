@@ -12,7 +12,7 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-import { closeQuietly, primeStream } from '../../../io/stream.ts'
+import { asyncChain, closeQuietly, primeStream } from '../../../io/stream.ts'
 
 import { respelled } from '../../../utils/key_prefix.ts'
 import { AsyncLineIterator } from '../../../io/async_line_iterator.ts'
@@ -77,10 +77,25 @@ import { CycleError, parent, resolvePath } from '../../../utils/path.ts'
 import { shellQuoteAlways } from '../../../utils/quote.ts'
 import type { FsCondition, WalkDeclinedError } from '../../../errors/types.ts'
 import { classify } from '../../../errors/classify.ts'
+import { sessionUmask } from '../../../context/session_context.ts'
 
 const ENC = new TextEncoder()
 
 const UPDATE_MODES = ['all', 'none', 'none-fail', 'older'] as const
+// What --preserve and --no-preserve name, in the order cp lists them.
+const PRESERVE_ATTRS = [
+  'mode',
+  'timestamps',
+  'ownership',
+  'links',
+  'context',
+  'xattr',
+  'all',
+] as const
+// What -p and a bare --preserve keep; -a keeps every one.
+const DEFAULT_KEEP: ReadonlySet<string> = new Set(['mode', 'ownership', 'timestamps'])
+const ALL_KEEP: ReadonlySet<string> = new Set(PRESERVE_ATTRS.filter((word) => word !== 'all'))
+const NO_SELINUX = 'cp: cannot preserve security context without an SELinux-enabled kernel'
 const SPECIAL_FILE_NOUNS: ReadonlyMap<FileType, string> = new Map([
   [FileType.FIFO, 'fifo'],
   [FileType.CHAR_DEVICE, 'special file'],
@@ -88,6 +103,15 @@ const SPECIAL_FILE_NOUNS: ReadonlyMap<FileType, string> = new Map([
   [FileType.SOCKET, 'special file'],
 ])
 
+/**
+ * The cp flag bag, parsed once. From `preserve` on: the attributes -p, -a,
+ * --preserve and --no-preserve keep, in the order typed; --parents, each
+ * source landing under the destination at the name it was typed as; `link`,
+ * `hard` for -l and `symbolic` for -s; --remove-destination, a file at the
+ * destination removed before the copy, a link standing there replaced rather
+ * than written through; --attributes-only, no bytes moving; and -f, which
+ * under -s replaces a file at the destination with the link.
+ */
 export interface CpFlags {
   recursive: boolean
   noClobber: boolean
@@ -99,6 +123,12 @@ export interface CpFlags {
   targetDir: PathSpec | null
   noTargetDir: boolean
   dereference: CopyDeref
+  preserve: ReadonlySet<string>
+  parents: boolean
+  link: 'hard' | 'symbolic' | null
+  removeDestination: boolean
+  attributesOnly: boolean
+  force: boolean
 }
 
 /**
@@ -141,6 +171,12 @@ export function cpFlags(init: Partial<CpFlags> = {}): CpFlags {
     targetDir: init.targetDir ?? null,
     noTargetDir: init.noTargetDir ?? false,
     dereference: init.dereference ?? 'always',
+    preserve: init.preserve ?? new Set(),
+    parents: init.parents ?? false,
+    link: init.link ?? null,
+    removeDestination: init.removeDestination ?? false,
+    attributesOnly: init.attributesOnly ?? false,
+    force: init.force ?? false,
   }
 }
 
@@ -162,6 +198,313 @@ export interface TransferPolicy {
  * in the C locale); the end of input is no. A yes is recorded in `accepted`,
  * since it is no failure. Mirrors Python's prompter.
  */
+/**
+ * What -p, -a and --preserve carry from a source to its copy, set through the
+ * dispatcher from the source's stat. A file's attributes are set once its copy
+ * is made. A directory's wait for the end of the line and go the deepest
+ * first, so the copies made into it do not move its times again, set on the
+ * way out of the directory. A field the source does not report is
+ * left as the copy has it, and one the destination refuses is left too.
+ * Mirrors Python's `Keeper`.
+ */
+export class Keeper {
+  // Each directory made and its source, in the order made.
+  readonly dirs: [PathSpec, PathSpec][] = []
+
+  // `keep`: mode, ownership, timestamps and xattr, those asked for; `stat`,
+  // the sources' stat; `dispatch`, which sets the attributes.
+  constructor(
+    readonly keep: ReadonlySet<string>,
+    readonly stat: StatFn,
+    readonly dispatch: DispatchFn,
+  ) {}
+
+  /** Set a copy's kept attributes from its source. */
+  async copied(src: PathSpec, dst: PathSpec): Promise<void> {
+    try {
+      const info = await this.stat(src)
+      const fields: Record<string, unknown> = {}
+      if (this.keep.has('mode') && info.mode !== null) fields.mode = info.mode & 0o7777
+      if (this.keep.has('ownership')) {
+        fields.uid = info.uid
+        fields.gid = info.gid
+      }
+      if (this.keep.has('timestamps')) {
+        fields.mtime = info.modified
+        fields.atime = info.atime
+      }
+      const kept = Object.fromEntries(
+        Object.entries(fields).filter(([, value]) => value !== null && value !== undefined),
+      )
+      if (Object.keys(kept).length > 0) await this.dispatch('setattr', dst, [], kept)
+      if (this.keep.has('xattr')) {
+        const [names] = (await this.dispatch('listxattr', src)) as [string[], unknown]
+        for (const name of names) {
+          const [value] = (await this.dispatch('getxattr', src, [], { name })) as [
+            Uint8Array,
+            unknown,
+          ]
+          await this.dispatch('setxattr', dst, [], { name, value })
+        }
+      }
+    } catch (err) {
+      if (!isFsError(err)) throw err
+    }
+  }
+
+  /** Set the directories' attributes, the deepest first. */
+  async finish(): Promise<void> {
+    for (const [src, dst] of [...this.dirs].reverse()) await this.copied(src, dst)
+  }
+}
+
+// No bytes, for a copy --attributes-only makes without reading.
+function nothing(_path: PathSpec): AsyncIterable<Uint8Array> {
+  return asyncChain([])
+}
+
+// Make an empty file where none stands, and say whether it did; one that
+// stands keeps its bytes, as --attributes-only leaves them. Mirrors Python's
+// `_made_empty`.
+async function madeEmpty(stat: StatFn, dispatch: DispatchFn, dst: PathSpec): Promise<boolean> {
+  if (await pathExists(stat, dst)) return false
+  await dispatch('write', dst, [new Uint8Array()])
+  return true
+}
+
+// A copy under --attributes-only: a file it makes takes the source's mode
+// under the umask, as any new copy does, set only where that differs from a
+// new file's own. Mirrors Python's `_empty_copy`.
+async function emptyCopy(
+  stat: StatFn,
+  dispatch: DispatchFn,
+  umask: number,
+  src: PathSpec,
+  dst: PathSpec,
+): Promise<void> {
+  if (!(await madeEmpty(stat, dispatch, dst))) return
+  const info = await stat(src)
+  if (info.mode === null) return
+  const mode = info.mode & 0o777 & ~umask
+  if (mode !== (0o666 & ~umask)) await dispatch('setattr', dst, [], { mode })
+}
+
+// A primitive write under --attributes-only.
+async function emptyWrite(stat: StatFn, dispatch: DispatchFn, dst: PathSpec): Promise<void> {
+  await madeEmpty(stat, dispatch, dst)
+}
+
+/**
+ * The copy --attributes-only makes: no bytes are read or moved, a destination
+ * file that is not there is made empty with the mode a new copy gets, and
+ * directories are made as any copy makes them. A primitive copy makes each
+ * file through its store-to-store `copy`, which goes first, so its read and
+ * write stay empty. Mirrors Python's `attributes_only`.
+ */
+export function attributesOnly(
+  strategy: CopyStrategy,
+  stat: StatFn,
+  dispatch: DispatchFn,
+  umask: number,
+): CopyStrategy {
+  const copy = (src: PathSpec, dst: PathSpec): Promise<void> =>
+    emptyCopy(stat, dispatch, umask, src, dst)
+  if (isPrimitiveCopy(strategy)) {
+    return {
+      read: nothing,
+      write: (dst: PathSpec) => emptyWrite(stat, dispatch, dst),
+      mkdir: strategy.mkdir,
+      readdir: strategy.readdir,
+      copy,
+    }
+  }
+  return {
+    copy,
+    find: strategy.find,
+    ...(strategy.mkdir === undefined ? {} : { mkdir: strategy.mkdir }),
+  }
+}
+
+/**
+ * --parents: each source lands under the destination at the name it was typed
+ * as, `cp --parents a/b/f d` at `d/a/b/f`. Mirrors Python's
+ * `parented_targets`.
+ */
+export function parentedTargets(sources: PathSpec[], dst: PathSpec): [PathSpec, PathSpec][] {
+  return sources.map((src) => [
+    src,
+    respelled(
+      PathSpec.fromStrPath(resolvePath(`${rstripSlash(dst.virtual)}/${src.rawPath}`, '/')),
+      `${rstripSlash(dst.rawPath)}/${src.rawPath}`,
+    ),
+  ])
+}
+
+/**
+ * Make the directories --parents puts a source under, each named as the
+ * source was typed; false when one could not be made. A backend without
+ * `mkdir` has its directories implied; `keeper` notes each one made, whose
+ * attributes -p takes from the source's own. Mirrors Python's `made_parents`.
+ */
+export async function madeParents(
+  strategy: CopyStrategy,
+  stat: StatFn,
+  src: PathSpec,
+  dst: PathSpec,
+  errors: string[],
+  lines: string[] | undefined,
+  keeper: Keeper | null,
+): Promise<boolean> {
+  const words = src.rawPath.split('/').slice(0, -1)
+  for (let depth = 1; depth <= words.length; depth++) {
+    const typed = words.slice(0, depth).join('/')
+    if (typed.replace(/[/.]/g, '') === '') continue
+    const named = `${rstripSlash(dst.rawPath)}/${typed}`
+    const made = respelled(
+      PathSpec.fromStrPath(resolvePath(`${rstripSlash(dst.virtual)}/${typed}`, '/')),
+      named,
+    )
+    const { exists, isDir } = await entryKind(stat, made)
+    if (isDir || strategy.mkdir === undefined) continue
+    try {
+      if (exists) throw Object.assign(new Error('File exists'), { code: 'EEXIST' })
+      await strategy.mkdir(made)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      errors.push(`cp: cannot make directory '${named}': ${String(fsStrerror(err))}`)
+      return false
+    }
+    lines?.push(`${typed} -> ${named}`)
+    keeper?.dirs.push([
+      respelled(PathSpec.fromStrPath(resolvePath(typed, src.directory)), typed),
+      made,
+    ])
+  }
+  return true
+}
+
+/**
+ * The refusal of -s with a relative source, which it can only link from the
+ * working directory. Mirrors Python's `relative_link_error`.
+ */
+export function relativeLinkError(src: PathSpec, target: PathSpec): string | null {
+  if (src.rawPath.startsWith('/')) return null
+  const cut = target.rawPath.lastIndexOf('/')
+  const folder = cut === -1 ? '' : target.rawPath.slice(0, cut)
+  if (folder === '' || folder === '.') return null
+  return `cp: ${target.rawPath}: can make relative symbolic links only in current directory`
+}
+
+/**
+ * -s: link a source rather than copy it, the link reading the source as
+ * typed. A file at the destination stays, with `File exists`, unless -f or
+ * --remove-destination replaces it. Mirrors Python's `symlinked`.
+ */
+export async function symlinked(
+  dispatch: DispatchFn,
+  stat: StatFn,
+  src: PathSpec,
+  target: PathSpec,
+  flags: CpFlags,
+  errors: string[],
+  lines: string[] | undefined,
+): Promise<void> {
+  const refusal = relativeLinkError(src, target)
+  if (refusal !== null) {
+    errors.push(refusal)
+    return
+  }
+  try {
+    if (await pathExists(stat, target)) {
+      if (!(flags.force || flags.removeDestination)) {
+        throw Object.assign(new Error('File exists'), { code: 'EEXIST' })
+      }
+      await dispatch('unlink', target)
+    }
+    await dispatch('symlink', target, [], { target: src.rawPath })
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    errors.push(
+      `cp: cannot create symbolic link '${target.rawPath}' to '${src.rawPath}': ${String(fsStrerror(err))}`,
+    )
+    return
+  }
+  lines?.push(transferLine(src, target, null))
+}
+
+/**
+ * -s -r: make a source tree's directories and link each file in it, each entry
+ * spelled under the source as typed, so a relative source is refused file by
+ * file, as a single file is. Mirrors Python's `symlinked_tree`.
+ */
+export async function symlinkedTree(
+  dispatch: DispatchFn,
+  stat: StatFn,
+  readdir: ReaddirFn,
+  src: PathSpec,
+  target: PathSpec,
+  flags: CpFlags,
+  errors: string[],
+  lines: string[] | undefined,
+): Promise<void> {
+  const stack: [PathSpec, PathSpec][] = [[src, target]]
+  for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    const [here, there] = next
+    let names: string[]
+    try {
+      if (!(await pathExists(stat, there))) {
+        await dispatch('mkdir', there)
+        lines?.push(transferLine(here, there, null))
+      }
+      names = [...(await readdir(here))].sort(compareCodePoints)
+    } catch (err) {
+      if (!isFsError(err)) throw err
+      errors.push(`cp: cannot create directory '${there.rawPath}': ${String(fsStrerror(err))}`)
+      continue
+    }
+    for (const name of [...names].reverse()) {
+      const entry = spelledFrom(PathSpec.fromStrPath(name), here)
+      const leaf = rstripSlash(name).split('/').at(-1) ?? ''
+      const landing = respelled(
+        PathSpec.fromStrPath(`${rstripSlash(there.virtual)}/${leaf}`),
+        `${rstripSlash(there.rawPath)}/${leaf}`,
+      )
+      const { kind } = await sourceKind(stat, entry)
+      if (kind === FileType.DIRECTORY) stack.push([entry, landing])
+      else await symlinked(dispatch, stat, entry, landing, flags, errors, lines)
+    }
+  }
+}
+
+// Unlink one path through the dispatcher, a link itself.
+async function unlinked(dispatch: DispatchFn, path: PathSpec): Promise<void> {
+  await dispatch('unlink', path)
+}
+
+/**
+ * --remove-destination: remove a file at the destination before the copy, a
+ * link standing there itself rather than what it leads to; false when it
+ * could not be removed. Mirrors Python's `removed_first`.
+ */
+export async function removedFirst(
+  unlink: (path: PathSpec) => Promise<void>,
+  stat: StatFn,
+  dst: PathSpec,
+  errors: string[],
+  lines: string[] | undefined,
+): Promise<boolean> {
+  if (!(await pathExists(stat, dst))) return true
+  try {
+    await unlink(dst)
+  } catch (err) {
+    if (!isFsError(err)) throw err
+    errors.push(`cp: cannot remove '${dst.rawPath}': ${String(fsStrerror(err))}`)
+    return false
+  }
+  lines?.push(`removed '${dst.rawPath}'`)
+  return true
+}
+
 export function prompter(
   cmdName: string,
   stdin: ByteSource | null,
@@ -250,7 +593,56 @@ export function targetFlags(cmdName: string, fl: FlagView): [PathSpec | null, bo
 // no-ops (non-interactive control plane: overwrite always proceeds unless
 // -n/--update say otherwise), and --strip-trailing-slashes is a no-op
 // because PathSpec already normalizes trailing slashes.
+// The attributes one --preserve or --no-preserve value names, comma-separated,
+// each word or a prefix of one; and whether it names `context` itself, which
+// `all` does not. Mirrors Python's `_attr_words`.
+function attrWords(option: string, text: string): [Set<string>, boolean] {
+  const named = new Set<string>()
+  let context = false
+  for (const word of text.split(',')) {
+    const match = matchWord(word, PRESERVE_ATTRS)
+    if (!match.matched) throw wordRefusalError('cp', option, word, PRESERVE_ATTRS, 1, match.kind)
+    if (match.word === 'all') for (const kept of ALL_KEEP) named.add(kept)
+    else {
+      named.add(match.word)
+      context ||= match.word === 'context'
+    }
+  }
+  return [named, context]
+}
+
+/**
+ * What -p, -a, --preserve and --no-preserve keep, read in the order typed, a
+ * later one adding to or taking from what the earlier ones kept. A security
+ * context named outright is refused, as it is without SELinux, unless
+ * a later option drops it; one -a or `all` keeps is left out quietly. Hard
+ * links (`links`) have nothing to keep here. Mirrors Python's `preserved`.
+ */
+export function preserved(fl: FlagView): ReadonlySet<string> {
+  const kept = new Set<string>()
+  let required = false
+  for (const [name, value] of fl.occurrences('p', 'archive', 'preserve', 'no_preserve')) {
+    if (value === false) continue
+    if (name === 'archive') for (const word of ALL_KEEP) kept.add(word)
+    else if (name === 'p' || value === true) for (const word of DEFAULT_KEEP) kept.add(word)
+    else if (name === 'preserve') {
+      const [named, context] = attrWords('--preserve', String(value))
+      for (const word of named) kept.add(word)
+      required ||= context
+    } else {
+      const [named] = attrWords('--no-preserve', String(value))
+      for (const word of named) kept.delete(word)
+      required &&= !named.has('context')
+    }
+  }
+  if (required) throw new UsageError(NO_SELINUX, 1)
+  return kept
+}
+
 export function parseFlags(fl: FlagView): CpFlags {
+  if (fl.asBool('link') && fl.asBool('symbolic_link')) {
+    throw new UsageError(`cp: cannot make both hard and symbolic links\n${usageHint('cp')}`, 1)
+  }
   const update = updateMode('cp', fl)
   const suffix = suffixFlag(fl)
   const control = backupControl('cp', backupRaw(fl), suffix)
@@ -281,6 +673,12 @@ export function parseFlags(fl: FlagView): CpFlags {
     targetDir,
     noTargetDir,
     dereference,
+    preserve: preserved(fl),
+    parents: fl.asBool('parents'),
+    link: fl.asBool('symbolic_link') ? 'symbolic' : fl.asBool('link') ? 'hard' : null,
+    removeDestination: fl.asBool('remove_destination'),
+    attributesOnly: fl.asBool('attributes_only'),
+    force: fl.asBool('force'),
   })
 }
 
@@ -1086,6 +1484,8 @@ async function mirrorDirs(
   // Collects the source directories the walk may not open, which are still
   // made at the destination; absent lets the refusal propagate.
   unreadable?: string[],
+  // Notes each directory made, whose attributes -p sets at the end.
+  keeper: Keeper | null = null,
 ): Promise<{ blocked: string[]; made: Set<string> | null }> {
   if (strategy.mkdir === undefined) return { blocked: [], made: null }
   // A destination inside the source leaves its own subtree out, as the
@@ -1118,6 +1518,7 @@ async function mirrorDirs(
       ) {
         await strategy.mkdir(entryDst)
         made.add(dstMount)
+        keeper?.dirs.push([entry, entryDst])
         if (lines !== undefined) lines.push(`'${entry.rawPath}' -> '${entryDst.rawPath}'`)
         continue
       }
@@ -1211,6 +1612,13 @@ export async function copyEntries(
     copies?: TransferLinks | undefined
     rootBackup?: PathSpec | null
     blocked?: string[]
+    // Sets each copy's kept attributes.
+    keeper?: Keeper | null
+    // Under --remove-destination, what removes a file standing at an entry's
+    // destination first.
+    removeFirst?: ((path: PathSpec) => Promise<void>) | null
+    // Under --attributes-only, what moves a destination aside for its backup.
+    aside?: NativeMove | null
   } = {},
 ): Promise<boolean> {
   const srcBase = rstripSlash(src.virtual)
@@ -1247,6 +1655,7 @@ export async function copyEntries(
         if (free) {
           await strategy.mkdir(entryDstSpec)
           made.add(entryDstSpec.virtual)
+          opts.keeper?.dirs.push([entrySpec, entryDstSpec])
           opts.lines?.push(
             cmdName === 'mv'
               ? `created directory '${entryDstSpec.rawPath}'`
@@ -1312,7 +1721,7 @@ export async function copyEntries(
     if (opts.policy !== undefined) {
       const made = await makeBackup(
         opts.policy,
-        strategy,
+        opts.aside ?? strategy,
         stat,
         strategy.readdir,
         entryDstSpec,
@@ -1325,10 +1734,18 @@ export async function copyEntries(
       }
       backup = made.backup
     }
+    const removeFirst = opts.removeFirst ?? null
+    if (
+      removeFirst !== null &&
+      !(await removedFirst(removeFirst, stat, entryDstSpec, errors, opts.lines))
+    ) {
+      copiedAll = false
+      continue
+    }
     opts.lines?.push(transferLine(entrySpec, entryDstSpec, backup, cmdName))
     if (!(await transferFile(strategy, entrySpec, entryDstSpec, cmdName, errors))) {
       copiedAll = false
-    }
+    } else await opts.keeper?.copied(entrySpec, entryDstSpec)
   }
   return copiedAll
 }
@@ -1428,6 +1845,9 @@ export async function cpGeneric(
   // The command's dispatcher, which lets a source's mount refuse a tree
   // copied file by file; undefined outside a workspace.
   dispatch?: DispatchFn,
+  // The session's creation mask, which a file --attributes-only makes is
+  // under; the live sessions' when undefined.
+  umask?: number,
 ): Promise<[ByteSource | null, IOResult]> {
   const keyOf = backendKey ?? backendKeyDefault
   const [sources, dst] = splitOperands('cp', paths, flags.targetDir, flags.noTargetDir)
@@ -1451,10 +1871,41 @@ export async function cpGeneric(
     dstIsDir = probe.isDir
     dstErr = probe.condition
   }
+  if (flags.parents && !dstIsDir) {
+    return [
+      null,
+      new IOResult({
+        stderr: ENC.encode(
+          `cp: with --parents, the destination must be a directory\n${usageHint('cp')}\n`,
+        ),
+        exitCode: 1,
+      }),
+    ]
+  }
   let versionReaddir = readdir
   if (versionReaddir === undefined && isPrimitiveCopy(strategy)) {
     versionReaddir = strategy.readdir
   }
+  const kept = new Set(
+    [...flags.preserve].filter((word) =>
+      ['mode', 'ownership', 'timestamps', 'xattr'].includes(word),
+    ),
+  )
+  const keeper = kept.size > 0 && dispatch !== undefined ? new Keeper(kept, stat, dispatch) : null
+  if (flags.attributesOnly && dispatch !== undefined) {
+    strategy = attributesOnly(strategy, stat, dispatch, umask ?? sessionUmask())
+  }
+  // A backup under --attributes-only renames the destination aside, so the
+  // copy then makes a new empty file: copying it would go
+  // through the strategy, which moves no bytes.
+  const aside: NativeMove | null =
+    flags.attributesOnly && copies !== undefined
+      ? { rename: (a: PathSpec, b: PathSpec) => renameLink(copies, a, b) }
+      : null
+  const unlink =
+    flags.removeDestination && dispatch !== undefined
+      ? (path: PathSpec) => unlinked(dispatch, path)
+      : null
   const errors: string[] = []
   const accepted: string[] = []
   const policy: TransferPolicy = {
@@ -1469,7 +1920,9 @@ export async function cpGeneric(
     flags.noClobber ||
     flags.interactive ||
     updateGates(flags.update) ||
-    backupDisplaces(flags.backup)
+    backupDisplaces(flags.backup) ||
+    keeper !== null ||
+    unlink !== null
   const lines: string[] = []
   let warned = 0
   // Where each source's first copy went, by source and by link name.
@@ -1481,7 +1934,10 @@ export async function cpGeneric(
     updateGates(flags.update) ||
     flags.backup === 'numbered'
   )
-  for (const [src, dest] of copyTargets(sources, dst, dstIsDir, dstExists, dstErr, '.')) {
+  const pairs = flags.parents
+    ? parentedTargets(sources, dst)
+    : copyTargets(sources, dst, dstIsDir, dstExists, dstErr, '.')
+  for (const [src, dest] of pairs) {
     let target = dest
     const link =
       copies !== undefined && flags.dereference === 'never'
@@ -1531,6 +1987,21 @@ export async function cpGeneric(
       continue
     }
     const srcIsDir = srcKind === FileType.DIRECTORY
+    if (
+      flags.parents &&
+      (flags.recursive || !srcIsDir) &&
+      !(await madeParents(
+        strategy,
+        stat,
+        src,
+        dst,
+        errors,
+        flags.verbose ? lines : undefined,
+        keeper,
+      ))
+    ) {
+      continue
+    }
     if (flags.noTargetDir && !srcIsDir && target.walkError !== null && target.rawPath === '') {
       // Under -T, GNU stats an empty destination as the directory it is
       // typed in, which a file cannot overwrite (coreutils 9.7). A
@@ -1540,9 +2011,31 @@ export async function cpGeneric(
       errors.push(typeMismatchError('cp', src, target, false))
       continue
     }
-    if (keyOf(src) === keyOf(target)) {
-      errors.push(sameFileError('cp', src, target))
+    if (
+      keyOf(src) === keyOf(target) &&
+      !(
+        copies !== undefined &&
+        (backupDisplaces(flags.backup) || unlink !== null) &&
+        linkName(copies, target) !== null
+      )
+    ) {
+      // A file is already its own hard link (coreutils 9.7: `cp -l f f` says
+      // nothing). A link to the source standing at the name is no such file
+      // where a backup moves it aside or --remove-destination removes it: the
+      // copy then lands there.
+      if (flags.link !== 'hard' || srcIsDir) errors.push(sameFileError('cp', src, target))
       continue
+    }
+    if (flags.link === 'symbolic' && dispatch !== undefined) {
+      const sink = flags.verbose ? lines : undefined
+      if (srcIsDir && flags.recursive && versionReaddir !== undefined) {
+        await symlinkedTree(dispatch, stat, versionReaddir, src, target, flags, errors, sink)
+        continue
+      }
+      if (!srcIsDir) {
+        await symlinked(dispatch, stat, src, target, flags, errors, sink)
+        continue
+      }
     }
     // GNU copies a directory into its own subtree too: everything but the
     // new copy itself, before it says it could not (cp -r d d).
@@ -1647,6 +2140,9 @@ export async function cpGeneric(
           lines: flags.verbose ? lines : undefined,
           copies,
           blocked: leftOut,
+          keeper,
+          removeFirst: unlink,
+          aside,
         })
         if (copies !== undefined) {
           await copyTreeLinks(
@@ -1723,6 +2219,7 @@ export async function cpGeneric(
         intoItself,
         flags.verbose ? lines : undefined,
         unreadable,
+        keeper,
       )
       const files = await strategy.find(src, { type: 'f', unreadable })
       for (const root of new Set(unreadable)) {
@@ -1747,7 +2244,7 @@ export async function cpGeneric(
         }
         const made = await makeBackup(
           policy,
-          strategy,
+          aside ?? strategy,
           stat,
           versionReaddir,
           entryDst,
@@ -1755,6 +2252,12 @@ export async function cpGeneric(
           copies,
         )
         if (!made.ok) continue
+        if (
+          unlink !== null &&
+          !(await removedFirst(unlink, stat, entryDst, errors, flags.verbose ? lines : undefined))
+        ) {
+          continue
+        }
         if (flags.verbose) lines.push(transferLine(entry, entryDst, made.backup))
         try {
           await copyEntry(strategy, copies, entry, entryDst)
@@ -1763,6 +2266,7 @@ export async function cpGeneric(
           errors.push(copyFailed('cp', entry, entryDst, err))
           continue
         }
+        await keeper?.copied(entry, entryDst)
       }
       if (copies !== undefined) {
         await copyTreeLinks(
@@ -1798,8 +2302,10 @@ export async function cpGeneric(
       continue
     }
     let copier: CopyStrategy = strategy
-    let mover: CopyStrategy | NativeMove = strategy
-    if (copies !== undefined && policy.backup !== null) {
+    let mover: CopyStrategy | NativeMove = aside ?? strategy
+    // A backup moves, and --remove-destination removes, a link standing at the
+    // name rather than what it leads to.
+    if (copies !== undefined && (policy.backup !== null || unlink !== null)) {
       const linked = linkName(copies, target)
       if (linked !== null) {
         target = linked
@@ -1809,6 +2315,12 @@ export async function cpGeneric(
     }
     const made = await makeBackup(policy, mover, stat, versionReaddir, target, errors, copies)
     if (!made.ok) continue
+    if (
+      unlink !== null &&
+      !(await removedFirst(unlink, stat, target, errors, flags.verbose ? lines : undefined))
+    ) {
+      continue
+    }
     if (flags.verbose) lines.push(transferLine(src, target, made.backup))
     if (isPrimitiveCopy(copier)) {
       if (!(await transferFile(copier, src, target, 'cp', errors))) continue
@@ -1821,8 +2333,10 @@ export async function cpGeneric(
         continue
       }
     }
+    await keeper?.copied(src, target)
     created.add(keyOf(target))
   }
+  await keeper?.finish()
   const output: ByteSource | null = lines.length > 0 ? ENC.encode(lines.join('\n') + '\n') : null
   return [
     output,

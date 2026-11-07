@@ -954,3 +954,136 @@ async def test_a_refused_probe_reads_as_permission_denied(why):
             None,
             FsCondition.EACCES,
         )
+
+
+@pytest.mark.parametrize(
+    "argv,keep",
+    [
+        (["-p"], {"mode", "ownership", "timestamps"}),
+        (["--preserve"], {"mode", "ownership", "timestamps"}),
+        (["--preserve=mode,time"], {"mode", "timestamps"}),
+        (["-p", "--no-preserve=mode"], {"ownership", "timestamps"}),
+        (["--no-preserve=mode", "-p"], {"mode", "ownership", "timestamps"}),
+        (["--preserve=context", "--no-preserve=context"], set()),
+    ],
+)
+def test_preserve_options_read_in_the_order_typed(argv, keep):
+    assert _cp_flags(*argv).preserve == frozenset(keep)
+
+
+@pytest.mark.parametrize(
+    "argv,message",
+    [
+        (
+            ["--preserve=context"],
+            "cp: cannot preserve security context without an SELinux-enabled"
+            " kernel",
+        ),
+        (["-l", "-s"], "cp: cannot make both hard and symbolic links\n"),
+    ],
+)
+def test_options_cp_cannot_honour_are_refused(argv, message):
+    # Pinned on debian:stable-slim, which has no SELinux.
+    with pytest.raises(UsageError) as exc:
+        _cp_flags(*argv)
+    assert str(exc.value).startswith(message)
+    assert exc.value.exit_code == 1
+
+
+_CP_SETUP = (
+    "cd /d && printf abc > f && chmod 640 f && touch -d '2020-01-02 03:04:05'"
+    " f && mkdir -p a/b dest && printf x > a/b/f; "
+)
+
+
+# Each line pinned on debian:stable-slim (coreutils 9.7). Mirrored in
+# cp.test.ts.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["ram", "disk"])
+@pytest.mark.parametrize(
+    "line,out,err,code",
+    [
+        (
+            "cp --parents a/b/f dest; find dest | sort",
+            "dest\ndest/a\ndest/a/b\ndest/a/b/f\n",
+            "",
+            0,
+        ),
+        (
+            "cp --parents a/b/f g",
+            "",
+            "cp: with --parents, the destination must be a directory\n"
+            "Try 'cp --help' for more information.\n",
+            1,
+        ),
+        ("cp -s f g; readlink g", "f\n", "", 0),
+        (
+            "cp -s f a/g",
+            "",
+            "cp: a/g: can make relative symbolic links only in current"
+            " directory\n",
+            1,
+        ),
+        (
+            "ln -s t lnk; printf T > t; cp --remove-destination f lnk;"
+            " test ! -L lnk && cat t lnk",
+            "Tabc",
+            "",
+            0,
+        ),
+        (
+            "printf zz > g; cp --attributes-only f g; cat g; stat -c '%s' g",
+            "zz2\n",
+            "",
+            0,
+        ),
+        ("cp --attributes-only f h; stat -c '%s %a' h", "0 640\n", "", 0),
+        (
+            "printf zz > g; cp --attributes-only -b f g; cat g~; echo; cat g",
+            "zz\n",
+            "",
+            0,
+        ),
+        ("cp -l f h; cat h", "abc", "", 0),
+        (
+            "ln -s f l; cp --remove-destination f l; test ! -L l && cat l",
+            "abc",
+            "",
+            0,
+        ),
+        (
+            "ln -s f l; cp -b f l; echo rc=$?; test -L l~ && cat l",
+            "rc=0\nabc",
+            "",
+            0,
+        ),
+    ],
+)
+async def test_cp_link_parent_and_attribute_options(
+    tmp_path, backend, line, out, err, code
+):
+    vfs = RAMVFS() if backend == "ram" else DiskVFS(root=str(tmp_path))
+    ws = Workspace({"/d": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    try:
+        result = await ws.shell(_CP_SETUP + line)
+        assert (await result.materialize_stdout()).decode() == out
+        assert (await result.materialize_stderr()).decode() == err
+        assert result.exit_code == code
+    finally:
+        await ws.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["ram", "disk"])
+async def test_cp_p_keeps_the_mode_and_times(tmp_path, backend):
+    vfs = RAMVFS() if backend == "ram" else DiskVFS(root=str(tmp_path))
+    ws = Workspace({"/d": (vfs, MountMode.WRITE)}, mode=MountMode.WRITE)
+    try:
+        result = await ws.shell(_CP_SETUP + "cp -p f g; stat -c '%a %Y' f g")
+        source, copy = (
+            (await result.materialize_stdout()).decode().split("\n")[:2]
+        )
+        assert source == copy
+        assert source.startswith("640 ")
+    finally:
+        await ws.close()
