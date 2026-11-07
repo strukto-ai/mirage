@@ -157,18 +157,15 @@ async def _seen(line: str, reach: str = "remote") -> tuple[Process, str]:
 
 
 # A program a runtime runs past the workspace is a process of its own on
-# the runtime's machine: the line's when it is the line's one command,
-# a pipeline stage's when it is the stage's, a job's when it is the job's,
-# or the shell's when ``exec`` replaces it, as bash execs it there; a
-# child of its shell otherwise, and of ``find``, which forks each one.
+# the runtime's machine: a pipeline stage's when it is the stage's, a
+# job's when it is the job's, including one ``exec`` replaces, as bash
+# execs it there; a child of its shell otherwise, the session's shell
+# staying across its lines, and of ``find``, which forks each one.
 @pytest.mark.asyncio
 async def test_a_program_past_the_workspace_is_a_process_of_its_own():
-    alone, _ = await _seen("probe")
-    assert (alone.parent, alone.command) == (None, "probe")
+    alone, line = await _seen("probe; echo $$")
+    assert (alone.parent, alone.command) == (int(line), "probe")
     assert (alone.machine, alone.runtime) == (MachineId("box", "b1"), "seen")
-    child, line = await _seen("echo $$; probe")
-    assert (child.parent, child.command) == (int(line), "probe")
-    assert (child.machine, child.runtime) == (MachineId("box", "b1"), "seen")
     stage, line = await _seen("echo $$; probe | cat")
     assert (stage.parent, stage.command, stage.runtime) == (
         int(line),
@@ -177,8 +174,8 @@ async def test_a_program_past_the_workspace_is_a_process_of_its_own():
     )
     job, pid = await _seen("probe & echo $!; wait")
     assert (job.pid, job.runtime) == (int(pid), "seen")
-    replaced, _ = await _seen("exec probe")
-    assert (replaced.parent, replaced.runtime) == (None, "seen")
+    replaced, pid = await _seen("exec probe & echo $!; wait")
+    assert (replaced.pid, replaced.runtime) == (int(pid), "seen")
     forked, pid = await _seen(
         "find /data -maxdepth 0 -exec probe {} \\; & echo $!; wait"
     )

@@ -77,7 +77,7 @@ from mirage.workspace.dispatcher.dispatcher import Dispatcher
 from mirage.workspace.evaluation import EvaluationContext, child_context
 from mirage.workspace.executor.builtins.alias import expanding_aliases
 from mirage.workspace.executor.control import UNWINDING, ended
-from mirage.workspace.executor.jobs import one_program, start_shell
+from mirage.workspace.executor.jobs import start_shell
 from mirage.workspace.executor.statement import (
     StatusSnapshot,
     record_status,
@@ -1035,24 +1035,6 @@ async def run_prepared_line(
                 job_table=job_table,
             )
             line_runtime = whole_line_runtime(decision.bindings)
-            shell = current_caller().process
-            if (
-                top_level
-                and shell is not None
-                and shell.record.line == line_handle.id
-            ):
-                # A line a runtime runs whole, or one program makes up,
-                # is the line's process itself, as bash -c execs its one
-                # command.
-                statements = [
-                    child
-                    for child in ast.named_children
-                    if child.type != NT.COMMENT
-                ]
-                shell.one_command = line_runtime is not None or (
-                    len(statements) == 1
-                    and one_program(statements[0], effective_session)
-                )
             if line_runtime is not None:
                 # A whole line is a command like any other: the same
                 # visibility and admission gate as the tree, per parsed

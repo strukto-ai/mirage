@@ -113,7 +113,7 @@ import { type StatusWriter, ExecutionNode } from '../types.ts'
 import { newStatusWriter } from '../abort.ts'
 import { failureResult, isControlFlowError, placementRefused } from './failure.ts'
 import { ended, isUnwinding } from '../executor/control.ts'
-import { oneProgram, startShell } from '../executor/jobs.ts'
+import { startShell } from '../executor/jobs.ts'
 import { finishShell, inheritTraps } from '../executor/traps.ts'
 import { expandingAliases } from '../executor/builtins/alias/index.ts'
 import type { ResolvedSource } from '../../secrets/types.ts'
@@ -1105,21 +1105,6 @@ async function runParsedLine(
   // both admission passes below can put one.
   const killed = mergeSignals(deps.signal, context.frame.abortSignal)
   const lineRuntime = wholeLineRuntime(decision.bindings)
-  const shell = currentCaller().process
-  if (
-    topLevel &&
-    shell != null &&
-    options.lineHandle !== undefined &&
-    shell.record.line?.value === options.lineHandle.id.value
-  ) {
-    // A line a runtime runs whole, or one program makes up, is the line's
-    // process itself, as bash -c execs its one command.
-    const statements = rootNode.namedChildren.filter((child) => child.type !== NT.COMMENT)
-    const [only] = statements
-    shell.oneCommand =
-      lineRuntime !== null ||
-      (statements.length === 1 && only !== undefined && oneProgram(only, effectiveSession))
-  }
   // Filled only after the applicable line-tier admission (a refused
   // line must never reach a secret store) and before expansion or the
   // runtime's env snapshot reads the vars. The prejudge pass leaves
