@@ -19,11 +19,11 @@ sys.path[:] = [p for p in sys.path if p not in (_INTEG_DIR, "")]
 
 import asyncio  # noqa: E402
 import os  # noqa: E402
-import re  # noqa: E402
 import uuid  # noqa: E402
 
 from mirage import MountMode, Workspace  # noqa: E402
-from mirage.execution.job import JobStatus  # noqa: E402
+from mirage.execution.errors import WorkspaceHeldError  # noqa: E402
+from mirage.execution.process.config import ProcessPermissions  # noqa: E402
 from mirage.vfs.ram import RAMVFS  # noqa: E402
 from mirage.vfs.s3.config import S3Config  # noqa: E402
 from mirage.workspace.mount.namespace.store import NamespaceStore  # noqa: E402
@@ -38,13 +38,6 @@ S3_BUCKET = os.environ.get("STORE_S3_BUCKET", "mirage-state")
 WORKSPACE_ID = "xstore"
 MARKER = "xstore-history-marker"
 JOBS_WORKSPACE_ID = "xjobs"
-# Enough sleeps that the peer's own PIDs share numbers with the owner's
-# jobs, which a bare PID must not reach.
-SLEEP_COUNT = 16
-SLEEPS = (
-    f"for i in {' '.join(str(n) for n in range(SLEEP_COUNT))}; "
-    "do sleep 30 & done"
-)
 JOBS_SESSION = "s"
 
 
@@ -313,178 +306,80 @@ async def until(probe) -> bool:
     return False
 
 
-async def jobs_own(prefix: str) -> None:
-    """Run the jobs the other language's peer lists, kills and waits on.
-
-    Stays up until the peer has reaped each job, since a job dies with
-    its owner."""
+async def lease_own(prefix: str) -> None:
+    """Hold the workspace while the other language's peer finds the job it
+    runs in the store, is refused a line, and stops the job by its pid;
+    then give the workspace up for the peer to run."""
     ws, store = make_jobs_workspace(prefix)
-    plane = store.jobs(JOBS_WORKSPACE_ID)
-
-    async def reaped() -> bool:
-        listed = await plane.load(JOBS_SESSION)
-        return listed is not None and not listed["jobs"]
-
     result = await ws.shell("sleep 30 &", session_id=JOBS_SESSION)
     check("py own: sleep started", result.exit_code == 0)
     job = ws.job_table.get(1, JOBS_SESSION)
     check("py own: the job is listed here", job is not None)
     if job is not None and job.process is not None:
-        joined = asyncio.ensure_future(job.process.join())
-        await asyncio.wait({joined}, timeout=20)
+        try:
+            async with asyncio.timeout(20):
+                await job.process.join()
+        except TimeoutError:
+            pass
     check(
-        "py own: the peer's kill stopped the runner by TERM",
-        job is not None
-        and (job.status, job.exit_code) == (JobStatus.KILLED, 143),
-        f"got {(job.status, job.exit_code) if job is not None else None!r}",
+        "py own: the peer's stop ended the job by TERM",
+        job is not None and (job.exit_code, job.signal) == (143, 15),
+        f"got {job.exit_code if job else None} {job.signal if job else None}",
     )
-    check("py own: the peer's wait reaped it", await until(reaped))
-    result = await ws.shell("false &", session_id=JOBS_SESSION)
-    check("py own: false started", result.exit_code == 0)
-    check("py own: the peer's wait reaped false", await until(reaped))
-    result = await ws.shell(SLEEPS, session_id=JOBS_SESSION)
-    check("py own: the sleeps started", result.exit_code == 0)
-    check("py own: the peer's kill and wait reaped them", await until(reaped))
-    await plane.clear()
     await ws.close()
     await store.close()
 
 
-async def jobs_peer(prefix: str) -> None:
-    """List, kill and wait on jobs the other language's owner runs."""
+async def lease_peer(prefix: str) -> None:
+    """Find the job the other language's owner runs through the store, be
+    refused a line while the owner holds the workspace, stop the job by
+    its pid, and run the workspace once the owner gave it up, numbering
+    pids past the owner's."""
     ws, store = make_jobs_workspace(prefix)
-    plane = store.jobs(JOBS_WORKSPACE_ID)
+    found: list[int] = []
 
     async def listed() -> bool:
-        found = await plane.load(JOBS_SESSION)
-        return found is not None and "1" in found["jobs"]
+        remote = await ws.job_table.remote_processes()
+        found[:] = [
+            int(pid)
+            for records in remote.values()
+            for pid, record in records.items()
+            if record.get("command") == "sleep 30"
+        ]
+        return len(found) == 1
 
     check("py peer: the owner's job is listed", await until(listed))
-    result = await ws.shell("jobs", session_id=JOBS_SESSION)
-    check(
-        "py peer: jobs shows it running",
-        result.stdout == b"[1] running sleep 30\n",
-        f"got {result.stdout!r}",
-    )
-    result = await ws.shell("kill %1", session_id=JOBS_SESSION)
-    check("py peer: kill %1", result.exit_code == 0, f"got {result.stderr!r}")
-    result = await ws.shell("wait %1; echo $?", session_id=JOBS_SESSION)
-    check(
-        "py peer: wait answers TERM's status",
-        result.stdout == b"143\n",
-        f"got {result.stdout!r}",
-    )
-    check("py peer: the owner's false is listed", await until(listed))
-    result = await ws.shell("wait %1; echo $?", session_id=JOBS_SESSION)
-    check(
-        "py peer: wait answers false's status",
-        result.stdout == b"1\n",
-        f"got {result.stdout!r}",
-    )
-
-    async def sleeping() -> bool:
-        found = await plane.load(JOBS_SESSION)
-        return found is not None and len(found["jobs"]) == SLEEP_COUNT
-
-    check("py peer: the owner's sleeps are listed", await until(sleeping))
-    result = await ws.shell('sleep 30 & kill "$!"', session_id=JOBS_SESSION)
-    check("py peer: kill $!", result.exit_code == 0, f"got {result.stderr!r}")
-    result = await ws.shell("jobs", session_id=JOBS_SESSION)
-    check(
-        "py peer: kill $! left every one of the owner's sleeps running",
-        result.stdout.count(b"running") == SLEEP_COUNT,
-        f"got {result.stdout!r}",
-    )
+    pid = found[0] if found else 0
+    refused: WorkspaceHeldError | None = None
     try:
-        result = await asyncio.wait_for(
-            ws.shell('false & wait "$!"; echo $?', session_id=JOBS_SESSION),
-            10,
-        )
-        waited = result.stdout
-    except TimeoutError:
-        waited = b"timed out"
+        await ws.shell("true", session_id=JOBS_SESSION)
+    except WorkspaceHeldError as exc:
+        refused = exc
     check(
-        "py peer: wait $! waits for its own job",
-        waited == b"1\n",
-        f"got {waited!r}",
+        "py peer: a line is refused, naming the owner",
+        refused is not None and refused.holder != ws.job_table.daemon,
+        repr(refused),
     )
-    specs = " ".join(f"%{n}" for n in range(1, SLEEP_COUNT + 1))
-    result = await ws.shell(f"kill {specs}; wait", session_id=JOBS_SESSION)
+    stopped = await ws.job_table.signal_remote(
+        pid, 15, JOBS_SESSION, lambda: ProcessPermissions()
+    )
+    check("py peer: the stop reached the owner's job", stopped)
+    ran: list[str] = []
+
+    async def runs() -> bool:
+        try:
+            result = await ws.shell(
+                "sleep 0 & echo $!; wait", session_id=JOBS_SESSION
+            )
+        except WorkspaceHeldError:
+            return False
+        ran.append(await result.stdout_str())
+        return True
+
+    check("py peer: the workspace runs here once given up", await until(runs))
+    after = int(ran[0].strip() or 0) if ran else 0
     check(
-        "py peer: kill and wait the owner's sleeps",
-        result.exit_code == 0,
-        f"got {result.stderr!r}",
-    )
-    await ws.close()
-    await store.close()
-
-
-PROCESS_ROW = re.compile(r"^([0-9a-f]{6}:[0-9]+)\tsleep 30$", re.MULTILINE)
-
-
-async def processes_own(prefix: str) -> None:
-    """Run a job the other language's peer finds in ps by its owner:pid,
-    kills by that name and waits on.
-
-    Stays up until the peer has reaped it, since a process dies with its
-    owner."""
-    ws, store = make_jobs_workspace(prefix)
-    plane = store.jobs(JOBS_WORKSPACE_ID)
-
-    async def reaped() -> bool:
-        listed = await plane.load(JOBS_SESSION)
-        return listed is not None and not listed["jobs"]
-
-    result = await ws.shell("sleep 30 &", session_id=JOBS_SESSION)
-    check("py own: sleep started", result.exit_code == 0)
-    job = ws.job_table.get(1, JOBS_SESSION)
-    if job is not None and job.process is not None:
-        joined = asyncio.ensure_future(job.process.join())
-        await asyncio.wait({joined}, timeout=20)
-    check(
-        "py own: the peer's kill owner:pid stopped it by TERM",
-        job is not None
-        and (job.status, job.exit_code) == (JobStatus.KILLED, 143),
-        f"got {(job.status, job.exit_code) if job is not None else None!r}",
-    )
-    check("py own: the peer's wait reaped it", await until(reaped))
-    await plane.clear()
-    await ws.close()
-    await store.close()
-
-
-async def processes_peer(prefix: str) -> None:
-    """Find the other language's process in ps, kill it by owner:pid and
-    wait on its job."""
-    ws, store = make_jobs_workspace(prefix)
-    names: list[str] = []
-
-    async def listed() -> bool:
-        result = await ws.shell("ps", session_id=JOBS_SESSION)
-        names[:] = PROCESS_ROW.findall(result.stdout.decode())
-        return len(names) == 1
-
-    check("py peer: ps lists the owner's process", await until(listed))
-    name = names[0] if names else "none:0"
-    result = await ws.shell(
-        f"ps -p {name} -o pid=,comm=", session_id=JOBS_SESSION
-    )
-    check(
-        "py peer: ps -p selects it with its ids tagged",
-        result.stdout.decode().split() == [name, "sleep"],
-        f"got {result.stdout!r}",
-    )
-    result = await ws.shell(f"kill {name}", session_id=JOBS_SESSION)
-    check(
-        f"py peer: kill {name}",
-        result.exit_code == 0,
-        f"got {result.stderr!r}",
-    )
-    result = await ws.shell("wait %1; echo $?", session_id=JOBS_SESSION)
-    check(
-        "py peer: wait answers TERM's status",
-        result.stdout == b"143\n",
-        f"got {result.stdout!r}",
+        "py peer: its pids continue past the owner's", after > pid, repr(ran)
     )
     await ws.close()
     await store.close()
@@ -501,14 +396,10 @@ async def main() -> None:
         await hammer(prefix, int(sys.argv[3]))
     elif role == "cas-verify":
         await cas_verify(prefix, int(sys.argv[3]))
-    elif role == "jobs-own":
-        await jobs_own(prefix)
-    elif role == "jobs-peer":
-        await jobs_peer(prefix)
-    elif role == "processes-own":
-        await processes_own(prefix)
-    elif role == "processes-peer":
-        await processes_peer(prefix)
+    elif role == "lease-own":
+        await lease_own(prefix)
+    elif role == "lease-peer":
+        await lease_peer(prefix)
     else:
         raise SystemExit(f"unknown role: {role!r}")
     if fail:

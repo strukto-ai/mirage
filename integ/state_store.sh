@@ -52,38 +52,20 @@ run_concurrent() {
   (cd "$HERE" && pnpm exec tsx state_store.ts cas-verify "$prefix" "$rounds") || fail=1
 }
 
-run_jobs() {
+run_lease() {
   local backend="$1" owner_name="$2" peer_name="$3"
-  local prefix="mirage-integ-xstore-${RUN_ID}-${backend}-jobs-${owner_name}:"
+  local prefix="mirage-integ-xstore-${RUN_ID}-${backend}-lease-${owner_name}:"
   local owner_pid
   echo
-  echo "===== [$backend] $owner_name job owner -> $peer_name lists, kills, waits ====="
+  echo "===== [$backend] $owner_name holds the workspace -> $peer_name lists, stops, takes it over ====="
   if [ "$owner_name" == "py" ]; then
-    "$PY" "$HERE/state_store.py" jobs-own "$prefix" &
+    "$PY" "$HERE/state_store.py" lease-own "$prefix" &
     owner_pid=$!
-    (cd "$HERE" && pnpm exec tsx state_store.ts jobs-peer "$prefix") || fail=1
+    (cd "$HERE" && pnpm exec tsx state_store.ts lease-peer "$prefix") || fail=1
   else
-    (cd "$HERE" && pnpm exec tsx state_store.ts jobs-own "$prefix") &
+    (cd "$HERE" && pnpm exec tsx state_store.ts lease-own "$prefix") &
     owner_pid=$!
-    "$PY" "$HERE/state_store.py" jobs-peer "$prefix" || fail=1
-  fi
-  wait "$owner_pid" || fail=1
-}
-
-run_processes() {
-  local backend="$1" owner_name="$2" peer_name="$3"
-  local prefix="mirage-integ-xstore-${RUN_ID}-${backend}-processes-${owner_name}:"
-  local owner_pid
-  echo
-  echo "===== [$backend] $owner_name process owner -> $peer_name lists and kills by owner:pid ====="
-  if [ "$owner_name" == "py" ]; then
-    "$PY" "$HERE/state_store.py" processes-own "$prefix" &
-    owner_pid=$!
-    (cd "$HERE" && pnpm exec tsx state_store.ts processes-peer "$prefix") || fail=1
-  else
-    (cd "$HERE" && pnpm exec tsx state_store.ts processes-own "$prefix") &
-    owner_pid=$!
-    "$PY" "$HERE/state_store.py" processes-peer "$prefix" || fail=1
+    "$PY" "$HERE/state_store.py" lease-peer "$prefix" || fail=1
   fi
   wait "$owner_pid" || fail=1
 }
@@ -94,10 +76,8 @@ run_battery() {
   run_direction "$backend" "py" "ts"
   run_direction "$backend" "ts" "py"
   run_concurrent "$backend"
-  run_jobs "$backend" "py" "ts"
-  run_jobs "$backend" "ts" "py"
-  run_processes "$backend" "py" "ts"
-  run_processes "$backend" "ts" "py"
+  run_lease "$backend" "py" "ts"
+  run_lease "$backend" "ts" "py"
 }
 
 run_battery "redis"
