@@ -574,8 +574,9 @@ fn a_unique_merge_keeps_the_first_of_a_key_equal_series() {
     assert_eq!(merged(&typed, &[&["b"], &["B"]]), ["b"]);
 }
 
-/// What `-R` under `salt` makes of `list`, with the other `options`.
-fn shuffled(options: &Options, salt: &[u8], list: &[&str]) -> Vec<String> {
+/// What `-R` makes of `list` when the host draws `drawn`, with the other
+/// `options`.
+fn shuffled(options: &Options, drawn: &[u8], list: &[&str]) -> Vec<String> {
     let mut typed = options.to_vec();
     typed.push(("random_sort", ""));
     let mut config: Json = serde_json::from_str(&engine(
@@ -583,7 +584,7 @@ fn shuffled(options: &Options, salt: &[u8], list: &[&str]) -> Vec<String> {
         json!({"mode": "sort", "run_bytes": 8 << 20}),
     ))
     .expect("json");
-    config["compare"]["salt"] = json!(salt);
+    config["compare"]["salt"] = json!(drawn);
     split(&run("sort", &config.to_string(), &[&records(list)]).0)
 }
 

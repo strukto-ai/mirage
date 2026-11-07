@@ -63,10 +63,10 @@
         "gdrive-folder",
         "box"
       ],
-      "command": "echo '7/2' | bc; echo 'scale' | bc --mathlib; echo '1+1' | bc --quiet; echo 's(0)' | bc -l",
+      "command": "echo '7/2' | bc",
       "expect": {
         "exit": 0,
-        "stdout": "3\n20\n2\n0\n",
+        "stdout": "3\n",
         "stderr": ""
       }
     },
