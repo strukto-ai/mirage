@@ -14,8 +14,16 @@
 
 import pytest
 
+from mirage.execution.constants import LOCAL_MACHINE
+from mirage.execution.process.types import Process
+from mirage.execution.types import ProcessId
+from mirage.types import PathSpec
 from mirage.workspace.session.session import SessionState, vars_from_env
-from mirage.workspace.workspace.utils import command_name, fork_for_call
+from mirage.workspace.workspace.utils import (
+    command_name,
+    fork_for_call,
+    process_tree,
+)
 
 
 @pytest.mark.parametrize(
@@ -73,3 +81,32 @@ def test_env_override_layers_on_top_of_the_session_env():
         "OPTIND": "1",
         "OPTERR": "1",
     }
+
+
+def _process(pid: int, parent: int | None) -> Process:
+    return Process(
+        id=ProcessId("w", pid),
+        session_id="s1",
+        line=None,
+        parent=parent,
+        group=1,
+        command="sh",
+        cwd=PathSpec.from_str_path("/"),
+        machine=LOCAL_MACHINE,
+        started_at=0.0,
+    )
+
+
+# A process's tree is it and every process under it, however deep, and
+# none of its siblings or its parent.
+def test_a_process_tree_holds_every_process_under_it():
+    records = [
+        _process(1, None),
+        _process(2, 1),
+        _process(3, 2),
+        _process(4, 1),
+        _process(5, 3),
+    ]
+    assert process_tree(records, 2) == {2, 3, 5}
+    assert process_tree(records, 4) == {4}
+    assert process_tree(records, 9) == {9}

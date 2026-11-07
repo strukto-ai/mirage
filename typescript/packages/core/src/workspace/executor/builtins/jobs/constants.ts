@@ -12,4 +12,4 @@
 // limitations under the License.
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-export const JOBS_FLAGS: ReadonlySet<string> = new Set('lnprs')
+export const FLAGS: ReadonlySet<string> = new Set('lnprs')

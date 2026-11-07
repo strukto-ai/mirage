@@ -849,6 +849,20 @@ class HttpSteps:
             for a in await self._ok("GET", f"/v1/workspaces/{wid}/asks")
         ]
 
+    async def records(
+        self, wid: str, kind: str, state: str | None
+    ) -> list[dict[str, Any]]:
+        """A record list, each record as its own route answers it."""
+        params = {"state": state} if state is not None else {}
+        listed = await self._ok(
+            "GET", f"/v1/workspaces/{wid}/{kind}", params=params
+        )
+        key = "pid" if kind == "processes" else "id"
+        return [
+            await self._ok("GET", f"/v1/workspaces/{wid}/{kind}/{r[key]}")
+            for r in listed
+        ]
+
     async def explain(
         self, wid: str, session: str, command: str
     ) -> tuple[str, int]:
@@ -1077,6 +1091,14 @@ class CliSteps:
             for a in await self._json("workspace", "list-asks", wid)
         ]
 
+    async def records(
+        self, wid: str, kind: str, state: str | None
+    ) -> list[dict[str, Any]]:
+        args = ["workspace", f"list-{kind}", wid]
+        if state is not None:
+            args += ["--state", state]
+        return await self._json(*args)
+
     async def explain(
         self, wid: str, session: str, command: str
     ) -> tuple[str, int]:
@@ -1108,6 +1130,20 @@ def _headings(markdown: str) -> str:
 
 def _prefix(path: str) -> str:
     return path.rstrip("/") or "/"
+
+
+def record_row(kind: str, record: dict[str, Any]) -> str:
+    """One line, job or process as a ``records`` step prints it.
+
+    Args:
+        kind (str): ``lines``, ``jobs`` or ``processes``.
+        record (dict[str, Any]): the record's fields.
+    """
+    if kind == "jobs":
+        return f"%{record['number']} {record['command']} {record['state']}"
+    if kind == "processes":
+        return f"{record['command']} {record['state']}"
+    return f"{record['command']} {record['state']} {record['exit']}"
 
 
 class InAppSteps:
@@ -1231,6 +1267,30 @@ class InAppSteps:
     async def asks(self, wid: str) -> list[tuple[str, str]]:
         return [
             (d.id, d.reason) for d in self.workspaces[wid].decisions.pending()
+        ]
+
+    async def records(
+        self, wid: str, kind: str, state: str | None
+    ) -> list[dict[str, Any]]:
+        ws = self.workspaces[wid]
+        listed = {
+            "lines": ws.lines,
+            "jobs": ws.jobs,
+            "processes": ws.processes,
+        }
+        found = [
+            r
+            for r in listed[kind]()
+            if state is None or r.state.value == state
+        ]
+        return [
+            {
+                "number": getattr(r, "number", None),
+                "command": r.command,
+                "state": r.state.value,
+                "exit": r.exit,
+            }
+            for r in found
         ]
 
     async def explain(
@@ -1374,6 +1434,15 @@ async def run_steps(
                 answer = {
                     "text": "\n".join(
                         reason for _, reason in await steps.asks(wid)
+                    )
+                }
+            elif kind == "records":
+                found = await steps.records(
+                    wid, step["kind"], step.get("state")
+                )
+                answer = {
+                    "text": "\n".join(
+                        record_row(step["kind"], r) for r in found
                     )
                 }
             elif kind == "history":

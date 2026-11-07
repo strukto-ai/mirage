@@ -21,8 +21,9 @@ export type JobState = 'running' | 'stopping' | 'exited'
  * `cmd &` started, numbered `%N` in its session's list.
  *
  * A job a `kill` reached is `stopping` until its runner stops. `line` is
- * the line that started it and `group` the process group its process runs
- * in, null for a job restored from a snapshot. `endedAt` is set exactly when
+ * the line that started it, `group` the process group its process runs in
+ * and `pid` that process's, null for a job restored from a snapshot; `pid`
+ * is null too for a job another daemon runs. `endedAt` is set exactly when
  * `state` is final, with `exit` the status `wait` answers and `signal` the
  * signal a kill or a hangup ended it with, if one did.
  */
@@ -35,6 +36,7 @@ export interface Job {
   readonly startedAt: number
   readonly line: LineId | null
   readonly group: number | null
+  readonly pid: number | null
   readonly state: JobState
   readonly endedAt: number | null
   readonly exit: number | null

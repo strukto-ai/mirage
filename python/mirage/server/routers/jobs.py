@@ -16,7 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from mirage.execution.job import Job, JobState
-from mirage.execution.types import JobId
+from mirage.execution.types import JobId, LineId
 from mirage.server.routers.vfs import require_entry
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/jobs")
@@ -30,11 +30,16 @@ class JobResponse(BaseModel):
     cwd: str
     line_id: str | None
     group: int | None
+    pid: int | None
     state: str
     started_at: float
     ended_at: float | None
     exit: int | None
     signal: int | None
+
+
+class JobDetailResponse(JobResponse):
+    processes: list[int]
 
 
 def _to_response(record: Job) -> JobResponse:
@@ -46,6 +51,7 @@ def _to_response(record: Job) -> JobResponse:
         cwd=record.cwd,
         line_id=str(record.line) if record.line is not None else None,
         group=record.group,
+        pid=record.pid,
         state=record.state.value,
         started_at=record.started_at,
         ended_at=record.ended_at,
@@ -60,20 +66,41 @@ async def list_jobs(
     request: Request,
     session_id: str | None = None,
     state: JobState | None = None,
+    line_id: str | None = None,
 ) -> list[JobResponse]:
     """The jobs the workspace's sessions list, as ``jobs`` does, a
-    session's or those in a state when named."""
-    ws = require_entry(request, workspace_id).runner.ws
-    return [_to_response(r) for r in ws.jobs(session_id or None, state)]
+    session's, those in a state or those a line started when named.
+    Read on the workspace's own loop."""
+    runner = require_entry(request, workspace_id).runner
+    line = LineId(line_id) if line_id else None
+
+    async def read() -> list[JobResponse]:
+        records = runner.ws.jobs(session_id or None, state, line)
+        return [_to_response(r) for r in records]
+
+    return await runner.call(read())
 
 
-@router.get("/{job_id}", response_model=JobResponse)
+@router.get("/{job_id}", response_model=JobDetailResponse)
 async def get_job(
     workspace_id: str, job_id: str, request: Request
-) -> JobResponse:
-    """One job, named by the id its listing gives."""
-    ws = require_entry(request, workspace_id).runner.ws
-    record = ws.job(JobId(ws.workspace_id, job_id))
-    if record is None:
+) -> JobDetailResponse:
+    """One job, named by the id its listing gives, with the pids of the
+    processes it ran that the workspace still keeps: its own and every
+    one under it. Read on the workspace's own loop."""
+    runner = require_entry(request, workspace_id).runner
+
+    async def read() -> JobDetailResponse | None:
+        ws = runner.ws
+        record = ws.job(JobId(ws.workspace_id, job_id))
+        if record is None:
+            return None
+        return JobDetailResponse(
+            **_to_response(record).model_dump(),
+            processes=[p.pid for p in ws.processes(job_id=record.id)],
+        )
+
+    detail = await runner.call(read())
+    if detail is None:
         raise HTTPException(status_code=404, detail="job not found")
-    return _to_response(record)
+    return detail

@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Job, JobState } from '@struktoai/mirage-core/execution/job/types'
-import { JobId } from '@struktoai/mirage-core/execution/types'
+import { JobId, LineId } from '@struktoai/mirage-core/execution/types'
 import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 
@@ -29,6 +29,7 @@ interface WsJobParams {
 interface ListJobsQuery {
   session_id?: string
   state?: string
+  line_id?: string
 }
 
 interface JobResponse {
@@ -39,11 +40,16 @@ interface JobResponse {
   cwd: string
   line_id: string | null
   group: number | null
+  pid: number | null
   state: string
   started_at: number
   ended_at: number | null
   exit: number | null
   signal: number | null
+}
+
+interface JobDetailResponse extends JobResponse {
+  processes: number[]
 }
 
 const STATES: readonly JobState[] = ['running', 'stopping', 'exited']
@@ -57,6 +63,7 @@ function toResponse(record: Job): JobResponse {
     cwd: record.cwd,
     line_id: record.line?.value ?? null,
     group: record.group,
+    pid: record.pid,
     state: record.state,
     started_at: record.startedAt,
     ended_at: record.endedAt,
@@ -75,12 +82,12 @@ export function registerJobsRoutes(
     '/v1/workspaces/:wsId/jobs',
     (req, reply) => {
       // The jobs the workspace's sessions list, as `jobs` does, a
-      // session's or those in a state when named.
+      // session's, those in a state or those a line started when named.
       const { wsId } = req.params
       if (deps.registry.visible(wsId, req.account) === null) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
-      const { session_id: sessionId, state } = req.query
+      const { session_id: sessionId, state, line_id: lineId } = req.query
       if (state !== undefined && !(STATES as readonly string[]).includes(state)) {
         return reply.status(422).send({ detail: `state must be one of ${STATES.join(', ')}` })
       }
@@ -89,13 +96,16 @@ export function registerJobsRoutes(
         .jobs({
           ...(sessionId !== undefined && sessionId !== '' ? { sessionId } : {}),
           ...(state !== undefined ? { state: state as JobState } : {}),
+          ...(lineId !== undefined && lineId !== '' ? { lineId: new LineId(lineId) } : {}),
         })
         .map(toResponse)
     },
   )
 
   app.get<{ Params: WsJobParams }>('/v1/workspaces/:wsId/jobs/:jobId', (req, reply) => {
-    // One job, named by the id its listing gives.
+    // One job, named by the id its listing gives, with the pids of the
+    // processes it ran that the workspace still keeps: its own and every
+    // one under it.
     const { wsId, jobId } = req.params
     if (deps.registry.visible(wsId, req.account) === null) {
       return reply.status(404).send({ detail: 'workspace not found' })
@@ -103,6 +113,10 @@ export function registerJobsRoutes(
     const ws = deps.registry.get(wsId).runner.ws
     const record = ws.job(new JobId(ws.workspaceId, jobId))
     if (record === null) return reply.status(404).send({ detail: 'job not found' })
-    return toResponse(record)
+    const detail: JobDetailResponse = {
+      ...toResponse(record),
+      processes: ws.processes({ jobId: record.id }).map((process) => process.id.pid),
+    }
+    return detail
   })
 }

@@ -16,7 +16,7 @@
 from mirage.execution.process.types import ProcessState
 
 # procps-ng 4.0.4's usage block, printed under every option error.
-PS_USAGE = (
+USAGE = (
     "\nUsage:\n ps [options]\n\n"
     " Try 'ps --help <simple|list|output|threads|misc|all>'\n"
     "  or 'ps --help <s|l|o|t|m|a>'\n"
@@ -28,7 +28,7 @@ PS_USAGE = (
 # procps-ng 4.0.4's -o keys: the header, width and right alignment
 # measured from its ``ps -o`` output, and the fact ``_ps_cell`` renders;
 # accounting a runner lacks prints procps's none.
-PS_COLUMNS: dict[str, tuple[str, int, bool, str]] = {
+COLUMNS: dict[str, tuple[str, int, bool, str]] = {
     "pid": ("PID", 7, True, "pid"),
     "tgid": ("TGID", 7, True, "pid"),
     "lwp": ("LWP", 7, True, "pid"),
@@ -124,7 +124,7 @@ PS_COLUMNS: dict[str, tuple[str, int, bool, str]] = {
 
 # The fixed answers for a runner: what procps prints for a process on no
 # terminal, never scheduled away from the default policy and priority.
-PS_FIXED = {
+FIXED = {
     "tpgid": "-1",
     "tty": "?",
     "time": "00:00:00",
@@ -141,7 +141,7 @@ PS_FIXED = {
 
 # A runner's state letter: live, being cancelled (still unwinding), or
 # exited and not yet reaped.
-PS_STATES = {
+STATES = {
     ProcessState.RUNNING: "R",
     ProcessState.STOPPING: "R",
     ProcessState.EXITED: "Z",
@@ -149,4 +149,4 @@ PS_STATES = {
 
 
 # Letters that select every process: SysV -e/-A/-a/-x, BSD a/x.
-PS_ALL = frozenset("eAax")
+ALL = frozenset("eAax")

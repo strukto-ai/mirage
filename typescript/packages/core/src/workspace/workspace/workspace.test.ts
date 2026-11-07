@@ -506,3 +506,32 @@ it('lists its lines, jobs and processes', async () => {
     await ws.close()
   }
 })
+
+// A line queued behind another of its session is listed as waiting, and
+// ends stopped when it is aborted before it starts.
+it('lists a queued line as waiting until it is aborted', async () => {
+  const ws = new Workspace({ '/data': new RAMVFS() })
+  const stopFirst = new AbortController()
+  const first = ws.shell('sleep 30', { signal: stopFirst.signal }).catch(() => undefined)
+  try {
+    await vi.waitFor(() => {
+      expect(ws.lines({ state: 'running' })).toHaveLength(1)
+    })
+    const stopSecond = new AbortController()
+    const second = ws.shell('echo next', { signal: stopSecond.signal })
+    await vi.waitFor(() => {
+      expect(ws.lines({ state: 'waiting' })).toHaveLength(1)
+    })
+    const [waiting] = ws.lines({ state: 'waiting' })
+    expect(waiting?.command).toBe('echo next')
+    stopSecond.abort()
+    await expect(second).rejects.toThrow()
+    if (waiting === undefined) throw new Error('no line')
+    const ended = ws.line(waiting.id)
+    expect([ended?.state, ended?.signal]).toEqual(['exited', 2])
+  } finally {
+    stopFirst.abort()
+    await first
+    await ws.close()
+  }
+})

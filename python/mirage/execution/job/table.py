@@ -385,6 +385,7 @@ class JobTable:
                         created_at,
                         line,
                         group,
+                        process.record.pid,
                     ),
                     self.daemon,
                 ),

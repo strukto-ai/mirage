@@ -1731,9 +1731,11 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: 'One line, with the ids of the jobs it started and the pids of the
+      description: 'One line, with the ids of the jobs it started, the pids of the
 
-        processes it ran.'
+        processes it ran that the workspace still keeps and the machines
+
+        those ran on.'
       tags:
         - Lines
       x-hosts:
@@ -1759,6 +1761,12 @@ paths:
           description: Only the records in this state.
           schema:
             $ref: '#/components/schemas/JobState'
+        - name: line_id
+          in: query
+          required: false
+          description: Only the jobs this line started.
+          schema:
+            type: string
       responses:
         '200':
           description: OK
@@ -1783,7 +1791,7 @@ paths:
           $ref: '#/components/responses/429'
       description: 'The jobs the workspace''s sessions list, as ``jobs`` does, a
 
-        session''s or those in a state when named.'
+        session''s, those in a state or those a line started when named.'
       tags:
         - Jobs
       x-hosts:
@@ -1809,7 +1817,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/JobResponse'
+                $ref: '#/components/schemas/JobDetailResponse'
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1822,7 +1830,11 @@ paths:
                 $ref: '#/components/schemas/HTTPValidationError'
         '429':
           $ref: '#/components/responses/429'
-      description: One job, named by the id its listing gives.
+      description: 'One job, named by the id its listing gives, with the pids of the
+
+        processes it ran that the workspace still keeps: its own and every
+
+        one under it.'
       tags:
         - Jobs
       x-hosts:
@@ -1854,6 +1866,18 @@ paths:
           description: Only the processes this line ran.
           schema:
             type: string
+        - name: job_id
+          in: query
+          required: false
+          description: Only the processes this job ran, its own and every one under it.
+          schema:
+            type: string
+        - name: machine
+          in: query
+          required: false
+          description: Only the processes run on this machine, written `provider:name`.
+          schema:
+            type: string
       responses:
         '200':
           description: OK
@@ -1864,6 +1888,8 @@ paths:
                 items:
                   $ref: '#/components/schemas/ProcessResponse'
                 title: Response List Processes V1 Workspaces  Workspace Id  Processes Get
+        '400':
+          $ref: '#/components/responses/400'
         '401':
           $ref: '#/components/responses/401'
         '404':
@@ -1878,9 +1904,11 @@ paths:
           $ref: '#/components/responses/429'
       description: 'The processes the workspace keeps, by pid: every live one and the
 
-        newest ended ones, a session''s, those in a state or those a line ran
+        newest ended ones, a session''s, those in a state, those a line ran,
 
-        when named.'
+        those a job ran or those run on a machine (``provider:name``) when
+
+        named.'
       tags:
         - Processes
       x-hosts:
@@ -5200,6 +5228,81 @@ components:
         - scope
         - note
       title: AskResponse
+    JobDetailResponse:
+      properties:
+        command:
+          title: Command
+          type: string
+        cwd:
+          title: Cwd
+          type: string
+        ended_at:
+          anyOf:
+            - type: number
+            - type: 'null'
+          title: Ended At
+        exit:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Exit
+        group:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Group
+        id:
+          title: Id
+          type: string
+        line_id:
+          anyOf:
+            - type: string
+            - type: 'null'
+          title: Line Id
+        number:
+          title: Number
+          type: integer
+        pid:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Pid
+        processes:
+          items:
+            type: integer
+          title: Processes
+          type: array
+        session_id:
+          title: Session Id
+          type: string
+        signal:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Signal
+        started_at:
+          title: Started At
+          type: number
+        state:
+          title: State
+          type: string
+      required:
+        - id
+        - number
+        - session_id
+        - command
+        - cwd
+        - line_id
+        - group
+        - pid
+        - state
+        - started_at
+        - ended_at
+        - exit
+        - signal
+        - processes
+      title: JobDetailResponse
+      type: object
     JobResponse:
       properties:
         command:
@@ -5234,6 +5337,11 @@ components:
         number:
           title: Number
           type: integer
+        pid:
+          anyOf:
+            - type: integer
+            - type: 'null'
+          title: Pid
         session_id:
           title: Session Id
           type: string
@@ -5256,6 +5364,7 @@ components:
         - cwd
         - line_id
         - group
+        - pid
         - state
         - started_at
         - ended_at
@@ -5298,6 +5407,11 @@ components:
             type: string
           title: Jobs
           type: array
+        machines:
+          items:
+            type: string
+          title: Machines
+          type: array
         processes:
           items:
             type: integer
@@ -5329,6 +5443,7 @@ components:
         - error
         - jobs
         - processes
+        - machines
       title: LineDetailResponse
       type: object
     LineResponse:
@@ -5388,6 +5503,25 @@ components:
         - exited
       title: LineState
       type: string
+    MachinePidResponse:
+      properties:
+        exited:
+          anyOf:
+            - type: number
+            - type: 'null'
+          title: Exited
+        pid:
+          title: Pid
+          type: integer
+        started:
+          title: Started
+          type: number
+      required:
+        - pid
+        - started
+        - exited
+      title: MachinePidResponse
+      type: object
     ProcessResponse:
       properties:
         command:
@@ -5424,9 +5558,8 @@ components:
           type: string
         machine_pid:
           anyOf:
-            - type: integer
+            - $ref: '#/components/schemas/MachinePidResponse'
             - type: 'null'
-          title: Machine Pid
         parent:
           anyOf:
             - type: integer

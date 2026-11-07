@@ -45,12 +45,14 @@ async function get(app: App, url: string): Promise<{ status: number; body: unkno
   return { status: r.statusCode, body: r.json() }
 }
 
-// A job is listed while its session lists it, and found by its id.
+// A job is listed while its session lists it, with the pid `$!` names, and
+// found by its id with the processes it ran.
 it('lists a running job and finds it by id', async () => {
   const app = buildApp()
   try {
     await createWs(app, 'w')
     const result = await shell(app, 'w', 'sleep 30 & echo $!')
+    const pid = Number(result.stdout)
     try {
       const listed = await get(app, '/v1/workspaces/w/jobs?state=running')
       expect(listed.status).toBe(200)
@@ -59,10 +61,20 @@ it('lists a running job and finds it by id', async () => {
         number: number
         command: string
         line_id: string
+        pid: number
       }[]
-      expect([job?.number, job?.command, job?.line_id]).toEqual([1, 'sleep 30', result.line_id])
+      expect([job?.number, job?.command, job?.line_id, job?.pid]).toEqual([
+        1,
+        'sleep 30',
+        result.line_id,
+        pid,
+      ])
       const found = await get(app, `/v1/workspaces/w/jobs/${job?.id ?? ''}`)
-      expect([found.status, found.body]).toEqual([200, job])
+      expect([found.status, found.body]).toEqual([200, { ...job, processes: [pid] }])
+      expect((await get(app, `/v1/workspaces/w/jobs?line_id=${result.line_id}`)).body).toEqual([
+        job,
+      ])
+      expect((await get(app, '/v1/workspaces/w/jobs?line_id=nope')).body).toEqual([])
       expect((await get(app, '/v1/workspaces/w/jobs?session_id=other')).body).toEqual([])
       expect((await get(app, '/v1/workspaces/w/jobs/nope')).status).toBe(404)
     } finally {

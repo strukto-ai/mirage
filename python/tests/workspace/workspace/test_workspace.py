@@ -13,6 +13,7 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import asyncio
+import contextlib
 import inspect
 import io
 import itertools
@@ -34,6 +35,7 @@ from mirage.execution.ram import RAMExecutionStore
 from mirage.execution.types import MachineId
 from mirage.runtime.sandbox import RemoteSandbox
 from mirage.types import MountBackend, MountMode
+from mirage.utils.abort import MirageAbortError
 from mirage.utils.clock import ManualClock
 from mirage.utils.ids import SeededIdSource, SystemIdSource
 from mirage.vfs.gdrive.config import GoogleDriveConfig
@@ -938,4 +940,33 @@ async def test_a_workspace_lists_its_lines_jobs_and_processes():
         assert ended is not None
         assert (ended.state, ended.signal) == (ProcessState.EXITED, 15)
     finally:
+        await ws.close()
+
+
+# A line queued behind another of its session is listed as waiting, and
+# ends stopped when it is cancelled before it starts.
+@pytest.mark.asyncio
+async def test_a_queued_line_is_listed_waiting_until_it_is_cancelled():
+    ws = Workspace({"/data": RAMVFS()})
+    first = asyncio.ensure_future(ws.shell("sleep 30"))
+    try:
+        async with asyncio.timeout(5):
+            while not ws.lines(state=LineState.RUNNING):
+                await asyncio.sleep(0.01)
+        second = asyncio.ensure_future(ws.shell("echo next"))
+        async with asyncio.timeout(5):
+            while not ws.lines(state=LineState.WAITING):
+                await asyncio.sleep(0.01)
+        [waiting] = ws.lines(state=LineState.WAITING)
+        assert waiting.command == "echo next"
+        second.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await second
+        ended = ws.line(waiting.id)
+        assert ended is not None
+        assert (ended.state, ended.signal) == (LineState.EXITED, 2)
+    finally:
+        first.cancel()
+        with contextlib.suppress(asyncio.CancelledError, MirageAbortError):
+            await first
         await ws.close()

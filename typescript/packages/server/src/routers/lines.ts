@@ -46,6 +46,7 @@ interface LineResponse {
 interface LineDetailResponse extends LineResponse {
   jobs: string[]
   processes: number[]
+  machines: string[]
 }
 
 const STATES: readonly LineState[] = ['waiting', 'running', 'stopping', 'exited']
@@ -95,8 +96,8 @@ export function registerLinesRoutes(
   )
 
   app.get<{ Params: WsLineParams }>('/v1/workspaces/:wsId/lines/:lineId', (req, reply) => {
-    // One line, with the ids of the jobs it started and the pids of the
-    // processes it ran.
+    // One line, with the ids of the jobs it started, the pids of the
+    // processes it ran and the machines those ran on.
     const { wsId, lineId } = req.params
     if (deps.registry.visible(wsId, req.account) === null) {
       return reply.status(404).send({ detail: 'workspace not found' })
@@ -104,13 +105,12 @@ export function registerLinesRoutes(
     const ws = deps.registry.get(wsId).runner.ws
     const record = ws.line(new LineId(lineId))
     if (record === null) return reply.status(404).send({ detail: 'line not found' })
+    const processes = ws.processes({ lineId: record.id })
     const detail: LineDetailResponse = {
       ...toResponse(record),
-      jobs: ws
-        .jobs()
-        .filter((job) => job.line?.value === record.id.value)
-        .map((job) => job.id.console),
-      processes: ws.processes({ lineId: record.id }).map((process) => process.id.pid),
+      jobs: ws.jobs({ lineId: record.id }).map((job) => job.id.console),
+      processes: processes.map((process) => process.id.pid),
+      machines: [...new Set(processes.map((process) => process.machine.toString()))],
     }
     return detail
   })

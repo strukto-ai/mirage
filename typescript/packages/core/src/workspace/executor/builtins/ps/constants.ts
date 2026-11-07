@@ -15,7 +15,7 @@
 import type { ProcessState } from '../../../../execution/process/types.ts'
 
 // procps-ng 4.0.4's usage block, printed under every option error.
-export const PS_USAGE =
+export const USAGE =
   '\nUsage:\n ps [options]\n\n' +
   " Try 'ps --help <simple|list|output|threads|misc|all>'\n" +
   "  or 'ps --help <s|l|o|t|m|a>'\n" +
@@ -25,7 +25,7 @@ export const PS_USAGE =
 // procps-ng 4.0.4's -o keys: the header, width and right alignment measured
 // from its `ps -o` output, and the fact `psCell` renders; accounting a runner
 // lacks prints procps's none.
-export const PS_COLUMNS: Readonly<Record<string, readonly [string, number, boolean, string]>> = {
+export const COLUMNS: Readonly<Record<string, readonly [string, number, boolean, string]>> = {
   pid: ['PID', 7, true, 'pid'],
   tgid: ['TGID', 7, true, 'pid'],
   lwp: ['LWP', 7, true, 'pid'],
@@ -120,7 +120,7 @@ export const PS_COLUMNS: Readonly<Record<string, readonly [string, number, boole
 
 // The fixed answers for a runner: what procps prints for a process on no
 // terminal, never scheduled away from the default policy and priority.
-export const PS_FIXED: Readonly<Record<string, string>> = {
+export const FIXED: Readonly<Record<string, string>> = {
   tpgid: '-1',
   tty: '?',
   time: '00:00:00',
@@ -136,11 +136,11 @@ export const PS_FIXED: Readonly<Record<string, string>> = {
 
 // A runner's state letter: live, being cancelled (still unwinding), or exited
 // and not yet reaped.
-export const PS_STATES: Readonly<Record<ProcessState, string>> = {
+export const STATES: Readonly<Record<ProcessState, string>> = {
   running: 'R',
   stopping: 'R',
   exited: 'Z',
 }
 
 // Letters that select every process: SysV -e/-A/-a/-x, BSD a/x.
-export const PS_ALL = new Set(['e', 'A', 'a', 'x'])
+export const ALL = new Set(['e', 'A', 'a', 'x'])

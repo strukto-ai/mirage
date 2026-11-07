@@ -247,6 +247,7 @@ def _format_jobs(items: list[dict[str, Any]]) -> str:
         [
             item["id"],
             f"%{item['number']}",
+            "-" if item["pid"] is None else str(item["pid"]),
             item["session_id"],
             item["state"],
             _exit_cell(item),
@@ -255,7 +256,7 @@ def _format_jobs(items: list[dict[str, Any]]) -> str:
         for item in items
     ]
     return format_table(
-        ["ID", "JOB", "SESSION", "STATE", "EXIT", "COMMAND"], rows
+        ["ID", "JOB", "PID", "SESSION", "STATE", "EXIT", "COMMAND"], rows
     )
 
 
@@ -266,6 +267,7 @@ def _format_processes(items: list[dict[str, Any]]) -> str:
         [
             str(item["pid"]),
             str(item["parent"] or 0),
+            item["machine"],
             item["session_id"],
             item["state"],
             _exit_cell(item),
@@ -274,7 +276,8 @@ def _format_processes(items: list[dict[str, Any]]) -> str:
         for item in items
     ]
     return format_table(
-        ["PID", "PPID", "SESSION", "STATE", "EXIT", "COMMAND"], rows
+        ["PID", "PPID", "MACHINE", "SESSION", "STATE", "EXIT", "COMMAND"],
+        rows,
     )
 
 
@@ -690,9 +693,12 @@ def list_jobs_cmd(
     state: str = typer.Option(
         "", "--state", help="Only the jobs in this state."
     ),
+    line: str = typer.Option(
+        "", "--line", help="Only the jobs this line started."
+    ),
 ) -> None:
     """List the workspace's jobs, as each session's jobs shows them."""
-    params = {"session_id": session, "state": state}
+    params = {"session_id": session, "state": state, "line_id": line}
     emit(_list_records(workspace_id, "jobs", params), human=_format_jobs)
 
 
@@ -708,9 +714,23 @@ def list_processes_cmd(
     line: str = typer.Option(
         "", "--line", help="Only the processes this line ran."
     ),
+    job: str = typer.Option(
+        "", "--job", help="Only the processes this job ran."
+    ),
+    machine: str = typer.Option(
+        "",
+        "--machine",
+        help="Only the processes run on this machine (provider:name).",
+    ),
 ) -> None:
     """List the processes the workspace keeps: live and newest ended."""
-    params = {"session_id": session, "state": state, "line_id": line}
+    params = {
+        "session_id": session,
+        "state": state,
+        "line_id": line,
+        "job_id": job,
+        "machine": machine,
+    }
     emit(
         _list_records(workspace_id, "processes", params),
         human=_format_processes,

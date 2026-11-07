@@ -390,6 +390,7 @@ export class JobTable {
             startedAt: createdAt,
             line,
             group,
+            pid: process.record.id.pid,
             state: 'running',
             endedAt: null,
             exit: null,

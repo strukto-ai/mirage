@@ -148,7 +148,11 @@ export class ProcessTable {
         this.history.delete(id)
         this.history.set(id, handle.record)
         this.prune()
-        this.ended?.(handle.record)
+        try {
+          this.ended?.(handle.record)
+        } catch (err) {
+          console.debug('process ended hook failed:', err)
+        }
       },
       (signal) => {
         this.terminateChildren(pid, signal)

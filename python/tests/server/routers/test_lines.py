@@ -61,6 +61,8 @@ async def test_a_line_is_listed_and_found_by_the_id_its_result_names():
             detail = r.json()
             assert len(detail["jobs"]) == 1
             assert pid in detail["processes"]
+            r = await client.get(f"/v1/workspaces/{wid}/processes/{pid}")
+            assert detail["machines"] == [r.json()["machine"]]
             r = await client.get(
                 f"/v1/workspaces/{wid}/lines", params={"state": "running"}
             )

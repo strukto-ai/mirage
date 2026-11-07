@@ -12,8 +12,19 @@
 # limitations under the License.
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
-from mirage.workspace.executor.builtins.ps.ps import handle_ps
+from typing import TYPE_CHECKING
+
+from mirage.utils.loader import lazy_exports
+
+if TYPE_CHECKING:
+    from mirage.workspace.executor.builtins.ps.ps import handle_ps
+
+_EXPORTS: dict[str, tuple[str, ...]] = {
+    "mirage.workspace.executor.builtins.ps.ps": ("handle_ps",),
+}
 
 __all__ = [
     "handle_ps",
 ]
+
+__getattr__ = lazy_exports(__name__, _EXPORTS)

@@ -30,8 +30,10 @@ class Job:
     a ``cmd &`` started, numbered ``%N`` in its session's list.
 
     A job a ``kill`` reached is ``stopping`` until its runner stops.
-    ``line`` is the line that started it and ``group`` the process group
-    its process runs in, None for a job restored from a snapshot.
+    ``line`` is the line that started it, ``group`` the process group
+    its process runs in and ``pid`` that process's, None for a job
+    restored from a snapshot; ``pid`` is None too for a job another
+    daemon runs.
     ``ended_at`` is set exactly when ``state`` is final, with ``exit`` the
     status ``wait`` answers and ``signal`` the signal a kill or a hangup
     ended it with, if one did.
@@ -45,6 +47,7 @@ class Job:
     started_at: float
     line: LineId | None = None
     group: int | None = None
+    pid: int | None = None
     state: JobState = JobState.RUNNING
     ended_at: float | None = None
     exit: int | None = None

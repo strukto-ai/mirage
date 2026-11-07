@@ -66,6 +66,7 @@ from mirage.context.session_context import run_as_process
 from mirage.core.history.constants import HISTFILESIZE
 from mirage.errors.fs import enoent
 from mirage.events.base import EventRuntime
+from mirage.execution.constants import LINE_STOP_SIGNAL
 from mirage.execution.context import new_line_id
 from mirage.execution.job import Job, JobState, JobTable
 from mirage.execution.line.handle import LineHandle
@@ -268,7 +269,7 @@ from mirage.workspace.workspace.mounts import (
 from mirage.workspace.workspace.routing import Router
 from mirage.workspace.workspace.runtimes import Runtimes
 from mirage.workspace.workspace.types import VFSMount
-from mirage.workspace.workspace.utils import fork_for_call
+from mirage.workspace.workspace.utils import fork_for_call, process_tree
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -2606,6 +2607,7 @@ class Workspace:
         self,
         session_id: str | None = None,
         state: JobState | None = None,
+        line_id: LineId | None = None,
     ) -> list[Job]:
         """The jobs the workspace's sessions list, as ``jobs`` does:
         each until its ending is reported.
@@ -2613,16 +2615,19 @@ class Workspace:
         Args:
             session_id (str | None): only this session's jobs.
             state (JobState | None): only the jobs in this state.
+            line_id (LineId | None): only the jobs this line started.
         """
         handles = (
             self.job_table.all_jobs()
             if session_id is None
             else self.job_table.list_jobs(session_id)
         )
+        records = [job.record for job in handles if not job.reported]
         return [
-            job.record
-            for job in handles
-            if state is None or job.record.state == state
+            record
+            for record in records
+            if (state is None or record.state == state)
+            and (line_id is None or record.line == line_id)
         ]
 
     def job(self, job_id: JobId) -> Job | None:
@@ -2638,6 +2643,8 @@ class Workspace:
         session_id: str | None = None,
         state: ProcessState | None = None,
         line_id: LineId | None = None,
+        job_id: JobId | None = None,
+        machine: MachineId | None = None,
     ) -> list[Process]:
         """The processes the workspace keeps, by pid: every live one,
         and the newest ended ones.
@@ -2646,13 +2653,27 @@ class Workspace:
             session_id (str | None): only this session's processes.
             state (ProcessState | None): only the processes in this state.
             line_id (LineId | None): only the processes this line ran.
+            job_id (JobId | None): only the processes this job ran, its
+                own and every one under it, while a session lists it.
+            machine (MachineId | None): only the processes run there.
         """
+        records = self.process_table.records()
+        tree: set[int] | None = None
+        if job_id is not None:
+            job = self.job(job_id)
+            tree = (
+                process_tree(records, job.pid)
+                if job is not None and job.pid is not None
+                else set()
+            )
         return [
             process
-            for process in self.process_table.records()
+            for process in records
             if (session_id is None or process.session_id == session_id)
             and (state is None or process.state == state)
             and (line_id is None or process.line == line_id)
+            and (tree is None or process.pid in tree)
+            and (machine is None or process.machine == machine)
         ]
 
     def process(self, process_id: ProcessId) -> Process | None:
@@ -3084,6 +3105,7 @@ class Workspace:
         self,
         session_id: str | None,
         run: Callable[[], Awaitable[IOResult]],
+        line: LineHandle | None = None,
     ) -> IOResult:
         """Run one line of a session at a time, as one bash process does.
 
@@ -3104,6 +3126,9 @@ class Workspace:
                 None for the default.
             run (Callable[[], Awaitable[IOResult]]):
                 the line, started only once the session is held.
+            line (LineHandle | None): the line's record, listed as
+                waiting from here; ended as stopped, or with the error,
+                should it never start.
         """
         ambient = get_current_session_for(self._session_mgr)
         if ambient is not None and session_id in (None, ambient.session_id):
@@ -3114,13 +3139,25 @@ class Workspace:
         await self.ensure_sessions_loaded()
         if session_id is None:
             session_id = self._session_mgr.default_id
-        async with self._session_mgr.line_lock_for(session_id):
-            # A line queued behind a running one wakes after close may
-            # have started; it runs nothing, like a line that arrived
-            # after.
-            if self._shutting_down:
-                raise RuntimeError("Workspace is closed")
-            return await run()
+        if line is not None:
+            self.line_table.start(line)
+        try:
+            async with self._session_mgr.line_lock_for(session_id):
+                # A line queued behind a running one wakes after close
+                # may have started; it runs nothing, like a line that
+                # arrived after.
+                if self._shutting_down:
+                    raise RuntimeError("Workspace is closed")
+                return await run()
+        except (asyncio.CancelledError, MirageAbortError):
+            if line is not None and line.record.state == LineState.WAITING:
+                line.stop(LINE_STOP_SIGNAL)
+                line.end(128 + LINE_STOP_SIGNAL)
+            raise
+        except Exception as exc:
+            if line is not None and line.record.state == LineState.WAITING:
+                line.end(None, f"{type(exc).__name__}: {exc}")
+            raise
 
     async def _run_beside(
         self,
@@ -3500,7 +3537,9 @@ class Workspace:
                         session_id, cwd, env, run
                     )
                 else:
-                    result = await self._serialize_line(session_id, run)
+                    result = await self._serialize_line(
+                        session_id, run, line_handle
+                    )
                 if sink is not None and isinstance(result, IOResult):
                     await drain_to_sink(sink, result)
                 if source is not None:

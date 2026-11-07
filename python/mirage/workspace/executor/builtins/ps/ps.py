@@ -30,13 +30,7 @@ from mirage.workspace.executor.builtins.jobspec import (
     process_view,
     session_of,
 )
-from mirage.workspace.executor.builtins.ps.constants import (
-    PS_ALL,
-    PS_COLUMNS,
-    PS_FIXED,
-    PS_STATES,
-    PS_USAGE,
-)
+from mirage.workspace.executor.builtins.ps import constants
 from mirage.workspace.executor.builtins.ps.types import PsContext, PsOptions
 from mirage.workspace.session import SessionState
 from mirage.workspace.types import ExecutionNode
@@ -79,11 +73,13 @@ def _ps_columns(value: str, option: str) -> list[tuple[str, str]]:
             raise ValueError("improper format list")
         for token in item.split():
             key, equal, header = token.partition("=")
-            if key not in PS_COLUMNS:
+            if key not in constants.COLUMNS:
                 raise ValueError(
                     f'unknown user-defined format specifier "{key}"'
                 )
-            columns.append((key, header if equal else PS_COLUMNS[key][0]))
+            columns.append(
+                (key, header if equal else constants.COLUMNS[key][0])
+            )
     return columns
 
 
@@ -125,7 +121,7 @@ def _parse_ps(words: list[str]) -> PsOptions:
         letters = word[1:]
         while letters:
             flag, letters = letters[0], letters[1:]
-            if flag in PS_ALL:
+            if flag in constants.ALL:
                 select_all = True
                 continue
             if flag == "f":
@@ -152,7 +148,7 @@ def _ps_row(keys: list[str], cells: list[str]) -> str:
     """
     out: list[str] = []
     for at, (key, cell) in enumerate(zip(keys, cells)):
-        _, width, right, _ = PS_COLUMNS[key]
+        _, width, right, _ = constants.COLUMNS[key]
         if right:
             out.append(cell.rjust(width))
         elif at == len(keys) - 1:
@@ -217,9 +213,9 @@ def _ps_cell(key: str, info: Process, ctx: PsContext) -> str:
         info (Process): the runner.
         ctx (PsContext): the line's shared facts.
     """
-    fact = PS_COLUMNS[key][3]
-    if fact in PS_FIXED:
-        return PS_FIXED[fact]
+    fact = constants.COLUMNS[key][3]
+    if fact in constants.FIXED:
+        return constants.FIXED[fact]
     session = (
         ctx.shell_pid
         if info.session_id == ctx.session_id and ctx.shell_pid is not None
@@ -234,7 +230,7 @@ def _ps_cell(key: str, info: Process, ctx: PsContext) -> str:
     if fact == "sid":
         return str(session)
     if fact in ("stat", "state"):
-        state = PS_STATES[info.state]
+        state = constants.STATES[info.state]
         return state + ("s" if fact == "stat" and info.pid == session else "")
     if fact == "comm":
         head = info.command.split()[0] if info.command.split() else ""
@@ -275,7 +271,7 @@ async def handle_ps(
     A runner has no CPU, RSS or TTY accounting, so without ``-o`` the
     rows stay mirage's compact ``PID<TAB>COMMAND`` and never broaden the
     profile's view. ``-o`` lays out procps-ng 4.0.4's columns, every key
-    a runner can answer (``PS_COLUMNS``); a header row prints unless
+    a runner can answer (``constants.COLUMNS``); a header row prints unless
     every header is empty. Selecting nothing (``-p`` of an absent PID)
     exits 1, as procps does, and an option error is procps's message and
     usage.
@@ -296,7 +292,7 @@ async def handle_ps(
     try:
         options = _parse_ps(parts[1:])
     except ValueError as exc:
-        return job_result(cmd_str, f"error: {exc}\n{PS_USAGE}", 1)
+        return job_result(cmd_str, f"error: {exc}\n{constants.USAGE}", 1)
     sid = session_of(session)
     processes = process_view(job_table, session)
     every = options.all or not options.pids

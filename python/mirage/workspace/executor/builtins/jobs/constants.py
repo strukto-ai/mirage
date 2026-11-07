@@ -13,4 +13,4 @@
 # ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 
-JOBS_FLAGS = frozenset("lnprs")
+FLAGS = frozenset("lnprs")

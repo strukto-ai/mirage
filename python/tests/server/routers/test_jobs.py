@@ -35,7 +35,8 @@ async def _shell(client: AsyncClient, wid: str, command: str) -> dict:
     return r.json()
 
 
-# A job is listed while its session lists it, and found by its id.
+# A job is listed while its session lists it, with the pid `$!` names,
+# and found by its id with the processes it ran.
 @pytest.mark.asyncio
 async def test_a_running_job_is_listed_and_found_by_id():
     app = build_app(idle_grace_seconds=10.0)
@@ -44,20 +45,31 @@ async def test_a_running_job_is_listed_and_found_by_id():
     ) as client:
         wid = await _create_workspace(client)
         result = await _shell(client, wid, "sleep 30 & echo $!")
+        pid = int(result["stdout"])
         try:
             r = await client.get(
                 f"/v1/workspaces/{wid}/jobs", params={"state": "running"}
             )
             assert r.status_code == 200, r.text
             [job] = r.json()
-            assert (job["number"], job["command"], job["line_id"]) == (
-                1,
-                "sleep 30",
-                result["line_id"],
-            )
+            assert (
+                job["number"],
+                job["command"],
+                job["line_id"],
+                job["pid"],
+            ) == (1, "sleep 30", result["line_id"], pid)
             r = await client.get(f"/v1/workspaces/{wid}/jobs/{job['id']}")
             assert r.status_code == 200, r.text
-            assert r.json() == job
+            assert r.json() == {**job, "processes": [pid]}
+            r = await client.get(
+                f"/v1/workspaces/{wid}/jobs",
+                params={"line_id": result["line_id"]},
+            )
+            assert r.json() == [job]
+            r = await client.get(
+                f"/v1/workspaces/{wid}/jobs", params={"line_id": "nope"}
+            )
+            assert r.json() == []
             r = await client.get(
                 f"/v1/workspaces/{wid}/jobs", params={"session_id": "other"}
             )

@@ -265,13 +265,19 @@ describe('mirage workspace list-lines, list-jobs and list-processes', () => {
     try {
       expect(await mirage(url, dir, 'list-lines', 'w', '--state', 'running')).toBe(0)
       expect(await mirage(url, dir, 'list-jobs', 'w', '--session', 's1')).toBe(0)
+      expect(await mirage(url, dir, 'list-jobs', 'w', '--line', 'line_1')).toBe(0)
       expect(
         await mirage(url, dir, 'list-processes', 'w', '--line', 'line_1', '--state', 'exited'),
+      ).toBe(0)
+      expect(
+        await mirage(url, dir, 'list-processes', 'w', '--job', 'j1', '--machine', 'docker:t'),
       ).toBe(0)
       expect(seen.map((s) => [s.method, s.url])).toEqual([
         ['GET', '/v1/workspaces/w/lines?state=running'],
         ['GET', '/v1/workspaces/w/jobs?session_id=s1'],
+        ['GET', '/v1/workspaces/w/jobs?line_id=line_1'],
         ['GET', '/v1/workspaces/w/processes?state=exited&line_id=line_1'],
+        ['GET', '/v1/workspaces/w/processes?job_id=j1&machine=docker%3At'],
       ])
     } finally {
       server.close()

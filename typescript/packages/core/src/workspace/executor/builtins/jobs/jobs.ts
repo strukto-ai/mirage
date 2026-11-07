@@ -21,7 +21,7 @@ import type { SessionView } from '../../../../view/types.ts'
 import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { builtinUsage } from '../shared.ts'
-import { JOBS_FLAGS } from './constants.ts'
+import * as constants from './constants.ts'
 import { jobNumbered, sessionOf } from '../jobspec.ts'
 
 /** One `jobs` line; `-l` includes the managed PID. */
@@ -57,7 +57,7 @@ export async function handleJobs(
   for (const word of parts.slice(1)) {
     if (word.startsWith('-') && word.length > 1 && specs.length === 0) {
       if (word === '--') continue
-      const bad = Array.from(word.slice(1)).find((c) => !JOBS_FLAGS.has(c))
+      const bad = Array.from(word.slice(1)).find((c) => !constants.FLAGS.has(c))
       if (bad !== undefined) {
         const err = encodeText(
           `${shellVoice()}jobs: -${bad}: invalid option\n${builtinUsage('jobs')}`,

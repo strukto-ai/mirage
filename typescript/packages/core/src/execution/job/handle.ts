@@ -87,7 +87,7 @@ export class JobHandle {
   line: LineId | null
   group: number | null
   private readonly now: () => number
-  private readonly ended: ((record: Job) => void) | null
+  private ended: ((record: Job) => void) | null
 
   state: JobState = 'running'
   exitCode = 0
@@ -149,6 +149,7 @@ export class JobHandle {
       startedAt: this.createdAt,
       line: this.line,
       group: this.group,
+      pid: this.process?.record.id.pid ?? null,
       state: this.state,
       endedAt: this.endedAt,
       exit: this.state === 'exited' ? this.exitCode : null,
@@ -179,12 +180,26 @@ export class JobHandle {
     this.markEnded()
   }
 
-  /** Mark the job ended, now, unless it already was, and tell `ended`. */
+  /** Mark the job ended, now, unless it already was. */
   private markEnded(): void {
     if (this.state === 'exited') return
     this.state = 'exited'
     this.endedAt = this.now()
-    this.ended?.(this.record)
+  }
+
+  /**
+   * Tell `ended` the job's record once, as it ended; a hook that fails is
+   * logged, so the job still ends. Mirrors Python's `_tell_ended`.
+   */
+  private tellEnded(): void {
+    const ended = this.ended
+    this.ended = null
+    if (ended === null) return
+    try {
+      ended(this.record)
+    } catch (err) {
+      console.debug('job ended hook failed:', err)
+    }
   }
 
   /** Ask the job's runner to stop with `signal`, without waiting for it. */
@@ -224,9 +239,11 @@ export class JobHandle {
     this.markEnded()
     if (signal !== null) await markKilled(this.console, exitCode, signal)
     else await this.console.finish(exitOutcome(exitCode))
-    if (this.console.store.closed) return
-    const outcome = await this.console.outcome()
-    if (outcome !== null) this.take(outcome)
+    if (!this.console.store.closed) {
+      const outcome = await this.console.outcome()
+      if (outcome !== null) this.take(outcome)
+    }
+    this.tellEnded()
   }
 
   /**

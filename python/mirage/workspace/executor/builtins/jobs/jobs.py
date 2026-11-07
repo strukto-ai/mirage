@@ -19,7 +19,7 @@ from mirage.io.types import ByteSource
 from mirage.shell.bytes import encode_text
 from mirage.shell.voice import shell_voice
 from mirage.view.types import SessionView
-from mirage.workspace.executor.builtins.jobs.constants import JOBS_FLAGS
+from mirage.workspace.executor.builtins.jobs import constants
 from mirage.workspace.executor.builtins.jobspec import (
     job_numbered,
     session_of,
@@ -76,7 +76,7 @@ async def handle_jobs(
         if word.startswith("-") and len(word) > 1 and not specs:
             if word == "--":
                 continue
-            bad = next((c for c in word[1:] if c not in JOBS_FLAGS), None)
+            bad = next((c for c in word[1:] if c not in constants.FLAGS), None)
             if bad is not None:
                 err = encode_text(
                     f"{shell_voice()}jobs: -{bad}: invalid option\n"

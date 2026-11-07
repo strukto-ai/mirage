@@ -55,6 +55,26 @@ async def test_a_process_is_listed_live_and_after_it_ends():
             params={"line_id": result["line_id"]},
         )
         assert pid in [p["pid"] for p in r.json()]
+        [job] = (await client.get(f"/v1/workspaces/{wid}/jobs")).json()
+        r = await client.get(
+            f"/v1/workspaces/{wid}/processes", params={"job_id": job["id"]}
+        )
+        [live] = r.json()
+        assert (live["pid"], live["machine_pid"]) == (pid, None)
+        r = await client.get(
+            f"/v1/workspaces/{wid}/processes",
+            params={"machine": live["machine"]},
+        )
+        assert pid in [p["pid"] for p in r.json()]
+        r = await client.get(
+            f"/v1/workspaces/{wid}/processes",
+            params={"machine": "docker:nowhere"},
+        )
+        assert r.json() == []
+        r = await client.get(
+            f"/v1/workspaces/{wid}/processes", params={"machine": "nowhere"}
+        )
+        assert r.status_code == 400
         await _shell(client, wid, "kill %1; wait")
         r = await client.get(f"/v1/workspaces/{wid}/processes/{pid}")
         assert r.status_code == 200, r.text

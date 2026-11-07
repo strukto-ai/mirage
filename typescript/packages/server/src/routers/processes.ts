@@ -13,7 +13,7 @@
 // ========= Copyright 2026 @ Strukto.AI All Rights Reserved. =========
 
 import type { Process, ProcessState } from '@struktoai/mirage-core/execution/process/types'
-import { LineId, ProcessId } from '@struktoai/mirage-core/execution/types'
+import { JobId, LineId, MachineId, ProcessId } from '@struktoai/mirage-core/execution/types'
 import type { RouteApp } from '../routes.ts'
 import type { WorkspaceRegistry } from '../registry.ts'
 
@@ -30,6 +30,14 @@ interface ListProcessesQuery {
   session_id?: string
   state?: string
   line_id?: string
+  job_id?: string
+  machine?: string
+}
+
+interface MachinePidResponse {
+  pid: number
+  started: number
+  exited: number | null
 }
 
 interface ProcessResponse {
@@ -42,7 +50,7 @@ interface ProcessResponse {
   cwd: string
   machine: string
   runtime: string | null
-  machine_pid: number | null
+  machine_pid: MachinePidResponse | null
   state: string
   started_at: number
   ended_at: number | null
@@ -64,7 +72,14 @@ function toResponse(record: Process): ProcessResponse {
     cwd: record.cwd.virtual,
     machine: record.machine.toString(),
     runtime: record.runtime,
-    machine_pid: record.machinePid?.pid ?? null,
+    machine_pid:
+      record.machinePid === null
+        ? null
+        : {
+            pid: record.machinePid.pid,
+            started: record.machinePid.started,
+            exited: record.machinePid.exited ?? null,
+          },
     state: record.state,
     started_at: record.startedAt,
     ended_at: record.endedAt,
@@ -84,15 +99,22 @@ export function registerProcessesRoutes(
     '/v1/workspaces/:wsId/processes',
     (req, reply) => {
       // The processes the workspace keeps, by pid: every live one and the
-      // newest ended ones, a session's, those in a state or those a line
-      // ran when named.
+      // newest ended ones, a session's, those in a state, those a line
+      // ran, those a job ran or those run on a machine (`provider:name`)
+      // when named.
       const { wsId } = req.params
       if (deps.registry.visible(wsId, req.account) === null) {
         return reply.status(404).send({ detail: 'workspace not found' })
       }
-      const { session_id: sessionId, state, line_id: lineId } = req.query
+      const { session_id: sessionId, state, line_id: lineId, job_id: jobId, machine } = req.query
       if (state !== undefined && !(STATES as readonly string[]).includes(state)) {
         return reply.status(422).send({ detail: `state must be one of ${STATES.join(', ')}` })
+      }
+      let where: MachineId | null = null
+      try {
+        where = machine !== undefined && machine !== '' ? MachineId.parse(machine) : null
+      } catch (err) {
+        return reply.status(400).send({ detail: (err as Error).message })
       }
       const ws = deps.registry.get(wsId).runner.ws
       return ws
@@ -100,6 +122,10 @@ export function registerProcessesRoutes(
           ...(sessionId !== undefined && sessionId !== '' ? { sessionId } : {}),
           ...(state !== undefined ? { state: state as ProcessState } : {}),
           ...(lineId !== undefined && lineId !== '' ? { lineId: new LineId(lineId) } : {}),
+          ...(jobId !== undefined && jobId !== ''
+            ? { jobId: new JobId(ws.workspaceId, jobId) }
+            : {}),
+          ...(where !== null ? { machine: where } : {}),
         })
         .map(toResponse)
     },

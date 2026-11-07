@@ -16,10 +16,16 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from mirage.execution.process.types import Process, ProcessState
-from mirage.execution.types import LineId, ProcessId
+from mirage.execution.types import JobId, LineId, MachineId, ProcessId
 from mirage.server.routers.vfs import require_entry
 
 router = APIRouter(prefix="/v1/workspaces/{workspace_id}/processes")
+
+
+class MachinePidResponse(BaseModel):
+    pid: int
+    started: float
+    exited: float | None
 
 
 class ProcessResponse(BaseModel):
@@ -32,7 +38,7 @@ class ProcessResponse(BaseModel):
     cwd: str
     machine: str
     runtime: str | None
-    machine_pid: int | None
+    machine_pid: MachinePidResponse | None
     state: str
     started_at: float
     ended_at: float | None
@@ -53,7 +59,13 @@ def _to_response(record: Process) -> ProcessResponse:
         machine=str(record.machine),
         runtime=record.runtime,
         machine_pid=(
-            record.machine_pid.pid if record.machine_pid is not None else None
+            MachinePidResponse(
+                pid=record.machine_pid.pid,
+                started=record.machine_pid.started,
+                exited=record.machine_pid.exited,
+            )
+            if record.machine_pid is not None
+            else None
         ),
         state=record.state.value,
         started_at=record.started_at,
@@ -71,24 +83,41 @@ async def list_processes(
     session_id: str | None = None,
     state: ProcessState | None = None,
     line_id: str | None = None,
+    job_id: str | None = None,
+    machine: str | None = None,
 ) -> list[ProcessResponse]:
     """The processes the workspace keeps, by pid: every live one and the
-    newest ended ones, a session's, those in a state or those a line ran
-    when named."""
-    ws = require_entry(request, workspace_id).runner.ws
-    records = ws.processes(
-        session_id or None, state, LineId(line_id) if line_id else None
-    )
-    return [_to_response(r) for r in records]
+    newest ended ones, a session's, those in a state, those a line ran,
+    those a job ran or those run on a machine (``provider:name``) when
+    named. Read on the workspace's own loop."""
+    runner = require_entry(request, workspace_id).runner
+    line = LineId(line_id) if line_id else None
+    job = JobId(runner.ws.workspace_id, job_id) if job_id else None
+    try:
+        where = MachineId.parse(machine) if machine else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    async def read() -> list[ProcessResponse]:
+        records = runner.ws.processes(
+            session_id or None, state, line, job, where
+        )
+        return [_to_response(r) for r in records]
+
+    return await runner.call(read())
 
 
 @router.get("/{pid}", response_model=ProcessResponse)
 async def get_process(
     workspace_id: str, pid: int, request: Request
 ) -> ProcessResponse:
-    """One process, by its pid."""
-    ws = require_entry(request, workspace_id).runner.ws
-    record = ws.process(ProcessId(ws.workspace_id, pid))
+    """One process, by its pid. Read on the workspace's own loop."""
+    runner = require_entry(request, workspace_id).runner
+
+    async def read() -> Process | None:
+        return runner.ws.process(ProcessId(runner.ws.workspace_id, pid))
+
+    record = await runner.call(read())
     if record is None:
         raise HTTPException(status_code=404, detail="process not found")
     return _to_response(record)

@@ -26,7 +26,7 @@ import type { SessionState } from '../../../session/session.ts'
 import { ExecutionNode } from '../../../types.ts'
 import { MAX_PID_OPERAND } from '../constants.ts'
 import { jobResult, processView, sessionOf } from '../jobspec.ts'
-import { PS_ALL, PS_COLUMNS, PS_FIXED, PS_STATES, PS_USAGE } from './constants.ts'
+import * as constants from './constants.ts'
 import type { PsContext, PsOptions } from './types.ts'
 
 /** One `-p` list, refused in procps's words. */
@@ -50,7 +50,7 @@ function psColumns(value: string, option: string): [string, string][] {
     for (const token of item.split(/\s+/).filter((t) => t !== '')) {
       const equal = token.indexOf('=')
       const key = equal < 0 ? token : token.slice(0, equal)
-      const column = PS_COLUMNS[key]
+      const column = constants.COLUMNS[key]
       if (column === undefined) throw new Error(`unknown user-defined format specifier "${key}"`)
       columns.push([key, equal < 0 ? column[0] : token.slice(equal + 1)])
     }
@@ -92,7 +92,7 @@ function parsePs(words: string[]): PsOptions {
     while (letters !== '') {
       const flag = letters.charAt(0)
       letters = letters.slice(1)
-      if (PS_ALL.has(flag)) {
+      if (constants.ALL.has(flag)) {
         all = true
         continue
       }
@@ -111,7 +111,7 @@ function parsePs(words: string[]): PsOptions {
 function psRow(keys: readonly string[], cells: readonly string[]): string {
   return keys
     .map((key, at) => {
-      const [, width, right] = PS_COLUMNS[key] ?? ['', 0, false, '']
+      const [, width, right] = constants.COLUMNS[key] ?? ['', 0, false, '']
       const cell = cells[at] ?? ''
       if (right) return cell.padStart(width)
       return at === keys.length - 1 ? cell : cell.padEnd(width)
@@ -159,8 +159,8 @@ function started(fact: string, info: Process, ctx: PsContext): string {
  * session `$$` leads; another session's to its own group.
  */
 function psCell(key: string, info: Process, ctx: PsContext): string {
-  const fact = PS_COLUMNS[key]?.[3] ?? ''
-  const fixed = PS_FIXED[fact]
+  const fact = constants.COLUMNS[key]?.[3] ?? ''
+  const fixed = constants.FIXED[fact]
   if (fixed !== undefined) return fixed
   const session =
     info.sessionId === ctx.sessionId && ctx.shellPid !== null
@@ -171,7 +171,7 @@ function psCell(key: string, info: Process, ctx: PsContext): string {
   if (fact === 'pgid') return String(info.group || info.id.pid)
   if (fact === 'sid') return String(session)
   if (fact === 'stat' || fact === 'state') {
-    return PS_STATES[info.state] + (fact === 'stat' && info.id.pid === session ? 's' : '')
+    return constants.STATES[info.state] + (fact === 'stat' && info.id.pid === session ? 's' : '')
   }
   if (fact === 'comm') {
     const head = info.command.split(/\s+/).find((w) => w !== '') ?? ''
@@ -200,7 +200,7 @@ function runWhere(info: Process): string {
  * List managed runners with procps's selection and `-o` columns. A runner
  * has no CPU, RSS or TTY accounting, so without `-o` the rows stay mirage's
  * compact `PID<TAB>COMMAND` and never broaden the profile's view. `-o` lays
- * out procps-ng 4.0.4's columns, every key a runner can answer (PS_COLUMNS);
+ * out procps-ng 4.0.4's columns, every key a runner can answer (constants.COLUMNS);
  * a header row prints unless every header is empty. Selecting nothing (`-p`
  * of an absent PID) exits 1, as procps does, and an option error is
  * procps's message and usage.
@@ -221,7 +221,9 @@ export function handlePs(
   try {
     options = parsePs(parts.slice(1))
   } catch (err) {
-    return Promise.resolve(jobResult(cmdStr, `error: ${(err as Error).message}\n${PS_USAGE}`, 1))
+    return Promise.resolve(
+      jobResult(cmdStr, `error: ${(err as Error).message}\n${constants.USAGE}`, 1),
+    )
   }
   const sid = sessionOf(session)
   const processes = processView(jobTable, session)

@@ -1,5 +1,6 @@
 import asyncio
 import errno
+import logging
 from collections.abc import Callable
 from threading import RLock
 
@@ -15,6 +16,8 @@ from mirage.execution.process.view import ProcessView
 from mirage.execution.types import LineId, MachineId, ProcessId
 from mirage.types import PathSpec, under_ceiling
 from mirage.utils.clock import system_now
+
+logger = logging.getLogger(__name__)
 
 
 def deliver(handle: ProcessHandle, signal: int) -> None:
@@ -290,7 +293,10 @@ class ProcessTable:
             self._ended[pid] = handle.record
             self._prune()
         if self._ended_hook is not None:
-            self._ended_hook(handle.record)
+            try:
+                self._ended_hook(handle.record)
+            except Exception as exc:
+                logger.debug("process %d: ended hook failed: %s", pid, exc)
 
     def view(
         self,

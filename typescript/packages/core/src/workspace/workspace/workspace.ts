@@ -69,7 +69,7 @@ import { statedProcesses, type ProcessPermissions } from '../../execution/proces
 import { ProcessInput, ProcessOutput } from '../../execution/process/stdio.ts'
 import { ProcessTable } from '../../execution/process/table.ts'
 import type { Process, ProcessState, SpawnRequest } from '../../execution/process/types.ts'
-import { LOCAL_MACHINE } from '../../execution/constants.ts'
+import { LINE_STOP_SIGNAL, LOCAL_MACHINE } from '../../execution/constants.ts'
 import {
   type JobId,
   type LineId,
@@ -199,7 +199,7 @@ import type {
   SessionExecuteOptions,
   WorkspaceOptions,
 } from './types.ts'
-import { forkForCall } from './utils.ts'
+import { forkForCall, processTree } from './utils.ts'
 
 export { ExecuteResult } from './types.ts'
 export type { ExecuteOptions, MountSpec, SessionExecuteOptions, WorkspaceOptions } from './types.ts'
@@ -1353,14 +1353,19 @@ export class Workspace {
    * The jobs the workspace's sessions list, as `jobs` does: each until its
    * ending is reported; a session's or those in a state when named.
    */
-  jobs(filter: { sessionId?: string; state?: JobState } = {}): Job[] {
+  jobs(filter: { sessionId?: string; state?: JobState; lineId?: LineId } = {}): Job[] {
     const handles =
       filter.sessionId === undefined
         ? this.jobTable.allJobs()
         : this.jobTable.listJobs(filter.sessionId)
     return handles
+      .filter((job) => !job.reported)
       .map((job) => job.record)
-      .filter((job) => filter.state === undefined || job.state === filter.state)
+      .filter(
+        (job) =>
+          (filter.state === undefined || job.state === filter.state) &&
+          (filter.lineId === undefined || job.line?.value === filter.lineId.value),
+      )
   }
 
   /** One job's record, while a session lists it. */
@@ -1374,18 +1379,33 @@ export class Workspace {
 
   /**
    * The processes the workspace keeps, by pid: every live one, and the
-   * newest ended ones; a session's, those in a state or those a line ran
-   * when named.
+   * newest ended ones; a session's, those in a state, those a line ran,
+   * those a job ran (its own and every one under it, while a session lists
+   * it) or those run on a machine when named.
    */
-  processes(filter: { sessionId?: string; state?: ProcessState; lineId?: LineId } = {}): Process[] {
-    return this.processTable
-      .records()
-      .filter(
-        (process) =>
-          (filter.sessionId === undefined || process.sessionId === filter.sessionId) &&
-          (filter.state === undefined || process.state === filter.state) &&
-          (filter.lineId === undefined || process.line?.value === filter.lineId.value),
-      )
+  processes(
+    filter: {
+      sessionId?: string
+      state?: ProcessState
+      lineId?: LineId
+      jobId?: JobId
+      machine?: MachineId
+    } = {},
+  ): Process[] {
+    const records = this.processTable.records()
+    let tree: Set<number> | null = null
+    if (filter.jobId !== undefined) {
+      const pid = this.job(filter.jobId)?.pid ?? null
+      tree = pid === null ? new Set() : processTree(records, pid)
+    }
+    return records.filter(
+      (process) =>
+        (filter.sessionId === undefined || process.sessionId === filter.sessionId) &&
+        (filter.state === undefined || process.state === filter.state) &&
+        (filter.lineId === undefined || process.line?.value === filter.lineId.value) &&
+        (tree === null || tree.has(process.id.pid)) &&
+        (filter.machine === undefined || process.machine.toString() === filter.machine.toString()),
+    )
   }
 
   /** One process's record, while the workspace keeps it. */
@@ -2219,6 +2239,7 @@ export class Workspace {
       options.signal,
       () => executeLine(this.executeEnv(), command, options),
       options.session,
+      options.lineHandle,
     )
   }
 
@@ -2313,6 +2334,7 @@ export class Workspace {
     signal: AbortSignal | undefined,
     run: () => Promise<T>,
     session?: SessionState,
+    line?: LineHandle,
   ): Promise<T> {
     if (session !== undefined) return run()
     const ambient = asyncContextIsolatesTasks ? getCurrentSessionFor(this.sessionManager) : null
@@ -2324,14 +2346,29 @@ export class Workspace {
     // later line would wait on.
     await abortable(this.ensureSessionsLoaded(), signal)
     const key = sessionId ?? this.sessionManager.defaultId
-    return this.lineLock.withLock(
-      key,
-      async () => {
-        if (this.isShuttingDown()) throw new Error('Workspace is closed')
-        return run()
-      },
-      signal,
-    )
+    // The line is listed as waiting from here, and ended as stopped, or
+    // with the error, should it never start.
+    if (line !== undefined) this.lineTable.start(line)
+    try {
+      return await this.lineLock.withLock(
+        key,
+        async () => {
+          if (this.isShuttingDown()) throw new Error('Workspace is closed')
+          return run()
+        },
+        signal,
+      )
+    } catch (err) {
+      if (line?.record.state === 'waiting') {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          line.stop(LINE_STOP_SIGNAL)
+          line.end(128 + LINE_STOP_SIGNAL)
+        } else {
+          line.end(null, err instanceof Error ? `${err.name}: ${err.message}` : String(err))
+        }
+      }
+      throw err
+    }
   }
 
   /**

@@ -37,6 +37,7 @@ class LineResponse(BaseModel):
 class LineDetailResponse(LineResponse):
     jobs: list[str]
     processes: list[int]
+    machines: list[str]
 
 
 def _to_response(record: Line) -> LineResponse:
@@ -62,23 +63,39 @@ async def list_lines(
 ) -> list[LineResponse]:
     """The lines the workspace keeps, oldest first: every one not ended
     yet and the newest ended ones, a session's or those in a state when
-    named."""
-    ws = require_entry(request, workspace_id).runner.ws
-    return [_to_response(r) for r in ws.lines(session_id or None, state)]
+    named. Read on the workspace's own loop."""
+    runner = require_entry(request, workspace_id).runner
+
+    async def read() -> list[LineResponse]:
+        records = runner.ws.lines(session_id or None, state)
+        return [_to_response(r) for r in records]
+
+    return await runner.call(read())
 
 
 @router.get("/{line_id}", response_model=LineDetailResponse)
 async def get_line(
     workspace_id: str, line_id: str, request: Request
 ) -> LineDetailResponse:
-    """One line, with the ids of the jobs it started and the pids of the
-    processes it ran."""
-    ws = require_entry(request, workspace_id).runner.ws
-    record = ws.line(LineId(line_id))
-    if record is None:
+    """One line, with the ids of the jobs it started, the pids of the
+    processes it ran that the workspace still keeps and the machines
+    those ran on. Read on the workspace's own loop."""
+    runner = require_entry(request, workspace_id).runner
+
+    async def read() -> LineDetailResponse | None:
+        ws = runner.ws
+        record = ws.line(LineId(line_id))
+        if record is None:
+            return None
+        processes = ws.processes(line_id=record.id)
+        return LineDetailResponse(
+            **_to_response(record).model_dump(),
+            jobs=[job.id.console for job in ws.jobs(line_id=record.id)],
+            processes=[p.pid for p in processes],
+            machines=list(dict.fromkeys(str(p.machine) for p in processes)),
+        )
+
+    detail = await runner.call(read())
+    if detail is None:
         raise HTTPException(status_code=404, detail="line not found")
-    return LineDetailResponse(
-        **_to_response(record).model_dump(),
-        jobs=[job.id.console for job in ws.jobs() if job.line == record.id],
-        processes=[process.pid for process in ws.processes(line_id=record.id)],
-    )
+    return detail
