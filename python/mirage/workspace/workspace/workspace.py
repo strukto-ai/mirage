@@ -469,12 +469,13 @@ class Workspace:
             now = self._clock.now()
             hangup = HANGUP_EXIT_CODE - 128
             store = self.job_table.store
-            # Read the store first: a process or line started while it
-            # answers is this workspace's own by the time it is checked.
+            # Read the store first: a process or line started, or ended,
+            # while it answers is this workspace's own by the time it is
+            # checked, and keeps the record it wrote.
             records = await store.find_processes()
-            live = {handle.record.pid for handle in self.process_table.live()}
+            own = {record.pid for record in self.process_table.records()}
             for record in records:
-                if record.ended_at is None and record.pid not in live:
+                if record.ended_at is None and record.pid not in own:
                     store.note(
                         replace(
                             record,
@@ -485,13 +486,9 @@ class Workspace:
                         )
                     )
             lines = await store.find_lines()
-            reading = {
-                line.id
-                for line in self.line_table.lines()
-                if line.ended_at is None
-            }
+            read = {line.id for line in self.line_table.lines()}
             for line in lines:
-                if line.ended_at is None and line.id not in reading:
+                if line.ended_at is None and line.id not in read:
                     store.note(
                         replace(
                             line,

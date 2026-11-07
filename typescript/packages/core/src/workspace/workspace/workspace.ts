@@ -389,12 +389,13 @@ export class Workspace {
       const now = this.clock.now()
       const hangup = HANGUP_EXIT_CODE - 128
       const store = this.jobTable.store
-      // Read the store first: a process or line started while it answers is
-      // this workspace's own by the time it is checked.
+      // Read the store first: a process or line started, or ended, while it
+      // answers is this workspace's own by the time it is checked, and keeps
+      // the record it wrote.
       const records = await store.findProcesses()
-      const live = new Set(this.processTable.live().map((handle) => handle.record.id.pid))
+      const own = new Set(this.processTable.records().map((record) => record.id.pid))
       for (const record of records) {
-        if (record.endedAt === null && !live.has(record.id.pid)) {
+        if (record.endedAt === null && !own.has(record.id.pid)) {
           store.note({
             ...record,
             state: 'exited',
@@ -405,14 +406,9 @@ export class Workspace {
         }
       }
       const lines = await store.findLines()
-      const reading = new Set(
-        this.lineTable
-          .lines()
-          .filter((line) => line.endedAt === null)
-          .map((line) => line.id.value),
-      )
+      const read = new Set(this.lineTable.lines().map((line) => line.id.value))
       for (const line of lines) {
-        if (line.endedAt === null && !reading.has(line.id.value)) {
+        if (line.endedAt === null && !read.has(line.id.value)) {
           store.note({
             ...line,
             state: 'exited',
